@@ -14,6 +14,7 @@
 |---|---|---|---|
 | 0.1 | 2026-03-30 | Brian / Claude | Initial draft |
 | 0.2 | 2026-03-31 | Brian / Claude | Radar device corrected to RTL515/RCT715; BLE sensor priority for HR/speed/cadence; power meter to Phase 3; navigation to MVP; data model corrections; GPX export with gpxtpx:TrackPointExtension; resolved OQ1,3,4,5,6,8,9,10; app renamed Cyclometer |
+| 0.2.1 | 2026-04-05 | Brian / Claude | Updated all design asset paths to reflect new `assets/design/` folder structure; corrected color token reference from root-level file to `assets/design/colors.md`; added Appendix C — Design Assets |
 
 ---
 
@@ -36,6 +37,7 @@
 15. [Out of Scope](#15-out-of-scope)
 16. [Appendix A — Design Tokens](#16-appendix-a--design-tokens)
 17. [Appendix B — GPX TrackPoint Extension Schema](#17-appendix-b--gpx-trackpoint-extension-schema)
+18. [Appendix C — Design Assets](#18-appendix-c--design-assets)
 
 ---
 
@@ -823,7 +825,7 @@ Cyclometer/
 ├── Export/
 │   └── GPXExporter.swift              ← Assembles GPX from SwiftData records
 ├── DesignSystem/
-│   ├── Color+Cyclometer.swift
+│   ├── Color+Cyclometer.swift         ← br-prefixed tokens; source: assets/design/colors.md
 │   ├── Typography.swift
 │   └── Components/
 └── Tests/
@@ -951,7 +953,7 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration, route planning, seg
 
 ## 16. Appendix A — Design Tokens
 
-The Cyclometer color system is a 30-token system in 7 categories. Full specification in `BikeRider-ColorSystem.md`. Safety-critical and zone tokens:
+The Cyclometer color system is a 30-token system in 7 categories. The **canonical source** for all token definitions, hex values, and contrast annotations is `assets/design/colors.md`. Safety-critical and zone tokens summary:
 
 | Token | Light Mode | Dark Mode | Usage |
 |---|---|---|---|
@@ -964,6 +966,8 @@ The Cyclometer color system is a 30-token system in 7 categories. Full specifica
 | `brHRZone4` | `#F57C00` | `#FFA726` | Threshold |
 | `brHRZone5` | `#D32F2F` | `#EF5350` | VO2 Max |
 | `brPrimary` | `#60BD10` | `#6FD11E` | Brand, CTAs, active states |
+
+> For the complete 30-token table with all categories (backgrounds, text, borders, system), refer to `assets/design/colors.md`.
 
 ---
 
@@ -985,12 +989,12 @@ Every ride exports a GPX 1.1 file with the following structure. The `gpxtpx:Trac
        http://www.garmin.com/xmlschemas/TrackPointExtensionv2.xsd">
 
   <metadata>
-    <name>Cyclometer_2026-03-31_08-15</name>
+    <n>Cyclometer_2026-03-31_08-15</n>
     <time>2026-03-31T08:15:00Z</time>
   </metadata>
 
   <trk>
-    <name>Morning Ride</name>
+    <n>Morning Ride</n>
     <trkseg>
 
       <trkpt lat="36.0726" lon="-79.7920">
@@ -1023,4 +1027,30 @@ Every ride exports a GPX 1.1 file with the following structure. The `gpxtpx:Trac
 
 ---
 
-*Cyclometer PRD v0.2 · Second Review Draft · 2026-03-31*
+## 18. Appendix C — Design Assets
+
+All manual design assets are located in `assets/design/`. This folder is the single source of truth for visual design. Do not look for design files in the `assets/` root.
+
+| Asset | Path | Format | Notes |
+|---|---|---|---|
+| Color tokens | `assets/design/colors.md` | Markdown | 30 semantic tokens, light + dark mode, WCAG AA notes. Source of truth for `Color+Cyclometer.swift`. |
+| Primary UI design | `assets/design/Design.sketch` | Sketch | All screens in the screen inventory (S01–S18). Component specs, interaction flows, annotation. |
+| App icon | `assets/design/CyclometerIcon.sketch` | Sketch | App icon artwork and all required iOS size variants. |
+| D-DIN Regular | `assets/design/d-din/D-DIN.otf` | OTF | Dashboard body numerics |
+| D-DIN Bold | `assets/design/d-din/D-DIN-Bold.otf` | OTF | Dashboard emphasis |
+| D-DIN Italic | `assets/design/d-din/D-DIN-Italic.otf` | OTF | |
+| D-DIN Condensed | `assets/design/d-din/D-DINCondensed.otf` | OTF | Hero numerics (138pt) |
+| D-DIN Condensed Bold | `assets/design/d-din/D-DINCondensed-Bold.otf` | OTF | |
+| D-DIN Expanded | `assets/design/d-din/D-DINExp.otf` | OTF | |
+| D-DIN Expanded Bold | `assets/design/d-din/D-DINExp-Bold.otf` | OTF | |
+| D-DIN Expanded Italic | `assets/design/d-din/D-DINExp-Italic.otf` | OTF | |
+| Font license | `assets/design/d-din/SIL Open Font License.txt` | Text | SIL OFL — free to bundle in commercial iOS app |
+
+**Implementation notes for Xcode:**
+- All OTF files in `assets/design/d-din/` must be added to the Xcode target's "Copy Bundle Resources" build phase
+- Each font file must be declared in `Info.plist` under the `UIAppFonts` key
+- Font family name for SwiftUI: `"D-DIN"`, `"D-DIN Condensed"`, `"D-DINExp"`
+
+---
+
+*Cyclometer PRD v0.2.1 · Second Review Draft · Updated 2026-04-05*

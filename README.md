@@ -80,7 +80,7 @@ The GPS is only used for speed and distance when the BLE cycling speed sensor is
 ### Type and ramp
 Type is set with GillSans primarily in the GillSans Light variety. Gill Sans is a humanistic type face with open an large numbers making it ideal for the dashboard where quick reading and understanding of the numbers is important.
 
-Large numbers on the dashboard should use D-Din as the typeface. The font files for this are found in the assets/d-din folder within this project folder.
+Large numbers on the dashboard should use D-Din as the typeface. The font files for this are found in `assets/design/d-din/` within this project folder. D-DIN is licensed under the SIL Open Font License (see `assets/design/d-din/SIL Open Font License.txt`).
 
 The ramp is set as:
 
@@ -91,14 +91,19 @@ The ramp is set as:
 * Values: D-Din 34pt
 * Units: GillSans-Light 17pt
 
-GillSans is install on all
+GillSans is installed on all iOS devices as a system font.
 
 Labels should be in **ALL CAPS**
 Units should be in *lowercase*
+Units should always be set baseline aligned with their corresponding values.
 
-### BikeRider Color System
+### Color System
 
-Primary brand: `#60BD10` · Optimized for outdoor sunlight visibility · WCAG AA+ contrast ratios
+The canonical color token reference is `assets/design/colors.md`. It defines all 30 semantic design tokens across 7 categories for both light and dark modes, with WCAG AA+ contrast ratios optimized for outdoor sunlight visibility.
+
+**Brand color:** `#60BD10` (green)
+
+The tables below are reproduced here for quick reference. `assets/design/colors.md` is the source of truth.
 
 ---
 
@@ -190,15 +195,32 @@ Primary brand: `#60BD10` · Optimized for outdoor sunlight visibility · WCAG AA
 | `shadow` | `rgba(0,0,0,0.4)` | Elevation shadows |
 | `overlay` | `rgba(0,0,0,0.6)` | Modal backdrop |
 
-
 ### Text alignment
-Units should always be set baseline aligned with their coorsponding values
+Units should always be set baseline aligned with their corresponding values.
 
 ### Icons
 Icons should use Font Awesome. Font Awesome is downloaded and is in ~/Projects/fontawesome-pro-7.2.0-desktop
 
 ### Sounds and Haptics
-For warnings and alerts, especially RADAR, the watch extension should be used to give the user hapic alerts in addition to the dashboard. Additionally sounds should also be used in conjunction with the watch haptics. An appropriately set of sounds should be sourced from open source or public domain sounds.
+For warnings and alerts, especially RADAR, the watch extension should be used to give the user haptic alerts in addition to the dashboard. Additionally sounds should also be used in conjunction with the watch haptics. An appropriately set of sounds should be sourced from open source or public domain sounds.
+
+## Project Structure
+
+```
+CyclometerAI/
+├── CLAUDE.md                        ← Claude Code guidance
+├── README.md                        ← This file; full product spec
+├── LICENSE
+├── .gitignore
+└── assets/
+    ├── PRD.md                       ← Product Requirements Document (v0.2)
+    ├── UX.md                        ← Screen-level UX specification
+    └── design/                      ← All manual design assets
+        ├── colors.md                ← Canonical color token reference
+        ├── Design.sketch            ← Primary UI/UX design file
+        ├── CyclometerIcon.sketch    ← App icon designs
+        └── d-din/                   ← D-DIN font family (SIL Open Font License)
+```
 
 ## Pages
 This tree represents the page hierarchy and sitemap. The top level is the primary bottom navigation. This is also a liquid glass app.
@@ -239,7 +261,7 @@ The dashboard is the primary UI with the user while riding. It should be a confi
     * Elevation
         * Show total ascent and decent in the 2x1 size.
         * Only show accent in 1x1 size
-        * As a watermark, show the elevation provile of the ride
+        * As a watermark, show the elevation profile of the ride
     * Grade
     * Pace
     * Distance
