@@ -77,25 +77,13 @@ The GPS is only used for speed and distance when the BLE cycling speed sensor is
 
 ## Style Guide
 
+See `assets/UX.md` for details.
+
 ### Type and ramp
-Type is set with GillSans primarily in the GillSans Light variety. Gill Sans is a humanistic type face with open an large numbers making it ideal for the dashboard where quick reading and understanding of the numbers is important.
 
-Large numbers on the dashboard should use D-Din as the typeface. The font files for this are found in `assets/design/d-din/` within this project folder. D-DIN is licensed under the SIL Open Font License (see `assets/design/d-din/SIL Open Font License.txt`).
+Type is set with Gill Sans Light. Gill Sans is a humanistic type face with open an large numbers making it ideal for the dashboard where quick reading and understanding of the numbers is important.
 
-The ramp is set as:
-
-* Hero: D-Din Condensed 138pt (letter spacing: -6.47)
-* Caption: GillSans-Light 14pt
-* Major: D-Din 56pt
-* Minor: D-Din 14pt
-* Values: D-Din 34pt
-* Units: GillSans-Light 17pt
-
-GillSans is installed on all iOS devices as a system font.
-
-Labels should be in **ALL CAPS**
-Units should be in *lowercase*
-Units should always be set baseline aligned with their corresponding values.
+Numbers on the dashboard should use D-Din as the typeface. The font files for this are found in `assets/design/d-din/` within this project folder. D-DIN is licensed under the SIL Open Font License (see `assets/design/d-din/SIL Open Font License.txt`).
 
 ### Color System
 
@@ -199,7 +187,7 @@ The tables below are reproduced here for quick reference. `assets/design/colors.
 Units should always be set baseline aligned with their corresponding values.
 
 ### Icons
-Icons should use Font Awesome. Font Awesome is downloaded and is in ~/Projects/fontawesome-pro-7.2.0-desktop
+Icons should use SF Symbols as specified. Other icons not included in SF Symbols are found at `assets/icons/`
 
 ### Sounds and Haptics
 For warnings and alerts, especially RADAR, the watch extension should be used to give the user haptic alerts in addition to the dashboard. Additionally sounds should also be used in conjunction with the watch haptics. An appropriately set of sounds should be sourced from open source or public domain sounds.
@@ -225,7 +213,7 @@ CyclometerAI/
 ## Pages
 This tree represents the page hierarchy and sitemap. The top level is the primary bottom navigation. This is also a liquid glass app.
 
-* Dashboard
+* Home (deferred)
 * Rides
 * Settings
 
@@ -305,4 +293,4 @@ The settings page allows the user to define their connections and options. It ha
 * Accounts: This section shows associated services.
 * About: This section shows the following:
     * Version
-    * Privacy
+    * Privacy 

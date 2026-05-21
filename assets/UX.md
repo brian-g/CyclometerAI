@@ -1,6 +1,7 @@
 # Cyclometer — UX Specification
-**Version:** 0.1 Stub  
+**Version:** 0.3  
 **Date:** 2026-03-31  
+**Updated:** 2026-05-20 — Fixed screen index phases; rewrote S05.3 from prototype; updated navigation to 3 tabs; promoted S19/S20 to Phase 2; added S07/S08; updated S05.4/S05.5 status; corrected S10; fixed widget catalog numbering; added empty state patterns  
 **Status:** Awaiting UX Direction  
 **Author:** Brian (UX Design)  
 **Companion Document:** `PRD.md` — defines *what* each screen must do; this document defines *how* it is structured.
@@ -23,105 +24,166 @@ The screens in this document correspond 1:1 with the Screen Inventory in `PRD.md
 
 ---
 
+## Source Files
+
+All design artifacts are in `assets/design/`. These files are the source of truth for visual design; this document provides annotation and interaction specification to accompany them.
+
+| Asset | Path | Contents |
+|---|---|---|
+| Primary UI design | `assets/design/Design.sketch` | Screen layouts and component specs for S01–S20 |
+| App icon | `assets/design/CyclometerIcon.sketch` | App icon artwork, all iOS size variants |
+| Color tokens | `assets/design/colors.md` | 30 semantic tokens, light + dark mode hex values, WCAG AA notes |
+| D-DIN fonts | `assets/design/d-din/` | D-DIN family (Regular, Bold, Italic, Condensed, Condensed Bold, Exp, Exp Bold, Exp Italic) — SIL Open Font License. Currently only need the Condensed for this project. |
+| Icons | `assets/design/icons` | Set of SVG icons that should be added as SF Symbols extensions. |
+
+> When implementing any screen, open `assets/design/Design.sketch` first. This UX.md provides interaction annotation and open questions that supplement the Sketch layouts — it is not a standalone specification.
+
+---
+
 ## Screen Index
 
 | ID | Screen | Phase | Status |
 |---|---|---|---|
-| [S01](#s01-onboarding--welcome) | Onboarding — Welcome | MVP | Stub |
-| [S02](#s02-onboarding--sensor-pairing) | Onboarding — Sensor Pairing | MVP | Stub |
-| [S03](#s03-onboarding--profile-setup) | Onboarding — Profile Setup | MVP | Stub |
-| [S04](#s04-home) | Home | MVP | Stub |
+| [S01](#s01-onboarding--welcome) | Onboarding — Welcome | MVP | Complete |
+| [S02](#s02-onboarding--sensor-pairing) | Onboarding — Sensor Pairing | MVP | Complete |
+| [S03](#s03-onboarding--profile-setup) | Onboarding — Profile Setup | Cut | Complete |
+| [S04](#s04-home) | Home | Deferred | Deferred |
 | [S05](#s05-active-ride-dashboard) | Active Ride Dashboard | MVP | **Priority — Detailed UX Needed** |
-| [S06](#s06-radar-alert--advisory-l1) | Radar Alert — Advisory (L1) | MVP | Stub |
-| [S07](#s07-radar-alert--caution-l2) | Radar Alert — Caution (L2) | MVP | Stub |
-| [S08](#s08-radar-alert--danger-l3) | Radar Alert — Danger (L3) | MVP | Stub |
+| [S05.1](#s051-start-sheet) | Start Sheet | MVP | Priority |
+| S05.2 | Route Selector | Phase 2 | Stub |
+| [S05.3](#s053-active-ride-accessory) | Active Ride Accessory | MVP | Complete — refer to prototype |
+| S05.4 | Widget Layout | MVP | Grid only — blocking wireframes |
+| S05.5 | Widget Layout 2 | MVP | Grid only — blocking wireframes |
+| [S06](#s06-radar-alert) | Radar Alert | MVP | Stub |
+| [S07](#s07-dashboard-customization) | Dashboard Customization | Phase 2 | Stub |
+| [S08](#s08-add-widget) | Add Widget | Phase 2 | Stub |
 | [S09](#s09-ride-paused) | Ride Paused | MVP | Stub |
 | [S10](#s10-ride-summary) | Ride Summary | MVP | Stub |
 | [S11](#s11-device-management) | Device Management | MVP | Stub |
 | [S12](#s12-app-settings) | App Settings | MVP | Stub |
-| [S13](#s13-hr-zone-configuration) | HR Zone Configuration | MVP | Stub |
+| [S13](#s13-hr-zone-configuration) | HR Zone Configuration | Deprecated | Stub |
 | [S14](#s14-ride-history-list) | Ride History List | Phase 2 | Stub |
 | [S15](#s15-ride-detail) | Ride Detail | Phase 2 | Stub |
-| [S16](#s16-training-zones-graph) | Training Zones Graph | Phase 2 | Stub |
-| [S17](#s17-apple-watch-face) | Apple Watch Face | Phase 2 | Stub |
+| [S16](#s16-training-zones-graph) | Training Zones Graph | Cut | Stub |
+| [S17](#s17-apple-watch) | Apple Watch | Phase 2 | Stub |
 | [S18](#s18-ar-hud-configuration) | AR HUD Configuration | Phase 3 | Stub |
+| [S19](#s19-route-management) | Route Management | Phase 2 | Stub |
+| [S20](#s20-route-detail) | Route Detail | Phase 2 | Stub |
 
 ---
 
 ## Global Design Notes
 
-> *To be completed by Brian.*
+The design should be aligned with Apple HIG and use standard SwiftUI components and layout. All screens have a dark and light mode.
 
 ### Typography Scale
+
+The type ramp is scalable on the dashboard depending on the device and scale using Apple Dynamic Type. Cyclometer should be able to run on any iPhone that supports iOS 26. Use the standard font style on iOS, SF Pro Rounded.
+
+Units should always be set baseline aligned with their corresponding values.
+
 - [ ] Define heading, subheading, metric (large numeral), label, caption scales
-- [ ] Specify font: D-DIN (see `assets/d-din/`) for numerics; system font (-apple-system) for UI text
+- [ ] Specify font: D-DIN Condensed (see `assets/design/d-din/`) for hero number
+
+### Color Tokens
+- All semantic color token names and hex values are defined in `assets/design/colors.md`
+- Use `br`-prefixed token names (e.g., `brPrimary`, `brHRZone3`, `brRatingBad`) in all annotations
+- Do not specify raw hex values in this document; reference token names only
 
 ### Spacing System
 - [ ] Define base unit and scale (e.g., 4pt base)
+- [ ] Do not override the padding on any page but the Dashboard. The dashboard should use the 4pt padding.
 
 ### Navigation Pattern
-- [ ] Tab bar vs. sidebar vs. full-screen modal flow
-- [ ] Ride dashboard: full-screen takeover or pushed view?
+The navigation in the app will follow standard iOS application guidelines patterns. In this case, the application to model is the Apple Music app. The bottom TabView should have the following 3 items:
+
+- Rides
+- Routes
+- Settings
+
+There will be a button in a toolbar at the top-right of the screen to start a ride. The toolbar button should have:
+
+- Accessibility label: Start ride
+- Icon: play-fill
+- Hidden when a ride is active
+- When pressed, will display the Start Ride sheet.
+
+When a ride is active, the Start ride toolbar item will be hidden. The Routes tab is present in the tab bar during MVP but shows a "Coming Soon" placeholder view until Phase 2 content is ready.
+
+### Widget Size Convention
+
+Widget sizes are expressed as **WxH** (width × height) in grid units. The dashboard grid is 2 columns × 7 rows. Cell dimensions are approximately 201×96pt on iPhone 17 Pro.
+
+| Size | Grid units | Approximate pt |
+|---|---|---|
+| 1x1 | 1 col × 1 row | 201 × 96 |
+| 2x1 | 2 col × 1 row | 402 × 96 |
+| 2x2 | 2 col × 2 rows | 402 × 195 |
+
+This convention matches the frame naming in `Design.sketch`.
 
 ### Safe Area Handling
-- [ ] Dynamic Island behavior on active ride dashboard
-- [ ] Home indicator avoidance on metric tiles
+- [x] Dynamic Island behavior on active ride dashboard. If the map is at the top or at the bottom in a 2x2 configuration, the map will bleed into the safe area.
+- [x] Home indicator avoidance on metric tiles
 
 ---
 
 ## S01 — Onboarding — Welcome
 
 **Phase:** MVP  
-**Purpose:** Introduce Cyclometer, establish trust, and request system permissions (Bluetooth, Location, HealthKit, Files).
+**Purpose:** Introduce Cyclometer, establish trust, and request system permissions (Bluetooth, Location, HealthKit, Motion and Fitness, Files).
 
 ### Layout
-> *To be defined by Brian.*
+> *Refer to `assets/design/Design.sketch` — S01.*
 
 ### Permissions Flow
 - Bluetooth (required for BLE sensors)
 - Location Always (required for GPS track + background recording)
 - HealthKit read (HR, resting HR, max HR, date of birth)
+- Motion and Fitness (required for activity detection)
 - Files / Documents directory (for GPX export)
 
 ### Interactions
-> *To be defined by Brian.*
+For each permission item, when the user taps it, the system permission prompt will be displayed. When permission has been successfully granted for an item, the circle to the left of the item will become a filled circular checkmark. If they deny a permission, it will be a red X.
+
+If the user blocks Bluetooth, Location, or Motion and Fitness, they will not be able to proceed. Health and Files are optional; that functionality will not be available if denied. There is no skip affordance — users who have denied a required permission must go to iOS Settings to re-enable it.
 
 ### Open UX Questions
-- [ ] Single permission-per-screen carousel, or batched permission request?
-- [ ] What happens if the user denies Bluetooth? (Core functionality blocked — how to handle?)
-- [ ] Skip / come back later affordance?
+- [x] Single permission-per-screen carousel, or batched permission request? Single permission request per item, all shown on the same screen.
+- [x] What happens if the user denies Bluetooth? Cannot proceed.
+- [x] Skip / come back later affordance? No.
 
 ---
 
 ## S02 — Onboarding — Sensor Pairing
 
 **Phase:** MVP  
-**Purpose:** Guide the rider through pairing their BLE sensors: Varia radar, HR strap, and speed/cadence sensor.
+**Purpose:** Guide the rider through pairing their BLE sensors: Varia radar, HR strap, and speed/cadence sensor. The list of sensors used in this onboarding page should also be reused in Settings.
 
 ### Sensors to Pair
 1. Garmin Varia RTL515 or RCT715 (radar — optional but promoted)
 2. BLE Heart Rate sensor (optional; Apple Watch used as fallback)
 3. BLE Speed / Cadence sensor (optional; GPS used as speed fallback)
+4. Power meters (future)
 
 ### Layout
-> *To be defined by Brian.*
+> *Refer to `assets/design/Design.sketch` — S02.*
 
 ### Interactions
 - BLE scan + discovered device list
-- Tap to pair; confirm pairing
-- Skip individual sensor types
-- "I'll add sensors later" exit path
+- Tap "Pair" for each device; confirm pairing
+- "Next" without pairing any sensor is a valid exit path
 
 ### Open UX Questions
-- [ ] How are sensor types visually distinguished in the scan list? (icon + sensor type label?)
-- [ ] What if multiple sensors of the same type are discovered? (e.g., two HR straps)
-- [ ] Order of sensor pairing: radar first (safety), then HR, then speed/cadence?
+- [x] How are sensor types visually distinguished in the scan list? Icon. SVG icons are in the repo under `assets/icons/`.
+- [x] What if multiple sensors of the same type are discovered? Both shown; user chooses.
+- [x] Order of sensor pairing? Any order; see the mockup.
 
 ---
 
 ## S03 — Onboarding — Profile Setup
 
-**Phase:** MVP  
+**Phase:** Cut  
 **Purpose:** Collect or confirm the rider's HR profile data (resting HR, max HR) for Karvonen zone calculation.
 
 ### Data Sources (in priority order)
@@ -130,7 +192,7 @@ The screens in this document correspond 1:1 with the Screen Inventory in `PRD.md
 3. Manual entry by rider
 
 ### Layout
-> *To be defined by Brian.*
+> *Refer to `assets/design/Design.sketch` — S03.*
 
 ### Interactions
 - Display pulled-from-Apple-Health values with edit affordance
@@ -145,11 +207,11 @@ The screens in this document correspond 1:1 with the Screen Inventory in `PRD.md
 
 ## S04 — Home
 
-**Phase:** MVP  
+**Phase:** Deferred  
 **Purpose:** Pre-ride hub. Displays last ride summary, active sensor status, and quick-start CTA.
 
 ### Layout
-> *To be defined by Brian.*
+> *Refer to `assets/design/Design.sketch` — S04.*
 
 ### Key Components
 - Sensor status row: radar badge, HR badge, speed/cadence badge (green = connected, amber = not paired, red = paired but not found)
@@ -164,286 +226,504 @@ The screens in this document correspond 1:1 with the Screen Inventory in `PRD.md
 
 ---
 
+## S05.1 — Start Sheet
+
+**Phase:** MVP  
+**Purpose:** Allow user to quickly set up a ride and provide sensor status.
+
+### Layout
+
+> *Refer to `assets/design/Design.sketch` — S05.1.*
+
+### Key Components
+
+- Group: Ride Setup
+  - Route picker (Phase 2)
+  - Bike picker (Phase 2)
+
+- Group: Sensors
+  - Sensor type (icon)
+  - Sensor name
+  - Status (Connected, Searching)
+  - When Connected, the battery level if supported
+
+### Open UX Questions
+
+- [ ] TBD
+
+---
+
+## S05.2 — Route Picker
+
+**Phase:** Phase 2  
+**Purpose:** Allow user to select a route for the ride.
+
+### Layout
+
+> *Refer to `assets/design/Design.sketch` — S05.2.*
+
+### Key Components
+
+- Route picker
+- Bike picker
+- List of sensors and status
+
+### Open UX Questions
+
+- [ ] TBD
+
+---
+
+## S05.3 — Active Ride Accessory
+
+**Phase:** MVP  
+**Purpose:** When the Active Ride Dashboard full-screen sheet is swiped down to a minimized state, the ride is represented by the Active Ride Accessory — a compact strip that appears just above the TabBar using `tabViewBottomAccessory`. The pattern is identical to the mini-player in Apple Music.
+
+### Implementation Reference
+
+> The canonical implementation is `ActiveRideAccessoryView` in the prototype at `Test-ToolbarAndAccessoryView/Test-ToolbarAndAccessoryView/ContentView.swift`. For visual layout, see `assets/design/Design.sketch` — S05.3.
+
+The accessory is enabled via:
+
+```swift
+.tabViewBottomAccessory(isEnabled: currentRide != nil) {
+    if let currentRide {
+        ActiveRideAccessoryView(ride: currentRide) {
+            dashboardRide = currentRide   // re-presents the full-screen dashboard
+        }
+        .padding(.horizontal, 4)
+    }
+}
+```
+
+### Layout
+
+The accessory is a full-width horizontal strip. Internal layout (left to right):
+
+- **Leading progress ring** — `OpenRingProgressView`: a donut-style Swift Charts `SectorMark` showing route completion percentage. The visible arc spans 84% of the circle with a gap at the bottom; the completed segment uses `brPrimary` tint, the remaining segment uses `.secondary` at 22% opacity. The percentage integer is displayed in `.caption2.weight(.semibold)` at the center. When no route is loaded, progress is `0.0` (ring shows empty). Frame: 42×42pt.
+- **Live stats** — two `HeroNumber` views at `.small` size (34pt D-DIN Condensed), `.horizontal` layout, showing current distance and current speed with units from `UserProfile.preferredUnit`. Stats update at 1Hz matching the dashboard.
+- **Spacer**
+- **Open button** — `.borderedProminent` button style, label "Open". Taps re-present the full-screen `RideDashboardView`.
+
+### Behavior
+
+- Visible **only when a ride is active** (state = `.active` or `.paused`).
+- When the ride is paused, stats display the last recorded values and do not update.
+- When the rider taps "Open" (or taps anywhere on the strip in future iteration), the full-screen dashboard is re-presented via `fullScreenCover`.
+- The TabBar remains visible and functional beneath the accessory — the rider can navigate to Routes or Settings without losing the active ride.
+- The `tabViewBottomAccessory` API requires iOS 26.
+
+### Eyes-Free Considerations
+
+The accessory strip is a passive display. The rider uses it only when they have consciously minimized the dashboard. The primary safety-critical path (alerts, haptics, audio) continues uninterrupted regardless of whether the dashboard is full-screen or minimized.
+
+### Open UX Questions
+
+- [ ] Should the accessory show a radar alert indicator (small colored dot) when a threat is active, so the rider can see alert state without reopening the dashboard? No.
+- [ ] Should the progress ring be replaced with a bicycle SF Symbol icon when no route is loaded, matching the Sketch design? Yes, that is correct.
+
+---
+
 ## S05 — Active Ride Dashboard
 
 **Phase:** MVP  
 **Priority:** HIGH — this is the most complex and safety-critical screen; detailed UX direction required from Brian before implementation begins.
 
-**Purpose:** The primary screen during a ride. Simultaneously displays speed, HR with zone color, cadence, elapsed time, distance, radar arc, and live map. Must be readable in direct sunlight in under one second.
+**Purpose:** The primary screen during a ride. Simultaneously displays speed, HR with zone color, cadence, elapsed time, distance, radar sidebar, and live map. Must be readable in direct sunlight in under one second.
+
+### Canonical Layout Reference
+
+> S05.4 and S05.5 in `assets/design/Design.sketch` are the canonical layout references for the dashboard widget grid. S05 (the older direct-composition frame) should be ignored. S05.4 and S05.5 are blocking wireframes showing the grid structure; widget visual design is defined per widget below and in the standalone widget frames (W1–W2, etc.).
 
 ### Layout
-> **Brian to define.** Considerations below are provided as structural prompts, not prescriptions.
 
-**Structural Zones to Allocate:**
-- Top zone: elapsed time and distance (secondary metrics)
-- Primary metric zone: speed (dominant numeral) + cadence
-- HR zone: heart rate BPM + zone color indicator + zone label
-- Radar arc: semi-circular visualization, positioned for peripheral awareness
-- Map zone: live position map — below radar arc, or side-by-side?
-- Control zone: pause button (44×44 pt minimum); accessible without looking
+**Structural Zones:**
 
-**Key Layout Decisions Needed:**
-- [ ] Does the live map occupy its own scrollable card, or is it always-visible embedded?
-- [ ] Is the radar arc above or below the map? Or does it overlay the map edge?
-- [ ] What is the spatial relationship between the radar arc and the HR zone indicator?
-- [ ] Does cadence share a row with speed, or does it have its own tile?
-- [ ] What does the metric layout look like in landscape orientation? (or is landscape locked out?)
-- [ ] Where do sensor source badges appear without cluttering critical metrics?
+- Widgets (full screen, no intrinsic padding — widgets extend to screen edges)
+- Dashboard paging indicator
+- Bottom Toolbar
 
-### Component Details
+**Widget Grid**
 
-#### Speed Tile
-- Value: large numeral (minimum 64pt; D-DIN preferred)
-- Unit: km/h or mph (from UserProfile.preferredUnit)
-- Source badge: BLE wheel icon or GPS icon (small, corner of tile)
+The dashboard divides the phone screen into 7 rows × 2 columns. Widget sizes follow the WxH convention (see Global Design Notes). Each widget scales horizontally and vertically to fill its allocated cells. Empty cells are left blank — no placeholder or background.
 
-#### Heart Rate Tile
-- Value: BPM numeral
-- Zone color: background or left border tint in current zone color (`brHRZone1` – `brHRZone5`)
-- Zone label: "Z1 Recovery", "Z2 Endurance", etc.
-- Source badge: BLE HR icon or Apple Watch icon
+**Dashboard Paging**
 
-#### Cadence Tile
-- Value: RPM numeral
-- Source badge: BLE cadence icon
-- Empty state: "--" with "Pair Sensor" affordance when no cadence sensor connected
+Multiple dashboard pages are supported. Pages are added automatically (SpringBoard model). The paging indicator is always visible. See S07 for editing behavior.
 
-#### Elapsed Time
-- HH:MM:SS format
-- Running clock; pauses in `paused` state
+**Bottom Toolbar**
 
-#### Distance
-- Value with unit (km or mi)
-- Updates from active speed source (BLE wheel or GPS)
+Toolbar buttons shown based on ride state:
 
-#### Radar Arc
-> *Full visual specification to be defined by Brian.*
-- Semi-circle representing road behind rider
-- Vehicles as dots; position = relative distance; color = closing speed severity
-- Empty state: arc present but no dots; border in `brRatingGood`
-- Disconnected state: arc grayed; "Radar offline" label
+| Button | Shown when |
+|---|---|
+| Pause | Ride is active |
+| Sensor | One or more paired sensors not found |
+| Resume | Ride is paused |
+| Finish | Ride is paused |
+| Bell | Always |
 
-#### Live Map
-> *Visual integration with radar arc to be defined by Brian.*
-- MapKit view embedded in dashboard
-- Current position dot in `brPrimary`
-- Heading indicator (direction of travel)
-- Route polyline in `brPrimary` if route is loaded
-- Heading-up default; toggle to north-up via tap
+All toolbar buttons use `.buttonStyle(.glass)` (iOS 26), `.labelStyle(.iconOnly)`, and a 52×52pt frame. The toolbar uses `.sharedBackgroundVisibility(.hidden)`.
 
-#### Pause Button
-- Minimum 44×44 pt; recommend 60×60 pt for gloved operation
-- Position: accessible without moving thumb from natural grip
+**Key Layout Decisions:**
+- [ ] Exact widget placement for S05.4 and S05.5 — Brian to annotate cells in `assets/design/Design.sketch`
+- [ ] Landscape locked to portrait ✅
+- [ ] Sensor source badges: none ✅
+- [ ] Map widget: full-screen sheet on tap; no auto-expand ✅
+- [ ] Night mode: follow system ✅
 
-### Alert State Overlays
-Alert states (S06, S07, S08) are applied as overlays on top of this dashboard. See S06–S08.
+### Widget Details
 
-### Open UX Questions
-- [ ] Exact layout grid and component position — Brian to provide via UX.md annotation or Sketch
-- [ ] Does the map ever animate to full-screen (e.g., upcoming turn)? Or is it always dashboard-embedded?
-- [ ] Landscape mode: supported or locked to portrait?
-- [ ] Night / low-light mode: auto-switch to dark mode at dusk, or always follow system?
-- [ ] What is the interaction to navigate from active ride to any other screen? (Swipe? Dedicated nav icon?)
+The basic building block of all widgets is the **hero number**. Defined as Sketch symbols: `large-hero`, `medium-hero`, `small-hero`. The SwiftUI implementation is the `HeroNumber` view in the prototype.
+
+**Hero number sizes (D-DIN Condensed):**
+
+| Symbol | Value pt | Unit pt | Notes |
+|---|---|---|---|
+| `large-hero` | 136 | 20 | Used as the primary value in 2x2 widgets |
+| `medium-hero` | 68 | 20 | Secondary values |
+| `small-hero` | 34 | 20 | Compact values; label shown below, right-aligned |
+
+- Units are baseline-aligned with their value
+- Optional label: `.caption`, uppercased, 16pt
+- Each widget exposes a label modifier; the label is hidden on 2x2 widgets
+- Tapping any widget opens a detail sheet for that metric category
 
 ---
 
-## S06 — Radar Alert — Advisory (L1)
+#### W1 — Speed
+
+**Sizes:** 2x2, 2x1, 1x1
+
+- Primary value: `large-hero`; unit: km/h or mph (`UserProfile.preferredUnit`)
+- Watermark speed history graph (area line behind the numbers)
+- 2x1, 2x2: Max speed for ride (`small-hero`, labeled "MAX")
+- 2x1, 2x2: Current average speed with directional arrow indicating above/below average (`small-hero`, labeled "AVG")
+- 2x2 only: Ride duration (`medium-hero`)
+- 2x2 only: Ride distance (`medium-hero`)
+- Sheet: Ride metrics
+
+---
+
+#### W2 — Average Speed
+
+**Sizes:** 1x1
+
+- Primary value: rolling average speed, excluding stopped time
+- Unit: km/h or mph
+- Watermark speed history graph
+- Sheet: Ride metrics
+
+---
+
+#### W3 — Duration
+
+**Sizes:** 1x1
+
+- Primary value: elapsed ride time, excluding stopped time; format HH:MM:SS
+- No unit
+- Sheet: Ride metrics
+
+---
+
+#### W4 — Heart Rate
+
+**Sizes:** 2x1, 1x1
+
+- Value: current BPM
+- Zone color treatment: background or left-border tint in current zone color (`brHRZone1`–`brHRZone5`)
+- Zone label: "Z1 Recovery", "Z2 Endurance", "Z3 Tempo", "Z4 Threshold", "Z5 VO₂ Max"
+- Empty state: "--" with "Pair Sensor" affordance (navigates to S11)
+- Sheet: Heart rate
+
+---
+
+#### W5 — Cadence
+
+**Sizes:** 2x1, 1x1
+
+- Value: current RPM
+- Empty state: "--" with "Pair Sensor" affordance (navigates to S11)
+- Sheet: Ride metrics
+
+---
+
+#### W6 — Distance
+
+**Sizes:** 1x1
+
+- Value with unit (km or mi); from active speed source (BLE wheel or GPS)
+- Sheet: Ride metrics
+
+---
+
+#### W7 — Radar
+
+**Sizes:** 2x2, 2x1, 1x1
+
+- 24pt-wide vertical strip on the right edge representing the road behind the rider
+- Vehicles as car icons; vertical position = relative distance (closer = lower); icon color = closing speed severity
+- Background: `brRatingOkayBg` / `brRatingBadBg` by alert level; neutral/transparent at L0
+- Layer naming in Design.sketch: background (strip bg), `critical` (L3 vehicle icon), `warning` (L2 vehicle icon), `car` (L1/neutral vehicle icon)
+- Empty state (radar paired, no vehicles): strip present, no icons, `brRatingGood` neutral
+- Disconnected state (was paired, lost signal): strip grayed, "Radar offline" label
+- Hidden entirely when no radar device is paired
+- Sheet: Radar detail
+
+---
+
+#### W8 — Map
+
+**Sizes:** 2x2, 2x1, 1x1
+
+- MapKit view embedded in the widget
+- Current position dot in `brPrimary`; heading indicator
+- Route polyline in `brPrimary` when a route is loaded
+- Heading-up by default; tap toggles to north-up
+- When positioned in the first or last row of the grid, the map extends into the safe area
+- Sheet: Full-screen map
+
+---
+
+#### W9 — Directions
+
+**Sizes:** 2x2, 2x1, 1x1
+
+- Displays next turn maneuver icon and distance to turn
+- Empty state when no route is loaded: hidden or shows "No Route"
+- Sheet: Map
+
+---
+
+#### W10 — Weather
+
+**Sizes:** 2x2, 2x1, 1x1
+
+- Current temperature with unit
+- Wind direction indicator (arrow rotated to bearing) and wind speed
+- Sheet: Weather details
+
+---
+
+#### W11 — Pace
+
+**Sizes:** 2x2, 2x1, 1x1
+
+- Current pace in min/mi or min/km (`UserProfile.preferredUnit`)
+- Sheet: Ride metrics
+
+---
+
+#### W12 — Zones
+
+**Sizes:** 2x2, 2x1, 1x1
+
+- HR zone distribution chart: time spent in each zone for the current ride
+- Zone colors: `brHRZone1`–`brHRZone5`
+- Empty state when no HR source active: "--"
+- Sheet: Heart rate
+
+---
+
+### Open UX Questions
+- [ ] Exact widget placement per page — Brian to annotate S05.4 / S05.5 in Design.sketch. Widgets are placed by the user, there is no "exact" placement. The dashboard will be entirely customizable. 
+- [ ] Should the Sensor toolbar button use a specific SF Symbol to indicate which sensor is missing? Yes, it should just use sensor.tag.radiowaves.forward.fill with a badge. 
+
+---
+
+## S06 — Radar Alert
 
 **Phase:** MVP  
-**Purpose:** Communicate the presence of a vehicle in the radar zone at low threat level without disrupting the rider's concentration.
+**Purpose:** Communicate the presence and severity of approaching vehicles via the radar sidebar visualization and escalating haptic/audio alerts.
+
+> See `assets/design/Design.sketch` — S06 for the visual design. The sidebar is implemented as W7 within the dashboard widget grid.
 
 ### Visual Treatment
-- Peripheral amber tint: thin `brRatingOkay` wash at screen edges (~10% opacity)
-- No modal or overlay; dashboard remains fully readable
-- Radar arc dot transitions to `brRatingOkay` for the approaching vehicle
+
+- A 24pt-wide strip on the right edge of the dashboard, present only when a radar device is paired
+- Car icons represent vehicles; vertical position encodes relative distance (top = far, bottom = near)
+- Background layer named `background` in Sketch; tinted `brRatingOkayBg` / `brRatingBadBg` by alert level; neutral at L0
+- Vehicle icons named `car` (neutral/L1), `warning` (L2), `critical` (L3) in Sketch; colored `brRatingOkay` / `brRatingBad` accordingly
 
 ### Haptic
-- Single `UIImpactFeedbackGenerator` `.light` tap
+
 - Minimum 3 seconds before re-trigger at same level
 
+- **L1 — Advisory:** Single `UIImpactFeedbackGenerator` `.light` tap
+
+- **L2 — Warning:** Double `UIImpactFeedbackGenerator` `.medium` tap, 0.3s between taps
+
+- **L3 — Danger:** Core Haptics pattern — three 0.14s `HapticContinuous` bursts at full intensity and sharpness:
+
+  ```json
+  {
+      "Version": 1.0,
+      "Pattern": [
+          { "Event": { "Time": 0.0,  "Duration": 0.14, "EventType": "HapticContinuous", "EventParameters": [{ "ParameterID": "HapticIntensity", "Value": 1.0 }, { "ParameterID": "HapticSharpness", "Value": 0.9 }] } },
+          { "Event": { "Time": 0.22, "Duration": 0.14, "EventType": "HapticContinuous", "EventParameters": [{ "ParameterID": "HapticIntensity", "Value": 1.0 }, { "ParameterID": "HapticSharpness", "Value": 0.9 }] } },
+          { "Event": { "Time": 0.44, "Duration": 0.14, "EventType": "HapticContinuous", "EventParameters": [{ "ParameterID": "HapticIntensity", "Value": 1.0 }, { "ParameterID": "HapticSharpness", "Value": 0.9 }] } }
+      ]
+  }
+  ```
+
 ### Audio
-- None
+
+See `Audio.md` for the canonical specification of all three tones (All Clear, Warning, Danger). The sox generation commands, frequencies, waveforms, and jersey-pocket audibility test requirements are defined there and are the source of truth.
 
 ### Open UX Questions
-- [ ] How wide is the peripheral amber tint? (Full edge gradient, or just top/bottom?)
-- [ ] Should there be a subtle animation (pulse) on the peripheral tint, or is static opacity sufficient?
+- [ ] At what specific closure rates (km/h delta) should L1, L2, and L3 thresholds be set?
+- [ ] Should there be a subtle pulse animation on the peripheral screen tint, or is static opacity sufficient? Static
 
 ---
 
-## S07 — Radar Alert — Caution (L2)
+## S07 — Dashboard Customization
 
-**Phase:** MVP  
-**Purpose:** Escalate awareness for moderate threat — multiple vehicles or moderate closing speed.
+**Phase:** Phase 2  
+**Purpose:** Allow the rider to customize dashboard widget placement and add additional dashboard pages.
 
-### Visual Treatment
-- Amber border pulse: `brRatingOkay` border around screen perimeter, animating in/out at ~1Hz
-- Radar arc dot(s) in `brRatingOkay`
-- Dashboard metrics remain fully visible
+### Interaction
 
-### Haptic
-- Double tap, `.medium`, 0.5s interval between taps
-- Minimum 3 seconds before re-trigger at same level
+Modeled on SpringBoard widget editing:
 
-### Audio
-- None
+1. Long press on the dashboard enters customization mode
+2. Existing widgets wiggle and display a "minus" remove button at the upper-left corner
+3. The navigation area shows an "Add" button (upper left) and "Done" (upper right)
+4. A blank page is automatically appended; rider can swipe to it to place widgets. Empty pages are removed on exit.
+5. "Add" opens the Add Widget sheet (S08)
 
 ### Open UX Questions
-- [ ] Border pulse: full perimeter, or just sides + bottom (road-awareness metaphor)?
-- [ ] Does the L2 state persist until threat drops to L1, or does it decay after a fixed duration?
+
+- [ ] TBD
 
 ---
 
-## S08 — Radar Alert — Danger (L3)
+## S08 — Add Widget
 
-**Phase:** MVP  
-**Purpose:** Maximum urgency alert for high-speed vehicle approach. Eyes-free must work completely; visual treatment is supplementary.
+**Phase:** Phase 2  
+**Purpose:** Display all available widgets and allow the rider to add one to the dashboard. Widgets shown with size previews.
 
-### Visual Treatment
-- Full-screen `brRatingBad` color wash at ~70% opacity over dashboard
-- Cannot be dismissed by rider — persists until threat recedes
-- Radar arc at full red; vehicle dot(s) prominent
+### Interaction
 
-### Haptic
-- Continuous rhythmic `.heavy` at 0.3s on / 0.3s off
-- Persists until alert level drops below danger threshold
-
-### Audio
-- Tone alert (system audio channel)
-- Overrides Silent Mode if `UserProfile.overrideSilentModeForL3 == true`
-- Tone: distinct from system notification sounds; not jarring but clearly audible
-- Tone pattern: [ ] to be defined — single sustained tone, repeating short tones, or escalating pitch?
+TBD
 
 ### Open UX Questions
-- [ ] Does any readable text appear on the L3 wash screen? ("Vehicle approaching"?) Or is it color + haptic only?
-- [ ] If multiple L3 vehicles are present simultaneously, does the screen treatment change?
-- [ ] Tone pattern: define specific tone frequency, duration, and repeat interval
+
+- [ ] TBD
 
 ---
 
 ## S09 — Ride Paused
 
 **Phase:** MVP  
-**Purpose:** Clearly indicate the ride is paused; provide resume and end ride options.
+**Purpose:** Clearly indicate the ride is paused; provide Resume and Finish options.
 
-### Layout
-> *To be defined by Brian.*
+### Interaction
 
-### Key Components
-- "PAUSED" indicator (prominent)
-- Elapsed time (frozen)
-- Distance (frozen)
-- Live map (static, showing current position)
-- Resume button (primary CTA, `brPrimary`)
-- End Ride button (secondary; leads to ride summary)
-- Radar arc remains visible (safety persists during pause)
+When a ride is paused, elapsed time stops incrementing. All sensors continue recording (GPS, BLE radar, HR, cadence). The dashboard bottom toolbar replaces the Pause button with Resume and Finish buttons. The Bell button is always shown. Finish requires confirmation before ending the ride.
+
+The visual dashboard is otherwise unchanged — all metric widgets continue displaying the last recorded values.
+
+> Implementation reference: `RideDashboardView` in the prototype manages this state via `@State private var isPaused`. The toolbar uses `if isPaused { Resume + Finish } else { Pause }`. The Finish confirmation uses `.alert("Finish Ride", ...)`.
 
 ### Open UX Questions
-- [ ] Does BLE radar alerting continue during pause? (Recommendation: yes — safety does not pause)
-- [ ] Is there a minimum pause duration before "End Ride" appears, to prevent accidental ride termination?
+- [x] Does BLE radar alerting continue during pause? Yes — all sensors continue.
+- [x] Minimum pause duration before Finish appears? No — Finish is always shown when paused; confirmation dialog prevents accidental termination.
 
 ---
 
 ## S10 — Ride Summary
 
 **Phase:** MVP  
-**Purpose:** Post-ride overview of completed ride with key metrics and GPX export action.
+**Purpose:** Post-ride overview of completed ride with key metrics.
 
 ### Layout
-> *To be defined by Brian.*
+> *Refer to `assets/design/Design.sketch` — S10.*
 
 ### Key Components
-- Map thumbnail (full route trace in `brPrimary`)
+- Map thumbnail (full route trace in `brPrimary`; placeholder in Design.sketch)
 - Primary metrics: total distance, total time, avg speed
-- HR zone breakdown: time-in-zone bar chart (5 zones, zone colors)
-- Average cadence (if cadence sensor was active)
-- Radar events count
-- GPX Export / Share action (Files app + Share Sheet)
+- HR zone breakdown (placeholder in Design.sketch — chart type TBD)
+- Average cadence (if cadence sensor was active during the ride)
+- Radar events count / vehicle pass count
 - Save / Done navigation
 
+> **Note:** There is no explicit GPX export action on this screen. The GPX file is written automatically at ride end and is available via the iOS Files app in the app's `Documents/Rides/` directory.
+
 ### Open UX Questions
-- [ ] Is the zone breakdown a horizontal bar chart, a stacked bar, or a pie chart?
-- [ ] Should the ride summary show a "best" highlight (e.g., longest Z4 interval)?
-- [ ] Can the rider rename the ride from this screen?
+- [ ] Is the zone breakdown a horizontal bar chart, a stacked bar, or a pie chart? Pie chart
+- [ ] Should the ride summary show a "best" highlight (e.g., longest Z4 interval)? We'll enhance this after more feedback
+- [ ] Can the rider rename the ride from this screen? Yes. Tapping on the description will focus the control and open the keyboard to name. The name should be defaulted from the route. 
 
 ---
 
 ## S11 — Device Management
 
 **Phase:** MVP  
-**Purpose:** View and manage all paired BLE sensors; check signal strength; pair new sensors; set sensor priority.
+**Purpose:** View and manage all paired BLE sensors; pair new sensors.
 
 ### Layout
-> *To be defined by Brian.*
+> *Refer to `assets/design/Design.sketch` — S11.*
 
 ### Sensor Sections
 1. Radar (Garmin Varia RTL515 / RCT715)
 2. Heart Rate sensor
-3. Speed / Cadence sensor
-4. Power meter (Phase 3 — shown as "Coming soon" or hidden in MVP)
+3. Speed sensor
+4. Cadence sensor
+5. Power meter (Phase 3 — hidden in MVP)
 
 ### Per-Sensor Row
-- Sensor name and model (if identifiable from BLE advertisement)
-- Connection status dot (green / amber / red)
-- Signal strength indicator (RSSI bars)
-- Unpair action
-- "Add Sensor" row below each category
+- Sensor name and model (from BLE advertisement if identifiable)
+- Connection status
+- Pair / Unpair action
+- Unpaired sensors sorted to the top
+- When pairing a sensor with multiple profiles (e.g., combined speed+cadence), the rider is prompted to choose which type it represents
 
 ### Open UX Questions
-- [ ] If multiple sensors of the same type are paired, how is active source indicated?
-- [ ] Should RSSI be shown numerically (dBm) or as icon bars only?
+- [x] Multiple sensors of same type: active source by connection order — first wins.
+- [x] RSSI display: none.
 
 ---
 
 ## S12 — App Settings
 
 **Phase:** MVP  
-**Purpose:** Configure units, alert behavior, haptic intensity, audio alerts, and Silent Mode override.
+**Purpose:** Configure units, wheel size, alert behavior, haptic intensity, audio alerts, and accounts.
 
 ### Settings Sections
 
-**Units**
-- Distance / speed: Metric (km) | Imperial (miles)
+**General**
+- Units: Metric (km) | Imperial (miles)
 - Wheel circumference (mm) — numeric entry with preset selector
+- Auto-pause
+- Auto-dim
+- Set Do Not Disturb
+- Sensors (navigates to S11)
 
-**Navigation**
-- Map orientation: Heading-up | North-up
-- Turn alert distance: 100m | 200m | 300m
+**HR Zones**
+- Each zone listed with a Stepper control for adjustment
+- Footer: "HR Zone data is derived from data collected by Apple Health."
 
-**Radar Alerts**
-- Haptic intensity: Light | Medium | Heavy (applies scale to all levels)
-- Audio alerts: On | Off
-- Override Silent Mode for L3 danger alerts: On | Off (off by default; warning copy required)
-- Danger threshold (closing speed): [configurable, default 30 km/h]
-- Caution vehicle count threshold: [configurable, default 3]
+**Accounts**
+- List of connected accounts (Strava, Ride with GPS, etc.)
+- Each row navigates to account detail (S12.1)
+- Last row: "Add Account" with confirmation dialog for service selection
 
-**Ride Recording**
-- Auto-end ride after stationary (minutes): Off | 5 | 10 | 15
+**About**
+- Version (read from bundle, shown as `CFBundleShortVersionString (CFBundleVersion)`)
+- Privacy Policy (navigates to inline policy view)
 
 ### Open UX Questions
-- [ ] What warning copy accompanies the Silent Mode override toggle? (Safety implication for other notifications)
-- [ ] Should the danger threshold be a slider or a numeric stepper?
+- [x] Silent Mode override toggle: not a setting at this time.
+- [x] Danger threshold: not a setting at this time.
 
 ---
 
 ## S13 — HR Zone Configuration
 
-**Phase:** MVP  
-**Purpose:** Display the rider's calculated HR zones; allow manual override of profile values.
+**Phase:** Deprecated — functionality moved to S12 App Settings (HR Zones section)
 
 ### Layout
-> *To be defined by Brian.*
-
-### Key Components
-- Source indicator: "From Apple Health" or "Manually entered"
-- Resting HR field (editable)
-- Max HR field (editable; shows Apple Health value and age-based estimate for comparison)
-- Calculated zone table: Zone 1–5, BPM range per zone, zone color swatch
-- Karvonen formula explanation (brief, collapsible)
-- "Refresh from Apple Health" action
-
-### Open UX Questions
-- [ ] If Apple Health values are present, are the fields read-only with an edit override, or always editable?
-- [ ] Should zone boundaries animate when the rider adjusts resting / max HR values?
+> *Refer to `assets/design/Design.sketch` — S13 (deprecated).*
 
 ---
 
@@ -453,67 +733,74 @@ Alert states (S06, S07, S08) are applied as overlays on top of this dashboard. S
 **Purpose:** Browsable list of all recorded rides.
 
 ### Layout
-> *To be defined in Phase 2.*
+> *Refer to `assets/design/Design.sketch` — S14.*
 
-### Per-Row Content (indicative)
-- Date and time
-- Distance and duration
-- Map thumbnail (small)
-- Average HR zone color indicator
-- Radar event count badge
+### Per-Row Content
+- Map thumbnail (56×56pt, rounded corners)
+- Ride name and date/time
+- Distance (`HeroNumber` small) and elapsed time (D-DIN Condensed 20pt)
+- Swipe actions: leading — Sync (blue), Make Route (green); trailing — Delete (red, destructive)
+
+### Empty State
+
+When the ride list is empty, use `ContentUnavailableView`:
+
+```swift
+ContentUnavailableView {
+    Label("No Rides Yet", systemImage: "figure.outdoor.cycle")
+} description: {
+    Text("Start a ride to see it appear here.")
+} actions: {
+    Button("Start New Ride") {
+        isPresentingNewRide = true
+    }
+}
+.frame(maxWidth: .infinity, minHeight: 220)
+.listRowBackground(Color.clear)
+```
 
 ---
 
 ## S15 — Ride Detail
 
 **Phase:** Phase 2  
-**Purpose:** Deep view of a completed ride — map replay, HR over time, cadence over time, radar event markers on timeline.
+**Purpose:** Deep view of a completed ride — map, HR over time, cadence, elevation, Strava segments.
 
 ### Layout
-> *To be defined in Phase 2.*
+> *Refer to `assets/design/Design.sketch` — S15 when available.*
 
 ### Key Components
-- Full map with route trace and radar event markers
+- Full-width MapKit view (240pt height, rounded corners, inset to list edges)
+- Elevation profile chart (Swift Charts, AreaMark + LineMark in `brPrimary`)
+- Stats section: avg/max speed, avg/max cadence
 - HR zone graph over elapsed time
-- Cadence graph over elapsed time
-- Radar event timeline with alert level color coding
+- Strava segments list: name, distance, best time + date
 - GPX re-export action
 
 ---
 
 ## S16 — Training Zones Graph
 
-**Phase:** Phase 2  
-**Purpose:** Training load view — time spent in each HR zone across a configurable recent period (7d / 30d / 90d).
-
-### Layout
-> *To be defined in Phase 2.*
+**Phase:** Cut  
+**Purpose:** Time-in-zone breakdown across recent rides. Cut — does not align with the app's goals.
 
 ---
 
-## S17 — Apple Watch Face
+## S17 — Apple Watch
 
 **Phase:** Phase 2  
-**Purpose:** Glanceable watch complication and standalone mini-dashboard on Apple Watch.
-
-### Complication Data
-- Speed (large)
-- HR zone color indicator
-- Radar alert indicator (simplified: safe / caution / danger icon)
+**Purpose:** Standalone ride dashboard on Apple Watch (not a complication-only target).
 
 ### Open UX Questions
-- [ ] Which complication family sizes to target? (Graphic Circular, Graphic Corner, Graphic Rectangular)
-- [ ] Does the watch app function independently (no iPhone required during ride)?
+- [x] Which complication family sizes? This is a full watch dashboard, not a complication.
+- [x] Functions independently without iPhone? No.
 
 ---
 
 ## S18 — AR HUD Configuration
 
 **Phase:** Phase 3  
-**Purpose:** Configure the heads-up display layout for ENGO 2 / ActiveLook AR glasses.
-
-### Layout
-> *To be defined in Phase 3 AR specification document.*
+**Purpose:** Configure the HUD layout for ENGO 2 / ActiveLook AR glasses.
 
 ### Constraints
 - Monochrome display (~300×256px)
@@ -522,4 +809,48 @@ Alert states (S06, S07, S08) are applied as overlays on top of this dashboard. S
 
 ---
 
-*Cyclometer UX Specification v0.1 · Stub · 2026-03-31 · Awaiting UX direction from Brian*
+## S19 — Route Management
+
+**Phase:** Phase 2  
+**Purpose:** Browsable list of saved routes with list and map views.
+
+### Layout
+> *Refer to `assets/design/Design.sketch` — S19.*
+
+### Key Components
+- Toolbar toggle: list view / map view (`list.bullet` / `map` SF Symbol)
+- List view: route rows with name, distance, terrain description
+- Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls
+- Tap a route → navigates to S20
+- Empty state: `ContentUnavailableView` with "No Routes" label and import action
+
+### Open UX Questions
+- [ ] How does the user import a route here (vs. at ride start)?
+- [ ] Should routes from tribos.studio be shown in a separate section or merged with local routes?
+
+---
+
+## S20 — Route Detail
+
+**Phase:** Phase 2  
+**Purpose:** Full detail view of a route with map, elevation, weather, Strava segments, and previous rides.
+
+### Layout
+> *Refer to `assets/design/Design.sketch` — S20.*
+
+### Key Components
+- Full-width `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag)
+- Distance and elevation gain/loss summary (`LabeledContent`)
+- Elevation profile: Swift Charts `AreaMark` + `LineMark` in `brPrimary`, catmullRom interpolation
+- Current weather section: temperature, wind direction (`WindDirectionView` — rotated arrow SF Symbol + compass label + degrees), wind speed
+- Strava segments: name, distance, best time, best time date
+- Previous rides: date, elapsed time, conditions
+- "Use This Route" CTA — sets active route in Start Sheet and navigates to S05.1
+
+### Open UX Questions
+- [x] Should weather be fetched live or cached at route-save time? The weather should be fetched live.
+- [x] If the route has never been ridden, should Previous Rides be hidden or show an empty state? Hidden.
+
+---
+
+*Cyclometer UX Specification v0.3 · 2026-03-31 · Updated 2026-05-20*

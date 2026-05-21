@@ -1,9 +1,9 @@
 # Cyclometer — Product Requirements Document
-**Version:** 0.2 Draft  
-**Date:** 2026-03-31  
-**Status:** Second Review  
+**Version:** 0.4 Draft  
+**Date:** 2026-05-20  
+**Status:** Fourth Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
-**Platform:** iOS 17+ · iPhone-first · Apple Watch companion  
+**Platform:** iOS 26+ · iPhone-first · Apple Watch companion  
 **App Name:** Cyclometer
 
 ---
@@ -14,7 +14,9 @@
 |---|---|---|---|
 | 0.1 | 2026-03-30 | Brian / Claude | Initial draft |
 | 0.2 | 2026-03-31 | Brian / Claude | Radar device corrected to RTL515/RCT715; BLE sensor priority for HR/speed/cadence; power meter to Phase 3; navigation to MVP; data model corrections; GPX export with gpxtpx:TrackPointExtension; resolved OQ1,3,4,5,6,8,9,10; app renamed Cyclometer |
-| 0.2.1 | 2026-04-05 | Brian / Claude | Updated all design asset paths to reflect new `assets/design/` folder structure; corrected color token reference from root-level file to `assets/design/colors.md`; added Appendix C — Design Assets |
+| 0.2.1 | 2026-04-05 | Brian / Claude | Updated all design asset paths to reflect new `assets/design/` folder structure; corrected color token reference; added Appendix C — Design Assets |
+| 0.3 | 2026-04-05 | Brian / Claude | Corrected Cadence competitive row (navigation ✅, ActiveLook AR ✅); three-tone audio system (All Clear, Warning, Danger) — spec in `Audio.md`; radar visualization brainstorming added; radar hidden when no device paired; haptic brainstorming added; route planning expanded to GPX import + tribos.studio; vehicle pass event recording added to GPX and data model; resolved OQ12 (GPX import only), OQ13 (presets + manual + auto-calibration); wheel auto-calibration spec added |
+| 0.4 | 2026-05-20 | Brian / Claude | iOS minimum updated to 26.0; S05.4, S05.5, S19, S20 added to screen inventory; OQ14 resolved (Option F sidebar); L3 haptic updated to Core Haptics; Routes tab added and promoted to Phase 2; deferred alert-configuration fields removed from UserProfile |
 
 ---
 
@@ -47,7 +49,7 @@ Cyclometer is a **safety-first cycling companion for iPhone and Apple Watch** th
 
 The central insight: **a cycling computer's most critical job is not to display data — it's to keep the rider alive when something dangerous is approaching from behind.**
 
-Cyclometer records every ride as an industry-standard GPX file with full `gpxtpx:TrackPointExtension` data — heart rate, cadence, speed, and power correlated per track point — available directly in the iOS Files app and exportable to any compatible platform.
+Cyclometer records every ride as an industry-standard GPX file with full `gpxtpx:TrackPointExtension` data — heart rate, cadence, speed, and power correlated per track point — available directly in the iOS Files app and exportable to any compatible platform. Vehicle pass events are also recorded as GPX waypoints using a custom `cyc:` namespace, enabling post-ride traffic analysis.
 
 ---
 
@@ -65,7 +67,7 @@ Cyclists using a smartphone as a cycling computer face a dangerous information g
 Steps 1–4 typically take 1–3 seconds of eyes-off-road time. At 30 km/h, that is 8–25 meters of blind riding.
 
 ### The Opportunity
-The Garmin Varia RTL515 and RCT715 expose real-time radar alert data over BLE. Cyclometer's opportunity is to make that data immediately useful **without requiring the rider to look at the phone** — through progressive haptic escalation, peripheral color cues, audio alerts, and future AR glasses integration. Combined with rich BLE sensor integration (HR, speed, cadence) and standards-based GPX export, Cyclometer replaces a dedicated cycling computer for the majority of cyclists.
+The Garmin Varia RTL515 and RCT715 expose real-time radar alert data over BLE. Cyclometer's opportunity is to make that data immediately useful **without requiring the rider to look at the phone** — through progressive haptic escalation, peripheral color cues, a three-tone audio alert system (All Clear, Warning, Danger), and future AR glasses integration. Combined with rich BLE sensor integration (HR, speed, cadence) and standards-based GPX export with vehicle pass event recording, Cyclometer replaces a dedicated cycling computer for the majority of cyclists.
 
 ---
 
@@ -99,15 +101,17 @@ The Garmin Varia RTL515 and RCT715 expose real-time radar alert data over BLE. C
 
 ## 4. Competitive Landscape
 
-| App | Radar Support | HR Zones | Eyes-Free | Navigation | GPX Export |
-|---|---|---|---|---|---|
-| **Cadence (Seven Bold)** | ✅ Best-in-class | Partial | ❌ | ❌ | Partial |
-| **Wahoo ELEMNT** | ✅ (hardware only) | ✅ | Partial | ✅ | ✅ |
-| **Strava** | ❌ | Basic | ❌ | Limited | ✅ |
-| **Garmin Connect Mobile** | ✅ (own device) | ✅ | ❌ | ✅ | ✅ |
-| **Cyclometer** | ✅ First-class | ✅ Zone-aware | ✅ Core | ✅ MVP | ✅ GPX+ext |
+| App | Radar Support | AR Glasses | HR Zones | Eyes-Free | Navigation | GPX Export |
+|---|---|---|---|---|---|---|
+| **Cadence (Seven Bold)** | ✅ Best-in-class | ✅ ActiveLook | ✅ Full | ❌ | ✅ Mapbox turn-by-turn + GPX import | ❌ (TCX only) |
+| **Wahoo ELEMNT** | ✅ (hardware only) | ❌ | ✅ | Partial | ✅ | ✅ |
+| **Strava** | ❌ | ❌ | Basic | ❌ | Limited | ✅ |
+| **Garmin Connect Mobile** | ✅ (own device) | ❌ | ✅ | ❌ | ✅ | ✅ |
+| **Cyclometer** | ✅ First-class | ✅ Phase 3 | ✅ Zone-aware | ✅ Core design | ✅ GPX import MVP | ✅ GPX+ext+vehicle pass |
 
-**Key differentiator:** Cyclometer is the only app designed from the ground up around eyes-free interaction patterns as a primary design constraint, combined with full-fidelity GPX export with per-point biometric correlation.
+**Key differentiator:** Cyclometer is the only app designed from the ground up around eyes-free interaction patterns as a primary design constraint, with a complete three-tone audio alert system (including a deliberate All Clear tone that Cadence lacks), full-fidelity GPX export with per-point biometric correlation, and vehicle pass event recording.
+
+**Cadence correction (v0.2 had this wrong):** Cadence does have routing and navigation (Mapbox-powered turn-by-turn, GPX import, route saving from activities) and does support ActiveLook AR glasses. These are feature-complete implementations and represent a meaningful competitive benchmark.
 
 ---
 
@@ -129,7 +133,7 @@ Radar alerts must escalate proportionally to threat severity. A distant vehicle 
 For every metric, the highest-fidelity source is preferred. The app degrades gracefully when any sensor is unavailable, always using the best available source. The rider is never blocked by missing hardware.
 
 ### P6 — Standards-Based Data Portability
-Ride data is the rider's data. Every ride exports as a standards-compliant GPX file with biometric extensions. No proprietary formats, no lock-in.
+Ride data is the rider's data. Every ride exports as a standards-compliant GPX file with biometric extensions and vehicle pass events. No proprietary formats, no lock-in.
 
 ### P7 — Minimal Interaction During Ride
 Controls must be large enough to tap without looking. The active ride screen must require zero navigation to reach the most critical information.
@@ -140,43 +144,50 @@ Controls must be large enough to tap without looking. The active ride screen mus
 
 ### MVP (Phase 1)
 - Active ride dashboard — speed, HR, cadence, elapsed time, distance, live map
-- Garmin Varia RTL515 / RCT715 BLE radar integration with arc visualization
+- Garmin Varia RTL515 / RCT715 BLE radar integration with sidebar visualization (hidden when no radar device is paired)
+- Three-tone audio alert system: All Clear, Warning, Danger (spec: `Audio.md`)
 - BLE sensor priority system — HR strap, speed/cadence sensor, with Apple Watch and GPS as fallbacks
 - Heart rate zone display (Zones 1–5) via BLE HR sensor or Apple Watch / HealthKit
-- Haptic alert system (3 escalation levels) with Silent Mode override
-- Audio tone alerts for high-severity radar events
+- Haptic alert system (3 escalation levels) with Silent Mode override for Danger
 - GPS track recording with live map view
-- GPX export with `gpxtpx:TrackPointExtension` (HR, cadence, speed per track point)
+- Route loading from GPX file import (Files app) or tribos.studio integration
+- GPX export with `gpxtpx:TrackPointExtension` (HR, cadence, speed per track point) and `cyc:VehiclePassEvent` waypoints
 - GPX files available in iOS Files app
 - Basic ride summary (post-ride)
 - BLE device pairing and management screen
+- Wheel circumference with preset sizes, manual entry, and GPS auto-calibration
 - Settings screen
 - Open TestFlight beta
 
 ### Phase 2
-- Ride history with map replay
+- Routes tab (S19, S20): route list with list and map views, route detail with elevation profile, current weather, Strava segments, and previous ride history
+- Ride history (S14) with map replay and vehicle pass event visualization
+- Ride detail view (S15): HR graph, cadence graph, radar event + vehicle pass timeline
 - Heart rate zone training graphs
-- Customizable metric tiles on dashboard
+- Customizable metric tiles on dashboard (S07, S08)
+- Route picker in Start Sheet (S05.2)
 - Lock screen / Dynamic Island integration
-- Apple Watch standalone companion app and complication
+- Apple Watch standalone companion app and complication (S17)
 - Cadence + HR data visualization on ride detail screen
 - Strava / Garmin Connect export
 
 ### Phase 3
 - Power meter BLE support (ANT+ bridge via Garmin SDK if viable; BLE power meters natively)
-- ENGO 2 / ActiveLook AR glasses integration
-- Route planning with turn-by-turn
+- ENGO 2 / ActiveLook AR glasses integration (S18)
 - Segment detection
 
-### Resolved Decisions (from v0.1 Open Questions)
-- **Persistence:** SwiftData (iOS 17+ minimum target confirmed)
+### Resolved Decisions (cumulative)
+- **Persistence:** SwiftData (iOS 26+ minimum target confirmed)
 - **Platform:** iPhone only; no iPad support
-- **Audio alerts:** Tones (not synthesized voice)
-- **Silent Mode:** Override for L3 danger alerts (user-confirmed in settings)
+- **Audio alerts:** Three tones — All Clear, Warning, Danger. Full spec in `Audio.md`.
+- **Silent Mode:** Danger tone overrides with user opt-in; Warning and All Clear always respect Silent Mode
 - **App name:** Cyclometer
 - **Apple Watch:** Deferred to Phase 2
 - **HR zone formula:** Karvonen only in MVP
 - **TestFlight:** Open beta
+- **Navigation (OQ12):** GPX file import only for MVP; no `MKDirections` routing
+- **Wheel sizing (OQ13):** Preset common sizes + manual entry + GPS auto-calibration (see §8.9)
+- **Radar visualization (OQ14):** Option F — right-side sidebar strip (see §8.2)
 
 ---
 
@@ -186,22 +197,29 @@ Controls must be large enough to tap without looking. The active ride screen mus
 |---|---|---|---|
 | S01 | Onboarding — Welcome | MVP | App intro, permission requests (BLE, HealthKit, Location, Files) |
 | S02 | Onboarding — Sensor Pairing | MVP | BLE scan + pair radar, HR strap, speed/cadence sensor |
-| S03 | Onboarding — Profile Setup | MVP | Age; pulls Max HR and Resting HR from Apple Health if available |
-| S04 | Home | MVP | Pre-ride summary; last ride, sensor status badges, quick-start |
-| S05 | Active Ride Dashboard | MVP | **Primary screen.** Speed, HR zone, radar arc, cadence, elapsed time, distance, live map |
-| S06 | Radar Alert — Advisory (L1) | MVP | Peripheral amber wash; subtle haptic |
-| S07 | Radar Alert — Caution (L2) | MVP | Amber border pulse; escalating haptic |
-| S08 | Radar Alert — Danger (L3) | MVP | Full-screen red wash; continuous haptic + tone; overrides Silent Mode |
+| S03 | Onboarding — Profile Setup | Cut | Age; pulls Max HR and Resting HR from Apple Health if available |
+| S04 | Home | Deferred | Pre-ride summary; last ride, sensor status badges, quick-start |
+| S05 | Active Ride Dashboard | MVP | **Primary screen.** Speed, HR zone, radar sidebar (if paired), cadence, elapsed time, distance, live map |
+| S05.1 | Start Ride Sheet | MVP | Sheet to start a ride |
+| S05.2 | Route Picker | Phase 2 | From the Start Sheet, the ability to pick a route for the ride |
+| S05.3 | Active Ride Accessory | MVP | Compact strip above TabBar when the dashboard sheet is minimized; shows live ride stats and an Open button |
+| S05.4 | Widget Layout | MVP | Default widget layout for the active ride dashboard |
+| S05.5 | Widget Layout 2 | MVP | Second widget layout page for the active ride dashboard |
+| S06 | Radar Alert | MVP | Sidebar visualization and alert-level state changes |
+| S07 | Dashboard Customization | Phase 2 | SpringBoard-style long-press widget editing and page management |
+| S08 | Add Widget | Phase 2 | Widget picker sheet; previews all available widgets in supported sizes |
 | S09 | Ride Paused | MVP | Pause state with live map frozen; resume / end ride options |
-| S10 | Ride Summary | MVP | Distance, time, avg speed, HR zone breakdown, cadence avg, map thumbnail, GPX export action |
+| S10 | Ride Summary | MVP | Distance, time, avg speed, HR zone breakdown, cadence avg, map thumbnail, vehicle pass count, GPX export action |
 | S11 | Device Management | MVP | BLE device list; signal strength; pair / unpair; sensor source priority |
-| S12 | App Settings | MVP | Units, alert thresholds, haptic intensity, audio alert toggle, Silent Mode override toggle |
-| S13 | HR Zone Configuration | MVP | Pulled from Apple Health; manual override; Karvonen calculation display |
+| S12 | App Settings | MVP | Units, alert thresholds, haptic intensity, audio alert toggles, Silent Mode override toggle |
+| S13 | HR Zone Configuration | Deprecated | Pulled from Apple Health; manual override; Karvonen calculation display. See S12 - App Settings for details. |
 | S14 | Ride History List | Phase 2 | Scrollable list of past rides with summary stats |
-| S15 | Ride Detail | Phase 2 | Full ride: map replay, HR graph, cadence graph, radar event timeline |
-| S16 | Training Zones Graph | Phase 2 | Time-in-zone breakdown across recent rides |
-| S17 | Apple Watch Face | Phase 2 | Glanceable watch complication and standalone mini-dashboard |
+| S15 | Ride Detail | Phase 2 | Full ride: map replay, HR graph, cadence graph, radar event + vehicle pass timeline |
+| S16 | Training Zones Graph | Cut | Time-in-zone breakdown across recent rides |
+| S17 | Apple Watch | Phase 2 | Glanceable watch app. |
 | S18 | AR HUD Configuration | Phase 3 | Configure ENGO 2 / ActiveLook display layout |
+| S19 | Route Management | Phase 2 | Browsable list of saved routes with list and map views |
+| S20 | Route Detail | Phase 2 | Route detail: MapView, elevation profile, distance, current weather, Strava segments, previous ride history |
 
 > **Note:** Screen-level UX detail — layout, component hierarchy, interaction patterns, and annotation — is specified in `UX.md`. The PRD defines *what* each screen must accomplish; UX.md defines *how* it is structured.
 
@@ -214,23 +232,21 @@ Controls must be large enough to tap without looking. The active ride screen mus
 The active ride dashboard is the primary screen during a ride. Full layout specification, component hierarchy, and interaction annotations are defined in `UX.md` (see S05 section). This section captures functional requirements and acceptance criteria only.
 
 **Functional Requirements:**
-- Must display simultaneously: current speed, HR with zone color, cadence, elapsed time, distance, radar arc, and live map
-- All safety-critical elements (radar arc, alert states) must occupy positions that do not require the rider to search the screen
+- Must display simultaneously: current speed, HR with zone color, cadence, elapsed time, distance, radar sidebar (only if a radar device is paired), and live map
+- All safety-critical elements (radar sidebar, alert states) must occupy positions that do not require the rider to search the screen
 - Live map must show current position and heading; north-up or heading-up based on user setting
 - All numeric metrics must remain legible in direct sunlight (WCAG AA minimum)
-
-**Sensor Source Indicators:**
-- Each metric tile must carry a small source badge indicating the active sensor (BLE icon, Apple Watch icon, or GPS icon) so the rider can confirm their hardware is active
 
 **Acceptance Criteria:**
 - [ ] Screen renders within 100ms of ride start
 - [ ] Speed updates at minimum 1Hz from active source
 - [ ] HR updates reflected within 2 seconds of sensor reading
 - [ ] Cadence updates at minimum 1Hz from active source
-- [ ] Radar arc updates within 500ms of BLE data arrival
+- [ ] Radar sidebar updates within 500ms of BLE data arrival
 - [ ] Live map updates position at minimum 1Hz
 - [ ] All text meets WCAG AA in both light and dark mode
 - [ ] Dashboard is operable with one gloved tap for pause
+- [ ] Radar sidebar is not shown at all when no radar device is paired (space reclaimed by other elements)
 
 ---
 
@@ -238,30 +254,69 @@ The active ride dashboard is the primary screen during a ride. Full layout speci
 
 **Purpose:** Represent the approaching-vehicle threat state visually on the ride dashboard without requiring cognitive parsing.
 
-**Design:** A semi-circular arc at the bottom of the dashboard representing the road behind the rider. Vehicles appear as dots on the arc positioned by relative distance. Dot color maps to closing speed severity. Full visual specification in UX.md (S05).
-
 **Target Devices:** Garmin Varia RTL515 and RCT715.
 
 > **Note on RVR820:** The Garmin Varia RVR820 uses a proprietary secure protocol over BLE that is not publicly documented and cannot be reliably targeted. Integration is not planned for any phase.
 
-**Dot Color Mapping:**
+#### Visibility Rule
+
+The radar visualization component is **only shown when a radar device is paired**. If no radar has been paired in S11:
+- The radar component is hidden entirely; its screen space is reclaimed by other dashboard elements
+- No "Radar not connected" placeholder is shown
+- The rider is not reminded of a feature they do not have
+
+If a radar **was paired** but has **lost connection during an active ride**:
+- The sidebar displays a grayed "Radar offline" indicator (the component remains visible because the rider expects it)
+- An L1 advisory haptic fires once on disconnection
+- A status badge on the dashboard shows the disconnected state
+
+#### Dot Color Mapping
+
 | Closing Speed Differential | Color Token | Meaning |
 |---|---|---|
 | Stationary / receding | `brRatingGood` | Safe |
 | < 30 km/h differential | `brRatingOkay` | Caution |
 | ≥ 30 km/h differential | `brRatingBad` | Danger |
 
-**Data Requirements from RTL515 / RCT715:**
+#### Data Requirements from RTL515 / RCT715
 - Alert level (0–3: clear, advisory, caution, danger)
 - Vehicle count (0–8)
 - Per-vehicle: relative distance (meters), closing speed delta (km/h)
 
+---
+
+#### Visualization — Selected Approach: Option F (Sidebar)
+
+**Resolved (OQ14):** Brian has selected Option F — a right-side sidebar strip. The full design is illustrated in `assets/design/Design.sketch` — S06 Radar Alert.
+
+A 24pt-wide vertical strip on the right edge of the active ride dashboard represents the road behind the rider. Vehicles are shown as car icons stacked vertically; their vertical position within the strip reflects relative distance to the rider (closer vehicles appear lower, approaching the rider position at the bottom). Icon size may scale if the Varia exposes signal amplitude for size inference (see OQ11).
+
+**Alert level color treatment:**
+- The sidebar background uses `brRatingOkayBg` / `brRatingBadBg` depending on the current alert level
+- The individual vehicle icon causing the alert is colored `brRatingOkay` / `brRatingBad`
+- At L0 (clear), the sidebar background is transparent / neutral and vehicle icons are `brRatingGood`
+
+**Prior options considered for reference:**
+
+| Option | Summary | Disposition |
+|---|---|---|
+| A — Semicircular Arc | Dots on arc; position = distance; familiar to Varia users | Considered; not selected |
+| B — Bottom Edge Strip | Thin strip; color bars by severity; no distance | Loses too much information |
+| C — Threat Ring | Ring around speed value; alert level only | Lowest information density |
+| D — Adaptive Disclosure | Compact badge normally; arc expands on L2/L3 | Animation conflicts; complexity |
+| E — Map Overlay | Vehicle dots rendered on live map | Rendering conflicts; occlusion |
+| **F — Sidebar** | **Right-edge strip; car icons; distance-encoded position** | **Selected** |
+
+---
+
 **Acceptance Criteria:**
-- [ ] Arc renders correctly with 0 vehicles (empty / safe state)
-- [ ] Arc renders correctly with 1–8 vehicles
-- [ ] Dot position animates smoothly as vehicle approaches (no jump cuts)
+
+- [ ] Renders correctly with 0 vehicles (empty / safe state)
+- [ ] Renders correctly with 1–8 vehicles
+- [ ] Icon position animates smoothly as vehicle approaches (no jump cuts)
 - [ ] Color transitions animate at 0.3s ease
-- [ ] No radar hardware present → arc displays "Radar not connected" gracefully
+- [ ] Radar sidebar is entirely absent when no device is paired
+- [ ] Sidebar degrades to "Radar offline" state (grayed) when device was paired but connection lost during ride
 - [ ] Disconnection during active ride triggers L1 advisory haptic + status badge on dashboard
 
 ---
@@ -270,27 +325,56 @@ The active ride dashboard is the primary screen during a ride. Full layout speci
 
 **Purpose:** Communicate radar threat severity without requiring the rider to look at the phone.
 
-**Three Escalation Levels:**
+#### Three Escalation Levels
 
 | Level | Trigger | Haptic Pattern | Screen Effect | Audio |
 |---|---|---|---|---|
 | L1 — Advisory | 1–2 vehicles, low closing speed | Single tap — `UIImpactFeedbackGenerator` `.light` | Peripheral amber tint (10% opacity overlay) | None |
-| L2 — Caution | Moderate closing speed OR 3+ vehicles | Double tap `.medium`, 0.5s interval | Amber border pulse animation | None |
-| L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Continuous rhythmic `.heavy` at 0.3s on/off | Full-screen `brRatingBad` wash | Tone alert — overrides Silent Mode |
+| L2 — Caution | Moderate closing speed OR 3+ vehicles | Double tap `.medium`, 0.5s interval | Amber border pulse animation | Warning tone (see `Audio.md`) |
+| L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Core Haptics pattern: three 0.14s `HapticContinuous` bursts at full intensity and sharpness — pattern defined in `UX.md §S06` | Full-screen `brRatingBad` wash | Danger tone — overrides Silent Mode if user opt-in |
+| L0 — Clear | Threat resolves after L2 or L3 | None | — | All Clear tone (see `Audio.md`) |
 
-**Alert Rules:**
+#### Alert Rules
 - Minimum 3 seconds between same-level re-triggers to prevent alert fatigue
 - L3 alert persists until threat recedes; it is not dismissible by the rider
-- Silent Mode: L3 tone uses `AVAudioSession` category `.playback` with route override to force audio through speaker. **User must opt in to Silent Mode override in Settings (S12) before this behavior activates.** Default is silent-mode-respectful.
+- Danger tone: uses `AVAudioSession` category `.playback` with route override to force audio through speaker. **User must opt in to Silent Mode override in Settings (S12) before this behavior activates.** Default is silent-mode-respectful.
+- Warning and All Clear tones always respect Silent Mode (never override)
 - Phase 2: Mirror haptic pattern on Apple Watch wrist
+
+---
+
+#### Haptic Design Brainstorming
+
+The current three-level haptic design is functionally sound but warrants discussion before implementation. The following considerations and alternatives are documented for UX review.
+
+**Current Design Rationale**
+- L1 single light tap: Low information load; does not interrupt flow
+- L2 double medium tap: The double pattern is pre-attentive — riders will recognize "two taps = caution" after minimal conditioning
+- L3 Core Haptics continuous pattern: Three burst pattern conveys urgency; harder to ignore than discrete pulses, which is the goal for L3
+
+**Design Considerations**
+
+*Pattern distinctiveness:*  
+Each level must be instantly recognizable by feel alone, through cycling gloves, with hands on handlebars. The current single/double/continuous progression satisfies this — but double-tap at L2 has a ≈200ms window where L1 and L2 feel identical until the second tap arrives. Consider extending the inter-tap gap to 400ms to make the double pattern more deliberate.
+
+*False positive fatigue:*  
+On a busy road, L1 alerts may fire every 30–90 seconds. If L1 haptic is too prominent, riders will habituate and ignore it, defeating the escalation hierarchy. The `.light` single tap is intentionally subtle for this reason. Validate in field testing.
+
+*Glove permeability:*  
+Standard `UIImpactFeedbackGenerator` taptic patterns are perceptible through thin cycling gloves (gel padding ≤ 3mm). Winter gloves with >5mm padding may dampen `.light` impacts significantly. A user-configurable "Haptic Intensity" setting scales all levels up/down to account for this.
+
+*Apple Watch (Phase 2):*  
+Wrist haptics are significantly more noticeable than pocket haptics. The same pattern language should be preserved on the watch, but intensity levels should be re-calibrated for wrist delivery. The watch's `WKHapticType.retry` and `.failure` patterns may provide useful references.
 
 **Acceptance Criteria:**
 - [ ] L1 haptic fires within 500ms of threshold crossing
 - [ ] L2 fires within 500ms
 - [ ] L3 fires within 200ms (safety-critical tight budget)
-- [ ] L3 tone audible at 70dB ambient noise with phone in jersey pocket
+- [ ] Warning tone fires within 500ms of L2 threshold crossing (see `Audio.md`)
+- [ ] Danger tone fires within 200ms of L3 threshold crossing (see `Audio.md`)
+- [ ] All Clear tone fires within 300ms of threat resolving (see `Audio.md`)
 - [ ] Silent Mode override only activates when user has explicitly enabled it in S12
-- [ ] All three levels fully testable with mock BLE data (no hardware required)
+- [ ] All three haptic levels and all four audio states fully testable with mock BLE data (no hardware required)
 
 ---
 
@@ -316,7 +400,7 @@ The active ride dashboard is the primary screen during a ride. Full layout speci
 
 **Cadence Notes:**
 - Cadence has no fallback source; if no BLE cadence sensor is paired, the cadence tile displays "--" with a "Pair Sensor" affordance (tapping navigates to S11)
-- Cadence is recorded as 0 in GPX export when no sensor is present for that track point
+- Cadence is recorded as absent (element omitted) in GPX export when no sensor is present for that track point
 
 **Acceptance Criteria:**
 - [ ] HR switches from BLE strap to Apple Watch within 5 seconds of strap disconnection
@@ -367,38 +451,50 @@ Zone boundaries:
 
 ### 8.6 Navigation and Live Map (MVP)
 
-**Purpose:** Provide a live map view on the active ride dashboard showing current position and heading. Provide basic turn-by-turn navigation for pre-planned routes.
+**Purpose:** Provide a live map view on the active ride dashboard showing current position and heading. Support pre-planned route following via GPX import.
 
 **Live Map (MVP):**
-- Embedded `MapKit` view within the dashboard (lower portion of screen; see UX.md S05)
+- Embedded `MapKit` view within the dashboard (as a widget — see UX.md S05)
 - Updates position at minimum 1Hz using `CoreLocation`
 - Heading-up orientation by default; user-toggleable to north-up
 - No base-map download required; uses standard MapKit tile cache
 - During L3 radar alert, map view may be obscured by full-screen alert wash — this is acceptable given the safety priority
 
+**Route Loading (MVP):**
+
+Routes are pre-planned by the rider before the ride. The following sources are supported:
+
+| Source | Method | Notes |
+|---|---|---|
+| iOS Files app | Import GPX file | Rider selects a `.gpx` or `.fit` file from any location accessible via the Files app (iCloud Drive, local storage, imported from another app) |
+| tribos.studio | Service integration | Rider connects their tribos.studio account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
+
+> **Resolved (OQ12):** MVP does not use `MKDirections` (Apple Maps routing). Route creation is not an in-app feature in MVP — riders plan routes externally using tools like tribos.studio, Komoot, Strava, or OnTheGoMap.com and import the resulting GPX file.
+
 **Turn-by-Turn Navigation (MVP):**
-- Rider can load a route (GPX file from Files app, or draw a simple point-to-point)
 - Route overlaid on live map as a polyline in `brPrimary` color
-- Turn notifications: audio tone + banner at configurable distance (100m / 200m / 300m from turn)
-- No recalculation in MVP; if the rider goes off-route, a "Off route" banner displays with no auto-reroute
+- Turn notifications: Warning audio tone + banner at configurable distance from turn
+- No recalculation in MVP; if the rider goes off-route, an "Off route" banner displays with no auto-reroute
 
 **Acceptance Criteria:**
 - [ ] Map renders current position within 5 seconds of ride start (GPS lock)
 - [ ] Position updates smoothly at 1Hz minimum with no jumping
 - [ ] Route overlay renders correctly from imported GPX file
+- [ ] tribos.studio route browsing and import functional (service integration)
 - [ ] Turn notification fires within ±10m of configured distance from turn
+- [ ] "Off route" banner displays within 5 seconds of deviation from route polyline
 - [ ] Map remains functional when radar BLE and HR BLE are simultaneously active (no resource contention)
 - [ ] Map does not drain more than an additional 5% battery per hour beyond GPS-only baseline
 
 ---
 
-### 8.7 GPX Export with Biometric Track Point Extensions
+### 8.7 GPX Export with Biometric Track Point Extensions and Vehicle Pass Events
 
-**Purpose:** Produce a standards-compliant GPX 1.1 file for every ride with full per-point biometric data: heart rate, cadence, speed, and power (when available). Files are stored in a location accessible via the iOS Files app.
+**Purpose:** Produce a standards-compliant GPX 1.1 file for every ride with full per-point biometric data (heart rate, cadence, speed, power) and vehicle pass events recorded as waypoints. Files are stored in a location accessible via the iOS Files app.
 
 **GPX Version:** 1.1  
-**Extension Schema:** `gpxtpx:TrackPointExtension` v2  
-**Namespace:** `http://www.garmin.com/xmlschemas/TrackPointExtension/v2`
+**Biometric Extension Schema:** `gpxtpx:TrackPointExtension` v2  
+**Vehicle Pass Extension Schema:** Custom `cyc:VehiclePassEvent` (see Appendix B)
 
 **Per Track Point Data:**
 | Field | Source | GPX Element |
@@ -411,21 +507,42 @@ Zone boundaries:
 | Speed | Active speed source (m/s) | `<gpxtpx:speed>` |
 | Power | BLE power meter (Watts, Phase 3) | `<gpxtpx:power>` |
 
-**Recording Rate:** Track points recorded at 1Hz. Fields that have no active source at a given second record as absent (element omitted, not zero) to distinguish "no sensor" from "zero value."
+**Vehicle Pass Events:**
+
+A vehicle pass event is recorded when a radar-tracked vehicle transitions from approaching to overtaking and clearing the rider. Detection criteria:
+- Vehicle was present in radar data (distance decreasing) for ≥ 2 seconds
+- Vehicle then disappears from radar tracking (distance reached minimum threshold or vehicle left radar range from the front)
+- This distinguishes a genuine overtake from a vehicle that turned off or slowed before reaching the rider
+
+Vehicle pass events are recorded as GPX `<wpt>` (waypoint) elements rather than track point extensions. This preserves compatibility with any app that reads GPX waypoints without requiring `cyc:` namespace support.
+
+> **No existing standard:** There is no published standard or widely-adopted extension for vehicle pass events in GPX 1.1 or any common extension namespace (gpxtpx, Garmin Training Center, etc.). The `cyc:` namespace defined here is Cyclometer-specific. Future standardization with other radar-compatible apps (e.g., Cadence, MyBikeTraffic) would be a positive industry outcome.
+
+| Field | GPX Element | Notes |
+|---|---|---|
+| Location at pass | `<wpt lat="..." lon="...">` | Rider position when vehicle cleared |
+| Timestamp | `<time>` | UTC timestamp of pass |
+| Event type | `<type>vehiclePass</type>` | Standard GPX type element for filtering |
+| Alert level | `<cyc:alertLevel>` | danger / caution / advisory at time of pass |
+| Rider speed | `<cyc:riderSpeedKph>` | Rider speed at moment of pass (km/h) |
+| Estimated pass speed | `<cyc:estimatedPassSpeedKph>` | Inferred from closing speed data (km/h); omitted if insufficient data |
+
+**Recording Rate:** Track points recorded at 1Hz. Vehicle pass events recorded discretely on occurrence.
 
 **File Naming Convention:** `Cyclometer_YYYY-MM-DD_HH-mm.gpx`
 
-**Storage:** Files app integration via `UIFileSharingEnabled` (`Info.plist`) and `LSSupportsOpeningDocumentsInPlace`. Ride GPX files stored in the app's `Documents/Rides/` directory, which appears in Files app under "On My iPhone → Cyclometer."
-
-**Export Trigger:** GPX file written at ride end and available immediately in Files app. Also accessible from Ride Summary screen (S10) via a Share Sheet action.
+**Storage:** Files app integration via `UIFileSharingEnabled` (`Info.plist`) and `LSSupportsOpeningDocumentsInPlace`. Ride GPX files stored in the app's `Documents/Rides/` directory.
 
 **Acceptance Criteria:**
 - [ ] GPX file validates against GPX 1.1 schema
 - [ ] `gpxtpx:TrackPointExtension` namespace declared correctly in file header
+- [ ] `cyc:` namespace declared correctly in file header
 - [ ] HR, cadence, speed values present for each second where sensor data was active
 - [ ] Fields correctly absent (not zero) for seconds with no active sensor
+- [ ] Vehicle pass `<wpt>` elements present for each detected pass event
+- [ ] Vehicle pass detection correctly distinguishes overtakes from vehicles that turn off before reaching rider
 - [ ] File available in Files app within 5 seconds of ride end
-- [ ] GPX imports correctly into Strava, Garmin Connect, and RideWithGPS (manual QA)
+- [ ] GPX imports correctly into Strava, Garmin Connect, and RideWithGPS (manual QA; `cyc:` waypoints should be ignored gracefully by apps that don't support them)
 - [ ] File naming convention applied consistently
 
 ---
@@ -446,6 +563,55 @@ Zone boundaries:
 - [ ] Active ride state persists across app kill/relaunch (crash recovery)
 - [ ] Ride data checkpointed to SwiftData every 30 seconds
 - [ ] GPX file is written atomically at ride end (partial write does not produce corrupt file)
+
+---
+
+### 8.9 Wheel Circumference and GPS Auto-Calibration
+
+**Purpose:** Provide accurate speed and distance measurements from the BLE speed sensor, with automatic calibration against GPS to correct for tire wear, inflation changes, and rider weight variations.
+
+**Circumference Configuration:**
+
+Riders can configure wheel circumference using one of three methods:
+
+1. **Preset sizes** (selected from a list in S12):
+
+| Tire | Circumference |
+|---|---|
+| 700c × 23mm | 2,096 mm |
+| 700c × 25mm | 2,105 mm |
+| 700c × 28mm | 2,136 mm |
+| 700c × 32mm | 2,155 mm |
+| 700c × 35mm | 2,168 mm |
+| 650b × 47mm (27.5") | 2,144 mm |
+| 29" × 2.1" (MTB) | 2,288 mm |
+| 26" × 2.0" (MTB) | 2,051 mm |
+
+2. **Manual entry:** Rider enters circumference in mm directly. Useful for non-standard tires or measured values.
+
+3. **GPS auto-calibration** (automatic, no user action required): The system continuously compares BLE wheel distance against GPS-derived distance during an active ride and adjusts the stored circumference when a discrepancy exceeds the threshold.
+
+**GPS Auto-Calibration Algorithm:**
+- Runs continuously during active ride when both BLE speed sensor and GPS are active
+- Measurement window: rolling 500-meter GPS distance minimum (to accumulate sufficient data for reliable comparison)
+- Discrepancy threshold: if `|BLE distance − GPS distance| / GPS distance > 5%` over the measurement window, trigger calibration
+- Calibration adjustment: `new circumference = stored circumference × (GPS distance / BLE distance)`
+- Maximum single adjustment: ±10% of stored value (guards against GPS spikes causing overcorrection)
+- After calibration: updated circumference is saved to `UserProfile.wheelCircumferenceMM`; rider is notified via a brief non-intrusive banner: "Wheel size auto-adjusted to [N] mm"
+- Calibration is suspended during L2/L3 radar alerts, map-following turn alerts, or when GPS horizontal accuracy is > 10 meters (unreliable GPS)
+
+**Rationale:** GPS is not precise enough for per-second speed measurement (hence BLE priority) but is accurate enough over 500-meter windows for circumference calibration. A 5% discrepancy threshold prevents constant micro-adjustments while catching meaningful drift from tire pressure changes or load.
+
+**Acceptance Criteria:**
+- [ ] All preset sizes available in S12 with tire label and circumference in mm
+- [ ] Manual entry accepts values in range 1,500–3,000 mm (reasonable sanity bounds)
+- [ ] Auto-calibration triggers correctly when 5% discrepancy sustained over 500m GPS window
+- [ ] Auto-calibration does not trigger when GPS horizontal accuracy > 10m
+- [ ] Calibration adjustment capped at ±10% per event
+- [ ] Updated circumference persisted to UserProfile immediately
+- [ ] Banner notification displayed when auto-calibration fires
+- [ ] Calibration disabled when GPS-only speed mode is active (no BLE sensor connected)
+- [ ] Unit tested: calibration math correct for a range of known discrepancy scenarios
 
 ---
 
@@ -518,7 +684,7 @@ disconnected → scanning → connecting → connected → active (notifications
 **Compatible devices:** Any BLE CSC sensor (Garmin GSC-10, Wahoo RPM, Polar speed/cadence sensors, etc.)
 
 **Speed Calculation:**  
-Speed is derived from cumulative wheel revolutions and event time stamps per the CSC specification. Requires wheel circumference configured in Settings (S12). Default: 2096mm (700c × 23mm tire).
+Speed is derived from cumulative wheel revolutions and event time stamps per the CSC specification. Requires wheel circumference configured in Settings (S12) or auto-calibrated (see §8.9). Default: 2096mm (700c × 23mm tire).
 
 **Cadence Calculation:**  
 Derived from cumulative crank revolutions and event time stamps per CSC specification.
@@ -526,7 +692,7 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 **Acceptance Criteria:**
 - [ ] Connects to any BLE CSC Profile-compliant device
 - [ ] Speed and cadence calculated correctly from cumulative revolution data
-- [ ] Wheel circumference configurable in S12
+- [ ] Wheel circumference configurable in S12 (presets + manual + GPS auto-calibration)
 - [ ] Cadence and speed independently functional when sensor provides only one (some sensors are speed-only or cadence-only)
 - [ ] Graceful fallback to GPS speed on BLE speed sensor disconnection
 
@@ -561,7 +727,8 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 
 **SDK:** ActiveLook iOS SDK  
 **Protocol:** BLE  
-**Display:** Monochrome HUD, ~300×256px effective area
+**Display:** Monochrome HUD, ~300×256px effective area  
+**Competitive benchmark:** Cadence already ships ActiveLook support — review their implementation for feature parity baseline.
 
 **Planned HUD Layout:**
 - Speed (large, center)
@@ -577,9 +744,9 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 
 ## 10. Data Model
 
-### SwiftData Schema
+### Persistence Strategy
 
-> **Persistence:** SwiftData (iOS 17+). All ride data, sensor samples, and user profile data stored in SwiftData. GPX export produced from SwiftData records at ride end.
+> **Hybrid persistence:** In-memory ring buffer (`RideDataBuffer`) during active rides, flushed to CoreData via `NSBatchInsertRequest` at ride end for raw `TrackPoint` time-series. SwiftData with `@Query` for `Ride` summaries, `UserProfile`, and history screens.
 
 ---
 
@@ -598,11 +765,12 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
     var maxHeartRate: Int?             // bpm; nil if no HR source
     var averageCadence: Int?           // rpm; nil if no cadence sensor
     var hrZoneDurations: [Int: TimeInterval] // zone (1–5) → seconds in zone
-                                             // calculated at ride end from HRSamples
     var radarEventCount: Int
-    var gpxFileURL: URL?               // reference to exported GPX in Documents/Rides/
-    var trackPoints: [TrackPoint]      // relationship
-    var radarEvents: [RadarEvent]      // relationship
+    var vehiclePassCount: Int          // total vehicle pass events recorded
+    var gpxFileURL: URL?
+    var trackPoints: [TrackPoint]
+    var radarEvents: [RadarEvent]
+    var vehiclePassEvents: [VehiclePassEvent]  // discrete pass events for GPX export
 }
 ```
 
@@ -610,47 +778,32 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 
 ### TrackPoint
 
-> Replaces the simple `CLLocation` array from v0.1. Each TrackPoint correlates location with all active biometric readings at that second. This is the source of truth for GPX export.
-
 ```swift
 @Model class TrackPoint {
     var id: UUID
     var rideId: UUID
     var timestamp: Date
     
-    // Location
     var latitude: Double
     var longitude: Double
-    var altitude: Double               // meters
-    var horizontalAccuracy: Double     // meters
+    var altitude: Double
+    var horizontalAccuracy: Double
     
-    // Speed — from active source
     var speed: Double?                 // m/s; nil if no source active
-    var speedSource: SensorSource      // .bleWheel | .gps
+    var speedSource: SensorSource
     
-    // Heart Rate — from active source
-    var heartRateBPM: Int?             // nil if no HR source active
-    var heartRateSource: SensorSource  // .bleHR | .appleWatch | .none
+    var heartRateBPM: Int?
+    var heartRateSource: SensorSource
     
-    // Cadence — BLE only (no fallback)
-    var cadenceRPM: Int?               // nil if no cadence sensor active
+    var cadenceRPM: Int?
     
-    // Power — Phase 3; nil until power meter support added
-    var powerWatts: Int?
+    var powerWatts: Int?               // Phase 3
 }
 
 enum SensorSource: String, Codable {
-    case bleHR
-    case bleWheel
-    case bleCadence
-    case blePower
-    case appleWatch
-    case gps
-    case none
+    case bleHR, bleWheel, bleCadence, blePower, appleWatch, gps, none
 }
 ```
-
-> **Note on HR Zone in TrackPoint:** Zone is **not** stored on `TrackPoint`. Zone is a derived value: `zone = karvonen(bpm, profile.restingHR, profile.maxHR)`. It is computed at query time from the stored BPM and the current user profile. Storing zone would create data inconsistency if the user updates their HR profile post-ride. For GPX export, zone is not part of the `gpxtpx:TrackPointExtension` schema; only raw BPM is exported.
 
 ---
 
@@ -662,15 +815,12 @@ enum SensorSource: String, Codable {
     var rideId: UUID
     var timestamp: Date
     var vehicleCount: Int
-    var alertLevel: AlertLevel         // .clear | .advisory | .caution | .danger
+    var alertLevel: AlertLevel
     var vehicles: [RadarVehicle]
 }
 
 enum AlertLevel: Int, Codable, Comparable {
-    case clear     = 0
-    case advisory  = 1
-    case caution   = 2
-    case danger    = 3
+    case clear = 0, advisory = 1, caution = 2, danger = 3
 }
 ```
 
@@ -678,35 +828,49 @@ enum AlertLevel: Int, Codable, Comparable {
 
 ### RadarVehicle
 
-> Prepared for RTL515 / RCT715 data. Vehicle size classification is flagged below.
-
 ```swift
 struct RadarVehicle: Codable {
-    var vehicleIndex: Int              // 1–8 per Varia protocol
-    var distanceMeters: Double         // relative distance behind rider
+    var vehicleIndex: Int
+    var distanceMeters: Double
     var closingSpeedKph: Double        // positive = approaching; negative = receding
-    var alertLevel: AlertLevel         // per-vehicle threat level
-    
-    // Vehicle size classification:
-    // The RTL515 and RCT715 are Doppler-based radar units. They do not natively
-    // classify vehicle size (car vs. truck vs. motorcycle). Size classification
-    // would require inference from radar return signal strength, which is not
-    // exposed in the current BLE characteristic payload.
-    //
-    // This field is reserved for a future firmware update or SDK capability.
-    // Set to .unknown for all vehicles in MVP.
-    var estimatedSize: VehicleSize
+    var alertLevel: AlertLevel
+    var estimatedSize: VehicleSize     // .unknown for MVP (see OQ11)
 }
 
 enum VehicleSize: String, Codable {
-    case unknown       // default — radar does not classify in current protocol
-    case small         // reserved (motorcycle / bicycle)
-    case medium        // reserved (car / SUV)
-    case large         // reserved (truck / bus)
+    case unknown, small, medium, large
 }
 ```
 
-> **Engineering Note (OQ-New):** Confirm with Garmin's BLE spec or SDK whether signal return amplitude is exposed in any characteristic that could be used to infer vehicle size. If not, `VehicleSize` remains `.unknown` indefinitely for RTL515/RCT715 unless Garmin adds classification to firmware. Document finding in OQ11.
+---
+
+### VehiclePassEvent
+
+> New in v0.3. Recorded as a GPX `<wpt>` element with `cyc:VehiclePassEvent` extension (see Appendix B). Stored separately from `RadarEvent` because a pass event is a discrete occurrence, not a state snapshot.
+
+```swift
+@Model class VehiclePassEvent {
+    var id: UUID
+    var rideId: UUID
+    var timestamp: Date
+    
+    var latitude: Double               // rider position at time of pass
+    var longitude: Double
+    
+    var alertLevelAtPass: AlertLevel   // threat level when vehicle cleared the rider
+    var riderSpeedKph: Double          // rider speed at moment of pass
+    var estimatedPassSpeedKph: Double? // inferred from closing speed history; nil if insufficient data
+}
+```
+
+**Pass detection logic:**
+```swift
+// A pass is detected when a vehicle that was being tracked:
+// 1. Was present in radar data for >= 2 continuous seconds
+// 2. AND then disappears from radar tracking
+// 3. AND closing speed was positive (approaching) for majority of tracking duration
+// This guards against vehicles that turn off or slow before reaching the rider.
+```
 
 ---
 
@@ -716,28 +880,15 @@ enum VehicleSize: String, Codable {
 @Model class UserProfile {
     var id: UUID
     
-    // HR Profile — sourced from Apple Health; manual override available in S13
-    // Read from HealthKit at app launch and at each ride start.
-    // Apple Health is the source of truth; manual values are fallback only.
-    var restingHeartRate: Int          // bpm; from HKQuantityTypeIdentifierRestingHeartRate
-    var maxHeartRate: Int              // bpm; from historical HK max HR or 220 − age estimate
-    var heartRateSourceIsAppleHealth: Bool  // true = pulled from HK; false = manually entered
-    var dateOfBirth: DateComponents?   // read from HK for age-based max HR estimate
+    var restingHeartRate: Int
+    var maxHeartRate: Int
+    var heartRateSourceIsAppleHealth: Bool
+    var dateOfBirth: DateComponents?
     
-    // Preferences
-    var preferredUnit: UnitSystem      // .metric | .imperial
-    var wheelCircumferenceMM: Int      // default 2096 (700c × 23mm)
-    var mapOrientation: MapOrientation // .headingUp | .northUp
-    var navigationTurnDistanceM: Int   // 100 | 200 | 300 — turn alert distance
+    var preferredUnit: UnitSystem
+    var wheelCircumferenceMM: Int      // default 2096; updated by auto-calibration
+    var mapOrientation: MapOrientation
     
-    // Alert Settings
-    var hapticIntensity: HapticIntensity    // .light | .medium | .heavy (scales all levels)
-    var audioAlertsEnabled: Bool
-    var overrideSilentModeForL3: Bool       // user must explicitly enable; default false
-    var dangerThresholdKph: Double          // default 30; closing speed that triggers L3
-    var cautionVehicleCountThreshold: Int   // default 3; vehicle count that triggers L2
-
-    // BLE Sensor Configuration
     var pairedRadarIdentifier: UUID?
     var pairedHRSensorIdentifier: UUID?
     var pairedSpeedCadenceSensorIdentifier: UUID?
@@ -745,7 +896,6 @@ enum VehicleSize: String, Codable {
 
 enum UnitSystem: String, Codable { case metric, imperial }
 enum MapOrientation: String, Codable { case headingUp, northUp }
-enum HapticIntensity: String, Codable { case light, medium, heavy }
 ```
 
 ---
@@ -758,14 +908,14 @@ enum HapticIntensity: String, Codable { case light, medium, heavy }
 
 **TCA Dependency Clients:**
 ```swift
-// All hardware dependencies are protocol-based for full testability
-@DependencyClient struct BluetoothClient      // Varia BLE, HR BLE, CSC BLE
-@DependencyClient struct HealthKitClient      // HR streaming, profile reads
-@DependencyClient struct LocationClient       // GPS, map position
-@DependencyClient struct HapticClient         // Haptic engine
-@DependencyClient struct AudioAlertClient     // Tone alerts
-@DependencyClient struct PersistenceClient    // SwiftData operations
-@DependencyClient struct NavigationClient     // Route loading, turn calculations
+@DependencyClient struct BluetoothClient
+@DependencyClient struct HealthKitClient
+@DependencyClient struct LocationClient
+@DependencyClient struct HapticClient
+@DependencyClient struct AudioAlertClient     // Three tones: allClear, warning, danger
+@DependencyClient struct PersistenceClient
+@DependencyClient struct NavigationClient     // GPX import, tribos.studio routes, turn calc
+@DependencyClient struct WheelCalibrationClient  // GPS vs BLE distance comparison
 ```
 
 **Feature Decomposition:**
@@ -775,28 +925,38 @@ AppFeature
 │   ├── WelcomeFeature
 │   ├── SensorPairingFeature
 │   └── ProfileSetupFeature
-├── HomeFeature
-├── ActiveRideFeature                   ← Primary feature
-│   ├── RadarFeature                    ← BLE stream, alert level logic
-│   ├── HeartRateFeature                ← BLE HR + HealthKit fallback, zone calc
-│   ├── SpeedCadenceFeature             ← BLE CSC + GPS fallback
-│   ├── NavigationFeature               ← MapKit, route overlay, turn alerts
-│   ├── TrackPointRecorderFeature       ← 1Hz track point assembly + GPX write
+├── ActiveRideFeature
+│   ├── RadarFeature                    ← BLE stream, alert level, vehicle pass detection
+│   ├── HeartRateFeature
+│   ├── SpeedCadenceFeature
+│   ├── NavigationFeature               ← GPX import, tribos.studio, turn alerts
+│   ├── TrackPointRecorderFeature       ← 1Hz track points + vehicle pass event recording
+│   ├── WheelCalibrationFeature         ← GPS vs BLE auto-calibration
 │   └── AlertOrchestratorFeature        ← Combines all streams → haptic/audio/screen
-├── RideHistoryFeature
-├── RideDetailFeature
+├── RideHistoryFeature                  ← Phase 2
+├── RideDetailFeature                   ← Phase 2
+├── RouteFeature                        ← Phase 2; Routes tab (list, map, detail)
 └── SettingsFeature
     ├── DeviceSettingsFeature
     ├── HRZoneSettingsFeature
     └── AlertSettingsFeature
 ```
 
+**Navigation Structure:**
+The app uses a `TabView` with three tabs:
+
+| Tab | Icon | Phase |
+|---|---|---|
+| Rides | `figure.outdoor.cycle` | MVP |
+| Routes | `point.topleft.down.curvedto.point.bottomright.up` | Phase 2 |
+| Settings | `gearshape` | MVP |
+
+The Routes tab is hidden or shows a "Coming in a future update" placeholder in MVP and becomes fully functional in Phase 2.
+
 **Project Folder Structure:**
 ```
 Cyclometer/
 ├── App/
-│   ├── CyclometerApp.swift
-│   └── AppFeature.swift
 ├── Features/
 │   ├── ActiveRide/
 │   ├── Radar/
@@ -804,9 +964,11 @@ Cyclometer/
 │   ├── SpeedCadence/
 │   ├── Navigation/
 │   ├── TrackPointRecorder/
+│   ├── WheelCalibration/
 │   ├── AlertOrchestrator/
 │   ├── Onboarding/
 │   ├── RideHistory/
+│   ├── Routes/
 │   └── Settings/
 ├── Clients/
 │   ├── BluetoothClient.swift
@@ -815,24 +977,29 @@ Cyclometer/
 │   ├── HapticClient.swift
 │   ├── AudioAlertClient.swift
 │   ├── NavigationClient.swift
+│   ├── WheelCalibrationClient.swift
 │   └── PersistenceClient.swift
 ├── Models/
 │   ├── Ride.swift
 │   ├── TrackPoint.swift
 │   ├── RadarEvent.swift
 │   ├── RadarVehicle.swift
+│   ├── VehiclePassEvent.swift
 │   └── UserProfile.swift
 ├── Export/
-│   └── GPXExporter.swift              ← Assembles GPX from SwiftData records
+│   └── GPXExporter.swift
 ├── DesignSystem/
-│   ├── Color+Cyclometer.swift         ← br-prefixed tokens; source: assets/design/colors.md
+│   ├── Color+Cyclometer.swift
 │   ├── Typography.swift
 │   └── Components/
 └── Tests/
     ├── RadarFeatureTests.swift
+    ├── VehiclePassDetectionTests.swift
     ├── HeartRateFeatureTests.swift
     ├── SpeedCadenceFeatureTests.swift
+    ├── WheelCalibrationTests.swift
     ├── AlertOrchestratorTests.swift
+    ├── AudioAlertTests.swift
     ├── TrackPointRecorderTests.swift
     ├── GPXExporterTests.swift
     └── RideRecordingTests.swift
@@ -846,31 +1013,31 @@ Cyclometer/
 - Active ride dashboard: 60fps render target; no dropped frames during simultaneous BLE + GPS + HealthKit updates
 - BLE characteristic processing: < 50ms from receipt to state update
 - App cold launch to ready-to-ride: < 3 seconds
-- Memory footprint: < 120MB during active ride on iPhone 13 or later (increased from v0.1 due to MapKit addition)
+- Memory footprint: < 120MB during active ride on iPhone 16 or later
 
 ### Battery
-- Active ride session: < 15% battery drain per hour (iPhone 14 baseline, screen-on navigation included)
+- Active ride session: < 15% battery drain per hour (iPhone 16 baseline, screen-on navigation included)
 - GPS: `CLLocationManager` with `allowsBackgroundLocationUpdates = true`; `pausesLocationUpdatesAutomatically = false`
 - BLE: connection-based characteristic notification (not continuous scan) after pairing
 
 ### Reliability
 - Active ride state survives app backgrounding, phone calls, and iOS memory pressure events
-- Ride data not lost on crash: SwiftData checkpoint every 30 seconds
-- GPX file written atomically at ride end; partial writes do not produce corrupt files
+- Ride data not lost on crash: CoreData checkpoint every 30 seconds
+- GPX file written atomically at ride end
 - Radar alert L3 must not be skipped even if the UI thread is momentarily busy (dispatched on a high-priority queue)
+- Audio Danger tone dispatched from high-priority queue to guarantee < 200ms latency
 
 ### Accessibility
-- VoiceOver: supported on all non-ride screens; suspended during active ride (cycling context)
+- VoiceOver: supported on all non-ride screens; suspended during active ride
 - Dynamic Type: supported on all screens
-- Minimum tap target: 44×44 pt on all active ride controls (Apple HIG)
+- Minimum tap target: 44×44 pt on all active ride controls
 - High contrast: tested with iOS Increase Contrast enabled
 
 ### Privacy
 - HealthKit data: read-only; no data transmitted to any server
-- GPS and ride data: stored locally only; no server upload without explicit user action
+- GPS and ride data: stored locally only
 - BLE device identifiers: not transmitted externally
 - No analytics or crash reporting without explicit user consent
-- Files app access: read/write to `Documents/Rides/` only; no access to other apps' data
 
 ### Localization (MVP)
 - English only at launch
@@ -879,7 +1046,7 @@ Cyclometer/
 - GPX timestamps: UTC per GPX 1.1 spec
 
 ### Platform
-- iOS 17.0 minimum
+- **iOS 26.0 minimum**
 - iPhone only (no iPad support)
 - No Mac Catalyst
 
@@ -891,24 +1058,24 @@ Cyclometer/
 
 | Milestone | Deliverable |
 |---|---|
-| M1 | Xcode project scaffold; TCA + SwiftData; CI/CD via GitHub Actions |
+| M1 | Xcode project scaffold; TCA + CoreData + SwiftData; CI/CD via GitHub Actions |
 | M2 | BLE client — Varia RTL515/RCT715 connect + parse + mock; HR Profile; CSC Profile |
 | M3 | Active Ride Dashboard — speed, cadence, time, distance (no radar, no HR) |
-| M4 | Radar visualization; haptic alerts L1–L3; Silent Mode override |
+| M4 | Radar sidebar visualization; haptic alerts L1–L3; three-tone audio system (All Clear, Warning, Danger) |
 | M5 | HealthKit integration; HR zone display; BLE HR fallback to Apple Watch |
-| M6 | BLE CSC speed/cadence; GPS fallback for speed |
-| M7 | TrackPoint recording; GPX export with `gpxtpx:TrackPointExtension`; Files app integration |
-| M8 | Navigation: live map on dashboard; route overlay; turn alerts |
-| M9 | Ride summary screen; ride data persistence in SwiftData |
-| M10 | Settings, device management, onboarding flow |
+| M6 | BLE CSC speed/cadence; GPS fallback for speed; wheel auto-calibration |
+| M7 | TrackPoint recording; vehicle pass event detection; GPX export with `gpxtpx` + `cyc:` extensions |
+| M8 | Navigation: live map; GPX route import; tribos.studio integration; turn alerts |
+| M9 | Ride summary; ride history persistence; vehicle pass event count in summary |
+| M10 | Settings, device management, onboarding flow; wheel circumference presets |
 | M11 | QA; TestFlight open beta; bug fixes |
 | M12 | App Store submission |
 
-### Phase 2 — Companion & History (Target: +2 months post-launch)
-Ride history + detail view, Apple Watch app + complication, Dynamic Island, HR/cadence graphs, Strava/Garmin export.
+### Phase 2 — Companion, History & Routes (Target: +2 months post-launch)
+Routes tab (S19, S20): route list with list and map views, route detail with elevation profile, current weather, Strava segments, and previous ride history. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). Dynamic Island. HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Route picker in Start Sheet (S05.2).
 
 ### Phase 3 — AR, Power & Platform (Target: +4 months post-Phase 2)
-Power meter BLE support, ENGO 2 / ActiveLook AR integration, route planning, segment detection.
+Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detection.
 
 ---
 
@@ -916,19 +1083,22 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration, route planning, seg
 
 | # | Question | Owner | Priority | Status |
 |---|---|---|---|---|
-| OQ1 | SwiftData vs CoreData? | Engineering | High | ✅ **Resolved: SwiftData** |
+| OQ1 | SwiftData vs CoreData? | Engineering | High | ✅ **Resolved: Hybrid — CoreData for TrackPoint time-series, SwiftData for summaries** |
 | OQ2 | Does Garmin's mobile SDK provide a cleaner Varia BLE path than raw CoreBluetooth? Evaluate in M2 spike. | Engineering | High | Open |
 | OQ3 | iPad support? | Product | Low | ✅ **Resolved: No iPad** |
-| OQ4 | Audio alert delivery: tones vs synthesized voice? | Design | Medium | ✅ **Resolved: Tones** |
-| OQ5 | Override Silent Mode for L3 danger alerts? | Design | High | ✅ **Resolved: Yes, user opt-in in Settings** |
+| OQ4 | Audio alert delivery: tones vs synthesized voice? | Design | Medium | ✅ **Resolved: Tones — three-tone system (All Clear, Warning, Danger). Spec in `Audio.md`.** |
+| OQ5 | Override Silent Mode for L3 danger alerts? | Design | High | ✅ **Resolved: Yes, user opt-in. Warning and All Clear respect Silent Mode always.** |
 | OQ6 | App name for App Store? | Product | Medium | ✅ **Resolved: Cyclometer** |
-| OQ7 | Minimum Varia RTL515 / RCT715 firmware version required for BLE characteristic support? Confirm in M2. | Engineering | High | Open |
+| OQ7 | Minimum Varia RTL515 / RCT715 firmware version required for BLE characteristic support? | Engineering | High | Open — confirm in M2 spike |
 | OQ8 | Include basic Apple Watch complication in Phase 1? | Product | Medium | ✅ **Resolved: Defer to Phase 2** |
 | OQ9 | HR zone formula: Karvonen-only or allow custom percentages in MVP? | Design | Low | ✅ **Resolved: Karvonen-only** |
 | OQ10 | TestFlight beta: open or closed? | Product | Low | ✅ **Resolved: Open beta** |
 | OQ11 | Does Garmin Varia RTL515/RCT715 expose radar return signal amplitude over BLE for vehicle size inference? | Engineering | Medium | Open — confirm in M2 spike |
-| OQ12 | Navigation: For MVP turn-by-turn, use `MKDirections` (Apple Maps routing) or require rider to import pre-planned GPX route only? | Design | Medium | Open |
-| OQ13 | What wheel circumference presets should be included in Settings? (Common tire sizes: 700c × 23/25/28/32mm, 650b, 29er MTB) | Design | Low | Open |
+| OQ12 | Navigation: `MKDirections` routing or GPX import only? | Design | Medium | ✅ **Resolved: GPX import only. No in-app route creation in MVP.** |
+| OQ13 | Wheel circumference presets and calibration? | Design | Low | ✅ **Resolved: Common presets (700c, 650b, 29", 26") + manual entry + GPS auto-calibration at 5% discrepancy threshold over 500m window. See §8.9.** |
+| OQ14 | Radar visualization approach: arc, strip, ring, adaptive, or map overlay? | Design | High | ✅ **Resolved: Option F — right-side sidebar strip with car icons; vehicle position encodes relative distance. See §8.2 and `assets/design/Design.sketch` — S06.** |
+| OQ15 | Vehicle pass detection: minimum approach distance threshold before qualifying as a pass vs. turn-off? | Engineering | Medium | Open — requires field testing with RTL515/RCT715 to determine realistic detection parameters |
+| OQ16 | Audio tone fine-tuning: exact frequencies, durations, and waveforms validated on real ride (phone in jersey pocket at speed)? | Design | Medium | Open — `Audio.md §Acceptance Criteria` defines test requirements; field test required before M4 freeze |
 
 ---
 
@@ -938,16 +1108,18 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration, route planning, seg
 |---|---|
 | **Garmin Varia RVR820** | Proprietary secure BLE protocol; not publicly documented |
 | **ANT+ direct support** | iOS hardware does not support ANT+; Garmin SDK evaluated as bridge only (OQ2) |
-| **SRAM AXS / electronic shifting** | No public write API; read-only ANT+ profile is low-value |
-| **Power meter support** | Phase 3 (BLE power meters); pending ANT+ feasibility via SDK |
-| **Live ride sharing** | Requires server infrastructure; out of scope for local-first MVP |
+| **SRAM AXS / electronic shifting** | No public write API |
+| **Power meter support** | Phase 3 |
+| **Live ride sharing** | Requires server infrastructure; local-first MVP |
 | **Coaching / AI training plans** | Separate product consideration |
-| **Android** | iOS-only; no cross-platform framework |
+| **Android** | iOS-only |
 | **Web dashboard** | No server component planned |
-| **Social / community features** | No social graph in any current phase |
+| **Social / community features** | No social graph planned |
 | **iPad** | iPhone-only by product decision |
 | **Mac Catalyst** | Not planned |
-| **Auto-reroute navigation** | MVP shows "Off route" banner only; full rerouting deferred |
+| **Auto-reroute navigation** | MVP shows "Off route" banner only |
+| **In-app route creation** | Riders plan routes externally (tribos.studio, Komoot, Strava) and import GPX |
+| **`MKDirections` routing** | Resolved out of scope for MVP (OQ12) |
 
 ---
 
@@ -967,13 +1139,11 @@ The Cyclometer color system is a 30-token system in 7 categories. The **canonica
 | `brHRZone5` | `#D32F2F` | `#EF5350` | VO2 Max |
 | `brPrimary` | `#60BD10` | `#6FD11E` | Brand, CTAs, active states |
 
-> For the complete 30-token table with all categories (backgrounds, text, borders, system), refer to `assets/design/colors.md`.
-
 ---
 
 ## 17. Appendix B — GPX TrackPoint Extension Schema
 
-Every ride exports a GPX 1.1 file with the following structure. The `gpxtpx:TrackPointExtension` namespace is declared in the `<gpx>` root element.
+Every ride exports a GPX 1.1 file with biometric track point extensions and vehicle pass event waypoints.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -981,6 +1151,7 @@ Every ride exports a GPX 1.1 file with the following structure. The `gpxtpx:Trac
      creator="Cyclometer iOS"
      xmlns="http://www.topografix.com/GPX/1/1"
      xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2"
+     xmlns:cyc="http://cyclometerapp.com/xmlschemas/VehicleEvent/v1"
      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
      xsi:schemaLocation="
        http://www.topografix.com/GPX/1/1
@@ -989,12 +1160,28 @@ Every ride exports a GPX 1.1 file with the following structure. The `gpxtpx:Trac
        http://www.garmin.com/xmlschemas/TrackPointExtensionv2.xsd">
 
   <metadata>
-    <n>Cyclometer_2026-03-31_08-15</n>
+    <name>Cyclometer_2026-03-31_08-15</name>
     <time>2026-03-31T08:15:00Z</time>
   </metadata>
 
+  <!-- Vehicle pass events recorded as waypoints at rider position when vehicle cleared -->
+  <!-- Apps that don't support cyc: namespace will read these as generic waypoints -->
+  <wpt lat="36.0726" lon="-79.7920">
+    <time>2026-03-31T08:15:23Z</time>
+    <name>Vehicle Pass</name>
+    <type>vehiclePass</type>
+    <extensions>
+      <cyc:VehiclePassEvent>
+        <cyc:alertLevel>caution</cyc:alertLevel>
+        <cyc:riderSpeedKph>28.4</cyc:riderSpeedKph>
+        <cyc:estimatedPassSpeedKph>62.1</cyc:estimatedPassSpeedKph>
+        <!-- estimatedPassSpeedKph omitted if insufficient closing speed data -->
+      </cyc:VehiclePassEvent>
+    </extensions>
+  </wpt>
+
   <trk>
-    <n>Morning Ride</n>
+    <name>Morning Ride</name>
     <trkseg>
 
       <trkpt lat="36.0726" lon="-79.7920">
@@ -1010,34 +1197,32 @@ Every ride exports a GPX 1.1 file with the following structure. The `gpxtpx:Trac
         </extensions>
       </trkpt>
 
-      <!-- Track points continue at 1Hz for ride duration -->
-      <!-- Elements are OMITTED (not zero) when their sensor source is inactive -->
-
     </trkseg>
   </trk>
 </gpx>
 ```
 
 **Schema Notes:**
-- `gpxtpx:speed` is in **m/s** per the TrackPointExtension v2 schema
-- `gpxtpx:cad` is **RPM** (crank revolutions per minute)
-- `gpxtpx:hr` is integer **BPM**
-- `gpxtpx:power` is integer **Watts** (Phase 3; element omitted in MVP)
-- Elements are **omitted** (not zero-valued) when no sensor is active, preserving the distinction between "zero cadence" and "no cadence sensor"
+- `gpxtpx:speed` is in **m/s**; `gpxtpx:cad` is **RPM**; `gpxtpx:hr` is integer **BPM**
+- Elements are **omitted** (not zero-valued) when no sensor is active
+- `cyc:VehiclePassEvent` is a Cyclometer-defined extension. No industry standard exists for vehicle pass events as of v0.4.
+- The `cyc:` namespace URI (`http://cyclometerapp.com/xmlschemas/VehicleEvent/v1`) does not need to resolve to a live schema document; it serves as a unique identifier
+- Third-party apps that cannot parse `cyc:` elements will still read the `<wpt>` as a generic waypoint with name "Vehicle Pass", preserving basic compatibility
 
 ---
 
 ## 18. Appendix C — Design Assets
 
-All manual design assets are located in `assets/design/`. This folder is the single source of truth for visual design. Do not look for design files in the `assets/` root.
+All manual design assets are located in `assets/design/`. The audio specification is in `assets/Audio.md`.
 
 | Asset | Path | Format | Notes |
 |---|---|---|---|
 | Color tokens | `assets/design/colors.md` | Markdown | 30 semantic tokens, light + dark mode, WCAG AA notes. Source of truth for `Color+Cyclometer.swift`. |
-| Primary UI design | `assets/design/Design.sketch` | Sketch | All screens in the screen inventory (S01–S18). Component specs, interaction flows, annotation. |
+| Audio alert spec | `assets/Audio.md` | Markdown | Three-tone system: All Clear, Warning, Danger. Frequency specs, waveforms, timing, open questions. |
+| Primary UI design | `assets/design/Design.sketch` | Sketch | All screens S01–S20. Component specs, radar sidebar visualization. |
 | App icon | `assets/design/CyclometerIcon.sketch` | Sketch | App icon artwork and all required iOS size variants. |
 | D-DIN Regular | `assets/design/d-din/D-DIN.otf` | OTF | Dashboard body numerics |
-| D-DIN Bold | `assets/design/d-din/D-DIN-Bold.otf` | OTF | Dashboard emphasis |
+| D-DIN Bold | `assets/design/d-din/D-DIN-Bold.otf` | OTF | |
 | D-DIN Italic | `assets/design/d-din/D-DIN-Italic.otf` | OTF | |
 | D-DIN Condensed | `assets/design/d-din/D-DINCondensed.otf` | OTF | Hero numerics (138pt) |
 | D-DIN Condensed Bold | `assets/design/d-din/D-DINCondensed-Bold.otf` | OTF | |
@@ -1046,11 +1231,6 @@ All manual design assets are located in `assets/design/`. This folder is the sin
 | D-DIN Expanded Italic | `assets/design/d-din/D-DINExp-Italic.otf` | OTF | |
 | Font license | `assets/design/d-din/SIL Open Font License.txt` | Text | SIL OFL — free to bundle in commercial iOS app |
 
-**Implementation notes for Xcode:**
-- All OTF files in `assets/design/d-din/` must be added to the Xcode target's "Copy Bundle Resources" build phase
-- Each font file must be declared in `Info.plist` under the `UIAppFonts` key
-- Font family name for SwiftUI: `"D-DIN"`, `"D-DIN Condensed"`, `"D-DINExp"`
-
 ---
 
-*Cyclometer PRD v0.2.1 · Second Review Draft · Updated 2026-04-05*
+*Cyclometer PRD v0.4 · Fourth Review Draft · 2026-05-20*
