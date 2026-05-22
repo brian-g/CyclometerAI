@@ -418,7 +418,7 @@ final class PairedSensor {
     var id: UUID
     var peripheralIdentifierString: String     // CBPeripheral.identifier — stable per device per iOS install
     var role: SensorRole
-    var displayName: String?                   // From BLE advertisement; user-editable in S11
+    var displayName: String?                   // From BLE advertisement
     var modelIdentifier: String?               // Inferred from advertisement (e.g. "RTL515")
 
     var peripheralIdentifier: UUID? {
