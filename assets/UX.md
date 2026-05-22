@@ -1,8 +1,8 @@
 # Cyclometer — UX Specification
-**Version:** 0.3  
+**Version:** 0.6  
 **Date:** 2026-03-31  
-**Updated:** 2026-05-20 — Fixed screen index phases; rewrote S05.3 from prototype; updated navigation to 3 tabs; promoted S19/S20 to Phase 2; added S07/S08; updated S05.4/S05.5 status; corrected S10; fixed widget catalog numbering; added empty state patterns  
-**Status:** Awaiting UX Direction  
+**Updated:** 2026-05-21 — Dashboard vision rewritten; S05.4 reframed as factory default; S05.5 removed  
+**Status:** In Progress  
 **Author:** Brian (UX Design)  
 **Companion Document:** `PRD.md` — defines *what* each screen must do; this document defines *how* it is structured.
 
@@ -52,8 +52,8 @@ All design artifacts are in `assets/design/`. These files are the source of trut
 | [S05.1](#s051-start-sheet) | Start Sheet | MVP | Priority |
 | S05.2 | Route Selector | Phase 2 | Stub |
 | [S05.3](#s053-active-ride-accessory) | Active Ride Accessory | MVP | Complete — refer to prototype |
-| S05.4 | Widget Layout | MVP | Grid only — blocking wireframes |
-| S05.5 | Widget Layout 2 | MVP | Grid only — blocking wireframes |
+| S05.4 | Widget Layout — Factory Default | MVP | Grid resolved — see S05 |
+| [S05.5](#s055) | Widget Layout 2 | Removed | — |
 | [S06](#s06-radar-alert) | Radar Alert | MVP | Stub |
 | [S07](#s07-dashboard-customization) | Dashboard Customization | Phase 2 | Stub |
 | [S08](#s08-add-widget) | Add Widget | Phase 2 | Stub |
@@ -319,8 +319,8 @@ The accessory strip is a passive display. The rider uses it only when they have 
 
 ### Open UX Questions
 
-- [ ] Should the accessory show a radar alert indicator (small colored dot) when a threat is active, so the rider can see alert state without reopening the dashboard? No.
-- [ ] Should the progress ring be replaced with a bicycle SF Symbol icon when no route is loaded, matching the Sketch design? Yes, that is correct.
+- [x] Should the accessory show a radar alert indicator (small colored dot) when a threat is active, so the rider can see alert state without reopening the dashboard? No.
+- [x] Should the progress ring be replaced with a bicycle SF Symbol icon when no route is loaded, matching the Sketch design? Yes, that is correct.
 
 ---
 
@@ -331,9 +331,54 @@ The accessory strip is a passive display. The rider uses it only when they have 
 
 **Purpose:** The primary screen during a ride. Simultaneously displays speed, HR with zone color, cadence, elapsed time, distance, radar sidebar, and live map. Must be readable in direct sunlight in under one second.
 
-### Canonical Layout Reference
+### Dashboard Vision
 
-> S05.4 and S05.5 in `assets/design/Design.sketch` are the canonical layout references for the dashboard widget grid. S05 (the older direct-composition frame) should be ignored. S05.4 and S05.5 are blocking wireframes showing the grid structure; widget visual design is defined per widget below and in the standalone widget frames (W1–W2, etc.).
+The Cyclometer dashboard is not a static screen — it is a **rider-configured instrument panel**. The design philosophy is borrowed from professional cycling computers and adapted for the iPhone form factor: the rider decides which data matters to them, at what prominence, on how many pages. The app’s role is to make that configuration effortless and to make every widget instantly readable mid-ride, in sunlight, at a glance.
+
+The `S05 - Active Ride Dashboard (don’t use)` frame in Design.sketch captures this vision in its fullest compositional form: a speed hero number dominating the top with a watermark area chart behind it, secondary metrics occupying the mid-section at equal visual weight, a HR zone donut coexisting with a live BPM readout, and a full-width map anchoring the bottom. A sensor status strip with small-icon indicators for each connected source (radar, HR, GPS, cadence, power, AR glasses) sits between the Dynamic Island and the top grid row. That composition is one valid arrangement of the underlying system — not the system itself. It is marked “don’t use” because it was created directly in Sketch as a composition rather than assembled from the widget grid — it’s a vision artefact, not an implementation target.
+
+The real system is the **widget grid**: a 2-column × 7-row canvas the rider populates, rearranges, and pages through. S05.4 in Design.sketch is the **factory default** — the arrangement a new user sees before any customisation. It is a starting point chosen to serve the broadest range of riders, not a constraint on what the dashboard can become.
+
+**Grid**
+
+The grid always occupies the full screen height between the Dynamic Island and the bottom toolbar. It is never scrollable. Row height is calculated dynamically so that all 7 rows fill the available display height for the current device. Cell dimensions are approximately 201×96pt on iPhone 17 Pro.
+
+**Widget sizing** Dimensions are expressed as *columns × rows* (e.g., `2×2` spans 2 columns and 2 rows). Supported sizes range from `1×1` (single cell) up to `2×7` (full grid). A widget may not exceed the grid boundaries, and no two widgets may share a cell.
+
+**Adaptive content** Each widget is size-aware. At `1×1` it surfaces the single most critical value — the number readable in under a second. At `2×1` it adds a secondary metric or sparkline. At `2×2` it exposes the full picture: hero number, trend watermark, supporting stats, and contextual detail. The content hierarchy within each widget is defined in the widget specifications below.
+
+**Multiple pages** The dashboard supports multiple swipeable pages, each with its own independent widget layout. Pages are managed through the customisation flow (S07). The paging indicator is always visible at the bottom of the grid. The factory default shows four paging dots, signalling that multi-page use is a first-class pattern, not an edge case.
+
+**Customisation** The rider configures the dashboard by choosing which widgets to display, their sizes, and their positions. The layout must satisfy:
+- All widgets fit within the 2-column × 7-row boundary
+- No two widgets overlap
+- The grid remains full-height and non-scrollable on all supported devices
+
+**Map widget — safe area bleed** When the map is placed in row 1 (top) or rows 6–7 (bottom) of the grid, its rendering extends past the standard content area and bleeds into the iOS safe zones — beneath the Dynamic Island at the top, or beneath the home indicator at the bottom. All interactive controls and data labels within the map widget must remain inside safe area bounds.
+
+**Empty cells** Any unoccupied cells render as empty space with no content and no interactive behaviour.
+
+**Grabber** A minimal grabber-style strip sits between the Dynamic Island and the top grid row. This allows the user to minimize the ride and look at other aspects of the app while riding (typically while stopped).
+
+### Factory Default — S05.4
+
+> `S05.4 - Widget Layout` in Design.sketch is the factory default grid, verified by reading layer names directly via the Sketch MCP API. Widget visual design is defined per widget below and in the standalone widget frames (`W1 – Speed (2x2)`, `W1 – Speed (2x1)`, `W1 – Speed (1x1)`, `W2 – Avg Speed (1x1)`, etc.).
+
+This is the arrangement every new user sees. It demonstrates the full range of widget sizes available and is immediately useful without any configuration.
+
+| Row(s) | Left column | Right column | Widget |
+|---|---|---|---|
+| 1–2 | Speed | Speed (continued) | W1 — 2×2 |
+| 3 | HR | HR Zones | W4, W12 — 1×1 |
+| 4 | Radar | Pace | W7, W11 — 1×1 |
+| 5 | Cadence | Weather | W5, W10 — 1×1 |
+| 6–7 | Map | Map (continued) | W8 — 2×2 |
+
+**Rationale for factory choices:**
+- W1 Speed 2×2 leads — the metric every rider checks most. The 2×2 size surfaces the hero number plus distance, duration, max, and average speed without a glance away.
+- W4 HR and W12 HR Zones share row 3 — physiology together, neither dominant.
+- W7 Radar at row 4 left — in the thumb zone; adjacent to HR so safety and effort are perceived together peripherally.
+- W8 Map 2×2 at the bottom bleeds into the home indicator safe area, maximising map real estate.
 
 ### Layout
 
@@ -366,17 +411,20 @@ Toolbar buttons shown based on ride state:
 All toolbar buttons use `.buttonStyle(.glass)` (iOS 26), `.labelStyle(.iconOnly)`, and a 52×52pt frame. The toolbar uses `.sharedBackgroundVisibility(.hidden)`.
 
 **Key Layout Decisions:**
-- [ ] Exact widget placement for S05.4 and S05.5 — Brian to annotate cells in `assets/design/Design.sketch`
-- [ ] Landscape locked to portrait ✅
-- [ ] Sensor source badges: none ✅
-- [ ] Map widget: full-screen sheet on tap; no auto-expand ✅
-- [ ] Night mode: follow system ✅
+- [x] S05.4 factory default layout resolved — see table above; rider-customisable after first launch
+- [x] S05.5 removed — pages beyond page 1 are rider-defined, not factory-specified
+- [x] Landscape locked to portrait ✅
+- [x] Sensor source badges: none ✅
+- [x] Map widget: full-screen sheet on tap; no auto-expand ✅
+- [x] Night mode: follow system ✅
 
 ### Widget Details
 
 The basic building block of all widgets is the **hero number**. Defined as Sketch symbols: `large-hero`, `medium-hero`, `small-hero`. The SwiftUI implementation is the `HeroNumber` view in the prototype.
 
 **Hero number sizes (D-DIN Condensed):**
+
+Due to differences in phone sizes, some of the numbers will increase or decrease to fit. These sizes should be considered proportional to the widget size based on the cap-height of the character. For example, the cap-height for a 68pt medium-hero is 48pt. This leaves 24pt above and below the number or a scale of .5x for the font size of medium. GeometryReader() will need to be used to correctly scale. This is probably going to need some experimentation to understand if a linear scale would be used between the type cap-height to the size of widget.
 
 | Symbol | Value pt | Unit pt | Notes |
 |---|---|---|---|
@@ -526,8 +574,9 @@ The basic building block of all widgets is the **hero number**. Defined as Sketc
 ---
 
 ### Open UX Questions
-- [ ] Exact widget placement per page — Brian to annotate S05.4 / S05.5 in Design.sketch. Widgets are placed by the user, there is no "exact" placement. The dashboard will be entirely customizable. 
-- [ ] Should the Sensor toolbar button use a specific SF Symbol to indicate which sensor is missing? Yes, it should just use sensor.tag.radiowaves.forward.fill with a badge. 
+- [x] S05.4 factory default layout resolved — see table above.
+- [x] S05.5 removed — pages beyond page 1 are rider-defined, not factory-specified.
+- [x] Should the Sensor toolbar button use a specific SF Symbol to indicate which sensor is missing? Yes, it should just use sensor.tag.radiowaves.forward.fill with a badge.
 
 ---
 
@@ -541,7 +590,7 @@ The basic building block of all widgets is the **hero number**. Defined as Sketc
 ### Visual Treatment
 
 - A 24pt-wide strip on the right edge of the dashboard, present only when a radar device is paired
-- Car icons represent vehicles; vertical position encodes relative distance (top = far, bottom = near)
+- Car icons represent vehicles; vertical position encodes relative distance (top = near, bottom = far)
 - Background layer named `background` in Sketch; tinted `brRatingOkayBg` / `brRatingBadBg` by alert level; neutral at L0
 - Vehicle icons named `car` (neutral/L1), `warning` (L2), `critical` (L3) in Sketch; colored `brRatingOkay` / `brRatingBad` accordingly
 
@@ -642,17 +691,36 @@ The visual dashboard is otherwise unchanged — all metric widgets continue disp
 ### Key Components
 - Map thumbnail (full route trace in `brPrimary`; placeholder in Design.sketch)
 - Primary metrics: total distance, total time, avg speed
-- HR zone breakdown (placeholder in Design.sketch — chart type TBD)
+- Elevation profile
+- HR zone breakdown (pie chart)
 - Average cadence (if cadence sensor was active during the ride)
 - Radar events count / vehicle pass count
-- Save / Done navigation
+- Rename field: tapping the ride title focuses the field and opens the keyboard; defaults to route name
+- **Sync button** — taps present the Service Sync sheet (see below)
+- Done navigation
 
-> **Note:** There is no explicit GPX export action on this screen. The GPX file is written automatically at ride end and is available via the iOS Files app in the app's `Documents/Rides/` directory.
+> **Note:** The GPX file is written automatically at ride end and is available via the iOS Files app in the app's `Documents/Rides/` directory. No explicit export action is shown on this screen.
+
+### Service Sync Sheet (Phase 2)
+
+Presented as a `.sheet` when the rider taps Sync. Lists all enabled `ConnectedService` records from `AppPreferences` as toggleable rows. Rider selects which services to send the ride to and taps "Sync."
+
+- Each service row shows: service icon, service name, account display name (e.g. "brian@strava.com"), toggle
+- All connected services default to selected
+- After tapping Sync, each row shows an in-progress indicator, then a checkmark (success) or warning icon (failure)
+- Failed syncs show an error message and a "Retry" affordance per service
+- Tapping Done dismisses the sheet regardless of sync status; incomplete syncs can be retried from Ride History (S14) via the Sync swipe action
+
+### HKWorkout (automatic)
+
+An `HKWorkout` is written to Apple Health automatically when the ride ends, before the summary screen is presented. No user action required. The ride appears in the iOS Fitness app and counts toward Activity rings.
 
 ### Open UX Questions
-- [ ] Is the zone breakdown a horizontal bar chart, a stacked bar, or a pie chart? Pie chart
-- [ ] Should the ride summary show a "best" highlight (e.g., longest Z4 interval)? We'll enhance this after more feedback
-- [ ] Can the rider rename the ride from this screen? Yes. Tapping on the description will focus the control and open the keyboard to name. The name should be defaulted from the route. 
+- [x] Zone breakdown chart type? Pie chart
+- [x] Ride summary highlights? Enhanced after user feedback
+- [x] Rider can rename ride from this screen? Yes — tapping the title field opens the keyboard
+- [ ] Should the sync sheet show estimated upload size or time? TBD
+- [ ] If HKWorkout write fails (HealthKit permission revoked), should the rider be notified? TBD
 
 ---
 
@@ -692,7 +760,7 @@ The visual dashboard is otherwise unchanged — all metric widgets continue disp
 ### Settings Sections
 
 **General**
-- Units: Metric (km) | Imperial (miles)
+- Units: Metric (km) | Imperial (miles) [Defaults from iOS]
 - Wheel circumference (mm) — numeric entry with preset selector
 - Auto-pause
 - Auto-dim
@@ -736,8 +804,8 @@ The visual dashboard is otherwise unchanged — all metric widgets continue disp
 > *Refer to `assets/design/Design.sketch` — S14.*
 
 ### Per-Row Content
-- Map thumbnail (56×56pt, rounded corners)
-- Ride name and date/time
+- Map thumbnail (56×56pt, rounded corners). The thumbnail will have to be captured at the completion of a ride. It will be a performance issue if a live map view is shown for each row. 
+- Ride name and date/time (using relative dates for the previous week)
 - Distance (`HeroNumber` small) and elapsed time (D-DIN Condensed 20pt)
 - Swipe actions: leading — Sync (blue), Make Route (green); trailing — Delete (red, destructive)
 
@@ -776,6 +844,7 @@ ContentUnavailableView {
 - HR zone graph over elapsed time
 - Strava segments list: name, distance, best time + date
 - GPX re-export action
+- Create route action
 
 ---
 
@@ -823,10 +892,12 @@ ContentUnavailableView {
 - Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls
 - Tap a route → navigates to S20
 - Empty state: `ContentUnavailableView` with "No Routes" label and import action
+- Route import action
 
 ### Open UX Questions
-- [ ] How does the user import a route here (vs. at ride start)?
-- [ ] Should routes from tribos.studio be shown in a separate section or merged with local routes?
+- [x] How does the user import a route here (vs. at ride start)? There will be a route import action. Routes can be imported from Files, from Strava, other from other connected services that have routes.
+- [x] Should routes from tribos.studio be shown in a separate section or merged with local routes? Merged
+- [ ] In the future, Phase 4, there will be a route suggestion tool.
 
 ---
 
@@ -848,9 +919,9 @@ ContentUnavailableView {
 - "Use This Route" CTA — sets active route in Start Sheet and navigates to S05.1
 
 ### Open UX Questions
-- [x] Should weather be fetched live or cached at route-save time? The weather should be fetched live.
+- [x] Should weather be fetched live or cached at route-save time? The weather should be fetched live since the user is trying to plan a route.
 - [x] If the route has never been ridden, should Previous Rides be hidden or show an empty state? Hidden.
 
 ---
 
-*Cyclometer UX Specification v0.3 · 2026-03-31 · Updated 2026-05-20*
+*Cyclometer UX Specification v0.6 · 2026-03-31 · Updated 2026-05-21*

@@ -51,6 +51,8 @@ The central insight: **a cycling computer's most critical job is not to display 
 
 Cyclometer records every ride as an industry-standard GPX file with full `gpxtpx:TrackPointExtension` data — heart rate, cadence, speed, and power correlated per track point — available directly in the iOS Files app and exportable to any compatible platform. Vehicle pass events are also recorded as GPX waypoints using a custom `cyc:` namespace, enabling post-ride traffic analysis.
 
+The Cyclometer dashboard is not a static screen — it is a **rider-configured instrument panel**. The design philosophy is borrowed from professional cycling computers and adapted for the iPhone form factor: the rider decides which data matters to them, at what prominence, on how many pages. The app’s role is to make that configuration effortless and to make every widget instantly readable mid-ride, in sunlight, at a glance.
+
 ---
 
 ## 2. Problem Statement
@@ -468,6 +470,8 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 |---|---|---|
 | iOS Files app | Import GPX file | Rider selects a `.gpx` or `.fit` file from any location accessible via the Files app (iCloud Drive, local storage, imported from another app) |
 | tribos.studio | Service integration | Rider connects their tribos.studio account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
+| Strava | Service integration | Rider connects their Strava account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
+| Ride with GPS | Service integration | Rider connects their Ride with GPS account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
 
 > **Resolved (OQ12):** MVP does not use `MKDirections` (Apple Maps routing). Route creation is not an in-app feature in MVP — riders plan routes externally using tools like tribos.studio, Komoot, Strava, or OnTheGoMap.com and import the resulting GPX file.
 
@@ -695,6 +699,10 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 - [ ] Wheel circumference configurable in S12 (presets + manual + GPS auto-calibration)
 - [ ] Cadence and speed independently functional when sensor provides only one (some sensors are speed-only or cadence-only)
 - [ ] Graceful fallback to GPS speed on BLE speed sensor disconnection
+
+**Open Questions**:
+
+- [ ] OQBLE1: Does this support devices that do both speed and cadence as well as devices that are either speed or cadence? We may also run into situations where the user is using a dedicated speed sensor, but they are using a combination device's cadence and doesn't use it for speed.
 
 ---
 

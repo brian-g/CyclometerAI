@@ -222,6 +222,7 @@ try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
 - [ ] **OQA3** — Earphone behavior: should the app detect if earphones are connected and adjust the Warning/Danger tone volume/character accordingly? (Earphones at full volume could be startling at 2,100 Hz)
 - [ ] **OQA4** — Should the All Clear tone be a user-toggleable setting? Some riders may find any audio at "clear" distracting. Current spec: on by default, configurable in S12.
 - [ ] **OQA5** — Tone fine-tuning: exact frequencies and patterns above are a starting point. User testing on a real ride (phone in pocket, at speed) is required to validate audibility and distinctiveness before finalizing.
+- [ ] **OQA6** — Turn right and Turn left sounds must also be incorporated when turn by turn directions are added.
 
 ---
 
