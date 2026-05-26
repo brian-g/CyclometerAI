@@ -48,7 +48,7 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 
 ## Planned Architecture (from PRD.md)
 
-**Platform:** iOS 17+, iPhone only. No iPad, no Mac Catalyst.
+**Platform:** iOS 26+, iPhone only. No iPad, no Mac Catalyst.
 
 **Architecture Pattern:** The Composable Architecture (TCA) — explicit state, side-effect isolation via `Effect`, hardware abstraction via `@DependencyClient`, and `TestStore` for all safety-critical logic.
 
@@ -57,10 +57,11 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 - `CoreBluetooth` — BLE sensor connectivity (Garmin Varia RTL515/RCT715, HR strap, CSC sensor)
 - `HealthKit` — Resting HR, max HR, date of birth (read-only)
 - `MapKit` — Live map, route overlay
+- `WeatherKit` - Current weather, wind overlaw
 - `AVFoundation` — Audio tone alerts (L3 danger override)
 - `CoreHaptics` / `UIFeedbackGenerator` — Haptic escalation (L1–L3)
 
-**Persistence:** SwiftData (iOS 17+) for ride summaries and history. CoreData via `NSBatchInsertRequest` for high-frequency per-second `TrackPoint` time-series during active rides. GPX export via `gpxtpx:TrackPointExtension` v2 schema.
+**Persistence:** SwiftData (iOS 26+) for ride summaries and history. CoreData via `NSBatchInsertRequest` for high-frequency per-second `TrackPoint` time-series during active rides. GPX export via `gpxtpx:TrackPointExtension` v2 schema.
 
 **BLE Targets (Phase 1):**
 - Garmin Varia RTL515 / RCT715 radar (Cycling Radar GATT profile)
