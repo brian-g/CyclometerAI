@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Standard bundle keys (Xcode injects these only when GENERATE_INFOPLIST_FILE=YES). -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+
+	<!-- Font registration — AppFonts.swift registers D-DINCondensed programmatically,
+	     but UIAppFonts ensures the system can load it from the bundle. -->
+	<key>UIAppFonts</key>
+	<array>
+		<string>D-DINCondensed.otf</string>
+	</array>
+
+	<!-- Launch screen (auto-generated replacement) -->
+	<key>UILaunchScreen</key>
+	<dict/>
+
+	<!-- Scene manifest -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict/>
+	</dict>
+
+	<!-- Supported orientations — iPhone only, portrait only (locked per UX spec) -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+
+	<!-- BLE — required for Varia radar + HR strap + speed/cadence sensor -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Cyclometer uses Bluetooth to connect to your Garmin Varia radar, heart rate sensor, and speed/cadence sensor.</string>
+
+	<!-- Location — GPS track recording and speed fallback -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Cyclometer uses your location to record your route and calculate GPS speed.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Cyclometer records your route in the background during an active ride.</string>
+
+	<!-- HealthKit — resting HR and max HR for Karvonen zone calculation -->
+	<key>NSHealthShareUsageDescription</key>
+	<string>Cyclometer reads your heart rate data to display accurate training zones.</string>
+
+	<!-- Indirect input (required by Xcode 15+ template) -->
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+
+	<!-- Files app access for GPX export -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+</dict>
+</plist>
