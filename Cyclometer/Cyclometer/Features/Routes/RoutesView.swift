@@ -97,7 +97,7 @@ struct RouteDetailView: View {
                     .frame(height: 120)
                     .padding(.vertical, 8)
                 LabeledContent("Elevation Gain (ft)", value: route.elevationGain)
-                LabeledContent("Elevation Loss (ft)", value: route.elevationGain)
+                LabeledContent("Elevation Loss (ft)", value: route.elevationLoss)
             }
             Section("Current Weather") {
                 LabeledContent("Temperature", value: route.currentTemperature)

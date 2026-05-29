@@ -241,10 +241,10 @@ CoreBluetooth · CoreLocation · HealthKit · CoreHaptics · AVFoundation · Swi
 
 ## What's Next
 
-- [x] Create Xcode project + add scaffold files
-- [x] Add TCA package dependency
-- [x] Create xcassets Color Sets for all 30 `cy*` tokens
-- [ ] Build `RideMetricsView` secondary metrics grid against mockup
+- [ ] Create Xcode project + add scaffold files
+- [ ] Add TCA package dependency
+- [ ] Create xcassets Color Sets for all 30 `cy*` tokens
+- [ ] Build `RideDashboardView` widget grid against S05.4 spec — see elaboration below
 - [ ] Implement `VariaRadarClient` live value (CoreBluetooth)
 - [ ] Implement `HealthKitClient` live value
 - [ ] Implement `AudioClient` live value (Audio.md spec)
@@ -252,3 +252,249 @@ CoreBluetooth · CoreLocation · HealthKit · CoreHaptics · AVFoundation · Swi
 - [ ] Wire up `TestStore` tests — all 5 RideMetrics + 6 HRZone cases should pass
 - [ ] TestFlight open beta configuration
 - [ ] Apply for Garmin Radar Data BLE Program
+
+---
+
+## Widget Grid Spec — S05.4 Factory Default (Milestone M3)
+
+> **Source:** `assets/design/Design.sketch` → S05.4 Widget Layout (layer tree measured directly).  
+> **Milestone:** M3 — Active Ride Dashboard (speed, cadence, time, distance; no radar, no HR yet).  
+> **Implementation file:** `Features/ActiveRide/RideDashboardView.swift`
+
+---
+
+### Grid Geometry
+
+The widget grid (the `Blocking` group in Sketch) occupies the full screen width below the Dynamic Island / status bar and above the page indicator dots.
+
+| Dimension | Value | Source |
+|-----------|-------|--------|
+| Grid width | 402pt | Full device width (iPhone frame) |
+| Grid height | 676pt | `Blocking` group height in S05.4 |
+| Grid top offset | 84pt | Below Dynamic Island + status bar |
+| Grid bottom offset | 117pt | Above page indicator strip (`dashboard-pager` at y=753) |
+| 1×1 cell width | 201pt | Half of grid width |
+| 1×1 cell height | 95pt | Measured from Stack 4/5/6 layer heights |
+| 2×2 cell width | 402pt | Full grid width |
+| 2×2 cell height | 195pt | Measured from Speed 2×2 and Map 2×2 layer heights |
+| Row divider | 1pt | Hairline — `Color.cyBorderSubtle` |
+| Column divider | 1pt | Hairline — `Color.cyBorderSubtle` |
+
+**Row layout — top to bottom:**
+
+| Row | Height | Widget (left) | Widget (right) |
+|-----|--------|---------------|----------------|
+| 1–2 | 195pt | **W1 Speed** (full width — spans both columns) | — |
+| 3 | 95pt | W4 Heart Rate | W12 HR Zones |
+| 4 | 95pt | W7 Radar | W11 Pace |
+| 5 | 95pt | W5 Cadence | W10 Weather |
+| 6–7 | 195pt | **W8 Map** (full width — spans both columns) | — |
+
+Total: 195 + 95 + 95 + 95 + 195 = 675pt + 1pt divider = 676pt ✓
+
+**SwiftUI implementation:** Use `Grid` with `GridRow` and `gridCellColumns(2)` for the 2×2 widgets. `Divider()` between each row. No `spacing` on the `Grid` — dividers are explicit. This matches the Sketch layer structure exactly.
+
+---
+
+### W1 — Speed (2×2) · 402×195pt
+
+> **Sketch frame:** `W1 - Speed (2x2)` · layer name in S05.4: `Speed 2x2`
+
+The Speed widget is the hero element of the dashboard. It occupies the full width of the grid and the top two row units.
+
+**Internal layout (from Sketch layer tree):**
+
+```
+Speed 2x2 (402×195)
+├── Speed group (403×134 @1,7)
+│   ├── average-chart bitmap (406×104 @-3,85)  ← background sparkline chart
+│   └── Numbers group (394×131 @9,0)
+│       ├── speed symbol — large-hero (180×120 @0,0)  ← hero speed number
+│       └── stats group (77×131 @309,0)              ← right column avg/max
+│           ├── Average — small-hero (77×72)
+│           └── max — small-hero (77×59)
+├── Distance group (123×70 @22,121)   ← bottom-left secondary metric
+│   ├── Medium hero symbol (81×37)
+│   └── "Distance" label (66×16)
+└── Duration group (123×70 @166,121)  ← bottom-center secondary metric
+    ├── Medium hero symbol (97×37)
+    └── "Duration" label (68×16)
+```
+
+**Hero number sizes (from Symbols page measurements):**
+
+| Symbol name | Width | Height | Usage |
+|-------------|-------|--------|-------|
+| `large-hero` | 180pt | 120pt | Current speed (the primary value) |
+| `medium-hero` | 112pt | 54pt | Distance, Duration (bottom row) |
+| `small-hero` | 86pt | 56pt | Avg speed, Max speed (right column) |
+| `small-hero-h` | 73pt | 37pt | Horizontal variant |
+
+**SwiftUI implementation recipe:**
+
+```swift
+// W1 Speed widget internal layout
+HStack(alignment: .top, spacing: 0) {
+
+    // Left: hero speed + distance/time bottom row
+    VStack(alignment: .leading, spacing: 0) {
+
+        // Hero speed — D-DIN Condensed, large-hero size (180×120pt frame)
+        HeroNumber(speedString, unit: "mph")   // .heroNumberSize(.large)
+            .frame(width: 180, height: 120)
+
+        Spacer()
+
+        // Bottom row: distance + elapsed time
+        HStack(spacing: 0) {
+            HeroNumber(distanceString, unit: "mi") { Text("DISTANCE").cyCaption() }
+                .heroNumberSize(.medium)          // 112×54pt
+                .frame(width: 123, height: 70)
+            HeroNumber(elapsedString, unit: "") { Text("DURATION").cyCaption() }
+                .heroNumberSize(.medium)
+                .frame(width: 123, height: 70)
+        }
+    }
+
+    Spacer()
+
+    // Right column: avg + max speed stacked
+    // Background: average-chart sparkline (future — placeholder `Rectangle` in M3)
+    VStack(alignment: .trailing, spacing: 12) {
+        HeroNumber(avgSpeedString, unit: "") { Text("AVG").cyCaption() }
+            .heroNumberSize(.small)           // 77×72pt
+            .layout(.vertical)
+        HeroNumber(maxSpeedString, unit: "") { Text("MAX").cyCaption() }
+            .heroNumberSize(.small)           // 77×59pt
+            .layout(.vertical)
+    }
+    .frame(width: 77)
+}
+.padding(8)
+.frame(width: 402, height: 195)
+.background(Color.cyBgSecondary)
+// Background sparkline chart rendered behind Numbers group via ZStack in final impl
+```
+
+**M3 scope:** Render the layout with live speed, distance, and elapsed time. Avg/max values are computed from ride state. The `average-chart` background sparkline is a `Rectangle(.cyBgTertiary)` placeholder in M3 — real chart implementation deferred to M9 (Ride Summary milestone).
+
+---
+
+### W4 — Heart Rate · 201×95pt (left, row 3)
+
+**Sketch layer name in S05.4:** `HR` (inside Stack 4)
+
+**Layout:**
+- Label: `HEART RATE` — `cyCaption` font, uppercase, tracking 1.5, `cyTextSecondary`
+- Value: current BPM — `HeroNumber`, `.heroNumberSize(.medium)` (112×54pt), `cyTextPrimary`
+- Left border: 3pt solid bar in `Color.hrZone(store.hrZone)` — zone color treatment
+- Background tint: `Color.hrZone(store.hrZone).opacity(0.12)`
+
+**M3 scope:** Render static `--` value (no HR source in M3). Left border renders in `cyBorderSubtle`. Live HR + zone color wired in M5.
+
+---
+
+### W12 — HR Zones · 201×95pt (right, row 3)
+
+**Sketch layer name in S05.4:** `HR Zones` (inside Stack 4)
+
+**Layout:**
+- Label: `ZONE` — `cyCaption`, uppercase
+- Value: `Z4` or `Z–` when no source — `HeroNumber`, `.heroNumberSize(.medium)`
+- Value color: `Color.hrZone(store.hrZone)`
+- Background tint: `Color.hrZone(store.hrZone).opacity(0.12)`
+
+**M3 scope:** Renders `Z–` in `cyTextTertiary`. Zone color wired in M5.
+
+---
+
+### W7 — Radar · 201×95pt (left, row 4)
+
+**Sketch layer name in S05.4:** `Radar` (inside Stack 5)
+
+**Layout:**
+```
+HStack(spacing: 0) {
+    // Left: label + state text
+    VStack(alignment: .leading) {
+        Text("RADAR").cyCaption()
+        // Paired + targets: nothing (column shows vehicles)
+        // Paired + clear:   Text("Clear").foregroundStyle(.cyRatingGood)
+        // Not paired:       Text("–").dDINCondensed(size: 68)
+    }
+    .padding(8)
+    .frame(maxWidth: .infinity, alignment: .leading)
+
+    // Right: 24pt radar column (S06) — only when radar is paired
+    if isRadarPaired {
+        RadarColumnView(targets: targets)
+            .frame(width: 24)
+    }
+}
+.frame(width: 201, height: 95)
+.background(Color.cyBgSecondary)
+```
+
+**M3 scope:** Renders `–` (not paired state). `RadarColumnView` wired in M4.
+
+---
+
+### W11 — Pace · 201×95pt (right, row 4)
+
+**Layout:**
+- Label: `PACE` — `cyCaption`, uppercase
+- Value: min/mile string e.g. `4:52` — `HeroNumber`, `.heroNumberSize(.medium)`
+- Unit: `/mi` — `cyCaption`
+- Computed: `pace = 3600 / (speedMPH * 5280 / 5280)` → `60 / speedMPH` minutes/mile
+
+**M3 scope:** Live — computed from speed state. Shows `--:--` when speed is 0.
+
+---
+
+### W5 — Cadence · 201×95pt (left, row 5)
+
+**Sketch layer name in S05.4:** `Cadence` (inside Stack 6)
+
+**Layout:**
+- Label: `CADENCE` — `cyCaption`, uppercase
+- Value: RPM integer — `HeroNumber`, `.heroNumberSize(.medium)`
+- Unit: `rpm`
+
+**M3 scope:** Renders `--` (no cadence sensor in M3). Live value wired in M6.
+
+---
+
+### W10 — Weather · 201×95pt (right, row 5)
+
+**Sketch layer name in S05.4:** `Weather` (inside Stack 6)
+
+**M3 scope:** Static placeholder — temperature string `72°` in `cyTextTertiary`. Real WeatherKit integration is post-MVP.
+
+---
+
+### W8 — Map · 402×195pt (full width, rows 6–7)
+
+**Sketch layer name in S05.4:** `Map 2x2`
+
+**M3 scope:** `Rectangle().fill(Color.cyBgTertiary)` placeholder with a centered `Image(systemName: "map")` in `cyTextTertiary`. Live MapKit implementation in M8.
+
+---
+
+### Implementation Checklist — M3 Widget Grid
+
+- [ ] `Grid` with `gridCellColumns(2)` for W1 and W8; explicit `Divider()` between all rows
+- [ ] `HeroNumber` renders correctly at all three sizes (large/medium/small) in D-DIN Condensed
+- [ ] W1 hero speed updates live from `ActiveRideFeature.State.speedKPH`
+- [ ] W1 distance updates live from `ActiveRideFeature.State.distanceKM`
+- [ ] W1 elapsed time updates live from `ActiveRideFeature.State.elapsedSeconds` (timer fires every second)
+- [ ] W1 avg speed computed from ride start; max speed tracked as high-water mark in TCA state
+- [ ] W11 pace correctly shows `--:--` at speed = 0; correct min/mile at speed > 0
+- [ ] W4 and W12 render `--` / `Z–` placeholders in `cyTextTertiary` (HR not yet wired)
+- [ ] W7 renders `–` (not paired state); `RadarColumnView` absent
+- [ ] W5 renders `--` (no cadence sensor yet)
+- [ ] W10 renders static temperature placeholder
+- [ ] W8 renders map placeholder `Rectangle`
+- [ ] All cells meet 44×44pt minimum tap target for future widget-press interaction (Phase 2)
+- [ ] Grid renders correctly on iPhone 15 Pro (393pt) and iPhone 16 Pro Max (430pt) — no clipping
+- [ ] Dark mode only (`.preferredColorScheme(.dark)` on `RideDashboardView`)
+- [ ] No scroll — entire grid fits on screen without overflow (confirmed: 676pt < safe area height on all supported devices)

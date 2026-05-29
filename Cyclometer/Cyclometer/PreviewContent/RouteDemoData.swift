@@ -12,6 +12,7 @@ struct RouteStub: Identifiable {
     let detail: String
     let distance: String
     let elevationGain: String
+    let elevationLoss: String
     let windDirectionDegrees: Int
     let windSpeed: Int
     let coordinates: [CLLocationCoordinate2D]
@@ -59,6 +60,7 @@ struct RouteStub: Identifiable {
         detail: "No predefined route",
         distance: "Open",
         elevationGain: "Open",
+        elevationLoss: "Open",
         windDirectionDegrees: 0,
         windSpeed: 0,
         coordinates: [
@@ -76,6 +78,7 @@ struct RouteStub: Identifiable {
             detail: "22.4 • Rolling terrain",
             distance: "22.4",
             elevationGain: "840",
+            elevationLoss: "820",
             windDirectionDegrees: 315,
             windSpeed: 9,
             coordinates: [
@@ -104,6 +107,7 @@ struct RouteStub: Identifiable {
             detail: "31.8 • 2,450 gain",
             distance: "31.8",
             elevationGain: "2,450",
+            elevationLoss: "480",
             windDirectionDegrees: 270,
             windSpeed: 12,
             coordinates: [
@@ -131,6 +135,7 @@ struct RouteStub: Identifiable {
             detail: "18.1 • Fast and flat",
             distance: "18.1",
             elevationGain: "210",
+            elevationLoss: "210",
             windDirectionDegrees: 180,
             windSpeed: 6,
             coordinates: [
@@ -158,6 +163,7 @@ struct RouteStub: Identifiable {
             detail: "12.6 • Easy recovery pace",
             distance: "12.6",
             elevationGain: "320",
+            elevationLoss: "320",
             windDirectionDegrees: 45,
             windSpeed: 5,
             coordinates: [

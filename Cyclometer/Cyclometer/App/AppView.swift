@@ -50,11 +50,12 @@ struct AppView: View {
         // ── Active Ride Accessory (Apple Music mini-player pattern) ──────────
         .tabViewBottomAccessory(isEnabled: store.activeRide != nil) {
             if store.activeRide != nil {
-                ActiveRideAccessoryView(onOpen: {
-                    store.send(.dashboardDismissed)
-                }) {
-                    store.send(.dashboardDismissed)
-                }
+                ActiveRideAccessoryView(
+                    distanceKM: store.activeRide?.distanceKM ?? 0,
+                    speedKPH: store.activeRide?.speedKPH ?? 0,
+                    onOpen: { store.send(.dashboardOpened) },
+                    onDismiss: { store.send(.dashboardDismissed) }
+                )
                 .padding(.horizontal, 4)
             }
         }

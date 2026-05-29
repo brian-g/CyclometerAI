@@ -9,16 +9,14 @@ struct RidesFeature {
     }
 
     enum Action {
-        case deleteRide(RideSummary)
+        case deleteDemoRide(UUID)
     }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
-            case .deleteRide(let ride):
-                if case .demo(let id) = ride.source {
-                    state.demoRides.removeAll { $0.id == id }
-                }
+            case .deleteDemoRide(let id):
+                state.demoRides.removeAll { $0.id == id }
                 return .none
             }
         }

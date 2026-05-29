@@ -58,8 +58,8 @@ struct RidesView: View {
 
     private func deleteRide(_ ride: RideSummary) {
         switch ride.source {
-        case .demo:
-            store.send(.deleteRide(ride))
+        case .demo(let id):
+            store.send(.deleteDemoRide(id))
         case .recorded(let item):
             modelContext.delete(item)
         }

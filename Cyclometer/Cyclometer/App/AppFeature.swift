@@ -28,6 +28,7 @@ struct AppFeature {
         case newRideSheetDismissed
         case rideStartConfirmed
         case dashboardDismissed
+        case dashboardOpened
         case rideFinished
         case rides(RidesFeature.Action)
         case routes(RoutesFeature.Action)
@@ -65,7 +66,12 @@ struct AppFeature {
                 state.isDashboardPresented = false
                 return .none
 
+            case .dashboardOpened:
+                if state.activeRide != nil { state.isDashboardPresented = true }
+                return .none
+
             case .rideFinished:
+                // TODO: persist ride summary to SwiftData before clearing state (M7).
                 state.activeRide = nil
                 state.isDashboardPresented = false
                 return .none

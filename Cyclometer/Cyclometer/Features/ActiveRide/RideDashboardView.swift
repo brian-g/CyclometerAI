@@ -35,7 +35,9 @@ struct RideDashboardView: View {
                     SpeedWidget(
                         speed: store.speedKPH,
                         distance: store.distanceKM,
-                        elapsed: store.elapsedSeconds
+                        elapsed: store.elapsedSeconds,
+                        averageSpeed: store.averageSpeedKPH,
+                        maxSpeed: store.maxSpeedKPH
                     )
                     .gridCellColumns(2)
                     .gridCellUnsizedAxes(.vertical)
@@ -81,22 +83,10 @@ struct RideDashboardView: View {
             }
             .gridCellUnsizedAxes(.vertical)
 
-            Spacer()
-        }
-        .padding(0)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .offset(y: max(dragOffset, 0))
-        .gesture(
-            DragGesture()
-                .updating($dragOffset) { value, state, _ in
-                    state = value.translation.height
-                }
-                .onEnded { value in
-                    if value.translation.height > 120 { onClose() }
-                }
-        )
-        .toolbar {
-            ToolbarItemGroup(placement: .bottomBar) {
+            Spacer(minLength: 0)
+
+            // ── Ride Controls ─────────────────────────────────────────────────
+            HStack(spacing: 12) {
                 if store.isPaused {
                     Button {
                         store.send(.resumeTapped)
@@ -132,6 +122,8 @@ struct RideDashboardView: View {
                     .accessibilityLabel("Pause")
                 }
 
+                Spacer()
+
                 Button {
                     AudioServicesPlaySystemSound(1005)
                 } label: {
@@ -143,8 +135,23 @@ struct RideDashboardView: View {
                 .buttonStyle(.glass)
                 .accessibilityLabel("Ring Bell")
             }
-            .sharedBackgroundVisibility(.hidden)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(.bar)
         }
+        .padding(0)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .offset(y: max(dragOffset, 0))
+        .gesture(
+            DragGesture()
+                .updating($dragOffset) { value, state, _ in
+                    state = value.translation.height
+                }
+                .onEnded { value in
+                    if value.translation.height > 120 { onClose() }
+                }
+        )
+        .task { await store.send(.task).finish() }
         .alert("Finish Ride", isPresented: $isConfirmingFinish) {
             Button("Finish", role: .destructive) { onFinish() }
             Button("Cancel", role: .cancel) { }
@@ -159,6 +166,8 @@ private struct SpeedWidget: View {
     let speed: Double
     let distance: Double
     let elapsed: Int
+    let averageSpeed: Double
+    let maxSpeed: Double
 
     var body: some View {
         HStack(spacing: 0) {
@@ -178,12 +187,12 @@ private struct SpeedWidget: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 8) {
-                HeroNumber("18.4", unit: "") {
+                HeroNumber(String(format: "%.1f", averageSpeed), unit: "") {
                     Text("AVG").font(.caption)
                 }
                 .heroNumberSize(.small)
                 .layout(.vertical)
-                HeroNumber("31.2", unit: "") {
+                HeroNumber(String(format: "%.1f", maxSpeed), unit: "") {
                     Text("MAX").font(.caption)
                 }
                 .heroNumberSize(.small)
@@ -359,10 +368,13 @@ private struct MapWidget: View {
 // MARK: - Active Ride Accessory (tabViewBottomAccessory mini-player)
 
 struct ActiveRideAccessoryView: View {
+    let distanceKM: Double
+    let speedKPH: Double
     let onOpen: () -> Void
     let onDismiss: () -> Void
 
-    private let currentDistance = 20.3
+    private var distanceMi: Double { distanceKM * 0.621371 }
+    private var speedMPH: Double { speedKPH * 0.621371 }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -370,9 +382,9 @@ struct ActiveRideAccessoryView: View {
                 .frame(width: 42, height: 42)
 
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                HeroNumber(String(format: "%.1f", currentDistance), unit: "mi")
+                HeroNumber(String(format: "%.1f", distanceMi), unit: "mi")
                     .heroNumberSize(.small)
-                HeroNumber("15.5", unit: "mph")
+                HeroNumber(String(format: "%.1f", speedMPH), unit: "mph")
                     .heroNumberSize(.small)
             }
             Spacer()

@@ -10,6 +10,10 @@ final class CoreDataStack {
     let container: NSPersistentContainer
 
     private init() {
+        // REQUIRES: CyclometerTimeSeries.xcdatamodeld must exist in the Xcode target
+        // before this stack is first accessed. Create it via File → New → Data Model,
+        // name it "CyclometerTimeSeries", and add the TrackPoint entity.
+        // Accessing CoreDataStack.shared without the model file will fatalError here.
         container = NSPersistentContainer(name: "CyclometerTimeSeries")
         container.loadPersistentStores { _, error in
             if let error { fatalError("CoreData load failed: \(error)") }
