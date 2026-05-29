@@ -1,56 +1,81 @@
 import ComposableArchitecture
+import SwiftData
 
-/// Root reducer — owns the three-page paged navigation state.
-/// Pages: Ride Metrics (1) · Map/Navigation (2) · Radar Detail (3)
+/// Root feature — owns tab selection and active ride lifecycle.
+/// Navigation follows Apple Music pattern: Rides / Routes / Settings tabs.
+/// Active ride dashboard is a fullScreenCover over the tab structure.
 @Reducer
 struct AppFeature {
 
     @ObservableState
     struct State: Equatable {
-        var rideMetrics    = RideMetricsFeature.State()
-        var mapNavigation  = MapNavigationFeature.State()
-        var radarDetail    = RadarDetailFeature.State()
-        var selectedPage   = Page.rideMetrics
-        // Radar state is owned here so RideMetricsFeature can subscribe to it.
-        // The radar column is only rendered on the Ride Metrics page.
-        var radarTargets: [RadarTarget] = []
-        var isRadarPaired: Bool = false
+        var selectedTab: Tab = .rides
+        var activeRide: ActiveRideFeature.State? = nil
+        var isShowingNewRide: Bool = false
+        var isDashboardPresented: Bool = false
+        var rides: RidesFeature.State = RidesFeature.State()
+        var routes: RoutesFeature.State = RoutesFeature.State()
+        var settings: SettingsFeature.State = SettingsFeature.State()
     }
 
-    enum Page: Int, CaseIterable, Equatable {
-        case rideMetrics   = 0
-        case mapNavigation = 1
-        case radarDetail   = 2
+    enum Tab: Hashable {
+        case rides, routes, settings
     }
 
     enum Action {
-        case rideMetrics(RideMetricsFeature.Action)
-        case mapNavigation(MapNavigationFeature.Action)
-        case radarDetail(RadarDetailFeature.Action)
-        case pageSelected(Page)
-        case radarTargetsUpdated([RadarTarget])
-        case radarPairingChanged(Bool)
+        case tabSelected(Tab)
+        case startRideTapped
+        case newRideSheetDismissed
+        case rideStartConfirmed
+        case dashboardDismissed
+        case rideFinished
+        case rides(RidesFeature.Action)
+        case routes(RoutesFeature.Action)
+        case settings(SettingsFeature.Action)
+        case activeRide(ActiveRideFeature.Action)
     }
 
     var body: some ReducerOf<Self> {
-        Scope(state: \.rideMetrics,   action: \.rideMetrics)   { RideMetricsFeature() }
-        Scope(state: \.mapNavigation, action: \.mapNavigation)  { MapNavigationFeature() }
-        Scope(state: \.radarDetail,   action: \.radarDetail)    { RadarDetailFeature() }
+        Scope(state: \.rides,    action: \.rides)    { RidesFeature() }
+        Scope(state: \.routes,   action: \.routes)   { RoutesFeature() }
+        Scope(state: \.settings, action: \.settings) { SettingsFeature() }
 
         Reduce { state, action in
             switch action {
-            case .pageSelected(let page):
-                state.selectedPage = page
+            case .tabSelected(let tab):
+                state.selectedTab = tab
                 return .none
-            case .radarTargetsUpdated(let targets):
-                state.radarTargets = targets
+
+            case .startRideTapped:
+                state.isShowingNewRide = true
                 return .none
-            case .radarPairingChanged(let paired):
-                state.isRadarPaired = paired
+
+            case .newRideSheetDismissed:
+                state.isShowingNewRide = false
                 return .none
-            default:
+
+            case .rideStartConfirmed:
+                state.activeRide = ActiveRideFeature.State()
+                state.isShowingNewRide = false
+                state.isDashboardPresented = true
+                state.selectedTab = .rides
+                return .none
+
+            case .dashboardDismissed:
+                state.isDashboardPresented = false
+                return .none
+
+            case .rideFinished:
+                state.activeRide = nil
+                state.isDashboardPresented = false
+                return .none
+
+            case .rides, .routes, .settings, .activeRide:
                 return .none
             }
+        }
+        .ifLet(\.activeRide, action: \.activeRide) {
+            ActiveRideFeature()
         }
     }
 }

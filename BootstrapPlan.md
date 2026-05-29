@@ -241,9 +241,9 @@ CoreBluetooth · CoreLocation · HealthKit · CoreHaptics · AVFoundation · Swi
 
 ## What's Next
 
-- [ ] Create Xcode project + add scaffold files
-- [ ] Add TCA package dependency
-- [ ] Create xcassets Color Sets for all 30 `cy*` tokens
+- [x] Create Xcode project + add scaffold files
+- [x] Add TCA package dependency
+- [x] Create xcassets Color Sets for all 30 `cy*` tokens
 - [ ] Build `RideMetricsView` secondary metrics grid against mockup
 - [ ] Implement `VariaRadarClient` live value (CoreBluetooth)
 - [ ] Implement `HealthKitClient` live value
