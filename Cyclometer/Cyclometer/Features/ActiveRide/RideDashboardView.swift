@@ -590,3 +590,52 @@ private extension Int {
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
     }
 }
+
+// MARK: - Previews
+
+#Preview("Zone 4 — Radar Active") {
+    RideDashboardView(
+        store: Store(
+            initialState: ActiveRideFeature.State(
+                elapsedSeconds: 2340,
+                speedKPH: 28.4,
+                heartRateBPM: 155,
+                hrZone: 4,
+                cadenceRPM: 87,
+                distanceKM: 12.3,
+                maxSpeedKPH: 34.1,
+                speedSampleCount: 120,
+                speedSampleSum: 3408,
+                isRadarPaired: true,
+                radarTargets: [
+                    RadarTarget(id: UUID(), relativeVelocityMPS: 8.5, rangeMetres: 45, threatLevel: .warning),
+                    RadarTarget(id: UUID(), relativeVelocityMPS: 12.0, rangeMetres: 20, threatLevel: .danger)
+                ]
+            )
+        ) {
+            ActiveRideFeature()
+        },
+        onClose: { },
+        onFinish: { }
+    )
+}
+
+#Preview("Paused") {
+    RideDashboardView(
+        store: Store(
+            initialState: ActiveRideFeature.State(
+                isPaused: true,
+                elapsedSeconds: 1230,
+                heartRateBPM: 130,
+                hrZone: 3,
+                cadenceRPM: 0,
+                distanceKM: 7.6,
+                maxSpeedKPH: 31.2
+            )
+        ) {
+            ActiveRideFeature()
+        },
+        onClose: { },
+        onFinish: { }
+    )
+}
