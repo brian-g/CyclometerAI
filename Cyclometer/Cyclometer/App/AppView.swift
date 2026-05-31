@@ -92,3 +92,37 @@ struct AppView: View {
         }
     }
 }
+
+// MARK: - Previews
+
+#Preview("Rides Tab") {
+    AppView(
+        store: Store(initialState: AppFeature.State()) {
+            AppFeature()
+        }
+    )
+    .modelContainer(for: Item.self, inMemory: true)
+}
+
+#Preview("Active Ride") {
+    AppView(
+        store: Store(
+            initialState: AppFeature.State(
+                activeRide: ActiveRideFeature.State(
+                    elapsedSeconds: 2340,
+                    speedKPH: 28.4,
+                    heartRateBPM: 155,
+                    hrZone: 4,
+                    cadenceRPM: 87,
+                    distanceKM: 12.3,
+                    maxSpeedKPH: 34.1,
+                    speedSampleCount: 120,
+                    speedSampleSum: 3408
+                )
+            )
+        ) {
+            AppFeature()
+        }
+    )
+    .modelContainer(for: Item.self, inMemory: true)
+}
