@@ -23,13 +23,13 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Cyclometer uses Bluetooth to connect to your Garmin Varia radar, heart rate sensor, and speed/cadence sensor.</string>
+	<string>Cyclometer uses Bluetooth to connect to your cycling sensors including, heart rate sensor, speed, cadence, power, and radar.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Cyclometer reads your heart rate data to display accurate training zones.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Cyclometer records your route in the background during an active ride.</string>
+	<string>Cyclometer records your route in the background during an active ride. Unless you are recording the GPS is not active.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Cyclometer uses your location to record your route and calculate GPS speed.</string>
+	<string>Cyclometer uses your location to record your route. GPS is not active unless your are recording a ride.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>D-DINCondensed.otf</string>

@@ -343,7 +343,7 @@ The real system is the **widget grid**: a 2-column × 7-row canvas the rider pop
 
 The grid always occupies the full screen height between the Dynamic Island and the bottom toolbar. It is never scrollable. Row height is calculated dynamically so that all 7 rows fill the available display height for the current device. Cell dimensions are approximately 201×96pt on iPhone 17 Pro.
 
-**Widget sizing** Dimensions are expressed as *columns × rows* (e.g., `2×2` spans 2 columns and 2 rows). Supported sizes range from `1×1` (single cell) up to `2×7` (full grid). A widget may not exceed the grid boundaries, and no two widgets may share a cell.
+**Widget sizing** Dimensions are expressed as *columns × rows* (e.g., `2×2` spans 2 columns and 2 rows). Supported sizes range from `1×1` (single cell) up to `2×2`. A widget may not exceed the grid boundaries (except for the map), and no two widgets may share a cell.
 
 **Adaptive content** Each widget is size-aware. At `1×1` it surfaces the single most critical value — the number readable in under a second. At `2×1` it adds a secondary metric or sparkline. At `2×2` it exposes the full picture: hero number, trend watermark, supporting stats, and contextual detail. The content hierarchy within each widget is defined in the widget specifications below.
 
@@ -354,7 +354,7 @@ The grid always occupies the full screen height between the Dynamic Island and t
 - No two widgets overlap
 - The grid remains full-height and non-scrollable on all supported devices
 
-**Map widget — safe area bleed** When the map is placed in row 1 (top) or rows 6–7 (bottom) of the grid, its rendering extends past the standard content area and bleeds into the iOS safe zones — beneath the Dynamic Island at the top, or beneath the home indicator at the bottom. All interactive controls and data labels within the map widget must remain inside safe area bounds.
+**Map widget — safe area bleed** When the map is placed in row 1-2 (top) or rows 6–7 (bottom) of the grid, its rendering extends past the standard content area and bleeds into the iOS safe zones — beneath the Dynamic Island at the top, or beneath the home indicator at the bottom. All interactive controls and data labels within the map widget must remain inside safe area bounds.
 
 **Empty cells** Any unoccupied cells render as empty space with no content and no interactive behaviour.
 
