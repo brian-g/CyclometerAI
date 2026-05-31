@@ -241,9 +241,9 @@ CoreBluetooth · CoreLocation · HealthKit · CoreHaptics · AVFoundation · Swi
 
 ## What's Next
 
-- [ ] Create Xcode project + add scaffold files
-- [ ] Add TCA package dependency
-- [ ] Create xcassets Color Sets for all 30 `cy*` tokens
+- [x] Create Xcode project + add scaffold files
+- [x] Add TCA package dependency
+- [x] Create xcassets Color Sets for all 30 `cy*` tokens
 - [ ] Build `RideDashboardView` widget grid against S05.4 spec — see elaboration below
 - [ ] Implement `VariaRadarClient` live value (CoreBluetooth)
 - [ ] Implement `HealthKitClient` live value
@@ -482,7 +482,7 @@ HStack(spacing: 0) {
 
 ### Implementation Checklist — M3 Widget Grid
 
-- [ ] `Grid` with `gridCellColumns(2)` for W1 and W8; explicit `Divider()` between all rows
+- [ ] `Grid` with `gridCellColumns(2)` for W1 and W8
 - [ ] `HeroNumber` renders correctly at all three sizes (large/medium/small) in D-DIN Condensed
 - [ ] W1 hero speed updates live from `ActiveRideFeature.State.speedKPH`
 - [ ] W1 distance updates live from `ActiveRideFeature.State.distanceKM`
@@ -496,5 +496,5 @@ HStack(spacing: 0) {
 - [ ] W8 renders map placeholder `Rectangle`
 - [ ] All cells meet 44×44pt minimum tap target for future widget-press interaction (Phase 2)
 - [ ] Grid renders correctly on iPhone 15 Pro (393pt) and iPhone 16 Pro Max (430pt) — no clipping
-- [ ] Dark mode only (`.preferredColorScheme(.dark)` on `RideDashboardView`)
+- [ ] Light mode only
 - [ ] No scroll — entire grid fits on screen without overflow (confirmed: 676pt < safe area height on all supported devices)
