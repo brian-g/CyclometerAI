@@ -9,14 +9,14 @@ struct MetricTileView: View {
     var borderColor: Color = Color.cyBorderSubtle
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(label)
                 .font(.cyCaption)
                 .foregroundStyle(Color.cyTextSecondary)
                 .textCase(.uppercase)
                 .tracking(1.5)
 
-            HStack(alignment: .lastTextBaseline, spacing: 3) {
+            HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
                 Text(value)
                     .font(.cyMetricMedium)
                     .foregroundStyle(Color.cyTextPrimary)
@@ -28,13 +28,13 @@ struct MetricTileView: View {
                 }
             }
         }
-        .padding(14)
+        .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.cyBgSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerMd))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(borderColor, lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: Spacing.cornerMd)
+                .strokeBorder(borderColor, lineWidth: Spacing.strokeThin)
         )
     }
 }

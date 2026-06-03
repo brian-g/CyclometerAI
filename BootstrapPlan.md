@@ -277,8 +277,6 @@ The widget grid (the `Blocking` group in Sketch) occupies the full screen width 
 | 1×1 cell height | 95pt | Measured from Stack 4/5/6 layer heights |
 | 2×2 cell width | 402pt | Full grid width |
 | 2×2 cell height | 195pt | Measured from Speed 2×2 and Map 2×2 layer heights |
-| Row divider | 1pt | Hairline — `Color.cyBorderSubtle` |
-| Column divider | 1pt | Hairline — `Color.cyBorderSubtle` |
 
 **Row layout — top to bottom:**
 
@@ -292,7 +290,7 @@ The widget grid (the `Blocking` group in Sketch) occupies the full screen width 
 
 Total: 195 + 95 + 95 + 95 + 195 = 675pt + 1pt divider = 676pt ✓
 
-**SwiftUI implementation:** Use `Grid` with `GridRow` and `gridCellColumns(2)` for the 2×2 widgets. `Divider()` between each row. No `spacing` on the `Grid` — dividers are explicit. This matches the Sketch layer structure exactly.
+**SwiftUI implementation:** Use `Grid` with `GridRow` and `gridCellColumns(2)` for the 2×2 widgets. No `spacing` on the `Grid`.
 
 ---
 

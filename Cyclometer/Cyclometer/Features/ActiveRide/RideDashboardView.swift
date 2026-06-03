@@ -18,10 +18,10 @@ struct RideDashboardView: View {
             // ── Grabber ───────────────────────────────────────────────────────
             Capsule()
                 .fill(Color(.systemGray3))
-                .frame(width: 36, height: 5)
+                .frame(width: Spacing.xxl, height: Spacing.grabberHeight)
                 .frame(maxWidth: .infinity)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
+                .padding(.top, Spacing.sm)
+                .padding(.bottom, Spacing.xs)
 
             // ── Widget Grid (S05.4 factory default) ───────────────────────────
             // Rows 1-2: Speed (W1 2×2)
@@ -29,64 +29,60 @@ struct RideDashboardView: View {
             // Row 4:    Radar (W7 1×1) + Pace (W11 1×1)
             // Row 5:    Cadence (W5 1×1) + Weather (W10 1×1) [placeholder]
             // Rows 6-7: Map (W8 2×2)
-            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
-                // W1 — Speed 2×2
-                GridRow {
-                    SpeedWidget(
-                        speed: store.speedKPH,
-                        distance: store.distanceKM,
-                        elapsed: store.elapsedSeconds,
-                        averageSpeed: store.averageSpeedKPH,
-                        maxSpeed: store.maxSpeedKPH
-                    )
-                    .gridCellColumns(2)
-                    .gridCellUnsizedAxes(.vertical)
-                }
-                Divider()
-
-                // W4 HR + W12 HR Zones
-                GridRow {
-                    HeartRateWidget(bpm: store.heartRateBPM, zone: store.hrZone)
-                        .gridCellUnsizedAxes(.vertical)
-                    HRZonesWidget(zone: store.hrZone)
-                        .gridCellUnsizedAxes(.vertical)
-                }
-                Divider()
-
-                // W7 Radar + W11 Pace
-                GridRow {
-                    RadarWidget(
-                        targets: store.radarTargets,
-                        isRadarPaired: store.isRadarPaired
-                    )
-                    .gridCellUnsizedAxes(.vertical)
-                    PaceWidget(speedKPH: store.speedKPH)
-                        .gridCellUnsizedAxes(.vertical)
-                }
-                Divider()
-
-                // W5 Cadence + W10 Weather placeholder
-                GridRow {
-                    CadenceWidget(cadence: store.cadenceRPM)
-                        .gridCellUnsizedAxes(.vertical)
-                    WeatherWidget()
-                        .gridCellUnsizedAxes(.vertical)
-                }
-                Divider()
-
-                // W8 — Map 2×2
-                GridRow {
-                    MapWidget()
+            GeometryReader { geo in
+                let unit = geo.size.height / 7
+                Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+                    // W1 — Speed 2×2
+                    GridRow {
+                        SpeedWidget(
+                            speed: store.speedKPH,
+                            distance: store.distanceKM,
+                            elapsed: store.elapsedSeconds,
+                            averageSpeed: store.averageSpeedKPH,
+                            maxSpeed: store.maxSpeedKPH
+                        )
                         .gridCellColumns(2)
-                        .gridCellUnsizedAxes(.vertical)
+                        .frame(height: unit * 2)
+                    }
+
+                    // W4 HR + W12 HR Zones
+                    GridRow {
+                        HeartRateWidget(bpm: store.heartRateBPM, zone: store.hrZone)
+                            .frame(height: unit)
+                        HRZonesWidget(zone: store.hrZone)
+                            .frame(height: unit)
+                    }
+
+                    // W7 Radar + W11 Pace
+                    GridRow {
+                        RadarWidget(
+                            targets: store.radarTargets,
+                            isRadarPaired: store.isRadarPaired
+                        )
+                        .frame(height: unit)
+                        PaceWidget(speedKPH: store.speedKPH)
+                            .frame(height: unit)
+                    }
+
+                    // W5 Cadence + W10 Weather placeholder
+                    GridRow {
+                        CadenceWidget(cadence: store.cadenceRPM)
+                            .frame(height: unit)
+                        WeatherWidget()
+                            .frame(height: unit)
+                    }
+
+                    // W8 — Map 2×2
+                    GridRow {
+                        MapWidget()
+                            .gridCellColumns(2)
+                            .frame(height: unit * 2)
+                    }
                 }
             }
-            .gridCellUnsizedAxes(.vertical)
-
-            Spacer(minLength: 0)
 
             // ── Ride Controls ─────────────────────────────────────────────────
-            HStack(spacing: 12) {
+            HStack(spacing: Spacing.md) {
                 if store.isPaused {
                     Button {
                         store.send(.resumeTapped)
@@ -94,7 +90,7 @@ struct RideDashboardView: View {
                         Label("Resume", systemImage: "play.fill")
                             .labelStyle(.iconOnly)
                             .font(.title3.weight(.semibold))
-                            .frame(width: 52, height: 52)
+                            .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
                     }
                     .buttonStyle(.glass)
                     .accessibilityLabel("Resume")
@@ -105,7 +101,7 @@ struct RideDashboardView: View {
                         Label("Finish", systemImage: "stop.fill")
                             .labelStyle(.iconOnly)
                             .font(.title3.weight(.semibold))
-                            .frame(width: 52, height: 52)
+                            .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
                     }
                     .buttonStyle(.glass)
                     .accessibilityLabel("Finish")
@@ -116,7 +112,7 @@ struct RideDashboardView: View {
                         Label("Pause", systemImage: "pause.fill")
                             .labelStyle(.iconOnly)
                             .font(.title3.weight(.semibold))
-                            .frame(width: 52, height: 52)
+                            .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
                     }
                     .buttonStyle(.glass)
                     .accessibilityLabel("Pause")
@@ -130,13 +126,13 @@ struct RideDashboardView: View {
                     Label("Bell", systemImage: "bell.fill")
                         .labelStyle(.iconOnly)
                         .font(.title3.weight(.semibold))
-                        .frame(width: 52, height: 52)
+                        .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
                 }
                 .buttonStyle(.glass)
                 .accessibilityLabel("Ring Bell")
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
             .background(.bar)
         }
         .padding(0)
@@ -171,10 +167,10 @@ private struct SpeedWidget: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 HeroNumber(String(format: "%.1f", speed), unit: "mph")
                 Spacer()
-                HStack(spacing: 16) {
+                HStack(spacing: Spacing.lg) {
                     HeroNumber(String(format: "%.1f", distance), unit: "mi") {
                         Text("DIST").font(.caption)
                     }
@@ -186,7 +182,7 @@ private struct SpeedWidget: View {
                 }
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 8) {
+            VStack(alignment: .trailing, spacing: Spacing.sm) {
                 HeroNumber(String(format: "%.1f", averageSpeed), unit: "") {
                     Text("AVG").font(.caption)
                 }
@@ -199,8 +195,8 @@ private struct SpeedWidget: View {
                 .layout(.vertical)
             }
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, minHeight: 104)
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity)
         .background(Color.cyBgSecondary)
     }
 }
@@ -219,13 +215,13 @@ private struct HeartRateWidget: View {
             HeroNumber("\(bpm)", unit: "bpm").heroNumberSize(.medium)
             Spacer()
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.hrZone(zone).opacity(0.12))
         .overlay(
             Rectangle()
                 .fill(Color.hrZone(zone))
-                .frame(width: 3),
+                .frame(width: Spacing.hrBorderWidth),
             alignment: .leading
         )
     }
@@ -244,8 +240,8 @@ private struct HRZonesWidget: View {
             HeroNumber("Z\(zone == 0 ? "-" : "\(zone)")", unit: "").heroNumberSize(.medium)
             Spacer()
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.hrZone(zone).opacity(0.12))
     }
 }
@@ -272,16 +268,16 @@ private struct RadarWidget: View {
                 }
                 Spacer()
             }
-            .padding(8)
+            .padding(Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             // 24pt radar column (S06) — only when paired
             if isRadarPaired {
                 RadarColumnView(targets: targets)
-                    .frame(width: 24)
+                    .frame(width: Spacing.xl)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 104)
+        .frame(maxWidth: .infinity)
         .background(Color.cyBgSecondary)
     }
 }
@@ -308,8 +304,8 @@ private struct PaceWidget: View {
             HeroNumber(pace, unit: "/mi").heroNumberSize(.medium)
             Spacer()
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.cyBgSecondary)
     }
 }
@@ -327,8 +323,8 @@ private struct CadenceWidget: View {
             HeroNumber("\(cadence)", unit: "rpm").heroNumberSize(.medium)
             Spacer()
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.cyBgSecondary)
     }
 }
@@ -344,8 +340,8 @@ private struct WeatherWidget: View {
             HeroNumber("77°", unit: "").heroNumberSize(.medium)
             Spacer()
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.cyBgSecondary)
     }
 }
@@ -355,8 +351,7 @@ private struct MapWidget: View {
     var body: some View {
         Rectangle()
             .fill(Color.cyBgTertiary)
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 195)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(
                 Image(systemName: "map")
                     .font(.system(size: 32))
@@ -377,11 +372,11 @@ struct ActiveRideAccessoryView: View {
     private var speedMPH: Double { speedKPH * 0.621371 }
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             OpenRingProgressView(progress: 0.42, percentage: 42)
-                .frame(width: 42, height: 42)
+                .frame(width: Spacing.xxxl, height: Spacing.xxxl)
 
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                 HeroNumber(String(format: "%.1f", distanceMi), unit: "mi")
                     .heroNumberSize(.small)
                 HeroNumber(String(format: "%.1f", speedMPH), unit: "mph")
@@ -417,7 +412,7 @@ private struct OpenRingProgressView: View {
             Chart(segments) { s in
                 SectorMark(angle: .value("", s.value), innerRadius: .ratio(0.68),
                            outerRadius: .ratio(1), angularInset: s.id == "gap" ? 0 : 1)
-                .cornerRadius(3)
+                .cornerRadius(Spacing.cornerSm)
                 .foregroundStyle(s.color)
             }
             .chartLegend(.hidden)
@@ -477,26 +472,26 @@ private struct SensorStatusRow: View {
     let sensor: SensorStub
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Spacing.md) {
             Image(systemName: sensor.systemImage)
                 .font(.headline)
                 .foregroundStyle(sensor.tint)
-                .frame(width: 36, height: 36)
+                .frame(width: Spacing.xxl, height: Spacing.xxl)
                 .background(sensor.tint.opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            in: RoundedRectangle(cornerRadius: Spacing.cornerMd, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(sensor.name).font(.headline)
                 Text(sensor.detail).font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
             Text(sensor.status)
                 .font(.caption.weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.sm)
                 .background(.quaternary, in: Capsule())
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, Spacing.xs)
     }
 }
 
@@ -509,8 +504,8 @@ private struct RoutePickerView: View {
             Button {
                 selectedRouteName = route.name
             } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: Spacing.md) {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
                         Text(route.name).foregroundStyle(.primary)
                         Text(route.detail).font(.subheadline).foregroundStyle(.secondary)
                     }
@@ -519,7 +514,7 @@ private struct RoutePickerView: View {
                         Image(systemName: "checkmark").font(.headline).foregroundStyle(.blue)
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, Spacing.xs)
             }
             .buttonStyle(.plain)
         }
@@ -565,15 +560,15 @@ struct HeroNumber<Label: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             label
             if alignment == .vertical {
-                VStack(alignment: .trailing, spacing: 2) {
+                VStack(alignment: .trailing, spacing: Spacing.xs) {
                     Text(value).dDINCondensed(size: ptSize, relativeTo: .largeTitle)
                     Text(unit).font(.footnote)
                 }
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Text(value).dDINCondensed(size: ptSize, relativeTo: .largeTitle)
                     if !unit.isEmpty { Text(unit).font(.footnote) }
                 }
