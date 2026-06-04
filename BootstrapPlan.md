@@ -244,7 +244,9 @@ CoreBluetooth · CoreLocation · HealthKit · CoreHaptics · AVFoundation · Swi
 - [x] Create Xcode project + add scaffold files
 - [x] Add TCA package dependency
 - [x] Create xcassets Color Sets for all 30 `cy*` tokens
-- [ ] Build `RideDashboardView` widget grid against S05.4 spec — see elaboration below
+- [x] Build `RideDashboardView` widget grid against S05.4 spec — see elaboration below
+- [ ] Refine the Speed widget to not overflow bounds
+- [ ] Implement `
 - [ ] Implement `VariaRadarClient` live value (CoreBluetooth)
 - [ ] Implement `HealthKitClient` live value
 - [ ] Implement `AudioClient` live value (Audio.md spec)

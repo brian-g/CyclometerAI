@@ -276,7 +276,7 @@ private struct RadarWidget: View {
             // 24pt radar column (S06) — only when paired
             if isRadarPaired {
                 RadarColumnView(targets: targets)
-                    .frame(width: Spacing.xl)
+                    .frame(width: Spacing.radarColumnWidth)
             }
         }
         .frame(maxWidth: .infinity)

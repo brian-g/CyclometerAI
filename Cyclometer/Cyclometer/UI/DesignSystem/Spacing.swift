@@ -10,9 +10,12 @@ enum Spacing {
     static let lg: CGFloat = unit * 4   // 16 — outer horizontal padding
 
     // Larger layout dimensions
-    static let xl: CGFloat   = unit * 6  // 24 — radar column width
+    static let xl: CGFloat   = unit * 6  // 24
     static let xxl: CGFloat  = unit * 9  // 36 — grabber width, sensor icon size
     static let xxxl: CGFloat = unit * 10 // 40 — accessory ring progress view
+
+    // Semantic component dimensions
+    static let radarColumnWidth: CGFloat = xl  // 24 — Varia sidebar strip (S06 spec)
 
     // Fixed UI affordances (named, not forced onto the grid)
     static let tapTarget: CGFloat     = unit * 13 // 52 — HIG minimum button tap target
