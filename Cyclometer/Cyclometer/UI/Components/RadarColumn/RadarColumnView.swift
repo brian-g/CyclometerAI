@@ -45,9 +45,9 @@ struct RadarColumnView: View {
                 let sorted = targets.sorted { $0.rangeMetres < $1.rangeMetres }
                 ForEach(sorted) { target in
                     VehicleGlyphView(threatLevel: target.threatLevel)
-                        .frame(width: 16, height: 16)
+                        .frame(width: Spacing.lg, height: Spacing.lg)
                         .position(
-                            x: 12,   // centre of 24pt column
+                            x: Spacing.xl / 2,   // centre of radar column
                             y: yPosition(for: target.rangeMetres, in: geo.size.height)
                         )
                 }
@@ -60,9 +60,9 @@ struct RadarColumnView: View {
     private func yPosition(for rangeMetres: Double, in height: CGFloat) -> CGFloat {
         let maxRange: Double = 140
         let fraction = min(rangeMetres / maxRange, 1.0)
-        // Reserve 12pt padding top and bottom so glyphs don't clip at edges
-        let usable = Double(height) - 24
-        return CGFloat(12 + fraction * usable)
+        // Reserve half-glyph padding top and bottom so glyphs don't clip at edges
+        let usable = Double(height) - Double(Spacing.xl)
+        return CGFloat(Double(Spacing.xl / 2) + fraction * usable)
     }
 }
 

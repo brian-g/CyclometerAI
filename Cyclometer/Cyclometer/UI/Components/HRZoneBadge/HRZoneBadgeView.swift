@@ -8,9 +8,9 @@ struct HRZoneBadgeView: View {
         Text("Z\(zone)")
             .font(.system(size: 11, weight: .black, design: .monospaced))
             .foregroundStyle(Color.hrZone(zone))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
             .background(Color.hrZone(zone).opacity(0.15))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerSm))
     }
 }
