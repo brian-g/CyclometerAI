@@ -46,7 +46,7 @@ struct RideDashboardView: View {
                         )
                         .gridCellColumns(2)
                         .frame(height: unit * 2)
-                    }.background(Color.red)
+                    }
 
                     // W4 HR + W12 HR Zones
                     GridRow {
