@@ -45,21 +45,107 @@ struct HeroNumber<Label: View>: View {
         case .large:  136
         }
     }
+    
+    private var frameSize: CGFloat {
+        switch size {
+        case .small: 27
+        case .medium: 50
+        case .large:  100
+        }
+    }
 
+    private var offset : CGFloat {
+        switch size {
+        case .small: -4
+        case .medium: -6
+        case .large:  -8
+        }
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            label
+        VStack(alignment: .leading, spacing: 0) {
+            label.textCase(.uppercase)
             if alignment == .vertical {
-                VStack(alignment: .trailing, spacing: Spacing.xs) {
-                    Text(value).dDINCondensed(size: ptSize, relativeTo: .largeTitle)
-                    Text(unit).font(.footnote)
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(value).dDINCondensed(size: ptSize, relativeTo: .largeTitle).lineLimit(1).frame(height: frameSize).baselineOffset(offset).padding(0)
+                    if !unit.isEmpty { Text(unit).textCase(.lowercase).font(.footnote).padding(0) }
                 }
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    Text(value).dDINCondensed(size: ptSize, relativeTo: .largeTitle)
-                    if !unit.isEmpty { Text(unit).font(.footnote) }
-                }
+                HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
+                    Text(value).dDINCondensed(size: ptSize, relativeTo: .largeTitle).lineLimit(1).frame(height: frameSize).baselineOffset(offset).padding(0)
+                    if !unit.isEmpty { Text(unit).textCase(.lowercase).font(.footnote).baselineOffset(offset) }
+                }.padding(0)
             }
         }
+    }
+}
+
+// MARK: - Previews
+
+#Preview("Sizes") {
+    VStack(alignment: .leading, spacing: Spacing.lg) {
+        HeroNumber(28.4, unit: "mph")
+        HeroNumber(28.4, unit: "mph").heroNumberSize(.medium)
+        HeroNumber(28.4, unit: "mph").heroNumberSize(.small)
+    }
+    .padding()
+}
+
+#Preview("With Labels") {
+    VStack(alignment: .leading, spacing: Spacing.lg) {
+        HeroNumber(12.3, unit: "mi") {
+            Text("Distance").font(.caption)
+        }
+        .heroNumberSize(.small)
+
+        HeroNumber("155", unit: "bpm") {
+            Text("Heart Rate").font(.caption)
+        }
+        .heroNumberSize(.medium)
+
+        HeroNumber(28.4, unit: "mph") {
+            Text("Speed").font(.caption)
+        }
+    }
+    .padding()
+}
+
+#Preview("Vertical Layout") {
+    VStack(alignment: .leading, spacing: Spacing.lg) {
+        HeroNumber(26.7, unit: "avg") {
+            Text("Average").font(.caption)
+        }
+        .heroNumberSize(.small)
+        .layout(.vertical)
+
+        HeroNumber(34.1, unit: "mph") {
+            Text("Maximum").font(.caption)
+        }
+        .heroNumberSize(.small)
+        .layout(.vertical)
+        HeroNumber(34.1, unit: "max") {
+            Text("MAX").font(.caption)
+        }
+        .heroNumberSize(.medium)
+        .layout(.vertical)
+        HeroNumber(34.1, unit: "max") {
+            Text("MAX").font(.caption)
+        }
+        .heroNumberSize(.large)
+        .layout(.vertical)
+
+    }
+    .padding()
+}
+
+#Preview("Mixed") {
+    VStack(alignment: .leading, spacing: Spacing.sm) {
+        HeroNumber(34.1, unit: "max") {
+            Text("MAX").font(.caption)
+        }
+        HeroNumber(34.1, unit: "max") {
+            Text("mph").font(.caption)
+        }
+        .heroNumberSize(.small)
+        .layout(.vertical)
     }
 }

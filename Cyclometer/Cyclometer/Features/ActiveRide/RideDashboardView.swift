@@ -46,7 +46,7 @@ struct RideDashboardView: View {
                         )
                         .gridCellColumns(2)
                         .frame(height: unit * 2)
-                    }
+                    }.background(Color.red)
 
                     // W4 HR + W12 HR Zones
                     GridRow {
@@ -169,23 +169,23 @@ private struct SpeedWidget: View {
     let maxSpeed: Double
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: Spacing.sm) {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HeroNumber(speed, unit: "mph")
                 Spacer()
-                HStack(spacing: Spacing.lg) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.lg) {
                     HeroNumber(distance, unit: "mi") {
-                        Text("DIST").font(.caption)
+                        Text("Distance").font(.caption)
                     }
                     .heroNumberSize(.small)
                     HeroNumber(elapsed.formattedElapsed, unit: "") {
-                        Text("TIME").font(.caption)
+                        Text("Time").font(.caption)
                     }
                     .heroNumberSize(.small)
                 }
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: Spacing.lg) {
                 HeroNumber(averageSpeed, unit: "") {
                     Text("AVG").font(.caption)
                 }
