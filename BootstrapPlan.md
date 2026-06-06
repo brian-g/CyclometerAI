@@ -246,7 +246,6 @@ CoreBluetooth · CoreLocation · HealthKit · CoreHaptics · AVFoundation · Swi
 - [x] Create xcassets Color Sets for all 30 `cy*` tokens
 - [x] Build `RideDashboardView` widget grid against S05.4 spec — see elaboration below
 - [ ] Refine the Speed widget to not overflow bounds
-- [ ] Implement `
 - [ ] Implement `VariaRadarClient` live value (CoreBluetooth)
 - [ ] Implement `HealthKitClient` live value
 - [ ] Implement `AudioClient` live value (Audio.md spec)
