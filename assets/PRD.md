@@ -1092,16 +1092,16 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detec
 | # | Question | Owner | Priority | Status |
 |---|---|---|---|---|
 | OQ1 | SwiftData vs CoreData? | Engineering | High | ✅ **Resolved: Hybrid — CoreData for TrackPoint time-series, SwiftData for summaries** |
-| OQ2 | Does Garmin's mobile SDK provide a cleaner Varia BLE path than raw CoreBluetooth? Evaluate in M2 spike. | Engineering | High | Open |
+| OQ2 | Does Garmin's mobile SDK provide a cleaner Varia BLE path than raw CoreBluetooth? Evaluate in M2 spike. | Engineering | High | ✅ **Resolved: Combined approach. Use CoreBluetooth and apply for Garmin developer program** |
 | OQ3 | iPad support? | Product | Low | ✅ **Resolved: No iPad** |
 | OQ4 | Audio alert delivery: tones vs synthesized voice? | Design | Medium | ✅ **Resolved: Tones — three-tone system (All Clear, Warning, Danger). Spec in `Audio.md`.** |
 | OQ5 | Override Silent Mode for L3 danger alerts? | Design | High | ✅ **Resolved: Yes, user opt-in. Warning and All Clear respect Silent Mode always.** |
 | OQ6 | App name for App Store? | Product | Medium | ✅ **Resolved: Cyclometer** |
-| OQ7 | Minimum Varia RTL515 / RCT715 firmware version required for BLE characteristic support? | Engineering | High | Open — confirm in M2 spike |
+| OQ7 | Minimum Varia RTL515 / RCT715 firmware version required for BLE characteristic support? | Engineering | High | ✅ **Resolved: v2.00 or v3.00 depending on the production run** |
 | OQ8 | Include basic Apple Watch complication in Phase 1? | Product | Medium | ✅ **Resolved: Defer to Phase 2** |
 | OQ9 | HR zone formula: Karvonen-only or allow custom percentages in MVP? | Design | Low | ✅ **Resolved: Karvonen-only** |
 | OQ10 | TestFlight beta: open or closed? | Product | Low | ✅ **Resolved: Open beta** |
-| OQ11 | Does Garmin Varia RTL515/RCT715 expose radar return signal amplitude over BLE for vehicle size inference? | Engineering | Medium | Open — confirm in M2 spike |
+| OQ11 | Does Garmin Varia RTL515/RCT715 expose radar return signal amplitude over BLE for vehicle size inference? | Engineering | Medium | ✅ **Resolved: No it does not** |
 | OQ12 | Navigation: `MKDirections` routing or GPX import only? | Design | Medium | ✅ **Resolved: GPX import only. No in-app route creation in MVP.** |
 | OQ13 | Wheel circumference presets and calibration? | Design | Low | ✅ **Resolved: Common presets (700c, 650b, 29", 26") + manual entry + GPS auto-calibration at 5% discrepancy threshold over 500m window. See §8.9.** |
 | OQ14 | Radar visualization approach: arc, strip, ring, adaptive, or map overlay? | Design | High | ✅ **Resolved: Option F — right-side sidebar strip with car icons; vehicle position encodes relative distance. See §8.2 and `assets/design/Design.sketch` — S06.** |
