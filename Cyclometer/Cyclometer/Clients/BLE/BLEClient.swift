@@ -10,6 +10,8 @@ enum BLEEvent: Sendable {
     case connected(id: UUID)
     case disconnected(id: UUID, error: (any Error)?)
     case failedToConnect(id: UUID, error: (any Error)?)
+    case servicesDiscovered(peripheralID: UUID, serviceUUIDs: [CBUUID])
+    case characteristicsDiscovered(peripheralID: UUID, serviceUUID: CBUUID, characteristicUUIDs: [CBUUID])
     case characteristicValueUpdated(peripheralID: UUID, characteristicUUID: CBUUID, value: Data)
 }
 
@@ -214,10 +216,14 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: (any Error)?) {
-        // Services now accessible via peripheral.services — sensor clients proceed via discoverCharacteristics().
+        guard error == nil else { return }
+        let uuids = peripheral.services?.map(\.uuid) ?? []
+        broadcast(.servicesDiscovered(peripheralID: peripheral.identifier, serviceUUIDs: uuids))
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: (any Error)?) {
-        // Characteristics now accessible via service.characteristics — sensor clients proceed via setNotifyValue().
+        guard error == nil else { return }
+        let uuids = service.characteristics?.map(\.uuid) ?? []
+        broadcast(.characteristicsDiscovered(peripheralID: peripheral.identifier, serviceUUID: service.uuid, characteristicUUIDs: uuids))
     }
 }
