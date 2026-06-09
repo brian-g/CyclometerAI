@@ -58,6 +58,18 @@ struct BLEHRClientTests {
 
     // MARK: - testValue behaviour
 
+    @Test("testValue startScanning does not crash")
+    func testValueStartScanning() async {
+        let client = BLEHRClient.testValue
+        await client.startScanning()
+    }
+
+    @Test("testValue stopScanning does not crash")
+    func testValueStopScanning() async {
+        let client = BLEHRClient.testValue
+        await client.stopScanning()
+    }
+
     @Test("testValue connect does not crash")
     func testValueConnect() async {
         let client = BLEHRClient.testValue

@@ -10,10 +10,13 @@ private let hrMeasurementUUID = CBUUID(string: "2A37")
 /// Connects to any compliant HR strap (Polar H10, Wahoo TICKR, Garmin HRM-Pro, etc.)
 /// and delivers real-time BPM. Uses BLEClient as the CoreBluetooth transport.
 struct BLEHRClient: Sendable {
-    var heartRate:     @Sendable () -> AsyncStream<Int>
-    var connect:       @Sendable (UUID) async -> Void
-    var disconnect:    @Sendable () async -> Void
-    var pairingStatus: @Sendable () -> AsyncStream<Bool>
+    /// Scan for and auto-connect to the first advertising HR strap.
+    var startScanning:  @Sendable () async -> Void
+    var stopScanning:   @Sendable () async -> Void
+    var connect:        @Sendable (UUID) async -> Void   // explicit device selection (future settings UI)
+    var disconnect:     @Sendable () async -> Void
+    var heartRate:      @Sendable () -> AsyncStream<Int>
+    var pairingStatus:  @Sendable () -> AsyncStream<Bool>
 
     /// Parse BPM from a 0x2A37 Heart Rate Measurement characteristic value.
     /// Flags byte[0] bit 0: 0 = uint8 in byte[1], 1 = uint16 LE in bytes[1..2].
@@ -34,18 +37,22 @@ extension BLEHRClient: DependencyKey {
     static let liveValue: BLEHRClient = {
         let state = HRClientState(bleClient: BLEClient.liveValue)
         return BLEHRClient(
-            heartRate:     { state.makeHeartRateStream() },
-            connect:       { id in await state.connect(peripheralID: id) },
-            disconnect:    { await state.disconnect() },
-            pairingStatus: { state.makePairingStream() }
+            startScanning:  { await state.startScanning() },
+            stopScanning:   { await state.stopScanning() },
+            connect:        { id in await state.connect(peripheralID: id) },
+            disconnect:     { await state.disconnect() },
+            heartRate:      { state.makeHeartRateStream() },
+            pairingStatus:  { state.makePairingStream() }
         )
     }()
 
     static let testValue = BLEHRClient(
-        heartRate:     { AsyncStream { $0.finish() } },
-        connect:       { _ in },
-        disconnect:    { },
-        pairingStatus: { AsyncStream { $0.finish() } }
+        startScanning:  { },
+        stopScanning:   { },
+        connect:        { _ in },
+        disconnect:     { },
+        heartRate:      { AsyncStream { $0.finish() } },
+        pairingStatus:  { AsyncStream { $0.finish() } }
     )
 }
 
@@ -100,6 +107,16 @@ private final class HRClientState: @unchecked Sendable {
         return stream
     }
 
+    // MARK: Scanning
+
+    func startScanning() async {
+        await bleClient.startScanning([hrServiceUUID])
+    }
+
+    func stopScanning() async {
+        await bleClient.stopScanning()
+    }
+
     // MARK: Connection control
 
     func connect(peripheralID: UUID) async {
@@ -110,7 +127,9 @@ private final class HRClientState: @unchecked Sendable {
     func disconnect() async {
         let id = lock.withLock { targetPeripheralID }
         guard let id else { return }
+        lock.withLock { targetPeripheralID = nil }
         await bleClient.disconnect(id)
+        await bleClient.stopScanning()
     }
 
     // MARK: Event loop
@@ -126,6 +145,12 @@ private final class HRClientState: @unchecked Sendable {
 
     private func handle(_ event: BLEEvent) async {
         switch event {
+        case .discovered(let id, _, _):
+            // Auto-connect first discovered HR device (startScanning filters to 0x180D only).
+            let shouldConnect = lock.withLock { targetPeripheralID == nil }
+            guard shouldConnect else { return }
+            await connect(peripheralID: id)
+
         case .connected(let id):
             guard lock.withLock({ targetPeripheralID }) == id else { return }
             await bleClient.discoverServices(id, [hrServiceUUID])
@@ -150,7 +175,9 @@ private final class HRClientState: @unchecked Sendable {
 
         case .disconnected(let id, _):
             guard lock.withLock({ targetPeripheralID }) == id else { return }
+            lock.withLock { targetPeripheralID = nil }
             broadcastPairing(false)
+            await bleClient.startScanning([hrServiceUUID])
 
         default:
             break

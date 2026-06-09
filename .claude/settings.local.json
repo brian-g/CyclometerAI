@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /Users/brian/Projects/CyclometerAI -maxdepth 1 -name .* -type f)",
+      "Bash(git config:*)",
+      "Bash(file:*)",
+      "Bash(find /Users/brian/Projects/CyclometerAI -not -path */.git/* -type f -o -type d)"
+    ]
+  }
+}
