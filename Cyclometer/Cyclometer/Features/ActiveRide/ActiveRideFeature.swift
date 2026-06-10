@@ -6,6 +6,7 @@ import ComposableArchitecture
 struct ActiveRideFeature {
 
     @Dependency(\.continuousClock) var clock
+    @Dependency(\.bleHRClient) var bleHRClient
 
     @ObservableState
     struct State: Equatable {
@@ -14,6 +15,7 @@ struct ActiveRideFeature {
         var speedKPH: Double = 0
         var heartRateBPM: Int = 0
         var hrZone: Int = 0
+        var isHRPaired: Bool = false
         var cadenceRPM: Int = 0
         var distanceKM: Double = 0
         var maxHeartRate: Int = 190
@@ -37,6 +39,7 @@ struct ActiveRideFeature {
         case finishTapped
         case speedUpdated(Double)
         case heartRateUpdated(Int)
+        case hrPairingChanged(Bool)
         case cadenceUpdated(Int)
         case elapsedTick
         case radarTargetsUpdated([RadarTarget])
@@ -52,11 +55,24 @@ struct ActiveRideFeature {
                 // SwiftUI .task modifier is cancelled on view disappearance.
                 // Note: timer pauses when dashboard is minimised in this bootstrap;
                 // move to AppFeature for continuous background timing (M3).
-                return .run { send in
-                    for await _ in clock.timer(interval: .seconds(1)) {
-                        await send(.elapsedTick)
+                return .merge(
+                    .run { send in
+                        for await _ in clock.timer(interval: .seconds(1)) {
+                            await send(.elapsedTick)
+                        }
+                    },
+                    .run { [bleHRClient] send in
+                        await bleHRClient.startScanning()
+                        for await bpm in bleHRClient.heartRate() {
+                            await send(.heartRateUpdated(bpm))
+                        }
+                    },
+                    .run { [bleHRClient] send in
+                        for await paired in bleHRClient.pairingStatus() {
+                            await send(.hrPairingChanged(paired))
+                        }
                     }
-                }
+                )
             case .pauseTapped:
                 state.isPaused = true
                 return .none
@@ -64,7 +80,9 @@ struct ActiveRideFeature {
                 state.isPaused = false
                 return .none
             case .finishTapped:
-                return .none
+                return .run { [bleHRClient] _ in
+                    await bleHRClient.disconnect()
+                }
             case .speedUpdated(let kph):
                 state.speedKPH = kph
                 if kph > 0 {
@@ -78,6 +96,13 @@ struct ActiveRideFeature {
                 state.hrZone = HeartRateZone.zone(
                     bpm: bpm, maxHR: state.maxHeartRate, restingHR: state.restingHeartRate
                 ).rawValue
+                return .none
+            case .hrPairingChanged(let paired):
+                state.isHRPaired = paired
+                if !paired {
+                    state.heartRateBPM = 0
+                    state.hrZone = 0
+                }
                 return .none
             case .cadenceUpdated(let rpm):
                 state.cadenceRPM = rpm
