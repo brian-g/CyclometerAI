@@ -1,5 +1,9 @@
 import ComposableArchitecture
 import CoreBluetooth
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "hr")
 
 private let hrServiceUUID     = CBUUID(string: "180D")
 private let hrMeasurementUUID = CBUUID(string: "2A37")
@@ -110,10 +114,12 @@ private final class HRClientState: @unchecked Sendable {
     // MARK: Scanning
 
     func startScanning() async {
+        logger.notice("starting scan")
         await bleClient.startScanning([hrServiceUUID])
     }
 
     func stopScanning() async {
+        logger.notice("stopping scan")
         await bleClient.stopScanning([hrServiceUUID])
     }
 
@@ -122,6 +128,7 @@ private final class HRClientState: @unchecked Sendable {
     func connect(peripheralID: UUID) async {
         lock.withLock { targetPeripheralID = peripheralID }
         await bleClient.connect(peripheralID)
+        logger.notice("connect requested for \(peripheralID, privacy: .public)")
     }
 
     func disconnect() async {
@@ -175,6 +182,7 @@ private final class HRClientState: @unchecked Sendable {
                   charUUID == hrMeasurementUUID,
                   let bpm = BLEHRClient.parseBPM(from: data) else { return }
             broadcastHeartRate(bpm)
+            logger.info("bpm \(bpm)")
 
         case .disconnected(let id, _):
             guard lock.withLock({ targetPeripheralID }) == id else { return }

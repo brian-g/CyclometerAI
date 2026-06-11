@@ -1,5 +1,10 @@
 import ComposableArchitecture
 @preconcurrency import CoreBluetooth
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Retrieve after an untethered ride: `log collect --device --last 1h` (notice level persists).
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "ble")
 
 // MARK: - BLEEvent
 
@@ -156,10 +161,16 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
     /// (Re)issue the hardware scan to match the currently requested union.
     /// Must be called on bleQueue.
     private func rescan() {
-        guard manager.state == .poweredOn else { return }
+        guard manager.state == .poweredOn else {
+            logger.info("rescan deferred — manager state \(self.manager.state.rawValue) (resumes on poweredOn)")
+            return
+        }
         if requestedServices.isEmpty {
+            logger.notice("scan stopped — no services requested")
             manager.stopScan()
         } else {
+            let union = requestedServices.map(\.uuidString).sorted().joined(separator: ", ")
+            logger.notice("scanning for union: [\(union, privacy: .public)]")
             manager.scanForPeripherals(withServices: Array(requestedServices))
         }
     }
@@ -208,6 +219,7 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
     // MARK: CBCentralManagerDelegate
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        logger.notice("manager state → \(central.state.rawValue) (5 = poweredOn)")
         if central.state == .poweredOn {
             // Resume scans requested before power-on or cleared by a radio cycle.
             rescan()
@@ -222,6 +234,11 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
         if let overflow = advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID] {
             services.append(contentsOf: overflow)
         }
+        let serviceList = services.map(\.uuidString).joined(separator: ", ")
+        logger.notice("""
+            discovered "\(peripheral.name ?? "?", privacy: .public)" \
+            rssi \(RSSI.intValue) services [\(serviceList, privacy: .public)]
+            """)
         broadcast(.discovered(
             id: peripheral.identifier, name: peripheral.name, rssi: RSSI.intValue, services: services
         ))
@@ -229,14 +246,23 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         peripheral.delegate = self
+        logger.notice("connected \(peripheral.name ?? "?", privacy: .public) \(peripheral.identifier, privacy: .public)")
         broadcast(.connected(id: peripheral.identifier))
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: (any Error)?) {
+        logger.notice("""
+            disconnected \(peripheral.name ?? "?", privacy: .public) \
+            error: \(error.map(String.init(describing:)) ?? "none", privacy: .public)
+            """)
         broadcast(.disconnected(id: peripheral.identifier, error: error))
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: (any Error)?) {
+        logger.notice("""
+            failed to connect \(peripheral.name ?? "?", privacy: .public) \
+            error: \(error.map(String.init(describing:)) ?? "none", privacy: .public)
+            """)
         broadcast(.failedToConnect(id: peripheral.identifier, error: error))
     }
 

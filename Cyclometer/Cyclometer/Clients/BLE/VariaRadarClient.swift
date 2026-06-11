@@ -1,5 +1,10 @@
 import ComposableArchitecture
 import CoreBluetooth
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Retrieve after an untethered ride: `log collect --device --last 1h` (notice level persists).
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "radar")
 
 // UUIDs pending validation against Garmin's official Radar BLE spec
 // (developer program application in progress — see issue #18).
@@ -189,7 +194,10 @@ private final class RadarClientState: @unchecked Sendable {
         // .task re-runs when the view re-appears, while this state object is
         // process-global) must not stomp a live connection back to .scanning.
         let shouldScan = lock.withLock { connectionState == .disconnected }
-        guard shouldScan else { return }
+        guard shouldScan else {
+            logger.info("startScanning skipped — not in disconnected state")
+            return
+        }
         setConnectionState(.scanning)
         await bleClient.startScanning([radarServiceUUID])
     }
@@ -267,8 +275,18 @@ private final class RadarClientState: @unchecked Sendable {
 
         case .characteristicValueUpdated(let id, let charUUID, let data):
             guard lock.withLock({ targetPeripheralID }) == id,
-                  charUUID == radarAlertUUID,
-                  let targets = VariaRadarClient.parseAlert(from: data) else { return }
+                  charUUID == radarAlertUUID else { return }
+            // Raw frame hex is the ground truth for validating the payload-layout
+            // assumption in parseAlert — keep failed parses visible.
+            let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+            guard let targets = VariaRadarClient.parseAlert(from: data) else {
+                logger.notice("alert frame [\(hex, privacy: .public)] → parse FAILED — layout assumption likely wrong")
+                return
+            }
+            let summary = targets
+                .map { "(\(Int($0.rangeMetres))m, \(Int($0.relativeVelocityMPS))m/s)" }
+                .joined(separator: " ")
+            logger.notice("alert frame [\(hex, privacy: .public)] → \(targets.count) target(s) \(summary, privacy: .public)")
             broadcastTargets(targets)
 
         case .disconnected(let id, _):
@@ -313,6 +331,7 @@ private final class RadarClientState: @unchecked Sendable {
                 try? await self.clock.sleep(for: VariaRadarClient.reconnectDelay(attempt: attempt))
                 guard !Task.isCancelled else { return }
                 guard let id = self.lock.withLock({ self.targetPeripheralID }) else { return }
+                logger.notice("reconnect attempt \(attempt + 1)")
                 await self.bleClient.connect(id)
                 attempt += 1
             }
@@ -335,10 +354,14 @@ private final class RadarClientState: @unchecked Sendable {
         // Mutate and broadcast in one critical section so subscribers observe
         // transitions in order and replay-on-subscribe can't miss one. Yielding
         // to an AsyncStream never blocks, so holding the lock here is safe.
-        lock.withLock {
-            guard connectionState != newState else { return }
+        let changed = lock.withLock { () -> Bool in
+            guard connectionState != newState else { return false }
             connectionState = newState
             for continuation in stateContinuations.values { continuation.yield(newState) }
+            return true
+        }
+        if changed {
+            logger.notice("connection state → \(String(describing: newState), privacy: .public)")
         }
     }
 
