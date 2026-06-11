@@ -6,7 +6,10 @@ import ComposableArchitecture
 /// Events broadcast by BLEClient from CBCentralManager and CBPeripheral delegate callbacks.
 enum BLEEvent: Sendable {
     case stateChanged(CBManagerState)
-    case discovered(id: UUID, name: String?, rssi: Int)
+    /// `services` carries the advertised service UUIDs so sensor clients can
+    /// filter discoveries — the shared central may scan for several sensor
+    /// types at once.
+    case discovered(id: UUID, name: String?, rssi: Int, services: [CBUUID])
     case connected(id: UUID)
     case disconnected(id: UUID, error: (any Error)?)
     case failedToConnect(id: UUID, error: (any Error)?)
@@ -23,8 +26,13 @@ enum BLEEvent: Sendable {
 /// BLEHRClient, BLECSCClient) subscribe to `events()` and filter for their service UUIDs.
 struct BLEClient: Sendable {
     /// Start scanning for peripherals advertising the given service UUIDs.
+    /// Requests from multiple clients are unioned — CoreBluetooth has a single
+    /// scan per central, and a second `scanForPeripherals` call would otherwise
+    /// replace the first caller's filter.
     var startScanning: @Sendable ([CBUUID]) async -> Void
-    var stopScanning: @Sendable () async -> Void
+    /// Stop scanning for the given service UUIDs. The central keeps scanning
+    /// for any services other clients still have requested.
+    var stopScanning: @Sendable ([CBUUID]) async -> Void
     /// Connect to a previously discovered peripheral by its UUID.
     var connect: @Sendable (UUID) async -> Void
     var disconnect: @Sendable (UUID) async -> Void
@@ -47,7 +55,7 @@ extension BLEClient: DependencyKey {
         let central = BLECentral.shared
         return BLEClient(
             startScanning: { central.startScanning(serviceUUIDs: $0) },
-            stopScanning: { central.stopScanning() },
+            stopScanning: { central.stopScanning(serviceUUIDs: $0) },
             connect: { central.connect(peripheralID: $0) },
             disconnect: { central.disconnect(peripheralID: $0) },
             discoverServices: { central.discoverServices(peripheralID: $0, serviceUUIDs: $1) },
@@ -59,7 +67,7 @@ extension BLEClient: DependencyKey {
 
     static let testValue = BLEClient(
         startScanning: { _ in },
-        stopScanning: { },
+        stopScanning: { _ in },
         connect: { _ in },
         disconnect: { _ in },
         discoverServices: { _, _ in },
@@ -91,6 +99,12 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
 
     // Retained peripherals — CBCentralManager doesn't hold strong references.
     private var discovered: [UUID: CBPeripheral] = [:]
+
+    // Union of service UUIDs requested by all sensor clients. CoreBluetooth has
+    // a single scan per central — a second scanForPeripherals call replaces the
+    // filter — so the central scans for the union and clients filter discoveries
+    // via the `services` field on `.discovered`. Guarded by bleQueue.
+    private var requestedServices: Set<CBUUID> = []
 
     // Multi-subscriber broadcast: each call to makeEventStream() registers a continuation.
     private var subscribers: [Int: AsyncStream<BLEEvent>.Continuation] = [:]
@@ -127,14 +141,26 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
 
     func startScanning(serviceUUIDs: [CBUUID]) {
         bleQueue.async { [self] in
-            guard manager.state == .poweredOn else { return }
-            manager.scanForPeripherals(withServices: serviceUUIDs.isEmpty ? nil : serviceUUIDs)
+            requestedServices.formUnion(serviceUUIDs)
+            rescan()
         }
     }
 
-    func stopScanning() {
+    func stopScanning(serviceUUIDs: [CBUUID]) {
         bleQueue.async { [self] in
+            requestedServices.subtract(serviceUUIDs)
+            rescan()
+        }
+    }
+
+    /// (Re)issue the hardware scan to match the currently requested union.
+    /// Must be called on bleQueue.
+    private func rescan() {
+        guard manager.state == .poweredOn else { return }
+        if requestedServices.isEmpty {
             manager.stopScan()
+        } else {
+            manager.scanForPeripherals(withServices: Array(requestedServices))
         }
     }
 
@@ -182,13 +208,23 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
     // MARK: CBCentralManagerDelegate
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        if central.state == .poweredOn {
+            // Resume scans requested before power-on or cleared by a radio cycle.
+            rescan()
+        }
         broadcast(.stateChanged(central.state))
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         discovered[peripheral.identifier] = peripheral
-        broadcast(.discovered(id: peripheral.identifier, name: peripheral.name, rssi: RSSI.intValue))
+        var services = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]) ?? []
+        if let overflow = advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID] {
+            services.append(contentsOf: overflow)
+        }
+        broadcast(.discovered(
+            id: peripheral.identifier, name: peripheral.name, rssi: RSSI.intValue, services: services
+        ))
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {

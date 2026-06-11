@@ -15,7 +15,7 @@ struct BLEClientTests {
     @Test("Test value stopScanning does not crash")
     func stopScanningNoOp() async {
         let client = BLEClient.testValue
-        await client.stopScanning()
+        await client.stopScanning([CBUUID(string: "180D")])
     }
 
     @Test("Test value connect does not crash")
@@ -65,7 +65,7 @@ struct BLEClientTests {
 
         let client = BLEClient(
             startScanning: { _ in },
-            stopScanning: { },
+            stopScanning: { _ in },
             connect: { _ in },
             disconnect: { _ in },
             discoverServices: { _, _ in },
@@ -76,7 +76,10 @@ struct BLEClientTests {
 
         Task {
             continuation.yield(.stateChanged(.poweredOn))
-            continuation.yield(.discovered(id: peripheralID, name: "Varia RTL515", rssi: -65))
+            continuation.yield(.discovered(
+                id: peripheralID, name: "Varia RTL515", rssi: -65,
+                services: [CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")]
+            ))
             continuation.yield(.connected(id: peripheralID))
             continuation.finish()
         }
@@ -92,7 +95,7 @@ struct BLEClientTests {
             Issue.record("Expected stateChanged(.poweredOn), got \(received[0])")
             return
         }
-        guard case .discovered(let id, let name, _) = received[1] else {
+        guard case .discovered(let id, let name, _, _) = received[1] else {
             Issue.record("Expected .discovered, got \(received[1])")
             return
         }
@@ -115,7 +118,7 @@ struct BLEClientTests {
         let (stream, continuation) = AsyncStream<BLEEvent>.makeStream()
         let client = BLEClient(
             startScanning: { _ in },
-            stopScanning: { },
+            stopScanning: { _ in },
             connect: { _ in },
             disconnect: { _ in },
             discoverServices: { _, _ in },
@@ -153,6 +156,6 @@ struct BLEClientTests {
         let client = BLEClient.testValue
         await client.startScanning([CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")])
         await client.connect(UUID())
-        await client.stopScanning()
+        await client.stopScanning([CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")])
     }
 }

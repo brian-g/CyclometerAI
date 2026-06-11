@@ -114,7 +114,7 @@ private final class HRClientState: @unchecked Sendable {
     }
 
     func stopScanning() async {
-        await bleClient.stopScanning()
+        await bleClient.stopScanning([hrServiceUUID])
     }
 
     // MARK: Connection control
@@ -129,7 +129,7 @@ private final class HRClientState: @unchecked Sendable {
         guard let id else { return }
         lock.withLock { targetPeripheralID = nil }
         await bleClient.disconnect(id)
-        await bleClient.stopScanning()
+        await bleClient.stopScanning([hrServiceUUID])
     }
 
     // MARK: Event loop
@@ -145,8 +145,11 @@ private final class HRClientState: @unchecked Sendable {
 
     private func handle(_ event: BLEEvent) async {
         switch event {
-        case .discovered(let id, _, _):
-            // Auto-connect first discovered HR device (startScanning filters to 0x180D only).
+        case .discovered(let id, _, _, let services):
+            // Auto-connect the first discovered HR device. The shared central may
+            // be scanning for several sensor types at once, so filter on the
+            // advertised service rather than assuming every discovery is a strap.
+            guard services.contains(hrServiceUUID) else { return }
             let shouldConnect = lock.withLock { targetPeripheralID == nil }
             guard shouldConnect else { return }
             await connect(peripheralID: id)
