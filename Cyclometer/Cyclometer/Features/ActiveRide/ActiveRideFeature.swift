@@ -7,6 +7,8 @@ struct ActiveRideFeature {
 
     @Dependency(\.continuousClock) var clock
     @Dependency(\.bleHRClient) var bleHRClient
+    @Dependency(\.variaRadarClient) var variaRadarClient
+    @Dependency(\.hapticsClient) var hapticsClient
 
     @ObservableState
     struct State: Equatable {
@@ -43,8 +45,11 @@ struct ActiveRideFeature {
         case cadenceUpdated(Int)
         case elapsedTick
         case radarTargetsUpdated([RadarTarget])
-        case radarPairingChanged(Bool)
+        case radarConnectionChanged(VariaRadarClient.ConnectionState)
+        case radarReconnectTimedOut
     }
+
+    private enum CancelID { case radarLossTimer }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -71,6 +76,17 @@ struct ActiveRideFeature {
                         for await paired in bleHRClient.pairingStatus() {
                             await send(.hrPairingChanged(paired))
                         }
+                    },
+                    .run { [variaRadarClient] send in
+                        await variaRadarClient.startScanning()
+                        for await targets in variaRadarClient.radarTargets() {
+                            await send(.radarTargetsUpdated(targets))
+                        }
+                    },
+                    .run { [variaRadarClient] send in
+                        for await connectionState in variaRadarClient.connectionState() {
+                            await send(.radarConnectionChanged(connectionState))
+                        }
                     }
                 )
             case .pauseTapped:
@@ -80,8 +96,11 @@ struct ActiveRideFeature {
                 state.isPaused = false
                 return .none
             case .finishTapped:
-                return .run { [bleHRClient] _ in
-                    await bleHRClient.disconnect()
+                return .run { [bleHRClient, variaRadarClient] _ in
+                    // Independent teardowns — run concurrently.
+                    async let hr: Void = bleHRClient.disconnect()
+                    async let radar: Void = variaRadarClient.disconnect()
+                    _ = await (hr, radar)
                 }
             case .speedUpdated(let kph):
                 state.speedKPH = kph
@@ -113,9 +132,33 @@ struct ActiveRideFeature {
             case .radarTargetsUpdated(let targets):
                 state.radarTargets = targets
                 return .none
-            case .radarPairingChanged(let paired):
-                state.isRadarPaired = paired
-                return .none
+            case .radarConnectionChanged(let connectionState):
+                switch connectionState {
+                case .active:
+                    state.isRadarPaired = true
+                    return .cancel(id: CancelID.radarLossTimer)
+                case .reconnecting:
+                    // Badge stays paired during the 10s grace window (PRD §9.1);
+                    // only arm the timer while paired so the haptic fires once.
+                    guard state.isRadarPaired else { return .none }
+                    return .run { send in
+                        try await clock.sleep(for: .seconds(10))
+                        await send(.radarReconnectTimedOut)
+                    }
+                    .cancellable(id: CancelID.radarLossTimer, cancelInFlight: true)
+                case .disconnected:
+                    state.isRadarPaired = false
+                    state.radarTargets = []
+                    return .cancel(id: CancelID.radarLossTimer)
+                default:
+                    return .none
+                }
+            case .radarReconnectTimedOut:
+                state.isRadarPaired = false
+                state.radarTargets = []
+                return .run { [hapticsClient] _ in
+                    await hapticsClient.playAdvisory()   // L1 advisory, fires once
+                }
             }
         }
     }

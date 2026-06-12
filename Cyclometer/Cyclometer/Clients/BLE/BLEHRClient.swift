@@ -1,5 +1,9 @@
 import ComposableArchitecture
 import CoreBluetooth
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "hr")
 
 private let hrServiceUUID     = CBUUID(string: "180D")
 private let hrMeasurementUUID = CBUUID(string: "2A37")
@@ -110,11 +114,13 @@ private final class HRClientState: @unchecked Sendable {
     // MARK: Scanning
 
     func startScanning() async {
+        logger.notice("starting scan")
         await bleClient.startScanning([hrServiceUUID])
     }
 
     func stopScanning() async {
-        await bleClient.stopScanning()
+        logger.notice("stopping scan")
+        await bleClient.stopScanning([hrServiceUUID])
     }
 
     // MARK: Connection control
@@ -122,6 +128,7 @@ private final class HRClientState: @unchecked Sendable {
     func connect(peripheralID: UUID) async {
         lock.withLock { targetPeripheralID = peripheralID }
         await bleClient.connect(peripheralID)
+        logger.notice("connect requested for \(peripheralID, privacy: .public)")
     }
 
     func disconnect() async {
@@ -129,7 +136,7 @@ private final class HRClientState: @unchecked Sendable {
         guard let id else { return }
         lock.withLock { targetPeripheralID = nil }
         await bleClient.disconnect(id)
-        await bleClient.stopScanning()
+        await bleClient.stopScanning([hrServiceUUID])
     }
 
     // MARK: Event loop
@@ -145,8 +152,11 @@ private final class HRClientState: @unchecked Sendable {
 
     private func handle(_ event: BLEEvent) async {
         switch event {
-        case .discovered(let id, _, _):
-            // Auto-connect first discovered HR device (startScanning filters to 0x180D only).
+        case .discovered(let id, _, _, let services):
+            // Auto-connect the first discovered HR device. The shared central may
+            // be scanning for several sensor types at once, so filter on the
+            // advertised service rather than assuming every discovery is a strap.
+            guard services.contains(hrServiceUUID) else { return }
             let shouldConnect = lock.withLock { targetPeripheralID == nil }
             guard shouldConnect else { return }
             await connect(peripheralID: id)
@@ -172,6 +182,7 @@ private final class HRClientState: @unchecked Sendable {
                   charUUID == hrMeasurementUUID,
                   let bpm = BLEHRClient.parseBPM(from: data) else { return }
             broadcastHeartRate(bpm)
+            logger.info("bpm \(bpm)")
 
         case .disconnected(let id, _):
             guard lock.withLock({ targetPeripheralID }) == id else { return }

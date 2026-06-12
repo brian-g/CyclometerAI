@@ -4,7 +4,10 @@
       "Bash(find /Users/brian/Projects/CyclometerAI -maxdepth 1 -name .* -type f)",
       "Bash(git config:*)",
       "Bash(file:*)",
-      "Bash(find /Users/brian/Projects/CyclometerAI -not -path */.git/* -type f -o -type d)"
+      "Bash(find /Users/brian/Projects/CyclometerAI -not -path */.git/* -type f -o -type d)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }
