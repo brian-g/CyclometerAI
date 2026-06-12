@@ -1,6 +1,6 @@
 # Cyclometer — Product Requirements Document
-**Version:** 0.4 Draft  
-**Date:** 2026-05-20  
+**Version:** 0.4.1 Draft  
+**Date:** 2026-06-12  
 **Status:** Fourth Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
 **Platform:** iOS 26+ · iPhone-first · Apple Watch companion  
@@ -17,6 +17,7 @@
 | 0.2.1 | 2026-04-05 | Brian / Claude | Updated all design asset paths to reflect new `assets/design/` folder structure; corrected color token reference; added Appendix C — Design Assets |
 | 0.3 | 2026-04-05 | Brian / Claude | Corrected Cadence competitive row (navigation ✅, ActiveLook AR ✅); three-tone audio system (All Clear, Warning, Danger) — spec in `Audio.md`; radar visualization brainstorming added; radar hidden when no device paired; haptic brainstorming added; route planning expanded to GPX import + tribos.studio; vehicle pass event recording added to GPX and data model; resolved OQ12 (GPX import only), OQ13 (presets + manual + auto-calibration); wheel auto-calibration spec added |
 | 0.4 | 2026-05-20 | Brian / Claude | iOS minimum updated to 26.0; S05.4, S05.5, S19, S20 added to screen inventory; OQ14 resolved (Option F sidebar); L3 haptic updated to Core Haptics; Routes tab added and promoted to Phase 2; deferred alert-configuration fields removed from UserProfile |
+| 0.4.1 | 2026-06-12 | Brian / Claude | OQBLE1 resolved (separate Speed/Cadence roles per `BLE.md`); M6 milestone wording clarified — CSC client is built in M2 (#20), M6 wires it into the metrics pipeline; wheel circumference presets + manual entry moved from M10 to M6 to align with GitHub milestone scoping |
 
 ---
 
@@ -702,7 +703,7 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 
 **Open Questions**:
 
-- [ ] OQBLE1: Does this support devices that do both speed and cadence as well as devices that are either speed or cadence? We may also run into situations where the user is using a dedicated speed sensor, but they are using a combination device's cadence and doesn't use it for speed.
+- [x] OQBLE1: ✅ **Resolved (see `BLE.md`):** Speed and Cadence are separate roles, not a single combined sensor type. All device variants — speed-only, cadence-only, and combo — use the same CSC service (`0x1816`) and CSC Measurement characteristic (`0x2A5B`); the payload flags byte (`hasWheelData` / `hasCrankData`) determines which fields are present per notification. Device capabilities are read from the CSC Feature characteristic (`0x2A5C`) at pairing, and the rider assigns roles per device in S11 — supporting the mixed case of a dedicated speed sensor alongside a combo device used for cadence only. A single `BLECSCClient` (#20) handles all variants.
 
 ---
 
@@ -1071,11 +1072,11 @@ Cyclometer/
 | M3 | Active Ride Dashboard — speed, cadence, time, distance (no radar, no HR) |
 | M4 | Radar sidebar visualization; haptic alerts L1–L3; three-tone audio system (All Clear, Warning, Danger) |
 | M5 | HealthKit integration; HR zone display; BLE HR fallback to Apple Watch |
-| M6 | BLE CSC speed/cadence; GPS fallback for speed; wheel auto-calibration |
+| M6 | Wire CSC client (built in M2, #20) into the metrics pipeline; GPS fallback for speed; wheel circumference presets + manual entry + GPS auto-calibration |
 | M7 | TrackPoint recording; vehicle pass event detection; GPX export with `gpxtpx` + `cyc:` extensions |
 | M8 | Navigation: live map; GPX route import; tribos.studio integration; turn alerts |
 | M9 | Ride summary; ride history persistence; vehicle pass event count in summary |
-| M10 | Settings, device management, onboarding flow; wheel circumference presets |
+| M10 | Settings, device management, onboarding flow |
 | M11 | QA; TestFlight open beta; bug fixes |
 | M12 | App Store submission |
 
@@ -1241,4 +1242,4 @@ All manual design assets are located in `assets/design/`. The audio specificatio
 
 ---
 
-*Cyclometer PRD v0.4 · Fourth Review Draft · 2026-05-20*
+*Cyclometer PRD v0.4.1 · Fourth Review Draft · 2026-06-12*
