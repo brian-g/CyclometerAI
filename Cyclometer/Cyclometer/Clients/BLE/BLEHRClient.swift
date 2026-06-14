@@ -8,6 +8,10 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "hr")
 private let hrServiceUUID     = CBUUID(string: "180D")
 private let hrMeasurementUUID = CBUUID(string: "2A37")
 
+// Identifies this client to BLEClient's connection ref-count so disconnecting the
+// HR strap never severs a peripheral another client shares (see BLEClient.connect).
+private let hrOwnerID = "hr"
+
 // MARK: - BLEHRClient
 
 /// TCA dependency for the Bluetooth SIG standard BLE Heart Rate Profile (0x180D).
@@ -127,7 +131,7 @@ private final class HRClientState: @unchecked Sendable {
 
     func connect(peripheralID: UUID) async {
         lock.withLock { targetPeripheralID = peripheralID }
-        await bleClient.connect(peripheralID)
+        await bleClient.connect(peripheralID, hrOwnerID)
         logger.notice("connect requested for \(peripheralID, privacy: .public)")
     }
 
@@ -135,7 +139,7 @@ private final class HRClientState: @unchecked Sendable {
         let id = lock.withLock { targetPeripheralID }
         guard let id else { return }
         lock.withLock { targetPeripheralID = nil }
-        await bleClient.disconnect(id)
+        await bleClient.disconnect(id, hrOwnerID)
         await bleClient.stopScanning([hrServiceUUID])
     }
 

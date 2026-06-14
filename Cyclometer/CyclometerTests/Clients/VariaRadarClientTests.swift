@@ -132,11 +132,11 @@ struct VariaRadarIntegrationTests {
             let bleClient = BLEClient(
                 startScanning: { uuids in scanned.withValue { $0.append(uuids) } },
                 stopScanning: { _ in },
-                connect: { id in
+                connect: { id, _ in
                     connectCount.withValue { $0 += 1 }
                     connectContinuation.yield(id)
                 },
-                disconnect: { _ in },
+                disconnect: { _, _ in },
                 discoverServices: { _, _ in },
                 discoverCharacteristics: { _, _, _ in },
                 setNotifyValue: { enabled, _, _, charUUID in

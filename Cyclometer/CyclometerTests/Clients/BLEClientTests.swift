@@ -21,13 +21,13 @@ struct BLEClientTests {
     @Test("Test value connect does not crash")
     func connectNoOp() async {
         let client = BLEClient.testValue
-        await client.connect(UUID())
+        await client.connect(UUID(), "test")
     }
 
     @Test("Test value disconnect does not crash")
     func disconnectNoOp() async {
         let client = BLEClient.testValue
-        await client.disconnect(UUID())
+        await client.disconnect(UUID(), "test")
     }
 
     @Test("Test value discoverServices does not crash")
@@ -66,8 +66,8 @@ struct BLEClientTests {
         let client = BLEClient(
             startScanning: { _ in },
             stopScanning: { _ in },
-            connect: { _ in },
-            disconnect: { _ in },
+            connect: { _, _ in },
+            disconnect: { _, _ in },
             discoverServices: { _, _ in },
             discoverCharacteristics: { _, _, _ in },
             setNotifyValue: { _, _, _, _ in },
@@ -119,8 +119,8 @@ struct BLEClientTests {
         let client = BLEClient(
             startScanning: { _ in },
             stopScanning: { _ in },
-            connect: { _ in },
-            disconnect: { _ in },
+            connect: { _, _ in },
+            disconnect: { _, _ in },
             discoverServices: { _, _ in },
             discoverCharacteristics: { _, _, _ in },
             setNotifyValue: { _, _, _, _ in },
@@ -155,7 +155,7 @@ struct BLEClientTests {
         // In testValue, scanning with no CBCentralManager present never throws.
         let client = BLEClient.testValue
         await client.startScanning([CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")])
-        await client.connect(UUID())
+        await client.connect(UUID(), "test")
         await client.stopScanning([CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")])
     }
 }
