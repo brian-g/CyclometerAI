@@ -232,11 +232,11 @@ struct BLECSCIntegrationTests {
             let bleClient = BLEClient(
                 startScanning: { uuids in scanned.withValue { $0.append(uuids) } },
                 stopScanning: { _ in },
-                connect: { id in
+                connect: { id, _ in
                     connectCount.withValue { $0 += 1 }
                     connectContinuation.yield(id)
                 },
-                disconnect: { _ in },
+                disconnect: { _, _ in },
                 discoverServices: { _, _ in },
                 discoverCharacteristics: { _, _, _ in },
                 setNotifyValue: { enabled, _, _, charUUID in
@@ -470,6 +470,68 @@ struct BLECSCIntegrationTests {
         ))
         let speed = await speeds.next()
         #expect(abs((speed ?? 0) - 4.192) < 0.0001)   // 2 rev/s from (105,107), not the gap value
+    }
+
+    @Test("Reassigning a role away resets that role's calculator on the losing peripheral")
+    func roleReassignmentResetsCalculator() async {
+        let harness = Harness()
+        let a = UUID()
+        let b = UUID()
+        await harness.client.connect(a, [.speed, .cadence])
+        var speeds = harness.client.speed().makeAsyncIterator()
+
+        // Prime + emit a speed from A so its wheel calculator holds a sample.
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: a, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 100, wheelTime: 0)
+        ))
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: a, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 102, wheelTime: 1024)
+        ))
+        #expect(abs((await speeds.next() ?? 0) - 4.192) < 0.0001)
+
+        // Move speed to B, then back to A. A keeps cadence throughout so its slot
+        // survives — but its wheel calculator must have been reset on the strip.
+        await harness.client.connect(b, [.speed])
+        await harness.client.connect(a, [.speed])
+
+        // First sample after the role returns must re-prime (no emission). Were the
+        // stale (102 @ t1024) sample retained, this would emit a plausible-but-wrong
+        // 0.75 rev/s across the gap (105−102 over 4s) instead of priming.
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: a, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 105, wheelTime: 5120)
+        ))
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: a, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 107, wheelTime: 6144)
+        ))
+        #expect(abs((await speeds.next() ?? 0) - 4.192) < 0.0001)   // 2 rev/s from (105,107)
+    }
+
+    @Test("Reconnection gives up after the max attempt ladder and releases the role")
+    func reconnectGivesUp() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.connect(id, [.speed])
+
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .connecting)   // replay
+
+        var connects = harness.connectCalls.makeAsyncIterator()
+        #expect(await connects.next() == id)               // initial connect
+
+        harness.events.yield(.disconnected(id: id, error: nil))
+        #expect(await speedStates.next() == .reconnecting)
+
+        // Walk the full backoff ladder; each advance releases one reconnect attempt.
+        for delay in [1, 2, 4, 8, 16, 30, 30, 30, 30, 30] {
+            await harness.clock.advance(by: .seconds(delay))
+            #expect(await connects.next() == id)
+        }
+        // Ladder exhausted → sensor considered lost, role released to disconnected.
+        #expect(await speedStates.next() == .disconnected)
     }
 
     @Test("User-initiated disconnect does not trigger reconnection")

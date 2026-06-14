@@ -38,9 +38,15 @@ struct BLEClient: Sendable {
     /// Stop scanning for the given service UUIDs. The central keeps scanning
     /// for any services other clients still have requested.
     var stopScanning: @Sendable ([CBUUID]) async -> Void
-    /// Connect to a previously discovered peripheral by its UUID.
-    var connect: @Sendable (UUID) async -> Void
-    var disconnect: @Sendable (UUID) async -> Void
+    /// Connect to a previously discovered peripheral by its UUID. `owner` identifies
+    /// the calling sensor client; the central ref-counts connection requests so one
+    /// client disconnecting never severs a peripheral another client still uses
+    /// (the same physical device can serve several profiles). Repeating connect with
+    /// the same owner is idempotent.
+    var connect: @Sendable (UUID, _ owner: String) async -> Void
+    /// Release this `owner`'s interest in the peripheral. The central cancels the
+    /// CoreBluetooth connection only once no owner still wants it.
+    var disconnect: @Sendable (UUID, _ owner: String) async -> Void
     /// Call after `.connected` to discover services on the peripheral.
     var discoverServices: @Sendable (UUID, [CBUUID]?) async -> Void
     /// Call after services are found to discover characteristics within a service.
@@ -61,8 +67,8 @@ extension BLEClient: DependencyKey {
         return BLEClient(
             startScanning: { central.startScanning(serviceUUIDs: $0) },
             stopScanning: { central.stopScanning(serviceUUIDs: $0) },
-            connect: { central.connect(peripheralID: $0) },
-            disconnect: { central.disconnect(peripheralID: $0) },
+            connect: { central.connect(peripheralID: $0, owner: $1) },
+            disconnect: { central.disconnect(peripheralID: $0, owner: $1) },
             discoverServices: { central.discoverServices(peripheralID: $0, serviceUUIDs: $1) },
             discoverCharacteristics: { central.discoverCharacteristics(peripheralID: $0, serviceUUID: $1, characteristicUUIDs: $2) },
             setNotifyValue: { central.setNotifyValue($0, peripheralID: $1, serviceUUID: $2, characteristicUUID: $3) },
@@ -73,8 +79,8 @@ extension BLEClient: DependencyKey {
     static let testValue = BLEClient(
         startScanning: { _ in },
         stopScanning: { _ in },
-        connect: { _ in },
-        disconnect: { _ in },
+        connect: { _, _ in },
+        disconnect: { _, _ in },
         discoverServices: { _, _ in },
         discoverCharacteristics: { _, _, _ in },
         setNotifyValue: { _, _, _, _ in },
@@ -104,6 +110,13 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
 
     // Retained peripherals — CBCentralManager doesn't hold strong references.
     private var discovered: [UUID: CBPeripheral] = [:]
+
+    // Which sensor clients want each peripheral connected. The same physical device
+    // can serve several profiles (e.g. CSC + HR), so a CoreBluetooth connection is a
+    // shared resource: cancel it only once the last interested client releases it.
+    // A Set makes repeated connect() requests from one client idempotent (the radar
+    // and CSC reconnect loops re-issue connect as a nudge). Guarded by bleQueue.
+    private var connectionOwners: [UUID: Set<String>] = [:]
 
     // Union of service UUIDs requested by all sensor clients. CoreBluetooth has
     // a single scan per central — a second scanForPeripherals call replaces the
@@ -177,15 +190,20 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
 
     // MARK: Connection
 
-    func connect(peripheralID: UUID) {
+    func connect(peripheralID: UUID, owner: String) {
         bleQueue.async { [self] in
+            connectionOwners[peripheralID, default: []].insert(owner)
             guard let peripheral = discovered[peripheralID] else { return }
             manager.connect(peripheral)
         }
     }
 
-    func disconnect(peripheralID: UUID) {
+    func disconnect(peripheralID: UUID, owner: String) {
         bleQueue.async { [self] in
+            connectionOwners[peripheralID]?.remove(owner)
+            // Another client still depends on this peripheral — leave it connected.
+            if let remaining = connectionOwners[peripheralID], !remaining.isEmpty { return }
+            connectionOwners[peripheralID] = nil
             guard let peripheral = discovered[peripheralID] else { return }
             manager.cancelPeripheralConnection(peripheral)
         }

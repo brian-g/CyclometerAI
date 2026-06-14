@@ -8,6 +8,10 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "radar
 
 // UUIDs pending validation against Garmin's official Radar BLE spec
 // (developer program application in progress — see issue #18).
+// Identifies this client to BLEClient's connection ref-count so disconnecting the
+// radar never severs a peripheral another client shares (see BLEClient.connect).
+private let radarOwnerID = "radar"
+
 private let radarServiceUUID    = CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")
 private let radarAlertUUID      = CBUUID(string: "6A4E3202-667B-11E3-949A-0800200C9A66")  // notify
 // Read-only capability characteristic. Unused until BLEClient gains a readValue
@@ -211,7 +215,7 @@ private final class RadarClientState: @unchecked Sendable {
     func connect(peripheralID: UUID) async {
         lock.withLock { targetPeripheralID = peripheralID }
         setConnectionState(.connecting)
-        await bleClient.connect(peripheralID)
+        await bleClient.connect(peripheralID, radarOwnerID)
     }
 
     /// User-initiated disconnect: clears the target first so the resulting
@@ -228,7 +232,7 @@ private final class RadarClientState: @unchecked Sendable {
         }
         setConnectionState(.disconnected)
         if let id {
-            await bleClient.disconnect(id)
+            await bleClient.disconnect(id, radarOwnerID)
         }
         await bleClient.stopScanning([radarServiceUUID])
     }
@@ -332,7 +336,7 @@ private final class RadarClientState: @unchecked Sendable {
                 guard !Task.isCancelled else { return }
                 guard let id = self.lock.withLock({ self.targetPeripheralID }) else { return }
                 logger.notice("reconnect attempt \(attempt + 1)")
-                await self.bleClient.connect(id)
+                await self.bleClient.connect(id, radarOwnerID)
                 attempt += 1
             }
         }

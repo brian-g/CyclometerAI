@@ -8,6 +8,11 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "csc")
 
 private let cscServiceUUID     = CBUUID(string: "1816")
 private let cscMeasurementUUID = CBUUID(string: "2A5B")  // notify
+
+// Identifies this client to BLEClient's connection ref-count, so disconnecting a
+// CSC peripheral never tears down a connection a different client (HR/radar) shares
+// with the same physical device.
+private let cscOwnerID = "csc"
 // 0x2A5C (CSC Feature, read) deliberately unused: BLEClient has no readValue
 // operation, sensor capabilities are inferable from the measurement flags byte,
 // and the role-selection sheet is an M6/S11 (pairing UI) concern. See BLE.md §5.0.
@@ -64,6 +69,10 @@ struct BLECSCClient: Sendable {
     static func reconnectDelay(attempt: Int) -> Duration {
         .seconds(min(1 << min(attempt, 5), 30))
     }
+
+    /// After this many failed attempts the sensor is considered lost: its slot is
+    /// released and the role falls back to `.disconnected` (BLE.md §6.1).
+    static let maxReconnectAttempts = 10
 }
 
 // MARK: - Measurement parsing
@@ -336,6 +345,12 @@ private final class CSCClientState: @unchecked Sendable {
                     slots.removeValue(forKey: id)
                     removed.append(id)
                 } else {
+                    // The slot keeps another role, so it survives — but the stripped
+                    // role's calculator would otherwise retain its pre-reassignment
+                    // sample and compute a bogus rate if the role is later returned.
+                    let stripped = before.subtracting(slot.roles)
+                    if stripped.contains(.speed) { slot.wheel.reset() }
+                    if stripped.contains(.cadence) { slot.crank.reset() }
                     slots[id] = slot
                 }
             }
@@ -349,8 +364,8 @@ private final class CSCClientState: @unchecked Sendable {
             recomputeRoleStatesLocked()
             return removed
         }
-        for id in toDisconnect { await bleClient.disconnect(id) }
-        await bleClient.connect(peripheralID)
+        for id in toDisconnect { await bleClient.disconnect(id, cscOwnerID) }
+        await bleClient.connect(peripheralID, cscOwnerID)
         logger.notice("connect requested for \(peripheralID, privacy: .public) roles \(String(describing: roles), privacy: .public)")
     }
 
@@ -363,7 +378,7 @@ private final class CSCClientState: @unchecked Sendable {
             recomputeRoleStatesLocked()
             return ids
         }
-        for id in ids { await bleClient.disconnect(id) }
+        for id in ids { await bleClient.disconnect(id, cscOwnerID) }
         await bleClient.stopScanning([cscServiceUUID])
     }
 
@@ -502,8 +517,7 @@ private final class CSCClientState: @unchecked Sendable {
         // bounded by the BLE.md §6.1 ladder. BLECentral retains discovered
         // peripherals, so reconnect-by-UUID works without rescanning.
         let task = Task { [weak self] in
-            var attempt = 0
-            while !Task.isCancelled {
+            for attempt in 0..<BLECSCClient.maxReconnectAttempts {
                 guard let self else { return }
                 try? await self.clock.sleep(for: BLECSCClient.reconnectDelay(attempt: attempt))
                 guard !Task.isCancelled else { return }
@@ -512,9 +526,18 @@ private final class CSCClientState: @unchecked Sendable {
                 }
                 guard stillReconnecting else { return }
                 logger.notice("reconnect attempt \(attempt + 1) for \(peripheralID, privacy: .public)")
-                await self.bleClient.connect(peripheralID)
-                attempt += 1
+                await self.bleClient.connect(peripheralID, cscOwnerID)
             }
+            // Ladder exhausted — give up and release the slot so the role falls back
+            // to .disconnected (BLE.md §6.1). Guard that we're still reconnecting so a
+            // late success (which cancels this task) isn't undone.
+            guard let self else { return }
+            self.lock.withLock {
+                guard self.slots[peripheralID]?.connectionState == .reconnecting else { return }
+                self.slots.removeValue(forKey: peripheralID)
+                self.recomputeRoleStatesLocked()
+            }
+            logger.notice("reconnect gave up for \(peripheralID, privacy: .public) — sensor lost")
         }
         lock.withLock {
             slots[peripheralID]?.reconnectTask?.cancel()
