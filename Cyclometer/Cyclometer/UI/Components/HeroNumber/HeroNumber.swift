@@ -8,7 +8,10 @@ struct HeroNumber<Label: View>: View {
     let unit: String
     var size: HeroSize = .large
     var alignment: HeroUnitAlignment = .horizontal
+    var color: Color = .primary
     let label: Label
+
+    // MARK: - Plain-value inits
 
     init(_ value: String, unit: String) where Label == EmptyView {
         self.value = value; self.unit = unit; self.label = EmptyView()
@@ -30,6 +33,28 @@ struct HeroNumber<Label: View>: View {
         self.label = label()
     }
 
+    // MARK: - Binding inits (TCA binding support)
+
+    init(_ value: Binding<String>, unit: String) where Label == EmptyView {
+        self.value = value.wrappedValue; self.unit = unit; self.label = EmptyView()
+    }
+
+    init(_ value: Binding<Double>, decimals: Int = 1, unit: String) where Label == EmptyView {
+        self.value = value.wrappedValue.formatted(.number.precision(.fractionLength(decimals)))
+        self.unit = unit; self.label = EmptyView()
+    }
+
+    init(_ value: Binding<String>, unit: String, @ViewBuilder label: () -> Label) {
+        self.value = value.wrappedValue; self.unit = unit; self.label = label()
+    }
+
+    init(_ value: Binding<Double>, decimals: Int = 1, unit: String, @ViewBuilder label: () -> Label) {
+        self.value = value.wrappedValue.formatted(.number.precision(.fractionLength(decimals)))
+        self.unit = unit; self.label = label()
+    }
+
+    // MARK: - Modifiers
+
     func heroNumberSize(_ size: HeroSize) -> Self {
         var copy = self; copy.size = size; return copy
     }
@@ -38,6 +63,13 @@ struct HeroNumber<Label: View>: View {
         var copy = self; copy.alignment = alignment; return copy
     }
 
+    func foregroundColor(_ color: Color) -> Self {
+        var copy = self; copy.color = color; return copy
+    }
+
+    // MARK: - Layout constants
+
+    /// Nominal (maximum) font size for each size class.
     private var ptSize: CGFloat {
         switch size {
         case .small:  34
@@ -45,37 +77,54 @@ struct HeroNumber<Label: View>: View {
         case .large:  136
         }
     }
-    
+
+    /// Height offered to the GeometryReader as a layout anchor.
+    /// Font scales up to ptSize when the parent supplies a taller frame.
     private var frameSize: CGFloat {
         switch size {
-        case .small: 27
+        case .small:  27
         case .medium: 50
         case .large:  100
         }
     }
 
-    private var offset : CGFloat {
-        switch size {
-        case .small: -4
-        case .medium: -6
-        case .large:  -8
-        }
-    }
+    // MARK: - Body
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             label.textCase(.uppercase)
             if alignment == .vertical {
                 VStack(alignment: .trailing, spacing: 0) {
-                    Text(value).dDINCondensed(size: ptSize, relativeTo: .largeTitle).lineLimit(1).frame(height: frameSize).baselineOffset(offset).padding(0)
-                    if !unit.isEmpty { Text(unit).textCase(.lowercase).font(.footnote).padding(0) }
+                    scaledValue
+                    if !unit.isEmpty { unitLabel }
                 }
             } else {
                 HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
-                    Text(value).dDINCondensed(size: ptSize, relativeTo: .largeTitle).lineLimit(1).frame(height: frameSize).baselineOffset(offset).padding(0)
-                    if !unit.isEmpty { Text(unit).textCase(.lowercase).font(.footnote).baselineOffset(offset) }
-                }.padding(0)
+                    scaledValue
+                    if !unit.isEmpty { unitLabel }
+                }
             }
         }
+    }
+
+    // MARK: - Private helpers
+
+    /// Value text wrapped in a GeometryReader so the font size scales proportionally
+    /// to the available container height, capped at `ptSize`.
+    @ViewBuilder private var scaledValue: some View {
+        GeometryReader { geo in
+            let h = geo.size.height > 0 ? geo.size.height : frameSize
+            Text(value)
+                .dDINCondensed(size: min(ptSize, h), relativeTo: .largeTitle)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .foregroundStyle(color)
+        }
+        .frame(height: frameSize)
+    }
+
+    private var unitLabel: some View {
+        Text(unit).textCase(.lowercase).font(.footnote)
     }
 }
 
@@ -122,30 +171,31 @@ struct HeroNumber<Label: View>: View {
         }
         .heroNumberSize(.small)
         .layout(.vertical)
+
         HeroNumber(34.1, unit: "max") {
             Text("MAX").font(.caption)
         }
         .heroNumberSize(.medium)
         .layout(.vertical)
+
         HeroNumber(34.1, unit: "max") {
             Text("MAX").font(.caption)
         }
         .heroNumberSize(.large)
         .layout(.vertical)
-
     }
     .padding()
 }
 
-#Preview("Mixed") {
+#Preview("Color + Empty State") {
     VStack(alignment: .leading, spacing: Spacing.sm) {
-        HeroNumber(34.1, unit: "max") {
-            Text("MAX").font(.caption)
-        }
-        HeroNumber(34.1, unit: "max") {
-            Text("mph").font(.caption)
-        }
-        .heroNumberSize(.small)
-        .layout(.vertical)
+        HeroNumber(34.1, unit: "mph")
+            .foregroundColor(.accentColor)
+        HeroNumber("—", unit: "mph")
+            .heroNumberSize(.medium)
+        HeroNumber("—", unit: "bpm")
+            .heroNumberSize(.small)
+            .foregroundColor(.secondary)
     }
+    .padding()
 }
