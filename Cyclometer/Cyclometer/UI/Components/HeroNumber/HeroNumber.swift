@@ -14,7 +14,9 @@ struct HeroNumber<Label: View>: View {
     // MARK: - Plain-value inits
 
     init(_ value: String, unit: String) where Label == EmptyView {
-        self.value = value; self.unit = unit; self.label = EmptyView()
+        self.value = value
+        self.unit = unit
+        self.label = EmptyView()
     }
 
     init(_ value: Double, decimals: Int = 1, unit: String) where Label == EmptyView {
@@ -24,7 +26,9 @@ struct HeroNumber<Label: View>: View {
     }
 
     init(_ value: String, unit: String, @ViewBuilder label: () -> Label) {
-        self.value = value; self.unit = unit; self.label = label()
+        self.value = value
+        self.unit = unit
+        self.label = label()
     }
 
     init(_ value: Double, decimals: Int = 1, unit: String, @ViewBuilder label: () -> Label) {
@@ -33,58 +37,36 @@ struct HeroNumber<Label: View>: View {
         self.label = label()
     }
 
-    // MARK: - Binding inits (TCA binding support)
-
-    init(_ value: Binding<String>, unit: String) where Label == EmptyView {
-        self.value = value.wrappedValue; self.unit = unit; self.label = EmptyView()
-    }
-
-    init(_ value: Binding<Double>, decimals: Int = 1, unit: String) where Label == EmptyView {
-        self.value = value.wrappedValue.formatted(.number.precision(.fractionLength(decimals)))
-        self.unit = unit; self.label = EmptyView()
-    }
-
-    init(_ value: Binding<String>, unit: String, @ViewBuilder label: () -> Label) {
-        self.value = value.wrappedValue; self.unit = unit; self.label = label()
-    }
-
-    init(_ value: Binding<Double>, decimals: Int = 1, unit: String, @ViewBuilder label: () -> Label) {
-        self.value = value.wrappedValue.formatted(.number.precision(.fractionLength(decimals)))
-        self.unit = unit; self.label = label()
-    }
-
     // MARK: - Modifiers
 
     func heroNumberSize(_ size: HeroSize) -> Self {
-        var copy = self; copy.size = size; return copy
+        var copy = self
+        copy.size = size
+        return copy
     }
 
     func layout(_ alignment: HeroUnitAlignment) -> Self {
-        var copy = self; copy.alignment = alignment; return copy
+        var copy = self
+        copy.alignment = alignment
+        return copy
     }
 
-    func foregroundColor(_ color: Color) -> Self {
-        var copy = self; copy.color = color; return copy
+    func valueColor(_ color: Color) -> Self {
+        var copy = self
+        copy.color = color
+        return copy
     }
 
     // MARK: - Layout constants
 
-    /// Nominal (maximum) font size for each size class.
+    /// Nominal font size for each size class. Also the maximum: the value never
+    /// renders larger, but `minimumScaleFactor` lets it shrink continuously if a
+    /// container ever constrains it smaller than the text needs.
     private var ptSize: CGFloat {
         switch size {
         case .small:  34
         case .medium: 68
         case .large:  136
-        }
-    }
-
-    /// Height offered to the GeometryReader as a layout anchor.
-    /// Font scales up to ptSize when the parent supplies a taller frame.
-    private var frameSize: CGFloat {
-        switch size {
-        case .small:  27
-        case .medium: 50
-        case .large:  100
         }
     }
 
@@ -109,18 +91,12 @@ struct HeroNumber<Label: View>: View {
 
     // MARK: - Private helpers
 
-    /// Value text wrapped in a GeometryReader so the font size scales proportionally
-    /// to the available container height, capped at `ptSize`.
-    @ViewBuilder private var scaledValue: some View {
-        GeometryReader { geo in
-            let h = geo.size.height > 0 ? geo.size.height : frameSize
-            Text(value)
-                .dDINCondensed(size: min(ptSize, h), relativeTo: .largeTitle)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .foregroundStyle(color)
-        }
-        .frame(height: frameSize)
+    private var scaledValue: some View {
+        Text(value)
+            .dDINCondensed(size: ptSize, relativeTo: .largeTitle)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .foregroundStyle(color)
     }
 
     private var unitLabel: some View {
@@ -190,12 +166,12 @@ struct HeroNumber<Label: View>: View {
 #Preview("Color + Empty State") {
     VStack(alignment: .leading, spacing: Spacing.sm) {
         HeroNumber(34.1, unit: "mph")
-            .foregroundColor(.accentColor)
+            .valueColor(.accentColor)
         HeroNumber("—", unit: "mph")
             .heroNumberSize(.medium)
         HeroNumber("—", unit: "bpm")
             .heroNumberSize(.small)
-            .foregroundColor(.secondary)
+            .valueColor(.secondary)
     }
     .padding()
 }
