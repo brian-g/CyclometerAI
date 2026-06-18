@@ -37,6 +37,32 @@ struct HeroNumber<Label: View>: View {
         self.label = label()
     }
 
+    // MARK: - Binding inits
+
+    init(_ value: Binding<String>, unit: String) where Label == EmptyView {
+        self.value = value.wrappedValue
+        self.unit = unit
+        self.label = EmptyView()
+    }
+
+    init(_ value: Binding<Double>, decimals: Int = 1, unit: String) where Label == EmptyView {
+        self.value = value.wrappedValue.formatted(.number.precision(.fractionLength(decimals)))
+        self.unit = unit
+        self.label = EmptyView()
+    }
+
+    init(_ value: Binding<String>, unit: String, @ViewBuilder label: () -> Label) {
+        self.value = value.wrappedValue
+        self.unit = unit
+        self.label = label()
+    }
+
+    init(_ value: Binding<Double>, decimals: Int = 1, unit: String, @ViewBuilder label: () -> Label) {
+        self.value = value.wrappedValue.formatted(.number.precision(.fractionLength(decimals)))
+        self.unit = unit
+        self.label = label()
+    }
+
     // MARK: - Modifiers
 
     func heroNumberSize(_ size: HeroSize) -> Self {
@@ -110,7 +136,6 @@ struct HeroNumber<Label: View>: View {
         Text(value)
             .dDINCondensed(size: ptSize, relativeTo: .largeTitle)
             .lineLimit(1)
-            .minimumScaleFactor(0.5)
             .foregroundStyle(color)
             .frame(height: frameSize)
             .baselineOffset(offset)
