@@ -59,14 +59,29 @@ struct HeroNumber<Label: View>: View {
 
     // MARK: - Layout constants
 
-    /// Nominal font size for each size class. Also the maximum: the value never
-    /// renders larger, but `minimumScaleFactor` lets it shrink continuously if a
-    /// container ever constrains it smaller than the text needs.
     private var ptSize: CGFloat {
         switch size {
         case .small:  34
         case .medium: 68
         case .large:  136
+        }
+    }
+
+    /// Layout height offered to the parent. Smaller than `ptSize` so the text
+    /// overflows the frame visually while the widget grid takes a compact slot.
+    private var frameSize: CGFloat {
+        switch size {
+        case .small:  27
+        case .medium: 50
+        case .large:  100
+        }
+    }
+
+    private var offset: CGFloat {
+        switch size {
+        case .small:  -4
+        case .medium: -6
+        case .large:  -8
         }
     }
 
@@ -83,7 +98,7 @@ struct HeroNumber<Label: View>: View {
             } else {
                 HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
                     scaledValue
-                    if !unit.isEmpty { unitLabel }
+                    if !unit.isEmpty { unitLabel.baselineOffset(offset) }
                 }
             }
         }
@@ -97,6 +112,8 @@ struct HeroNumber<Label: View>: View {
             .lineLimit(1)
             .minimumScaleFactor(0.5)
             .foregroundStyle(color)
+            .frame(height: frameSize)
+            .baselineOffset(offset)
     }
 
     private var unitLabel: some View {
