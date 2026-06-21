@@ -8,10 +8,15 @@ struct HeroNumber<Label: View>: View {
     let unit: String
     var size: HeroSize = .large
     var alignment: HeroUnitAlignment = .horizontal
+    var color: Color = .primary
     let label: Label
 
+    // MARK: - Plain-value inits
+
     init(_ value: String, unit: String) where Label == EmptyView {
-        self.value = value; self.unit = unit; self.label = EmptyView()
+        self.value = value
+        self.unit = unit
+        self.label = EmptyView()
     }
 
     init(_ value: Double, decimals: Int = 1, unit: String) where Label == EmptyView {
@@ -21,7 +26,9 @@ struct HeroNumber<Label: View>: View {
     }
 
     init(_ value: String, unit: String, @ViewBuilder label: () -> Label) {
-        self.value = value; self.unit = unit; self.label = label()
+        self.value = value
+        self.unit = unit
+        self.label = label()
     }
 
     init(_ value: Double, decimals: Int = 1, unit: String, @ViewBuilder label: () -> Label) {
@@ -30,13 +37,53 @@ struct HeroNumber<Label: View>: View {
         self.label = label()
     }
 
+    // MARK: - Binding inits
+
+    init(_ value: Binding<String>, unit: String) where Label == EmptyView {
+        self.value = value.wrappedValue
+        self.unit = unit
+        self.label = EmptyView()
+    }
+
+    init(_ value: Binding<Double>, decimals: Int = 1, unit: String) where Label == EmptyView {
+        self.value = value.wrappedValue.formatted(.number.precision(.fractionLength(decimals)))
+        self.unit = unit
+        self.label = EmptyView()
+    }
+
+    init(_ value: Binding<String>, unit: String, @ViewBuilder label: () -> Label) {
+        self.value = value.wrappedValue
+        self.unit = unit
+        self.label = label()
+    }
+
+    init(_ value: Binding<Double>, decimals: Int = 1, unit: String, @ViewBuilder label: () -> Label) {
+        self.value = value.wrappedValue.formatted(.number.precision(.fractionLength(decimals)))
+        self.unit = unit
+        self.label = label()
+    }
+
+    // MARK: - Modifiers
+
     func heroNumberSize(_ size: HeroSize) -> Self {
-        var copy = self; copy.size = size; return copy
+        var copy = self
+        copy.size = size
+        return copy
     }
 
     func layout(_ alignment: HeroUnitAlignment) -> Self {
-        var copy = self; copy.alignment = alignment; return copy
+        var copy = self
+        copy.alignment = alignment
+        return copy
     }
+
+    func valueColor(_ color: Color) -> Self {
+        var copy = self
+        copy.color = color
+        return copy
+    }
+
+    // MARK: - Layout constants
 
     private var ptSize: CGFloat {
         switch size {
@@ -45,37 +92,57 @@ struct HeroNumber<Label: View>: View {
         case .large:  136
         }
     }
-    
+
+    /// Layout height offered to the parent. Smaller than `ptSize` so the text
+    /// overflows the frame visually while the widget grid takes a compact slot.
     private var frameSize: CGFloat {
         switch size {
-        case .small: 27
+        case .small:  27
         case .medium: 50
         case .large:  100
         }
     }
 
-    private var offset : CGFloat {
+    private var offset: CGFloat {
         switch size {
-        case .small: -4
+        case .small:  -4
         case .medium: -6
         case .large:  -8
         }
     }
+
+    // MARK: - Body
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             label.textCase(.uppercase)
             if alignment == .vertical {
                 VStack(alignment: .trailing, spacing: 0) {
-                    Text(value).dDINCondensed(size: ptSize, relativeTo: .largeTitle).lineLimit(1).frame(height: frameSize).baselineOffset(offset).padding(0)
-                    if !unit.isEmpty { Text(unit).textCase(.lowercase).font(.footnote).padding(0) }
+                    scaledValue
+                    if !unit.isEmpty { unitLabel }
                 }
             } else {
                 HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
-                    Text(value).dDINCondensed(size: ptSize, relativeTo: .largeTitle).lineLimit(1).frame(height: frameSize).baselineOffset(offset).padding(0)
-                    if !unit.isEmpty { Text(unit).textCase(.lowercase).font(.footnote).baselineOffset(offset) }
-                }.padding(0)
+                    scaledValue
+                    if !unit.isEmpty { unitLabel.baselineOffset(offset) }
+                }
             }
         }
+    }
+
+    // MARK: - Private helpers
+
+    private var scaledValue: some View {
+        Text(value)
+            .dDINCondensed(size: ptSize, relativeTo: .largeTitle)
+            .lineLimit(1)
+            .foregroundStyle(color)
+            .frame(height: frameSize)
+            .baselineOffset(offset)
+    }
+
+    private var unitLabel: some View {
+        Text(unit).textCase(.lowercase).font(.footnote)
     }
 }
 
@@ -122,30 +189,31 @@ struct HeroNumber<Label: View>: View {
         }
         .heroNumberSize(.small)
         .layout(.vertical)
+
         HeroNumber(34.1, unit: "max") {
             Text("MAX").font(.caption)
         }
         .heroNumberSize(.medium)
         .layout(.vertical)
+
         HeroNumber(34.1, unit: "max") {
             Text("MAX").font(.caption)
         }
         .heroNumberSize(.large)
         .layout(.vertical)
-
     }
     .padding()
 }
 
-#Preview("Mixed") {
+#Preview("Color + Empty State") {
     VStack(alignment: .leading, spacing: Spacing.sm) {
-        HeroNumber(34.1, unit: "max") {
-            Text("MAX").font(.caption)
-        }
-        HeroNumber(34.1, unit: "max") {
-            Text("mph").font(.caption)
-        }
-        .heroNumberSize(.small)
-        .layout(.vertical)
+        HeroNumber(34.1, unit: "mph")
+            .valueColor(.accentColor)
+        HeroNumber("—", unit: "mph")
+            .heroNumberSize(.medium)
+        HeroNumber("—", unit: "bpm")
+            .heroNumberSize(.small)
+            .valueColor(.secondary)
     }
+    .padding()
 }

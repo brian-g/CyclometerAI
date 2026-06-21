@@ -161,7 +161,7 @@ struct RideDashboardView: View {
 // MARK: - Dashboard Widgets
 
 /// W1 — Speed 2×2: hero speed + distance + elapsed + avg/max
-private struct SpeedWidget: View {
+struct SpeedWidget: View {
     let speed: Double
     let distance: Double
     let elapsed: Int
@@ -403,6 +403,19 @@ private extension Int {
         onClose: { },
         onFinish: { }
     )
+}
+
+// Renders W1 at a representative grid height (≈unit×2 on a typical iPhone).
+// Use this preview to catch layout regressions in HeroNumber's frameSize constraint.
+#Preview("SpeedWidget — grid height") {
+    SpeedWidget(
+        speed: 28.4,
+        distance: 12.3,
+        elapsed: 2340,
+        averageSpeed: 28.4,
+        maxSpeed: 34.1
+    )
+    .frame(width: 393, height: 200)
 }
 
 #Preview("Paused") {
