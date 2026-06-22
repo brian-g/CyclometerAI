@@ -155,6 +155,10 @@ struct ActiveRideFeatureLocationTests {
             $0.speedMPS = 8.5
             $0.horizontalAccuracy = 5.0
             $0.heading = 192.0
+            $0.speedKPH = 8.5 * 3.6
+            $0.speedSampleCount = 1
+            $0.speedSampleSum = 8.5 * 3.6
+            $0.maxSpeedKPH = 8.5 * 3.6
         }
     }
 
@@ -167,6 +171,10 @@ struct ActiveRideFeatureLocationTests {
             $0.speedMPS = 8.5
             $0.horizontalAccuracy = 5.0
             $0.heading = 192.0
+            $0.speedKPH = 8.5 * 3.6
+            $0.speedSampleCount = 1
+            $0.speedSampleSum = 8.5 * 3.6
+            $0.maxSpeedKPH = 8.5 * 3.6
         }
         await store.send(.pauseTapped) {
             $0.isPaused = true
@@ -186,6 +194,10 @@ struct ActiveRideFeatureLocationTests {
             $0.speedMPS = 12.0
             $0.horizontalAccuracy = 3.0
             $0.heading = 45.0
+            $0.speedKPH = 12.0 * 3.6
+            $0.speedSampleCount = 2
+            $0.speedSampleSum = 8.5 * 3.6 + 12.0 * 3.6
+            $0.maxSpeedKPH = 12.0 * 3.6
         }
     }
 

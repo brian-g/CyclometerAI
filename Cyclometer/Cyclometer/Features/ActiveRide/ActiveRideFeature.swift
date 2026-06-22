@@ -189,6 +189,13 @@ struct ActiveRideFeature {
                 state.heading = update.heading
                 state.speedMPS = update.speed
                 state.horizontalAccuracy = update.horizontalAccuracy
+                let kph = max(update.speed, 0) * 3.6
+                state.speedKPH = kph
+                if kph > 0 {
+                    state.speedSampleCount += 1
+                    state.speedSampleSum += kph
+                }
+                if kph > state.maxSpeedKPH { state.maxSpeedKPH = kph }
                 return .none
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = (status == .authorizedWhenInUse || status == .authorizedAlways)
