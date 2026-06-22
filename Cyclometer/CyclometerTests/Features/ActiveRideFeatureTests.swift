@@ -155,11 +155,15 @@ struct ActiveRideFeatureLocationTests {
             $0.speedMPS = 8.5
             $0.horizontalAccuracy = 5.0
             $0.heading = 192.0
+            $0.speedKPH = 8.5 * 3.6
+            $0.speedSampleCount = 1
+            $0.speedSampleSum = 8.5 * 3.6
+            $0.maxSpeedKPH = 8.5 * 3.6
         }
     }
 
-    @Test("Location updates ignored while paused")
-    func locationIgnoredWhilePaused() async {
+    @Test("Location updates continue while paused")
+    func locationContinuesWhilePaused() async {
         let store = makeStore()
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
@@ -167,12 +171,16 @@ struct ActiveRideFeatureLocationTests {
             $0.speedMPS = 8.5
             $0.horizontalAccuracy = 5.0
             $0.heading = 192.0
+            $0.speedKPH = 8.5 * 3.6
+            $0.speedSampleCount = 1
+            $0.speedSampleSum = 8.5 * 3.6
+            $0.maxSpeedKPH = 8.5 * 3.6
         }
         await store.send(.pauseTapped) {
             $0.isPaused = true
         }
 
-        let ignoredUpdate = LocationUpdate(
+        let pausedUpdate = LocationUpdate(
             coordinate: Coordinate(latitude: 44.0, longitude: -90.0),
             altitude: 300.0,
             speed: 12.0,
@@ -180,17 +188,16 @@ struct ActiveRideFeatureLocationTests {
             heading: 45.0,
             timestamp: Date(timeIntervalSince1970: 1_000_001)
         )
-        await store.send(.locationUpdated(ignoredUpdate))
-
-        await store.send(.resumeTapped) {
-            $0.isPaused = false
-        }
-        await store.send(.locationUpdated(ignoredUpdate)) {
+        await store.send(.locationUpdated(pausedUpdate)) {
             $0.coordinate = Coordinate(latitude: 44.0, longitude: -90.0)
             $0.altitude = 300.0
             $0.speedMPS = 12.0
             $0.horizontalAccuracy = 3.0
             $0.heading = 45.0
+            $0.speedKPH = 12.0 * 3.6
+            $0.speedSampleCount = 2
+            $0.speedSampleSum = 8.5 * 3.6 + 12.0 * 3.6
+            $0.maxSpeedKPH = 12.0 * 3.6
         }
     }
 
@@ -234,5 +241,104 @@ struct ActiveRideFeatureLocationTests {
         }
         await store.send(.finishTapped)
         #expect(stopCalled.value == true)
+    }
+}
+
+// MARK: - 1 Hz timer
+
+@MainActor
+@Suite("ActiveRideFeature — 1 Hz timer")
+struct ActiveRideFeatureTimerTests {
+
+    private func makeStore(
+        speedMPS: Double = 0
+    ) -> TestStoreOf<ActiveRideFeature> {
+        TestStore(
+            initialState: ActiveRideFeature.State(speedMPS: speedMPS)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+        }
+    }
+
+    @Test("5 ticks increment elapsedSeconds to 5")
+    func fiveTicksElapsed() async {
+        let store = makeStore()
+        for tick in 1...5 {
+            await store.send(.elapsedTick) {
+                $0.elapsedSeconds = tick
+            }
+        }
+    }
+
+    @Test("Paused tick does not increment elapsedSeconds")
+    func pausedTickNoElapsed() async {
+        let store = makeStore()
+        await store.send(.pauseTapped) {
+            $0.isPaused = true
+        }
+        await store.send(.elapsedTick)
+    }
+
+    @Test("Distance accumulates from speedMPS per tick")
+    func distanceAccumulates() async {
+        let store = makeStore(speedMPS: 10.0)
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.distanceMeters = 10.0
+        }
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 2
+            $0.distanceMeters = 20.0
+        }
+    }
+
+    @Test("Distance accumulates even while paused")
+    func distanceAccumulatesWhilePaused() async {
+        let store = makeStore(speedMPS: 10.0)
+        await store.send(.pauseTapped) {
+            $0.isPaused = true
+        }
+        await store.send(.elapsedTick) {
+            $0.distanceMeters = 10.0
+        }
+        await store.send(.elapsedTick) {
+            $0.distanceMeters = 20.0
+        }
+    }
+
+    @Test("Negative speedMPS does not accumulate distance")
+    func negativeSpeedIgnored() async {
+        let store = makeStore(speedMPS: -1)
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+        }
+    }
+
+    @Test("Resume after pause: elapsed resumes, distance uninterrupted")
+    func resumeAfterPause() async {
+        let store = makeStore(speedMPS: 10.0)
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.distanceMeters = 10.0
+        }
+        await store.send(.pauseTapped) {
+            $0.isPaused = true
+        }
+        await store.send(.elapsedTick) {
+            $0.distanceMeters = 20.0
+        }
+        await store.send(.resumeTapped) {
+            $0.isPaused = false
+        }
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 2
+            $0.distanceMeters = 30.0
+        }
     }
 }
