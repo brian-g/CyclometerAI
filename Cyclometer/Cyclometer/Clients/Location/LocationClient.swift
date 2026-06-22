@@ -7,8 +7,8 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "locat
 // MARK: - Models
 
 struct Coordinate: Sendable, Equatable, Hashable {
-    let latitude: Double
-    let longitude: Double
+    let latitude: Double   // WGS 84 degrees
+    let longitude: Double  // WGS 84 degrees
 
     var clLocationCoordinate2D: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
@@ -17,10 +17,10 @@ struct Coordinate: Sendable, Equatable, Hashable {
 
 struct LocationUpdate: Sendable, Equatable {
     let coordinate: Coordinate
-    let altitude: Double
-    let speed: Double              // m/s; -1 if invalid
-    let horizontalAccuracy: Double
-    let heading: Double            // degrees; -1 if unavailable
+    let altitude: Double              // meters above sea level
+    let speed: Double                 // m/s; -1 if invalid
+    let horizontalAccuracy: Double    // meters; lower is better
+    let heading: Double               // degrees from true north (0–360); -1 if unavailable
     let timestamp: Date
 }
 

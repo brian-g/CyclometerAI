@@ -106,6 +106,7 @@ struct ActiveRideFeature {
                         for await update in locationClient.startUpdates() {
                             await send(.locationUpdated(update))
                         }
+                        await locationClient.stopUpdates()
                     }
                 )
             case .pauseTapped:
