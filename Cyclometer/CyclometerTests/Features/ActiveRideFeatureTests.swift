@@ -1,5 +1,6 @@
 import Testing
 import ComposableArchitecture
+import CoreLocation
 @testable import Cyclometer
 
 @MainActor
@@ -19,6 +20,7 @@ struct ActiveRideFeatureRadarTests {
             $0.hapticsClient = haptics
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
         }
     }
 
@@ -114,5 +116,123 @@ struct ActiveRideFeatureRadarTests {
             $0.isRadarPaired = false
             $0.radarTargets = []
         }
+    }
+}
+
+// MARK: - Location wiring
+
+@MainActor
+@Suite("ActiveRideFeature — location wiring")
+struct ActiveRideFeatureLocationTests {
+
+    private static let sampleUpdate = LocationUpdate(
+        coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
+        altitude: 280.0,
+        speed: 8.5,
+        horizontalAccuracy: 5.0,
+        heading: 192.0,
+        timestamp: Date(timeIntervalSince1970: 1_000_000)
+    )
+
+    private func makeStore() -> TestStoreOf<ActiveRideFeature> {
+        TestStore(initialState: ActiveRideFeature.State()) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+        }
+    }
+
+    @Test("Location update populates state")
+    func locationUpdatePopulatesState() async {
+        let store = makeStore()
+        await store.send(.locationUpdated(Self.sampleUpdate)) {
+            $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.altitude = 280.0
+            $0.speedMPS = 8.5
+            $0.horizontalAccuracy = 5.0
+            $0.heading = 192.0
+        }
+    }
+
+    @Test("Location updates ignored while paused")
+    func locationIgnoredWhilePaused() async {
+        let store = makeStore()
+        await store.send(.locationUpdated(Self.sampleUpdate)) {
+            $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.altitude = 280.0
+            $0.speedMPS = 8.5
+            $0.horizontalAccuracy = 5.0
+            $0.heading = 192.0
+        }
+        await store.send(.pauseTapped) {
+            $0.isPaused = true
+        }
+
+        let ignoredUpdate = LocationUpdate(
+            coordinate: Coordinate(latitude: 44.0, longitude: -90.0),
+            altitude: 300.0,
+            speed: 12.0,
+            horizontalAccuracy: 3.0,
+            heading: 45.0,
+            timestamp: Date(timeIntervalSince1970: 1_000_001)
+        )
+        await store.send(.locationUpdated(ignoredUpdate))
+
+        await store.send(.resumeTapped) {
+            $0.isPaused = false
+        }
+        await store.send(.locationUpdated(ignoredUpdate)) {
+            $0.coordinate = Coordinate(latitude: 44.0, longitude: -90.0)
+            $0.altitude = 300.0
+            $0.speedMPS = 12.0
+            $0.horizontalAccuracy = 3.0
+            $0.heading = 45.0
+        }
+    }
+
+    @Test("Authorization denied sets isLocationAvailable false")
+    func authDenied() async {
+        let store = makeStore()
+        await store.send(.locationAuthorizationResult(.denied))
+    }
+
+    @Test("Authorization granted sets isLocationAvailable true")
+    func authGranted() async {
+        let store = makeStore()
+        await store.send(.locationAuthorizationResult(.authorizedWhenInUse)) {
+            $0.isLocationAvailable = true
+        }
+    }
+
+    @Test("Authorization authorizedAlways also sets isLocationAvailable true")
+    func authAlways() async {
+        let store = makeStore()
+        await store.send(.locationAuthorizationResult(.authorizedAlways)) {
+            $0.isLocationAvailable = true
+        }
+    }
+
+    @Test("Finish ride calls stopUpdates")
+    func finishCallsStop() async {
+        let stopCalled = LockIsolated(false)
+        let store = TestStore(initialState: ActiveRideFeature.State()) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = LocationClient(
+                requestAuthorization: { .authorizedWhenInUse },
+                startUpdates: { AsyncStream { $0.finish() } },
+                stopUpdates: { stopCalled.setValue(true) }
+            )
+        }
+        await store.send(.finishTapped)
+        #expect(stopCalled.value == true)
     }
 }
