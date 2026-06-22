@@ -1,4 +1,5 @@
 import ComposableArchitecture
+import CoreLocation
 
 /// Active ride state — owns radar, HR, speed/cadence, and recording state.
 /// Radar column state is also here — fed to RideDashboardView.
@@ -9,6 +10,7 @@ struct ActiveRideFeature {
     @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.variaRadarClient) var variaRadarClient
     @Dependency(\.hapticsClient) var hapticsClient
+    @Dependency(\.locationClient) var locationClient
 
     @ObservableState
     struct State: Equatable {
@@ -32,6 +34,13 @@ struct ActiveRideFeature {
         // Radar
         var isRadarPaired: Bool = false
         var radarTargets: [RadarTarget] = []
+        // Location (GPS)
+        var coordinate: Coordinate? = nil
+        var altitude: Double = 0
+        var heading: Double = -1
+        var speedMPS: Double = -1
+        var horizontalAccuracy: Double = 0
+        var isLocationAvailable: Bool = false
     }
 
     enum Action {
@@ -47,6 +56,8 @@ struct ActiveRideFeature {
         case radarTargetsUpdated([RadarTarget])
         case radarConnectionChanged(VariaRadarClient.ConnectionState)
         case radarReconnectTimedOut
+        case locationUpdated(LocationUpdate)
+        case locationAuthorizationResult(CLAuthorizationStatus)
     }
 
     private enum CancelID { case radarLossTimer }
@@ -87,6 +98,15 @@ struct ActiveRideFeature {
                         for await connectionState in variaRadarClient.connectionState() {
                             await send(.radarConnectionChanged(connectionState))
                         }
+                    },
+                    .run { [locationClient] send in
+                        let status = await locationClient.requestAuthorization()
+                        await send(.locationAuthorizationResult(status))
+                        guard status == .authorizedWhenInUse || status == .authorizedAlways else { return }
+                        for await update in locationClient.startUpdates() {
+                            await send(.locationUpdated(update))
+                        }
+                        await locationClient.stopUpdates()
                     }
                 )
             case .pauseTapped:
@@ -96,11 +116,11 @@ struct ActiveRideFeature {
                 state.isPaused = false
                 return .none
             case .finishTapped:
-                return .run { [bleHRClient, variaRadarClient] _ in
-                    // Independent teardowns — run concurrently.
+                return .run { [bleHRClient, variaRadarClient, locationClient] _ in
                     async let hr: Void = bleHRClient.disconnect()
                     async let radar: Void = variaRadarClient.disconnect()
-                    _ = await (hr, radar)
+                    async let loc: Void = locationClient.stopUpdates()
+                    _ = await (hr, radar, loc)
                 }
             case .speedUpdated(let kph):
                 state.speedKPH = kph
@@ -159,6 +179,17 @@ struct ActiveRideFeature {
                 return .run { [hapticsClient] _ in
                     await hapticsClient.playAdvisory()   // L1 advisory, fires once
                 }
+            case .locationUpdated(let update):
+                guard !state.isPaused else { return .none }
+                state.coordinate = update.coordinate
+                state.altitude = update.altitude
+                state.heading = update.heading
+                state.speedMPS = update.speed
+                state.horizontalAccuracy = update.horizontalAccuracy
+                return .none
+            case .locationAuthorizationResult(let status):
+                state.isLocationAvailable = (status == .authorizedWhenInUse || status == .authorizedAlways)
+                return .none
             }
         }
     }
