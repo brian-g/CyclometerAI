@@ -21,7 +21,8 @@ struct ActiveRideFeature {
         var hrZone: Int = 0
         var isHRPaired: Bool = false
         var cadenceRPM: Int = 0
-        var distanceKM: Double = 0
+        var distanceMeters: Double = 0
+        var distanceKM: Double { distanceMeters / 1000.0 }
         var maxHeartRate: Int = 190
         var restingHeartRate: Int = 55
         // Speed statistics
@@ -147,7 +148,10 @@ struct ActiveRideFeature {
                 state.cadenceRPM = rpm
                 return .none
             case .elapsedTick:
-                if !state.isPaused { state.elapsedSeconds += 1 }
+                if !state.isPaused {
+                    state.elapsedSeconds += 1
+                }
+                state.distanceMeters += max(state.speedMPS, 0)
                 return .none
             case .radarTargetsUpdated(let targets):
                 state.radarTargets = targets
@@ -180,7 +184,6 @@ struct ActiveRideFeature {
                     await hapticsClient.playAdvisory()   // L1 advisory, fires once
                 }
             case .locationUpdated(let update):
-                guard !state.isPaused else { return .none }
                 state.coordinate = update.coordinate
                 state.altitude = update.altitude
                 state.heading = update.heading

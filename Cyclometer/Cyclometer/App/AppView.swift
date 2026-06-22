@@ -114,7 +114,7 @@ struct AppView: View {
                     heartRateBPM: 155,
                     hrZone: 4,
                     cadenceRPM: 87,
-                    distanceKM: 12.3,
+                    distanceMeters: 12300,
                     maxSpeedKPH: 34.1,
                     speedSampleCount: 120,
                     speedSampleSum: 3408

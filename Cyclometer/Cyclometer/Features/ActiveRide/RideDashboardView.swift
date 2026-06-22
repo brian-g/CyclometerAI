@@ -387,7 +387,7 @@ private extension Int {
                 heartRateBPM: 155,
                 hrZone: 4,
                 cadenceRPM: 87,
-                distanceKM: 12.3,
+                distanceMeters: 12300,
                 maxSpeedKPH: 34.1,
                 speedSampleCount: 120,
                 speedSampleSum: 3408,
@@ -427,7 +427,7 @@ private extension Int {
                 heartRateBPM: 130,
                 hrZone: 3,
                 cadenceRPM: 0,
-                distanceKM: 7.6,
+                distanceMeters: 7600,
                 maxSpeedKPH: 31.2
             )
         ) {
