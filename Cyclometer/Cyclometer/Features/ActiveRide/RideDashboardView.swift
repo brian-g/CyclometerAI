@@ -70,10 +70,7 @@ struct RideDashboardView: View {
 
                     // W5 Cadence + W10 Weather placeholder
                     GridRow {
-                        CadenceWidget(
-                            cadence: store.cadence.cadenceRPM,
-                            connectionState: store.cadence.connectionState
-                        )
+                        CadenceWidget(cadence: store.cadence.cadenceRPM)
                             .frame(height: unit)
                         WeatherWidget()
                             .frame(height: unit)
@@ -338,7 +335,6 @@ private struct PaceWidget: View {
 /// W5 — Cadence 1×1
 private struct CadenceWidget: View {
     let cadence: Int?
-    let connectionState: BLECSCClient.ConnectionState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -352,11 +348,6 @@ private struct CadenceWidget: View {
                 HeroNumber("–", unit: "rpm").heroNumberSize(.medium)
             }
             Spacer()
-            if connectionState == .disconnected {
-                Text("Pair Sensor")
-                    .font(.caption)
-                    .foregroundStyle(Color.accentColor)
-            }
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
