@@ -39,6 +39,7 @@ struct RideDashboardView: View {
                     GridRow {
                         SpeedWidget(
                             speed: store.speedKPH,
+                            activeSpeedSource: store.speed.activeSpeedSource,
                             distance: store.distanceKM,
                             elapsed: store.elapsedSeconds,
                             averageSpeed: store.averageSpeedKPH,
@@ -163,6 +164,7 @@ struct RideDashboardView: View {
 /// W1 — Speed 2×2: hero speed + distance + elapsed + avg/max
 struct SpeedWidget: View {
     let speed: Double
+    let activeSpeedSource: SensorSource
     let distance: Double
     let elapsed: Int
     let averageSpeed: Double
@@ -171,7 +173,10 @@ struct SpeedWidget: View {
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                HeroNumber(speed, unit: "mph")
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    HeroNumber(speed, unit: "mph")
+                    sourceBadge
+                }
                 Spacer()
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.lg) {
                     HeroNumber(distance, unit: "mi") {
@@ -201,6 +206,20 @@ struct SpeedWidget: View {
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity)
         .background(Color.cyBgSecondary)
+    }
+
+    private var sourceBadge: some View {
+        let (label, fg, bg): (String, Color, Color) = switch activeSpeedSource {
+        case .gps:      ("GPS", .cyTextOnPrimary, .cyPrimary)
+        case .bleWheel: ("BLE", .cyTextOnPrimary, .cyPrimary)
+        case .none:     ("--",  .cyTextTertiary,  .cyBgTertiary)
+        }
+        return Text(label)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, 2)
+            .foregroundStyle(fg)
+            .background(bg, in: Capsule())
     }
 }
 
@@ -388,6 +407,7 @@ private extension Int {
                 hrZone: 4,
                 cadenceRPM: 87,
                 distanceMeters: 12300,
+                speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
                 maxSpeedKPH: 34.1,
                 speedSampleCount: 120,
                 speedSampleSum: 3408,
@@ -410,6 +430,7 @@ private extension Int {
 #Preview("SpeedWidget — grid height") {
     SpeedWidget(
         speed: 28.4,
+        activeSpeedSource: .gps,
         distance: 12.3,
         elapsed: 2340,
         averageSpeed: 28.4,
@@ -428,6 +449,7 @@ private extension Int {
                 hrZone: 3,
                 cadenceRPM: 0,
                 distanceMeters: 7600,
+                speed: SpeedFeature.State(speedMPS: 0, activeSpeedSource: .gps),
                 maxSpeedKPH: 31.2
             )
         ) {

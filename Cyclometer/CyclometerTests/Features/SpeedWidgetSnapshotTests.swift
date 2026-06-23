@@ -14,6 +14,7 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
     private func makeWidget() -> some View {
         SpeedWidget(
             speed: 28.4,
+            activeSpeedSource: .gps,
             distance: 12.3,
             elapsed: 2340,
             averageSpeed: 28.4,

@@ -115,6 +115,7 @@ struct AppView: View {
                     hrZone: 4,
                     cadenceRPM: 87,
                     distanceMeters: 12300,
+                    speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
                     maxSpeedKPH: 34.1,
                     speedSampleCount: 120,
                     speedSampleSum: 3408
