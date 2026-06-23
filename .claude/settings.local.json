@@ -10,7 +10,12 @@
       "Bash(git push *)",
       "Bash(xcodebuild build *)",
       "Bash(xcodebuild test *)",
-      "Bash(gh api *)"
+      "Bash(gh api *)",
+      "Bash(xcodebuild -project /Users/brian/Projects/CyclometerAI/Cyclometer/Cyclometer.xcodeproj -scheme Cyclometer -destination 'platform=iOS Simulator,id=65732455-DE68-4C3F-B545-9F24E4B2A555' build)",
+      "Bash(xcrun simctl *)",
+      "Bash(osascript *)",
+      "Bash(xcodebuild -project /Users/brian/Projects/CyclometerAI/Cyclometer/Cyclometer.xcodeproj -scheme Cyclometer -destination 'platform=iOS Simulator,id=42B5213B-30F2-4CAD-9649-EDC4243822D7' build-for-testing)",
+      "Bash(xcodebuild -project /Users/brian/Projects/CyclometerAI/Cyclometer/Cyclometer.xcodeproj -scheme Cyclometer -destination 'platform=iOS Simulator,id=42B5213B-30F2-4CAD-9649-EDC4243822D7' build)"
     ]
   }
 }
