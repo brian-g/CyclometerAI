@@ -20,7 +20,7 @@ struct ActiveRideFeature {
         var heartRateBPM: Int = 0
         var hrZone: Int = 0
         var isHRPaired: Bool = false
-        var cadenceRPM: Int = 0
+        var cadence = CadenceFeature.State()
         var distanceMeters: Double = 0
         var distanceKM: Double { distanceMeters / 1000.0 }
         var maxHeartRate: Int = 190
@@ -51,7 +51,7 @@ struct ActiveRideFeature {
         case finishTapped
         case heartRateUpdated(Int)
         case hrPairingChanged(Bool)
-        case cadenceUpdated(Int)
+        case cadence(CadenceFeature.Action)
         case elapsedTick
         case radarTargetsUpdated([RadarTarget])
         case radarConnectionChanged(VariaRadarClient.ConnectionState)
@@ -67,6 +67,9 @@ struct ActiveRideFeature {
         Scope(state: \.speed, action: \.speed) {
             SpeedFeature()
         }
+        Scope(state: \.cadence, action: \.cadence) {
+            CadenceFeature()
+        }
         Reduce { state, action in
             switch action {
             case .task:
@@ -77,6 +80,7 @@ struct ActiveRideFeature {
                 // move to AppFeature for continuous background timing (M3).
                 return .merge(
                     .send(.speed(.startListening)),
+                    .send(.cadence(.startListening)),
                     .run { send in
                         for await _ in clock.timer(interval: .seconds(1)) {
                             await send(.elapsedTick)
@@ -140,8 +144,7 @@ struct ActiveRideFeature {
                     state.hrZone = 0
                 }
                 return .none
-            case .cadenceUpdated(let rpm):
-                state.cadenceRPM = rpm
+            case .cadence:
                 return .none
             case .elapsedTick:
                 if !state.isPaused {

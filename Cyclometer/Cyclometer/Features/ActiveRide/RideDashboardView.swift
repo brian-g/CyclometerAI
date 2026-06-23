@@ -70,7 +70,7 @@ struct RideDashboardView: View {
 
                     // W5 Cadence + W10 Weather placeholder
                     GridRow {
-                        CadenceWidget(cadence: store.cadenceRPM)
+                        CadenceWidget(cadence: store.cadence.cadenceRPM)
                             .frame(height: unit)
                         WeatherWidget()
                             .frame(height: unit)
@@ -334,7 +334,7 @@ private struct PaceWidget: View {
 
 /// W5 — Cadence 1×1
 private struct CadenceWidget: View {
-    let cadence: Int
+    let cadence: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -342,7 +342,11 @@ private struct CadenceWidget: View {
                 .font(.caption)
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
-            HeroNumber("\(cadence)", unit: "rpm").heroNumberSize(.medium)
+            if let cadence {
+                HeroNumber("\(cadence)", unit: "rpm").heroNumberSize(.medium)
+            } else {
+                HeroNumber("–", unit: "rpm").heroNumberSize(.medium)
+            }
             Spacer()
         }
         .padding(Spacing.sm)
@@ -405,7 +409,7 @@ private extension Int {
                 speedKPH: 28.4,
                 heartRateBPM: 155,
                 hrZone: 4,
-                cadenceRPM: 87,
+                cadence: CadenceFeature.State(cadenceRPM: 87),
                 distanceMeters: 12300,
                 speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
                 maxSpeedKPH: 34.1,
@@ -447,7 +451,7 @@ private extension Int {
                 elapsedSeconds: 1230,
                 heartRateBPM: 130,
                 hrZone: 3,
-                cadenceRPM: 0,
+                cadence: CadenceFeature.State(),
                 distanceMeters: 7600,
                 speed: SpeedFeature.State(speedMPS: 0, activeSpeedSource: .gps),
                 maxSpeedKPH: 31.2

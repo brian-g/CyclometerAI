@@ -113,7 +113,7 @@ struct AppView: View {
                     speedKPH: 28.4,
                     heartRateBPM: 155,
                     hrZone: 4,
-                    cadenceRPM: 87,
+                    cadence: CadenceFeature.State(cadenceRPM: 87),
                     distanceMeters: 12300,
                     speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
                     maxSpeedKPH: 34.1,
