@@ -152,13 +152,16 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.altitude = 280.0
-            $0.speedMPS = 8.5
             $0.horizontalAccuracy = 5.0
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
             $0.speedSampleCount = 1
             $0.speedSampleSum = 8.5 * 3.6
             $0.maxSpeedKPH = 8.5 * 3.6
+        }
+        await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.speed.speedMPS = 8.5
+            $0.speed.activeSpeedSource = .gps
         }
     }
 
@@ -168,13 +171,16 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.altitude = 280.0
-            $0.speedMPS = 8.5
             $0.horizontalAccuracy = 5.0
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
             $0.speedSampleCount = 1
             $0.speedSampleSum = 8.5 * 3.6
             $0.maxSpeedKPH = 8.5 * 3.6
+        }
+        await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.speed.speedMPS = 8.5
+            $0.speed.activeSpeedSource = .gps
         }
         await store.send(.pauseTapped) {
             $0.isPaused = true
@@ -191,13 +197,46 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.locationUpdated(pausedUpdate)) {
             $0.coordinate = Coordinate(latitude: 44.0, longitude: -90.0)
             $0.altitude = 300.0
-            $0.speedMPS = 12.0
             $0.horizontalAccuracy = 3.0
             $0.heading = 45.0
             $0.speedKPH = 12.0 * 3.6
             $0.speedSampleCount = 2
             $0.speedSampleSum = 8.5 * 3.6 + 12.0 * 3.6
             $0.maxSpeedKPH = 12.0 * 3.6
+        }
+        await store.receive(.speed(.gpsSpeedReceived(12.0))) {
+            $0.speed.speedMPS = 12.0
+            $0.speed.activeSpeedSource = .gps
+        }
+    }
+
+    @Test("Invalid location speed clears SpeedFeature state")
+    func invalidLocationSpeedClearsSpeedFeature() async {
+        let store = makeStore()
+        await store.send(.speed(.gpsSpeedReceived(8.5))) {
+            $0.speed.speedMPS = 8.5
+            $0.speed.activeSpeedSource = .gps
+        }
+
+        let invalidUpdate = LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
+            altitude: 280.0,
+            speed: -1,
+            horizontalAccuracy: 5.0,
+            heading: 192.0,
+            timestamp: Date(timeIntervalSince1970: 1_000_002)
+        )
+
+        await store.send(.locationUpdated(invalidUpdate)) {
+            $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.altitude = 280.0
+            $0.horizontalAccuracy = 5.0
+            $0.heading = 192.0
+            $0.speedKPH = 0
+        }
+        await store.receive(.speed(.gpsSpeedReceived(-1))) {
+            $0.speed.speedMPS = nil
+            $0.speed.activeSpeedSource = .none
         }
     }
 
@@ -254,7 +293,12 @@ struct ActiveRideFeatureTimerTests {
         speedMPS: Double = 0
     ) -> TestStoreOf<ActiveRideFeature> {
         TestStore(
-            initialState: ActiveRideFeature.State(speedMPS: speedMPS)
+            initialState: ActiveRideFeature.State(
+                speed: SpeedFeature.State(
+                    speedMPS: speedMPS >= 0 ? speedMPS : nil,
+                    activeSpeedSource: speedMPS >= 0 ? .gps : .none
+                )
+            )
         ) {
             ActiveRideFeature()
         } withDependencies: {
@@ -298,18 +342,14 @@ struct ActiveRideFeatureTimerTests {
         }
     }
 
-    @Test("Distance accumulates even while paused")
-    func distanceAccumulatesWhilePaused() async {
+    @Test("Distance does not accumulate while paused")
+    func distanceDoesNotAccumulateWhilePaused() async {
         let store = makeStore(speedMPS: 10.0)
         await store.send(.pauseTapped) {
             $0.isPaused = true
         }
-        await store.send(.elapsedTick) {
-            $0.distanceMeters = 10.0
-        }
-        await store.send(.elapsedTick) {
-            $0.distanceMeters = 20.0
-        }
+        await store.send(.elapsedTick)
+        await store.send(.elapsedTick)
     }
 
     @Test("Negative speedMPS does not accumulate distance")
@@ -320,7 +360,7 @@ struct ActiveRideFeatureTimerTests {
         }
     }
 
-    @Test("Resume after pause: elapsed resumes, distance uninterrupted")
+    @Test("Resume after pause: elapsed and distance resume, no phantom distance during pause")
     func resumeAfterPause() async {
         let store = makeStore(speedMPS: 10.0)
         await store.send(.elapsedTick) {
@@ -330,15 +370,13 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.isPaused = true
         }
-        await store.send(.elapsedTick) {
-            $0.distanceMeters = 20.0
-        }
+        await store.send(.elapsedTick)
         await store.send(.resumeTapped) {
             $0.isPaused = false
         }
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
-            $0.distanceMeters = 30.0
+            $0.distanceMeters = 20.0
         }
     }
 }

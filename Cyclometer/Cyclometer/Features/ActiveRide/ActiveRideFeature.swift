@@ -25,6 +25,7 @@ struct ActiveRideFeature {
         var distanceKM: Double { distanceMeters / 1000.0 }
         var maxHeartRate: Int = 190
         var restingHeartRate: Int = 55
+        var speed = SpeedFeature.State()
         // Speed statistics
         var maxSpeedKPH: Double = 0
         var speedSampleCount: Int = 0
@@ -39,17 +40,15 @@ struct ActiveRideFeature {
         var coordinate: Coordinate? = nil
         var altitude: Double = 0
         var heading: Double = -1
-        var speedMPS: Double = -1
         var horizontalAccuracy: Double = 0
         var isLocationAvailable: Bool = false
     }
 
-    enum Action {
+    enum Action: Equatable {
         case task
         case pauseTapped
         case resumeTapped
         case finishTapped
-        case speedUpdated(Double)
         case heartRateUpdated(Int)
         case hrPairingChanged(Bool)
         case cadenceUpdated(Int)
@@ -57,6 +56,7 @@ struct ActiveRideFeature {
         case radarTargetsUpdated([RadarTarget])
         case radarConnectionChanged(VariaRadarClient.ConnectionState)
         case radarReconnectTimedOut
+        case speed(SpeedFeature.Action)
         case locationUpdated(LocationUpdate)
         case locationAuthorizationResult(CLAuthorizationStatus)
     }
@@ -64,6 +64,9 @@ struct ActiveRideFeature {
     private enum CancelID { case radarLossTimer }
 
     var body: some ReducerOf<Self> {
+        Scope(state: \.speed, action: \.speed) {
+            SpeedFeature()
+        }
         Reduce { state, action in
             switch action {
             case .task:
@@ -73,6 +76,7 @@ struct ActiveRideFeature {
                 // Note: timer pauses when dashboard is minimised in this bootstrap;
                 // move to AppFeature for continuous background timing (M3).
                 return .merge(
+                    .send(.speed(.startListening)),
                     .run { send in
                         for await _ in clock.timer(interval: .seconds(1)) {
                             await send(.elapsedTick)
@@ -123,14 +127,6 @@ struct ActiveRideFeature {
                     async let loc: Void = locationClient.stopUpdates()
                     _ = await (hr, radar, loc)
                 }
-            case .speedUpdated(let kph):
-                state.speedKPH = kph
-                if kph > 0 {
-                    state.speedSampleCount += 1
-                    state.speedSampleSum += kph
-                }
-                if kph > state.maxSpeedKPH { state.maxSpeedKPH = kph }
-                return .none
             case .heartRateUpdated(let bpm):
                 state.heartRateBPM = bpm
                 state.hrZone = HeartRateZone.zone(
@@ -150,8 +146,8 @@ struct ActiveRideFeature {
             case .elapsedTick:
                 if !state.isPaused {
                     state.elapsedSeconds += 1
+                    state.distanceMeters += max(state.speed.speedMPS ?? 0, 0)
                 }
-                state.distanceMeters += max(state.speedMPS, 0)
                 return .none
             case .radarTargetsUpdated(let targets):
                 state.radarTargets = targets
@@ -187,7 +183,6 @@ struct ActiveRideFeature {
                 state.coordinate = update.coordinate
                 state.altitude = update.altitude
                 state.heading = update.heading
-                state.speedMPS = update.speed
                 state.horizontalAccuracy = update.horizontalAccuracy
                 let kph = max(update.speed, 0) * 3.6
                 state.speedKPH = kph
@@ -196,9 +191,11 @@ struct ActiveRideFeature {
                     state.speedSampleSum += kph
                 }
                 if kph > state.maxSpeedKPH { state.maxSpeedKPH = kph }
-                return .none
+                return .send(.speed(.gpsSpeedReceived(update.speed)))
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = (status == .authorizedWhenInUse || status == .authorizedAlways)
+                return .none
+            case .speed:
                 return .none
             }
         }
