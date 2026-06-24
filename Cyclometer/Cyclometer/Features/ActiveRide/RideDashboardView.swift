@@ -9,135 +9,31 @@ struct RideDashboardView: View {
     let store: StoreOf<ActiveRideFeature>
     let onClose: () -> Void
     @GestureState private var dragOffset: CGFloat = 0
+    @State private var selectedPage = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // ── Grabber ───────────────────────────────────────────────────────
-            Capsule()
-                .fill(Color(.systemGray3))
-                .frame(width: Spacing.xxl, height: Spacing.grabberHeight)
-                .frame(maxWidth: .infinity)
-                .padding(.top, Spacing.sm)
-                .padding(.bottom, Spacing.xs)
+        // Pages float full-screen so the map can bleed into the safe areas
+        // (S05 — Map widget safe-area bleed). The grabber and toolbar are
+        // safe-area insets: they stay visible on every page and bound the grid
+        // page to the area top-safe-area → toolbar, giving 1/7-height rows.
+        TabView(selection: $selectedPage) {
+            gridPage
+                .tag(0)
 
-            // ── Widget Grid (S05.4 factory default) ───────────────────────────
-            // GeometryReader is intentional here: containerRelativeFrame measures
-            // from the fullScreenCover container (full screen height), not from
-            // this grid area (screen minus grabber and controls). GeometryReader
-            // correctly captures only the height available to the grid.
-            // Rows 1-2: Speed (W1 2×2)
-            // Row 3:    HR (W4 1×1) + HR Zones (W12 1×1)
-            // Row 4:    Radar (W7 1×1) + Pace (W11 1×1)
-            // Row 5:    Cadence (W5 1×1) + Weather (W10 1×1) [placeholder]
-            // Rows 6-7: Map (W8 2×2)
-            GeometryReader { geo in
-                let unit = geo.size.height / 7
-                Grid(horizontalSpacing: 0, verticalSpacing: 0) {
-                    // W1 — Speed 2×2
-                    GridRow {
-                        SpeedWidget(
-                            speed: store.speedKPH,
-                            activeSpeedSource: store.speed.activeSpeedSource,
-                            distance: store.distanceKM,
-                            elapsed: store.elapsedSeconds,
-                            averageSpeed: store.averageSpeedKPH,
-                            maxSpeed: store.maxSpeedKPH
-                        )
-                        .gridCellColumns(2)
-                        .frame(height: unit * 2)
-                    }
-
-                    // W4 HR + W12 HR Zones
-                    GridRow {
-                        HeartRateWidget(bpm: store.heartRateBPM, zone: store.hrZone)
-                            .frame(height: unit)
-                        HRZonesWidget(zone: store.hrZone)
-                            .frame(height: unit)
-                    }
-
-                    // W7 Radar + W11 Pace
-                    GridRow {
-                        RadarWidget(
-                            targets: store.radarTargets,
-                            isRadarPaired: store.isRadarPaired
-                        )
-                        .frame(height: unit)
-                        PaceWidget(speedKPH: store.speedKPH)
-                            .frame(height: unit)
-                    }
-
-                    // W5 Cadence + W10 Weather placeholder
-                    GridRow {
-                        CadenceWidget(cadence: store.cadence.cadenceRPM)
-                            .frame(height: unit)
-                        WeatherWidget()
-                            .frame(height: unit)
-                    }
-
-                    // W8 — Map 2×2
-                    GridRow {
-                        MapWidget()
-                            .gridCellColumns(2)
-                            .frame(height: unit * 2)
-                    }
-                }
-            }
-
-            // ── Ride Controls ─────────────────────────────────────────────────
-            HStack(spacing: Spacing.md) {
-                if store.isPaused {
-                    Button {
-                        store.send(.resumeTapped)
-                    } label: {
-                        Label("Resume", systemImage: "play.fill")
-                            .labelStyle(.iconOnly)
-                            .font(.title3.weight(.semibold))
-                            .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
-                    }
-                    .buttonStyle(.glass)
-                    .accessibilityLabel("Resume")
-
-                    Button {
-                        store.send(.finishTapped)
-                    } label: {
-                        Label("Finish", systemImage: "stop.fill")
-                            .labelStyle(.iconOnly)
-                            .font(.title3.weight(.semibold))
-                            .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
-                    }
-                    .buttonStyle(.glass)
-                    .accessibilityLabel("Finish")
-                } else {
-                    Button {
-                        store.send(.pauseTapped)
-                    } label: {
-                        Label("Pause", systemImage: "pause.fill")
-                            .labelStyle(.iconOnly)
-                            .font(.title3.weight(.semibold))
-                            .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
-                    }
-                    .buttonStyle(.glass)
-                    .accessibilityLabel("Pause")
-                }
-
-                Spacer()
-
-                Button {
-                    AudioServicesPlaySystemSound(1005)
-                } label: {
-                    Label("Bell", systemImage: "bell.fill")
-                        .labelStyle(.iconOnly)
-                        .font(.title3.weight(.semibold))
-                        .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
-                }
-                .buttonStyle(.glass)
-                .accessibilityLabel("Ring Bell")
-            }
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, Spacing.md)
-            .background(.bar)
+            // Page 2 — single full-bleed map (S05 "second page has a single map").
+            ActiveRideMapView(coordinates: store.trackCoordinates)
+                .ignoresSafeArea()
+                .tag(1)
         }
-        .padding(0)
+        .background(Color.cyBgSecondary)
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .safeAreaInset(edge: .top, spacing: 0) { grabber }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: Spacing.xs) {
+                pageIndicator
+                rideControls
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .offset(y: max(dragOffset, 0))
         .gesture(
@@ -151,6 +47,150 @@ struct RideDashboardView: View {
         )
         .task { await store.send(.task).finish() }
         .alert(store: store.scope(state: \.$finishAlert, action: \.finishAlert))
+    }
+
+    // ── Page 1 — Widget Grid (S05.4 factory default) ──────────────────────────
+    // GeometryReader measures only the region between the grabber and the
+    // toolbar (both are safe-area insets), so unit = height/7 yields the
+    // ≈201×96pt cells the spec calls for on iPhone 17 Pro.
+    // Rows 1-2: Speed (W1 2×2)
+    // Row 3:    HR (W4 1×1) + HR Zones (W12 1×1)
+    // Row 4:    Radar (W7 1×1) + Pace (W11 1×1)
+    // Row 5:    Cadence (W5 1×1) + Weather (W10 1×1) [placeholder]
+    // Rows 6-7: Map (W8 2×2) — bleeds into the bottom safe area
+    private var gridPage: some View {
+        GeometryReader { geo in
+            let unit = geo.size.height / 7
+            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+                // W1 — Speed 2×2
+                GridRow {
+                    SpeedWidget(
+                        speed: store.speedKPH,
+                        activeSpeedSource: store.speed.activeSpeedSource,
+                        distance: store.distanceKM,
+                        elapsed: store.elapsedSeconds,
+                        averageSpeed: store.averageSpeedKPH,
+                        maxSpeed: store.maxSpeedKPH
+                    )
+                    .gridCellColumns(2)
+                    .frame(height: unit * 2)
+                }
+
+                // W4 HR + W12 HR Zones
+                GridRow {
+                    HeartRateWidget(bpm: store.heartRateBPM, zone: store.hrZone)
+                        .frame(height: unit)
+                    HRZonesWidget(zone: store.hrZone)
+                        .frame(height: unit)
+                }
+
+                // W7 Radar + W11 Pace
+                GridRow {
+                    RadarWidget(
+                        targets: store.radarTargets,
+                        isRadarPaired: store.isRadarPaired
+                    )
+                    .frame(height: unit)
+                    PaceWidget(speedKPH: store.speedKPH)
+                        .frame(height: unit)
+                }
+
+                // W5 Cadence + W10 Weather placeholder
+                GridRow {
+                    CadenceWidget(cadence: store.cadence.cadenceRPM)
+                        .frame(height: unit)
+                    WeatherWidget()
+                        .frame(height: unit)
+                }
+
+                // W8 — Map 2×2 (bleeds into the bottom safe area)
+                GridRow {
+                    ActiveRideMapView(coordinates: store.trackCoordinates)
+                        .gridCellColumns(2)
+                        .frame(height: unit * 2)
+                        .ignoresSafeArea(edges: .bottom)
+                }
+            }
+        }
+    }
+
+    // ── Grabber ───────────────────────────────────────────────────────────────
+    private var grabber: some View {
+        Capsule()
+            .fill(Color(.systemGray3))
+            .frame(width: Spacing.xxl, height: Spacing.grabberHeight)
+            .frame(maxWidth: .infinity)
+            .padding(.top, Spacing.sm)
+            .padding(.bottom, Spacing.xs)
+    }
+
+    // ── Paging indicator — always visible; factory default shows 2 dots ────────
+    private var pageIndicator: some View {
+        HStack(spacing: Spacing.xs) {
+            ForEach(0..<2, id: \.self) { page in
+                Circle()
+                    .fill(page == selectedPage ? Color.cyPrimary : Color.cyTextTertiary)
+                    .frame(width: 7, height: 7)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Page \(selectedPage + 1) of 2")
+    }
+
+    // ── Ride Controls — floating glass buttons (S05) ───────────────────────────
+    private var rideControls: some View {
+        HStack(spacing: Spacing.md) {
+            if store.isPaused {
+                Button {
+                    store.send(.resumeTapped)
+                } label: {
+                    Label("Resume", systemImage: "play.fill")
+                        .labelStyle(.iconOnly)
+                        .font(.title3.weight(.semibold))
+                        .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
+                }
+                .buttonStyle(.glass)
+                .accessibilityLabel("Resume")
+
+                Button {
+                    store.send(.finishTapped)
+                } label: {
+                    Label("Finish", systemImage: "stop.fill")
+                        .labelStyle(.iconOnly)
+                        .font(.title3.weight(.semibold))
+                        .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
+                }
+                .buttonStyle(.glass)
+                .accessibilityLabel("Finish")
+            } else {
+                Button {
+                    store.send(.pauseTapped)
+                } label: {
+                    Label("Pause", systemImage: "pause.fill")
+                        .labelStyle(.iconOnly)
+                        .font(.title3.weight(.semibold))
+                        .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
+                }
+                .buttonStyle(.glass)
+                .accessibilityLabel("Pause")
+            }
+
+            Spacer()
+
+            Button {
+                AudioServicesPlaySystemSound(1005)
+            } label: {
+                Label("Bell", systemImage: "bell.fill")
+                    .labelStyle(.iconOnly)
+                    .font(.title3.weight(.semibold))
+                    .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
+            }
+            .buttonStyle(.glass)
+            .accessibilityLabel("Ring Bell")
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.top, 0)
+        .padding(.bottom, -1 * Spacing.lg)
     }
 }
 
@@ -229,7 +269,7 @@ private struct HeartRateWidget: View {
                 .font(.caption)
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
-            HeroNumber("\(bpm)", unit: "bpm").heroNumberSize(.medium)
+            HeroNumber(bpm > 0 ? "\(bpm)" : "—", unit: "bpm").heroNumberSize(.medium)
             Spacer()
         }
         .padding(Spacing.sm)
@@ -253,7 +293,7 @@ private struct HRZonesWidget: View {
                 .font(.caption)
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
-            HeroNumber("Z\(zone == 0 ? "-" : "\(zone)")", unit: "").heroNumberSize(.medium)
+            HeroNumber(zone == 0 ? "—" : "Z\(zone)", unit: "").heroNumberSize(.medium)
             Spacer()
         }
         .padding(Spacing.sm)
@@ -262,7 +302,9 @@ private struct HRZonesWidget: View {
     }
 }
 
-/// W7 — Radar 1×1 (24pt column on right edge per S06 spec)
+/// W7 — Radar 1×1 (24pt column on right edge per S06 spec).
+/// When no radar is paired (e.g. M3) the widget shows an em-dash stub,
+/// matching the other unpaired metrics.
 private struct RadarWidget: View {
     let targets: [RadarTarget]
     let isRadarPaired: Bool
@@ -275,8 +317,7 @@ private struct RadarWidget: View {
                     .textCase(.uppercase)
                     .foregroundStyle(.secondary)
                 if !isRadarPaired {
-                    Text("–")
-                        .dDINCondensed(size: 68, relativeTo: .largeTitle)
+                    HeroNumber("—", unit: "").heroNumberSize(.medium)
                 } else if targets.isEmpty {
                     Text("Clear")
                         .font(.headline)
@@ -340,7 +381,7 @@ private struct CadenceWidget: View {
             if let cadence {
                 HeroNumber("\(cadence)", unit: "rpm").heroNumberSize(.medium)
             } else {
-                HeroNumber("–", unit: "rpm").heroNumberSize(.medium)
+                HeroNumber("—", unit: "rpm").heroNumberSize(.medium)
             }
             Spacer()
         }
@@ -364,20 +405,6 @@ private struct WeatherWidget: View {
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.cyBgSecondary)
-    }
-}
-
-/// W8 — Map 2×2 (placeholder; full MapKit implementation in M8)
-private struct MapWidget: View {
-    var body: some View {
-        Rectangle()
-            .fill(Color.cyBgTertiary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay {
-                Image(systemName: "map")
-                    .font(.system(size: 32))
-                    .foregroundStyle(Color.cyTextTertiary)
-            }
     }
 }
 
