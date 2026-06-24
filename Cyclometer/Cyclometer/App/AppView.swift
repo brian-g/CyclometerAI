@@ -85,8 +85,7 @@ struct AppView: View {
             if let rideStore = store.scope(state: \.activeRide, action: \.activeRide) {
                 RideDashboardView(
                     store: rideStore,
-                    onClose: { store.send(.dashboardDismissed) },
-                    onFinish: { store.send(.rideFinished) }
+                    onClose: { store.send(.dashboardDismissed) }
                 )
             }
         }
@@ -109,6 +108,7 @@ struct AppView: View {
         store: Store(
             initialState: AppFeature.State(
                 activeRide: ActiveRideFeature.State(
+                    recordingState: .active,
                     elapsedSeconds: 2340,
                     speedKPH: 28.4,
                     heartRateBPM: 155,

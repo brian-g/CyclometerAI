@@ -8,8 +8,6 @@ import AudioToolbox
 struct RideDashboardView: View {
     let store: StoreOf<ActiveRideFeature>
     let onClose: () -> Void
-    let onFinish: () -> Void
-    @State private var isConfirmingFinish = false
     @GestureState private var dragOffset: CGFloat = 0
 
     var body: some View {
@@ -100,7 +98,7 @@ struct RideDashboardView: View {
                     .accessibilityLabel("Resume")
 
                     Button {
-                        isConfirmingFinish = true
+                        store.send(.finishTapped)
                     } label: {
                         Label("Finish", systemImage: "stop.fill")
                             .labelStyle(.iconOnly)
@@ -152,10 +150,7 @@ struct RideDashboardView: View {
                 }
         )
         .task { await store.send(.task).finish() }
-        .alert("Finish Ride", isPresented: $isConfirmingFinish) {
-            Button("Finish", role: .destructive) { onFinish() }
-            Button("Cancel", role: .cancel) { }
-        }
+        .alert(store: store.scope(state: \.$finishAlert, action: \.finishAlert))
     }
 }
 
@@ -405,6 +400,7 @@ private extension Int {
     RideDashboardView(
         store: Store(
             initialState: ActiveRideFeature.State(
+                recordingState: .active,
                 elapsedSeconds: 2340,
                 speedKPH: 28.4,
                 heartRateBPM: 155,
@@ -424,8 +420,7 @@ private extension Int {
         ) {
             ActiveRideFeature()
         },
-        onClose: { },
-        onFinish: { }
+        onClose: { }
     )
 }
 
@@ -447,7 +442,7 @@ private extension Int {
     RideDashboardView(
         store: Store(
             initialState: ActiveRideFeature.State(
-                isPaused: true,
+                recordingState: .paused,
                 elapsedSeconds: 1230,
                 heartRateBPM: 130,
                 hrZone: 3,
@@ -459,7 +454,6 @@ private extension Int {
         ) {
             ActiveRideFeature()
         },
-        onClose: { },
-        onFinish: { }
+        onClose: { }
     )
 }

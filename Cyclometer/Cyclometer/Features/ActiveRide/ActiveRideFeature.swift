@@ -1,8 +1,10 @@
 import ComposableArchitecture
 import CoreLocation
 
-/// Active ride state — owns radar, HR, speed/cadence, and recording state.
-/// Radar column state is also here — fed to RideDashboardView.
+enum RideRecordingState: Equatable, Sendable {
+    case idle, active, paused, ended
+}
+
 @Reducer
 struct ActiveRideFeature {
 
@@ -14,7 +16,7 @@ struct ActiveRideFeature {
 
     @ObservableState
     struct State: Equatable {
-        var isPaused: Bool = false
+        var recordingState: RideRecordingState = .idle
         var elapsedSeconds: Int = 0
         var speedKPH: Double = 0
         var heartRateBPM: Int = 0
@@ -26,22 +28,23 @@ struct ActiveRideFeature {
         var maxHeartRate: Int = 190
         var restingHeartRate: Int = 55
         var speed = SpeedFeature.State()
-        // Speed statistics
         var maxSpeedKPH: Double = 0
         var speedSampleCount: Int = 0
         var speedSampleSum: Double = 0
         var averageSpeedKPH: Double {
             speedSampleCount > 0 ? speedSampleSum / Double(speedSampleCount) : 0
         }
-        // Radar
         var isRadarPaired: Bool = false
         var radarTargets: [RadarTarget] = []
-        // Location (GPS)
         var coordinate: Coordinate? = nil
         var altitude: Double = 0
         var heading: Double = -1
         var horizontalAccuracy: Double = 0
         var isLocationAvailable: Bool = false
+        var zeroSpeedSeconds: Int = 0
+        var isAutoEndEnabled: Bool = true
+        @Presents var finishAlert: AlertState<Action.FinishAlert>?
+        var isPaused: Bool { recordingState == .paused }
     }
 
     enum Action: Equatable {
@@ -49,6 +52,8 @@ struct ActiveRideFeature {
         case pauseTapped
         case resumeTapped
         case finishTapped
+        case finishAlert(PresentationAction<FinishAlert>)
+        case autoEndTriggered
         case heartRateUpdated(Int)
         case hrPairingChanged(Bool)
         case cadence(CadenceFeature.Action)
@@ -59,6 +64,11 @@ struct ActiveRideFeature {
         case speed(SpeedFeature.Action)
         case locationUpdated(LocationUpdate)
         case locationAuthorizationResult(CLAuthorizationStatus)
+
+        @CasePathable
+        enum FinishAlert: Equatable {
+            case confirmFinish
+        }
     }
 
     private enum CancelID { case radarLossTimer }
@@ -73,11 +83,7 @@ struct ActiveRideFeature {
         Reduce { state, action in
             switch action {
             case .task:
-                // Timer continues while the reducer is alive. Cancelled automatically
-                // when activeRide becomes nil (via AppFeature.ifLet) or when the
-                // SwiftUI .task modifier is cancelled on view disappearance.
-                // Note: timer pauses when dashboard is minimised in this bootstrap;
-                // move to AppFeature for continuous background timing (M3).
+                state.recordingState = .active
                 return .merge(
                     .send(.speed(.startListening)),
                     .send(.cadence(.startListening)),
@@ -119,18 +125,41 @@ struct ActiveRideFeature {
                     }
                 )
             case .pauseTapped:
-                state.isPaused = true
+                guard state.recordingState == .active else { return .none }
+                state.recordingState = .paused
                 return .none
             case .resumeTapped:
-                state.isPaused = false
+                guard state.recordingState == .paused else { return .none }
+                state.recordingState = .active
+                state.zeroSpeedSeconds = 0
                 return .none
             case .finishTapped:
+                guard state.recordingState == .paused else { return .none }
+                state.finishAlert = AlertState {
+                    TextState("Finish Ride")
+                } actions: {
+                    ButtonState(role: .destructive, action: .confirmFinish) {
+                        TextState("Finish")
+                    }
+                    ButtonState(role: .cancel) {
+                        TextState("Cancel")
+                    }
+                }
+                return .none
+            case .finishAlert(.presented(.confirmFinish)):
+                state.recordingState = .ended
                 return .run { [bleHRClient, variaRadarClient, locationClient] _ in
                     async let hr: Void = bleHRClient.disconnect()
                     async let radar: Void = variaRadarClient.disconnect()
                     async let loc: Void = locationClient.stopUpdates()
                     _ = await (hr, radar, loc)
                 }
+            case .finishAlert:
+                return .none
+            case .autoEndTriggered:
+                guard state.recordingState == .active else { return .none }
+                state.recordingState = .paused
+                return .send(.finishTapped)
             case .heartRateUpdated(let bpm):
                 state.heartRateBPM = bpm
                 state.hrZone = HeartRateZone.zone(
@@ -147,9 +176,16 @@ struct ActiveRideFeature {
             case .cadence:
                 return .none
             case .elapsedTick:
-                if !state.isPaused {
-                    state.elapsedSeconds += 1
-                    state.distanceMeters += max(state.speed.speedMPS ?? 0, 0)
+                guard state.recordingState == .active else { return .none }
+                state.elapsedSeconds += 1
+                state.distanceMeters += max(state.speed.speedMPS ?? 0, 0)
+                if state.speedKPH == 0 {
+                    state.zeroSpeedSeconds += 1
+                } else {
+                    state.zeroSpeedSeconds = 0
+                }
+                if state.isAutoEndEnabled, state.zeroSpeedSeconds >= 21_600 {
+                    return .send(.autoEndTriggered)
                 }
                 return .none
             case .radarTargetsUpdated(let targets):
@@ -202,5 +238,6 @@ struct ActiveRideFeature {
                 return .none
             }
         }
+        .ifLet(\.$finishAlert, action: \.finishAlert)
     }
 }

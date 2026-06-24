@@ -76,6 +76,11 @@ struct AppFeature {
                 state.isDashboardPresented = false
                 return .none
 
+            case .activeRide(.finishAlert(.presented(.confirmFinish))):
+                state.activeRide = nil
+                state.isDashboardPresented = false
+                return .none
+
             case .rides, .routes, .settings, .activeRide:
                 return .none
             }
