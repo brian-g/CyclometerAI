@@ -134,8 +134,10 @@ struct ActiveRideFeatureLocationTests {
         timestamp: Date(timeIntervalSince1970: 1_000_000)
     )
 
-    private func makeStore() -> TestStoreOf<ActiveRideFeature> {
-        TestStore(initialState: ActiveRideFeature.State()) {
+    private func makeStore(
+        recordingState: RideRecordingState = .active
+    ) -> TestStoreOf<ActiveRideFeature> {
+        TestStore(initialState: ActiveRideFeature.State(recordingState: recordingState)) {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
@@ -183,7 +185,7 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.activeSpeedSource = .gps
         }
         await store.send(.pauseTapped) {
-            $0.isPaused = true
+            $0.recordingState = .paused
         }
 
         let pausedUpdate = LocationUpdate(
@@ -265,7 +267,9 @@ struct ActiveRideFeatureLocationTests {
     @Test("Finish ride calls stopUpdates")
     func finishCallsStop() async {
         let stopCalled = LockIsolated(false)
-        let store = TestStore(initialState: ActiveRideFeature.State()) {
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(recordingState: .active)
+        ) {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
@@ -278,7 +282,25 @@ struct ActiveRideFeatureLocationTests {
                 stopUpdates: { stopCalled.setValue(true) }
             )
         }
-        await store.send(.finishTapped)
+        await store.send(.pauseTapped) {
+            $0.recordingState = .paused
+        }
+        await store.send(.finishTapped) {
+            $0.finishAlert = AlertState {
+                TextState("Finish Ride")
+            } actions: {
+                ButtonState(role: .destructive, action: .confirmFinish) {
+                    TextState("Finish")
+                }
+                ButtonState(role: .cancel) {
+                    TextState("Cancel")
+                }
+            }
+        }
+        await store.send(.finishAlert(.presented(.confirmFinish))) {
+            $0.recordingState = .ended
+            $0.finishAlert = nil
+        }
         #expect(stopCalled.value == true)
     }
 }
@@ -294,6 +316,7 @@ struct ActiveRideFeatureTimerTests {
     ) -> TestStoreOf<ActiveRideFeature> {
         TestStore(
             initialState: ActiveRideFeature.State(
+                recordingState: .active,
                 speed: SpeedFeature.State(
                     speedMPS: speedMPS >= 0 ? speedMPS : nil,
                     activeSpeedSource: speedMPS >= 0 ? .gps : .none
@@ -316,6 +339,7 @@ struct ActiveRideFeatureTimerTests {
         for tick in 1...5 {
             await store.send(.elapsedTick) {
                 $0.elapsedSeconds = tick
+                $0.zeroSpeedSeconds = tick
             }
         }
     }
@@ -324,7 +348,7 @@ struct ActiveRideFeatureTimerTests {
     func pausedTickNoElapsed() async {
         let store = makeStore()
         await store.send(.pauseTapped) {
-            $0.isPaused = true
+            $0.recordingState = .paused
         }
         await store.send(.elapsedTick)
     }
@@ -335,10 +359,12 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
+            $0.zeroSpeedSeconds = 1
         }
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
+            $0.zeroSpeedSeconds = 2
         }
     }
 
@@ -346,7 +372,7 @@ struct ActiveRideFeatureTimerTests {
     func distanceDoesNotAccumulateWhilePaused() async {
         let store = makeStore(speedMPS: 10.0)
         await store.send(.pauseTapped) {
-            $0.isPaused = true
+            $0.recordingState = .paused
         }
         await store.send(.elapsedTick)
         await store.send(.elapsedTick)
@@ -357,6 +383,7 @@ struct ActiveRideFeatureTimerTests {
         let store = makeStore(speedMPS: -1)
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = 1
         }
     }
 
@@ -366,17 +393,280 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
+            $0.zeroSpeedSeconds = 1
         }
         await store.send(.pauseTapped) {
-            $0.isPaused = true
+            $0.recordingState = .paused
         }
         await store.send(.elapsedTick)
         await store.send(.resumeTapped) {
-            $0.isPaused = false
+            $0.recordingState = .active
+            $0.zeroSpeedSeconds = 0
         }
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
+            $0.zeroSpeedSeconds = 1
         }
+    }
+}
+
+// MARK: - State machine
+
+@MainActor
+@Suite("ActiveRideFeature — state machine")
+struct ActiveRideFeatureStateMachineTests {
+
+    private func makeStore(
+        recordingState: RideRecordingState = .idle
+    ) -> TestStoreOf<ActiveRideFeature> {
+        TestStore(
+            initialState: ActiveRideFeature.State(recordingState: recordingState)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+        }
+    }
+
+    @Test("Initial state is idle")
+    func initialStateIsIdle() async {
+        let store = makeStore()
+        #expect(store.state.recordingState == .idle)
+    }
+
+    @Test("pauseTapped only transitions from active")
+    func pauseOnlyFromActive() async {
+        let store = makeStore(recordingState: .active)
+        await store.send(.pauseTapped) {
+            $0.recordingState = .paused
+        }
+    }
+
+    @Test("pauseTapped ignored when idle")
+    func pauseIgnoredWhenIdle() async {
+        let store = makeStore(recordingState: .idle)
+        await store.send(.pauseTapped)
+    }
+
+    @Test("pauseTapped ignored when already paused")
+    func pauseIgnoredWhenPaused() async {
+        let store = makeStore(recordingState: .paused)
+        await store.send(.pauseTapped)
+    }
+
+    @Test("resumeTapped only transitions from paused")
+    func resumeOnlyFromPaused() async {
+        let store = makeStore(recordingState: .paused)
+        await store.send(.resumeTapped) {
+            $0.recordingState = .active
+        }
+    }
+
+    @Test("resumeTapped ignored when active")
+    func resumeIgnoredWhenActive() async {
+        let store = makeStore(recordingState: .active)
+        await store.send(.resumeTapped)
+    }
+
+    @Test("finishTapped presents alert when paused")
+    func finishPresentsAlert() async {
+        let store = makeStore(recordingState: .paused)
+        await store.send(.finishTapped) {
+            $0.finishAlert = AlertState {
+                TextState("Finish Ride")
+            } actions: {
+                ButtonState(role: .destructive, action: .confirmFinish) {
+                    TextState("Finish")
+                }
+                ButtonState(role: .cancel) {
+                    TextState("Cancel")
+                }
+            }
+        }
+    }
+
+    @Test("finishTapped ignored when active")
+    func finishIgnoredWhenActive() async {
+        let store = makeStore(recordingState: .active)
+        await store.send(.finishTapped)
+    }
+
+    @Test("finishConfirmed transitions to ended and disconnects sensors")
+    func finishConfirmedEndsRide() async {
+        let disconnectCalled = LockIsolated(false)
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(recordingState: .paused)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = LocationClient(
+                requestAuthorization: { .authorizedWhenInUse },
+                startUpdates: { AsyncStream { $0.finish() } },
+                stopUpdates: { disconnectCalled.setValue(true) }
+            )
+        }
+        await store.send(.finishTapped) {
+            $0.finishAlert = AlertState {
+                TextState("Finish Ride")
+            } actions: {
+                ButtonState(role: .destructive, action: .confirmFinish) {
+                    TextState("Finish")
+                }
+                ButtonState(role: .cancel) {
+                    TextState("Cancel")
+                }
+            }
+        }
+        await store.send(.finishAlert(.presented(.confirmFinish))) {
+            $0.recordingState = .ended
+            $0.finishAlert = nil
+        }
+        #expect(disconnectCalled.value == true)
+    }
+
+    @Test("Alert cancel does not change recording state")
+    func alertCancelKeepsPaused() async {
+        let store = makeStore(recordingState: .paused)
+        await store.send(.finishTapped) {
+            $0.finishAlert = AlertState {
+                TextState("Finish Ride")
+            } actions: {
+                ButtonState(role: .destructive, action: .confirmFinish) {
+                    TextState("Finish")
+                }
+                ButtonState(role: .cancel) {
+                    TextState("Cancel")
+                }
+            }
+        }
+        await store.send(.finishAlert(.dismiss)) {
+            $0.finishAlert = nil
+        }
+        #expect(store.state.recordingState == .paused)
+    }
+
+    @Test("Auto-end triggers after 21600 zero-speed seconds")
+    func autoEndTriggersAtThreshold() async {
+        let store = makeStore(recordingState: .active)
+        store.exhaustivity = .off
+
+        for tick in 1..<21_600 {
+            await store.send(.elapsedTick) {
+                $0.elapsedSeconds = tick
+                $0.zeroSpeedSeconds = tick
+            }
+        }
+
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 21_600
+            $0.zeroSpeedSeconds = 21_600
+        }
+        await store.receive(.autoEndTriggered) {
+            $0.recordingState = .paused
+        }
+        await store.receive(.finishTapped) {
+            $0.finishAlert = AlertState {
+                TextState("Finish Ride")
+            } actions: {
+                ButtonState(role: .destructive, action: .confirmFinish) {
+                    TextState("Finish")
+                }
+                ButtonState(role: .cancel) {
+                    TextState("Cancel")
+                }
+            }
+        }
+    }
+
+    @Test("Zero-speed counter resets on non-zero speed")
+    func zeroSpeedCounterResetsOnSpeed() async {
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                speedKPH: 0,
+                zeroSpeedSeconds: 100
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+        }
+
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0, longitude: -89.0),
+            altitude: 280.0,
+            speed: 8.0,
+            horizontalAccuracy: 5.0,
+            heading: 0,
+            timestamp: Date()
+        ))) {
+            $0.coordinate = Coordinate(latitude: 43.0, longitude: -89.0)
+            $0.altitude = 280.0
+            $0.horizontalAccuracy = 5.0
+            $0.heading = 0
+            $0.speedKPH = 8.0 * 3.6
+            $0.speedSampleCount = 1
+            $0.speedSampleSum = 8.0 * 3.6
+            $0.maxSpeedKPH = 8.0 * 3.6
+        }
+        await store.receive(.speed(.gpsSpeedReceived(8.0))) {
+            $0.speed.speedMPS = 8.0
+            $0.speed.activeSpeedSource = .gps
+        }
+
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.distanceMeters = 8.0
+            $0.zeroSpeedSeconds = 0
+        }
+    }
+
+    @Test("Auto-end disabled skips trigger")
+    func autoEndDisabledSkipsTrigger() async {
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                zeroSpeedSeconds: 21_599,
+                isAutoEndEnabled: false
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+        }
+
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = 21_600
+        }
+    }
+
+    @Test("elapsedTick ignored when paused")
+    func elapsedTickIgnoredWhenPaused() async {
+        let store = makeStore(recordingState: .paused)
+        await store.send(.elapsedTick)
+    }
+
+    @Test("elapsedTick ignored when idle")
+    func elapsedTickIgnoredWhenIdle() async {
+        let store = makeStore(recordingState: .idle)
+        await store.send(.elapsedTick)
     }
 }
