@@ -221,7 +221,12 @@ struct ActiveRideFeature {
                 }
             case .locationUpdated(let update):
                 state.coordinate = update.coordinate
-                state.trackCoordinates.append(update.coordinate)
+                // Only record track points while actively riding, so paused/stopped
+                // GPS jitter doesn't pollute the polyline — mirrors distanceMeters,
+                // which also only accumulates while active (.elapsedTick).
+                if state.recordingState == .active {
+                    state.trackCoordinates.append(update.coordinate)
+                }
                 state.altitude = update.altitude
                 state.heading = update.heading
                 state.horizontalAccuracy = update.horizontalAccuracy
