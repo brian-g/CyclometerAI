@@ -6,16 +6,16 @@ import AudioToolbox
 /// Matches prototype RideDashboardView with TCA store replacing local @State.
 /// Dashboard uses the 2-col × 7-row widget grid (S05.4 factory default).
 struct RideDashboardView: View {
-    let store: StoreOf<ActiveRideFeature>
+    @Bindable var store: StoreOf<ActiveRideFeature>
     let onClose: () -> Void
     @GestureState private var dragOffset: CGFloat = 0
     @State private var selectedPage = 0
+    @State private var toolbarHeight: CGFloat = 0
 
     var body: some View {
-        // Pages float full-screen so the map can bleed into the safe areas
-        // (S05 — Map widget safe-area bleed). The grabber and toolbar are
-        // safe-area insets: they stay visible on every page and bound the grid
-        // page to the area top-safe-area → toolbar, giving 1/7-height rows.
+        // S05 — Map widget safe-area bleed. The toolbar floats as an overlay
+        // (not a safe-area inset) so the grid's map cell can extend behind it
+        // all the way to the physical screen bottom.
         TabView(selection: $selectedPage) {
             gridPage
                 .tag(0)
@@ -28,10 +28,16 @@ struct RideDashboardView: View {
         .background(Color.cyBgSecondary)
         .tabViewStyle(.page(indexDisplayMode: .never))
         .safeAreaInset(edge: .top, spacing: 0) { grabber }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .ignoresSafeArea(.all)
+        .overlay(alignment: .bottom) {
             VStack(spacing: Spacing.xs) {
                 pageIndicator
                 rideControls
+            }
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { newValue in
+                toolbarHeight = newValue
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -46,21 +52,25 @@ struct RideDashboardView: View {
                 }
         )
         .task { await store.send(.task).finish() }
-        .alert(store: store.scope(state: \.$finishAlert, action: \.finishAlert))
+        .alert($store.scope(state: \.finishAlert, action: \.finishAlert))
     }
 
     // ── Page 1 — Widget Grid (S05.4 factory default) ──────────────────────────
-    // GeometryReader measures only the region between the grabber and the
-    // toolbar (both are safe-area insets), so unit = height/7 yields the
-    // ≈201×96pt cells the spec calls for on iPhone 17 Pro.
+    // GeometryReader measures the area between the grabber and the screen
+    // bottom (safe areas are ignored at the TabView level). The floating
+    // toolbar overlays the bottom `toolbarHeight` pixels, so
+    // `unit = (height - toolbarHeight) / 7` keeps the 5 widget rows above
+    // the toolbar at the spec'd ≈201×96pt size, and the map row extends
+    // `unit * 2 + toolbarHeight` to bleed behind the toolbar to the screen
+    // bottom.
     // Rows 1-2: Speed (W1 2×2)
     // Row 3:    HR (W4 1×1) + HR Zones (W12 1×1)
     // Row 4:    Radar (W7 1×1) + Pace (W11 1×1)
     // Row 5:    Cadence (W5 1×1) + Weather (W10 1×1) [placeholder]
-    // Rows 6-7: Map (W8 2×2) — bleeds into the bottom safe area
+    // Rows 6-7: Map (W8 2×2) — bleeds behind the floating toolbar
     private var gridPage: some View {
         GeometryReader { geo in
-            let unit = geo.size.height / 7
+            let unit = max(geo.size.height - toolbarHeight, 1) / 7
             Grid(horizontalSpacing: 0, verticalSpacing: 0) {
                 // W1 — Speed 2×2
                 GridRow {
@@ -103,12 +113,11 @@ struct RideDashboardView: View {
                         .frame(height: unit)
                 }
 
-                // W8 — Map 2×2 (bleeds into the bottom safe area)
+                // W8 — Map 2×2 (extends behind the floating toolbar)
                 GridRow {
                     ActiveRideMapView(coordinates: store.trackCoordinates)
                         .gridCellColumns(2)
-                        .frame(height: unit * 2)
-                        .ignoresSafeArea(edges: .bottom)
+                        .frame(height: unit * 2 + toolbarHeight)
                 }
             }
         }
@@ -139,7 +148,7 @@ struct RideDashboardView: View {
 
     // ── Ride Controls — floating glass buttons (S05) ───────────────────────────
     private var rideControls: some View {
-        HStack(spacing: Spacing.md) {
+        HStack(spacing: Spacing.sm) {
             if store.isPaused {
                 Button {
                     store.send(.resumeTapped)
@@ -150,7 +159,9 @@ struct RideDashboardView: View {
                         .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
                 }
                 .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
                 .accessibilityLabel("Resume")
+                .transition(.scale.combined(with: .opacity))
 
                 Button {
                     store.send(.finishTapped)
@@ -159,9 +170,12 @@ struct RideDashboardView: View {
                         .labelStyle(.iconOnly)
                         .font(.title3.weight(.semibold))
                         .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
+
                 }
                 .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
                 .accessibilityLabel("Finish")
+                .transition(.scale.combined(with: .opacity))
             } else {
                 Button {
                     store.send(.pauseTapped)
@@ -172,7 +186,10 @@ struct RideDashboardView: View {
                         .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
                 }
                 .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
                 .accessibilityLabel("Pause")
+                .transition(.scale.combined(with: .opacity))
+
             }
 
             Spacer()
@@ -184,13 +201,16 @@ struct RideDashboardView: View {
                     .labelStyle(.iconOnly)
                     .font(.title3.weight(.semibold))
                     .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
+                    .padding(0)
             }
             .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
             .accessibilityLabel("Ring Bell")
         }
-        .padding(.horizontal, Spacing.md)
+        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.isPaused)
+        .padding(.horizontal, Spacing.lg)
         .padding(.top, 0)
-        .padding(.bottom, -1 * Spacing.lg)
+        .padding(.bottom, -1 * Spacing.cornerMd)
     }
 }
 
