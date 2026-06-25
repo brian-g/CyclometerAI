@@ -6,11 +6,18 @@ import AudioToolbox
 /// Matches prototype RideDashboardView with TCA store replacing local @State.
 /// Dashboard uses the 2-col × 7-row widget grid (S05.4 factory default).
 struct RideDashboardView: View {
+    /// Dashboard pages. Factory default is two; rider customisation (S07) will
+    /// drive this from state. Raw value doubles as the paging-dot index.
+    private enum Page: Int, CaseIterable {
+        case grid, map
+    }
+
     @Bindable var store: StoreOf<ActiveRideFeature>
     let onClose: () -> Void
     @GestureState private var dragOffset: CGFloat = 0
-    @State private var selectedPage = 0
+    @State private var selectedPage: Page = .grid
     @State private var toolbarHeight: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         // S05 — Map widget safe-area bleed. The toolbar floats as an overlay
@@ -18,12 +25,12 @@ struct RideDashboardView: View {
         // all the way to the physical screen bottom.
         TabView(selection: $selectedPage) {
             gridPage
-                .tag(0)
+                .tag(Page.grid)
 
             // Page 2 — single full-bleed map (S05 "second page has a single map").
             ActiveRideMapView(coordinates: store.trackCoordinates)
                 .ignoresSafeArea()
-                .tag(1)
+                .tag(Page.map)
         }
         .background(Color.cyBgSecondary)
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -136,81 +143,62 @@ struct RideDashboardView: View {
     // ── Paging indicator — always visible; factory default shows 2 dots ────────
     private var pageIndicator: some View {
         HStack(spacing: Spacing.xs) {
-            ForEach(0..<2, id: \.self) { page in
+            ForEach(Page.allCases, id: \.self) { page in
                 Circle()
                     .fill(page == selectedPage ? Color.cyPrimary : Color.cyTextTertiary)
-                    .frame(width: 7, height: 7)
+                    .frame(width: Spacing.pageIndicatorDot, height: Spacing.pageIndicatorDot)
             }
         }
         .accessibilityElement()
-        .accessibilityLabel("Page \(selectedPage + 1) of 2")
+        .accessibilityLabel("Page \(selectedPage.rawValue + 1) of \(Page.allCases.count)")
     }
 
     // ── Ride Controls — floating glass buttons (S05) ───────────────────────────
     private var rideControls: some View {
         HStack(spacing: Spacing.sm) {
             if store.isPaused {
-                Button {
-                    store.send(.resumeTapped)
-                } label: {
-                    Label("Resume", systemImage: "play.fill")
-                        .labelStyle(.iconOnly)
-                        .font(.title3.weight(.semibold))
-                        .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("Resume")
-                .transition(.scale.combined(with: .opacity))
-
-                Button {
-                    store.send(.finishTapped)
-                } label: {
-                    Label("Finish", systemImage: "stop.fill")
-                        .labelStyle(.iconOnly)
-                        .font(.title3.weight(.semibold))
-                        .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
-
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("Finish")
-                .transition(.scale.combined(with: .opacity))
+                rideControlButton("Resume", systemImage: "play.fill") { store.send(.resumeTapped) }
+                    .transition(controlTransition)
+                rideControlButton("Finish", systemImage: "stop.fill") { store.send(.finishTapped) }
+                    .transition(controlTransition)
             } else {
-                Button {
-                    store.send(.pauseTapped)
-                } label: {
-                    Label("Pause", systemImage: "pause.fill")
-                        .labelStyle(.iconOnly)
-                        .font(.title3.weight(.semibold))
-                        .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("Pause")
-                .transition(.scale.combined(with: .opacity))
-
+                rideControlButton("Pause", systemImage: "pause.fill") { store.send(.pauseTapped) }
+                    .transition(controlTransition)
             }
 
             Spacer()
 
-            Button {
-                AudioServicesPlaySystemSound(1005)
-            } label: {
-                Label("Bell", systemImage: "bell.fill")
-                    .labelStyle(.iconOnly)
-                    .font(.title3.weight(.semibold))
-                    .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
-                    .padding(0)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .accessibilityLabel("Ring Bell")
+            rideControlButton("Ring Bell", systemImage: "bell.fill", action: ringBell)
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.isPaused)
         .padding(.horizontal, Spacing.lg)
-        .padding(.top, 0)
         .padding(.bottom, -1 * Spacing.cornerMd)
+    }
+
+    /// One floating glass ride-control button. The icon-only `Label` keeps its
+    /// title available to VoiceOver, so no separate `accessibilityLabel` is needed.
+    private func rideControlButton(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+                .font(.title3.weight(.semibold))
+                .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+    }
+
+    /// Reduce Motion swaps the scale animation for a plain fade.
+    private var controlTransition: AnyTransition {
+        reduceMotion ? .opacity : .scale.combined(with: .opacity)
+    }
+
+    private func ringBell() {
+        AudioServicesPlaySystemSound(1005) // 1005 = system "Tink"; route via AudioClient later
     }
 }
 

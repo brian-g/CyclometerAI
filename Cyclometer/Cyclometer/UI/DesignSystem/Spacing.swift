@@ -20,6 +20,7 @@ enum Spacing {
     // Fixed UI affordances (named, not forced onto the grid)
     static let tapTarget: CGFloat     = unit * 13 // 52 — HIG minimum button tap target
     static let grabberHeight: CGFloat = unit       //  4 — sheet grabber bar height
+    static let pageIndicatorDot: CGFloat = 7       //  7 — dashboard paging indicator dot
     static let hrBorderWidth: CGFloat = 3          //  3 — HR zone left accent bar
     static let strokeThin: CGFloat    = 1.5        //  1.5 — thin border stroke
 
