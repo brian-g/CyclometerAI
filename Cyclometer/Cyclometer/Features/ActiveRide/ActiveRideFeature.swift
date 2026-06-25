@@ -37,6 +37,7 @@ struct ActiveRideFeature {
         var isRadarPaired: Bool = false
         var radarTargets: [RadarTarget] = []
         var coordinate: Coordinate? = nil
+        var trackCoordinates: [Coordinate] = []
         var altitude: Double = 0
         var heading: Double = -1
         var horizontalAccuracy: Double = 0
@@ -220,6 +221,12 @@ struct ActiveRideFeature {
                 }
             case .locationUpdated(let update):
                 state.coordinate = update.coordinate
+                // Only record track points while actively riding, so paused/stopped
+                // GPS jitter doesn't pollute the polyline — mirrors distanceMeters,
+                // which also only accumulates while active (.elapsedTick).
+                if state.recordingState == .active {
+                    state.trackCoordinates.append(update.coordinate)
+                }
                 state.altitude = update.altitude
                 state.heading = update.heading
                 state.horizontalAccuracy = update.horizontalAccuracy

@@ -153,6 +153,7 @@ struct ActiveRideFeatureLocationTests {
         let store = makeStore()
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.trackCoordinates = [Coordinate(latitude: 43.0731, longitude: -89.4012)]
             $0.altitude = 280.0
             $0.horizontalAccuracy = 5.0
             $0.heading = 192.0
@@ -172,6 +173,7 @@ struct ActiveRideFeatureLocationTests {
         let store = makeStore()
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.trackCoordinates = [Coordinate(latitude: 43.0731, longitude: -89.4012)]
             $0.altitude = 280.0
             $0.horizontalAccuracy = 5.0
             $0.heading = 192.0
@@ -198,6 +200,8 @@ struct ActiveRideFeatureLocationTests {
         )
         await store.send(.locationUpdated(pausedUpdate)) {
             $0.coordinate = Coordinate(latitude: 44.0, longitude: -90.0)
+            // trackCoordinates does NOT grow while paused — it stays at the single
+            // point recorded during the active update above.
             $0.altitude = 300.0
             $0.horizontalAccuracy = 3.0
             $0.heading = 45.0
@@ -231,6 +235,7 @@ struct ActiveRideFeatureLocationTests {
 
         await store.send(.locationUpdated(invalidUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.trackCoordinates = [Coordinate(latitude: 43.0731, longitude: -89.4012)]
             $0.altitude = 280.0
             $0.horizontalAccuracy = 5.0
             $0.heading = 192.0
@@ -614,6 +619,7 @@ struct ActiveRideFeatureStateMachineTests {
             timestamp: Date()
         ))) {
             $0.coordinate = Coordinate(latitude: 43.0, longitude: -89.0)
+            $0.trackCoordinates = [Coordinate(latitude: 43.0, longitude: -89.0)]
             $0.altitude = 280.0
             $0.horizontalAccuracy = 5.0
             $0.heading = 0
