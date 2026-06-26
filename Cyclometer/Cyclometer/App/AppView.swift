@@ -29,7 +29,7 @@ struct AppView: View {
                     }
                 }
             }
-            .tabItem { Label("Rides", systemImage: "figure.outdoor.cycle") }
+            .tabItem { Label("Rides", image: "cyclometer.rider") }
             .tag(AppFeature.Tab.rides)
 
             // ── Routes ───────────────────────────────────────────────────────
