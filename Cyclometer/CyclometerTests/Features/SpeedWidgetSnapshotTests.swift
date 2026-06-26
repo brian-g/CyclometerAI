@@ -11,19 +11,61 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
     // a 760pt grid, rounded down to keep the canvas conservative).
     private let canvas: SwiftUISnapshotLayout = .fixed(width: 393, height: 200)
 
-    private func makeWidget() -> some View {
+    private func makeWidget(
+        speed: Double = 28.4,
+        source: SensorSource = .gps,
+        distance: Double = 12.3,
+        elapsed: Int = 2340,
+        averageSpeed: Double = 28.4,
+        maxSpeed: Double = 34.1,
+        scheme: ColorScheme = .light
+    ) -> some View {
         SpeedWidget(
-            speed: 28.4,
-            activeSpeedSource: .gps,
-            distance: 12.3,
-            elapsed: 2340,
-            averageSpeed: 28.4,
-            maxSpeed: 34.1
+            speed: speed,
+            activeSpeedSource: source,
+            distance: distance,
+            elapsed: elapsed,
+            averageSpeed: averageSpeed,
+            maxSpeed: maxSpeed
         )
         .frame(width: 393, height: 200)
+        .preferredColorScheme(scheme)
     }
+
+    // MARK: - Source badge variants
 
     func testGridConstrainedLayout() {
         assertSnapshot(of: makeWidget(), as: .image(layout: canvas))
+    }
+
+    func testBLEWheelSource() {
+        assertSnapshot(of: makeWidget(source: .bleWheel), as: .image(layout: canvas))
+    }
+
+    func testNoSource() {
+        assertSnapshot(of: makeWidget(speed: 0, source: .none, averageSpeed: 0, maxSpeed: 0), as: .image(layout: canvas))
+    }
+
+    // MARK: - Dark mode
+
+    func testGPSSourceDark() {
+        assertSnapshot(
+            of: makeWidget(scheme: .dark),
+            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+        )
+    }
+
+    func testNoSourceDark() {
+        assertSnapshot(
+            of: makeWidget(speed: 0, source: .none, averageSpeed: 0, maxSpeed: 0, scheme: .dark),
+            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+        )
+    }
+
+    // MARK: - Edge cases
+
+    func testHighSpeed() {
+        // Triple-digit speed to verify layout doesn't clip the hero number.
+        assertSnapshot(of: makeWidget(speed: 102.7, averageSpeed: 88.3, maxSpeed: 102.7), as: .image(layout: canvas))
     }
 }
