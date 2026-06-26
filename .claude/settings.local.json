@@ -15,7 +15,12 @@
       "Bash(xcrun simctl *)",
       "Bash(osascript *)",
       "Bash(xcodebuild -project /Users/brian/Projects/CyclometerAI/Cyclometer/Cyclometer.xcodeproj -scheme Cyclometer -destination 'platform=iOS Simulator,id=42B5213B-30F2-4CAD-9649-EDC4243822D7' build-for-testing)",
-      "Bash(xcodebuild -project /Users/brian/Projects/CyclometerAI/Cyclometer/Cyclometer.xcodeproj -scheme Cyclometer -destination 'platform=iOS Simulator,id=42B5213B-30F2-4CAD-9649-EDC4243822D7' build)"
+      "Bash(xcodebuild -project /Users/brian/Projects/CyclometerAI/Cyclometer/Cyclometer.xcodeproj -scheme Cyclometer -destination 'platform=iOS Simulator,id=42B5213B-30F2-4CAD-9649-EDC4243822D7' build)",
+      "WebSearch",
+      "Bash(mdfind \"kMDItemContentType == 'com.apple.application-bundle' && kMDItemFSName == 'SF Symbols*.app'\")",
+      "Bash(find \"/Applications/SF Symbols.app/Contents/Resources\" -name \"*.svg\" -maxdepth 2 2>/dev/null | head -20)",
+      "Bash(find \"/Applications/SF Symbols.app/Contents\" -name \"*.svg\" -path \"*template*\" -o -name \"*.svg\" -path \"*export*\" 2>/dev/null | head -5)",
+      "Bash(find \"/Applications/SF Symbols.app/Contents\" -name \"symbolTemplate*\" -o -name \"SymbolTemplate*\" 2>/dev/null | head -10)"
     ]
   }
 }
