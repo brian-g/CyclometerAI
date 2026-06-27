@@ -35,10 +35,16 @@ struct ActiveRideFeature {
             speedSampleCount > 0 ? speedSampleSum / Double(speedSampleCount) : 0
         }
         // Canonical m/s views of the speed stats for consumers (e.g. SpeedWidget)
-        // that convert to display units themselves — avoids a KPH→MPS→KPH
-        // round-trip at the call site.
-        var averageSpeedMPS: Double { averageSpeedKPH / 3.6 }
-        var maxSpeedMPS: Double { maxSpeedKPH / 3.6 }
+        // that convert to display units themselves. Uses Measurement so the
+        // KPH→MPS factor isn't hardcoded at the call site.
+        var averageSpeedMPS: Double {
+            Measurement(value: averageSpeedKPH, unit: UnitSpeed.kilometersPerHour)
+                .converted(to: .metersPerSecond).value
+        }
+        var maxSpeedMPS: Double {
+            Measurement(value: maxSpeedKPH, unit: UnitSpeed.kilometersPerHour)
+                .converted(to: .metersPerSecond).value
+        }
         var isRadarPaired: Bool = false
         var radarTargets: [RadarTarget] = []
         var coordinate: Coordinate? = nil
@@ -49,10 +55,12 @@ struct ActiveRideFeature {
         var isLocationAvailable: Bool = false
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
-        // TODO: drive from UserProfile/Settings once persistence lands. Until
-        // then this is hard-wired to .metric and the widget's imperial path is
-        // effectively dead (no UI sets it).
-        var unitSystem: UnitSystem = .metric
+        // Defaults to the device locale's measurement system. This is a *read*
+        // preference, so in TCA it ideally lives as shared state (`@Shared`) or
+        // behind a settings dependency rather than per-feature State — that move
+        // lands with UserProfile/Settings persistence. Kept here (seeded from
+        // locale) until then so the imperial path is reachable today.
+        var unitSystem: UnitSystem = .system
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
     }

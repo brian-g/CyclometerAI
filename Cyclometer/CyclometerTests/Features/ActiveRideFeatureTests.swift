@@ -3,6 +3,9 @@ import ComposableArchitecture
 import CoreLocation
 @testable import Cyclometer
 
+/// Fixed clock for SpeedFeature's timestamped samples in TestStores.
+private let testDate = Date(timeIntervalSince1970: 1_000_000)
+
 @MainActor
 @Suite("ActiveRideFeature — radar wiring")
 struct ActiveRideFeatureRadarTests {
@@ -141,6 +144,7 @@ struct ActiveRideFeatureLocationTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -165,7 +169,7 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
-            $0.speed.speedHistory = [8.5]
+            $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
     }
 
@@ -186,7 +190,7 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
-            $0.speed.speedHistory = [8.5]
+            $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
@@ -215,7 +219,10 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(.speed(.gpsSpeedReceived(12.0))) {
             $0.speed.speedMPS = 12.0
             $0.speed.activeSpeedSource = .gps
-            $0.speed.speedHistory = [8.5, 12.0]
+            $0.speed.speedSamples = [
+                SpeedSample(time: testDate, mps: 8.5),
+                SpeedSample(time: testDate, mps: 12.0)
+            ]
         }
     }
 
@@ -225,7 +232,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
-            $0.speed.speedHistory = [8.5]
+            $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
 
         let invalidUpdate = LocationUpdate(
@@ -608,6 +615,7 @@ struct ActiveRideFeatureStateMachineTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -635,7 +643,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(.speed(.gpsSpeedReceived(8.0))) {
             $0.speed.speedMPS = 8.0
             $0.speed.activeSpeedSource = .gps
-            $0.speed.speedHistory = [8.0]
+            $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.0)]
         }
 
         await store.send(.elapsedTick) {

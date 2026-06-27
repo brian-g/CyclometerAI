@@ -16,11 +16,18 @@ struct SpeedWidget: View {
 
     @State private var showDetail = false
 
+    // Hero number scales proportionally to slot height: the large-hero spec is
+    // `heroNominalFont`pt in a `heroNominalHeight`pt 2×2 slot, floored at
+    // `heroMinFont`pt for the compact slots.
+    private static let heroNominalFont: CGFloat = 136
+    private static let heroNominalHeight: CGFloat = 200
+    private static let heroMinFont: CGFloat = 34
+
     var body: some View {
         ZStack {
             if size != .oneByOne, !speedHistory.isEmpty {
                 SpeedHistoryChart(history: speedHistory, unit: unit)
-                    .opacity(0.2)
+                    .opacity(Opacity.watermark)
             }
             GeometryReader { geo in
                 switch size {
@@ -44,20 +51,17 @@ struct SpeedWidget: View {
 
     @ViewBuilder
     private func twoByTwoContent(_ geo: GeometryProxy) -> some View {
-        let heroSize = heroFontSize(for: geo.size.height)
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                speedHero(fontSize: heroSize)
+                speedHero(fontSize: heroFontSize(for: geo.size.height))
                 Spacer()
+                // Distance must never truncate — it takes the width it needs and
+                // pushes Time to the right (Time yields space first).
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.lg) {
-                    HeroNumber(displayDistance, unit: unit.distanceLabel) {
-                        Text("Distance").font(.caption)
-                    }
-                    .heroNumberSize(.small)
-                    HeroNumber(elapsed.formattedElapsed, unit: "") {
-                        Text("Time").font(.caption)
-                    }
-                    .heroNumberSize(.small)
+                    distanceStat
+                        .fixedSize(horizontal: true, vertical: false)
+                        .layoutPriority(1)
+                    timeStat
                 }
             }
             .padding(Spacing.sm)
@@ -69,8 +73,8 @@ struct SpeedWidget: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: Spacing.lg) {
-                statCell(label: "Avg", value: displayAvg, showChevron: true)
-                statCell(label: "Max", value: displayMax)
+                avgStat
+                maxStat
             }
             .padding(Spacing.sm)
         }
@@ -78,17 +82,16 @@ struct SpeedWidget: View {
 
     @ViewBuilder
     private func twoByOneContent(_ geo: GeometryProxy) -> some View {
-        let heroSize = heroFontSize(for: geo.size.height)
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Spacing.xs) {
                 speedTitle
                 sourceBadge
             }
             HStack(alignment: .lastTextBaseline, spacing: Spacing.lg) {
-                speedHero(fontSize: heroSize)
+                speedHero(fontSize: heroFontSize(for: geo.size.height))
                 Spacer()
-                statCell(label: "AVG", value: displayAvg, labelFont: .caption2, showChevron: true)
-                statCell(label: "MAX", value: displayMax, labelFont: .caption2)
+                avgStat
+                maxStat
             }
             Spacer()
         }
@@ -98,10 +101,9 @@ struct SpeedWidget: View {
 
     @ViewBuilder
     private func oneByOneContent(_ geo: GeometryProxy) -> some View {
-        let heroSize = heroFontSize(for: geo.size.height)
         VStack(alignment: .leading, spacing: 0) {
             speedTitle
-            speedHero(fontSize: heroSize)
+            speedHero(fontSize: heroFontSize(for: geo.size.height))
             Spacer()
         }
         .padding(Spacing.sm)
@@ -110,7 +112,6 @@ struct SpeedWidget: View {
 
     // MARK: - Sub-Views
 
-    @ViewBuilder
     private func speedHero(fontSize: CGFloat) -> some View {
         HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
             Text(displaySpeed)
@@ -125,8 +126,33 @@ struct SpeedWidget: View {
         }
     }
 
+    // Stat cells reuse the design-system HeroNumber. Labels are authored in
+    // Title case; HeroNumber renders them ALL-CAPS via `.textCase`.
+    private var avgStat: some View {
+        HeroNumber(displayAvg, unit: "") { Text("Avg").font(.caption) }
+            .heroNumberSize(.small)
+            .layout(.vertical)
+            .heroAccessory { trendChevron }
+    }
+
+    private var maxStat: some View {
+        HeroNumber(displayMax, unit: "") { Text("Max").font(.caption) }
+            .heroNumberSize(.small)
+            .layout(.vertical)
+    }
+
+    private var distanceStat: some View {
+        HeroNumber(displayDistance, unit: unit.distanceLabel) { Text("Distance").font(.caption) }
+            .heroNumberSize(.small)
+    }
+
+    private var timeStat: some View {
+        HeroNumber(elapsed.formattedElapsed, unit: "") { Text("Time").font(.caption) }
+            .heroNumberSize(.small)
+    }
+
     private var speedTitle: some View {
-        Text("SPEED")
+        Text("Speed")
             .font(.caption2)
             .foregroundStyle(.secondary)
             .textCase(.uppercase)
@@ -148,22 +174,21 @@ struct SpeedWidget: View {
 
     // MARK: - Computed Display Values
 
+    /// One-decimal number format shared by every value in the widget.
+    private func oneDecimal(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(1)))
+    }
+
     private var displaySpeed: String {
         guard let s = speed else { return "—" }
-        return unit.speed(fromMPS: s).formatted(.number.precision(.fractionLength(1)))
+        return oneDecimal(unit.speed(fromMPS: s))
     }
 
-    private var displayAvg: String {
-        unit.speed(fromMPS: averageSpeed).formatted(.number.precision(.fractionLength(1)))
-    }
+    private var displayAvg: String { oneDecimal(unit.speed(fromMPS: averageSpeed)) }
+    private var displayMax: String { oneDecimal(unit.speed(fromMPS: maxSpeed)) }
+    private var displayDistance: String { oneDecimal(unit.distance(fromMeters: distance)) }
 
-    private var displayMax: String {
-        unit.speed(fromMPS: maxSpeed).formatted(.number.precision(.fractionLength(1)))
-    }
-
-    private var displayDistance: String {
-        unit.distance(fromMeters: distance).formatted(.number.precision(.fractionLength(1)))
-    }
+    // MARK: - Trend Chevron
 
     private enum Trend: Equatable { case up, even, down }
 
@@ -171,6 +196,8 @@ struct SpeedWidget: View {
     /// up/down. Compared in canonical m/s (≈0.5 km/h) so sensitivity is
     /// identical regardless of the display unit.
     private static let trendThresholdMPS = 0.14
+    /// Chevron tilt (degrees) for up (negative) / down (positive) trend.
+    private static let chevronTiltDegrees: Double = 45
 
     private var trend: Trend {
         guard let s = speed, averageSpeed > 0 else { return .even }
@@ -181,41 +208,20 @@ struct SpeedWidget: View {
     }
 
     private var trendChevron: some View {
-        Image(systemName: "chevron.forward.circle.fill")
+        let tilt = trend == .up ? -Self.chevronTiltDegrees
+                 : trend == .down ? Self.chevronTiltDegrees : 0
+        return Image(systemName: "chevron.forward.circle.fill")
             .foregroundStyle(
-                trend == .up   ? Color("cyRatingGood") :
-                trend == .down ? Color("cyRatingBad")  : Color.secondary
+                trend == .up   ? Color.cyRatingGood :
+                trend == .down ? Color.cyRatingBad  : Color.secondary
             )
-            .rotationEffect(.degrees(trend == .up ? -45 : trend == .down ? 45 : 0))
+            .rotationEffect(.degrees(tilt))
             .animation(.easeInOut(duration: 0.3), value: trend)
     }
 
-    private func statCell(
-        label: String,
-        value: String,
-        labelFont: Font = .caption,
-        showChevron: Bool = false
-    ) -> some View {
-        VStack(alignment: .trailing, spacing: 0) {
-            Text(label)
-                .font(labelFont)
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
-            HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
-                if showChevron { trendChevron }
-                Text(value)
-                    .dDINCondensed(size: 34, relativeTo: .largeTitle)
-                    .lineLimit(1)
-            }
-        }
-    }
-
-    // Scale the large-hero font proportionally to the available height.
-    // Nominal 2×2 slot height is 200pt; 136pt is the `large-hero` spec size.
+    // Scale the large-hero font proportionally to the available slot height.
     private func heroFontSize(for height: CGFloat) -> CGFloat {
-        let nominal: CGFloat = 136
-        let nominalHeight: CGFloat = 200
-        return max(34, nominal * (height / nominalHeight))
+        max(Self.heroMinFont, Self.heroNominalFont * (height / Self.heroNominalHeight))
     }
 }
 
@@ -232,12 +238,12 @@ private struct SpeedHistoryChart: View {
                 x: .value("t", index),
                 y: .value("speed", displaySpeed)
             )
-            .foregroundStyle(Color.cyPrimary.opacity(1))
+            .foregroundStyle(Color.cyPrimary)
             LineMark(
                 x: .value("t", index),
                 y: .value("speed", displaySpeed)
             )
-            .foregroundStyle(Color.cyPrimary.opacity(1))
+            .foregroundStyle(Color.cyPrimary)
         }
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)

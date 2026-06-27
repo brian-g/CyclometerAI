@@ -83,7 +83,7 @@ struct RideDashboardView: View {
                 GridRow {
                     SpeedWidget(
                         speed: store.speed.speedMPS,
-                        speedHistory: store.speed.speedHistory,
+                        speedHistory: store.speed.watermarkSamples,
                         activeSpeedSource: store.speed.activeSpeedSource,
                         distance: store.distanceMeters,
                         elapsed: store.elapsedSeconds,

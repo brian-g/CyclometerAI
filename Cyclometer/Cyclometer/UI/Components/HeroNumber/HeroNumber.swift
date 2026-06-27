@@ -9,6 +9,7 @@ struct HeroNumber<Label: View>: View {
     var size: HeroSize = .large
     var alignment: HeroUnitAlignment = .horizontal
     var color: Color = .primary
+    var accessory: AnyView? = nil
     let label: Label
 
     // MARK: - Plain-value inits
@@ -83,6 +84,15 @@ struct HeroNumber<Label: View>: View {
         return copy
     }
 
+    /// Optional view shown immediately before the value, baseline-aligned with
+    /// it (e.g. a trend chevron). Lives inside HeroNumber so callers don't have
+    /// to re-derive the value's baseline.
+    func heroAccessory<A: View>(@ViewBuilder _ make: () -> A) -> Self {
+        var copy = self
+        copy.accessory = AnyView(make())
+        return copy
+    }
+
     // MARK: - Layout constants
 
     private var ptSize: CGFloat {
@@ -118,11 +128,15 @@ struct HeroNumber<Label: View>: View {
             label.textCase(.uppercase)
             if alignment == .vertical {
                 VStack(alignment: .trailing, spacing: 0) {
-                    scaledValue
+                    HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
+                        if let accessory { accessory }
+                        scaledValue
+                    }
                     if !unit.isEmpty { unitLabel }
                 }
             } else {
                 HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
+                    if let accessory { accessory }
                     scaledValue
                     if !unit.isEmpty { unitLabel.baselineOffset(offset) }
                 }

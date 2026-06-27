@@ -99,6 +99,10 @@ Units should always be set baseline aligned with their corresponding values.
 - [ ] Define base unit and scale (e.g., 4pt base)
 - [ ] Do not override the padding on any page but the Dashboard. The dashboard should use the 4pt padding.
 
+### Opacity Tokens
+- Opacity values must be tokenized, not inline literals. Tokens live in `DesignSystem/Opacity.swift`.
+- `watermark` (0.2) — background sparkline / watermark behind a dashboard hero number (e.g. W1 speed history).
+
 ### Navigation Pattern
 The navigation in the app will follow standard iOS application guidelines patterns. In this case, the application to model is the Apple Music app. The bottom TabView should have the following 3 items:
 
