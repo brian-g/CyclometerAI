@@ -5,67 +5,124 @@ import SwiftUI
 
 final class SpeedWidgetSnapshotTests: XCTestCase {
 
-    // Matches the grid slot W1 receives: unit = gridHeight/7, frame = unit*2.
-    // 393×200 approximates a typical iPhone in portrait. Width is exact (393pt
-    // logical for iPhone 17 Pro); height is representative of unit*2 (~217pt on
-    // a 760pt grid, rounded down to keep the canvas conservative).
-    private let canvas: SwiftUISnapshotLayout = .fixed(width: 393, height: 200)
+    // Grid slot W1 receives in the factory default: 393×200pt.
+    // Width: exact logical pixels for iPhone 17 Pro.
+    // Height: representative of unit*2 on a 760pt grid.
+    private let canvas2x2: SwiftUISnapshotLayout = .fixed(width: 393, height: 200)
 
-    private func makeWidget(
-        speed: Double = 28.4,
+    // Representative speed history (20 ascending samples in m/s)
+    private let sampleHistory: [Double] = stride(from: 4.0, to: 9.5, by: 0.275).map { $0 }
+
+    private func make2x2(
+        speed: Double? = 7.89,         // m/s ≈ 28.4 km/h
         source: SensorSource = .gps,
-        distance: Double = 12.3,
+        distance: Double = 12_300,     // meters
         elapsed: Int = 2340,
-        averageSpeed: Double = 28.4,
-        maxSpeed: Double = 34.1,
+        averageSpeed: Double = 7.89,   // m/s
+        maxSpeed: Double = 9.47,       // m/s ≈ 34.1 km/h
+        unit: UnitSystem = .metric,
         scheme: ColorScheme = .light
     ) -> some View {
         SpeedWidget(
             speed: speed,
+            speedHistory: sampleHistory,
             activeSpeedSource: source,
             distance: distance,
             elapsed: elapsed,
             averageSpeed: averageSpeed,
-            maxSpeed: maxSpeed
+            maxSpeed: maxSpeed,
+            unit: unit,
+            size: .twoByTwo
         )
         .frame(width: 393, height: 200)
         .preferredColorScheme(scheme)
     }
 
-    // MARK: - Source badge variants
+    // MARK: - 2×2 — Source badge variants
 
-    func testGridConstrainedLayout() {
-        assertSnapshot(of: makeWidget(), as: .image(layout: canvas))
+    func testTwoByTwoGPSSource() {
+        assertSnapshot(of: make2x2(), as: .image(layout: canvas2x2))
     }
 
-    func testBLEWheelSource() {
-        assertSnapshot(of: makeWidget(source: .bleWheel), as: .image(layout: canvas))
+    func testTwoByTwoBLEWheelSource() {
+        assertSnapshot(of: make2x2(source: .bleWheel), as: .image(layout: canvas2x2))
     }
 
-    func testNoSource() {
-        assertSnapshot(of: makeWidget(speed: 0, source: .none, averageSpeed: 0, maxSpeed: 0), as: .image(layout: canvas))
-    }
-
-    // MARK: - Dark mode
-
-    func testGPSSourceDark() {
+    func testTwoByTwoNoSignal() {
         assertSnapshot(
-            of: makeWidget(scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            of: make2x2(speed: nil, source: .none, averageSpeed: 0, maxSpeed: 0),
+            as: .image(layout: canvas2x2)
         )
     }
 
-    func testNoSourceDark() {
+    // MARK: - 2×2 — Dark mode
+
+    func testTwoByTwoGPSDark() {
         assertSnapshot(
-            of: makeWidget(speed: 0, source: .none, averageSpeed: 0, maxSpeed: 0, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            of: make2x2(scheme: .dark),
+            as: .image(layout: canvas2x2, traits: .init(userInterfaceStyle: .dark))
         )
     }
 
-    // MARK: - Edge cases
+    func testTwoByTwoNoSignalDark() {
+        assertSnapshot(
+            of: make2x2(speed: nil, source: .none, averageSpeed: 0, maxSpeed: 0, scheme: .dark),
+            as: .image(layout: canvas2x2, traits: .init(userInterfaceStyle: .dark))
+        )
+    }
 
-    func testHighSpeed() {
-        // Triple-digit speed to verify layout doesn't clip the hero number.
-        assertSnapshot(of: makeWidget(speed: 102.7, averageSpeed: 88.3, maxSpeed: 102.7), as: .image(layout: canvas))
+    // MARK: - 2×2 — Edge cases
+
+    func testTwoByTwoHighSpeed() {
+        // ~100 km/h to verify layout doesn't clip the triple-digit hero number.
+        assertSnapshot(
+            of: make2x2(speed: 27.78, averageSpeed: 24.53, maxSpeed: 27.78),
+            as: .image(layout: canvas2x2)
+        )
+    }
+
+    func testTwoByTwoImperial() {
+        assertSnapshot(
+            of: make2x2(unit: .imperial),
+            as: .image(layout: canvas2x2)
+        )
+    }
+
+    // MARK: - 2×1 (single grid row: 393×96)
+
+    func testTwoByOneLayout() {
+        let canvas: SwiftUISnapshotLayout = .fixed(width: 393, height: 96)
+        let widget = SpeedWidget(
+            speed: 7.89,
+            speedHistory: sampleHistory,
+            activeSpeedSource: .gps,
+            distance: 12_300,
+            elapsed: 2340,
+            averageSpeed: 7.89,
+            maxSpeed: 9.47,
+            unit: .metric,
+            size: .twoByOne
+        )
+        .frame(width: 393, height: 96)
+        assertSnapshot(of: widget, as: .image(layout: canvas))
+    }
+
+    // MARK: - 1×1 (half-width single row: 196×96)
+
+    func testOneByOneLayout() {
+        let canvas: SwiftUISnapshotLayout = .fixed(width: 196, height: 96)
+        let widget = SpeedWidget(
+            speed: 7.89,
+            speedHistory: [],
+            activeSpeedSource: .gps,
+            distance: 12_300,
+            elapsed: 2340,
+            averageSpeed: 7.89,
+            maxSpeed: 9.47,
+            unit: .metric,
+            size: .oneByOne
+        )
+        .frame(width: 196, height: 96)
+        assertSnapshot(of: widget, as: .image(layout: canvas))
     }
 }

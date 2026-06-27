@@ -15,6 +15,7 @@ struct SpeedFeature {
         var activeSpeedSource: SensorSource = .none
         var connectionState: BLECSCClient.ConnectionState = .disconnected
         var pairedPeripheralId: UUID? = nil
+        var speedHistory: [Double] = []
     }
 
     enum Action: Equatable {
@@ -37,6 +38,10 @@ struct SpeedFeature {
                 }
                 state.speedMPS = speed
                 state.activeSpeedSource = .gps
+                state.speedHistory.append(speed)
+                if state.speedHistory.count > 60 {
+                    state.speedHistory.removeFirst()
+                }
                 return .none
             }
         }

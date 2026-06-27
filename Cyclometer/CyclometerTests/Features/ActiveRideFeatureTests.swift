@@ -165,6 +165,7 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
+            $0.speed.speedHistory = [8.5]
         }
     }
 
@@ -185,6 +186,7 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
+            $0.speed.speedHistory = [8.5]
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
@@ -213,6 +215,7 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(.speed(.gpsSpeedReceived(12.0))) {
             $0.speed.speedMPS = 12.0
             $0.speed.activeSpeedSource = .gps
+            $0.speed.speedHistory = [8.5, 12.0]
         }
     }
 
@@ -222,6 +225,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
+            $0.speed.speedHistory = [8.5]
         }
 
         let invalidUpdate = LocationUpdate(
@@ -631,6 +635,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(.speed(.gpsSpeedReceived(8.0))) {
             $0.speed.speedMPS = 8.0
             $0.speed.activeSpeedSource = .gps
+            $0.speed.speedHistory = [8.0]
         }
 
         await store.send(.elapsedTick) {

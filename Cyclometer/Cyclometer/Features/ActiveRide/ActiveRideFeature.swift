@@ -44,6 +44,7 @@ struct ActiveRideFeature {
         var isLocationAvailable: Bool = false
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
+        var unitSystem: UnitSystem = .metric
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
     }

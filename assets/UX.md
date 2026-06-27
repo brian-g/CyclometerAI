@@ -76,6 +76,11 @@ All design artifacts are in `assets/design/`. These files are the source of trut
 
 The design should be aligned with Apple HIG and use standard SwiftUI components and layout. All screens have a dark and light mode.
 
+## Alignment
+
+- Numbers arranged vertically and of the same unit must always be aligned to the right
+- Horizontal text should always be baseline aligned unless otherwise noted
+
 ### Typography Scale
 
 The type ramp is scalable on the dashboard depending on the device and scale using Apple Dynamic Type. Cyclometer should be able to run on any iPhone that supports iOS 26. Use the standard font style on iOS, SF Pro Rounded.
