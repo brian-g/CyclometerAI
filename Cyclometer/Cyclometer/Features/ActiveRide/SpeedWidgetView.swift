@@ -81,10 +81,7 @@ struct SpeedWidget: View {
         let heroSize = heroFontSize(for: geo.size.height)
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Spacing.xs) {
-                Text("SPEED")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
+                speedTitle
                 sourceBadge
             }
             HStack(alignment: .lastTextBaseline, spacing: Spacing.lg) {
@@ -103,10 +100,7 @@ struct SpeedWidget: View {
     private func oneByOneContent(_ geo: GeometryProxy) -> some View {
         let heroSize = heroFontSize(for: geo.size.height)
         VStack(alignment: .leading, spacing: 0) {
-            Text("SPEED")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+            speedTitle
             speedHero(fontSize: heroSize)
             Spacer()
         }
@@ -122,12 +116,20 @@ struct SpeedWidget: View {
             Text(displaySpeed)
                 .dDINCondensed(size: fontSize, relativeTo: .largeTitle)
                 .lineLimit(1)
+                .minimumScaleFactor(0.5)
             if speed != nil {
                 Text(unit.speedLabel)
                     .font(.footnote)
                     .textCase(.lowercase)
             }
         }
+    }
+
+    private var speedTitle: some View {
+        Text("SPEED")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
     }
 
     private var sourceBadge: some View {
@@ -165,11 +167,16 @@ struct SpeedWidget: View {
 
     private enum Trend: Equatable { case up, even, down }
 
+    /// Minimum delta from the ride average before the trend chevron points
+    /// up/down. Compared in canonical m/s (≈0.5 km/h) so sensitivity is
+    /// identical regardless of the display unit.
+    private static let trendThresholdMPS = 0.14
+
     private var trend: Trend {
         guard let s = speed, averageSpeed > 0 else { return .even }
-        let diff = unit.speed(fromMPS: s) - unit.speed(fromMPS: averageSpeed)
-        if diff > 0.5 { return .up }
-        if diff < -0.5 { return .down }
+        let diff = s - averageSpeed
+        if diff > Self.trendThresholdMPS { return .up }
+        if diff < -Self.trendThresholdMPS { return .down }
         return .even
     }
 

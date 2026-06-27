@@ -87,8 +87,8 @@ struct RideDashboardView: View {
                         activeSpeedSource: store.speed.activeSpeedSource,
                         distance: store.distanceMeters,
                         elapsed: store.elapsedSeconds,
-                        averageSpeed: store.averageSpeedKPH / 3.6,
-                        maxSpeed: store.maxSpeedKPH / 3.6,
+                        averageSpeed: store.averageSpeedMPS,
+                        maxSpeed: store.maxSpeedMPS,
                         unit: store.unitSystem,
                         size: .twoByTwo
                     )

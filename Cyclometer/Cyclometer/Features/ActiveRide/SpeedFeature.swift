@@ -9,6 +9,12 @@ enum SensorSource: Equatable, Sendable {
 
 @Reducer
 struct SpeedFeature {
+    /// Rolling window of recent speed samples (m/s) feeding the widget's
+    /// watermark sparkline. Bounded by sample count, not wall-clock time —
+    /// CoreLocation does not emit at a fixed rate, so the window covers a
+    /// variable real-time span.
+    static let speedHistoryCapacity = 60
+
     @ObservableState
     struct State: Equatable {
         var speedMPS: Double? = nil
@@ -39,7 +45,7 @@ struct SpeedFeature {
                 state.speedMPS = speed
                 state.activeSpeedSource = .gps
                 state.speedHistory.append(speed)
-                if state.speedHistory.count > 60 {
+                if state.speedHistory.count > Self.speedHistoryCapacity {
                     state.speedHistory.removeFirst()
                 }
                 return .none
