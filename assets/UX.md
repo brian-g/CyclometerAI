@@ -76,6 +76,11 @@ All design artifacts are in `assets/design/`. These files are the source of trut
 
 The design should be aligned with Apple HIG and use standard SwiftUI components and layout. All screens have a dark and light mode.
 
+## Alignment
+
+- Numbers arranged vertically and of the same unit must always be aligned to the right
+- Horizontal text should always be baseline aligned unless otherwise noted
+
 ### Typography Scale
 
 The type ramp is scalable on the dashboard depending on the device and scale using Apple Dynamic Type. Cyclometer should be able to run on any iPhone that supports iOS 26. Use the standard font style on iOS, SF Pro Rounded.
@@ -93,6 +98,10 @@ Units should always be set baseline aligned with their corresponding values.
 ### Spacing System
 - [ ] Define base unit and scale (e.g., 4pt base)
 - [ ] Do not override the padding on any page but the Dashboard. The dashboard should use the 4pt padding.
+
+### Opacity Tokens
+- Opacity values must be tokenized, not inline literals. Tokens live in `DesignSystem/Opacity.swift`.
+- `watermark` (0.2) — background sparkline / watermark behind a dashboard hero number (e.g. W1 speed history).
 
 ### Navigation Pattern
 The navigation in the app will follow standard iOS application guidelines patterns. In this case, the application to model is the Apple Music app. The bottom TabView should have the following 3 items:

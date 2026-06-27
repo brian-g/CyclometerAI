@@ -82,12 +82,15 @@ struct RideDashboardView: View {
                 // W1 — Speed 2×2
                 GridRow {
                     SpeedWidget(
-                        speed: store.speedKPH,
+                        speed: store.speed.speedMPS,
+                        speedHistory: store.speed.watermarkSamples,
                         activeSpeedSource: store.speed.activeSpeedSource,
-                        distance: store.distanceKM,
+                        distance: store.distanceMeters,
                         elapsed: store.elapsedSeconds,
-                        averageSpeed: store.averageSpeedKPH,
-                        maxSpeed: store.maxSpeedKPH
+                        averageSpeed: store.averageSpeedMPS,
+                        maxSpeed: store.maxSpeedMPS,
+                        unit: store.unitSystem,
+                        size: .twoByTwo
                     )
                     .gridCellColumns(2)
                     .frame(height: unit * 2)
@@ -203,68 +206,6 @@ struct RideDashboardView: View {
 }
 
 // MARK: - Dashboard Widgets
-
-/// W1 — Speed 2×2: hero speed + distance + elapsed + avg/max
-struct SpeedWidget: View {
-    let speed: Double
-    let activeSpeedSource: SensorSource
-    let distance: Double
-    let elapsed: Int
-    let averageSpeed: Double
-    let maxSpeed: Double
-
-    var body: some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                HStack(alignment: .top, spacing: Spacing.sm) {
-                    HeroNumber(speed, unit: "mph")
-                    sourceBadge
-                }
-                Spacer()
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.lg) {
-                    HeroNumber(distance, unit: "mi") {
-                        Text("Distance").font(.caption)
-                    }
-                    .heroNumberSize(.small)
-                    HeroNumber(elapsed.formattedElapsed, unit: "") {
-                        Text("Time").font(.caption)
-                    }
-                    .heroNumberSize(.small)
-                }
-            }
-            Spacer()
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                HeroNumber(averageSpeed, unit: "") {
-                    Text("AVG").font(.caption)
-                }
-                .heroNumberSize(.small)
-                .layout(.vertical)
-                HeroNumber(maxSpeed, unit: "") {
-                    Text("MAX").font(.caption)
-                }
-                .heroNumberSize(.small)
-                .layout(.vertical)
-            }
-        }
-        .padding(Spacing.sm)
-        .frame(maxWidth: .infinity)
-        .background(Color.cyBgSecondary)
-    }
-
-    private var sourceBadge: some View {
-        let (label, fg, bg): (String, Color, Color) = switch activeSpeedSource {
-        case .gps:      ("GPS", .cyTextOnPrimary, .cyPrimary)
-        case .bleWheel: ("BLE", .cyTextOnPrimary, .cyPrimary)
-        case .none:     ("--",  .cyTextTertiary,  .cyBgTertiary)
-        }
-        return Text(label)
-            .font(.caption2.weight(.bold))
-            .padding(.horizontal, Spacing.xs)
-            .padding(.vertical, 2)
-            .foregroundStyle(fg)
-            .background(bg, in: Capsule())
-    }
-}
 
 /// W4 — Heart Rate 1×1
 private struct HeartRateWidget: View {
@@ -416,19 +357,6 @@ private struct WeatherWidget: View {
     }
 }
 
-// MARK: - Helpers
-
-private extension Int {
-    var formattedElapsed: String {
-        let d = Duration.seconds(self)
-        if self >= 3600 {
-            return d.formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1, fractionalSecondsLength: 0)))
-        } else {
-            return d.formatted(.time(pattern: .minuteSecond(padMinuteToLength: 2, fractionalSecondsLength: 0)))
-        }
-    }
-}
-
 // MARK: - Previews
 
 #Preview("Zone 4 — Radar Active") {
@@ -457,20 +385,6 @@ private extension Int {
         },
         onClose: { }
     )
-}
-
-// Renders W1 at a representative grid height (≈unit×2 on a typical iPhone).
-// Use this preview to catch layout regressions in HeroNumber's frameSize constraint.
-#Preview("SpeedWidget — grid height") {
-    SpeedWidget(
-        speed: 28.4,
-        activeSpeedSource: .gps,
-        distance: 12.3,
-        elapsed: 2340,
-        averageSpeed: 28.4,
-        maxSpeed: 34.1
-    )
-    .frame(width: 393, height: 200)
 }
 
 #Preview("Paused") {
