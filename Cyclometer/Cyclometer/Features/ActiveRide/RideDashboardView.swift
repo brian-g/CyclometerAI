@@ -117,8 +117,16 @@ struct RideDashboardView: View {
 
                 // W5 Cadence + W10 Weather placeholder
                 GridRow {
-                    CadenceWidget(cadence: store.cadence.cadenceRPM)
-                        .frame(height: unit)
+                    CadenceWidget(
+                        // 1×1 never renders the watermark, so skip the O(n)
+                        // downsample — pass it only when placed at .twoByOne.
+                        cadence: store.cadence.cadenceRPM,
+                        cadenceHistory: [],
+                        averageCadence: store.cadence.averageCadenceRPM,
+                        maxCadence: store.cadence.maxCadenceRPM,
+                        size: .oneByOne
+                    )
+                    .frame(height: unit)
                     WeatherWidget()
                         .frame(height: unit)
                 }
@@ -309,29 +317,6 @@ private struct PaceWidget: View {
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
             HeroNumber(pace, unit: "/mi").heroNumberSize(.medium)
-            Spacer()
-        }
-        .padding(Spacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.cyBgSecondary)
-    }
-}
-
-/// W5 — Cadence 1×1
-private struct CadenceWidget: View {
-    let cadence: Int?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("CADENCE")
-                .font(.caption)
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
-            if let cadence {
-                HeroNumber("\(cadence)", unit: "rpm").heroNumberSize(.medium)
-            } else {
-                HeroNumber("—", unit: "rpm").heroNumberSize(.medium)
-            }
             Spacer()
         }
         .padding(Spacing.sm)
