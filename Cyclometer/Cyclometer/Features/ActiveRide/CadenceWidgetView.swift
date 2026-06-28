@@ -14,7 +14,7 @@ struct CadenceWidget: View {
 
     var body: some View {
         ZStack {
-            if size == .twoByOne, !cadenceHistory.isEmpty {
+            if !cadenceHistory.isEmpty {
                 CadenceHistoryChart(history: cadenceHistory)
             }
             switch size {
@@ -35,7 +35,7 @@ struct CadenceWidget: View {
 
     private var oneByOneContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            cadenceTitle
+            WidgetLabel("Cadence")
             cadenceHero
             Spacer()
         }
@@ -45,7 +45,7 @@ struct CadenceWidget: View {
 
     private var twoByOneContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            cadenceTitle
+            WidgetLabel("Cadence")
             HStack(alignment: .lastTextBaseline, spacing: Spacing.lg) {
                 cadenceHero
                 Spacer()
@@ -78,13 +78,6 @@ struct CadenceWidget: View {
         HeroNumber(displayMax, unit: "") { Text("Max").font(.caption) }
             .heroNumberSize(.small)
             .layout(.vertical)
-    }
-
-    private var cadenceTitle: some View {
-        Text("Cadence")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .textCase(.uppercase)
     }
 
     // MARK: - Computed Display Values

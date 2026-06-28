@@ -59,7 +59,7 @@ final class CadenceWidgetSnapshotTests: XCTestCase {
 
     func testOneByOneActive() {
         assertSnapshot(
-            of: widget(history: [], size: .oneByOne),
+            of: widget(history: sampleHistory, size: .oneByOne),
             as: .image(layout: canvas1x1)
         )
     }

@@ -118,10 +118,8 @@ struct RideDashboardView: View {
                 // W5 Cadence + W10 Weather placeholder
                 GridRow {
                     CadenceWidget(
-                        // 1×1 never renders the watermark, so skip the O(n)
-                        // downsample — pass it only when placed at .twoByOne.
                         cadence: store.cadence.cadenceRPM,
-                        cadenceHistory: [],
+                        cadenceHistory: store.cadence.watermarkSamples,
                         averageCadence: store.cadence.averageCadenceRPM,
                         maxCadence: store.cadence.maxCadenceRPM,
                         size: .oneByOne
@@ -222,10 +220,7 @@ private struct HeartRateWidget: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("HEART RATE")
-                .font(.caption)
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
+            WidgetLabel("Heart Rate")
             HeroNumber(bpm > 0 ? "\(bpm)" : "—", unit: "bpm").heroNumberSize(.medium)
             Spacer()
         }
@@ -246,10 +241,7 @@ private struct HRZonesWidget: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("ZONE")
-                .font(.caption)
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
+            WidgetLabel("Zone")
             HeroNumber(zone == 0 ? "—" : "Z\(zone)", unit: "").heroNumberSize(.medium)
             Spacer()
         }
@@ -269,10 +261,7 @@ private struct RadarWidget: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("RADAR")
-                    .font(.caption)
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
+                WidgetLabel("Radar")
                 if !isRadarPaired {
                     HeroNumber("—", unit: "").heroNumberSize(.medium)
                 } else if targets.isEmpty {
@@ -312,10 +301,7 @@ private struct PaceWidget: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("PACE")
-                .font(.caption)
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
+            WidgetLabel("Pace")
             HeroNumber(pace, unit: "/mi").heroNumberSize(.medium)
             Spacer()
         }
@@ -329,10 +315,7 @@ private struct PaceWidget: View {
 private struct WeatherWidget: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("WEATHER")
-                .font(.caption)
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
+            WidgetLabel("Weather")
             HeroNumber("77°", unit: "").heroNumberSize(.medium)
             Spacer()
         }
