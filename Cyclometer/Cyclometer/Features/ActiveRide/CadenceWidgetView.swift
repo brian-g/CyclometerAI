@@ -187,7 +187,7 @@ private let demoHistory: [Double] = stride(from: 60.0, to: 105.0, by: 1.2).map {
 #Preview("1×1 — Active") {
     CadenceWidget(
         cadence: 92,
-        cadenceHistory: [],
+        cadenceHistory: demoHistory,
         averageCadence: 88,
         maxCadence: 104,
         size: .oneByOne
