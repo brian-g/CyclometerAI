@@ -152,10 +152,7 @@ struct SpeedWidget: View {
     }
 
     private var speedTitle: some View {
-        Text("Speed")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .textCase(.uppercase)
+        WidgetLabel("Speed")
     }
 
     private var sourceBadge: some View {
