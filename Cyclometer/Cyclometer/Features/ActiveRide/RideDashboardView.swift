@@ -137,13 +137,7 @@ struct RideDashboardView: View {
 
                 // W8 — Map 2×2 (extends behind the floating toolbar)
                 GridRow {
-                    MapWidget(
-                        coordinate: store.coordinate,
-                        heading: store.heading,
-                        coordinates: store.trackCoordinates,
-                        isLocationAvailable: store.isLocationAvailable,
-                        onHeadingUpChanged: { store.send(.mapHeadingUpChanged($0)) }
-                    )
+                    MapWidget(coordinates: store.trackCoordinates)
                     .gridCellColumns(2)
                     .frame(height: unit * 2 + toolbarHeight)
                 }
