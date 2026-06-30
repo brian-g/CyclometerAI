@@ -31,9 +31,15 @@ struct ActiveRideMapView: View {
         }
         .mapStyle(.standard(elevation: .realistic))
         .mapControls {
-            MapUserLocationButton()
-            MapScaleView()
             MapCompass()
+            // MapUserLocationButton manages the user-tracking mode and overrides
+            // the heading-up follow camera (downgrading it to plain follow), so
+            // it's shown only in the interactive sheet — never on the live grid
+            // widget, which must stay heading-up. MapScaleView rides along there.
+            if !interactionModes.isEmpty {
+                MapUserLocationButton()
+                MapScaleView()
+            }
         }
         .mapControlVisibility(.visible)
     }
