@@ -53,6 +53,9 @@ struct ActiveRideFeature {
         var heading: Double = -1
         var horizontalAccuracy: Double = 0
         var isLocationAvailable: Bool = false
+        /// W8 map orientation. Heading-up (map rotates so travel points up) by
+        /// default; the map's compass control toggles to north-up.
+        var isMapHeadingUp: Bool = true
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
         // Defaults to the device locale's measurement system. This is a *read*
@@ -82,6 +85,7 @@ struct ActiveRideFeature {
         case speed(SpeedFeature.Action)
         case locationUpdated(LocationUpdate)
         case locationAuthorizationResult(CLAuthorizationStatus)
+        case mapHeadingUpChanged(Bool)
 
         @CasePathable
         enum FinishAlert: Equatable {
@@ -257,6 +261,9 @@ struct ActiveRideFeature {
                 return .send(.speed(.gpsSpeedReceived(update.speed)))
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = (status == .authorizedWhenInUse || status == .authorizedAlways)
+                return .none
+            case .mapHeadingUpChanged(let headingUp):
+                state.isMapHeadingUp = headingUp
                 return .none
             case .speed:
                 return .none

@@ -689,3 +689,23 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.elapsedTick)
     }
 }
+
+@MainActor
+@Suite("ActiveRideFeature — map orientation (W8)")
+struct ActiveRideFeatureMapOrientationTests {
+
+    @Test("mapHeadingUpChanged syncs heading-up ↔ north-up from the live camera")
+    func headingUpChangeSyncsState() async {
+        let store = TestStore(initialState: ActiveRideFeature.State()) {
+            ActiveRideFeature()
+        }
+
+        // Default is heading-up; native compass tap reorients to north (false).
+        await store.send(.mapHeadingUpChanged(false)) {
+            $0.isMapHeadingUp = false
+        }
+        await store.send(.mapHeadingUpChanged(true)) {
+            $0.isMapHeadingUp = true
+        }
+    }
+}
