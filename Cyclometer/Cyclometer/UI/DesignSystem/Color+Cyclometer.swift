@@ -37,4 +37,17 @@ extension Color {
             : score < 0.66 ? Color("cyRatingOkayBg")
             : Color("cyRatingGoodBg")
     }
+
+    /// Route hill-grade colour for a slope percentage. Bands: <3 flat, <6, <9,
+    /// <12, ≥12 (extreme). Used for steepness colour-coding on the route
+    /// polyline (M8); see `mapRoute` / `mapTravelPath` for the base map lines.
+    static func mapGrade(percent: Double) -> Color {
+        switch percent {
+        case ..<3:  return Color("cyMapGrade1")
+        case ..<6:  return Color("cyMapGrade2")
+        case ..<9:  return Color("cyMapGrade3")
+        case ..<12: return Color("cyMapGrade4")
+        default:    return Color("cyMapGrade5")
+        }
+    }
 }

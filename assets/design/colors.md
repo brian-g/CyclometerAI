@@ -41,6 +41,14 @@ Primary brand: `#60BD10` · Optimized for outdoor sunlight visibility · WCAG AA
 | `hrZone3` | `#60BD10` | Zone 3 — Tempo (green) |
 | `hrZone4` | `#F57C00` | Zone 4 — Threshold (orange) |
 | `hrZone5` | `#D32F2F` | Zone 5 — VO₂ Max (red) |
+| **Map** | | |
+| `mapTravelPath` | `#E91E63` | Recorded ride track — breadcrumb of distance covered |
+| `mapRoute` | `#5E5CE6` | Planned route polyline (GPX import) |
+| `mapGrade1` | `#159BA3` | Route hill grade 0–3% (flat) |
+| `mapGrade2` | `#F4B400` | Route hill grade 3–6% |
+| `mapGrade3` | `#F57C00` | Route hill grade 6–9% |
+| `mapGrade4` | `#E64A19` | Route hill grade 9–12% |
+| `mapGrade5` | `#B71C1C` | Route hill grade 12%+ (extreme) |
 | **System** | | |
 | `destructive` | `#C62828` | Delete, destructive actions |
 | `info` | `#1565C0` | Info badges, tips |
@@ -86,6 +94,14 @@ Primary brand: `#60BD10` · Optimized for outdoor sunlight visibility · WCAG AA
 | `hrZone3` | `#6FD11E` | Zone 3 — Tempo (green) |
 | `hrZone4` | `#FFA726` | Zone 4 — Threshold (orange) |
 | `hrZone5` | `#EF5350` | Zone 5 — VO₂ Max (red) |
+| **Map** | | |
+| `mapTravelPath` | `#FF5C8A` | Recorded ride track — breadcrumb of distance covered |
+| `mapRoute` | `#7D7AFF` | Planned route polyline (GPX import) |
+| `mapGrade1` | `#4FD0D6` | Route hill grade 0–3% (flat) |
+| `mapGrade2` | `#FFD24A` | Route hill grade 3–6% |
+| `mapGrade3` | `#FFA040` | Route hill grade 6–9% |
+| `mapGrade4` | `#FF7043` | Route hill grade 9–12% |
+| `mapGrade5` | `#E53935` | Route hill grade 12%+ (extreme) |
 | **System** | | |
 | `destructive` | `#EF5350` | Delete, destructive actions |
 | `info` | `#42A5F5` | Info badges, tips |

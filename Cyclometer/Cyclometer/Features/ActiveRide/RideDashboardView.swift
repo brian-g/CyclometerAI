@@ -27,10 +27,16 @@ struct RideDashboardView: View {
             gridPage
                 .tag(Page.grid)
 
-            // Page 2 — single full-bleed map (S05 "second page has a single map").
-            ActiveRideMapView(coordinates: store.trackCoordinates)
-                .ignoresSafeArea()
-                .tag(Page.map)
+            // Page 2 — temporarily showing the Cadence 2×1 widget (the full-bleed
+            // map lives on the W8 grid cell for now; the page-2 map returns later).
+            CadenceWidget(
+                cadence: store.cadence.cadenceRPM,
+                cadenceHistory: store.cadence.watermarkSamples,
+                averageCadence: store.cadence.averageCadenceRPM,
+                maxCadence: store.cadence.maxCadenceRPM,
+                size: .twoByOne
+            )
+            .tag(Page.map)
         }
         .background(Color.cyBgSecondary)
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -131,9 +137,9 @@ struct RideDashboardView: View {
 
                 // W8 — Map 2×2 (extends behind the floating toolbar)
                 GridRow {
-                    ActiveRideMapView(coordinates: store.trackCoordinates)
-                        .gridCellColumns(2)
-                        .frame(height: unit * 2 + toolbarHeight)
+                    MapWidget(coordinates: store.trackCoordinates)
+                    .gridCellColumns(2)
+                    .frame(height: unit * 2 + toolbarHeight)
                 }
             }
         }
