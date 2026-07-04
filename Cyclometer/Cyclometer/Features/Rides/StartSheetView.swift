@@ -61,9 +61,13 @@ private struct SensorStatusRow: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(sensor.kind.displayName).font(.headline)
-                Text(sensor.name ?? "Not Paired")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                // Device name only; the status badge conveys connection state, so we
+                // avoid a subtitle that could contradict it (e.g. "Not Paired" + Connected).
+                if let name = sensor.name {
+                    Text(name)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             if let battery = sensor.batteryPercent, sensor.status == .connected {

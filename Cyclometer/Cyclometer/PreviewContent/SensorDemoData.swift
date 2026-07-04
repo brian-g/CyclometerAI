@@ -23,28 +23,6 @@ extension SensorStatus {
     ]
 }
 
-struct SensorStub: Identifiable {
-    let id = UUID()
-    let name: String
-    let systemImage: String
-    let status: String
-    let detail: String
-    let tint: Color
-}
-
-extension SensorStub {
-    static let newRideDemoSensors = [
-        SensorStub(name: "Heart Rate", systemImage: "heart.fill", status: "Ready", detail: "Chest strap stub connected", tint: .red),
-        SensorStub(name: "Speed", systemImage: "speedometer", status: "Searching", detail: "Wheel sensor stub scanning", tint: .orange),
-        SensorStub(name: "GPS", systemImage: "location.fill", status: "Locked", detail: "High accuracy location stub", tint: .blue),
-        SensorStub(name: "Cadence", systemImage: "dial.medium.fill", status: "Ready", detail: "Crank sensor stub connected", tint: .green),
-        SensorStub(name: "RADAR", systemImage: "dot.radiowaves.forward", status: "Standby", detail: "Rear radar stub available", tint: .purple),
-        SensorStub(name: "Power", systemImage: "bolt.fill", status: "Ready", detail: "Power meter stub connected", tint: .pink),
-        SensorStub(name: "Heads Up Display", systemImage: "glasses.fill", status: "Ready", detail: "Engo 3 Glasses", tint: .yellow)
-    ]
-}
-
 struct NewRideDemoData {
     static let bikeName = "Road Bike Stub"
-    static let recordingSummary = "Auto-pause On"
 }

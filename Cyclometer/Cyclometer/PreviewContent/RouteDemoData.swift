@@ -210,9 +210,5 @@ struct PreviousRouteRideStub: Identifiable {
 }
 
 extension RouteStub {
-    static let availableRoutes: [RouteStub] = [.openRide] + sampleRoutes
-}
-
-extension RouteStub {
     var currentTemperature: String { "77°" }
 }
