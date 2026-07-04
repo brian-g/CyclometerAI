@@ -14,19 +14,10 @@ struct AppView: View {
                 RidesView(
                     store: store.scope(state: \.rides, action: \.rides),
                     recordedItems: items,
-                    onStartRide: { store.send(.startRideTapped) }
+                    onStartRide: { store.send(.startRideButtonTapped) }
                 )
-                .toolbar {
-                    if store.activeRide == nil {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button {
-                                store.send(.startRideTapped)
-                            } label: {
-                                Label("Start Ride", systemImage: "play.fill")
-                            }
-                            .accessibilityLabel("Start Ride")
-                        }
-                    }
+                .startRideToolbarItem(isHidden: store.activeRide != nil) {
+                    store.send(.startRideButtonTapped)
                 }
             }
             .tabItem { Label("Rides", image: "cyclometer.rider") }
@@ -35,6 +26,9 @@ struct AppView: View {
             // ── Routes ───────────────────────────────────────────────────────
             NavigationStack {
                 RoutesView(store: store.scope(state: \.routes, action: \.routes))
+                    .startRideToolbarItem(isHidden: store.activeRide != nil) {
+                        store.send(.startRideButtonTapped)
+                    }
             }
             .tabItem { Label("Routes", systemImage: "point.topleft.down.curvedto.point.bottomright.up") }
             .tag(AppFeature.Tab.routes)
@@ -42,6 +36,9 @@ struct AppView: View {
             // ── Settings ─────────────────────────────────────────────────────
             NavigationStack {
                 SettingsView(store: store.scope(state: \.settings, action: \.settings))
+                    .startRideToolbarItem(isHidden: store.activeRide != nil) {
+                        store.send(.startRideButtonTapped)
+                    }
             }
             .tabItem { Label("Settings", systemImage: "gearshape") }
             .tag(AppFeature.Tab.settings)
@@ -64,17 +61,11 @@ struct AppView: View {
         .tabViewStyle(.tabBarOnly)
         .fontDesign(.rounded)
 
-        // ── New Ride Sheet ────────────────────────────────────────────────────
-        .sheet(isPresented: Binding(
-            get: { store.isShowingNewRide },
-            set: { _ in store.send(.newRideSheetDismissed) }
-        )) {
-            NewRideView(
-                onCancel: { store.send(.newRideSheetDismissed) },
-                onStartRide: { store.send(.rideStartConfirmed) }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
+        // ── Start Ride Sheet (S05.1) ──────────────────────────────────────────
+        .sheet(item: $store.scope(state: \.startSheet, action: \.startSheet)) { sheetStore in
+            StartSheetView(store: sheetStore)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
 
         // ── Active Ride Dashboard (fullScreenCover) ───────────────────────────

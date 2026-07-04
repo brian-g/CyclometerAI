@@ -11,7 +11,7 @@ struct AppFeature {
     struct State: Equatable {
         var selectedTab: Tab = .rides
         var activeRide: ActiveRideFeature.State? = nil
-        var isShowingNewRide: Bool = false
+        @Presents var startSheet: StartSheetFeature.State? = nil
         var isDashboardPresented: Bool = false
         var rides: RidesFeature.State = RidesFeature.State()
         var routes: RoutesFeature.State = RoutesFeature.State()
@@ -24,9 +24,8 @@ struct AppFeature {
 
     enum Action {
         case tabSelected(Tab)
-        case startRideTapped
-        case newRideSheetDismissed
-        case rideStartConfirmed
+        case startRideButtonTapped
+        case startSheet(PresentationAction<StartSheetFeature.Action>)
         case dashboardDismissed
         case dashboardOpened
         case rideFinished
@@ -47,19 +46,18 @@ struct AppFeature {
                 state.selectedTab = tab
                 return .none
 
-            case .startRideTapped:
-                state.isShowingNewRide = true
+            case .startRideButtonTapped:
+                state.startSheet = StartSheetFeature.State()
                 return .none
 
-            case .newRideSheetDismissed:
-                state.isShowingNewRide = false
-                return .none
-
-            case .rideStartConfirmed:
+            case .startSheet(.presented(.delegate(.startRide))):
                 state.activeRide = ActiveRideFeature.State()
-                state.isShowingNewRide = false
+                state.startSheet = nil
                 state.isDashboardPresented = true
                 state.selectedTab = .rides
+                return .none
+
+            case .startSheet:
                 return .none
 
             case .dashboardDismissed:
@@ -87,6 +85,9 @@ struct AppFeature {
         }
         .ifLet(\.activeRide, action: \.activeRide) {
             ActiveRideFeature()
+        }
+        .ifLet(\.$startSheet, action: \.startSheet) {
+            StartSheetFeature()
         }
     }
 }
