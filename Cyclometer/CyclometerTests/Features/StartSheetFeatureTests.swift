@@ -29,6 +29,15 @@ struct StartSheetFeatureTests {
         #expect(isDismissed.value)
     }
 
+    @Test("Tap to Pair is a no-op hook until the pairing flow exists")
+    func pairButtonIsNoOp() async {
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        }
+
+        await store.send(.pairButtonTapped(.speed))
+    }
+
     @Test("Radar connection states map to the radar row badge")
     func radarStatusMapping() async {
         let store = TestStore(initialState: StartSheetFeature.State()) {

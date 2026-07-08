@@ -24,6 +24,7 @@ struct StartSheetFeature {
         case hrPairingUpdated(Bool)
         case speedStatusUpdated(BLECSCClient.ConnectionState)
         case cadenceStatusUpdated(BLECSCClient.ConnectionState)
+        case pairButtonTapped(SensorRow.Kind)
         case cancelButtonTapped
         case startRideButtonTapped
         case delegate(Delegate)
@@ -78,6 +79,11 @@ struct StartSheetFeature {
 
             case .cadenceStatusUpdated(let status):
                 state.setStatus(Self.status(from: status), for: .cadence)
+                return .none
+
+            case .pairButtonTapped:
+                // A discovered-but-unpaired sensor offers a "Tap to Pair" action. The pairing
+                // flow itself is a future feature; this is the hook for it.
                 return .none
 
             case .cancelButtonTapped:

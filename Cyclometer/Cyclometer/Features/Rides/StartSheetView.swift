@@ -5,6 +5,11 @@ import SwiftUI
 struct StartSheetView: View {
     let store: StoreOf<StartSheetFeature>
 
+    /// Found or paired sensors only; unpaired categories are never shown.
+    private var visibleSensors: [SensorRow] {
+        store.sensors.filter { $0.status != .notPaired }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -16,8 +21,17 @@ struct StartSheetView: View {
                     }
                 }
                 Section("Sensors") {
-                    ForEach(store.sensors) { sensor in
-                        SensorStatusRow(sensor: sensor)
+                    // Only surface sensors that are found or paired — never a fixed list of
+                    // unpaired categories. With nothing found, show a single searching row.
+                    if visibleSensors.isEmpty {
+                        Text("Searching for sensors")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(visibleSensors) { sensor in
+                            SensorStatusRow(sensor: sensor) {
+                                store.send(.pairButtonTapped(sensor.kind))
+                            }
+                        }
                     }
                 }
             }
@@ -49,6 +63,8 @@ struct StartSheetView: View {
 
 private struct SensorStatusRow: View {
     let sensor: SensorRow
+    /// Invoked when a found-but-unpaired sensor's "Tap to Pair" button is tapped.
+    let onPair: () -> Void
 
     var body: some View {
         HStack(spacing: Spacing.md) {
@@ -61,8 +77,8 @@ private struct SensorStatusRow: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(sensor.kind.displayName).font(.headline)
-                // Device name only; the status badge conveys connection state, so we
-                // avoid a subtitle that could contradict it (e.g. "Not Paired" + Connected).
+                // Device name only; the status control conveys connection state, so we
+                // avoid a subtitle that could contradict it.
                 if let name = sensor.name {
                     Text(name)
                         .font(.subheadline)
@@ -76,19 +92,34 @@ private struct SensorStatusRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            statusBadge
+            statusControl
         }
         .padding(.vertical, Spacing.xs)
     }
 
-    private var statusBadge: some View {
-        let badge = sensor.status.badge
-        return Text(badge.label)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .foregroundStyle(badge.foreground)
-            .background(badge.background, in: Capsule())
+    // Found sensors offer a pairing action; paired sensors show the connected badge.
+    // `.notPaired` rows are filtered out upstream, so they render nothing here.
+    @ViewBuilder
+    private var statusControl: some View {
+        switch sensor.status {
+        case .searching:
+            Button("Tap to Pair", action: onPair)
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                .tint(.cyPrimary)
+        case .connected:
+            let badge = sensor.status.badge
+            Text(badge.label)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .foregroundStyle(badge.foreground)
+                .background(badge.background, in: Capsule())
+        case .notPaired:
+            EmptyView()
+        }
     }
 }
 
