@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**CyclometerAI** is a premium iOS cycling app (SwiftUI/Swift) designed as a modern bicycle computer. The repository is currently in the **design/specification phase** — no Swift source code exists yet. The primary content is design specs, assets, and documentation.
+**CyclometerAI** is a premium iOS cycling app (SwiftUI/Swift) designed as a modern bicycle computer. Implementation is **underway**: a buildable Xcode project and TCA app source live under `Cyclometer/`, alongside the design specs, assets, and documentation. Work is milestone-driven (see GitHub issues/milestones); the codebase is the source of truth for what is actually built — treat the "Planned Architecture" below as the design intent, which the current tree may not yet fully match.
 
 ## Repository Contents
 
@@ -14,9 +14,15 @@ CyclometerAI/
 ├── README.md                        ← Full product specification
 ├── LICENSE
 ├── .gitignore
+├── Cyclometer/                      ← Xcode project + app source (implementation)
+│   ├── Cyclometer.xcodeproj
+│   ├── Cyclometer/                  ← App target (App, Features, Clients, Models, UI, PreviewContent)
+│   ├── CyclometerTests/             ← Unit + snapshot tests
+│   └── CyclometerUITests/
 └── assets/
     ├── PRD.md                       ← Product Requirements Document (v0.2)
     ├── UX.md                        ← Screen-level UX specification
+    ├── TCA.md                       ← TCA architecture spec (feature tree, file layout, test strategy)
     └── design/                      ← All manual design assets
         ├── colors.md                ← Canonical color token reference (light + dark)
         ├── Design.sketch            ← Primary UI/UX design file (all screens)
@@ -44,7 +50,7 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 | App icon | `assets/design/CyclometerIcon.sketch` | App icon artwork, all required sizes |
 | D-DIN fonts | `assets/design/d-din/` | Dashboard numeric typeface; must be bundled in the Xcode target. OTF files are licensed under SIL Open Font License. |
 
-> **Color token rule:** Always reference `assets/design/colors.md` for hex values and semantic token names before hardcoding any color in Swift. The Swift token file (`DesignSystem/Color+Cyclometer.swift`) will be generated from this source. All `br`-prefixed tokens (e.g., `brPrimary`, `brHRZone3`, `brRatingBad`) map to Xcode asset catalog entries.
+> **Color token rule:** Always reference `assets/design/colors.md` for hex values and semantic token names before hardcoding any color in Swift. The Swift token file is `Cyclometer/Cyclometer/UI/DesignSystem/Color+Cyclometer.swift`, backed by asset-catalog color sets in `Cyclometer/Cyclometer/Assets.xcassets/colors/`. **In code the tokens are `cy`-prefixed** (e.g. `Color.cyPrimary`, `cyHRZone3`, `cyRatingBad`); the `br`-prefixed names used in the UX/design specs map 1:1 to these `cy` tokens (`brPrimary` → `cyPrimary`).
 
 ## Planned Architecture (from PRD.md)
 
@@ -87,20 +93,23 @@ AppFeature
 └── SettingsFeature
 ```
 
-**Project Folder Structure (target):**
+**Project Folder Structure (actual — `Cyclometer/Cyclometer/`):**
 ```
-Cyclometer/
-├── App/
-├── Features/
-├── Clients/                       ← Protocol-based hardware clients (BluetoothClient, etc.)
-├── Models/                        ← SwiftData models (Ride, TrackPoint, RadarEvent, UserProfile)
-├── Export/                        ← GPXExporter.swift
-├── DesignSystem/
-│   ├── Color+Cyclometer.swift     ← br-prefixed Color extensions; source of truth: assets/design/colors.md
-│   ├── Typography.swift
-│   └── Components/
-└── Tests/
+Cyclometer/Cyclometer/
+├── App/                           ← AppFeature, AppView, CyclometerApp; StartRideToolbar
+├── Features/                      ← <Name>Feature.swift + <Name>View.swift pairs
+│   ├── ActiveRide/                ← ActiveRide, Speed, Cadence, Map widgets, RideDashboard
+│   ├── Rides/                     ← RidesFeature/View, StartSheetFeature/View (S05.1)
+│   ├── Routes/  └── Settings/
+├── Clients/                       ← TCA @Dependency clients (BLE/, Audio, Location, HealthKit, Persistence)
+├── Models/                        ← Ride, RadarTarget, HeartRateZone, CadenceZone, UnitSystem, Item
+├── UI/
+│   ├── DesignSystem/              ← Color+Cyclometer (cy tokens), Typography, AppFonts, Spacing, Opacity
+│   └── Components/                ← HeroNumber, HRZoneBadge, WidgetLabel, MetricTile, RadarColumn
+├── PreviewContent/                ← Demo/stub data for SwiftUI previews
+├── Assets.xcassets/  └── Resources/Fonts/
 ```
+> Note: `assets/TCA.md` §8 describes a more nested target layout (e.g. `Features/Tab/RidesTab/`) that the repo does **not** follow — match the flat `Features/<Area>/` grouping above when adding files.
 
 ## Design System
 
@@ -123,11 +132,20 @@ Labels: **ALL CAPS** · Units: *lowercase* · Units: baseline-aligned to their c
 
 ## Build & Development
 
-No Xcode project exists yet. When creating the iOS project:
-- Target: iOS 26.0+
-- iPhone only (`UIRequiredDeviceCapabilities` — no iPad)
-- Bundle ID: TBD
-- The `.gitignore` is already configured for Xcode/iOS development
+The Xcode project exists at `Cyclometer/Cyclometer.xcodeproj` (scheme: `Cyclometer`, target iOS 26.0+, iPhone only). Dependencies are resolved via SPM (The Composable Architecture, swift-snapshot-testing, etc.).
+
+Build and test from `Cyclometer/`:
+```
+xcodebuild build -project Cyclometer.xcodeproj -scheme Cyclometer \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+xcodebuild test  -project Cyclometer.xcodeproj -scheme Cyclometer \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:CyclometerTests
+```
+
+**Testing conventions** (target `CyclometerTests`):
+- Reducer logic — Swift Testing (`@Suite`/`@Test`/`#expect`) + TCA `TestStore` with `withDependencies` for mocks (e.g. `SpeedFeatureTests.swift`).
+- UI — `pointfreeco/swift-snapshot-testing` via XCTest, fixed-size canvases, light + dark variants (e.g. `SpeedWidgetSnapshotTests.swift`).
+- Known pre-existing failure: `HeroNumberSnapshotTests.testCustomColor()`.
 
 **Open Questions (resolve before or during M2):**
 - OQ2: Garmin mobile SDK vs. raw CoreBluetooth for Varia BLE integration
