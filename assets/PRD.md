@@ -1,6 +1,6 @@
 # Cyclometer — Product Requirements Document
-**Version:** 0.4.1 Draft  
-**Date:** 2026-06-12  
+**Version:** 0.4.2 Draft  
+**Date:** 2026-07-07  
 **Status:** Fourth Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
 **Platform:** iOS 26+ · iPhone-first · Apple Watch companion  
@@ -18,6 +18,7 @@
 | 0.3 | 2026-04-05 | Brian / Claude | Corrected Cadence competitive row (navigation ✅, ActiveLook AR ✅); three-tone audio system (All Clear, Warning, Danger) — spec in `Audio.md`; radar visualization brainstorming added; radar hidden when no device paired; haptic brainstorming added; route planning expanded to GPX import + tribos.studio; vehicle pass event recording added to GPX and data model; resolved OQ12 (GPX import only), OQ13 (presets + manual + auto-calibration); wheel auto-calibration spec added |
 | 0.4 | 2026-05-20 | Brian / Claude | iOS minimum updated to 26.0; S05.4, S05.5, S19, S20 added to screen inventory; OQ14 resolved (Option F sidebar); L3 haptic updated to Core Haptics; Routes tab added and promoted to Phase 2; deferred alert-configuration fields removed from UserProfile |
 | 0.4.1 | 2026-06-12 | Brian / Claude | OQBLE1 resolved (separate Speed/Cadence roles per `BLE.md`); M6 milestone wording clarified — CSC client is built in M2 (#20), M6 wires it into the metrics pipeline; wheel circumference presets + manual entry moved from M10 to M6 to align with GitHub milestone scoping |
+| 0.4.2 | 2026-07-07 | Brian / Claude | Milestone execution order re-sequenced: M3 -> M6 -> M10 -> M4 -> M5 -> M7-M12; GitHub milestone due dates updated to match; minimal BLE pairing sheet + CSC role assignment pulled forward into M6 (full S11 device management remains in M10); M6 issue set created (#65-#72) |
 
 ---
 
@@ -1065,6 +1066,8 @@ Cyclometer/
 
 ### Phase 1 — MVP (Target: 3 months)
 
+> **Execution order (v0.4.2):** M1 -> M2 -> M3 -> **M6 -> M10** -> M4 -> M5 -> M7 -> M8 -> M9 -> M11 -> M12. Milestone numbering is retained for tracking continuity; GitHub milestone due dates encode the execution sequence.
+
 | Milestone | Deliverable |
 |---|---|
 | M1 | Xcode project scaffold; TCA + CoreData + SwiftData; CI/CD via GitHub Actions |
@@ -1072,11 +1075,11 @@ Cyclometer/
 | M3 | Active Ride Dashboard — speed, cadence, time, distance (no radar, no HR) |
 | M4 | Radar sidebar visualization; haptic alerts L1–L3; three-tone audio system (All Clear, Warning, Danger) |
 | M5 | HealthKit integration; HR zone display; BLE HR fallback to Apple Watch |
-| M6 | Wire CSC client (built in M2, #20) into the metrics pipeline; GPS fallback for speed; wheel circumference presets + manual entry + GPS auto-calibration |
+| M6 | Wire CSC client (built in M2, #20) into the metrics pipeline; GPS fallback for speed; wheel circumference presets + manual entry + GPS auto-calibration; minimal BLE pairing UI + CSC role assignment (precursor to full S11 in M10) |
 | M7 | TrackPoint recording; vehicle pass event detection; GPX export with `gpxtpx` + `cyc:` extensions |
 | M8 | Navigation: live map; GPX route import; tribos.studio integration; turn alerts |
 | M9 | Ride summary; ride history persistence; vehicle pass event count in summary |
-| M10 | Settings, device management, onboarding flow |
+| M10 | Settings, full device management (S11, extended M6 pairing UI), onboarding flow |
 | M11 | QA; TestFlight open beta; bug fixes |
 | M12 | App Store submission |
 
@@ -1242,4 +1245,4 @@ All manual design assets are located in `assets/design/`. The audio specificatio
 
 ---
 
-*Cyclometer PRD v0.4.1 · Fourth Review Draft · 2026-06-12*
+*Cyclometer PRD v0.4.2 · Fourth Review Draft · 2026-07-07*
