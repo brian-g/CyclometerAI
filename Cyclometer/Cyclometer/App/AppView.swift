@@ -6,6 +6,14 @@ struct AppView: View {
     @Bindable var store: StoreOf<AppFeature>
     @Query(sort: \Item.timestamp, order: .reverse) private var items: [Item]
 
+    /// The accessory strip shows only while a ride is active or paused (S05.3).
+    private var hasVisibleRide: Bool {
+        switch store.activeRide?.recordingState {
+        case .active, .paused: return true
+        default: return false
+        }
+    }
+
     var body: some View {
         TabView(selection: $store.selectedTab.sending(\.tabSelected)) {
 
@@ -45,13 +53,17 @@ struct AppView: View {
         }
 
         // ── Active Ride Accessory (Apple Music mini-player pattern) ──────────
-        .tabViewBottomAccessory(isEnabled: store.activeRide != nil) {
-            if store.activeRide != nil {
+        // Visible only while a ride is active or paused (S05.3), not during the
+        // brief .idle window before `.task` starts the ride.
+        .tabViewBottomAccessory(isEnabled: hasVisibleRide) {
+            if let ride = store.activeRide, hasVisibleRide {
                 ActiveRideAccessoryView(
-                    distanceKM: store.activeRide?.distanceKM ?? 0,
-                    speedKPH: store.activeRide?.speedKPH ?? 0,
-                    onOpen: { store.send(.dashboardOpened) },
-                    onDismiss: { store.send(.dashboardDismissed) }
+                    progress: nil,                       // no route model yet → bicycle glyph
+                    distanceMeters: ride.distanceMeters,
+                    speedMPS: ride.speedMPS,
+                    elapsedSeconds: ride.elapsedSeconds,
+                    unit: ride.unitSystem,
+                    onOpen: { store.send(.dashboardOpened) }
                 )
                 .padding(.horizontal, 4)
             }
