@@ -37,6 +37,10 @@ struct ActiveRideFeature {
         // Canonical m/s views of the speed stats for consumers (e.g. SpeedWidget)
         // that convert to display units themselves. Uses Measurement so the
         // KPH→MPS factor isn't hardcoded at the call site.
+        var speedMPS: Double {
+            Measurement(value: speedKPH, unit: UnitSpeed.kilometersPerHour)
+                .converted(to: .metersPerSecond).value
+        }
         var averageSpeedMPS: Double {
             Measurement(value: averageSpeedKPH, unit: UnitSpeed.kilometersPerHour)
                 .converted(to: .metersPerSecond).value

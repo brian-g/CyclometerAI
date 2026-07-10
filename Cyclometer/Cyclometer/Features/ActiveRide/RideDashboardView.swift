@@ -64,7 +64,10 @@ struct RideDashboardView: View {
                     if value.translation.height > 120 { onClose() }
                 }
         )
-        .task { await store.send(.task).finish() }
+        // Ride effects (timer/HR/radar/location) are started by AppFeature when
+        // the ride begins and live for the whole ride, so they keep running when
+        // this dashboard is minimized to the accessory strip. Do NOT start them
+        // from a view `.task` here — that ties them to this view's lifetime.
         .alert($store.scope(state: \.finishAlert, action: \.finishAlert))
     }
 

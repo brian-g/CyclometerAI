@@ -55,7 +55,12 @@ struct AppFeature {
                 state.startSheet = nil
                 state.isDashboardPresented = true
                 state.selectedTab = .rides
-                return .none
+                // Start the ride's long-running effects (1 Hz timer, HR, radar,
+                // location) here so they live for the whole ride — bound to
+                // `activeRide` via `.ifLet` and torn down only when the ride
+                // ends. Previously this was driven by RideDashboardView's
+                // `.task`, so minimizing the dashboard cancelled the timer.
+                return .send(.activeRide(.task))
 
             case .startSheet:
                 return .none
