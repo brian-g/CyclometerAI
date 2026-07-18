@@ -8,6 +8,10 @@ enum RideRecordingState: Equatable, Sendable {
 @Reducer
 struct ActiveRideFeature {
 
+    /// Consecutive zero-speed seconds while active before the ride auto-ends.
+    /// PRD §8.8: "Auto-end if speed = 0 for > 5 minutes (configurable, default on)".
+    static let autoEndZeroSpeedSeconds = 300
+
     @Dependency(\.continuousClock) var clock
     @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.variaRadarClient) var variaRadarClient
@@ -206,7 +210,7 @@ struct ActiveRideFeature {
                 } else {
                     state.zeroSpeedSeconds = 0
                 }
-                if state.isAutoEndEnabled, state.zeroSpeedSeconds >= 21_600 {
+                if state.isAutoEndEnabled, state.zeroSpeedSeconds >= Self.autoEndZeroSpeedSeconds {
                     return .send(.autoEndTriggered)
                 }
                 return .none

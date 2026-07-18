@@ -38,6 +38,10 @@ struct SpeedFeatureTests {
         }
     }
 
+    // Placeholder, not real coverage: `BLECSCClient` is not yet injected here and
+    // nothing sets `pairedPeripheralId`, so both sides of the guard return `.none`
+    // and this would still pass with the guard deleted. It becomes meaningful once
+    // BLE speed pairing lands — assert then that no subscription is attempted.
     @Test("Start listening skips BLE when no peripheral is paired")
     func startListeningWithoutPeripheralIsNoop() async {
         let store = TestStore(initialState: SpeedFeature.State()) {

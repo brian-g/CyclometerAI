@@ -1,0 +1,53 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: CyclometerTests
+    # Pinned, not macos-latest: the app targets iOS 26.5, and macos-latest is still
+    # macOS 15 / Xcode 16 with no iOS 26 SDK. macos-26 defaults to Xcode 26.5 and
+    # ships an iOS 26.5 runtime with iPhone 17 Pro.
+    runs-on: macos-26
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Resolve SPM dependencies
+        working-directory: Cyclometer
+        run: xcodebuild -resolvePackageDependencies -project Cyclometer.xcodeproj -scheme Cyclometer
+
+      # -skipMacroValidation: Xcode won't expand SPM macros until they're explicitly
+      # trusted, and that approval is a GUI prompt cached in local preferences — there
+      # is no headless equivalent, so a fresh runner fails the build outright. The
+      # macros here are the pointfreeco TCA stack, version-pinned in Package.resolved.
+      #
+      # Snapshot suites are excluded deliberately, not by oversight. Their reference
+      # images were recorded against a local simulator and SwiftUI pixel output
+      # varies across runner images, so gating merges on them would be flaky from
+      # day one (HeroNumberSnapshotTests.testCustomColor is a known local failure
+      # already). Running them in CI needs its own issue — record-on-CI or a
+      # per-pixel tolerance.
+      - name: Run unit tests
+        working-directory: Cyclometer
+        run: |
+          xcodebuild test \
+            -project Cyclometer.xcodeproj \
+            -scheme Cyclometer \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+            -skipMacroValidation \
+            -only-testing:CyclometerTests \
+            -skip-testing:CyclometerTests/HeroNumberSnapshotTests \
+            -skip-testing:CyclometerTests/SpeedWidgetSnapshotTests \
+            -skip-testing:CyclometerTests/CadenceWidgetSnapshotTests \
+            -skip-testing:CyclometerTests/ActiveRideAccessorySnapshotTests

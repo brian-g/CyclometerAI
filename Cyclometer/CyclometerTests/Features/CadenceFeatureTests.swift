@@ -9,6 +9,8 @@ struct CadenceFeatureTests {
 
     private static let testDate = Date(timeIntervalSince1970: 1_000_000)
 
+    // Placeholder, not real coverage — see the matching note in SpeedFeatureTests.
+    // `BLECSCClient` is not injected here yet and nothing sets `pairedPeripheralId`.
     @Test("Start listening skips BLE when no peripheral is paired")
     func startListeningWithoutPeripheralIsNoop() async {
         let store = TestStore(initialState: CadenceFeature.State()) {
