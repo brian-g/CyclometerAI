@@ -165,7 +165,7 @@ struct RideDashboardView: View {
             // draggable; the paging TabView underneath never sees these drags.
             // Pin the capsule to the top so the enlarged frame grows downward
             // and doesn't push the visible grabber lower.
-            .frame(maxWidth: .infinity, minHeight: Spacing.tapTarget, alignment: .top)
+            .frame(maxWidth: .infinity, minHeight: Spacing.sm, alignment: .top)
             .contentShape(Rectangle())
             .padding(.bottom, Spacing.xs)
     }
