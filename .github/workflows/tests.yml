@@ -27,6 +27,11 @@ jobs:
         working-directory: Cyclometer
         run: xcodebuild -resolvePackageDependencies -project Cyclometer.xcodeproj -scheme Cyclometer
 
+      # -skipMacroValidation: Xcode won't expand SPM macros until they're explicitly
+      # trusted, and that approval is a GUI prompt cached in local preferences — there
+      # is no headless equivalent, so a fresh runner fails the build outright. The
+      # macros here are the pointfreeco TCA stack, version-pinned in Package.resolved.
+      #
       # Snapshot suites are excluded deliberately, not by oversight. Their reference
       # images were recorded against a local simulator and SwiftUI pixel output
       # varies across runner images, so gating merges on them would be flaky from
@@ -40,6 +45,7 @@ jobs:
             -project Cyclometer.xcodeproj \
             -scheme Cyclometer \
             -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+            -skipMacroValidation \
             -only-testing:CyclometerTests \
             -skip-testing:CyclometerTests/HeroNumberSnapshotTests \
             -skip-testing:CyclometerTests/SpeedWidgetSnapshotTests \
