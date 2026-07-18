@@ -15,83 +15,86 @@ struct AppView: View {
     }
 
     var body: some View {
-        TabView(selection: $store.selectedTab.sending(\.tabSelected)) {
-
-            // ── Rides ────────────────────────────────────────────────────────
-            NavigationStack {
-                RidesView(
-                    store: store.scope(state: \.rides, action: \.rides),
-                    recordedItems: items,
-                    onStartRide: { store.send(.startRideButtonTapped) }
-                )
-                .startRideToolbarItem(isHidden: store.activeRide != nil) {
-                    store.send(.startRideButtonTapped)
+        ZStack() {
+            TabView(selection: $store.selectedTab.sending(\.tabSelected)) {
+                
+                // ── Rides ────────────────────────────────────────────────────────
+                NavigationStack {
+                    RidesView(
+                        store: store.scope(state: \.rides, action: \.rides),
+                        recordedItems: items,
+                        onStartRide: { store.send(.startRideButtonTapped) }
+                    )
+                    .startRideToolbarItem(isHidden: store.activeRide != nil) {
+                        store.send(.startRideButtonTapped)
+                    }
+                }
+                .tabItem { Label("Rides", image: "cyclometer.rider") }
+                .tag(AppFeature.Tab.rides)
+                
+                // ── Routes ───────────────────────────────────────────────────────
+                NavigationStack {
+                    RoutesView(store: store.scope(state: \.routes, action: \.routes))
+                        .startRideToolbarItem(isHidden: store.activeRide != nil) {
+                            store.send(.startRideButtonTapped)
+                        }
+                }
+                .tabItem { Label("Routes", systemImage: "point.topleft.down.curvedto.point.bottomright.up") }
+                .tag(AppFeature.Tab.routes)
+                
+                // ── Settings ─────────────────────────────────────────────────────
+                NavigationStack {
+                    SettingsView(store: store.scope(state: \.settings, action: \.settings))
+                        .startRideToolbarItem(isHidden: store.activeRide != nil) {
+                            store.send(.startRideButtonTapped)
+                        }
+                }
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(AppFeature.Tab.settings)
+            }
+            
+            // ── Active Ride Accessory (Apple Music mini-player pattern) ──────────
+            // Visible only while a ride is active or paused (S05.3), not during the
+            // brief .idle window before `.task` starts the ride.
+            .tabViewBottomAccessory(isEnabled: hasVisibleRide) {
+                if let ride = store.activeRide, hasVisibleRide {
+                    ActiveRideAccessoryView(
+                        progress: nil,                       // no route model yet → bicycle glyph
+                        distanceMeters: ride.distanceMeters,
+                        speedMPS: ride.speedMPS,
+                        elapsedSeconds: ride.elapsedSeconds,
+                        unit: ride.unitSystem,
+                        onOpen: { store.send(.dashboardOpened) }
+                    )
+                    .padding(.horizontal, 4)
                 }
             }
-            .tabItem { Label("Rides", image: "cyclometer.rider") }
-            .tag(AppFeature.Tab.rides)
-
-            // ── Routes ───────────────────────────────────────────────────────
-            NavigationStack {
-                RoutesView(store: store.scope(state: \.routes, action: \.routes))
-                    .startRideToolbarItem(isHidden: store.activeRide != nil) {
-                        store.send(.startRideButtonTapped)
-                    }
+            .tabBarMinimizeBehavior(.onScrollDown)
+            .tint(.cyPrimary)
+            .tabViewStyle(.tabBarOnly)
+            .fontDesign(.rounded)
+            
+            // ── Start Ride Sheet (S05.1) ──────────────────────────────────────────
+            .sheet(item: $store.scope(state: \.startSheet, action: \.startSheet)) { sheetStore in
+                StartSheetView(store: sheetStore)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
-            .tabItem { Label("Routes", systemImage: "point.topleft.down.curvedto.point.bottomright.up") }
-            .tag(AppFeature.Tab.routes)
-
-            // ── Settings ─────────────────────────────────────────────────────
-            NavigationStack {
-                SettingsView(store: store.scope(state: \.settings, action: \.settings))
-                    .startRideToolbarItem(isHidden: store.activeRide != nil) {
-                        store.send(.startRideButtonTapped)
-                    }
-            }
-            .tabItem { Label("Settings", systemImage: "gearshape") }
-            .tag(AppFeature.Tab.settings)
-        }
-
-        // ── Active Ride Accessory (Apple Music mini-player pattern) ──────────
-        // Visible only while a ride is active or paused (S05.3), not during the
-        // brief .idle window before `.task` starts the ride.
-        .tabViewBottomAccessory(isEnabled: hasVisibleRide) {
-            if let ride = store.activeRide, hasVisibleRide {
-                ActiveRideAccessoryView(
-                    progress: nil,                       // no route model yet → bicycle glyph
-                    distanceMeters: ride.distanceMeters,
-                    speedMPS: ride.speedMPS,
-                    elapsedSeconds: ride.elapsedSeconds,
-                    unit: ride.unitSystem,
-                    onOpen: { store.send(.dashboardOpened) }
-                )
-                .padding(.horizontal, 4)
+            
+            // ── Active Ride Dashboard ───────────────────────────
+            if store.isDashboardPresented {
+                if let rideStore = store.scope(state: \.activeRide, action: \.activeRide) {
+                    RideDashboardView(
+                        store: rideStore,
+                        onClose: { store.send(.dashboardDismissed) }
+                    )
+                    .transition(.move(edge: .bottom)) // Animates beautifully when appearing/dismissing
+                    .zIndex(1) // Ensures it sits above the TabView
+                }
             }
         }
-        .tabBarMinimizeBehavior(.onScrollDown)
-        .tint(.cyPrimary)
-        .tabViewStyle(.tabBarOnly)
-        .fontDesign(.rounded)
+        .animation(.smooth, value: store.isDashboardPresented)
 
-        // ── Start Ride Sheet (S05.1) ──────────────────────────────────────────
-        .sheet(item: $store.scope(state: \.startSheet, action: \.startSheet)) { sheetStore in
-            StartSheetView(store: sheetStore)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-
-        // ── Active Ride Dashboard (fullScreenCover) ───────────────────────────
-        .fullScreenCover(isPresented: Binding(
-            get: { store.isDashboardPresented },
-            set: { _ in store.send(.dashboardDismissed) }
-        )) {
-            if let rideStore = store.scope(state: \.activeRide, action: \.activeRide) {
-                RideDashboardView(
-                    store: rideStore,
-                    onClose: { store.send(.dashboardDismissed) }
-                )
-            }
-        }
     }
 }
 

@@ -16,7 +16,6 @@ struct RideDashboardView: View {
     let onClose: () -> Void
     @GestureState private var dragOffset: CGFloat = 0
     @State private var selectedPage: Page = .grid
-    @State private var toolbarHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -27,43 +26,28 @@ struct RideDashboardView: View {
             gridPage
                 .tag(Page.grid)
 
-            // Page 2 — temporarily showing the Cadence 2×1 widget (the full-bleed
-            // map lives on the W8 grid cell for now; the page-2 map returns later).
-            CadenceWidget(
-                cadence: store.cadence.cadenceRPM,
-                cadenceHistory: store.cadence.watermarkSamples,
-                averageCadence: store.cadence.averageCadenceRPM,
-                maxCadence: store.cadence.maxCadenceRPM,
-                size: .twoByOne
-            )
-            .tag(Page.map)
+            // Page 2 — temporarily testing other configs
+            secondPage
+                .tag(Page.map)
         }
         .background(Color.cyBgSecondary)
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .safeAreaInset(edge: .top, spacing: 0) { grabber }
         .ignoresSafeArea(.all)
+        // Grabber floats as a top overlay (not a safe-area inset) so it does not
+        // push page content down. Pages that must stay clear of the island (the
+        // grid) reserve the space themselves; the map page bleeds up behind it.
+        .overlay(alignment: .top) {
+            grabber()
+                .gesture(dismissDrag)
+        }
         .overlay(alignment: .bottom) {
             VStack(spacing: Spacing.xs) {
                 pageIndicator
                 rideControls
             }
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.height
-            } action: { newValue in
-                toolbarHeight = newValue
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .offset(y: max(dragOffset, 0))
-        .gesture(
-            DragGesture()
-                .updating($dragOffset) { value, state, _ in
-                    state = value.translation.height
-                }
-                .onEnded { value in
-                    if value.translation.height > 120 { onClose() }
-                }
-        )
         // Ride effects (timer/HR/radar/location) are started by AppFeature when
         // the ride begins and live for the whole ride, so they keep running when
         // this dashboard is minimized to the accessory strip. Do NOT start them
@@ -72,13 +56,11 @@ struct RideDashboardView: View {
     }
 
     // ── Page 1 — Widget Grid (S05.4 factory default) ──────────────────────────
-    // GeometryReader measures the area between the grabber and the screen
-    // bottom (safe areas are ignored at the TabView level). The floating
-    // toolbar overlays the bottom `toolbarHeight` pixels, so
-    // `unit = (height - toolbarHeight) / 7` keeps the 5 widget rows above
-    // the toolbar at the spec'd ≈201×96pt size, and the map row extends
-    // `unit * 2 + toolbarHeight` to bleed behind the toolbar to the screen
-    // bottom.
+    // GeometryReader measures the full screen (safe areas are ignored at the
+    // TabView level), so `unit = height / 7` sizes the 5 widget rows at the
+    // spec'd ≈201×96pt. The floating toolbar is a bottom overlay (not a
+    // safe-area inset), so the grid fills the full height and the map row
+    // (`unit * 2`) bleeds behind the toolbar to the screen bottom.
     // Rows 1-2: Speed (W1 2×2)
     // Row 3:    HR (W4 1×1) + HR Zones (W12 1×1)
     // Row 4:    Radar (W7 1×1) + Pace (W11 1×1)
@@ -86,7 +68,7 @@ struct RideDashboardView: View {
     // Rows 6-7: Map (W8 2×2) — bleeds behind the floating toolbar
     private var gridPage: some View {
         GeometryReader { geo in
-            let unit = max(geo.size.height - toolbarHeight, 1) / 7
+            let unit = max(geo.size.height, 1) / 7
             Grid(horizontalSpacing: 0, verticalSpacing: 0) {
                 // W1 — Speed 2×2
                 GridRow {
@@ -142,20 +124,62 @@ struct RideDashboardView: View {
                 GridRow {
                     MapWidget(coordinates: store.trackCoordinates)
                     .gridCellColumns(2)
-                    .frame(height: unit * 2 + toolbarHeight)
+                    .frame(height: unit * 2)
+                }
+            }
+        }
+    }
+
+    // ── Page 2 — Static page to test other configurations
+    
+    private var secondPage: some View {
+        GeometryReader { geo in
+            let unit = max(geo.size.height, 1) / 7
+            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+                // W1 — Speed 2×2
+                GridRow {
+                    MapWidget(coordinates: store.trackCoordinates)
+                        .gridCellColumns(2)
+                        .frame(height: unit * 2)
+                }
+                GridRow {
+                    CadenceWidget(
+                        cadence: store.cadence.cadenceRPM,
+                        cadenceHistory: store.cadence.watermarkSamples,
+                        averageCadence: store.cadence.averageCadenceRPM,
+                        maxCadence: store.cadence.maxCadenceRPM,
+                        size: .twoByOne)
                 }
             }
         }
     }
 
     // ── Grabber ───────────────────────────────────────────────────────────────
-    private var grabber: some View {
+    // Floats as a top overlay on a view that ignores safe areas, so the capsule
+    // sits flush against the physical top edge (behind the dynamic island).
+    private func grabber() -> some View {
         Capsule()
             .fill(Color(.systemGray3))
             .frame(width: Spacing.xxl, height: Spacing.grabberHeight)
-            .frame(maxWidth: .infinity)
-            .padding(.top, Spacing.sm)
+            // Expand the hit area beyond the thin capsule so the whole strip is
+            // draggable; the paging TabView underneath never sees these drags.
+            // Pin the capsule to the top so the enlarged frame grows downward
+            // and doesn't push the visible grabber lower.
+            .frame(maxWidth: .infinity, minHeight: Spacing.tapTarget, alignment: .top)
+            .contentShape(Rectangle())
             .padding(.bottom, Spacing.xs)
+    }
+
+    /// Pull-down-to-dismiss. Attached to the grabber (not the container) so it
+    /// wins over the paging TabView's internal gesture recognizer.
+    private var dismissDrag: some Gesture {
+        DragGesture()
+            .updating($dragOffset) { value, state, _ in
+                state = value.translation.height
+            }
+            .onEnded { value in
+                if value.translation.height > 120 { onClose() }
+            }
     }
 
     // ── Paging indicator — always visible; factory default shows 2 dots ────────
