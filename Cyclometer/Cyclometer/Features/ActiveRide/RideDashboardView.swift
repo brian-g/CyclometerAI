@@ -37,8 +37,15 @@ struct RideDashboardView: View {
         // push page content down. Pages that must stay clear of the island (the
         // grid) reserve the space themselves; the map page bleeds up behind it.
         .overlay(alignment: .top) {
-            grabber()
-                .gesture(dismissDrag)
+            VStack(spacing: Spacing.xs) {
+                grabber()
+                    .gesture(dismissDrag)
+                if let banner = store.speed.sourceSwitchBanner {
+                    SourceSwitchBanner(text: banner)
+                        .transition(bannerTransition)
+                }
+            }
+            .animation(.default, value: store.speed.sourceSwitchBanner)
         }
         .overlay(alignment: .bottom) {
             VStack(spacing: Spacing.xs) {
@@ -102,7 +109,7 @@ struct RideDashboardView: View {
                         isRadarPaired: store.isRadarPaired
                     )
                     .frame(height: unit)
-                    PaceWidget(speedKPH: store.speedKPH)
+                    PaceWidget(speedKPH: (store.speed.speedMPS ?? 0) * 3.6)
                         .frame(height: unit)
                 }
 
@@ -237,6 +244,11 @@ struct RideDashboardView: View {
     /// Reduce Motion swaps the scale animation for a plain fade.
     private var controlTransition: AnyTransition {
         reduceMotion ? .opacity : .scale.combined(with: .opacity)
+    }
+
+    /// Reduce Motion swaps the slide-in for a plain fade.
+    private var bannerTransition: AnyTransition {
+        reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity)
     }
 
     private func ringBell() {
