@@ -3,7 +3,7 @@ import SwiftData
 
 /// Root feature — owns tab selection and active ride lifecycle.
 /// Navigation follows Apple Music pattern: Rides / Routes / Settings tabs.
-/// Active ride dashboard is a fullScreenCover over the tab structure.
+/// Active ride dashboard is a custom screen over the tab structure.
 @Reducer
 struct AppFeature {
 
