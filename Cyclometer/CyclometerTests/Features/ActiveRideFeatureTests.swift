@@ -455,6 +455,26 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(store.state.recordingState == .idle)
     }
 
+    /// The `idle → active` edge. `.task` merges seven long-lived effects (timer, HR,
+    /// radar, location); `.testValue` clients hand back immediately-finishing streams
+    /// and `TestClock` never advances, so nothing is emitted. Exhaustivity is off
+    /// because the two `.send` child actions fire without being individually asserted.
+    @Test("task transitions idle to active")
+    func taskTransitionsIdleToActive() async {
+        let store = makeStore(recordingState: .idle)
+        store.exhaustivity = .off
+
+        await store.send(.task) {
+            $0.recordingState = .active
+        }
+        #expect(store.state.recordingState == .active)
+
+        // The 1 Hz timer effect never completes on its own and `.task` returns no
+        // cancellation ID, so in-flight effects must be dropped explicitly or the
+        // TestStore fails on teardown.
+        await store.skipInFlightEffects(strict: false)
+    }
+
     @Test("pauseTapped only transitions from active")
     func pauseOnlyFromActive() async {
         let store = makeStore(recordingState: .active)
@@ -570,21 +590,30 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(store.state.recordingState == .paused)
     }
 
-    @Test("Auto-end triggers after 21600 zero-speed seconds")
+    /// PRD §8.8: auto-end after 5 minutes at zero speed. Seeded one tick below the
+    /// threshold rather than ticking up to it — the counter arithmetic is covered by
+    /// the timer suite, so looping here would only make the test slow.
+    @Test("Auto-end triggers on the tick that reaches the zero-speed threshold")
     func autoEndTriggersAtThreshold() async {
-        let store = makeStore(recordingState: .active)
-        store.exhaustivity = .off
-
-        for tick in 1..<21_600 {
-            await store.send(.elapsedTick) {
-                $0.elapsedSeconds = tick
-                $0.zeroSpeedSeconds = tick
-            }
+        let threshold = ActiveRideFeature.autoEndZeroSpeedSeconds
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                zeroSpeedSeconds: threshold - 1
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
         }
 
         await store.send(.elapsedTick) {
-            $0.elapsedSeconds = 21_600
-            $0.zeroSpeedSeconds = 21_600
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = threshold
         }
         await store.receive(.autoEndTriggered) {
             $0.recordingState = .paused
@@ -601,6 +630,37 @@ struct ActiveRideFeatureStateMachineTests {
                 }
             }
         }
+    }
+
+    @Test("Auto-end does not trigger one tick below the threshold")
+    func autoEndDoesNotTriggerBelowThreshold() async {
+        let threshold = ActiveRideFeature.autoEndZeroSpeedSeconds
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                zeroSpeedSeconds: threshold - 2
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+        }
+
+        // Reaches threshold - 1: no .autoEndTriggered follows, and an exhaustive
+        // TestStore fails the test if one did.
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = threshold - 1
+        }
+    }
+
+    @Test("Threshold matches the PRD's 5-minute rule")
+    func autoEndThresholdIsFiveMinutes() {
+        #expect(ActiveRideFeature.autoEndZeroSpeedSeconds == 300)
     }
 
     @Test("Zero-speed counter resets on non-zero speed")
@@ -659,7 +719,7 @@ struct ActiveRideFeatureStateMachineTests {
         let store = TestStore(
             initialState: ActiveRideFeature.State(
                 recordingState: .active,
-                zeroSpeedSeconds: 21_599,
+                zeroSpeedSeconds: ActiveRideFeature.autoEndZeroSpeedSeconds - 1,
                 isAutoEndEnabled: false
             )
         ) {
@@ -674,7 +734,7 @@ struct ActiveRideFeatureStateMachineTests {
 
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
-            $0.zeroSpeedSeconds = 21_600
+            $0.zeroSpeedSeconds = ActiveRideFeature.autoEndZeroSpeedSeconds
         }
     }
 
@@ -688,5 +748,60 @@ struct ActiveRideFeatureStateMachineTests {
     func elapsedTickIgnoredWhenIdle() async {
         let store = makeStore(recordingState: .idle)
         await store.send(.elapsedTick)
+    }
+}
+
+@MainActor
+@Suite("ActiveRideFeature — heart rate")
+struct ActiveRideFeatureHeartRateTests {
+
+    private func makeStore(
+        _ state: ActiveRideFeature.State = ActiveRideFeature.State(recordingState: .active)
+    ) -> TestStoreOf<ActiveRideFeature> {
+        TestStore(initialState: state) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+        }
+    }
+
+    @Test("heartRateUpdated stores bpm and derives the Karvonen zone")
+    func heartRateUpdatesZone() async {
+        let store = makeStore()
+        // Defaults maxHR 190 / restingHR 55 → HRR 135.
+        // (150 − 55) / 135 = 0.704 → zone 3 (tempo, 70–80% HRR).
+        await store.send(.heartRateUpdated(150)) {
+            $0.heartRateBPM = 150
+            $0.hrZone = 3
+        }
+    }
+
+    @Test("Unpairing clears both bpm and zone")
+    func unpairClearsHeartRate() async {
+        let store = makeStore(
+            ActiveRideFeature.State(
+                recordingState: .active,
+                heartRateBPM: 150,
+                hrZone: 3,
+                isHRPaired: true
+            )
+        )
+        await store.send(.hrPairingChanged(false)) {
+            $0.isHRPaired = false
+            $0.heartRateBPM = 0
+            $0.hrZone = 0
+        }
+    }
+
+    @Test("Pairing alone does not synthesise a reading")
+    func pairDoesNotSetHeartRate() async {
+        let store = makeStore()
+        await store.send(.hrPairingChanged(true)) {
+            $0.isHRPaired = true
+        }
     }
 }

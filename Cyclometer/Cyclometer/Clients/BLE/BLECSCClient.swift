@@ -63,6 +63,10 @@ struct BLECSCClient: Sendable {
     var speed:                 @Sendable () -> AsyncStream<Double>            // m/s
     var cadence:               @Sendable () -> AsyncStream<Double>            // rpm
     var connectionState:       @Sendable (SensorRole) -> AsyncStream<ConnectionState>
+    /// Advertised name of the peripheral currently holding this role, or nil if
+    /// unheld or the peripheral didn't advertise one. Replays on subscribe, same
+    /// as `connectionState`.
+    var sensorName:            @Sendable (SensorRole) -> AsyncStream<String?>
 
     /// Reconnection backoff ladder: 1s, 2s, 4s, 8s, 16s, then capped at 30s.
     /// Identical policy to VariaRadarClient (BLE.md §6.1).
@@ -203,7 +207,8 @@ extension BLECSCClient: DependencyKey {
             setWheelCircumference: { mm in await state.setWheelCircumference(mm) },
             speed:                 { state.makeSpeedStream() },
             cadence:               { state.makeCadenceStream() },
-            connectionState:       { role in state.makeConnectionStateStream(role: role) }
+            connectionState:       { role in state.makeConnectionStateStream(role: role) },
+            sensorName:            { role in state.makeSensorNameStream(role: role) }
         )
     }
 
@@ -217,7 +222,8 @@ extension BLECSCClient: DependencyKey {
         setWheelCircumference: { _ in },
         speed:                 { AsyncStream { $0.finish() } },
         cadence:               { AsyncStream { $0.finish() } },
-        connectionState:       { _ in AsyncStream { $0.finish() } }
+        connectionState:       { _ in AsyncStream { $0.finish() } },
+        sensorName:            { _ in AsyncStream { $0.finish() } }
     )
 }
 
@@ -240,6 +246,7 @@ private final class CSCClientState: @unchecked Sendable {
     private struct Slot {
         var roles: Set<BLECSCClient.SensorRole>
         var connectionState: BLECSCClient.ConnectionState = .connecting
+        var name: String?
         var wheel = CSCCalculator<UInt32>(maxRevsPerSecond: 15)   // ~120 km/h on a 700c wheel
         var crank = CSCCalculator<UInt16>(maxRevsPerSecond: 5)    // 300 rpm
         var reconnectTask: Task<Void, Never>?
@@ -254,10 +261,15 @@ private final class CSCClientState: @unchecked Sendable {
     private var roleState: [BLECSCClient.SensorRole: BLECSCClient.ConnectionState] = [
         .speed: .disconnected, .cadence: .disconnected,
     ]
+    /// Advertised names seen via `.discovered`, keyed by peripheral — looked up when
+    /// a `Slot` is created so a sensor's name survives even though `connect()` (the
+    /// public entry point, also usable by a future pairing UI) doesn't take one.
+    private var discoveredNames: [UUID: String] = [:]
 
     private var speedContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
     private var cadenceContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
     private var stateContinuations: [Int: (role: BLECSCClient.SensorRole, continuation: AsyncStream<BLECSCClient.ConnectionState>.Continuation)] = [:]
+    private var nameContinuations: [Int: (role: BLECSCClient.SensorRole, continuation: AsyncStream<String?>.Continuation)] = [:]
     private var nextID = 0
     private let lock = NSLock()
 
@@ -303,6 +315,24 @@ private final class CSCClientState: @unchecked Sendable {
             _ = self?.lock.withLock { self?.stateContinuations.removeValue(forKey: id) }
         }
         return stream
+    }
+
+    func makeSensorNameStream(role: BLECSCClient.SensorRole) -> AsyncStream<String?> {
+        let id = lock.withLock { () -> Int in let current = nextID; nextID += 1; return current }
+        let (stream, continuation) = AsyncStream<String?>.makeStream()
+        lock.withLock {
+            continuation.yield(nameForRoleLocked(role))
+            nameContinuations[id] = (role, continuation)
+        }
+        continuation.onTermination = { [weak self] _ in
+            _ = self?.lock.withLock { self?.nameContinuations.removeValue(forKey: id) }
+        }
+        return stream
+    }
+
+    /// Must be called with the lock held.
+    private func nameForRoleLocked(_ role: BLECSCClient.SensorRole) -> String? {
+        slots.values.first(where: { $0.roles.contains(role) })?.name
     }
 
     // MARK: Public control
@@ -359,7 +389,7 @@ private final class CSCClientState: @unchecked Sendable {
                 slot.roles.formUnion(roles)
                 slots[peripheralID] = slot
             } else {
-                slots[peripheralID] = Slot(roles: roles)   // defaults to .connecting
+                slots[peripheralID] = Slot(roles: roles, name: discoveredNames[peripheralID])
             }
             recomputeRoleStatesLocked()
             return removed
@@ -400,12 +430,13 @@ private final class CSCClientState: @unchecked Sendable {
 
     private func handle(_ event: BLEEvent) async {
         switch event {
-        case .discovered(let id, _, _, let services):
+        case .discovered(let id, let name, _, let services):
             // Auto-connect the first discovered CSC sensor (both roles) only when no
             // peripheral is connected yet — keeps the dashboard usable before M6's
             // pairing UI exists. A second device is never auto-grabbed. The shared
             // central may be scanning several sensor types, so filter on the service.
             guard services.contains(cscServiceUUID) else { return }
+            if let name { lock.withLock { discoveredNames[id] = name } }
             let shouldConnect = lock.withLock { slots.isEmpty }
             guard shouldConnect else { return }
             await connect(peripheralID: id, roles: [.speed, .cadence])
@@ -552,18 +583,22 @@ private final class CSCClientState: @unchecked Sendable {
     /// `.scanning` while scanning, else `.disconnected`. Must be called with the lock held.
     private func recomputeRoleStatesLocked() {
         for role in [BLECSCClient.SensorRole.speed, .cadence] {
-            let newState: BLECSCClient.ConnectionState
-            if let slot = slots.values.first(where: { $0.roles.contains(role) }) {
-                newState = slot.connectionState
-            } else {
-                newState = isScanning ? .scanning : .disconnected
+            let slot = slots.values.first(where: { $0.roles.contains(role) })
+            let newState: BLECSCClient.ConnectionState = slot?.connectionState ?? (isScanning ? .scanning : .disconnected)
+
+            if roleState[role] != newState {
+                roleState[role] = newState
+                for entry in stateContinuations.values where entry.role == role {
+                    entry.continuation.yield(newState)
+                }
+                logger.notice("\(String(describing: role), privacy: .public) state → \(String(describing: newState), privacy: .public)")
             }
-            guard roleState[role] != newState else { continue }
-            roleState[role] = newState
-            for entry in stateContinuations.values where entry.role == role {
-                entry.continuation.yield(newState)
+
+            // Broadcast unconditionally (unlike state above) — recompute only runs on
+            // discrete lifecycle events, not per-notification, so this isn't hot-path.
+            for entry in nameContinuations.values where entry.role == role {
+                entry.continuation.yield(slot?.name)
             }
-            logger.notice("\(String(describing: role), privacy: .public) state → \(String(describing: newState), privacy: .public)")
         }
     }
 

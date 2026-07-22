@@ -48,13 +48,15 @@ struct SpeedFeatureTests {
         }
     }
 
-    @Test("Start listening subscribes to BLE speed and connection-state streams")
+    @Test("Start listening subscribes to BLE speed, connection-state, and sensor-name streams")
     func startListeningSubscribesToBLEStreams() async {
         let (speedStream, speedContinuation) = AsyncStream<Double>.makeStream()
         let (connStream, connContinuation) = AsyncStream<BLECSCClient.ConnectionState>.makeStream()
+        let (nameStream, nameContinuation) = AsyncStream<String?>.makeStream()
         var ble = BLECSCClient.testValue
         ble.speed = { speedStream }
         ble.connectionState = { _ in connStream }
+        ble.sensorName = { _ in nameStream }
 
         let store = makeStore(bleCSCClient: ble)
         await store.send(.startListening)
@@ -62,6 +64,11 @@ struct SpeedFeatureTests {
         connContinuation.yield(.scanning)
         await store.receive(\.bleConnectionChanged) {
             $0.connectionState = .scanning
+        }
+
+        nameContinuation.yield("Wahoo RPM")
+        await store.receive(\.bleSensorNameChanged) {
+            $0.pairedSensorName = "Wahoo RPM"
         }
 
         speedContinuation.yield(3.5)
@@ -73,6 +80,7 @@ struct SpeedFeatureTests {
 
         speedContinuation.finish()
         connContinuation.finish()
+        nameContinuation.finish()
         await store.finish()
     }
 
@@ -157,14 +165,15 @@ struct SpeedFeatureTests {
         await clock.advance(by: .seconds(60))
     }
 
-    @Test("Fallback after 5s promotes the GPS shadow value and shows/dismisses the banner")
+    @Test("Fallback after 5s promotes the GPS shadow value and shows/dismisses the banner naming the sensor")
     func fallbackAfter5sWithGPSShadowValue() async {
         let clock = TestClock()
         let store = makeStore(
             initialState: SpeedFeature.State(
                 speedMPS: 6.0,
                 activeSpeedSource: .bleWheel,
-                latestGPSSpeedMPS: 5.5
+                latestGPSSpeedMPS: 5.5,
+                pairedSensorName: "Wahoo RPM"
             ),
             clock: clock
         )
@@ -176,7 +185,7 @@ struct SpeedFeatureTests {
         await store.receive(\.bleFallbackTimedOut) {
             $0.speedMPS = 5.5
             $0.activeSpeedSource = .gps
-            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
         }
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
         await store.receive(\.bannerDismissed) {
@@ -184,7 +193,7 @@ struct SpeedFeatureTests {
         }
     }
 
-    @Test("Fallback with no GPS fix available clears the displayed speed")
+    @Test("Fallback with no GPS fix available clears the displayed speed, banner falls back to a generic name")
     func fallbackWithNoGPSFix() async {
         let clock = TestClock()
         let store = makeStore(
@@ -202,7 +211,7 @@ struct SpeedFeatureTests {
         await store.receive(\.bleFallbackTimedOut) {
             $0.speedMPS = nil
             $0.activeSpeedSource = .none
-            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil)
         }
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
         await store.receive(\.bannerDismissed) {
@@ -276,7 +285,7 @@ struct SpeedFeatureTests {
             $0.connectionState = .disconnected
             $0.speedMPS = 5.0
             $0.activeSpeedSource = .gps
-            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil)
         }
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
         await store.receive(\.bannerDismissed) {

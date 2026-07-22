@@ -9,7 +9,7 @@ struct SourceSwitchBanner: View {
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
-            Image(systemName: "antenna.radiowaves.left.and.right.slash")
+            Image(systemName: "shuffle")
                 .foregroundStyle(Color.cyInfo)
             Text(text)
                 .font(.footnote.weight(.semibold))
@@ -26,7 +26,7 @@ struct SourceSwitchBanner: View {
 // MARK: - Previews
 
 #Preview("Banner") {
-    SourceSwitchBanner(text: SpeedFeature.gpsFallbackBannerText)
+    SourceSwitchBanner(text: SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM"))
         .padding(.top, Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)

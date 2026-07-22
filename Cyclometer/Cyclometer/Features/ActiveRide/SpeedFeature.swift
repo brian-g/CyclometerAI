@@ -26,7 +26,10 @@ struct SpeedFeature {
     static let fallbackDelay: Duration = .seconds(5)
     /// How long the source-switch banner stays visible before auto-dismissing.
     static let bannerDismissDelay: Duration = .seconds(4)
-    static let gpsFallbackBannerText = "Switched to GPS speed — BLE sensor disconnected"
+
+    static func gpsFallbackBannerText(sensorName: String?) -> String {
+        "Switch to GPS for speed — \(sensorName ?? "Speed sensor") disconnected"
+    }
 
     @Dependency(\.date.now) var now
     @Dependency(\.bleCSCClient) var bleCSCClient
@@ -41,6 +44,9 @@ struct SpeedFeature {
         /// GPS shadow value, kept live even while BLE is the displayed source,
         /// so a fallback has something to promote to immediately.
         var latestGPSSpeedMPS: Double? = nil
+        /// Advertised name of the currently paired Speed-role sensor, for the
+        /// fallback banner. Nil if unpaired or the peripheral advertised none.
+        var pairedSensorName: String? = nil
         /// Transient source-switch banner text; nil means hidden.
         var sourceSwitchBanner: String? = nil
         /// Timestamped speed samples from the last `historyWindow` seconds.
@@ -66,6 +72,7 @@ struct SpeedFeature {
         case gpsSpeedReceived(Double)
         case bleSpeedReceived(Double)
         case bleConnectionChanged(BLECSCClient.ConnectionState)
+        case bleSensorNameChanged(String?)
         case bleFallbackTimedOut
         case bannerDismissed
     }
@@ -89,6 +96,11 @@ struct SpeedFeature {
                     .run { [bleCSCClient] send in
                         for await connectionState in bleCSCClient.connectionState(.speed) {
                             await send(.bleConnectionChanged(connectionState))
+                        }
+                    },
+                    .run { [bleCSCClient] send in
+                        for await name in bleCSCClient.sensorName(.speed) {
+                            await send(.bleSensorNameChanged(name))
                         }
                     }
                 )
@@ -127,6 +139,10 @@ struct SpeedFeature {
                     return .none
                 }
 
+            case .bleSensorNameChanged(let name):
+                state.pairedSensorName = name
+                return .none
+
             case .bleFallbackTimedOut:
                 guard state.activeSpeedSource == .bleWheel else { return .none }
                 return fallBackToGPS(&state)
@@ -164,7 +180,7 @@ struct SpeedFeature {
     private func fallBackToGPS(_ state: inout State) -> Effect<Action> {
         state.activeSpeedSource = state.latestGPSSpeedMPS != nil ? .gps : .none
         state.speedMPS = state.latestGPSSpeedMPS
-        state.sourceSwitchBanner = Self.gpsFallbackBannerText
+        state.sourceSwitchBanner = Self.gpsFallbackBannerText(sensorName: state.pairedSensorName)
         return .run { send in
             try await clock.sleep(for: Self.bannerDismissDelay)
             await send(.bannerDismissed)
