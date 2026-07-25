@@ -169,6 +169,7 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
+            $0.speed.latestGPSSpeedMPS = 8.5
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
     }
@@ -190,6 +191,7 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
+            $0.speed.latestGPSSpeedMPS = 8.5
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
         await store.send(.pauseTapped) {
@@ -219,6 +221,7 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(.speed(.gpsSpeedReceived(12.0))) {
             $0.speed.speedMPS = 12.0
             $0.speed.activeSpeedSource = .gps
+            $0.speed.latestGPSSpeedMPS = 12.0
             $0.speed.speedSamples = [
                 SpeedSample(time: testDate, mps: 8.5),
                 SpeedSample(time: testDate, mps: 12.0)
@@ -232,6 +235,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
+            $0.speed.latestGPSSpeedMPS = 8.5
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
 
@@ -255,6 +259,7 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(.speed(.gpsSpeedReceived(-1))) {
             $0.speed.speedMPS = nil
             $0.speed.activeSpeedSource = .none
+            $0.speed.latestGPSSpeedMPS = nil
         }
     }
 
@@ -375,12 +380,10 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
-            $0.zeroSpeedSeconds = 1
         }
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
-            $0.zeroSpeedSeconds = 2
         }
     }
 
@@ -409,7 +412,6 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
-            $0.zeroSpeedSeconds = 1
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
@@ -417,12 +419,10 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick)
         await store.send(.resumeTapped) {
             $0.recordingState = .active
-            $0.zeroSpeedSeconds = 0
         }
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
-            $0.zeroSpeedSeconds = 1
         }
     }
 }
@@ -703,6 +703,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(.speed(.gpsSpeedReceived(8.0))) {
             $0.speed.speedMPS = 8.0
             $0.speed.activeSpeedSource = .gps
+            $0.speed.latestGPSSpeedMPS = 8.0
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.0)]
         }
 

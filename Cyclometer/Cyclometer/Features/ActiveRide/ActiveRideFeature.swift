@@ -205,7 +205,7 @@ struct ActiveRideFeature {
                 guard state.recordingState == .active else { return .none }
                 state.elapsedSeconds += 1
                 state.distanceMeters += max(state.speed.speedMPS ?? 0, 0)
-                if state.speedKPH == 0 {
+                if (state.speed.speedMPS ?? 0) == 0 {
                     state.zeroSpeedSeconds += 1
                 } else {
                     state.zeroSpeedSeconds = 0
