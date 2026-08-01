@@ -34,7 +34,7 @@ private let defaultWheelCircumferenceMM = 2096
 /// only its relevant fields from the shared CSC notification stream, so the client
 /// supports up to one peripheral per role simultaneously.
 struct BLECSCClient: Sendable {
-    enum SensorRole: Hashable, Sendable { case speed, cadence }
+    enum SensorRole: Hashable, CaseIterable, Sendable { case speed, cadence }
 
     /// Connection lifecycle per BLE.md §6. `.active` means notifications are
     /// enabled and measurement data is flowing. State is tracked per role: a role's
@@ -49,7 +49,10 @@ struct BLECSCClient: Sendable {
         case reconnecting
     }
 
-    /// Scan for CSC sensors and auto-connect the first one discovered (both roles).
+    /// Scan for CSC sensors and auto-connect whichever ones are needed to fulfil
+    /// both roles — the first discovered sensor optimistically takes both; if its
+    /// first measurement shows it only supports one, the other role is freed for
+    /// a second discovered sensor to claim.
     var startScanning:         @Sendable () async -> Void
     var stopScanning:          @Sendable () async -> Void
     /// Explicit role assignment (M6 pairing UI). Roles currently held by another
@@ -250,6 +253,15 @@ private final class CSCClientState: @unchecked Sendable {
         var wheel = CSCCalculator<UInt32>(maxRevsPerSecond: 15)   // ~120 km/h on a 700c wheel
         var crank = CSCCalculator<UInt16>(maxRevsPerSecond: 5)    // 300 rpm
         var reconnectTask: Task<Void, Never>?
+        /// True only for a role assignment guessed by the discovery auto-connect
+        /// heuristic (as opposed to an explicit `connect(peripheralID:roles:)` call,
+        /// e.g. from a future pairing UI) — only these are eligible for capability
+        /// narrowing once real data reveals what the sensor actually supports.
+        var isAutoAssigned = false
+        /// Whether this slot's real wheel/crank capability has been inferred yet
+        /// from a measurement's flags (auto-assigned slots only) — see the
+        /// narrowing logic in `.characteristicValueUpdated` handling.
+        var capabilitiesKnown = false
     }
 
     private let bleClient: BLEClient
@@ -265,6 +277,12 @@ private final class CSCClientState: @unchecked Sendable {
     /// a `Slot` is created so a sensor's name survives even though `connect()` (the
     /// public entry point, also usable by a future pairing UI) doesn't take one.
     private var discoveredNames: [UUID: String] = [:]
+    /// CSC peripherals seen via `.discovered` that don't currently hold a role.
+    /// Retained because CoreBluetooth won't redeliver a `.discovered` event for a
+    /// peripheral already seen this scan session — without this, a sensor seen
+    /// before a role frees up (e.g. a dedicated speed sensor's first measurement
+    /// reveals it doesn't actually report crank data) would be lost for good.
+    private var pendingPeripherals: [UUID] = []
 
     private var speedContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
     private var cadenceContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
@@ -362,7 +380,11 @@ private final class CSCClientState: @unchecked Sendable {
         await bleClient.stopScanning([cscServiceUUID])
     }
 
-    func connect(peripheralID: UUID, roles: Set<BLECSCClient.SensorRole>) async {
+    /// `speculative` marks the assignment as a discovery-time guess, eligible for
+    /// later capability narrowing (see `Slot.isAutoAssigned`). The public dependency
+    /// closure always calls this with the default `false` — only the internal
+    /// auto-discovery path (`claimUnfilledRoles`) passes `true`.
+    func connect(peripheralID: UUID, roles: Set<BLECSCClient.SensorRole>, speculative: Bool = false) async {
         let toDisconnect: [UUID] = lock.withLock {
             var removed: [UUID] = []
             // Reassign the requested roles away from any other peripheral holding them.
@@ -384,12 +406,17 @@ private final class CSCClientState: @unchecked Sendable {
                     slots[id] = slot
                 }
             }
-            // Upsert the target peripheral with the requested roles.
+            // Upsert the target peripheral with the requested roles. An explicit
+            // (non-speculative) call always marks the slot authoritative, even if it
+            // was previously auto-assigned — a real pairing decision overrides a guess.
             if var slot = slots[peripheralID] {
                 slot.roles.formUnion(roles)
+                if !speculative { slot.isAutoAssigned = false }
                 slots[peripheralID] = slot
             } else {
-                slots[peripheralID] = Slot(roles: roles, name: discoveredNames[peripheralID])
+                slots[peripheralID] = Slot(
+                    roles: roles, name: discoveredNames[peripheralID], isAutoAssigned: speculative
+                )
             }
             recomputeRoleStatesLocked()
             return removed
@@ -399,11 +426,33 @@ private final class CSCClientState: @unchecked Sendable {
         logger.notice("connect requested for \(peripheralID, privacy: .public) roles \(String(describing: roles), privacy: .public)")
     }
 
+    /// Speculatively connects a CSC peripheral to whichever roles no current slot
+    /// fulfils. `candidate` (if given) is queued if no role is free yet. Also called
+    /// with `candidate: nil` after a slot's capabilities narrow, so a peripheral
+    /// queued earlier can claim a role that just freed up without a fresh discovery.
+    private func claimUnfilledRoles(candidate: UUID?) async {
+        let next: (id: UUID, roles: Set<BLECSCClient.SensorRole>)? = lock.withLock {
+            if let candidate, slots[candidate] == nil, !pendingPeripherals.contains(candidate) {
+                pendingPeripherals.append(candidate)
+            }
+            while let first = pendingPeripherals.first, slots[first] != nil {
+                pendingPeripherals.removeFirst()
+            }
+            let unfilled = Set(BLECSCClient.SensorRole.allCases)
+                .subtracting(slots.values.flatMap(\.roles))
+            guard !unfilled.isEmpty, !pendingPeripherals.isEmpty else { return nil }
+            return (pendingPeripherals.removeFirst(), unfilled)
+        }
+        guard let next else { return }
+        await connect(peripheralID: next.id, roles: next.roles, speculative: true)
+    }
+
     func disconnect() async {
         let ids: [UUID] = lock.withLock {
             for slot in slots.values { slot.reconnectTask?.cancel() }
             let ids = Array(slots.keys)
             slots.removeAll()
+            pendingPeripherals.removeAll()
             isScanning = false
             recomputeRoleStatesLocked()
             return ids
@@ -431,15 +480,14 @@ private final class CSCClientState: @unchecked Sendable {
     private func handle(_ event: BLEEvent) async {
         switch event {
         case .discovered(let id, let name, _, let services):
-            // Auto-connect the first discovered CSC sensor (both roles) only when no
-            // peripheral is connected yet — keeps the dashboard usable before M6's
-            // pairing UI exists. A second device is never auto-grabbed. The shared
-            // central may be scanning several sensor types, so filter on the service.
+            // Auto-connect discovered CSC sensors to whichever roles aren't already
+            // fulfilled — keeps the dashboard usable before M6's pairing UI exists.
+            // The shared central may be scanning several sensor types, so filter on
+            // the service. See `claimUnfilledRoles` for how a second (or third)
+            // sensor claims a role the first one turns out not to actually support.
             guard services.contains(cscServiceUUID) else { return }
             if let name { lock.withLock { discoveredNames[id] = name } }
-            let shouldConnect = lock.withLock { slots.isEmpty }
-            guard shouldConnect else { return }
-            await connect(peripheralID: id, roles: [.speed, .cadence])
+            await claimUnfilledRoles(candidate: id)
 
         case .connected(let id):
             guard lock.withLock({ slots[id] != nil }) else { return }
@@ -478,8 +526,27 @@ private final class CSCClientState: @unchecked Sendable {
             // lets a combo sensor be used for cadence only while a dedicated sensor
             // supplies speed. Compute under the lock to keep calculator state and the
             // circumference read consistent.
+            var freedRole = false
+            var emptiedSlot = false
             let (speedVal, cadenceVal): (Double?, Double?) = lock.withLock {
                 guard var slot = slots[id] else { return (nil, nil) }
+                // Auto-assigned roles are a discovery-time guess; the first real
+                // measurement reveals what the sensor actually reports, so narrow the
+                // guess down to that. Explicit (pairing-UI) assignments are never
+                // second-guessed. A role the sensor doesn't support is freed for
+                // another discovered peripheral to claim (`claimUnfilledRoles`).
+                if slot.isAutoAssigned, !slot.capabilitiesKnown {
+                    var supported: Set<BLECSCClient.SensorRole> = []
+                    if measurement.cumulativeWheelRevolutions != nil { supported.insert(.speed) }
+                    if measurement.cumulativeCrankRevolutions != nil { supported.insert(.cadence) }
+                    let unsupported = slot.roles.subtracting(supported)
+                    if !unsupported.isEmpty {
+                        slot.roles.subtract(unsupported)
+                        freedRole = true
+                        logger.notice("\(id, privacy: .public) doesn't support \(String(describing: unsupported), privacy: .public) — role freed")
+                    }
+                    slot.capabilitiesKnown = true
+                }
                 var s: Double?
                 var c: Double?
                 if slot.roles.contains(.speed),
@@ -494,7 +561,13 @@ private final class CSCClientState: @unchecked Sendable {
                    let rps = slot.crank.update(revs: revs, eventTime: time) {
                     c = rps * 60.0
                 }
-                slots[id] = slot   // write back mutated calculator state
+                if slot.roles.isEmpty {
+                    slots.removeValue(forKey: id)
+                    emptiedSlot = true
+                } else {
+                    slots[id] = slot   // write back mutated calculator state
+                }
+                if freedRole { recomputeRoleStatesLocked() }
                 return (s, c)
             }
             if let speedVal {
@@ -505,6 +578,8 @@ private final class CSCClientState: @unchecked Sendable {
                 broadcastCadence(cadenceVal)
                 logger.info("cadence \(cadenceVal, format: .fixed(precision: 0)) rpm")
             }
+            if emptiedSlot { await bleClient.disconnect(id, cscOwnerID) }
+            if freedRole { await claimUnfilledRoles(candidate: nil) }
 
         case .disconnected(let id, _):
             // Only unexpected disconnects match — user disconnect() removes the slot first.
@@ -528,6 +603,7 @@ private final class CSCClientState: @unchecked Sendable {
                 lock.withLock {
                     for slot in slots.values { slot.reconnectTask?.cancel() }
                     slots.removeAll()
+                    pendingPeripherals.removeAll()
                     isScanning = false
                     recomputeRoleStatesLocked()
                 }
