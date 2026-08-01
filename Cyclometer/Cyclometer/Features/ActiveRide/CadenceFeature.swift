@@ -16,8 +16,14 @@ struct CadenceFeature {
     /// Maximum points plotted in the watermark; raw samples are downsampled to
     /// this many buckets so memory and render stay bounded over a full hour.
     static let watermarkResolution = 60
+    /// Grace window before a reconnecting cadence sensor clears to "--", mirroring
+    /// ActiveRideFeature's radar-reconnect grace window. No GPS-style fallback exists
+    /// for cadence (BLE.md §6.2), so this just avoids flicker on a brief drop.
+    static let reconnectGraceDelay: Duration = .seconds(10)
 
     @Dependency(\.date.now) var now
+    @Dependency(\.bleCSCClient) var bleCSCClient
+    @Dependency(\.continuousClock) var clock
 
     @ObservableState
     struct State: Equatable {
@@ -58,14 +64,29 @@ struct CadenceFeature {
     enum Action: Equatable {
         case startListening
         case cadenceReceived(Double)
+        case bleConnectionChanged(BLECSCClient.ConnectionState)
+        case cadenceReconnectTimedOut
     }
+
+    private enum CancelID { case reconnectTimer }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
             case .startListening:
-                guard state.pairedPeripheralId != nil else { return .none }
-                return .none
+                return .merge(
+                    .run { [bleCSCClient] send in
+                        await bleCSCClient.startScanning()
+                        for await rpm in bleCSCClient.cadence() {
+                            await send(.cadenceReceived(rpm))
+                        }
+                    },
+                    .run { [bleCSCClient] send in
+                        for await connectionState in bleCSCClient.connectionState(.cadence) {
+                            await send(.bleConnectionChanged(connectionState))
+                        }
+                    }
+                )
 
             case .cadenceReceived(let rpm):
                 guard rpm >= 0 else {
@@ -81,6 +102,31 @@ struct CadenceFeature {
                     state.cadenceSum += rpm
                     state.maxCadenceRPM = max(state.maxCadenceRPM, Int(rpm.rounded()))
                 }
+                // Real data flowing back cancels any pending clear-to-"--" timer.
+                return .cancel(id: CancelID.reconnectTimer)
+
+            case .bleConnectionChanged(let connectionState):
+                state.connectionState = connectionState
+                switch connectionState {
+                case .active:
+                    return .cancel(id: CancelID.reconnectTimer)
+                case .reconnecting:
+                    // Only worth protecting if a reading is actually on screen.
+                    guard state.cadenceRPM != nil else { return .none }
+                    return .run { send in
+                        try await clock.sleep(for: Self.reconnectGraceDelay)
+                        await send(.cadenceReconnectTimedOut)
+                    }
+                    .cancellable(id: CancelID.reconnectTimer, cancelInFlight: true)
+                case .disconnected:
+                    state.cadenceRPM = nil
+                    return .cancel(id: CancelID.reconnectTimer)
+                case .scanning, .connecting, .connected:
+                    return .none
+                }
+
+            case .cadenceReconnectTimedOut:
+                state.cadenceRPM = nil
                 return .none
             }
         }
