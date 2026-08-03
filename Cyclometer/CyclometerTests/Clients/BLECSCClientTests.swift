@@ -620,6 +620,57 @@ struct BLECSCIntegrationTests {
         #expect(harness.connectCount.value == 1)   // second device not grabbed
     }
 
+    @Test("A dedicated speed sensor + a dedicated cadence sensor both end up active")
+    func queuedDiscoveryClaimsRoleFreedByCapabilityNarrowing() async {
+        let harness = Harness()
+        let speedSensor = UUID()
+        let cadenceSensor = UUID()
+
+        await harness.client.startScanning()
+
+        var connects = harness.connectCalls.makeAsyncIterator()
+        harness.events.yield(.discovered(id: speedSensor, name: "Wahoo Speed", rssi: -55, services: [cscServiceUUID]))
+        #expect(await connects.next() == speedSensor)   // optimistically grabs both roles
+
+        // A second sensor shows up before the first's real capability is known —
+        // both roles are still nominally held, so it must not be grabbed yet.
+        harness.events.yield(.discovered(id: cadenceSensor, name: "Wahoo Cadence", rssi: -50, services: [cscServiceUUID]))
+        await Task.yield()
+        #expect(harness.connectCount.value == 1)
+
+        harness.bringToActive(speedSensor)
+
+        // First measurement from the speed sensor is wheel-only — reveals it
+        // doesn't support cadence, freeing the role for the queued sensor to claim.
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: speedSensor, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 100, wheelTime: 0)
+        ))
+        #expect(await connects.next() == cadenceSensor)
+        #expect(harness.connectCount.value == 2)
+
+        harness.bringToActive(cadenceSensor)
+
+        // Each sensor now supplies its own metric independently.
+        var speeds = harness.client.speed().makeAsyncIterator()
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: speedSensor, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 102, wheelTime: 1024)
+        ))
+        #expect(abs((await speeds.next() ?? 0) - 4.192) < 0.0001)
+
+        var cadences = harness.client.cadence().makeAsyncIterator()
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: cadenceSensor, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(crankRevs: 50, crankTime: 0)
+        ))
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: cadenceSensor, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(crankRevs: 52, crankTime: 2048)
+        ))
+        #expect(await cadences.next() == 60.0)
+    }
+
     @Test("Bluetooth permission denied stands down without crashing")
     func permissionDenied() async {
         let harness = Harness()
