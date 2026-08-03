@@ -1,43 +1,67 @@
-# PR #59 — address review comments + code-review findings
+# Issue #71 — Spike: CoreBluetooth state restoration + background modes decision
 
-Base: local `feat/speed-widget-w1` @ dbca127 (coherent, passing). Remote tip is a
-broken merge (old tests + new widget). Plan: finish all items locally, then
-**force-push** to overwrite remote (user-approved).
+Branch: `spike/71-ble-background-modes`. Milestone M6. Output is a decision note in
+`assets/BLE.md` plus the plist change that follows from it.
 
-## Decisions (user-confirmed)
-- Units: Foundation `Measurement` + `Locale` default (no hardcoded factors).
-- HeroNumber: extend it (baseline-clean + optional chevron accessory) and use it
-  for AVG/MAX/Distance/Time; delete `statCell`.
-- speedHistory: last-hour time-based window, downsampled (~60 buckets) for chart.
-- unitSystem stays in State for now, default `.system` (locale), with TCA note.
+## Decisions (user-approved plan)
+- Adopt `bluetooth-central` background mode — background scanning is gated on it, and
+  mid-ride discovery of a sensor that was off at ride start is a real scenario.
+- Defer full `CBCentralManager` state restoration to M7 — it only pays off once ride
+  state survives termination, and `CoreDataStack` has no checkpointing yet.
+- Adopt `audio` background mode; record the `.ambient`-category background-playback gap
+  as an M4 constraint rather than fixing it here.
+- Correct `BLE.md` §11's deprecated `NSBluetoothPeripheralUsageDescription` requirement.
 
 ## Tasks
-- [ ] 1. UnitSystem → Measurement + Locale `.system`; iOS-provided symbols.
-- [ ] 2. ActiveRideFeature: avg/maxSpeedMPS via Measurement (kill magic 3.6); unitSystem default `.system` + TCA comment.
-- [ ] 3. Title-case labels: "Speed", "Avg", "Max" (textCase handles display).
-- [ ] 4. Tokenize: opacity token (+UX.md), heroFontSize 136/200 constants, chevron rotation constant.
-- [ ] 5. Format-string helper for `.fractionLength(1)` (no copy/pasta).
-- [ ] 6. @ViewBuilder consistency on the layout fns.
-- [ ] 7. Layout bug: Distance must never truncate; expand and push Time right (testTwoByTwoNoSignalDark).
-- [ ] 8. HeroNumber: optional chevron accessory + baseline-clean; AVG/MAX/Distance/Time use it; delete statCell.
-- [ ] 9. speedHistory: last-hour time window + downsample for watermark.
-- [ ] 10. Rebuild, re-record snapshots, run full suite.
-- [ ] 11. Commit + force-push; reply to PR threads.
+- [x] 1. `Info.plist` — add `bluetooth-central` + `audio` to `UIBackgroundModes`.
+- [x] 2. `assets/BLE.md` §11 — drop the deprecated plist key, match the shipping Info.plist.
+- [x] 3. `assets/BLE.md` — new §13 decision note (questions, decisions, rationale, M7
+      revisit trigger, M4 audio constraint, restoration cost breakdown).
+- [x] 4. `assets/BLE.md` — bump the spec version line (v1.1 → v1.2).
+- [x] 5. `BLEClient.swift` — comment at the `CBCentralManager` init recording the deferral.
+- [x] 6. Build + full test suite; confirm no regression past the known baseline failure.
+- [x] 7. Comment on #63, #67, #68, #69, #70, #71 recording M6 order + shared blockers.
 
-## Review (done)
-All 11 tasks complete; full suite green (except pre-existing
-HeroNumberSnapshotTests.testCustomColor, unrelated).
-- Units: UnitSystem now uses Foundation Measurement + UnitSpeed/UnitLength
-  symbols; `.system` default from Locale.measurementSystem. No hardcoded factors.
-- ActiveRideFeature: averageSpeedMPS/maxSpeedMPS via Measurement; unitSystem
-  defaults to `.system` with a TCA note (preference → @Shared/dependency later).
-- Widget: title-case labels; HeroNumber used for Avg/Max/Distance/Time (chevron
-  via new `heroAccessory`); statCell deleted; Distance no longer truncates
-  (fixedSize + layoutPriority pushes Time right); tokenized opacity
-  (Opacity.watermark) + heroFont/chevron constants; shared oneDecimal formatter;
-  dropped needless @ViewBuilder on speedHero.
-- speedHistory → timestamped SpeedSample, 1-hour window, downsampled to ≤60
-  watermark points. SpeedFeature gains @Dependency(\.date). Tests updated to
-  pin date; added prune + downsample tests.
-- UX.md: documented Opacity tokens. HeroNumber: optional baseline-aligned accessory.
-- Snapshots re-recorded (9/9 pass).
+## Review
+
+All seven tasks complete. Four files changed, one of them code — the spike's output is
+a decision record, so the diff is deliberately small.
+
+**Decisions recorded in BLE.md §13.** Adopt `bluetooth-central` (background *scanning*
+is gated on it regardless of whether location keeps the process alive — without it, a
+sensor powered on mid-ride is never discovered while the phone is pocketed). Adopt
+`audio`. Defer state restoration to M7, with an explicit revisit trigger: it only pays
+off once a terminated ride is recoverable, and `CoreDataStack` has no checkpointing yet.
+§13.4 itemizes what adopting restoration would require so the M7 issue can be written
+from it — the substantive item is that `BLECentral.connectionOwners` has no CoreBluetooth
+equivalent and can only be rebuilt from #67's persisted `PairedSensor` records.
+
+**Evidence quality — stated plainly in §13.1.** No hardware was available, so the three
+background-behavior questions are reasoned from documented platform behavior, not
+measured. Marked *unverified* in §13.2, each with a `log collect` procedure to run on a
+device. The decisions were chosen to stay safe if the reasoning is wrong.
+
+**Finding handed to M4 (#33).** Audio.md specifies `.ambient` for the All Clear and
+Warning tones so they respect the silent switch, but `.ambient` neither survives
+backgrounding nor plays through the switch — so as specified, a rider with the phone
+pocketed and the screen locked hears no Warning tone, which is the exact case Audio.md's
+"jersey-pocket audible" requirement targets. The `audio` background mode is necessary but
+not sufficient, and iOS exposes no API to read the switch position, so category choice
+alone can't satisfy both goals.
+
+**Also corrected:** BLE.md §11 required `NSBluetoothPeripheralUsageDescription`,
+deprecated since iOS 13 and applicable only to peripheral-role apps. The shipping
+Info.plist was already correct; the spec was wrong.
+
+**Verification.** Build succeeds; `UIBackgroundModes` confirmed in the *built* app bundle
+via PlistBuddy, not just the source plist. Full `CyclometerTests` suite run: the only
+failure is `HeroNumberSnapshotTests.testCustomColor()`, documented in CLAUDE.md as
+pre-existing. Device verification of Q1–Q3 remains outstanding and is the real acceptance
+criterion.
+
+**M6 ordering** (posted to the six open issues):
+`#71 → BLEClient.readValue → #69 → #68 → #67 → #70 → #63 → #72`. The #67/#68 "circular
+dependency" was an artifact of both issues claiming "PairedSensor persisted"; the real
+edge is one-directional. Two unnamed prerequisites surfaced: `BLEClient` has no
+characteristic read operation (blocks #67 and #63), and no SwiftData plumbing exists
+(blocks #69, #67, #70).
