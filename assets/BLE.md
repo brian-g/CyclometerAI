@@ -659,11 +659,12 @@ During M2, the engineering team must evaluate whether Garmin's `ConnectIQ` mobil
 
 ```xml
 <key>NSBluetoothAlwaysUsageDescription</key>
-<string>Cyclometer connects to your Garmin Varia radar, heart rate strap, and speed/cadence sensor to record and display your ride data in real time.</string>
-
-<key>NSBluetoothPeripheralUsageDescription</key>
-<string>Cyclometer connects to Bluetooth cycling sensors to track your ride.</string>
+<string>Cyclometer uses Bluetooth to connect to your cycling sensors including, heart rate sensor, speed, cadence, power, and radar.</string>
 ```
+
+`NSBluetoothPeripheralUsageDescription` is **not** required. It was deprecated in iOS 13 and applies only to apps acting as a BLE *peripheral*; Cyclometer is central-only. An earlier revision of this spec listed it in error.
+
+Background mode declarations are covered in §13.
 
 ### CBCentralManagerState Handling
 
@@ -712,4 +713,135 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 
 ---
 
-*Cyclometer BLE Integration Spec v1.1 · 2026-05-22*
+## 13. Background Execution and State Restoration
+
+> **Decision note — issue #71 (M6 spike).** Recorded 2026-08-03. This section is the output of the
+> spike; it is a decision record, not a design proposal. Later milestones may supersede it, but should
+> do so explicitly rather than by drift.
+
+### 13.1 Status of the evidence
+
+The spike's questions were answered **by reasoning from documented platform behavior, not by
+measurement on hardware.** No physical iPhone with a paired Varia / HR strap / CSC sensor was available
+when this note was written. Q1–Q3 below are therefore marked *unverified* and each carries a concrete
+test to run when hardware is available. The decisions in §13.3 are deliberately biased toward the
+option that is safe if the reasoning turns out to be wrong.
+
+### 13.2 Questions
+
+**Q1 — With only the `location` background mode, do CoreBluetooth notifications keep arriving while the app is backgrounded?** *(unverified)*
+
+Probably yes, for the duration of a ride. `LocationClient` sets `allowsBackgroundLocationUpdates = true`
+and `pausesLocationUpdatesAutomatically = false`, so an active ride keeps the process *running* rather
+than suspended, and CoreBluetooth delegate callbacks continue to be delivered to a running process.
+The failure mode is not backgrounding but *suspension*, and location updates prevent suspension.
+
+This is load-bearing but fragile: it means BLE liveness is a side effect of the GPS session. If a rider
+denies location, or a future non-recording mode runs without GPS, BLE would silently stop working in the
+background. That fragility is the reason §13.3 adopts `bluetooth-central` even though Q1 alone may not
+require it.
+
+> **To verify:** start a ride, lock the screen for 10+ minutes, then `log collect --device --last 1h`
+> and filter subsystem `com.xavier.cyclometer`. The sensor clients log every notification, so a
+> continuous stream of `speed`/`cadence`/`hr` lines across the locked window confirms it.
+
+**Q2 — Does scanning work while backgrounded without `bluetooth-central`?** *(unverified)*
+
+No. Background scanning is gated on the `bluetooth-central` background mode independently of whether
+the process is alive. This is the question that decides the milestone: a rider who starts a ride with a
+sensor powered off, pockets the phone, and then powers the sensor on will never see it discovered.
+
+Note that when background scanning *is* permitted, it operates under two restrictions the current
+implementation already satisfies: an explicit service-UUID filter is required (`BLECentral.rescan`
+always passes one), and `CBCentralManagerScanOptionAllowDuplicatesKey` is ignored (never set).
+
+> **To verify:** start a ride with the CSC sensor powered off, lock the screen, power the sensor on,
+> and watch for the `discovered "…"` log line.
+
+**Q3 — Does reconnection work while backgrounded?** *(unverified)*
+
+Yes, and it is the most robust of the three. `startReconnect` re-issues `connect(peripheralID:)` rather
+than rescanning, and a pending connection request placed while the peripheral is out of range stays
+pending and completes when it returns — iOS honors this even when the app is not running. `BLECentral`
+retains discovered peripherals in `discovered`, so reconnect-by-UUID needs no fresh scan.
+
+> **To verify:** with the screen locked, power-cycle a connected sensor and confirm the backoff-ladder
+> log lines appear and the sensor returns to `.active`.
+
+**Q4 — Does an `.ambient`-category tone play while backgrounded?**
+
+No — and this is a real gap in the current audio design, not merely a background-mode question.
+`AudioClient.liveValue` is still stubs, so nothing is broken *yet*, but Audio.md §"AVAudioSession
+Configuration" specifies `.ambient` for the All Clear and Warning tones so they respect the silent
+switch. The `.ambient` category is both silenced by the hardware switch *and* non-functional for
+background playback. Under the spec as written, **a rider with the phone in a jersey pocket and the
+screen locked would hear no Warning tone** — which is precisely the scenario Audio.md's
+"jersey-pocket audible" requirement targets.
+
+Adding the `audio` background mode is necessary but not sufficient to fix this: `.ambient` will still
+not play backgrounded. The resolution requires an M4 decision about the L2 category, and iOS provides
+no API to read the silent-switch position, so "respect the switch" and "play while backgrounded" cannot
+both be satisfied by category choice alone. **Handed to M4 (#33) as an open design question.**
+
+### 13.3 Decisions
+
+**1. Adopt `bluetooth-central`. — Done, this issue.**
+
+Q2 is the reason. The cost is one `Info.plist` key; the alternative is a category of silent mid-ride
+failure that no test would catch. It also decouples BLE liveness from the GPS session, removing the
+Q1 fragility.
+
+**2. Adopt `audio`. — Done, this issue.**
+
+Required for any ride-time alert tone to be audible with the screen locked. The plist key is claimed
+here so M4 does not have to relitigate the background-mode question while designing tone playback;
+the `.ambient` problem in Q4 is M4's to resolve.
+
+**3. Defer `CBCentralManager` state restoration to M7. — Deferred.**
+
+State restoration matters only when iOS *terminates* the app and later relaunches it into the
+background on a BLE event. Today that relaunch would reconnect a radar into an app with no ride to
+attach it to: `CoreDataStack` has no checkpointing, so PRD §12's "CoreData checkpoint every 30 seconds"
+is unimplemented and a terminated ride is already lost. Restoring the BLE half of a state whose other
+half is gone buys nothing a rider can perceive.
+
+This is not a claim that restoration is unnecessary — it is a claim that it is **premature**. It is
+also cheap to reverse, being one options dictionary at a single call site.
+
+> **Revisit trigger:** M7, when TrackPoint recording and CoreData checkpointing land. Restoration
+> becomes worthwhile at exactly the point where a terminated ride is recoverable.
+
+### 13.4 What adopting restoration would require
+
+Recorded now so the M7 issue can be written from it rather than re-derived.
+
+| Change | Location |
+|---|---|
+| Pass `CBCentralManagerOptionRestoreIdentifierKey` at manager construction | `BLECentral.init` — `Clients/BLE/BLEClient.swift` |
+| Implement `centralManager(_:willRestoreState:)`, rehydrating `discovered` from `CBCentralManagerRestoredStatePeripheralsKey` | `BLECentral` |
+| Reassign `peripheral.delegate = self` on every restored peripheral — CoreBluetooth does not restore delegates | `BLECentral` |
+| Rebuild `connectionOwners`, which is **not** restorable from CoreBluetooth — the owner set is Cyclometer's own ref-count and must be reconstructed from persisted `PairedSensor` records (#67) | `BLECentral` + persistence |
+| Rebuild per-client state: `CSCClientState.slots` (roles, calculators, names) and the radar client's target peripheral | `BLECSCClient`, `VariaRadarClient` |
+| Re-establish notification subscriptions, or verify restored peripherals arrive with `isNotifying` already true | all three sensor clients |
+| Decide restoration behavior when no ride is active — a relaunch that reconnects sensors with no ride running should stand down rather than hold connections open | `AppFeature` |
+
+The fourth row is the substantive one and the reason this waits for #67: the connection ref-count is a
+Cyclometer invariant with no CoreBluetooth equivalent, so restoration is not well-defined until paired
+sensors are persisted.
+
+### 13.5 Resulting `Info.plist`
+
+```xml
+<key>UIBackgroundModes</key>
+<array>
+    <string>audio</string>
+    <string>bluetooth-central</string>
+    <string>location</string>
+</array>
+```
+
+No restore identifier is set, consistent with decision 3.
+
+---
+
+*Cyclometer BLE Integration Spec v1.2 · 2026-08-03*

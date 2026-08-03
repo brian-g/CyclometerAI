@@ -131,6 +131,12 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
 
     override private init() {
         super.init()
+        // No CBCentralManagerOptionRestoreIdentifierKey: state restoration was evaluated in the
+        // M6 spike (#71) and deferred to M7. It only pays off once a terminated ride is
+        // recoverable, and CoreDataStack has no checkpointing yet — restoring the BLE half of a
+        // state whose other half is gone buys nothing. See BLE.md §13 for the rationale and for
+        // what adopting it would require. The app does declare the bluetooth-central background
+        // mode, so background scanning and reconnection work without restoration.
         manager = CBCentralManager(delegate: self, queue: bleQueue)
     }
 
