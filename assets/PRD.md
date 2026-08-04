@@ -169,6 +169,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Ride detail view (S15): HR graph, cadence graph, radar event + vehicle pass timeline
 - Heart rate zone training graphs
 - Customizable metric tiles on dashboard (S07, S08)
+- **Multi-bike management:** a rider owns several bikes; each bike owns its wheelsets (each with its own circumference and calibration history) and its own speed/cadence/radar sensors. Heart rate stays rider-scoped. Includes the bike picker in the Start Sheet (S05.1/S05.2) and per-bike ride history. Data model in DataModel.md §3.9
 - Route picker in Start Sheet (S05.2)
 - Lock screen / Dynamic Island integration
 - Apple Watch standalone companion app and complication (S17)
@@ -190,7 +191,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - **HR zone formula:** Karvonen only in MVP
 - **TestFlight:** Open beta
 - **Navigation (OQ12):** GPX file import only for MVP; no `MKDirections` routing
-- **Wheel sizing (OQ13):** Preset common sizes + manual entry + GPS auto-calibration (see §8.9)
+- **Wheel sizing (OQ13):** Preset common sizes + manual entry + GPS auto-calibration (see §8.9). One app-wide value for MVP; Phase 2 moves it under per-bike wheelsets (see §8.9 scope note and DataModel.md §3.9)
 - **Radar visualization (OQ14):** Option F — right-side sidebar strip (see §8.2)
 
 ---
@@ -576,6 +577,8 @@ Vehicle pass events are recorded as GPX `<wpt>` (waypoint) elements rather than 
 
 **Purpose:** Provide accurate speed and distance measurements from the BLE speed sensor, with automatic calibration against GPS to correct for tire wear, inflation changes, and rider weight variations.
 
+> **MVP scope — one bike, one wheelset.** The circumference below is a single app-wide value, and paired sensors are keyed by role alone. Riders own several bikes, and a bike carries several wheelsets (race vs training, road vs gravel) — so Phase 2 makes each bike own its wheelsets and its own speed/cadence/radar sensors, with heart rate staying rider-scoped. Two MVP limitations follow and are accepted rather than filed as bugs: swapping wheelsets means re-entering the circumference and loses the calibration learned for the other set, and swapping bikes means re-pairing sensors. The target shape is specified in DataModel.md §3.9; the S05.1 bike picker is already reserved in UX.md.
+
 **Circumference Configuration:**
 
 Riders can configure wheel circumference using one of three methods:
@@ -603,18 +606,18 @@ Riders can configure wheel circumference using one of three methods:
 - Discrepancy threshold: if `|BLE distance − GPS distance| / GPS distance > 5%` over the measurement window, trigger calibration
 - Calibration adjustment: `new circumference = stored circumference × (GPS distance / BLE distance)`
 - Maximum single adjustment: ±10% of stored value (guards against GPS spikes causing overcorrection)
-- After calibration: updated circumference is saved to `UserProfile.wheelCircumferenceMM`; rider is notified via a brief non-intrusive banner: "Wheel size auto-adjusted to [N] mm"
+- After calibration: updated circumference is saved to `AppPreferences.wheelCircumferenceMM`; rider is notified via a brief non-intrusive banner: "Wheel size auto-adjusted to [N] mm"
 - Calibration is suspended during L2/L3 radar alerts, map-following turn alerts, or when GPS horizontal accuracy is > 10 meters (unreliable GPS)
 
 **Rationale:** GPS is not precise enough for per-second speed measurement (hence BLE priority) but is accurate enough over 500-meter windows for circumference calibration. A 5% discrepancy threshold prevents constant micro-adjustments while catching meaningful drift from tire pressure changes or load.
 
 **Acceptance Criteria:**
-- [ ] All preset sizes available in S12 with tire label and circumference in mm
-- [ ] Manual entry accepts values in range 1,500–3,000 mm (reasonable sanity bounds)
+- [x] All preset sizes available in S12, labelled as printed on the tire sidewall ("700 x 25c", "650b x 47", "29 x 2.1"). Circumference in mm is *not* shown against each preset — riders choose by tire size, and surfacing both made the row wrap; the mm value appears only when Custom is selected, where it is the thing being edited
+- [x] Manual entry accepts values in range 1,500–3,000 mm (reasonable sanity bounds); out-of-range entries are rejected and the field reverts to the stored value
 - [ ] Auto-calibration triggers correctly when 5% discrepancy sustained over 500m GPS window
 - [ ] Auto-calibration does not trigger when GPS horizontal accuracy > 10m
 - [ ] Calibration adjustment capped at ±10% per event
-- [ ] Updated circumference persisted to UserProfile immediately
+- [ ] Updated circumference persisted to AppPreferences immediately (#70; UserProfile was split into RiderProfile + AppPreferences — see DataModel.md §3.6)
 - [ ] Banner notification displayed when auto-calibration fires
 - [ ] Calibration disabled when GPS-only speed mode is active (no BLE sensor connected)
 - [ ] Unit tested: calibration math correct for a range of known discrepancy scenarios
@@ -1084,7 +1087,7 @@ Cyclometer/
 | M12 | App Store submission |
 
 ### Phase 2 — Companion, History & Routes (Target: +2 months post-launch)
-Routes tab (S19, S20): route list with list and map views, route detail with elevation profile, current weather, Strava segments, and previous ride history. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). Dynamic Island. HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Route picker in Start Sheet (S05.2).
+Routes tab (S19, S20): route list with list and map views, route detail with elevation profile, current weather, Strava segments, and previous ride history. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). Dynamic Island. HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Route picker in Start Sheet (S05.2). Multi-bike management — bikes own their wheelsets and sensors (DataModel.md §3.9) — plus the S05.1 bike picker.
 
 ### Phase 3 — AR, Power & Platform (Target: +4 months post-Phase 2)
 Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detection.

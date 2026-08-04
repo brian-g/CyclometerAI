@@ -37,6 +37,9 @@ struct SpeedFeature {
 
     @ObservableState
     struct State: Equatable {
+        /// Read-only here: Settings pushes changes to the CSC client directly, so
+        /// this is only the value applied when a ride starts.
+        @SharedReader(.appPreferences) var preferences
         var speedMPS: Double? = nil
         var activeSpeedSource: SensorSource = .none
         var connectionState: BLECSCClient.ConnectionState = .disconnected
@@ -87,7 +90,10 @@ struct SpeedFeature {
             switch action {
             case .startListening:
                 return .merge(
-                    .run { [bleCSCClient] send in
+                    .run { [bleCSCClient, mm = state.preferences.wheelCircumferenceMM] send in
+                        // Applied before scanning so the rider's configured wheel
+                        // size is in place before the first measurement lands.
+                        await bleCSCClient.setWheelCircumference(mm)
                         await bleCSCClient.startScanning()
                         for await mps in bleCSCClient.speed() {
                             await send(.bleSpeedReceived(mps))

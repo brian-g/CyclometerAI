@@ -1,20 +1,59 @@
 import ComposableArchitecture
 
+/// What the wheel-size picker is showing: one of the PRD §8.9 presets, or a
+/// manually entered circumference.
+enum WheelSelection: Hashable, Sendable {
+    case preset(WheelPreset)
+    case custom
+}
+
 @Reducer
 struct SettingsFeature {
+    @Dependency(\.bleCSCClient) var bleCSCClient
+
     @ObservableState
     struct State: Equatable {
+        @Shared(.appPreferences) var preferences
         var selectedUnits: String = "Imperial"
-        var selectedWheelSize: String = "700 x 28c"
+        /// In-progress manual entry. `nil` means the rider is not editing, so the
+        /// field shows the persisted value — which is why no lifecycle action is
+        /// needed to seed it, and why reverting a bad entry is just clearing this.
+        var customCircumferenceDraft: String? = nil
+        /// Only matters when the stored circumference happens to equal a preset —
+        /// it keeps the custom field on screen while the rider is typing.
+        var userChoseCustom: Bool = false
         var isAutoPauseEnabled: Bool = true
         var isAutoDimEnabled: Bool = true
         var shouldSetDoNotDisturb: Bool = false
         var heartRateZones: [HeartRateZoneSetting] = HeartRateZoneSetting.standardZones
         var isShowingAddAccountOptions: Bool = false
+
+        /// Derived from the stored value, so a manual or auto-calibrated (#70)
+        /// circumference still reads as Custom after a relaunch.
+        var wheelSelection: WheelSelection {
+            if userChoseCustom { return .custom }
+            return WheelPreset(rawValue: preferences.wheelCircumferenceMM)
+                .map(WheelSelection.preset) ?? .custom
+        }
+
+        /// What the manual-entry field shows: the live draft while editing,
+        /// otherwise whatever is persisted.
+        var customCircumferenceText: String {
+            customCircumferenceDraft ?? String(preferences.wheelCircumferenceMM)
+        }
+
+        /// True while the rider has typed something that cannot be committed.
+        var isCustomCircumferenceInvalid: Bool {
+            guard case .custom = wheelSelection, !customCircumferenceText.isEmpty else { return false }
+            guard let mm = Int(customCircumferenceText) else { return true }
+            return !WheelPreset.validRange.contains(mm)
+        }
     }
-    enum Action {
+    enum Action: Equatable {
         case unitSelected(String)
-        case wheelSizeSelected(String)
+        case wheelSelectionChanged(WheelSelection)
+        case customCircumferenceChanged(String)
+        case customCircumferenceCommitted
         case autoPauseToggled
         case autoDimToggled
         case doNotDisturbToggled
@@ -27,8 +66,31 @@ struct SettingsFeature {
             switch action {
             case .unitSelected(let unit):
                 state.selectedUnits = unit; return .none
-            case .wheelSizeSelected(let size):
-                state.selectedWheelSize = size; return .none
+            case .wheelSelectionChanged(let selection):
+                switch selection {
+                case .preset(let preset):
+                    state.userChoseCustom = false
+                    return apply(preset.circumferenceMM, to: &state)
+                case .custom:
+                    state.userChoseCustom = true
+                    return .none
+                }
+            case .customCircumferenceChanged(let text):
+                state.customCircumferenceDraft = text; return .none
+            case .customCircumferenceCommitted:
+                guard let mm = Int(state.customCircumferenceText),
+                      WheelPreset.validRange.contains(mm)
+                else {
+                    // Out of bounds or unparseable — dropping the draft falls the
+                    // field back to the persisted value.
+                    state.customCircumferenceDraft = nil
+                    return .none
+                }
+                // Committing an unchanged value is a no-op. Picking a preset while
+                // the field has focus tears the field down, which fires a commit —
+                // without this it would push the same circumference twice.
+                guard mm != state.preferences.wheelCircumferenceMM else { return .none }
+                return apply(mm, to: &state)
             case .autoPauseToggled:
                 state.isAutoPauseEnabled.toggle(); return .none
             case .autoDimToggled:
@@ -51,6 +113,17 @@ struct SettingsFeature {
             case .addAccountDismissed:
                 state.isShowingAddAccountOptions = false; return .none
             }
+        }
+    }
+
+    /// Single funnel for every circumference change — persisting and pushing to
+    /// the CSC client happen together so the stored value and the value driving
+    /// the speed derivation cannot drift apart.
+    private func apply(_ mm: Int, to state: inout State) -> Effect<Action> {
+        state.$preferences.withLock { $0.wheelCircumferenceMM = mm }
+        state.customCircumferenceDraft = nil
+        return .run { [bleCSCClient] _ in
+            await bleCSCClient.setWheelCircumference(mm)
         }
     }
 }

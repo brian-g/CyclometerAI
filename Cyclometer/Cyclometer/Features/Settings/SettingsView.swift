@@ -3,6 +3,9 @@ import ComposableArchitecture
 
 struct SettingsView: View {
     @Bindable var store: StoreOf<SettingsFeature>
+    /// The number pad has no return key, so the manual circumference commits when
+    /// focus leaves the field (via the keyboard's Done button or a tap elsewhere).
+    @FocusState private var isCircumferenceFocused: Bool
 
     private var appVersion: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -17,8 +20,28 @@ struct SettingsView: View {
                 Picker("Units", selection: $store.selectedUnits.sending(\.unitSelected)) {
                     ForEach(SettingsDemoData.units, id: \.self) { Text($0) }
                 }
-                Picker("Wheel Size", selection: $store.selectedWheelSize.sending(\.wheelSizeSelected)) {
-                    ForEach(SettingsDemoData.wheelSizes, id: \.self) { Text($0) }
+                Picker("Wheel Size", selection: Binding(
+                    get: { store.wheelSelection },
+                    set: { store.send(.wheelSelectionChanged($0)) }
+                )) {
+                    ForEach(WheelPreset.allCases) { preset in
+                        Text(preset.label).tag(WheelSelection.preset(preset))
+                    }
+                    Text("Custom").tag(WheelSelection.custom)
+                }
+                if store.wheelSelection == .custom {
+                    LabeledContent("Circumference") {
+                        HStack(spacing: 4) {
+                            TextField("mm", text: Binding(
+                                get: { store.customCircumferenceText },
+                                set: { store.send(.customCircumferenceChanged($0)) }
+                            ))
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .focused($isCircumferenceFocused)
+                            Text("mm").foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 Toggle("Auto-pause", isOn: Binding(
                     get: { store.isAutoPauseEnabled },
@@ -33,6 +56,11 @@ struct SettingsView: View {
                     set: { _ in store.send(.doNotDisturbToggled) }
                 ))
                 NavigationLink("Sensors") { SensorManagementView() }
+            } footer: {
+                if store.wheelSelection == .custom {
+                    Text("Wheel circumference must be between 1,500 and 3,000 mm.")
+                        .foregroundStyle(store.isCustomCircumferenceInvalid ? Color.red : Color.secondary)
+                }
             }
 
             Section {
@@ -79,6 +107,17 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .onChange(of: isCircumferenceFocused) { _, isFocused in
+            if !isFocused { store.send(.customCircumferenceCommitted) }
+        }
+        .toolbar {
+            if isCircumferenceFocused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { isCircumferenceFocused = false }
+                }
+            }
+        }
     }
 }
 

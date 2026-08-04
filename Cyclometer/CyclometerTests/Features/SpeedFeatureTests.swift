@@ -13,7 +13,8 @@ struct SpeedFeatureTests {
         initialState: SpeedFeature.State = SpeedFeature.State(),
         clock: TestClock<Duration> = TestClock(),
         bleCSCClient: BLECSCClient = .testValue,
-        date: Date = Self.testDate
+        date: Date = Self.testDate,
+        fileStorage: FileStorage? = nil
     ) -> TestStoreOf<SpeedFeature> {
         TestStore(initialState: initialState) {
             SpeedFeature()
@@ -21,6 +22,7 @@ struct SpeedFeatureTests {
             $0.date = .constant(date)
             $0.continuousClock = clock
             $0.bleCSCClient = bleCSCClient
+            if let fileStorage { $0.defaultFileStorage = fileStorage }
         }
     }
 
@@ -82,6 +84,32 @@ struct SpeedFeatureTests {
         connContinuation.finish()
         nameContinuation.finish()
         await store.finish()
+    }
+
+    @Test("Start listening applies the persisted wheel circumference before scanning")
+    func startListeningAppliesPersistedCircumference() async {
+        // Ordering matters: the circumference must land before the first
+        // measurement, so record the sequence rather than just the value.
+        let calls = LockIsolated<[String]>([])
+        var ble = BLECSCClient.testValue
+        ble.setWheelCircumference = { mm in calls.withValue { $0.append("circumference:\(mm)") } }
+        ble.startScanning = { calls.withValue { $0.append("scan") } }
+
+        // Own in-memory storage so the seeded circumference cannot leak into (or
+        // out of) other tests sharing the process-wide default.
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.wheelCircumferenceMM = 2288 }
+            return makeStore(bleCSCClient: ble, fileStorage: storage)
+        }
+
+        await store.send(.startListening)
+        await store.finish()
+
+        #expect(calls.value == ["circumference:2288", "scan"])
     }
 
     @Test("Samples older than the history window are pruned")

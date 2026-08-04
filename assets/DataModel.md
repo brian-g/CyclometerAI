@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
-**Version:** 1.1
+**Version:** 1.2
 **Date:** 2026-05-21
-**Updated:** 2026-05-22 — UserProfile split into RiderProfile, AppPreferences, PairedSensor, ConnectedService; all OQDMs resolved
+**Updated:** 2026-08-03 (#69) — AppPreferences moved out of SwiftData to a `@Shared(.fileStorage)` JSON document; PairedSensor / ConnectedService ownership reopened for #67; §3.9 records the Phase 2 multi-bike model (bikes own wheelsets and sensors)
+**Previously:** 2026-05-22 — UserProfile split into RiderProfile, AppPreferences, PairedSensor, ConnectedService; all OQDMs resolved
 **Status:** Draft — Ready for Engineering Review
 **Author:** Brian (UX Design) + Claude (Specification)
 **Companion Documents:** PRD.md section 10, TCA.md, BLE.md
@@ -20,9 +21,11 @@
 │  RadarEvent (discrete events)         (NSBatchInsertRequest)    │
 │  VehiclePassEvent (discrete events)                             │
 │  RiderProfile                                                   │
-│  AppPreferences                                                 │
 │  PairedSensor                                                   │
 │  ConnectedService                                               │
+│                                                                 │
+│  JSON document (@Shared / .fileStorage)                         │
+│  AppPreferences (singleton)                                     │
 │                                                                 │
 │  In-Memory (RideDataBuffer)                                     │
 │  Active TrackPoint ring buffer                                  │
@@ -34,7 +37,8 @@
 
 | Concern | Decision |
 |---|---|
-| Ride, RiderProfile, AppPreferences UI queries | SwiftData — ergonomic @Query macros in SwiftUI |
+| Ride, RiderProfile UI queries | SwiftData — ergonomic @Query macros in SwiftUI |
+| AppPreferences — exactly one record, no queries | `@Shared(.fileStorage)` Codable struct — synchronous reads, no ModelContainer, no migration plan (see §3.6) |
 | TrackPoint — up to 3,600 rows/hour at 1 Hz | CoreData NSBatchInsertRequest — batch write avoids per-object overhead |
 | Active-ride telemetry buffering | In-memory ring buffer; never written until checkpoint/end |
 | RadarEvent, VehiclePassEvent — discrete | SwiftData — low frequency; UI-queryable |
@@ -53,11 +57,12 @@
 ## 2. Entity Relationship Diagram
 
 ```
-RiderProfile (1)          AppPreferences (1)
-                               │
+RiderProfile (1)          AppPreferences (1) [JSON document]
+                               ┆
                     ┌──────────┴──────────┐
                     │                     │
                 (∞) PairedSensor    (∞) ConnectedService
+                    (ownership open — see §3.6, §3.7)
 
 (∞) Ride
     │
@@ -73,7 +78,7 @@ TrackPoint    RadarEvent   VehiclePassEvent
 ```
 
 **Key relationships:**
-- AppPreferences owns [PairedSensor] and [ConnectedService] with cascade delete
+- AppPreferences is no longer a SwiftData entity, so it cannot own a SwiftData `@Relationship`. Whether PairedSensor and ConnectedService become standalone `@Model`s queried by role/service type, or fold into the AppPreferences JSON document, is settled by #67 — see §3.6
 - Ride and RiderProfile have no SwiftData relationship — single rider; rides queried by date range
 - RadarVehicle is a value type embedded as JSON in RadarEvent, not a separate table
 - Phase 2: Ride gains a route: Route? relationship when Route becomes a first-class entity
@@ -348,68 +353,79 @@ final class RiderProfile {
 
 ### 3.6 AppPreferences
 
-All non-physiological preferences. Owns PairedSensor and ConnectedService collections. Exactly one record exists.
+All non-physiological preferences. Exactly one record exists.
+
+> **Revised 2026-08-03 (#69): not a SwiftData `@Model`.** Exactly one record exists, so there is
+> nothing to `@Query` and no relationship worth traversing, while a `@Model` would put an async
+> load in front of every consumer — including the Settings screen, which would flash a default
+> value on each appearance. It is instead a `Codable` struct persisted as a single JSON document
+> via swift-sharing's `.fileStorage` strategy, which TCA already vends (`@Shared`). Reads are
+> synchronous, tests get quarantined storage for free, and there is no `ModelContainer` or
+> `SchemaMigrationPlan` in the path. SwiftData remains the store for Ride, RadarEvent,
+> VehiclePassEvent and RiderProfile, which do need querying.
+
+**Implemented today** (`Cyclometer/Cyclometer/Models/AppPreferences.swift`) — fields land as their
+consumers do, so only wheel circumference is present:
 
 ```swift
-/// OQDM5 resolved: split from UserProfile. Preferences, sensors, services.
-@Model
-final class AppPreferences {
-    var id: UUID
+struct AppPreferences: Codable, Equatable, Sendable {
+    /// OQDM9 noted: one global value for MVP — the app assumes a single bike with a
+    /// single wheelset. Phase 2 moves this to Wheelset, owned by Bike, since a rider
+    /// owns several bikes and a bike carries several wheelsets. See §3.9.
+    var wheelCircumferenceMM: Int = WheelPreset.default.circumferenceMM   // 2096
+}
 
-    // MARK: - Display & Units
-    var preferredUnit: UnitSystem              // Defaults from iOS device locale
-    // OQDM8 resolved: mapOrientation is real — PRD section 8.6 specifies heading-up
-    // vs north-up as a user-toggleable setting. Persisted so the rider's choice survives
-    // app restarts.
-    var mapOrientation: MapOrientation
-
-    // MARK: - Ride Behaviour
-    // OQDM9 noted: wheelCircumferenceMM is a global default for MVP.
-    // Phase 2: migrates to Bike entity when multi-bike support is added.
-    var wheelCircumferenceMM: Int
-    var isAutoPauseEnabled: Bool
-    var isAutoDimEnabled: Bool
-    var shouldSetDoNotDisturb: Bool
-
-    // MARK: - Paired BLE Devices (OQDM6 resolved)
-    // Extensible collection keyed by SensorRole. Replaces fixed UUID string fields.
-    // A combo CSC sensor may appear twice (speed + cadence) with the same peripheralIdentifierString.
-    @Relationship(deleteRule: .cascade) var pairedSensors: [PairedSensor]
-
-    // MARK: - Connected Services (OQDM7 resolved)
-    // Extensible collection. Replaces fixed stravaAccessToken / rideWithGPSAccessToken fields.
-    @Relationship(deleteRule: .cascade) var connectedServices: [ConnectedService]
-
-    func pairedSensor(for role: SensorRole) -> PairedSensor? {
-        pairedSensors.first { $0.role == role }
-    }
-
-    func connectedService(of type: ExternalService) -> ConnectedService? {
-        connectedServices.first { $0.serviceType == type }
-    }
-
-    init() {
-        self.id = UUID()
-        self.preferredUnit = .imperial
-        self.mapOrientation = .headingUp
-        self.wheelCircumferenceMM = 2096
-        self.isAutoPauseEnabled = true
-        self.isAutoDimEnabled = true
-        self.shouldSetDoNotDisturb = false
-        self.pairedSensors = []
-        self.connectedServices = []
+extension SharedReaderKey where Self == FileStorageKey<AppPreferences>.Default {
+    static var appPreferences: Self {
+        Self[
+            .fileStorage(.documentsDirectory.appending(component: "app-preferences.json")),
+            default: AppPreferences()
+        ]
     }
 }
+```
+
+Consumed by `SettingsFeature` (read/write, pushing each change to
+`BLECSCClient.setWheelCircumference`) and `SpeedFeature` (`@SharedReader`, applied at ride start).
+
+**Still to land**, each with the feature that consumes it:
+
+```swift
+var preferredUnit: UnitSystem       // Defaults from iOS device locale.
+                                    // Today ActiveRideFeature.unitSystem is seeded from
+                                    // Locale per-feature and Settings' picker is a
+                                    // disconnected String — unifying them is follow-up work.
+// OQDM8 resolved: mapOrientation is real — PRD section 8.6 specifies heading-up vs north-up
+// as a user-toggleable setting. Persisted so the rider's choice survives app restarts.
+var mapOrientation: MapOrientation
+var isAutoPauseEnabled: Bool
+var isAutoDimEnabled: Bool
+var shouldSetDoNotDisturb: Bool
 
 enum UnitSystem: String, Codable { case metric, imperial }
 enum MapOrientation: String, Codable { case headingUp, northUp }
 ```
+
+**Open — PairedSensor and ConnectedService ownership (#67).** §3.6 previously held these as
+cascade-deleting `@Relationship` collections. With AppPreferences out of SwiftData that is no
+longer possible as written; #67 decides between two options, and §3.7/§3.8 are written against
+whichever it picks:
+
+1. Standalone SwiftData `@Model`s queried directly by `role` / `serviceType`. Cascade delete
+   becomes moot — nothing owns them. Keeps ConnectedService's Keychain-identifier pattern intact.
+2. Nested `Codable` arrays inside the AppPreferences document. Simplest for the 3–5 records that
+   realistically exist, and keeps `pairedSensor(for:)` / `connectedService(of:)` as plain struct
+   methods over synchronously available state.
 
 ---
 
 ### 3.7 PairedSensor
 
 One BLE sensor in a specific role. A single physical device may appear twice — once for .speed, once for .cadence — when a combo CSC sensor is assigned both roles (same peripheralIdentifierString, different role values).
+
+> Shown below as a SwiftData `@Model`. Since #69 moved AppPreferences out of SwiftData there is no `@Relationship` owner, so #67 confirms whether this stays a standalone `@Model` or becomes a nested `Codable` value in the AppPreferences document — see §3.6.
+
+> **Role-keyed lookup is an MVP simplification.** One sensor per role, app-wide. Phase 2 gives every bike its own speed, cadence, radar and power sensors, so the lookup key becomes (bike, role) — see §3.9. Heart rate is the exception: the strap follows the rider, not the bike.
 
 ```swift
 /// OQDM6 resolved: replaces fixed UUID string fields on AppPreferences.
@@ -449,6 +465,8 @@ enum SensorRole: String, Codable, Sendable {
 
 A connected third-party service. OAuth tokens live in the iOS Keychain; this entity holds only the lookup key and display metadata.
 
+> Same open ownership question as §3.7 — no `@Relationship` owner since #69.
+
 ```swift
 /// OQDM7 resolved: replaces fixed stravaAccessToken / rideWithGPSAccessToken fields.
 @Model
@@ -477,6 +495,60 @@ enum ExternalService: String, Codable, Sendable {
 ```
 
 > **Security note:** Raw OAuth tokens are stored in the iOS Keychain under kSecClassGenericPassword. keychainIdentifier is the kSecAttrAccount key. Tokens never touch SwiftData.
+
+---
+
+### 3.9 Bike (Phase 2 — not implemented)
+
+**A rider owns more than one bike, and the model must eventually reflect that.** MVP deliberately
+does not: wheel circumference is a single global value on AppPreferences (§3.6) and paired sensors
+are keyed by role alone (§3.7), which means one road bike's speed sensor and one gravel bike's are
+indistinguishable to the app. That is a scoping decision for MVP, not a belief that riders have one
+bike. Everything below is the shape the schema grows into; it is recorded here so MVP choices are
+made with the destination in view, not discovered as a rewrite in Phase 2.
+
+**What belongs to a bike, not to the app:**
+
+| Today (MVP) | Phase 2 |
+|---|---|
+| `AppPreferences.wheelCircumferenceMM` — one global value | Each bike owns **a set of wheelsets**, not a single circumference. A bike is not one wheel size: riders swap between training and race wheels, or road and gravel wheelsets, on the same frame. Each wheelset carries its own circumference and its own auto-calibration history (§8.9), so switching wheels must not discard the calibration learned for the other set |
+| `PairedSensor` keyed by `SensorRole` alone — one sensor per role, app-wide | Sensors belong to a bike. Each bike has its own speed, cadence, radar and (Phase 3) power sensors. The same physical HR strap follows the *rider* across bikes, so heart rate stays on the rider side, not the bike side |
+| Ride has no bike association | `Ride.bike: Bike?` and the wheelset in use, so history can be filtered per bike and per-bike totals (odometer, service intervals) become answerable |
+
+```swift
+/// Sketch only — not built. Relationships and delete rules settle when this lands.
+@Model
+final class Bike {
+    var id: UUID
+    var name: String                            // "Tarmac", "Checkpoint"
+    var isDefault: Bool                         // Pre-selected in the S05.1 bike picker
+    var wheelsets: [Wheelset]                   // At least one; each with its own circumference
+    var activeWheelset: Wheelset?               // What is currently fitted
+    var sensors: [PairedSensor]                 // Speed, cadence, radar, power — per bike
+}
+
+@Model
+final class Wheelset {
+    var id: UUID
+    var name: String                            // "Race carbon", "Winter alloy"
+    var circumferenceMM: Int
+    var isAutoCalibrated: Bool                  // Whether §8.9 has adjusted this value
+}
+```
+
+**Consequences to keep in mind while building MVP:**
+
+- **Ride start must eventually ask which bike.** UX.md S05.1 and S05.2 already reserve a bike picker
+  for Phase 2. Anything that reads wheel circumference or paired sensors at ride start (today
+  `SpeedFeature.startListening`) becomes "read it *for the selected bike*" — so that read wants to
+  stay in one place rather than spreading across features.
+- **Auto-calibration (#70) writes per wheelset, not globally.** Calibrating while the race wheels are
+  fitted must not overwrite the value learned for the training wheels. Until Bike exists,
+  calibration writes the single global value, which is wrong for a rider who swaps wheels — an
+  accepted MVP limitation, not a bug to file.
+- **Sensor pairing (#67, #68) is where this bites first.** Role-keyed pairing is the MVP
+  simplification; a rider with two bikes each carrying a CSC sensor has to re-pair on every swap.
+  Worth confirming the pairing UI can grow a bike dimension without a redesign.
 
 ---
 
@@ -693,11 +765,12 @@ extension RiderProfile {
 |---|---|
 | 1.0 (MVP) | All entities as specified above |
 | 1.1 (Phase 2 — Routes) | Add Route @Model; add Ride.route: Route?; migrate Ride.routeName |
-| 1.2 (Phase 2 — Bikes) | Add Bike @Model; migrate AppPreferences.wheelCircumferenceMM to Bike |
+| 1.2 (Phase 2 — Bikes) | Add Bike + Wheelset @Models (§3.9). Move `wheelCircumferenceMM` out of the AppPreferences JSON document into a Wheelset on a default Bike (a one-shot read-then-write at launch, not a schema stage — AppPreferences is not in the SwiftData schema). Re-key PairedSensor from role to (bike, role), migrating existing records onto that same default Bike; leave heart-rate sensors rider-scoped. Add `Ride.bike` and the wheelset in use |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 
 Key rules:
 - Never rename SwiftData properties without a SchemaMigrationPlan stage
+- AppPreferences is outside the SwiftData schema (§3.6). Adding a field is free — decoding an older document falls back to the property's default. Renaming or removing one needs an explicit `Codable` shim, since a stale document silently loses the value otherwise
 - CoreData TrackPoint changes require a NSMigrationManager mapping model
 - ExternalService and SensorRole enum cases can be added without migration
 
@@ -741,9 +814,9 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 | OQDM6 | Sensor storage limited to fixed fields | Resolved. PairedSensor @Model with role: SensorRole. Any number of sensors of any role |
 | OQDM7 | Connected services list is fixed | Resolved. ConnectedService @Model with serviceType: ExternalService. New services add an enum case |
 | OQDM8 | What is mapOrientation for? | Resolved — it is real. PRD section 8.6 specifies heading-up vs north-up as a user-toggleable setting; stored in AppPreferences to persist across sessions |
-| OQDM9 | Store bike information | Deferred to Phase 2. Bike @Model in schema v1.2; wheelCircumferenceMM migrates there |
+| OQDM9 | Store bike information | Deferred to Phase 2, shape recorded in §3.9. A rider owns several bikes; each bike owns several wheelsets (each with its own circumference and calibration history) and its own speed/cadence/radar/power sensors. Heart rate stays rider-scoped. Bike + Wheelset @Models in schema v1.2; `wheelCircumferenceMM` and role-keyed PairedSensor records migrate onto a default Bike |
 | OQDM10 | Capture weather conditions for a ride | Resolved. RideWeather Codable value type stored as JSON on Ride. Fields: temperature, wind speed, wind direction, conditions, humidity, capture timestamp |
 
 ---
 
-*Cyclometer Data Model Spec v1.2 · 2026-05-22*
+*Cyclometer Data Model Spec v1.2 · 2026-08-03*

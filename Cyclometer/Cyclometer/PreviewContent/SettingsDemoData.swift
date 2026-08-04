@@ -24,7 +24,6 @@ struct HeartRateZoneSetting: Identifiable, Equatable {
 
 struct SettingsDemoData {
     static let units = ["Imperial", "Metric"]
-    static let wheelSizes = ["700 x 23c", "700 x 25c", "700 x 28c", "700 x 30c", "700 x 32c", "650b x 42", "650b x 47"]
     static let stravaAccountStatus = "Not Connected"
     static let rideWithGPSAccountStatus = "Not Connected"
     static let privacyPolicyParagraphs = [

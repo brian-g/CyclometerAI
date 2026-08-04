@@ -248,7 +248,7 @@ If the user blocks Bluetooth, Location, or Motion and Fitness, they will not be 
 
 - Group: Ride Setup
   - Route picker (Phase 2)
-  - Bike picker (Phase 2)
+  - Bike picker (Phase 2) — selecting a bike selects its sensors and its fitted wheelset, so the sensor list below and the wheel circumference used for the ride both follow this control. Where a bike has more than one wheelset, the fitted one is picked here too. See DataModel.md §3.9
 
 - Group: Sensors
   - Sensor type (icon)
@@ -274,7 +274,7 @@ If the user blocks Bluetooth, Location, or Motion and Fitness, they will not be 
 ### Key Components
 
 - Route picker
-- Bike picker
+- Bike picker — drives which sensors and which wheelset the ride uses (see S05.1)
 - List of sensors and status
 
 ### Open UX Questions
@@ -770,7 +770,7 @@ An `HKWorkout` is written to Apple Health automatically when the ride ends, befo
 
 **General**
 - Units: Metric (km) | Imperial (miles) [Defaults from iOS]
-- Wheel circumference (mm) — numeric entry with preset selector
+- Wheel circumference (mm) — numeric entry with preset selector. One app-wide value in MVP. Phase 2 moves this off the Settings screen: circumference belongs to a wheelset, a wheelset belongs to a bike, and the rider has several of each (DataModel.md §3.9). Expect this row to become a "Bikes" navigation link rather than gaining more controls in place
 - Auto-pause
 - Auto-dim
 - Set Do Not Disturb
