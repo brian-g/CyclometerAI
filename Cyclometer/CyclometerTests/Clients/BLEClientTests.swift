@@ -48,6 +48,12 @@ struct BLEClientTests {
         await client.setNotifyValue(true, UUID(), CBUUID(string: "180D"), CBUUID(string: "2A37"))
     }
 
+    @Test("Test value readValue does not crash")
+    func readValueNoOp() async {
+        let client = BLEClient.testValue
+        await client.readValue(UUID(), CBUUID(string: "1816"), CBUUID(string: "2A5C"))
+    }
+
     @Test("Test value events stream completes immediately")
     func eventsStreamCompletes() async {
         let client = BLEClient.testValue
@@ -71,6 +77,7 @@ struct BLEClientTests {
             discoverServices: { _, _ in },
             discoverCharacteristics: { _, _, _ in },
             setNotifyValue: { _, _, _, _ in },
+            readValue: { _, _, _ in },
             events: { stream }
         )
 
@@ -124,6 +131,7 @@ struct BLEClientTests {
             discoverServices: { _, _ in },
             discoverCharacteristics: { _, _, _ in },
             setNotifyValue: { _, _, _, _ in },
+            readValue: { _, _, _ in },
             events: { stream }
         )
 
@@ -147,6 +155,60 @@ struct BLEClientTests {
         }
         #expect(pid == peripheralID)
         #expect(uuid == charUUID)
+        #expect(value == payload)
+    }
+
+    /// The round trip a read actually takes. `readValue` returns nothing; the answer
+    /// arrives on the shared event stream as `.characteristicValueUpdated`, which is
+    /// indistinguishable from a notification — hence callers match on the
+    /// characteristic UUID. This is the pattern #67 (0x2A5C) and #63 (0x2A19) build on.
+    @Test("A read request is answered on the event stream, not by the call itself")
+    func readValueRoundTrip() async {
+        let peripheralID = UUID()
+        let cscService = CBUUID(string: "1816")
+        let cscFeature = CBUUID(string: "2A5C")
+        let payload = Data([0x01, 0x00])   // CSC Feature flags: wheel yes, crank no
+
+        let (stream, continuation) = AsyncStream<BLEEvent>.makeStream()
+        let reads = LockIsolated<[(UUID, CBUUID, CBUUID)]>([])
+
+        let client = BLEClient(
+            startScanning: { _ in },
+            stopScanning: { _ in },
+            connect: { _, _ in },
+            disconnect: { _, _ in },
+            discoverServices: { _, _ in },
+            discoverCharacteristics: { _, _, _ in },
+            setNotifyValue: { _, _, _, _ in },
+            readValue: { id, service, characteristic in
+                reads.withValue { $0.append((id, service, characteristic)) }
+                // Stands in for the peripheral answering via didUpdateValueFor.
+                continuation.yield(.characteristicValueUpdated(
+                    peripheralID: id, characteristicUUID: characteristic, value: payload
+                ))
+                continuation.finish()
+            },
+            events: { stream }
+        )
+
+        await client.readValue(peripheralID, cscService, cscFeature)
+
+        var received: [BLEEvent] = []
+        for await event in client.events() {
+            received.append(event)
+        }
+
+        #expect(reads.value.count == 1)
+        #expect(reads.value.first?.0 == peripheralID)
+        #expect(reads.value.first?.1 == cscService)
+        #expect(reads.value.first?.2 == cscFeature)
+
+        guard case .characteristicValueUpdated(let pid, let uuid, let value) = received.first else {
+            Issue.record("Expected the read to be answered with .characteristicValueUpdated")
+            return
+        }
+        #expect(pid == peripheralID)
+        #expect(uuid == cscFeature)
         #expect(value == payload)
     }
 
