@@ -248,7 +248,7 @@ If the user blocks Bluetooth, Location, or Motion and Fitness, they will not be 
 
 - Group: Ride Setup
   - Route picker (Phase 2)
-  - Bike picker (Phase 2) — selecting a bike selects its sensors and its fitted wheelset, so the sensor list below and the wheel circumference used for the ride both follow this control. Where a bike has more than one wheelset, the fitted one is picked here too. See DataModel.md §3.9
+  - Bike picker (Phase 2) — selecting a bike selects its sensors, so the sensor list below follows this control, and the wheel circumference follows from whichever speed sensor that bike carries. See DataModel.md §3.9
 
 - Group: Sensors
   - Sensor type (icon)
@@ -274,7 +274,7 @@ If the user blocks Bluetooth, Location, or Motion and Fitness, they will not be 
 ### Key Components
 
 - Route picker
-- Bike picker — drives which sensors and which wheelset the ride uses (see S05.1)
+- Bike picker — drives which sensors the ride uses, and through the speed sensor, the wheel circumference (see S05.1)
 - List of sensors and status
 
 ### Open UX Questions
@@ -770,7 +770,7 @@ An `HKWorkout` is written to Apple Health automatically when the ride ends, befo
 
 **General**
 - Units: Metric (km) | Imperial (miles) [Defaults from iOS]
-- Wheel circumference (mm) — numeric entry with preset selector. One app-wide value in MVP. Phase 2 moves this off the Settings screen: circumference belongs to a wheelset, a wheelset belongs to a bike, and the rider has several of each (DataModel.md §3.9). Expect this row to become a "Bikes" navigation link rather than gaining more controls in place
+- Wheel circumference (mm) — numeric entry with preset selector. One app-wide value in MVP. Phase 2 moves this off the Settings screen: circumference belongs to the speed sensor, and sensors belong to a bike (DataModel.md §3.9). Expect this row to become a "Bikes" navigation link — or to move into the per-sensor detail under Sensors (S11) — rather than gaining more controls in place
 - Auto-pause
 - Auto-dim
 - Set Do Not Disturb

@@ -16,12 +16,11 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// Wheel rollout in millimetres. Drives the BLE speed and distance
     /// derivation; auto-calibration (#70) writes back here too.
     ///
-    /// One global value, which assumes the rider has one bike with one wheelset.
-    /// That is an MVP scoping decision, not the end state — Phase 2 moves this to
-    /// a Wheelset owned by a Bike, because a rider owns several bikes and a bike
-    /// carries several wheelsets (race vs training, road vs gravel), each with its
-    /// own circumference and calibration history. Paired sensors move under Bike
-    /// at the same time. See DataModel.md §3.9.
+    /// One global value, which assumes the rider has a single bike. That is an MVP
+    /// scoping decision, not the end state — Phase 2 moves this onto the speed-role
+    /// PairedSensor, because a hub-mounted CSC sensor is already bound to exactly
+    /// one wheel, and bikes own their sensors. See DataModel.md §3.9 and the
+    /// research note in PRD §8.9.1.
     var wheelCircumferenceMM: Int = WheelPreset.default.circumferenceMM
 }
 

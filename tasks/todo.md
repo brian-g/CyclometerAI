@@ -27,9 +27,12 @@ client — and carries M6's persistence prerequisite for #67 and #70.
 - [x] 7. Tests — `SettingsFeatureTests`, `WheelPresetTests`, one new `SpeedFeatureTests` case.
 - [x] 8. `assets/DataModel.md` — §1, §2, §3.6, §3.7, §3.8, §9; version 1.1 → 1.2.
 - [x] 9. Build + full test suite; confirm no regression past the known baseline failure.
-- [x] 10. Document the Phase 2 multi-bike model — new DataModel.md §3.9 (bikes own wheelsets and
-      sensors), cross-referenced from PRD §8.9 + Phase 2 roadmap, UX S05.1/S05.2/S12, and the
+- [x] 10. Document the Phase 2 multi-bike model — new DataModel.md §3.9, cross-referenced from
+      PRD §8.9 + Phase 2 roadmap, UX S05.1/S05.2/S12, and the
       `AppPreferences.wheelCircumferenceMM` doc comment.
+- [x] 11. PR #83 review — research where circumference belongs (PRD §8.9.1), drop the Wheelset
+      entity, record JSON-vs-plist (§3.6), add `Bike.stravaGearID` + `Ride.bikeName`, note
+      PairedSensor going per-bike in the ERD, file #84 for the SwiftUI architecture review.
 
 ## Review
 
@@ -79,14 +82,21 @@ in-memory instance in tests, so a circumference persisted by one test was still 
 seeding inside the same dependency scope — otherwise the seed and the store read different storage.
 Three consecutive suite runs, zero failures.
 
-**MVP assumes one bike with one wheelset, and that is now written down.** A single global
-`wheelCircumferenceMM` and role-keyed sensor pairing are scoping decisions, not the end state —
-riders own several bikes, and a bike carries several wheelsets. DataModel.md §3.9 specifies the
-Phase 2 shape (Bike owns Wheelsets and per-bike sensors; heart rate stays rider-scoped) and names
-the two limitations that follow from the MVP model: swapping wheelsets loses the calibration learned
-for the other set, and swapping bikes means re-pairing. Both are accepted, not bugs. This matters
-most for #67 (role-keyed pairing needs to grow a bike dimension) and #70 (calibration will need to
-write per wheelset, not globally).
+**MVP assumes one bike, and that is now written down.** A single global `wheelCircumferenceMM` and
+role-keyed sensor pairing are scoping decisions, not the end state. DataModel.md §3.9 specifies the
+Phase 2 shape and names the limitation that follows: a rider moving one speed sensor between bikes
+carries the last bike's circumference and calibration to the next. Accepted, not a bug. Matters most
+for #67 (role-keyed pairing needs to grow a bike dimension, and is the natural home for
+circumference) and #70 (calibration eventually writes to the sensor that produced the distance).
+
+**The review overturned my first answer on where circumference belongs, and the research is why.**
+I had drafted a `Wheelset` entity on the premise that riders swap race/training wheels on one frame.
+Challenged on whether that fits the target audience, I looked at how the incumbent does it: Garmin
+attaches wheel size to the *speed sensor*, not to the bike or activity profile. That is the better
+model for a reason I had missed — a BLE CSC speed sensor is hub-mounted, so it is already bound to
+exactly one wheel. The two-wheelset rider is served for free when each wheelset carries its own
+sensor, and no `Wheelset` entity needs to exist. Written up with sources and evidence quality in
+PRD §8.9.1; the entity is gone from §3.9.
 
 **Left alone deliberately:** `SwiftDataStack` (still an empty schema), `CoreDataStack`,
 `CyclometerApp`'s inline `Item` container, `BLECSCClient`, `ActiveRideFeature`. Also untouched: the
