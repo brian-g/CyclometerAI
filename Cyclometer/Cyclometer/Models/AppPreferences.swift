@@ -1,0 +1,36 @@
+import ComposableArchitecture
+import Foundation
+
+/// Persisted, non-physiological rider preferences — the MVP slice of
+/// DataModel.md §3.6.
+///
+/// Stored as a single JSON document rather than a SwiftData `@Model`: exactly one
+/// record exists, so there is nothing to query and no relationship worth
+/// traversing, and `@Shared` gives synchronous reads instead of an async load in
+/// front of every consumer. SwiftData stays reserved for Ride / RadarEvent /
+/// TrackPoint, which do need querying.
+///
+/// Further fields land with the features that consume them; today only wheel
+/// circumference has a consumer (`BLECSCClient.setWheelCircumference`).
+struct AppPreferences: Codable, Equatable, Sendable {
+    /// Wheel rollout in millimetres. Drives the BLE speed and distance
+    /// derivation; auto-calibration (#70) writes back here too.
+    ///
+    /// One global value, which assumes the rider has a single bike. That is an MVP
+    /// scoping decision, not the end state — Phase 2 moves this onto the speed-role
+    /// PairedSensor, because a hub-mounted CSC sensor is already bound to exactly
+    /// one wheel, and bikes own their sensors. See DataModel.md §3.9 and the
+    /// research note in PRD §8.9.1.
+    var wheelCircumferenceMM: Int = WheelPreset.default.circumferenceMM
+}
+
+extension SharedReaderKey where Self == FileStorageKey<AppPreferences>.Default {
+    /// Type-safe key so call sites read `@Shared(.appPreferences)` and cannot
+    /// accidentally point two features at different storage.
+    static var appPreferences: Self {
+        Self[
+            .fileStorage(.documentsDirectory.appending(component: "app-preferences.json")),
+            default: AppPreferences()
+        ]
+    }
+}

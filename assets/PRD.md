@@ -169,6 +169,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Ride detail view (S15): HR graph, cadence graph, radar event + vehicle pass timeline
 - Heart rate zone training graphs
 - Customizable metric tiles on dashboard (S07, S08)
+- **Multi-bike management:** a rider owns several bikes; each bike owns its speed/cadence/radar sensors and maps to a Strava gear id for export. Wheel circumference lives on the speed sensor (§8.9.1). Heart rate stays rider-scoped. Includes the bike picker in the Start Sheet (S05.1/S05.2) and ride history that names the bike ridden. Data model in DataModel.md §3.9
 - Route picker in Start Sheet (S05.2)
 - Lock screen / Dynamic Island integration
 - Apple Watch standalone companion app and complication (S17)
@@ -190,7 +191,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - **HR zone formula:** Karvonen only in MVP
 - **TestFlight:** Open beta
 - **Navigation (OQ12):** GPX file import only for MVP; no `MKDirections` routing
-- **Wheel sizing (OQ13):** Preset common sizes + manual entry + GPS auto-calibration (see §8.9)
+- **Wheel sizing (OQ13):** Preset common sizes + manual entry + GPS auto-calibration (see §8.9). One app-wide value for MVP; Phase 2 moves it onto the speed sensor, which is bound to one wheel (see §8.9.1 and DataModel.md §3.9)
 - **Radar visualization (OQ14):** Option F — right-side sidebar strip (see §8.2)
 
 ---
@@ -576,6 +577,8 @@ Vehicle pass events are recorded as GPX `<wpt>` (waypoint) elements rather than 
 
 **Purpose:** Provide accurate speed and distance measurements from the BLE speed sensor, with automatic calibration against GPS to correct for tire wear, inflation changes, and rider weight variations.
 
+> **MVP scope — one bike.** The circumference below is a single app-wide value, and paired sensors are keyed by role alone. Riders own several bikes, so Phase 2 makes each bike own its speed/cadence/radar sensors, with the circumference living on the speed sensor and heart rate staying rider-scoped (§8.9.1 explains why circumference belongs to the sensor rather than to the bike or a wheelset). One MVP limitation follows and is accepted rather than filed as a bug: a rider who moves a single speed sensor between bikes carries the last bike's circumference and calibration to the next. The target shape is specified in DataModel.md §3.9; the S05.1 bike picker is already reserved in UX.md.
+
 **Circumference Configuration:**
 
 Riders can configure wheel circumference using one of three methods:
@@ -603,21 +606,73 @@ Riders can configure wheel circumference using one of three methods:
 - Discrepancy threshold: if `|BLE distance − GPS distance| / GPS distance > 5%` over the measurement window, trigger calibration
 - Calibration adjustment: `new circumference = stored circumference × (GPS distance / BLE distance)`
 - Maximum single adjustment: ±10% of stored value (guards against GPS spikes causing overcorrection)
-- After calibration: updated circumference is saved to `UserProfile.wheelCircumferenceMM`; rider is notified via a brief non-intrusive banner: "Wheel size auto-adjusted to [N] mm"
+- After calibration: updated circumference is saved to `AppPreferences.wheelCircumferenceMM`; rider is notified via a brief non-intrusive banner: "Wheel size auto-adjusted to [N] mm"
 - Calibration is suspended during L2/L3 radar alerts, map-following turn alerts, or when GPS horizontal accuracy is > 10 meters (unreliable GPS)
 
 **Rationale:** GPS is not precise enough for per-second speed measurement (hence BLE priority) but is accurate enough over 500-meter windows for circumference calibration. A 5% discrepancy threshold prevents constant micro-adjustments while catching meaningful drift from tire pressure changes or load.
 
 **Acceptance Criteria:**
-- [ ] All preset sizes available in S12 with tire label and circumference in mm
-- [ ] Manual entry accepts values in range 1,500–3,000 mm (reasonable sanity bounds)
+- [x] All preset sizes available in S12, labelled as printed on the tire sidewall ("700 x 25c", "650b x 47", "29 x 2.1"). Circumference in mm is *not* shown against each preset — riders choose by tire size, and surfacing both made the row wrap; the mm value appears only when Custom is selected, where it is the thing being edited
+- [x] Manual entry accepts values in range 1,500–3,000 mm (reasonable sanity bounds); out-of-range entries are rejected and the field reverts to the stored value
 - [ ] Auto-calibration triggers correctly when 5% discrepancy sustained over 500m GPS window
 - [ ] Auto-calibration does not trigger when GPS horizontal accuracy > 10m
 - [ ] Calibration adjustment capped at ±10% per event
-- [ ] Updated circumference persisted to UserProfile immediately
+- [ ] Updated circumference persisted to AppPreferences immediately (#70; UserProfile was split into RiderProfile + AppPreferences — see DataModel.md §3.6)
 - [ ] Banner notification displayed when auto-calibration fires
 - [ ] Calibration disabled when GPS-only speed mode is active (no BLE sensor connected)
 - [ ] Unit tested: calibration math correct for a range of known discrepancy scenarios
+
+---
+
+### 8.9.1 Where Wheel Circumference Belongs — Research Note
+
+**Question (raised in PR #83 review):** a draft data model gave each bike a collection of wheelsets,
+each with its own circumference. Is multiple-wheelsets-per-bike a real need for this app's target
+audience, or invented complexity?
+
+**Finding: it is invented complexity, and the entity is not needed — but for a more interesting
+reason than "riders only own one wheelset."**
+
+**1. Circumference is a property of the sensor, not of the bike.** Every BLE CSC speed sensor this
+app targets is hub-mounted, so the sensor is physically bound to exactly one wheel. It already *is*
+the wheel's identity. Garmin — the incumbent this app is measured against — models it exactly this
+way: wheel size is configured per speed sensor, not per bike or activity profile.
+
+> "Wheel size does not matter unless you have a speed sensor, and if you have one (or more), then
+> wheel size setting is per sensor and not per profile."
+> — [Garmin Forums, Edge Explore 2](https://forums.garmin.com/sports-fitness/cycling/f/edge-explore-2/352281/bicycle-profiles-question)
+
+> "Each speed sensor can have its own manual wheel circumference entered in the settings, so that
+> the speed readings will be correct for each bike." … "profiles and sensors don't work in
+> conjunction with each other, they are completely separate."
+> — [mtbr forums, Edge 520/820](https://www.mtbr.com/gps-hrm-bike-computer/garmin-520-820-multiple-wheel-bike-profiles-1019414.html)
+
+**2. That makes the two-wheelset rider fall out for free.** A rider with a race wheelset and a
+training wheelset, each carrying its own sensor, gets two circumferences and two calibration
+histories without any wheelset concept existing. The remaining case — two wheelsets, one sensor —
+means moving the sensor and re-entering the value, which is the behaviour a Garmin Edge has today
+and which the same forums treat as normal ("most people only have one and will swap it between
+wheels/bikes"; the advice for multi-bike setups is simply to buy a sensor per wheel).
+
+**3. Target audience.** Cyclometer is a $10 one-time-purchase app for riders who want a legible
+outdoor dashboard with radar integration — not a team/fleet management tool. A rider affluent
+enough to own two wheelsets is, on this evidence, also the rider who owns two speed sensors, since
+the sensors cost a fraction of a wheelset. Designing a `Wheelset` entity to serve the narrow
+intersection of "owns two wheelsets" and "refuses to buy a second sensor" is not a good trade.
+
+**Decision:**
+- **MVP:** one global `AppPreferences.wheelCircumferenceMM`. Unchanged.
+- **Phase 2:** circumference moves onto the speed-role `PairedSensor`, and bikes own their sensors.
+  No `Wheelset` entity. See DataModel.md §3.9.
+- **Third major release at the earliest, if ever:** named wheelsets with swap-without-re-entry.
+  Revisit only if riders actually ask for it.
+
+**Evidence quality — stated plainly.** The Garmin behaviour is sourced from two independent user
+forums, corroborating each other, *not* from official Garmin documentation (the relevant support
+page would not render for retrieval). No user research was conducted with Cyclometer's own
+audience — point 3 is reasoning from the product's price point and positioning, not measured data.
+The decision is biased toward the option that stays cheap to reverse: adding a `Wheelset` entity
+later is additive, whereas removing one that riders have populated is not.
 
 ---
 
@@ -1084,7 +1139,7 @@ Cyclometer/
 | M12 | App Store submission |
 
 ### Phase 2 — Companion, History & Routes (Target: +2 months post-launch)
-Routes tab (S19, S20): route list with list and map views, route detail with elevation profile, current weather, Strava segments, and previous ride history. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). Dynamic Island. HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Route picker in Start Sheet (S05.2).
+Routes tab (S19, S20): route list with list and map views, route detail with elevation profile, current weather, Strava segments, and previous ride history. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). Dynamic Island. HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Route picker in Start Sheet (S05.2). Multi-bike management — bikes own their sensors, circumference lives on the speed sensor (DataModel.md §3.9) — plus the S05.1 bike picker.
 
 ### Phase 3 — AR, Power & Platform (Target: +4 months post-Phase 2)
 Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detection.
