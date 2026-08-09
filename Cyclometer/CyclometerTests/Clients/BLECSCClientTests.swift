@@ -218,6 +218,12 @@ struct BLECSCIntegrationTests {
         let connectCalls: AsyncStream<UUID>
         let connectCount: LockIsolated<Int>
         let scanned: LockIsolated<[[CBUUID]]>
+        /// Service UUIDs passed to `stopScanning` — the pairing-scan refcount tests
+        /// assert on whether the hardware scan was released at all.
+        let scanStopped: LockIsolated<[[CBUUID]]>
+        /// (peripheral, owner) pairs passed to `disconnect`, so per-device unpair can
+        /// be told apart from the all-devices teardown.
+        let disconnected: LockIsolated<[(UUID, String)]>
         let notified: LockIsolated<[(Bool, CBUUID)]>
         let clock: TestClock<Duration>
 
@@ -226,17 +232,19 @@ struct BLECSCIntegrationTests {
             let (connectStream, connectContinuation) = AsyncStream<UUID>.makeStream()
             let connectCount = LockIsolated(0)
             let scanned = LockIsolated<[[CBUUID]]>([])
+            let scanStopped = LockIsolated<[[CBUUID]]>([])
+            let disconnected = LockIsolated<[(UUID, String)]>([])
             let notified = LockIsolated<[(Bool, CBUUID)]>([])
             let clock = TestClock()
 
             let bleClient = BLEClient(
                 startScanning: { uuids in scanned.withValue { $0.append(uuids) } },
-                stopScanning: { _ in },
+                stopScanning: { uuids in scanStopped.withValue { $0.append(uuids) } },
                 connect: { id, _ in
                     connectCount.withValue { $0 += 1 }
                     connectContinuation.yield(id)
                 },
-                disconnect: { _, _ in },
+                disconnect: { id, owner in disconnected.withValue { $0.append((id, owner)) } },
                 discoverServices: { _, _ in },
                 discoverCharacteristics: { _, _, _ in },
                 setNotifyValue: { enabled, _, _, charUUID in
@@ -250,6 +258,8 @@ struct BLECSCIntegrationTests {
             self.connectCalls = connectStream
             self.connectCount = connectCount
             self.scanned = scanned
+            self.scanStopped = scanStopped
+            self.disconnected = disconnected
             self.notified = notified
             self.clock = clock
         }
@@ -685,6 +695,164 @@ struct BLECSCIntegrationTests {
 
         await harness.client.startScanning()
         #expect(await speedStates.next() == .scanning)
+    }
+
+    // MARK: - Pairing UI (S11 subset, #68)
+
+    @Test("Pairing scan runs even with a sensor already connected")
+    func pairingScanBypassesColdStateGuard() async {
+        let harness = Harness()
+        let connected = UUID()
+        await harness.client.connect(connected, [.speed, .cadence])
+        harness.bringToActive(connected)
+
+        // The ambient scan refuses once a slot exists — that guard is deliberate.
+        await harness.client.startScanning()
+        #expect(harness.scanned.value.isEmpty)
+
+        await harness.client.beginPairingScan()
+        #expect(harness.scanned.value == [[cscServiceUUID]])
+    }
+
+    @Test("A pairing scan does not make dashboard role tiles read .scanning")
+    func pairingScanDoesNotAffectRoleState() async {
+        let harness = Harness()
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)
+
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: UUID(), name: "GSC-10", rssi: -55, services: [cscServiceUUID]))
+
+        // Auto-connect claims the sensor, so the next state is .connecting — never
+        // .scanning, which would falsely show "Searching" behind a settings screen.
+        #expect(await speedStates.next() == .connecting)
+    }
+
+    @Test("Ending a pairing scan leaves the ambient dashboard scan running")
+    func endPairingScanRespectsAmbientScan() async {
+        let harness = Harness()
+        await harness.client.startScanning()      // ambient, from a cold state
+        await harness.client.beginPairingScan()
+
+        await harness.client.endPairingScan()
+        #expect(harness.scanStopped.value.isEmpty)
+
+        // ...and the ambient stop is likewise deferred while a pairing scan is open.
+        await harness.client.beginPairingScan()
+        await harness.client.stopScanning()
+        #expect(harness.scanStopped.value.isEmpty)
+
+        await harness.client.endPairingScan()
+        #expect(harness.scanStopped.value == [[cscServiceUUID]])
+    }
+
+    @Test("Unpair releases only that peripheral and never re-adopts it")
+    func unpairSticks() async {
+        let harness = Harness()
+        let id = UUID()
+
+        harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -55, services: [cscServiceUUID]))
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)
+        #expect(await speedStates.next() == .connecting)
+
+        await harness.client.unpair(id)
+        #expect(await speedStates.next() == .disconnected)
+        #expect(harness.disconnected.value.map(\.0) == [id])
+        #expect(harness.disconnected.value.map(\.1) == ["csc"])
+        // Unpair must not tear the scan down, unlike the all-devices disconnect().
+        #expect(harness.scanStopped.value.isEmpty)
+
+        // The role is free and the sensor advertises again — without the exclusion
+        // set the heuristic re-adopts it within a second and unpair looks broken.
+        let connectsBefore = harness.connectCount.value
+        harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -55, services: [cscServiceUUID]))
+        harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -55, services: [cscServiceUUID]))
+        #expect(harness.connectCount.value == connectsBefore)
+    }
+
+    @Test("Pairing an unpaired sensor clears the exclusion and reconnects")
+    func pairClearsExclusion() async {
+        let harness = Harness()
+        let id = UUID()
+        harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -55, services: [cscServiceUUID]))
+        await harness.client.unpair(id)
+
+        let connectsBefore = harness.connectCount.value
+        await harness.client.pair(id)
+        #expect(harness.connectCount.value == connectsBefore + 1)
+
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .connecting)
+    }
+
+    /// The regression the whole design turns on: the public `connect` marks a slot
+    /// authoritative (`isAutoAssigned = false`), which permanently disables capability
+    /// narrowing. `pair` must stay speculative so a wheel-only sensor gives up cadence.
+    @Test("Pair stays speculative, so a wheel-only sensor frees the cadence role")
+    func pairKeepsCapabilityNarrowing() async {
+        let harness = Harness()
+        let id = UUID()
+
+        var cadenceStates = harness.client.connectionState(.cadence).makeAsyncIterator()
+        #expect(await cadenceStates.next() == .disconnected)
+
+        await harness.client.pair(id)
+        #expect(await cadenceStates.next() == .connecting)
+        harness.bringToActive(id)
+        #expect(await cadenceStates.next() == .connected)
+        #expect(await cadenceStates.next() == .active)
+
+        // First measurement carries wheel data only.
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: id, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 100, wheelTime: 0)
+        ))
+        #expect(await cadenceStates.next() == .disconnected)
+    }
+
+    @Test("Discovered-sensors replays a discovery that happened before subscribing")
+    func discoveredSensorsReplaysPriorDiscovery() async {
+        let harness = Harness()
+        let id = UUID()
+
+        // CoreBluetooth won't redeliver `.discovered` for a peripheral already seen,
+        // so the replay is what populates a sheet opened after discovery.
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)
+        harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -55, services: [cscServiceUUID]))
+        // Sync point: the event has been fully processed once the role reacts to it.
+        #expect(await speedStates.next() == .connecting)
+
+        var devices = harness.client.discoveredSensors().makeAsyncIterator()
+        let list = await devices.next()
+        #expect(list?.count == 1)
+        #expect(list?.first?.id == id)
+        #expect(list?.first?.name == "GSC-10")
+        #expect(list?.first?.isPaired == true)
+    }
+
+    @Test("Discovered-sensors reports a sensor as unpaired after unpair")
+    func discoveredSensorsTracksUnpair() async {
+        let harness = Harness()
+        let id = UUID()
+
+        var devices = harness.client.discoveredSensors().makeAsyncIterator()
+        #expect(await devices.next()?.isEmpty == true)
+
+        harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -55, services: [cscServiceUUID]))
+        var list = await devices.next()
+        while list?.first?.isPaired != true { list = await devices.next() }
+
+        await harness.client.unpair(id)
+        var afterUnpair = await devices.next()
+        while afterUnpair?.first?.isPaired != false { afterUnpair = await devices.next() }
+        #expect(afterUnpair?.count == 1)
+        #expect(afterUnpair?.first?.roles.isEmpty == true)
+        #expect(afterUnpair?.first?.connectionState == nil)
+        // The peripheral stays listed after unpair — it is still in range and
+        // pairable, it just holds no roles.
+        #expect(afterUnpair?.first?.id == id)
     }
 }
 

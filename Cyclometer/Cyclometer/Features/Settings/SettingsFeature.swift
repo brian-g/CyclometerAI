@@ -14,6 +14,9 @@ struct SettingsFeature {
     @ObservableState
     struct State: Equatable {
         @Shared(.appPreferences) var preferences
+        /// S11 subset, pushed from the Sensors row. Non-optional like AppFeature's
+        /// tab children — its effects only run while the screen's `.task` is alive.
+        var deviceManagement = DeviceManagementFeature.State()
         var selectedUnits: String = "Imperial"
         /// In-progress manual entry. `nil` means the rider is not editing, so the
         /// field shows the persisted value — which is why no lifecycle action is
@@ -60,8 +63,13 @@ struct SettingsFeature {
         case hrZoneUpperBoundAdjusted(id: Int, delta: Int)
         case addAccountTapped
         case addAccountDismissed
+        case deviceManagement(DeviceManagementFeature.Action)
     }
     var body: some ReducerOf<Self> {
+        Scope(state: \.deviceManagement, action: \.deviceManagement) {
+            DeviceManagementFeature()
+        }
+
         Reduce { state, action in
             switch action {
             case .unitSelected(let unit):
@@ -112,6 +120,8 @@ struct SettingsFeature {
                 state.isShowingAddAccountOptions = true; return .none
             case .addAccountDismissed:
                 state.isShowingAddAccountOptions = false; return .none
+            case .deviceManagement:
+                return .none
             }
         }
     }

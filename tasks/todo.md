@@ -1,104 +1,81 @@
-# Issue #69 — Wheel circumference presets + manual entry
+# Issue #68 — Minimal BLE pairing screen (scan, discover, pair, unpair)
 
-Branch: `feat/69-wheel-circumference`. Milestone M6.
+Branch: `feat/68-ble-pairing`, from `origin/main` (#69 merged as `1c416f4`). Milestone M6.
 
-`BLECSCClient.setWheelCircumference` had zero production callers, so every ride ran on the
-hardcoded 2096 mm default while `SettingsFeature.selectedWheelSize` was a cosmetic String. This
-connects the three pieces: a persisted circumference, an mm-valued picker, and a push into the CSC
-client — and carries M6's persistence prerequisite for #67 and #70.
+M6 runs before M10, so live CSC needs a pairing surface before full S11 Device Management exists.
+Before this, `BLECSCClient` auto-connected the first CSC sensor it saw and the rider could not see
+what was found, choose between two sensors, or reject one. Settings' Sensors row led to a hardcoded
+three-row demo list.
 
 ## Decisions (user-approved plan)
-- **AppPreferences is not a SwiftData `@Model`** — a `Codable` struct persisted via
-  `@Shared(.fileStorage)`. One record, nothing to query, no relationship worth traversing; SwiftData
-  would force an async load in front of the Settings screen for one `Int`. swift-sharing 2.8.0 is
-  already in the resolved graph via TCA, so no package change. DataModel.md §3.6 updated to match.
-- **In-place picker**, not a detail screen — the existing `Picker("Wheel Size")` row keeps its
-  position; only its values change, plus a conditional mm field when Custom is selected.
-- **Scope is wheel circumference only.** Units and the three toggles stay in-memory as they were.
+- **Replace the pushed Sensors screen**, not a modal sheet. UX.md S12 says "Sensors (navigates to
+  S11)", the `NavigationLink` already existed, and TCA.md §8 names it `DeviceManagementFeature`.
+- **Keep auto-connect, add a session ignore-set.** Removing the heuristic outright is the clean end
+  state and what #70 wants, but with no persistence until #67 it would mean no sensor connects after
+  a launch until the rider opens the screen.
+- **Purpose-built `DeviceRow`.** `SensorStatusRow` is private to the Start sheet and models a fixed
+  category, not a device.
+- Pairing is in-memory only; `PairedSensor` and the role sheet are #67.
 
 ## Tasks
-- [x] 1. `Models/WheelPreset.swift` — 8 PRD §8.9 presets, mm as raw value, bounds 1,500–3,000.
-- [x] 2. `Models/AppPreferences.swift` — Codable struct + type-safe `.appPreferences` shared key.
-- [x] 3. `SettingsFeature` — `@Shared` preferences, `WheelSelection`, draft + validation, single
-      `apply(_:to:)` funnel that persists and pushes to `bleCSCClient` together.
-- [x] 4. `SettingsView` — preset picker + conditional Custom row, bounds footer, focus-loss commit.
-- [x] 5. `SpeedFeature` — `@SharedReader`; `setWheelCircumference` before `startScanning()`.
-- [x] 6. Drop the now-dead `SettingsDemoData.wheelSizes`.
-- [x] 7. Tests — `SettingsFeatureTests`, `WheelPresetTests`, one new `SpeedFeatureTests` case.
-- [x] 8. `assets/DataModel.md` — §1, §2, §3.6, §3.7, §3.8, §9; version 1.1 → 1.2.
-- [x] 9. Build + full test suite; confirm no regression past the known baseline failure.
-- [x] 10. Document the Phase 2 multi-bike model — new DataModel.md §3.9, cross-referenced from
-      PRD §8.9 + Phase 2 roadmap, UX S05.1/S05.2/S12, and the
-      `AppPreferences.wheelCircumferenceMM` doc comment.
-- [x] 11. PR #83 review — research where circumference belongs (PRD §8.9.1), drop the Wheelset
-      entity, record JSON-vs-plist (§3.6), add `Bike.stravaGearID` + `Ride.bikeName`, note
-      PairedSensor going per-bike in the ERD, file #84 for the SwiftUI architecture review.
+- [x] 1. `BLECSCClient.DiscoveredSensor` + `discoveredSensors` stream with replay-on-subscribe.
+- [x] 2. `beginPairingScan` / `endPairingScan` refcount that bypasses the cold-state guard.
+- [x] 3. `pair(UUID)` (speculative) and `unpair(UUID)` (per-device) endpoints.
+- [x] 4. `unpairedThisSession` exclusion honoured by `claimUnfilledRoles`.
+- [x] 5. `DeviceManagementFeature` + `DeviceManagementView` with Paired / Available sections.
+- [x] 6. Wire into `SettingsFeature` via `Scope`; delete `SensorManagementView` + `SensorStatus`.
+- [x] 7. Tests — 7 client cases via the existing `Harness`, 5 feature cases via `TestStore`.
+- [x] 8. `assets/TCA.md` §8/§9 — correct the `SensorStatusRow` claim.
+- [x] 9. Build + full suite; no regression past the known baseline failure.
 
 ## Review
 
-**The number pad has no return key.** `.onSubmit` would never fire on a `.numberPad` TextField, so
-the manual entry commits on focus loss (`@FocusState` + `.onChange`), with a keyboard Done button
-to give the rider a way out of the field. This was the one thing the plan got wrong.
+**The issue's own proposed mechanism would not have worked, and that shaped the design.** #68
+suggested pairing via `connect(peripheralID:roles:speculative: true)` so the existing measurement-flags
+capability narrowing would free a role the sensor doesn't support. But the public `connect` closure
+always passes `speculative: false`, which sets `isAutoAssigned = false` (`BLECSCClient.swift:414`),
+and narrowing is gated on exactly that flag. Pairing through the public API would have pinned both
+roles forever. Hence a separate `pair(UUID)` endpoint that takes **no roles**: capabilities are
+unknown until the first measurement, so it claims both speculatively and lets narrowing decide.
+`pairKeepsCapabilityNarrowing` is the regression test — a wheel-only sensor must give up `.cadence`.
 
-**No lifecycle action — the manual field needs neither `.onAppear` nor `.task`.** The first cut
-seeded a `String` draft from an `.onAppear` action, which put `String(preferences.wheelCircumferenceMM)`
-in four places and re-clobbered the draft on every tab switch. The draft is now
-`customCircumferenceDraft: String?`, where `nil` means "not editing" and the displayed text falls
-through to the persisted value. That deletes the action, the seeding at `.wheelSelectionChanged(.custom)`,
-and the seeding in `apply` — and reverting a rejected entry becomes `draft = nil` rather than
-re-deriving the string. `.task` would have been the wrong replacement regardless: it exists to bind
-a cancellable *async* effect to view lifetime, and this work is a synchronous state read.
+**Scanning is shared and unrefcounted, so both directions needed guarding.**
+`BLEClient.requestedServices` is a plain `Set` with `formUnion`/`subtract`, so a naive
+`stopScanning` from either side cancels the other's scan. The refcount lives in `BLECSCClient`
+(`pairingScanCount`) rather than the transport, keeping the change local: `stopScanning()`,
+`disconnect()` and `endPairingScan()` each release the hardware scan only when no other holder
+remains. Deliberately separate from `isScanning`, so a pairing scan never flips dashboard role tiles
+to `.scanning` behind a settings screen — `recomputeRoleStatesLocked` is untouched.
 
-**Presets are labelled as printed on the sidewall, without the circumference.** "700 x 25c",
-"650b x 47", "29 x 2.1" — riders pick by tire size, and showing the mm value alongside made the
-collapsed row wrap to two lines for the longest label. The millimetre value now appears only under
-Custom, where it is the thing being edited. PRD §8.9's acceptance criterion said presets show "tire
-label and circumference in mm", so that line was updated rather than left contradicting the build.
+**`discoveredNames` could not serve as the device inventory.** It is `[UUID: String]`, and assigning
+`nil` *removes* a key, so a sensor advertising no name could never get a row. Added `discoveredIDs:
+Set<UUID>` as the inventory and left `discoveredNames` for names.
 
-**Custom-vs-preset is derived, not stored.** `wheelSelection` reads the persisted value through
-`WheelPreset(rawValue:)` — every circumference in the spec table is distinct, so that lookup is
-unambiguous, and a manual (or, once #70 lands, auto-calibrated) value still reads as Custom after a
-relaunch with no extra persisted flag. `userChoseCustom` is ephemeral UI state covering the one case
-the derivation can't: picking Custom while the current value happens to equal a preset.
+**The list broadcast piggybacks on `recomputeRoleStatesLocked`.** That runs at all ten sites where
+slots mutate; enumerating them by hand would drift the first time someone adds an eleventh. The one
+case it does not cover — a name-only `.discovered` for an unpaired peripheral — broadcasts at its own
+site.
 
-**Both write paths funnel through `apply(_:to:)`** so the persisted value and the value driving the
-speed derivation cannot drift apart. Rejected entries never reach it — the reducer drops the draft
-and returns `.none`, so no BLE call is made. Committing an *unchanged* value is
-also a no-op: picking a preset while the manual field has focus tears the field down, which fires a
-focus-loss commit for the value the preset just wrote, and without the guard that pushed twice.
+**One test of mine was timing-sensitive, not the code.** A combined "replays and tracks pair/unpair"
+case asserted `isPaired == true` on the first non-empty emission, but the replay can land before
+`claimUnfilledRoles` has claimed the sensor. Split into two tests, one using a `connectionState`
+transition as a deterministic sync point. (The apparent 10-minute hang while diagnosing was a red
+herring: macOS has no `timeout` binary, so each loop iteration was exiting 127 and re-building. The
+suite runs in 25s.)
 
-**Applied before scanning, not after.** In `SpeedFeature.startListening` the circumference is set
-ahead of `startScanning()` so it is in place before the first measurement can arrive.
-`startListeningAppliesPersistedCircumference` asserts the call *sequence*, not just the value.
+**Tests: 12 new cases, all green.** Full suite passes except the known pre-existing
+`HeroNumberSnapshotTests.testCustomColor()`. The `Harness` gained `scanStopped` and `disconnected`
+recorders so per-device unpair can be told apart from the all-devices teardown.
 
-**Tests: 10 new cases, all green.** `WheelPresetTests` guards the eight presets against the PRD
-table (values, labels, spec order) and asserts uniqueness, which the `rawValue` lookup depends on.
-Full suite passes except the known pre-existing `HeroNumberSnapshotTests.testCustomColor()`.
+**Not verifiable without hardware.** The simulator has no BLE radio, so the client tests are the real
+gate. On-device checklist is in the plan — the one to actually watch is that an unpaired sensor
+*stays* unpaired for 10s or more, which is the whole point of the exclusion set.
 
-**One flake caught and fixed during verification.** `customEntryWithinBoundsIsApplied` passed on one
-suite pass and failed on the other: swift-sharing's `defaultFileStorage` is a single process-wide
-in-memory instance in tests, so a circumference persisted by one test was still there for the next.
-`FileStorage.inMemory` builds a *fresh* file system per access, so each store now takes its own, with
-seeding inside the same dependency scope — otherwise the seed and the store read different storage.
-Three consecutive suite runs, zero failures.
+## Left for the follow-ups
 
-**MVP assumes one bike, and that is now written down.** A single global `wheelCircumferenceMM` and
-role-keyed sensor pairing are scoping decisions, not the end state. DataModel.md §3.9 specifies the
-Phase 2 shape and names the limitation that follows: a rider moving one speed sensor between bikes
-carries the last bike's circumference and calibration to the next. Accepted, not a bug. Matters most
-for #67 (role-keyed pairing needs to grow a bike dimension, and is the natural home for
-circumference) and #70 (calibration eventually writes to the sensor that produced the distance).
-
-**The review overturned my first answer on where circumference belongs, and the research is why.**
-I had drafted a `Wheelset` entity on the premise that riders swap race/training wheels on one frame.
-Challenged on whether that fits the target audience, I looked at how the incumbent does it: Garmin
-attaches wheel size to the *speed sensor*, not to the bike or activity profile. That is the better
-model for a reason I had missed — a BLE CSC speed sensor is hub-mounted, so it is already bound to
-exactly one wheel. The two-wheelset rider is served for free when each wheelset carries its own
-sensor, and no `Wheelset` entity needs to exist. Written up with sources and evidence quality in
-PRD §8.9.1; the entity is gone from §3.9.
-
-**Left alone deliberately:** `SwiftDataStack` (still an empty schema), `CoreDataStack`,
-`CyclometerApp`'s inline `Item` container, `BLECSCClient`, `ActiveRideFeature`. Also untouched: the
-Settings units picker is still a disconnected `String` and `ActiveRideFeature.unitSystem` is still
-seeded from `Locale` — out of scope here, noted in DataModel.md §3.6 as follow-up.
+- `BLEClient.readValue` still has **no issue filed**. #71 named it an M6 prerequisite; it blocks #67
+  (0x2A5C) and #63 (0x2A19), though not this work. Worth filing before #67 starts.
+- Persistence, the 0x2A5C capability read and the Speed/Cadence/Both role sheet are #67, which is
+  also where `unpairedThisSession` should become durable.
+- Radar/HR/power sections, unpaired-to-top sorting, richer per-row status and sensor source priority
+  are M10 — PRD §13 says M10 *extends* this screen, so it was built to grow.

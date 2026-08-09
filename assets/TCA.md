@@ -977,8 +977,9 @@ Cyclometer/
 │   └── Components/
 │       ├── DashboardMetricCard.swift
 │       ├── DashboardSpeedCard.swift
-│       ├── OpenRingProgressView.swift
-│       └── SensorStatusRow.swift
+│       └── OpenRingProgressView.swift
+│                                              // SensorStatusRow is NOT here — it is
+│                                              // private to StartSheetView; see §9
 │
 └── Tests/
     ├── RadarFeatureTests.swift
@@ -1006,7 +1007,7 @@ The following components from `Test-ToolbarAndAccessoryView` are production-read
 | `DashboardSpeedCard` | `DesignSystem/Components/DashboardSpeedCard.swift` | Strip mock data; wire to TCA state |
 | `DashboardMetricCard` | `DesignSystem/Components/DashboardMetricCard.swift` | As above |
 | `OpenRingProgressView` | `DesignSystem/Components/OpenRingProgressView.swift` | Production-ready as-is |
-| `SensorStatusRow` | `DesignSystem/Components/SensorStatusRow.swift` | Production-ready |
+| `SensorStatusRow` | `Features/Rides/StartSheetView.swift` (private) | **Not a shared component.** It shipped as a `private struct` inside the Start sheet and models a fixed *category* (Radar / HR / Speed / Cadence) with a status badge. #68's pairing list needed a *device* row — one per discovered peripheral, appearing and disappearing as scanning proceeds, with a pair/unpair action — so it uses its own `DeviceRow` rather than adding a mode flag here. Promote and unify only if a third caller appears |
 | `AppFonts` | `DesignSystem/AppFonts.swift` | Production-ready |
 | `RouteStub` data structures | Replace with `Route` SwiftData model | Shape matches; swap stub for real persistence |
 | `CSCMeasurementPayload` layout | Formalize in `SpeedFeature` + `CadenceFeature` | Prototype has `DemoRideData` shape to reference |
