@@ -22,5 +22,6 @@
       "Bash(find \"/Applications/SF Symbols.app/Contents\" -name \"*.svg\" -path \"*template*\" -o -name \"*.svg\" -path \"*export*\" 2>/dev/null | head -5)",
       "Bash(find \"/Applications/SF Symbols.app/Contents\" -name \"symbolTemplate*\" -o -name \"SymbolTemplate*\" 2>/dev/null | head -10)"
     ]
-  }
+  },
+  "spinnerTipsEnabled": false
 }
