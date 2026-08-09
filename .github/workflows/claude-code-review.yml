@@ -21,8 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      # write, not read: the review is delivered *as* inline PR comments, and a
+      # read-only token makes the action fail those calls silently — the check
+      # still goes green having posted nothing (14 denials on PR #83).
+      pull-requests: write
+      issues: write
       id-token: write
 
     steps:
