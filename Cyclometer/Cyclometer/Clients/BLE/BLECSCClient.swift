@@ -13,9 +13,10 @@ private let cscMeasurementUUID = CBUUID(string: "2A5B")  // notify
 // CSC peripheral never tears down a connection a different client (HR/radar) shares
 // with the same physical device.
 private let cscOwnerID = "csc"
-// 0x2A5C (CSC Feature, read) deliberately unused: BLEClient has no readValue
-// operation, sensor capabilities are inferable from the measurement flags byte,
-// and the role-selection sheet is an M6/S11 (pairing UI) concern. See BLE.md §5.0.
+// 0x2A5C (CSC Feature, read) still unused, but no longer for want of a transport:
+// `BLEClient.readValue` exists now. Capabilities remain inferable from the first
+// measurement's flags byte, and the authoritative read only pays off once the
+// role-selection sheet consumes it — that is #67. See BLE.md §5.0.
 
 // Default 700c × 23mm tyre. Parameterised so M6 can supply the user-configured or
 // GPS-auto-calibrated value via setWheelCircumference.

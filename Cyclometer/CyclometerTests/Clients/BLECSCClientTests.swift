@@ -250,6 +250,7 @@ struct BLECSCIntegrationTests {
                 setNotifyValue: { enabled, _, _, charUUID in
                     notified.withValue { $0.append((enabled, charUUID)) }
                 },
+                readValue: { _, _, _ in },
                 events: { eventStream }
             )
 

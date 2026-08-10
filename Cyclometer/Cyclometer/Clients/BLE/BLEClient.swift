@@ -54,6 +54,20 @@ struct BLEClient: Sendable {
     /// Enable or disable value notifications on a characteristic. Yields
     /// `.characteristicValueUpdated` events when the peripheral sends data.
     var setNotifyValue: @Sendable (Bool, UUID, CBUUID, CBUUID) async -> Void
+    /// Request a one-shot read of a characteristic's current value. The result
+    /// arrives on `events()` as `.characteristicValueUpdated` — the same event a
+    /// notification produces, because CoreBluetooth delivers both through
+    /// `didUpdateValueFor`.
+    ///
+    /// Request-only rather than `async -> Data`: every sensor client already runs
+    /// an event loop, and a request/response form would need per-read correlation
+    /// plus a timeout to survive a read that errors — machinery no caller needs.
+    /// Read-only characteristics (0x2A5C, 0x2A19) are never notify-enabled, so
+    /// matching on the characteristic UUID in the event loop is unambiguous.
+    ///
+    /// Call only after `.characteristicsDiscovered` for the service: a read against
+    /// an undiscovered characteristic is dropped, and logged as such.
+    var readValue: @Sendable (UUID, CBUUID, CBUUID) async -> Void
     /// Returns an `AsyncStream` of BLE events. Each call returns a new stream;
     /// all active streams receive the same broadcast events.
     var events: @Sendable () -> AsyncStream<BLEEvent>
@@ -72,6 +86,7 @@ extension BLEClient: DependencyKey {
             discoverServices: { central.discoverServices(peripheralID: $0, serviceUUIDs: $1) },
             discoverCharacteristics: { central.discoverCharacteristics(peripheralID: $0, serviceUUID: $1, characteristicUUIDs: $2) },
             setNotifyValue: { central.setNotifyValue($0, peripheralID: $1, serviceUUID: $2, characteristicUUID: $3) },
+            readValue: { central.readValue(peripheralID: $0, serviceUUID: $1, characteristicUUID: $2) },
             events: { central.makeEventStream() }
         )
     }()
@@ -84,6 +99,7 @@ extension BLEClient: DependencyKey {
         discoverServices: { _, _ in },
         discoverCharacteristics: { _, _, _ in },
         setNotifyValue: { _, _, _, _ in },
+        readValue: { _, _, _ in },
         events: { AsyncStream { $0.finish() } }
     )
 }
@@ -240,6 +256,23 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
         }
     }
 
+    func readValue(peripheralID: UUID, serviceUUID: CBUUID, characteristicUUID: CBUUID) {
+        bleQueue.async { [self] in
+            guard let peripheral = discovered[peripheralID],
+                  let service = peripheral.services?.first(where: { $0.uuid == serviceUUID }),
+                  let characteristic = service.characteristics?.first(where: { $0.uuid == characteristicUUID }) else {
+                // Unlike setNotifyValue, a dropped read leaves a caller waiting on a
+                // response event that will never arrive — say so rather than no-op.
+                logger.notice("""
+                    read skipped — \(characteristicUUID.uuidString, privacy: .public) \
+                    not discovered on \(peripheralID, privacy: .public)
+                    """)
+                return
+            }
+            peripheral.readValue(for: characteristic)
+        }
+    }
+
     // MARK: CBCentralManagerDelegate
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
@@ -293,7 +326,18 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
     // MARK: CBPeripheralDelegate
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: (any Error)?) {
-        guard error == nil, let value = characteristic.value else { return }
+        if let error {
+            // A failed notification just means one dropped sample, but a failed read
+            // is the only signal its caller will ever get, and it arrives here — so
+            // this path stays silent to the app and must at least reach the log.
+            logger.error("""
+                value update failed for \(characteristic.uuid.uuidString, privacy: .public) \
+                on \(peripheral.identifier, privacy: .public): \
+                \(error.localizedDescription, privacy: .public)
+                """)
+            return
+        }
+        guard let value = characteristic.value else { return }
         broadcast(.characteristicValueUpdated(
             peripheralID: peripheral.identifier,
             characteristicUUID: characteristic.uuid,

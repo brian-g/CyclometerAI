@@ -14,8 +14,9 @@ private let radarOwnerID = "radar"
 
 private let radarServiceUUID    = CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")
 private let radarAlertUUID      = CBUUID(string: "6A4E3202-667B-11E3-949A-0800200C9A66")  // notify
-// Read-only capability characteristic. Unused until BLEClient gains a readValue
-// operation — not required for any M3 acceptance criterion.
+// Read-only capability characteristic. `BLEClient.readValue` can fetch it now, but
+// its payload is unvalidated until the developer-program application lands and no
+// acceptance criterion needs it.
 private let radarCapabilityUUID = CBUUID(string: "6A4E3201-667B-11E3-949A-0800200C9A66")
 
 // MARK: - VariaRadarClient
