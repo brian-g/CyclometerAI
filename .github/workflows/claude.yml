@@ -20,8 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      # Same read-only defect as claude-code-review.yml: an @claude mention is
+      # answered by posting a comment, so a read token means the job runs,
+      # succeeds, and replies nowhere.
+      pull-requests: write
+      issues: write
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
