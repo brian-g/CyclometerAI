@@ -10,4 +10,6 @@ enum Opacity {
     /// History trace line drawn over zone bands — fainter than foreground text but
     /// readable against the band wash.
     static let lineWatermark: Double = 0.35
+    /// Tinted square behind a sensor row's SF Symbol (`SensorListRowView`).
+    static let iconTile: Double = 0.14
 }

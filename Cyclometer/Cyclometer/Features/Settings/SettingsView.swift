@@ -55,7 +55,11 @@ struct SettingsView: View {
                     get: { store.shouldSetDoNotDisturb },
                     set: { _ in store.send(.doNotDisturbToggled) }
                 ))
-                NavigationLink("Sensors") { SensorManagementView() }
+                NavigationLink("Sensors") {
+                    DeviceManagementView(
+                        store: store.scope(state: \.deviceManagement, action: \.deviceManagement)
+                    )
+                }
             } footer: {
                 if store.wheelSelection == .custom {
                     Text("Wheel circumference must be between 1,500 and 3,000 mm.")
@@ -118,28 +122,6 @@ struct SettingsView: View {
                 }
             }
         }
-    }
-}
-
-struct SensorManagementView: View {
-    private let sensors = SensorStatus.demoSensors
-    var body: some View {
-        List(sensors) { sensor in
-            LabeledContent {
-                Text(sensor.status).foregroundStyle(.secondary)
-            } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(sensor.name)
-                        Text(sensor.detail).font(.caption).foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: sensor.systemImage).foregroundStyle(sensor.tint)
-                }
-            }
-        }
-        .navigationTitle("Sensors")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

@@ -102,6 +102,7 @@ Units should always be set baseline aligned with their corresponding values.
 ### Opacity Tokens
 - Opacity values must be tokenized, not inline literals. Tokens live in `DesignSystem/Opacity.swift`.
 - `watermark` (0.2) — background sparkline / watermark behind a dashboard hero number (e.g. W1 speed history).
+- `iconTile` (0.14) — tinted square behind a sensor row's SF Symbol (`SensorListRowView`).
 
 ### Navigation Pattern
 The navigation in the app will follow standard iOS application guidelines patterns. In this case, the application to model is the Apple Music app. The bottom TabView should have the following 3 items:

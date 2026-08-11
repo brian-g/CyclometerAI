@@ -61,31 +61,22 @@ struct StartSheetView: View {
     }
 }
 
+/// One sensor *category* in the Start sheet. Shares `SensorListRowView` with the
+/// Sensors settings screen, which lists discovered *devices* instead.
 private struct SensorStatusRow: View {
     let sensor: SensorRow
     /// Invoked when a found-but-unpaired sensor's "Tap to Pair" button is tapped.
     let onPair: () -> Void
 
     var body: some View {
-        HStack(spacing: Spacing.md) {
-            Image(systemName: sensor.kind.systemImage)
-                .font(.headline)
-                .foregroundStyle(sensor.kind.tint)
-                .frame(width: Spacing.xxl, height: Spacing.xxl)
-                .background(sensor.kind.tint.opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: Spacing.cornerMd))
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(sensor.kind.displayName).font(.headline)
-                // Device name only; the status control conveys connection state, so we
-                // avoid a subtitle that could contradict it.
-                if let name = sensor.name {
-                    Text(name)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
+        SensorListRowView(
+            icon: sensor.kind.systemImage,
+            iconTint: sensor.kind.tint,
+            title: sensor.kind.displayName,
+            // Device name only; the status control conveys connection state, so we
+            // avoid a subtitle that could contradict it.
+            subtitle: sensor.name
+        ) {
             if let battery = sensor.batteryPercent, sensor.status == .connected {
                 Label("\(battery)%", systemImage: "battery.100")
                     .labelStyle(.titleAndIcon)
@@ -94,7 +85,6 @@ private struct SensorStatusRow: View {
             }
             statusControl
         }
-        .padding(.vertical, Spacing.xs)
     }
 
     // Found sensors offer a pairing action; paired sensors show the connected badge.
@@ -103,12 +93,7 @@ private struct SensorStatusRow: View {
     private var statusControl: some View {
         switch sensor.status {
         case .searching:
-            Button("Tap to Pair", action: onPair)
-                .font(.caption.weight(.semibold))
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
-                .controlSize(.small)
-                .tint(.cyPrimary)
+            SensorRowButton("Tap to Pair", action: onPair)
         case .connected:
             let badge = sensor.status.badge
             Text(badge.label)

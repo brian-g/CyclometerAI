@@ -1,28 +1,28 @@
 //
 //  SensorDemoData.swift
-//  Test-ToolbarAndAccessoryView
+//  Cyclometer
 //
 
 import Foundation
-import SwiftUI
-
-struct SensorStatus: Identifiable {
-    let id = UUID()
-    let name: String
-    let detail: String
-    let status: String
-    let systemImage: String
-    let tint: Color
-}
-
-extension SensorStatus {
-    static let demoSensors = [
-        SensorStatus(name: "Heart Rate", detail: "Chest strap", status: "Connected", systemImage: "heart.fill", tint: Color.red),
-        SensorStatus(name: "Speed", detail: "Front hub", status: "Searching", systemImage: "speedometer", tint: Color.blue),
-        SensorStatus(name: "Cadence", detail: "Crank arm", status: "Connected", systemImage: "metronome", tint: Color.orange)
-    ]
-}
 
 struct NewRideDemoData {
     static let bikeName = "Road Bike Stub"
+}
+
+/// Discovered sensors for the Settings → Sensors previews. The screen is driven by
+/// live BLE discovery, and previews resolve dependencies to `liveValue` unless told
+/// otherwise, so previews inject these through a stub `bleCSCClient` rather than
+/// seeding `State` — the stream's replay would overwrite seeded state anyway.
+///
+/// UUIDs are fixed so preview rows keep their identity between renders.
+enum DeviceDemoData {
+    static let sensors: [BLECSCClient.DiscoveredSensor] = [
+        .init(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C5C1")!,
+              name: "Wahoo RPM", roles: [.speed, .cadence], connectionState: .active),
+        .init(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C5C2")!,
+              name: "GSC-10", roles: [], connectionState: nil),
+        // Unnamed peripherals must still get a row — see `discoveredIDs` in BLECSCClient.
+        .init(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C5C3")!,
+              name: nil, roles: [], connectionState: nil)
+    ]
 }
