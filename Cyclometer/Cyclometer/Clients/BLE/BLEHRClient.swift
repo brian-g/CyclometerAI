@@ -176,6 +176,12 @@ private final class HRClientState: @unchecked Sendable {
         let id = lock.withLock { targetPeripheralID }
         guard let id else { return }
         lock.withLock { targetPeripheralID = nil }
+        // Clearing here is the only chance: the `.disconnected` event that follows
+        // guard-fails on the now-nil target, so its clearing branch never runs.
+        // Left set, the replayed state tells the next subscriber that a strap the
+        // rider just disconnected is still connected, at its last known battery.
+        broadcastPairing(false)
+        setBattery(nil)
         await bleClient.disconnect(id, hrOwnerID)
         await bleClient.stopScanning([hrServiceUUID])
     }

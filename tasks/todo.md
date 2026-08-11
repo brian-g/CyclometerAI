@@ -79,6 +79,23 @@ suite. What it renders is the same `SensorBatteryLabel` in the same `SensorListR
 slot, and the label itself has its own snapshot suite covering every glyph band, both schemes, and
 the 20/21 threshold boundary.
 
+## PR #88 review round
+
+- [x] **User disconnect left the replayed state lying.** `HRClientState.disconnect()` nils
+      `targetPeripheralID` before the transport answers, so the `.disconnected` branch that clears
+      `isPaired` / `batteryPercent` guard-fails and never runs. Pre-PR nothing stored or replayed
+      those, so only live subscribers were affected; adding replay-on-subscribe made every *new*
+      subscriber inherit the lie. After Finish (`ActiveRideFeature.swift:178` calls
+      `bleHRClient.disconnect()`), reopening the Start sheet showed the powered-off strap as
+      "Connected — 45%". Both fields are now cleared in `disconnect()` itself.
+- [x] **The radar had the same asymmetry**, unflagged by the review: `disconnect()` sets
+      `.disconnected` but never cleared `batteryPercent`, for exactly the same reason. Not
+      user-visible today only because the Start sheet hides disconnected rows — a latent trap for
+      whoever changes that gate. Fixed alongside.
+- [x] Both regressions are covered by tests that assert through a **fresh** subscriber, since the
+      failure is in replay rather than in the live broadcast. Each was confirmed to fail against the
+      unfixed code before the fix was restored.
+
 **Not verifiable without hardware.** The simulator has no BLE radio. On-device checklist:
 1. Console filtered to `com.xavier.cyclometer` — no `read skipped — 2A19 …` line.
 2. Connect a strap or radar, open the Start sheet → battery next to Connected.

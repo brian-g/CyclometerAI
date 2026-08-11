@@ -20,7 +20,10 @@
       "Bash(mdfind \"kMDItemContentType == 'com.apple.application-bundle' && kMDItemFSName == 'SF Symbols*.app'\")",
       "Bash(find \"/Applications/SF Symbols.app/Contents/Resources\" -name \"*.svg\" -maxdepth 2 2>/dev/null | head -20)",
       "Bash(find \"/Applications/SF Symbols.app/Contents\" -name \"*.svg\" -path \"*template*\" -o -name \"*.svg\" -path \"*export*\" 2>/dev/null | head -5)",
-      "Bash(find \"/Applications/SF Symbols.app/Contents\" -name \"symbolTemplate*\" -o -name \"SymbolTemplate*\" 2>/dev/null | head -10)"
+      "Bash(find \"/Applications/SF Symbols.app/Contents\" -name \"symbolTemplate*\" -o -name \"SymbolTemplate*\" 2>/dev/null | head -10)",
+      "Bash(python3 -)",
+      "Bash(git checkout *)",
+      "Bash(git commit *)"
     ]
   },
   "spinnerTipsEnabled": false

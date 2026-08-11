@@ -249,6 +249,44 @@ struct BLEHRIntegrationTests {
         #expect(await battery.next() == Int?.none)
     }
 
+    /// A rider finishing a ride calls `disconnect()`, which nils the target before the
+    /// `.disconnected` event arrives — so that event's clearing branch guard-fails and
+    /// never runs. Without clearing here, the next Start sheet replays "paired, 45%"
+    /// for a strap that is powered off.
+    @Test("User disconnect clears pairing and battery for later subscribers")
+    func userDisconnectClearsReplayedState() async {
+        let harness = Harness()
+        let id = UUID()
+
+        var paired = harness.client.pairingStatus().makeAsyncIterator()
+        _ = await paired.next()
+
+        harness.events.yield(.discovered(id: id, name: "HRM-Dual", rssi: -55, services: [hrServiceUUID]))
+        harness.events.yield(.connected(id: id))
+        harness.events.yield(.servicesDiscovered(
+            peripheralID: id, serviceUUIDs: [hrServiceUUID, batteryServiceUUID]
+        ))
+        harness.events.yield(.characteristicsDiscovered(
+            peripheralID: id, serviceUUID: hrServiceUUID, characteristicUUIDs: [hrMeasurementUUID]
+        ))
+        harness.events.yield(.characteristicsDiscovered(
+            peripheralID: id, serviceUUID: batteryServiceUUID, characteristicUUIDs: [batteryLevelUUID]
+        ))
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: id, characteristicUUID: batteryLevelUUID, value: Data([0x2D])
+        ))
+        #expect(await paired.next() == true)   // sync point: fully connected
+
+        await harness.client.disconnect()
+        // The transport answers after the fact, as it does on hardware.
+        harness.events.yield(.disconnected(id: id, error: nil))
+
+        var latePaired = harness.client.pairingStatus().makeAsyncIterator()
+        var lateBattery = harness.client.batteryLevel().makeAsyncIterator()
+        #expect(await latePaired.next() == false)
+        #expect(await lateBattery.next() == Int?.none)
+    }
+
     /// The strap keeps notifying BPM whatever the battery does; a battery frame must
     /// not be mistaken for a measurement, or vice versa.
     @Test("Battery and heart-rate values stay on their own streams")

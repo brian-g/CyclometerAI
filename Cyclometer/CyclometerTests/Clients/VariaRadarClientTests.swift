@@ -281,6 +281,32 @@ struct VariaRadarIntegrationTests {
         #expect(await late.next() == 42)
     }
 
+    /// Same asymmetry as the HR client: `disconnect()` clears the target, so the
+    /// `.disconnected` branch that would clear the level can no longer match.
+    @Test("User disconnect clears the battery level for later subscribers")
+    func userDisconnectClearsReplayedBattery() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()
+        await harness.client.connect(peripheralID)
+        _ = await states.next()
+
+        var battery = harness.client.batteryLevel().makeAsyncIterator()
+        _ = await battery.next()
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: peripheralID, characteristicUUID: batteryLevelUUID, value: Data([0x52])
+        ))
+        #expect(await battery.next() == 82)   // sync point
+
+        await harness.client.disconnect()
+        harness.events.yield(.disconnected(id: peripheralID, error: nil))
+
+        var late = harness.client.batteryLevel().makeAsyncIterator()
+        #expect(await late.next() == Int?.none)
+    }
+
     @Test("Alert notification yields parsed targets; malformed payloads are dropped")
     func notificationYieldsTargets() async {
         let harness = Harness()

@@ -258,6 +258,9 @@ private final class RadarClientState: @unchecked Sendable {
             return current
         }
         setConnectionState(.disconnected)
+        // Same reason as the `.disconnected` branch: that branch can't run here,
+        // because the target has already been cleared above.
+        setBattery(nil)
         if let id {
             await bleClient.disconnect(id, radarOwnerID)
         }
