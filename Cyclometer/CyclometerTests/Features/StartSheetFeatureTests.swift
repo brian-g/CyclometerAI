@@ -82,4 +82,65 @@ struct StartSheetFeatureTests {
             $0.setStatus(.connected, for: .cadence)
         }
     }
+
+    @Test("Battery updates land on the addressed row only, and clear on nil")
+    func batteryUpdatesAddressedRow() async {
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        }
+
+        await store.send(.batteryUpdated(.radar, 82)) {
+            $0.setBattery(82, for: .radar)
+        }
+        // A second row's level must not disturb the first.
+        await store.send(.batteryUpdated(.heartRate, 14)) {
+            $0.setBattery(14, for: .heartRate)
+        }
+        #expect(store.state.sensors.first { $0.kind == .radar }?.batteryPercent == 82)
+
+        // Disconnecting clears it — the row must not keep showing a stale level.
+        await store.send(.batteryUpdated(.radar, nil)) {
+            $0.setBattery(nil, for: .radar)
+        }
+    }
+
+    @Test("Appearing subscribes to each client's battery stream")
+    func taskSubscribesToBatteryStreams() async {
+        let (radarStream, radarContinuation) = AsyncStream<Int?>.makeStream()
+        let (hrStream, hrContinuation) = AsyncStream<Int?>.makeStream()
+        let (speedStream, speedContinuation) = AsyncStream<Int?>.makeStream()
+        let (cadenceStream, cadenceContinuation) = AsyncStream<Int?>.makeStream()
+
+        var radar = VariaRadarClient.testValue
+        radar.batteryLevel = { radarStream }
+        var hr = BLEHRClient.testValue
+        hr.batteryLevel = { hrStream }
+        var csc = BLECSCClient.testValue
+        csc.batteryLevel = { role in role == .speed ? speedStream : cadenceStream }
+
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.variaRadarClient = radar
+            $0.bleHRClient = hr
+            $0.bleCSCClient = csc
+        }
+
+        await store.send(.task)
+
+        radarContinuation.yield(91)
+        await store.receive(\.batteryUpdated) { $0.setBattery(91, for: .radar) }
+        hrContinuation.yield(47)
+        await store.receive(\.batteryUpdated) { $0.setBattery(47, for: .heartRate) }
+        speedContinuation.yield(63)
+        await store.receive(\.batteryUpdated) { $0.setBattery(63, for: .speed) }
+        cadenceContinuation.yield(8)
+        await store.receive(\.batteryUpdated) { $0.setBattery(8, for: .cadence) }
+
+        radarContinuation.finish()
+        hrContinuation.finish()
+        speedContinuation.finish()
+        cadenceContinuation.finish()
+        await store.finish()
+    }
 }

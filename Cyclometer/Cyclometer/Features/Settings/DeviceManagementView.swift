@@ -54,10 +54,21 @@ private struct DeviceRow: View {
             title: device.name ?? "Unknown Sensor",
             subtitle: subtitle
         ) {
+            // Only for a device that is actually up: a reconnecting sensor's last
+            // known level would sit next to a "Reconnecting…" subtitle and read as
+            // current.
+            if let battery = device.batteryPercent, isUp {
+                SensorBatteryLabel(percent: battery)
+            }
             SensorRowButton(device.isPaired ? "Unpair" : "Pair",
                             tint: device.isPaired ? .cyDestructive : .cyPrimary,
                             action: onAction)
         }
+    }
+
+    /// Connected, whatever it is doing with its roles.
+    private var isUp: Bool {
+        device.connectionState == .connected || device.connectionState == .active
     }
 
     /// Roles held, or the connection state while it is still settling — a paired

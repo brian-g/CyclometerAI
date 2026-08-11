@@ -5,6 +5,8 @@ import CoreBluetooth
 
 private let cscServiceUUID     = CBUUID(string: "1816")
 private let cscMeasurementUUID = CBUUID(string: "2A5B")
+private let batteryServiceUUID = CBUUID(string: "180F")
+private let batteryLevelUUID   = CBUUID(string: "2A19")
 
 /// Builds a CSC Measurement (0x2A5B) payload. Wheel and/or crank blocks are
 /// included based on which arguments are supplied; little-endian per BLE.md §5.2.
@@ -225,6 +227,8 @@ struct BLECSCIntegrationTests {
         /// be told apart from the all-devices teardown.
         let disconnected: LockIsolated<[(UUID, String)]>
         let notified: LockIsolated<[(Bool, CBUUID)]>
+        let servicesDiscovered: LockIsolated<[[CBUUID]?]>
+        let reads: LockIsolated<[(UUID, CBUUID)]>
         let clock: TestClock<Duration>
 
         init() {
@@ -235,6 +239,8 @@ struct BLECSCIntegrationTests {
             let scanStopped = LockIsolated<[[CBUUID]]>([])
             let disconnected = LockIsolated<[(UUID, String)]>([])
             let notified = LockIsolated<[(Bool, CBUUID)]>([])
+            let servicesDiscovered = LockIsolated<[[CBUUID]?]>([])
+            let reads = LockIsolated<[(UUID, CBUUID)]>([])
             let clock = TestClock()
 
             let bleClient = BLEClient(
@@ -245,12 +251,16 @@ struct BLECSCIntegrationTests {
                     connectContinuation.yield(id)
                 },
                 disconnect: { id, owner in disconnected.withValue { $0.append((id, owner)) } },
-                discoverServices: { _, _ in },
+                discoverServices: { _, uuids in
+                    servicesDiscovered.withValue { $0.append(uuids) }
+                },
                 discoverCharacteristics: { _, _, _ in },
                 setNotifyValue: { enabled, _, _, charUUID in
                     notified.withValue { $0.append((enabled, charUUID)) }
                 },
-                readValue: { _, _, _ in },
+                readValue: { id, _, charUUID in
+                    reads.withValue { $0.append((id, charUUID)) }
+                },
                 events: { eventStream }
             )
 
@@ -262,6 +272,8 @@ struct BLECSCIntegrationTests {
             self.scanStopped = scanStopped
             self.disconnected = disconnected
             self.notified = notified
+            self.servicesDiscovered = servicesDiscovered
+            self.reads = reads
             self.clock = clock
         }
 
@@ -271,6 +283,13 @@ struct BLECSCIntegrationTests {
             events.yield(.servicesDiscovered(peripheralID: id, serviceUUIDs: [cscServiceUUID]))
             events.yield(.characteristicsDiscovered(
                 peripheralID: id, serviceUUID: cscServiceUUID, characteristicUUIDs: [cscMeasurementUUID]
+            ))
+        }
+
+        /// Answer this peripheral's battery read with `percent`.
+        func reportBattery(_ percent: UInt8, from id: UUID) {
+            events.yield(.characteristicValueUpdated(
+                peripheralID: id, characteristicUUID: batteryLevelUUID, value: Data([percent])
             ))
         }
     }
@@ -680,6 +699,78 @@ struct BLECSCIntegrationTests {
             value: cscPayload(crankRevs: 52, crankTime: 2048)
         ))
         #expect(await cadences.next() == 60.0)
+    }
+
+    @Test("Connecting discovers the battery service alongside the CSC service")
+    func connectDiscoversBatteryService() async {
+        let harness = Harness()
+        let id = UUID()
+
+        var states = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await states.next() == .disconnected)
+
+        await harness.client.connect(id, [.speed, .cadence])
+        #expect(await states.next() == .connecting)
+
+        harness.events.yield(.connected(id: id))
+        #expect(await states.next() == .connected)   // sync point: discoverServices has run
+
+        #expect(harness.servicesDiscovered.value.count == 1)
+        #expect(harness.servicesDiscovered.value[0]?.contains(cscServiceUUID) == true)
+        #expect(harness.servicesDiscovered.value[0]?.contains(batteryServiceUUID) == true)
+    }
+
+    @Test("Battery level is read on connect, published per role, and cleared on disconnect")
+    func batteryLevelReadAndCleared() async {
+        let harness = Harness()
+        let id = UUID()
+
+        await harness.client.connect(id, [.speed, .cadence])
+        var battery = harness.client.batteryLevel(.speed).makeAsyncIterator()
+        #expect(await battery.next() == Int?.none)   // replayed: nothing read yet
+
+        harness.bringToActive(id)
+        harness.events.yield(.characteristicsDiscovered(
+            peripheralID: id, serviceUUID: batteryServiceUUID,
+            characteristicUUIDs: [batteryLevelUUID]
+        ))
+        harness.reportBattery(64, from: id)
+
+        #expect(await battery.next() == 64)
+        #expect(harness.reads.value.map(\.1) == [batteryLevelUUID])
+
+        // A stale level next to a reconnecting sensor would read as current.
+        harness.events.yield(.disconnected(id: id, error: nil))
+        #expect(await battery.next() == Int?.none)
+    }
+
+    /// The case only CSC has: speed and cadence can be two physical devices, so one
+    /// battery level per client would be wrong for at least one of the two rows.
+    @Test("Two peripherals report their own battery to their own role")
+    func batteryIsPerRoleNotPerClient() async {
+        let harness = Harness()
+        let speedSensor = UUID()
+        let cadenceSensor = UUID()
+
+        await harness.client.connect(speedSensor, [.speed])
+        await harness.client.connect(cadenceSensor, [.cadence])
+
+        var speedBattery = harness.client.batteryLevel(.speed).makeAsyncIterator()
+        var cadenceBattery = harness.client.batteryLevel(.cadence).makeAsyncIterator()
+        _ = await speedBattery.next()    // replayed nil
+        _ = await cadenceBattery.next()
+
+        harness.reportBattery(90, from: speedSensor)
+        harness.reportBattery(15, from: cadenceSensor)
+
+        #expect(await speedBattery.next() == 90)
+        #expect(await cadenceBattery.next() == 15)
+
+        // And the device list carries each peripheral's own level for the S11 rows.
+        var devices = harness.client.discoveredSensors().makeAsyncIterator()
+        let listed = await devices.next() ?? []
+        #expect(listed.first { $0.id == speedSensor }?.batteryPercent == 90)
+        #expect(listed.first { $0.id == cadenceSensor }?.batteryPercent == 15)
     }
 
     @Test("Bluetooth permission denied stands down without crashing")

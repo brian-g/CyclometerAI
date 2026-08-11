@@ -62,6 +62,8 @@ Reducers consume these streams via .run { send in
 | Radar Capability | `6A4E3201-667B-11E3-949A-0800200C9A66` | Characteristic — Read |
 | Radar Alert | `6A4E3202-667B-11E3-949A-0800200C9A66` | Characteristic — Notify |
 
+The unit may also expose the Battery Service (§14).
+
 ### 3.2 Alert Payload Parsing
 
 The Radar Alert characteristic delivers notifications as a variable-length byte array.
@@ -164,6 +166,8 @@ Alert level changes are debounced with a **3-second minimum re-trigger window** 
 | Heart Rate Measurement | `0x2A37` | Characteristic — Notify |
 | Body Sensor Location | `0x2A38` | Characteristic — Read (optional) |
 
+The strap may also expose the Battery Service (§14).
+
 ### 4.2 HR Measurement Payload
 
 The HR Measurement characteristic uses a flags byte to indicate 8-bit vs 16-bit BPM encoding.
@@ -246,6 +250,8 @@ All CSC sensors (`0x1816`) go through role assignment when paired in S11 (Device
 | CSC Measurement | `0x2A5B` | Characteristic — Notify |
 | CSC Feature | `0x2A5C` | Characteristic — Read |
 | Sensor Location | `0x2A5D` | Characteristic — Read |
+
+The sensor may also expose the Battery Service (§14).
 
 ### 5.2 CSC Measurement Payload
 
@@ -841,6 +847,63 @@ sensors are persisted.
 ```
 
 No restore identifier is set, consistent with decision 3.
+
+---
+
+## 14. Battery Service (0x180F)
+
+Every sensor profile in this spec sits on a device that may also expose the Bluetooth SIG
+Battery Service. Battery level therefore belongs to the *peripheral*, not to the radar, HR or
+CSC profile — all three clients run one shared handshake (`BatteryService` in
+`Clients/BLE/BatteryService.swift`) rather than three copies of it.
+
+### 14.1 GATT
+
+| Name | UUID | Type |
+|---|---|---|
+| Battery Service | `0x180F` | Service |
+| Battery Level | `0x2A19` | Characteristic — Read, optionally Notify |
+
+Not advertised, so it does not join any scan filter: it is discovered after connect.
+
+### 14.2 Payload
+
+One byte, `0`–`100` percent. Values above 100 are rejected rather than clamped — a sensor
+answering `0xFF` is reporting a fault, not a full charge, and a bogus "255%" on a sensor row is
+worse than no battery label.
+
+### 14.3 Read policy — read once per connection, notify where offered
+
+On `.connected` the client includes `0x180F` in the same `discoverServices` call as its own
+profile service. A second call would work, but `didDiscoverServices` broadcasts the peripheral's
+*full* accumulated service list, so it would re-fire the profile characteristic's
+discover → notify chain.
+
+Once `0x2A19` is discovered the client issues both a `readValue` and a
+`setNotifyValue(true, …)`. The read guarantees a level on sensors that only support reads; the
+subscription keeps it live on the majority that push on change. A sensor that does not support
+notify ignores the subscription and the connect-time reading stands. No polling: battery moves
+slowly, and the Start sheet is opened at the point in a ride where a fresh value matters.
+
+The level is cleared on disconnect. It is re-read on reconnect rather than held, so a row never
+shows a level that predates the gap.
+
+### 14.4 Exposure
+
+| Client | Endpoint | Granularity |
+|---|---|---|
+| `VariaRadarClient` | `batteryLevel() -> AsyncStream<Int?>` | The one radar |
+| `BLEHRClient` | `batteryLevel() -> AsyncStream<Int?>` | The one strap |
+| `BLECSCClient` | `batteryLevel(SensorRole) -> AsyncStream<Int?>` | Per role — speed and cadence can be different devices |
+
+All replay on subscribe, as the connection-state streams do. Replay matters more here: the level
+is read once per connection, so a subscriber arriving afterwards would otherwise learn nothing
+until the next reconnect. `nil` means unknown — disconnected, or a sensor without `0x180F`.
+
+`BLECSCClient.DiscoveredSensor` also carries `batteryPercent` for the per-device rows on S11.
+
+Rendered by `SensorBatteryLabel` (UX.md §S05.1 "the battery level if supported"), which picks the
+SF Symbol by level and tints at or below 20% with `cyRatingBad`.
 
 ---
 

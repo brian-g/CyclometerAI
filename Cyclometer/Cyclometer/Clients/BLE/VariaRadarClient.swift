@@ -45,6 +45,10 @@ struct VariaRadarClient: Sendable {
     var disconnect:      @Sendable () async -> Void
     var radarTargets:    @Sendable () -> AsyncStream<[RadarTarget]>
     var connectionState: @Sendable () -> AsyncStream<ConnectionState>
+    /// Battery percentage of the connected radar, or `nil` when unknown — nothing
+    /// connected, or a unit that doesn't expose the Battery Service. Replays the
+    /// current value on subscribe.
+    var batteryLevel:    @Sendable () -> AsyncStream<Int?>
 
     /// Parse vehicle targets from a Radar Alert characteristic value.
     ///
@@ -112,7 +116,8 @@ extension VariaRadarClient: DependencyKey {
             connect:         { id in await state.connect(peripheralID: id) },
             disconnect:      { await state.disconnect() },
             radarTargets:    { state.makeTargetsStream() },
-            connectionState: { state.makeConnectionStateStream() }
+            connectionState: { state.makeConnectionStateStream() },
+            batteryLevel:    { state.makeBatteryStream() }
         )
     }
 
@@ -124,7 +129,8 @@ extension VariaRadarClient: DependencyKey {
         connect:         { _ in },
         disconnect:      { },
         radarTargets:    { AsyncStream { $0.finish() } },
-        connectionState: { AsyncStream { $0.finish() } }
+        connectionState: { AsyncStream { $0.finish() } },
+        batteryLevel:    { AsyncStream { $0.finish() } }
     )
 }
 
@@ -146,10 +152,12 @@ private final class RadarClientState: @unchecked Sendable {
 
     private var targetPeripheralID: UUID?
     private var connectionState: VariaRadarClient.ConnectionState = .disconnected
+    private var batteryPercent: Int?
     private var reconnectTask: Task<Void, Never>?
 
     private var targetsContinuations: [Int: AsyncStream<[RadarTarget]>.Continuation] = [:]
     private var stateContinuations: [Int: AsyncStream<VariaRadarClient.ConnectionState>.Continuation] = [:]
+    private var batteryContinuations: [Int: AsyncStream<Int?>.Continuation] = [:]
     private var nextID = 0
     private let lock = NSLock()
 
@@ -188,6 +196,24 @@ private final class RadarClientState: @unchecked Sendable {
         }
         continuation.onTermination = { [weak self] _ in
             _ = self?.lock.withLock { self?.stateContinuations.removeValue(forKey: id) }
+        }
+        return stream
+    }
+
+    func makeBatteryStream() -> AsyncStream<Int?> {
+        let id = lock.withLock { () -> Int in
+            let current = nextID; nextID += 1; return current
+        }
+        let (stream, continuation) = AsyncStream<Int?>.makeStream()
+        // Replay for the same reason the state stream does, and more urgently: battery
+        // is read once per connection, so a subscriber arriving after that read would
+        // otherwise wait until the next reconnect to learn anything.
+        lock.withLock {
+            continuation.yield(batteryPercent)
+            batteryContinuations[id] = continuation
+        }
+        continuation.onTermination = { [weak self] _ in
+            _ = self?.lock.withLock { self?.batteryContinuations.removeValue(forKey: id) }
         }
         return stream
     }
@@ -250,6 +276,14 @@ private final class RadarClientState: @unchecked Sendable {
     }
 
     private func handle(_ event: BLEEvent) async {
+        // Battery is a device concern, not a radar one — the shared handshake drives
+        // its own discover → read and only ever claims 0x2A19 value updates.
+        if let reading = await BatteryService.handle(event, bleClient: bleClient, owns: { [weak self] id in
+            self?.lock.withLock { self?.targetPeripheralID } == id
+        }) {
+            setBattery(reading.level)
+        }
+
         switch event {
         case .discovered(let id, _, _, let services):
             // Auto-connect the first discovered radar. The shared central may be
@@ -264,7 +298,10 @@ private final class RadarClientState: @unchecked Sendable {
             guard lock.withLock({ targetPeripheralID }) == id else { return }
             cancelReconnect()
             setConnectionState(.connected)
-            await bleClient.discoverServices(id, [radarServiceUUID])
+            // One call for both services: didDiscoverServices reports the peripheral's
+            // full service list, so a second call for 0x180F would re-fire the alert
+            // characteristic's discover → notify chain.
+            await bleClient.discoverServices(id, [radarServiceUUID, BatteryService.serviceUUID])
 
         case .servicesDiscovered(let id, let uuids):
             guard lock.withLock({ targetPeripheralID }) == id,
@@ -298,6 +335,7 @@ private final class RadarClientState: @unchecked Sendable {
             // Only unexpected disconnects match — user disconnect() nils the target first.
             guard lock.withLock({ targetPeripheralID }) == id else { return }
             broadcastTargets([])   // clear stale vehicles from the sidebar
+            setBattery(nil)        // re-read on reconnect rather than show a stale level
             setConnectionState(.reconnecting)
             startReconnect()
 
@@ -308,6 +346,7 @@ private final class RadarClientState: @unchecked Sendable {
                 cancelReconnect()
                 lock.withLock { targetPeripheralID = nil }
                 broadcastTargets([])
+                setBattery(nil)
                 setConnectionState(.disconnected)
             default:
                 break
@@ -367,6 +406,16 @@ private final class RadarClientState: @unchecked Sendable {
         }
         if changed {
             logger.notice("connection state → \(String(describing: newState), privacy: .public)")
+        }
+    }
+
+    /// Store and publish the battery level. Same single-critical-section discipline as
+    /// `setConnectionState`, so replay-on-subscribe can never miss a change.
+    private func setBattery(_ level: Int?) {
+        lock.withLock {
+            guard batteryPercent != level else { return }
+            batteryPercent = level
+            for continuation in batteryContinuations.values { continuation.yield(level) }
         }
     }
 
