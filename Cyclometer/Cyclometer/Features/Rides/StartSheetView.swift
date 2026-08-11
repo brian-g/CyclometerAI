@@ -78,10 +78,7 @@ private struct SensorStatusRow: View {
             subtitle: sensor.name
         ) {
             if let battery = sensor.batteryPercent, sensor.status == .connected {
-                Label("\(battery)%", systemImage: "battery.100")
-                    .labelStyle(.titleAndIcon)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SensorBatteryLabel(percent: battery)
             }
             statusControl
         }
@@ -116,7 +113,7 @@ private struct SensorStatusRow: View {
             initialState: StartSheetFeature.State(
                 sensors: [
                     SensorRow(kind: .radar, name: "Varia RTL515", status: .connected, batteryPercent: 82),
-                    SensorRow(kind: .heartRate, name: "HRM-Dual", status: .connected),
+                    SensorRow(kind: .heartRate, name: "HRM-Dual", status: .connected, batteryPercent: 14),
                     SensorRow(kind: .speed, status: .searching),
                     SensorRow(kind: .cadence, status: .notPaired)
                 ]

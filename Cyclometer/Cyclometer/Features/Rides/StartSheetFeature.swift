@@ -24,6 +24,7 @@ struct StartSheetFeature {
         case hrPairingUpdated(Bool)
         case speedStatusUpdated(BLECSCClient.ConnectionState)
         case cadenceStatusUpdated(BLECSCClient.ConnectionState)
+        case batteryUpdated(SensorRow.Kind, Int?)
         case pairButtonTapped(SensorRow.Kind)
         case cancelButtonTapped
         case startRideButtonTapped
@@ -61,6 +62,29 @@ struct StartSheetFeature {
                         for await status in bleCSCClient.connectionState(.cadence) {
                             await send(.cadenceStatusUpdated(status))
                         }
+                    },
+                    // Battery is a separate stream per sensor rather than part of the
+                    // status ones: it is read once per connection and arrives well
+                    // after the status transition that preceded it.
+                    .run { send in
+                        for await level in variaRadarClient.batteryLevel() {
+                            await send(.batteryUpdated(.radar, level))
+                        }
+                    },
+                    .run { send in
+                        for await level in bleHRClient.batteryLevel() {
+                            await send(.batteryUpdated(.heartRate, level))
+                        }
+                    },
+                    .run { send in
+                        for await level in bleCSCClient.batteryLevel(.speed) {
+                            await send(.batteryUpdated(.speed, level))
+                        }
+                    },
+                    .run { send in
+                        for await level in bleCSCClient.batteryLevel(.cadence) {
+                            await send(.batteryUpdated(.cadence, level))
+                        }
                     }
                 )
 
@@ -79,6 +103,10 @@ struct StartSheetFeature {
 
             case .cadenceStatusUpdated(let status):
                 state.setStatus(Self.status(from: status), for: .cadence)
+                return .none
+
+            case .batteryUpdated(let kind, let percent):
+                state.setBattery(percent, for: kind)
                 return .none
 
             case .pairButtonTapped:
@@ -122,6 +150,11 @@ extension StartSheetFeature.State {
         guard let index = sensors.firstIndex(where: { $0.kind == kind }) else { return }
         sensors[index].status = status
     }
+
+    mutating func setBattery(_ percent: Int?, for kind: SensorRow.Kind) {
+        guard let index = sensors.firstIndex(where: { $0.kind == kind }) else { return }
+        sensors[index].batteryPercent = percent
+    }
 }
 
 /// A single sensor row in the Start sheet's Sensors group.
@@ -139,8 +172,8 @@ struct SensorRow: Equatable, Identifiable {
     /// No BLE client exposes a device name yet, so this is always `nil` for now.
     var name: String? = nil
     var status: Status = .notPaired
-    /// Battery percentage (0–100) when supported and connected. Deferred — no client reads a
-    /// battery characteristic yet; rendered only when non-nil. Tracked by a follow-up issue.
+    /// Battery percentage (0–100), or nil when the sensor is disconnected or doesn't
+    /// expose the Battery Service. Rendered only when non-nil and connected.
     var batteryPercent: Int? = nil
 
     var id: Kind { kind }

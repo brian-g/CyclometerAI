@@ -18,11 +18,12 @@ struct NewRideDemoData {
 enum DeviceDemoData {
     static let sensors: [BLECSCClient.DiscoveredSensor] = [
         .init(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C5C1")!,
-              name: "Wahoo RPM", roles: [.speed, .cadence], connectionState: .active),
+              name: "Wahoo RPM", roles: [.speed, .cadence], connectionState: .active,
+              batteryPercent: 78),
         .init(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C5C2")!,
-              name: "GSC-10", roles: [], connectionState: nil),
+              name: "GSC-10", roles: [], connectionState: nil, batteryPercent: nil),
         // Unnamed peripherals must still get a row — see `discoveredIDs` in BLECSCClient.
         .init(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C5C3")!,
-              name: nil, roles: [], connectionState: nil)
+              name: nil, roles: [], connectionState: nil, batteryPercent: nil)
     ]
 }

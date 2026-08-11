@@ -14,9 +14,10 @@ struct DeviceManagementFeatureTests {
         id: UUID,
         name: String?,
         roles: Set<BLECSCClient.SensorRole> = [],
-        state: BLECSCClient.ConnectionState? = nil
+        state: BLECSCClient.ConnectionState? = nil,
+        battery: Int? = nil
     ) -> BLECSCClient.DiscoveredSensor {
-        .init(id: id, name: name, roles: roles, connectionState: state)
+        .init(id: id, name: name, roles: roles, connectionState: state, batteryPercent: battery)
     }
 
     private func makeStore(

@@ -5,6 +5,8 @@ import CoreBluetooth
 
 private let radarServiceUUID = CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")
 private let radarAlertUUID   = CBUUID(string: "6A4E3202-667B-11E3-949A-0800200C9A66")
+private let batteryServiceUUID = CBUUID(string: "180F")
+private let batteryLevelUUID   = CBUUID(string: "2A19")
 
 // MARK: - Payload parsing
 
@@ -119,6 +121,8 @@ struct VariaRadarIntegrationTests {
         let connectCount: LockIsolated<Int>
         let scanned: LockIsolated<[[CBUUID]]>
         let notified: LockIsolated<[(Bool, CBUUID)]>
+        let servicesDiscovered: LockIsolated<[[CBUUID]?]>
+        let reads: LockIsolated<[CBUUID]>
         let clock: TestClock<Duration>
 
         init() {
@@ -127,6 +131,8 @@ struct VariaRadarIntegrationTests {
             let connectCount = LockIsolated(0)
             let scanned = LockIsolated<[[CBUUID]]>([])
             let notified = LockIsolated<[(Bool, CBUUID)]>([])
+            let servicesDiscovered = LockIsolated<[[CBUUID]?]>([])
+            let reads = LockIsolated<[CBUUID]>([])
             let clock = TestClock()
 
             let bleClient = BLEClient(
@@ -137,12 +143,16 @@ struct VariaRadarIntegrationTests {
                     connectContinuation.yield(id)
                 },
                 disconnect: { _, _ in },
-                discoverServices: { _, _ in },
+                discoverServices: { _, uuids in
+                    servicesDiscovered.withValue { $0.append(uuids) }
+                },
                 discoverCharacteristics: { _, _, _ in },
                 setNotifyValue: { enabled, _, _, charUUID in
                     notified.withValue { $0.append((enabled, charUUID)) }
                 },
-                readValue: { _, _, _ in },
+                readValue: { _, _, charUUID in
+                    reads.withValue { $0.append(charUUID) }
+                },
                 events: { eventStream }
             )
 
@@ -152,6 +162,8 @@ struct VariaRadarIntegrationTests {
             self.connectCount = connectCount
             self.scanned = scanned
             self.notified = notified
+            self.servicesDiscovered = servicesDiscovered
+            self.reads = reads
             self.clock = clock
         }
     }
@@ -188,6 +200,111 @@ struct VariaRadarIntegrationTests {
         #expect(harness.notified.value.count == 1)
         #expect(harness.notified.value[0].0 == true)
         #expect(harness.notified.value[0].1 == radarAlertUUID)
+    }
+
+    @Test("Connecting discovers the battery service alongside the radar service")
+    func connectDiscoversBatteryService() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()  // .disconnected
+        await harness.client.connect(peripheralID)
+        _ = await states.next()  // .connecting
+
+        harness.events.yield(.connected(id: peripheralID))
+        #expect(await states.next() == .connected)
+
+        // One call carrying both. A second call for 0x180F would re-emit the full
+        // service list and re-fire the alert characteristic's discover → notify chain.
+        #expect(harness.servicesDiscovered.value.count == 1)
+        #expect(harness.servicesDiscovered.value[0]?.contains(radarServiceUUID) == true)
+        #expect(harness.servicesDiscovered.value[0]?.contains(batteryServiceUUID) == true)
+    }
+
+    @Test("Battery level is read on connect and published, then cleared on disconnect")
+    func batteryLevelReadAndCleared() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()  // .disconnected
+        await harness.client.connect(peripheralID)
+        _ = await states.next()  // .connecting
+
+        var battery = harness.client.batteryLevel().makeAsyncIterator()
+        #expect(await battery.next() == Int?.none)  // replayed: nothing read yet
+
+        harness.events.yield(.connected(id: peripheralID))
+        _ = await states.next()  // .connected — the handshake below follows it
+        harness.events.yield(.servicesDiscovered(
+            peripheralID: peripheralID, serviceUUIDs: [radarServiceUUID, batteryServiceUUID]
+        ))
+        harness.events.yield(.characteristicsDiscovered(
+            peripheralID: peripheralID, serviceUUID: batteryServiceUUID,
+            characteristicUUIDs: [batteryLevelUUID]
+        ))
+        // Stands in for the peripheral answering the read.
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: peripheralID, characteristicUUID: batteryLevelUUID, value: Data([0x52])
+        ))
+
+        #expect(await battery.next() == 82)
+        #expect(harness.reads.value == [batteryLevelUUID])
+
+        // A stale level next to a reconnecting radar would read as current.
+        harness.events.yield(.disconnected(id: peripheralID, error: nil))
+        #expect(await battery.next() == Int?.none)
+    }
+
+    /// Battery is read once per connection, so a subscriber that arrives afterwards —
+    /// the Start sheet's `.task`, typically — only learns anything by replay.
+    @Test("A late battery subscriber gets the current level replayed")
+    func batteryReplaysForLateSubscriber() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()
+        await harness.client.connect(peripheralID)
+        _ = await states.next()
+
+        var early = harness.client.batteryLevel().makeAsyncIterator()
+        _ = await early.next()
+
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: peripheralID, characteristicUUID: batteryLevelUUID, value: Data([0x2A])
+        ))
+        #expect(await early.next() == 42)   // sync point: the reading has landed
+
+        var late = harness.client.batteryLevel().makeAsyncIterator()
+        #expect(await late.next() == 42)
+    }
+
+    /// Same asymmetry as the HR client: `disconnect()` clears the target, so the
+    /// `.disconnected` branch that would clear the level can no longer match.
+    @Test("User disconnect clears the battery level for later subscribers")
+    func userDisconnectClearsReplayedBattery() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()
+        await harness.client.connect(peripheralID)
+        _ = await states.next()
+
+        var battery = harness.client.batteryLevel().makeAsyncIterator()
+        _ = await battery.next()
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: peripheralID, characteristicUUID: batteryLevelUUID, value: Data([0x52])
+        ))
+        #expect(await battery.next() == 82)   // sync point
+
+        await harness.client.disconnect()
+        harness.events.yield(.disconnected(id: peripheralID, error: nil))
+
+        var late = harness.client.batteryLevel().makeAsyncIterator()
+        #expect(await late.next() == Int?.none)
     }
 
     @Test("Alert notification yields parsed targets; malformed payloads are dropped")

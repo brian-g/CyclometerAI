@@ -62,8 +62,9 @@ struct BLEClient: Sendable {
     /// Request-only rather than `async -> Data`: every sensor client already runs
     /// an event loop, and a request/response form would need per-read correlation
     /// plus a timeout to survive a read that errors — machinery no caller needs.
-    /// Read-only characteristics (0x2A5C, 0x2A19) are never notify-enabled, so
-    /// matching on the characteristic UUID in the event loop is unambiguous.
+    /// Matching on the characteristic UUID in the event loop is unambiguous even
+    /// when the characteristic is also notify-enabled (as 0x2A19 is), because each
+    /// of these UUIDs carries exactly one kind of value whatever produced it.
     ///
     /// Call only after `.characteristicsDiscovered` for the service: a read against
     /// an undiscovered characteristic is dropped, and logged as such.

@@ -64,6 +64,9 @@ struct BLECSCClient: Sendable {
         let roles: Set<SensorRole>
         /// Connection lifecycle, or nil when unpaired.
         let connectionState: ConnectionState?
+        /// Battery percentage, or nil when unknown — unpaired, or a sensor that
+        /// doesn't expose the Battery Service.
+        let batteryPercent: Int?
 
         var isPaired: Bool { !roles.isEmpty }
     }
@@ -108,6 +111,11 @@ struct BLECSCClient: Sendable {
     /// unheld or the peripheral didn't advertise one. Replays on subscribe, same
     /// as `connectionState`.
     var sensorName:            @Sendable (SensorRole) -> AsyncStream<String?>
+    /// Battery percentage of the peripheral currently holding this role, or nil if
+    /// unheld or the sensor doesn't expose the Battery Service. Per role rather than
+    /// per client because speed and cadence can be two different devices. Replays on
+    /// subscribe, same as `connectionState`.
+    var batteryLevel:          @Sendable (SensorRole) -> AsyncStream<Int?>
 
     /// Reconnection backoff ladder: 1s, 2s, 4s, 8s, 16s, then capped at 30s.
     /// Identical policy to VariaRadarClient (BLE.md §6.1).
@@ -254,7 +262,8 @@ extension BLECSCClient: DependencyKey {
             speed:                 { state.makeSpeedStream() },
             cadence:               { state.makeCadenceStream() },
             connectionState:       { role in state.makeConnectionStateStream(role: role) },
-            sensorName:            { role in state.makeSensorNameStream(role: role) }
+            sensorName:            { role in state.makeSensorNameStream(role: role) },
+            batteryLevel:          { role in state.makeBatteryStream(role: role) }
         )
     }
 
@@ -274,7 +283,8 @@ extension BLECSCClient: DependencyKey {
         speed:                 { AsyncStream { $0.finish() } },
         cadence:               { AsyncStream { $0.finish() } },
         connectionState:       { _ in AsyncStream { $0.finish() } },
-        sensorName:            { _ in AsyncStream { $0.finish() } }
+        sensorName:            { _ in AsyncStream { $0.finish() } },
+        batteryLevel:          { _ in AsyncStream { $0.finish() } }
     )
 }
 
@@ -301,6 +311,9 @@ private final class CSCClientState: @unchecked Sendable {
         var wheel = CSCCalculator<UInt32>(maxRevsPerSecond: 15)   // ~120 km/h on a 700c wheel
         var crank = CSCCalculator<UInt16>(maxRevsPerSecond: 5)    // 300 rpm
         var reconnectTask: Task<Void, Never>?
+        /// Last Battery Service reading, or nil until one arrives. Cleared on
+        /// disconnect so a reconnect re-reads rather than showing a stale level.
+        var batteryPercent: Int?
         /// True only for a role assignment guessed by the discovery auto-connect
         /// heuristic (as opposed to an explicit `connect(peripheralID:roles:)` call,
         /// e.g. from a future pairing UI) — only these are eligible for capability
@@ -321,6 +334,10 @@ private final class CSCClientState: @unchecked Sendable {
     private var roleState: [BLECSCClient.SensorRole: BLECSCClient.ConnectionState] = [
         .speed: .disconnected, .cadence: .disconnected,
     ]
+    /// Last battery level published per role; an absent key means nil was published.
+    /// Deduped like `roleState` rather than broadcast unconditionally like names —
+    /// the radar and HR clients only emit changes, and this keeps all three alike.
+    private var roleBattery: [BLECSCClient.SensorRole: Int] = [:]
     /// Advertised names seen via `.discovered`, keyed by peripheral — looked up when
     /// a `Slot` is created so a sensor's name survives even though `connect()` (the
     /// public entry point, also usable by a future pairing UI) doesn't take one.
@@ -349,6 +366,7 @@ private final class CSCClientState: @unchecked Sendable {
     private var cadenceContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
     private var stateContinuations: [Int: (role: BLECSCClient.SensorRole, continuation: AsyncStream<BLECSCClient.ConnectionState>.Continuation)] = [:]
     private var nameContinuations: [Int: (role: BLECSCClient.SensorRole, continuation: AsyncStream<String?>.Continuation)] = [:]
+    private var batteryContinuations: [Int: (role: BLECSCClient.SensorRole, continuation: AsyncStream<Int?>.Continuation)] = [:]
     private var discoveredContinuations: [Int: AsyncStream<[BLECSCClient.DiscoveredSensor]>.Continuation] = [:]
     private var nextID = 0
     private let lock = NSLock()
@@ -427,9 +445,27 @@ private final class CSCClientState: @unchecked Sendable {
         return stream
     }
 
+    func makeBatteryStream(role: BLECSCClient.SensorRole) -> AsyncStream<Int?> {
+        let id = lock.withLock { () -> Int in let current = nextID; nextID += 1; return current }
+        let (stream, continuation) = AsyncStream<Int?>.makeStream()
+        lock.withLock {
+            continuation.yield(batteryForRoleLocked(role))
+            batteryContinuations[id] = (role, continuation)
+        }
+        continuation.onTermination = { [weak self] _ in
+            _ = self?.lock.withLock { self?.batteryContinuations.removeValue(forKey: id) }
+        }
+        return stream
+    }
+
     /// Must be called with the lock held.
     private func nameForRoleLocked(_ role: BLECSCClient.SensorRole) -> String? {
         slots.values.first(where: { $0.roles.contains(role) })?.name
+    }
+
+    /// Must be called with the lock held.
+    private func batteryForRoleLocked(_ role: BLECSCClient.SensorRole) -> Int? {
+        slots.values.first(where: { $0.roles.contains(role) })?.batteryPercent
     }
 
     // MARK: Public control
@@ -632,6 +668,19 @@ private final class CSCClientState: @unchecked Sendable {
     }
 
     private func handle(_ event: BLEEvent) async {
+        // Battery is a device concern, not a CSC one — the shared handshake drives its
+        // own discover → read and only ever claims 0x2A19 value updates. A reading is
+        // not a lifecycle event, so it has to ask for the fan-out explicitly.
+        if let reading = await BatteryService.handle(event, bleClient: bleClient, owns: { [weak self] id in
+            self?.lock.withLock { self?.slots[id] != nil } ?? false
+        }) {
+            lock.withLock {
+                guard slots[reading.peripheralID]?.batteryPercent != reading.level else { return }
+                slots[reading.peripheralID]?.batteryPercent = reading.level
+                recomputeRoleStatesLocked()
+            }
+        }
+
         switch event {
         case .discovered(let id, let name, _, let services):
             // Auto-connect discovered CSC sensors to whichever roles aren't already
@@ -658,7 +707,10 @@ private final class CSCClientState: @unchecked Sendable {
                 slots[id]?.connectionState = .connected
                 recomputeRoleStatesLocked()
             }
-            await bleClient.discoverServices(id, [cscServiceUUID])
+            // One call for both services: didDiscoverServices reports the peripheral's
+            // full service list, so a second call for 0x180F would re-fire the
+            // measurement characteristic's discover → notify chain.
+            await bleClient.discoverServices(id, [cscServiceUUID, BatteryService.serviceUUID])
 
         case .servicesDiscovered(let id, let uuids):
             guard lock.withLock({ slots[id] != nil }),
@@ -751,6 +803,9 @@ private final class CSCClientState: @unchecked Sendable {
                 // rate against the first post-reconnect sample.
                 slots[id]?.wheel.reset()
                 slots[id]?.crank.reset()
+                // Same reasoning for battery: re-read on reconnect rather than
+                // publish a level that may be hours old.
+                slots[id]?.batteryPercent = nil
                 recomputeRoleStatesLocked()
                 return true
             }
@@ -827,7 +882,8 @@ private final class CSCClientState: @unchecked Sendable {
                 id: id,
                 name: slot?.name ?? discoveredNames[id],
                 roles: slot?.roles ?? [],
-                connectionState: slot?.connectionState
+                connectionState: slot?.connectionState,
+                batteryPercent: slot?.batteryPercent
             )
         }
         .sorted {
@@ -864,6 +920,13 @@ private final class CSCClientState: @unchecked Sendable {
             // discrete lifecycle events, not per-notification, so this isn't hot-path.
             for entry in nameContinuations.values where entry.role == role {
                 entry.continuation.yield(slot?.name)
+            }
+            let newBattery = slot?.batteryPercent
+            if roleBattery[role] != newBattery {
+                roleBattery[role] = newBattery   // assigning nil removes the key
+                for entry in batteryContinuations.values where entry.role == role {
+                    entry.continuation.yield(newBattery)
+                }
             }
         }
 
