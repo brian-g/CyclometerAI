@@ -19,10 +19,9 @@ struct DeviceManagementView: View {
                 if store.availableDevices.isEmpty {
                     // No empty state for the Paired section: it is hidden entirely
                     // when nothing is paired, so this is the only "nothing yet" case.
-                    HStack(spacing: Spacing.sm) {
-                        ProgressView().controlSize(.small)
-                        Text("Searching for sensors").foregroundStyle(.secondary)
-                    }
+                    // The section header already says "Available", so the spinner
+                    // alone carries the message.
+                    ProgressView().controlSize(.small)
                 } else {
                     ForEach(store.availableDevices) { device in
                         DeviceRow(device: device) { store.send(.pairButtonTapped(device.id)) }
@@ -41,33 +40,24 @@ struct DeviceManagementView: View {
     }
 }
 
-/// One discovered peripheral. Purpose-built rather than reusing `SensorStatusRow`
-/// from the Start sheet: that row models a fixed *category* (Radar / HR / Speed /
-/// Cadence) with a status badge, whereas this models a *device* that appears and
-/// disappears as scanning proceeds and carries a pair/unpair action.
+/// One discovered peripheral. The row skeleton is `SensorListRowView`, shared with
+/// the Start sheet's Sensors group; what differs is what fills it — this models a
+/// *device* that appears and disappears as scanning proceeds and carries a
+/// pair/unpair action, rather than a fixed sensor category.
 private struct DeviceRow: View {
     let device: BLECSCClient.DiscoveredSensor
     let onAction: () -> Void
 
     var body: some View {
-        HStack(spacing: Spacing.md) {
-            Image(systemName: "sensor.tag.radiowaves.forward")
-                .font(.headline)
-                .foregroundStyle(.cyPrimary)
-                .frame(width: Spacing.xxl, height: Spacing.xxl)
-                .background(Color.cyPrimary.opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: Spacing.cornerMd))
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(device.name ?? "Unknown Sensor").font(.headline)
-                if let subtitle {
-                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            actionButton
+        SensorListRowView(
+            icon: "sensor.tag.radiowaves.forward",
+            title: device.name ?? "Unknown Sensor",
+            subtitle: subtitle
+        ) {
+            SensorRowButton(device.isPaired ? "Unpair" : "Pair",
+                            tint: device.isPaired ? .cyDestructive : .cyPrimary,
+                            action: onAction)
         }
-        .padding(.vertical, Spacing.xs)
     }
 
     /// Roles held, or the connection state while it is still settling — a paired
@@ -88,16 +78,6 @@ private struct DeviceRow: View {
         case .disconnected:  return "Disconnected"
         }
     }
-
-    @ViewBuilder
-    private var actionButton: some View {
-        Button(device.isPaired ? "Unpair" : "Pair", action: onAction)
-            .font(.caption.weight(.semibold))
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .controlSize(.small)
-            .tint(device.isPaired ? .cyDestructive : .cyPrimary)
-    }
 }
 
 extension BLECSCClient.SensorRole {
@@ -111,18 +91,32 @@ extension BLECSCClient.SensorRole {
 
 // MARK: - Previews
 
+// Both previews must override `bleCSCClient`. Previews resolve dependencies to
+// `liveValue` — there is no `previewValue` on this client — so without an override
+// the screen spins up a real CBCentralManager, and the live stream's empty replay
+// clears the list on appear. Seeding `State.devices` alone cannot survive that.
+//
+// The populated preview does both: the stub stream is what actually feeds the screen
+// once `.task` runs, and the seeded state means the rows are still there in any host
+// that renders without running `.task` (an image snapshot, for one).
+
 #Preview("Sensors") {
     NavigationStack {
         DeviceManagementView(
             store: Store(
-                initialState: DeviceManagementFeature.State(
-                    devices: [
-                        .init(id: UUID(), name: "Wahoo RPM", roles: [.speed, .cadence], connectionState: .active),
-                        .init(id: UUID(), name: "GSC-10", roles: [], connectionState: nil),
-                        .init(id: UUID(), name: nil, roles: [], connectionState: nil)
-                    ]
-                )
-            ) { DeviceManagementFeature() }
+                initialState: DeviceManagementFeature.State(devices: DeviceDemoData.sensors)
+            ) {
+                DeviceManagementFeature()
+            } withDependencies: {
+                var client = BLECSCClient.testValue
+                client.discoveredSensors = {
+                    AsyncStream { continuation in
+                        continuation.yield(DeviceDemoData.sensors)
+                        continuation.finish()
+                    }
+                }
+                $0.bleCSCClient = client
+            }
         )
     }
 }
@@ -130,7 +124,12 @@ extension BLECSCClient.SensorRole {
 #Preview("Sensors — searching") {
     NavigationStack {
         DeviceManagementView(
-            store: Store(initialState: DeviceManagementFeature.State()) { DeviceManagementFeature() }
+            store: Store(initialState: DeviceManagementFeature.State()) {
+                DeviceManagementFeature()
+            } withDependencies: {
+                // testValue's stream finishes without yielding — the empty case.
+                $0.bleCSCClient = .testValue
+            }
         )
     }
 }

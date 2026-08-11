@@ -71,6 +71,31 @@ recorders so per-device unpair can be told apart from the all-devices teardown.
 gate. On-device checklist is in the plan — the one to actually watch is that an unpaired sensor
 *stays* unpaired for 10s or more, which is the whole point of the exclusion set.
 
+## PR #87 review round
+
+- [x] Extract the row into `UI/Components/SensorListRow/SensorListRowView.swift` and use it from
+      both the Start sheet and the Sensors screen (closes #11). `SensorRowButton` goes with it —
+      the capsule "Pair" / "Unpair" / "Tap to Pair" button was duplicated verbatim in both files.
+      Each screen keeps a thin private wrapper, because the two model different things (category
+      vs device) and pass different trailing controls.
+- [x] Available-section empty state is the spinner alone; the "Searching for sensors" text is gone.
+- [x] Fix the previews. Root cause was not the mock data: previews resolve dependencies to
+      `liveValue` (this client has no `previewValue`), so the screen built a real CBCentralManager
+      and the live stream's empty replay cleared the seeded devices on `.task`. Both previews now
+      override `bleCSCClient`; demo devices live in `PreviewContent/SensorDemoData.swift`.
+- [x] `assets/TCA.md` §8/§9 — reverse the "not a shared component" entry this PR added, and
+      `assets/UX.md` — register the `iconTile` opacity token the shared row uses.
+
+**Verified by rendering, not by assertion.** Both screens were snapshotted through a throwaway test
+(since deleted): the Sensors screen shows Paired/Available with the right tints and destructive
+Unpair, and the Start sheet is unchanged — same category tints, battery label, badge, button.
+The Start sheet has no snapshot suite, so that check existed only for the duration of the refactor.
+
+**A wrong first fix, caught by rendering.** Overriding the dependency alone left the preview empty
+in a snapshot host. Driving the preview's exact store directly proved the stub was fine — `.task`
+simply does not run under `assertSnapshot`, even in the key window. The populated preview now seeds
+`State` *and* stubs the stream, so it renders in either host.
+
 ## Left for the follow-ups
 
 - `BLEClient.readValue` still has **no issue filed**. #71 named it an M6 prerequisite; it blocks #67

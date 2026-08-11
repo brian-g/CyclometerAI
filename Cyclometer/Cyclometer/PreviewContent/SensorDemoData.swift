@@ -5,10 +5,24 @@
 
 import Foundation
 
-// `SensorStatus` and its demo list lived here to feed the Settings → Sensors
-// placeholder. That screen is now DeviceManagementView, driven by live BLE
-// discovery (#68), so the stub is gone.
-
 struct NewRideDemoData {
     static let bikeName = "Road Bike Stub"
+}
+
+/// Discovered sensors for the Settings → Sensors previews. The screen is driven by
+/// live BLE discovery, and previews resolve dependencies to `liveValue` unless told
+/// otherwise, so previews inject these through a stub `bleCSCClient` rather than
+/// seeding `State` — the stream's replay would overwrite seeded state anyway.
+///
+/// UUIDs are fixed so preview rows keep their identity between renders.
+enum DeviceDemoData {
+    static let sensors: [BLECSCClient.DiscoveredSensor] = [
+        .init(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C5C1")!,
+              name: "Wahoo RPM", roles: [.speed, .cadence], connectionState: .active),
+        .init(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C5C2")!,
+              name: "GSC-10", roles: [], connectionState: nil),
+        // Unnamed peripherals must still get a row — see `discoveredIDs` in BLECSCClient.
+        .init(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C5C3")!,
+              name: nil, roles: [], connectionState: nil)
+    ]
 }
