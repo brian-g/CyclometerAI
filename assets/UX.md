@@ -754,7 +754,8 @@ An `HKWorkout` is written to Apple Health automatically when the ride ends, befo
 - Connection status
 - Pair / Unpair action
 - Unpaired sensors sorted to the top
-- When pairing a sensor with multiple profiles (e.g., combined speed+cadence), the rider is prompted to choose which type it represents
+- When pairing a sensor with multiple profiles (e.g., combined speed+cadence), the rider is prompted to choose which type it represents. Implemented (#67) as a confirmation dialog — "What should this sensor do?" with Speed / Cadence / Both — raised only when the sensor's 0x2A5C capabilities say it can do both. A single-capability sensor is assigned silently. Tapping an already-paired combo sensor re-opens the same prompt, which is how a role is reassigned without re-pairing (BLE.md §5.0)
+- A paired sensor that is out of range stays in the Paired section, showing Disconnected, so it can still be unpaired
 
 ### Open UX Questions
 - [x] Multiple sensors of same type: active source by connection order — first wins.

@@ -3,14 +3,25 @@ import ComposableArchitecture
 
 /// S11 (subset) — the Sensors screen pushed from Settings.
 struct DeviceManagementView: View {
-    let store: StoreOf<DeviceManagementFeature>
+    @Bindable var store: StoreOf<DeviceManagementFeature>
 
     var body: some View {
         List {
             if !store.pairedDevices.isEmpty {
-                Section("Paired") {
+                Section {
                     ForEach(store.pairedDevices) { device in
                         DeviceRow(device: device) { store.send(.unpairButtonTapped(device.id)) }
+                            // Tapping a combo sensor re-opens the role prompt —
+                            // BLE.md §5.0's "reassignable without re-pairing". Rows
+                            // with nothing to choose stay inert.
+                            .contentShape(.rect)
+                            .onTapGesture { store.send(.rowTapped(device.id)) }
+                    }
+                } header: {
+                    Text("Paired")
+                } footer: {
+                    if !store.reassignableIDs.isEmpty {
+                        Text("Tap a sensor that measures both to change what it does.")
                     }
                 }
             }
@@ -35,6 +46,7 @@ struct DeviceManagementView: View {
         }
         .navigationTitle("Sensors")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog($store.scope(state: \.roleDialog, action: \.roleDialog))
         .task { await store.send(.task).finish() }
         .onDisappear { store.send(.onDisappear) }
     }

@@ -1,113 +1,124 @@
-# Issue #63 — Sensor battery level in the Start sheet + BLE battery reads
+# Issue #67 — CSC role assignment at pairing (0x2A5C, role sheet, PairedSensor)
 
-Branch: `feat/63-sensor-battery`, from `main` (#68 merged as `ee571da`). Milestone M6.
+Branch: `feat/67-csc-role-assignment`, from `main` (#63 merged as `f8bc0d4`). Milestone M6.
 
-`SensorRow.batteryPercent` has existed since #42 and `StartSheetView` already rendered it, but
-nothing ever wrote it — no client read a battery characteristic, so UX.md §S05.1's "When Connected,
-the battery level if supported" was unmet. The `readValue` prerequisite the issue names had already
-landed in #85.
+#68 shipped a pairing screen, but everything behind it is a guess that evaporates on relaunch.
+`BLECSCClient` claims both roles speculatively on Pair and narrows them only once the rider starts
+pedalling and a measurement's flags byte reveals what the sensor actually reports. Nothing is
+persisted, so `unpairedThisSession` exists purely to stop the auto-adopt heuristic re-claiming a
+sensor the rider just rejected.
+
+Three things wait on this: #70 must not write a persistent wheel circumference from a sensor the
+rider never chose; BLE.md §13.4 records that M7 state restoration cannot rebuild
+`BLECentral.connectionOwners` without persisted pairings; and BLE.md §5.0's "role reassignable
+without re-pairing" has nowhere to live. The transport prerequisite landed in #85 (`readValue`), and
+#63's `BatteryService` is a worked example of the same read handshake.
 
 ## Decisions (user-approved plan)
-- **Read once on connect *and* subscribe to notify.** The read guarantees a level on sensors that
-  only support reads; the subscription is one line and keeps it live on the majority that push.
-  No polling — battery moves slowly and the Start sheet is where a fresh value matters.
-- **Both surfaces**: the Start sheet (S05.1, per-role) and the Sensors screen (S11, per-device).
-- **Level-aware glyph + low tint** at or below 20%, restyling the existing label in place.
-- **One shared handshake, not three.** The Battery Service belongs to the device, not the profile.
+- **`PairedSensor` is a `Codable` struct inside the `AppPreferences` JSON document**, not a SwiftData
+  `@Model`. DataModel.md §3.6 defers the choice to this issue. #69 proved the `@Shared(.fileStorage)`
+  pattern; SwiftData would mean building a `ModelContainer` test fixture from nothing and putting an
+  async load in front of 3–5 records nobody queries.
+- **Speculative auto-adoption is removed.** `.discovered` connects only peripherals with a persisted
+  record, which deletes `claimUnfilledRoles`, `pendingPeripherals` and `unpairedThisSession` —
+  durable unpair falls out rather than needing its own mechanism.
+- **The role prompt is a `ConfirmationDialogState`**, matching `ActiveRideFeature.finishAlert`. No
+  child reducer, no new files, and it renders as the bottom sheet BLE.md §5.0 describes.
 
 ## Tasks
-- [x] 1. `BatteryService` — 0x180F/0x2A19 constants, `parseLevel`, and the event-driven
-      discover → read → notify step function shared by all three clients.
-- [x] 2. `VariaRadarClient.batteryLevel()` with replay; 0x180F in `discoverServices`; cleared on
-      disconnect and on radio stand-down.
-- [x] 3. `BLEHRClient` — new `live(bleClient:)` factory, `makePairingStream` now replays,
-      `batteryLevel()` with replay.
-- [x] 4. `BLECSCClient` — `Slot.batteryPercent`, `DiscoveredSensor.batteryPercent`,
-      `batteryLevel(role:)` deduped and broadcast from `recomputeRoleStatesLocked`.
-- [x] 5. `SensorBatteryLabel` in `UI/Components/SensorListRow/`, used by both screens.
-- [x] 6. `StartSheetFeature` — `batteryUpdated(Kind, Int?)`, `setBattery`, four subscriptions.
-- [x] 7. Tests — 26 new cases across five files plus a new snapshot suite.
-- [x] 8. `assets/BLE.md` §14; corrected the `readValue` doc comment.
-- [x] 9. Build + full suite; no regression past the known baseline failure.
+- [x] 1. Model layer — `PairedSensor`; `AppPreferences.pairedSensors` + `pairedSensor(for:)` +
+      `sensorAssignments`; `SensorRole` gains `String` raw values and `Codable`.
+- [x] 2. `BLECSCClient.Capabilities` — 0x2A5C parser, 16-bit LE, failable like `Measurement`.
+- [x] 3. Client discovery — 0x2A5C in `discoverCharacteristics`, the read on
+      `.characteristicsDiscovered`, and the `.characteristicValueUpdated` branch.
+- [x] 4. Client roles — `Slot.isInterrogating`, `connect` → `setRoles` with assignment semantics,
+      capability narrowing demoted to a fallback.
+- [x] 5. Client pairing source of truth — `setPairedSensors`, `.discovered` gated on it, and the
+      deletion of the auto-adopt machinery.
+- [x] 6. `DeviceManagementFeature` — role dialog, `pendingPairing`, the `apply` write funnel,
+      sections built from persisted records.
+- [x] 7. `DeviceManagementView` — `@Bindable`, `.confirmationDialog`, tappable paired rows.
+- [x] 8. `AppFeature.task` + `AppView` root task — push persisted pairings at launch.
+- [x] 9. Tests — new `AppPreferencesTests`; `Capabilities` and client cases in `BLECSCClientTests`;
+      `DeviceManagementFeatureTests`; rewrote `pairKeepsCapabilityNarrowing`, `unpairSticks`,
+      `pairClearsExclusion`, `batteryLevelReadAndCleared` and the `Harness` helpers.
+- [x] 10. Specs — DataModel.md §1/§3.6/§3.7/§9, BLE.md §5.0/§12/§13.4, UX.md S11, and the stale
+      0x2A5C comment.
+- [x] 11. Build + full suite; no regression past the known baseline failure.
 
 ## Review
 
-**The handshake is shared because the Battery Service is a device concern.** The issue proposed
-adding battery reads to each of the three clients. Written that way it is the same ~30 lines of
-discover → read → parse three times. `BatteryService.handle(_:bleClient:owns:)` takes the event and
-an ownership predicate, performs the transport calls itself, and returns a level when one arrives;
-each client calls it once at the top of its event loop and keeps only the two things that genuinely
-differ — what "owns" means (a single `targetPeripheralID` for radar and HR, `slots[id] != nil` for
-CSC) and where the level is stored.
+**Persistence went into the AppPreferences document, not SwiftData.** DataModel.md §3.6 left the
+choice to this issue. The deciding factor was not the entity shape but what exists to build on: #69
+shipped `@Shared(.fileStorage)` with a working test-quarantine idiom, while SwiftData has no `@Model`
+in the app but the Xcode template's `Item`, no `ModelContainer` test fixture, and a `SwiftDataStack`
+that is unreferenced with an empty schema. Three to five records that are never queried and always
+read whole do not justify building that. `DeviceManagementFeature.State` now derives its sections
+synchronously, the way `SettingsFeature.wheelSelection` does.
 
-**One `discoverServices` call, not two.** `BLECentral.didDiscoverServices` broadcasts the
-peripheral's *full accumulated* service list, so a separate `discoverServices(id, [0x180F])` would
-re-emit `.servicesDiscovered` still containing the profile service and re-fire each client's own
-discover → notify chain. Adding 0x180F to the existing call avoids that entirely; the handshake's
-doc comment states it as a caller contract.
+**Auto-adoption is gone, which is most of the issue's value.** `.discovered` now connects a
+peripheral only if `setPairedSensors` has named it. That deleted `claimUnfilledRoles`,
+`pendingPeripherals` and `unpairedThisSession` — durable unpair falls out rather than needing its own
+mechanism, and #70 can trust that the sensor driving auto-calibration is one the rider chose.
 
-**Enabling notify contradicted a doc comment, so the comment was wrong.** `BLEClient.readValue`
-asserted that 0x2A5C and 0x2A19 "are never notify-enabled". The correlation argument it was
-supporting survives for a different reason — every 0x2A19 update carries a battery level whatever
-triggered it — and the comment now says that instead.
+**Two bugs found while building, neither in the plan.**
 
-**Two HR fixes were required, not incidental.** `BLEHRClient.liveValue` hard-wired
-`BLEClient.liveValue`, so `HRClientState` had no test coverage and the battery path would have had
-none either; it now has the `live(bleClient:)` factory radar and CSC already had. Separately,
-`makePairingStream` did not replay, so a strap that paired before the sheet opened left the row at
-`.notPaired`, `visibleSensors` filtered it out, and HR battery could never appear at all. Both are
-covered by new tests.
+*Pairing a second sensor knocked the first one offline.* `pair` claimed both roles speculatively, and
+`connect` strips requested roles from every other peripheral, disconnecting one left holding none. So
+interrogating a new sensor tore down a working one before the rider had chosen anything — and since
+the old slot was gone, it did not come back. `Slot.isInterrogating` fixes it: `pair` now connects with
+an empty role set, exempt from the "no roles means gone" rule, and the rider's answer commits via
+`setRoles`. Covered by `pairInterrogatesWithoutClaimingRoles`.
 
-**CSC battery is deduped, unlike CSC names.** `recomputeRoleStatesLocked` broadcasts names
-unconditionally. Battery follows `roleState` instead and only emits changes, because the radar and
-HR clients dedupe and three clients behaving alike matters more than matching the neighbouring line.
-It also makes the stream assertable with `==` rather than a drain loop.
+*`AppPreferences` could not survive gaining a field.* DataModel.md §9 claimed "adding a field is free
+— decoding an older document falls back to the property's default." It does not: the synthesised
+`Decodable` throws `keyNotFound`, `.fileStorage` swallows that and substitutes a default-constructed
+value, so an upgrading rider would have silently lost their wheel circumference the moment
+`pairedSensors` was added. `AppPreferences` now has a hand-written `init(from:)` using
+`decodeIfPresent`, and §9 says what is actually true. `decodesDocumentWithoutPairedSensors` pins it.
 
-**Out-of-range levels are rejected, not clamped.** A sensor answering 0xFF is reporting a fault; a
-"255%" row is worse than no label.
+**`connect` became `setRoles` and now assigns rather than unions.** The old upsert was
+`slot.roles.formUnion(roles)`, so moving a combo device from Both to Cadence would have left Speed
+attached — "reassignable without re-pairing" (BLE.md §5.0) was not actually expressible. No
+feature-layer caller existed, so the rename and the semantic change were free.
 
-**Tests: 26 new cases, all green.** Full suite 261 passing, one failure — the known pre-existing
-`HeroNumberSnapshotTests.testCustomColor()`. The parser and the handshake are tested standalone
-(the handshake against a recording transport, since `BLECentral` needs a radio); each client's
-integration suite drives the events through to its battery stream.
+**Capability narrowing survives as a fallback rather than being deleted.** 0x2A5C is authoritative
+and arrives at connect time, but a failed read produces *no event at all* — a non-compliant sensor
+would otherwise never reach role assignment. The measurement-flags path stays, gated on no
+authoritative capabilities having arrived. `pairKeepsCapabilityNarrowing` inverted into
+`measurementFlagsNarrowWhenNoFeatureCharacteristic`, which is the same behaviour in its new position.
 
-**Rendering verified for one screen, reasoned for the other.** The Sensors screen was snapshotted
-through a throwaway test (since deleted) and shows the level between subtitle and Unpair.
-`StartSheetView` renders blank under `assertSnapshot` — confirmed by stashing this branch and
-rendering it on unmodified `main`, so it is pre-existing and is why that screen has no snapshot
-suite. What it renders is the same `SensorBatteryLabel` in the same `SensorListRowView` trailing
-slot, and the label itself has its own snapshot suite covering every glyph band, both schemes, and
-the 20/21 threshold boundary.
+**A third bug surfaced from that fallback**: narrowing via measurement flags released the role but
+never called `recomputeRoleStatesLocked`, so the cadence tile stayed stuck on `.active` after the
+sensor gave the role up. Caught by the new test hanging rather than failing.
 
-## PR #88 review round
+**Test sync points.** Several new client tests raced the client's event-processing task — yielding an
+event and reading the device list on the next line. Connection-state assertions get a sync point for
+free from the state stream; the device list did not, so `Harness.devices(matching:)` waits for a
+predicate. `malformedCapabilitiesIgnored` needed particular care: its assertion is that *nothing*
+changed, which passes vacuously if the event has not been processed yet, so it uses a well-formed
+report from a second peripheral as the sync point.
 
-- [x] **User disconnect left the replayed state lying.** `HRClientState.disconnect()` nils
-      `targetPeripheralID` before the transport answers, so the `.disconnected` branch that clears
-      `isPaired` / `batteryPercent` guard-fails and never runs. Pre-PR nothing stored or replayed
-      those, so only live subscribers were affected; adding replay-on-subscribe made every *new*
-      subscriber inherit the lie. After Finish (`ActiveRideFeature.swift:178` calls
-      `bleHRClient.disconnect()`), reopening the Start sheet showed the powered-off strap as
-      "Connected — 45%". Both fields are now cleared in `disconnect()` itself.
-- [x] **The radar had the same asymmetry**, unflagged by the review: `disconnect()` sets
-      `.disconnected` but never cleared `batteryPercent`, for exactly the same reason. Not
-      user-visible today only because the Start sheet hides disconnected rows — a latent trap for
-      whoever changes that gate. Fixed alongside.
-- [x] Both regressions are covered by tests that assert through a **fresh** subscriber, since the
-      failure is in replay rather than in the live broadcast. Each was confirmed to fail against the
-      unfixed code before the fix was restored.
+**Verification.** Full suite: 296 passing, one failure — the known pre-existing
+`HeroNumberSnapshotTests.testCustomColor()`. Baseline before this work was 261 passing with the same
+single failure.
 
-**Not verifiable without hardware.** The simulator has no BLE radio. On-device checklist:
-1. Console filtered to `com.xavier.cyclometer` — no `read skipped — 2A19 …` line.
-2. Connect a strap or radar, open the Start sheet → battery next to Connected.
-3. Open the sheet with a sensor *already* connected → battery appears immediately (replay).
-4. Power the sensor off → the row leaves the connected state and battery disappears.
-5. Sensors screen → the paired CSC device row shows its level.
-6. A sensor without 0x180F shows no battery and no error.
+**Not verifiable in the simulator.** There is no BLE radio, so the 0x2A5C read has still never run
+against hardware — #85 shipped the transport without a caller, and this is its first one. On-device
+checklist for the PR:
+- [ ] Wheel-only sensor auto-assigns Speed with no prompt
+- [ ] Combo sensor prompts, and all three choices produce the right roles
+- [ ] A paired sensor reconnects after force-quit with no rider action
+- [ ] Reassigning Both → Cadence actually releases the speed role
+- [ ] Pairing a second sensor leaves the first connected and working
 
 ## Left for the follow-ups
-
-- Battery is not shown anywhere during a ride. UX.md only asks for S05.1; if a low-battery warning
-  mid-ride is ever wanted, the streams already exist.
-- `SensorRow.name` is still always nil in the Start sheet even though `BLECSCClient.sensorName(role:)`
-  exists and is unused. Out of scope here, but it is a one-line subscription away.
-- #67 still owns `PairedSensor` persistence, the 0x2A5C capability read, and the role sheet.
+- `ConnectedService` ownership is still open — its Keychain-identifier pattern is a different problem
+  and nothing consumes it yet (DataModel.md §3.6).
+- `SwiftDataStack` / `CoreDataStack` remain dead code. Deleting them is M7's call; this issue no
+  longer needs SwiftData at all.
+- UX.md S11 says "Unpaired sensors sorted to the top" while the screen sorts paired first. Left
+  alone — a pre-existing contradiction, and which one is right is a product decision.
+- #70 (wheel auto-calibration) is unblocked: its gate is
+  `bleCSCClient.connectionState(.speed) == .active`, which is now only ever true for a sensor the
+  rider deliberately paired.

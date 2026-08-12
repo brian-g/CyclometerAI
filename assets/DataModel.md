@@ -22,11 +22,11 @@
 │  RadarEvent (discrete events)         (NSBatchInsertRequest)    │
 │  VehiclePassEvent (discrete events)                             │
 │  RiderProfile                                                   │
-│  PairedSensor                                                   │
-│  ConnectedService                                               │
+│  ConnectedService (still open — §3.8)                           │
 │                                                                 │
 │  JSON document (@Shared / .fileStorage)                         │
 │  AppPreferences (singleton)                                     │
+│    └─ PairedSensor[]  (nested value, #67)                       │
 │                                                                 │
 │  In-Memory (RideDataBuffer)                                     │
 │  Active TrackPoint ring buffer                                  │
@@ -43,7 +43,8 @@
 | TrackPoint — up to 3,600 rows/hour at 1 Hz | CoreData NSBatchInsertRequest — batch write avoids per-object overhead |
 | Active-ride telemetry buffering | In-memory ring buffer; never written until checkpoint/end |
 | RadarEvent, VehiclePassEvent — discrete | SwiftData — low frequency; UI-queryable |
-| PairedSensor, ConnectedService — low-frequency writes | SwiftData — relationship owned by AppPreferences |
+| PairedSensor — a handful of records, never queried, read whole | Nested `Codable` array in the AppPreferences JSON document (#67, see §3.6) — synchronous reads, no ModelContainer |
+| ConnectedService — low-frequency writes | Open. The Keychain-identifier pattern is a separate problem and nothing consumes it yet |
 | iOS minimum | iOS 26 — SwiftData and Swift concurrency fully supported |
 
 ### Checkpoint Policy
@@ -81,8 +82,8 @@ TrackPoint    RadarEvent   VehiclePassEvent
 ```
 
 **Key relationships:**
-- AppPreferences is no longer a SwiftData entity, so it cannot own a SwiftData `@Relationship`. Whether PairedSensor and ConnectedService become standalone `@Model`s queried by role/service type, or fold into the AppPreferences JSON document, is settled by #67 — see §3.6
-- **PairedSensor is app-wide only for MVP.** In Phase 2 sensors belong to a bike: each bike has its own speed, cadence, radar and power sensors, and the speed sensor also carries that wheel's circumference. Heart rate is the exception and stays rider-scoped, since the strap follows the rider across bikes. Whatever #67 picks for MVP ownership needs to survive gaining that bike dimension — see §3.9
+- AppPreferences is no longer a SwiftData entity, so it cannot own a SwiftData `@Relationship`. #67 settled PairedSensor by folding it into the AppPreferences JSON document as a nested `Codable` array; ConnectedService is still open — see §3.6
+- **PairedSensor is app-wide only for MVP.** In Phase 2 sensors belong to a bike: each bike has its own speed, cadence, radar and power sensors, and the speed sensor also carries that wheel's circumference. Heart rate is the exception and stays rider-scoped, since the strap follows the rider across bikes. The MVP ownership #67 picked has to survive gaining that bike dimension — as a nested value it does: the array grows a `bikeID` field and the lookup key becomes (bike, role), which is a decode shim rather than a schema stage — see §3.9
 - Ride and RiderProfile have no SwiftData relationship — single rider; rides queried by date range
 - RadarVehicle is a value type embedded as JSON in RadarEvent, not a separate table
 - Phase 2: Ride gains a route: Route? relationship when Route becomes a first-class entity
@@ -396,7 +397,7 @@ switch is a one-line change plus a one-shot re-encode.
 > so it cannot hold AppPreferences as one value.
 
 **Implemented today** (`Cyclometer/Cyclometer/Models/AppPreferences.swift`) — fields land as their
-consumers do, so only wheel circumference is present:
+consumers do, so wheel circumference and paired sensors are present:
 
 ```swift
 struct AppPreferences: Codable, Equatable, Sendable {
@@ -404,6 +405,16 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// Phase 2 moves this onto the speed-role PairedSensor, since a hub-mounted
     /// CSC sensor is already bound to one wheel and bikes own their sensors. See §3.9.
     var wheelCircumferenceMM: Int = WheelPreset.default.circumferenceMM   // 2096
+    /// §3.7. The source of truth for which peripherals the app connects to —
+    /// BLECSCClient adopts nothing on its own and is told via setPairedSensors.
+    var pairedSensors: [PairedSensor] = []
+
+    func pairedSensor(for role: BLECSCClient.SensorRole) -> PairedSensor?
+    var sensorAssignments: [UUID: Set<BLECSCClient.SensorRole>]   // peripheral → roles
+
+    /// Hand-written: the synthesised init(from:) throws on a missing key rather
+    /// than using the property default. See §9.
+    init(from decoder: any Decoder) throws
 }
 
 extension SharedReaderKey where Self == FileStorageKey<AppPreferences>.Default {
@@ -417,7 +428,10 @@ extension SharedReaderKey where Self == FileStorageKey<AppPreferences>.Default {
 ```
 
 Consumed by `SettingsFeature` (read/write, pushing each change to
-`BLECSCClient.setWheelCircumference`) and `SpeedFeature` (`@SharedReader`, applied at ride start).
+`BLECSCClient.setWheelCircumference`), `SpeedFeature` (`@SharedReader`, applied at ride start),
+`DeviceManagementFeature` (read/write, pushing each pairing change to
+`BLECSCClient.setPairedSensors`) and `AppFeature` (`@SharedReader`, pushing the assignments once at
+launch so paired sensors reconnect without the Sensors screen being open).
 
 **Still to land**, each with the feature that consumes it:
 
@@ -437,16 +451,25 @@ enum UnitSystem: String, Codable { case metric, imperial }
 enum MapOrientation: String, Codable { case headingUp, northUp }
 ```
 
-**Open — PairedSensor and ConnectedService ownership (#67).** §3.6 previously held these as
-cascade-deleting `@Relationship` collections. With AppPreferences out of SwiftData that is no
-longer possible as written; #67 decides between two options, and §3.7/§3.8 are written against
-whichever it picks:
+**Resolved (#67) — PairedSensor is a nested `Codable` array, not a `@Model`.** §3.6 previously held
+these as cascade-deleting `@Relationship` collections. With AppPreferences out of SwiftData that is
+no longer possible as written, and the choice was between standalone `@Model`s queried by
+`role` / `serviceType`, and nested `Codable` arrays inside this document. #67 took the latter, and
+§3.7 is written against it:
 
-1. Standalone SwiftData `@Model`s queried directly by `role` / `serviceType`. Cascade delete
-   becomes moot — nothing owns them. Keeps ConnectedService's Keychain-identifier pattern intact.
-2. Nested `Codable` arrays inside the AppPreferences document. Simplest for the 3–5 records that
-   realistically exist, and keeps `pairedSensor(for:)` / `connectedService(of:)` as plain struct
-   methods over synchronously available state.
+- **Nothing to query.** Three to five records exist, always read whole and always by role. The
+  criterion §3.6 applies to AppPreferences itself — "is there anything to `@Query`?" — answers the
+  same way here.
+- **Synchronous reads.** `DeviceManagementFeature.State` derives its Paired and Available sections
+  from `preferences.pairedSensors` directly, the way `SettingsFeature.wheelSelection` derives from
+  `wheelCircumferenceMM`. A `@Model` would put an async load in front of that.
+- **The infrastructure already exists.** #69 shipped `@Shared(.fileStorage)` with a proven
+  test-quarantine idiom (`FileStorage.inMemory`). SwiftData has no `@Model` in the app but the
+  Xcode template's `Item`, no `ModelContainer` test fixture, and `SwiftDataStack` is unreferenced
+  with an empty schema.
+
+`ConnectedService` is untouched and still open — its Keychain-identifier pattern is a different
+problem, and nothing consumes it yet.
 
 ---
 
@@ -454,33 +477,39 @@ whichever it picks:
 
 One BLE sensor in a specific role. A single physical device may appear twice — once for .speed, once for .cadence — when a combo CSC sensor is assigned both roles (same peripheralIdentifierString, different role values).
 
-> Shown below as a SwiftData `@Model`. Since #69 moved AppPreferences out of SwiftData there is no `@Relationship` owner, so #67 confirms whether this stays a standalone `@Model` or becomes a nested `Codable` value in the AppPreferences document — see §3.6.
+> **Not a SwiftData `@Model` (#67).** A `Codable` struct nested in the AppPreferences document — the reasoning is in §3.6's resolved note.
 
 > **Role-keyed lookup is an MVP simplification.** One sensor per role, app-wide. Phase 2 gives every bike its own speed, cadence, radar and power sensors, so the lookup key becomes (bike, role) — see §3.9. Heart rate is the exception: the strap follows the rider, not the bike.
 
+**Implemented today** (`Cyclometer/Cyclometer/Models/PairedSensor.swift`):
+
 ```swift
 /// OQDM6 resolved: replaces fixed UUID string fields on AppPreferences.
-@Model
-final class PairedSensor {
-    var id: UUID
-    var peripheralIdentifierString: String     // CBPeripheral.identifier — stable per device per iOS install
-    var role: SensorRole
-    var displayName: String?                   // From BLE advertisement
-    var modelIdentifier: String?               // Inferred from advertisement (e.g. "RTL515")
-
-    var peripheralIdentifier: UUID? {
-        UUID(uuidString: peripheralIdentifierString)
-    }
-
-    init(peripheralId: UUID, role: SensorRole, displayName: String? = nil) {
-        self.id = UUID()
-        self.peripheralIdentifierString = peripheralId.uuidString
-        self.role = role
-        self.displayName = displayName
-    }
+struct PairedSensor: Codable, Equatable, Sendable {
+    var peripheralID: UUID            // CBPeripheral.identifier — stable per device per iOS install
+    var role: BLECSCClient.SensorRole
+    var displayName: String?          // From BLE advertisement, at pairing time
 }
+```
 
-/// Defined in BLE.md section 7; mirrored here for persistence.
+Three departures from the `@Model` sketch this replaces, each because the record is now a value in a
+JSON document rather than a row:
+
+- **`peripheralID` is a `UUID`,** not `peripheralIdentifierString` plus a parsing accessor. The string
+  was a SwiftData accommodation; JSON round-trips `UUID` natively.
+- **No synthetic `id`.** Nothing addresses a record by identity — lookup is by role, and a peripheral's
+  records are replaced wholesale when its roles change.
+- **No `modelIdentifier`.** Nothing reads it. It lands with the screen that shows it.
+
+`displayName` is retained rather than always read live so a paired sensor that is out of range still
+has a name on the Sensors screen, where there is no advertisement to name it.
+
+**Role enum.** MVP persists CSC roles only, so `SensorRole` is still `BLECSCClient.SensorRole`
+(`speed`, `cadence`), given `String` raw values and `Codable` by #67. M10 brings radar and heart rate
+into S11, at which point it moves to `Models/` and gains their cases — additive, and enum cases need
+no migration (§9). The full target shape:
+
+```swift
 enum SensorRole: String, Codable, Sendable {
     case radar
     case heartRate
@@ -489,6 +518,9 @@ enum SensorRole: String, Codable, Sendable {
     case power      // Phase 3
 }
 ```
+
+> **The raw values are the persisted contract.** Renaming a case silently orphans every record that
+> used it; `AppPreferencesTests` pins them for that reason.
 
 ---
 
@@ -755,10 +787,12 @@ var previousRides: [Ride]
 
 ### Paired Sensor for a Role
 ```swift
-// Not @Query — read directly from AppPreferences relationship
-let speedSensor = appPreferences.pairedSensor(for: .speed)
-let cadenceSensor = appPreferences.pairedSensor(for: .cadence)
-// These may return the same peripheral UUID for a combo sensor assigned both roles
+// Not @Query — a synchronous read off the AppPreferences document (#67)
+let speedSensor = preferences.pairedSensor(for: .speed)
+let cadenceSensor = preferences.pairedSensor(for: .cadence)
+// These may return the same peripheralID for a combo sensor assigned both roles.
+// Grouped the other way for the client, which connects per peripheral, not per role:
+let assignments = preferences.sensorAssignments   // [UUID: Set<SensorRole>]
 ```
 
 ### TrackPoints for GPX / Ride Detail
@@ -810,12 +844,12 @@ extension RiderProfile {
 |---|---|
 | 1.0 (MVP) | All entities as specified above |
 | 1.1 (Phase 2 — Routes) | Add Route @Model; add Ride.route: Route?; migrate Ride.routeName |
-| 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value out of the AppPreferences JSON document onto the speed-role sensor (a one-shot read-then-write at launch, not a schema stage — AppPreferences is not in the SwiftData schema). Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
+| 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 
 Key rules:
 - Never rename SwiftData properties without a SchemaMigrationPlan stage
-- AppPreferences is outside the SwiftData schema (§3.6). Adding a field is free — decoding an older document falls back to the property's default. Renaming or removing one needs an explicit `Codable` shim, since a stale document silently loses the value otherwise
+- AppPreferences is outside the SwiftData schema (§3.6), but **adding a field is only free because it has a hand-written `init(from:)`**. The synthesised `Decodable` does *not* fall back to a property's default when its key is absent — it throws `keyNotFound`, `.fileStorage` swallows that and hands back a default-constructed value, and the rider silently loses every *other* preference in the document. #67 found this the first time a second field was added. Every field is decoded with `decodeIfPresent` and an explicit default; new fields must follow. Renaming or removing one still needs a shim on top of that
 - CoreData TrackPoint changes require a NSMigrationManager mapping model
 - ExternalService and SensorRole enum cases can be added without migration
 
