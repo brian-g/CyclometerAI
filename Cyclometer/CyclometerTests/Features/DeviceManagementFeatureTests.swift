@@ -34,6 +34,23 @@ struct DeviceManagementFeatureTests {
         )
     }
 
+    /// One log across all three write endpoints. The ordering *between* them is the
+    /// thing under test — a separate `LockIsolated` per endpoint can only show that
+    /// each was called, which is what let two ordering races through review.
+    private enum ClientCall: Equatable {
+        case setPairedSensors([UUID: Set<BLECSCClient.SensorRole>])
+        case setRoles(UUID, Set<BLECSCClient.SensorRole>)
+        case unpair(UUID)
+    }
+
+    private static func recordingClient(into log: LockIsolated<[ClientCall]>) -> BLECSCClient {
+        var ble = BLECSCClient.testValue
+        ble.setPairedSensors = { map in log.withValue { $0.append(.setPairedSensors(map)) } }
+        ble.setRoles = { id, roles in log.withValue { $0.append(.setRoles(id, roles)) } }
+        ble.unpair = { id in log.withValue { $0.append(.unpair(id)) } }
+        return ble
+    }
+
     /// The dialog literal, rebuilt here rather than reached through the reducer's
     /// private builder — the same convention `ActiveRideFeatureTests` uses for
     /// `finishAlert`, so a copy change has to be made deliberately in both places.
@@ -373,5 +390,172 @@ struct DeviceManagementFeatureTests {
         #expect(pushed.value == [[:]])
         // The row survives as an Available device so it can be paired again.
         #expect(store.state.availableDevices.map(\.id) == [Self.pairedID])
+    }
+
+    // MARK: Write ordering
+    //
+    // `pairedAssignments` inside the client is the gate `.discovered` consults before
+    // reconnecting anything, and the client drops its lock across every connect and
+    // disconnect. So a teardown that runs before the narrowed map is pushed leaves a
+    // window — roughly one advertising interval, with the pairing scan running — in
+    // which the sensor's own advertisement undoes the rider's action.
+
+    @Test("Unpair closes the reconnect gate before releasing the connection")
+    func unpairPushesAssignmentsFirst() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            devices: [Self.sensor(id: Self.pairedID, name: "Wahoo RPM", roles: [.speed], state: .active)],
+            pairedSensors: [PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM")],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        await store.send(.unpairButtonTapped(Self.pairedID)) {
+            $0.$preferences.withLock { $0.pairedSensors = [] }
+        }
+        await store.finish()
+
+        // The other order reconnects the sensor holding the role it was just denied,
+        // with no record left behind it.
+        #expect(log.value == [.setPairedSensors([:]), .unpair(Self.pairedID)])
+    }
+
+    @Test("A reassignment pushes the new assignments before moving the role")
+    func reassignmentPushesAssignmentsFirst() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let found = [
+            Self.sensor(id: Self.pairedID, name: "GSC-10", roles: [.speed],
+                        state: .active, capabilities: Self.wheelOnly),
+            Self.sensor(id: Self.availableID, name: "Wahoo RPM", capabilities: Self.combo)
+        ]
+        let store = makeStore(
+            pairedSensors: [PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "GSC-10")],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(found))
+        await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed]))))
+        await store.finish()
+
+        // `setRoles` strips the incumbent's last role and disconnects it. Pushing
+        // after that would let its next advertisement reconnect it under the old map
+        // and take speed straight back off the sensor the rider chose.
+        #expect(log.value == [
+            .setPairedSensors([Self.availableID: [.speed]]),
+            .setRoles(Self.availableID, [.speed])
+        ])
+    }
+
+    // MARK: Capability reconciliation
+
+    /// The rider cannot produce this state — the prompt only offers roles the
+    /// capabilities advertise — but a pairing can outlive a firmware change. The
+    /// client narrows its own slot either way; the record has to follow, or every
+    /// launch reconnects, re-narrows, and the paired row keeps claiming the role.
+    @Test("A role the hardware no longer supports is dropped from the record")
+    func narrowedCapabilitiesCorrectTheRecord() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [
+                PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM"),
+                PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM")
+            ],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+
+        let found = [Self.sensor(id: Self.pairedID, name: "Wahoo RPM", roles: [.speed],
+                                 state: .active, capabilities: Self.wheelOnly)]
+        await store.send(.devicesUpdated(found)) {
+            $0.devices = found
+            $0.$preferences.withLock {
+                $0.pairedSensors = [
+                    PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM")
+                ]
+            }
+        }
+        await store.finish()
+
+        #expect(log.value == [.setPairedSensors([Self.pairedID: [.speed]])])
+    }
+
+    @Test("A sensor that can no longer fill its only role is released outright")
+    func narrowingToNothingUnpairs() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "GSC-10")],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+
+        let found = [Self.sensor(id: Self.pairedID, name: "GSC-10", capabilities: Self.wheelOnly)]
+        await store.send(.devicesUpdated(found)) {
+            $0.devices = found
+            $0.$preferences.withLock { $0.pairedSensors = [] }
+        }
+        await store.finish()
+
+        // `setRoles` rejects an empty set, so nothing left to hold has to go through
+        // `unpair` — and the push still comes first.
+        #expect(log.value == [.setPairedSensors([:]), .unpair(Self.pairedID)])
+        #expect(store.state.pairedDevices.isEmpty)
+    }
+
+    @Test("Reconciliation is silent when nothing contradicts the record")
+    func reconciliationIsSilentWithoutAContradiction() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let records = [
+            PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: Self.availableID, role: .cadence, displayName: "GSC-10")
+        ]
+        let store = makeStore(pairedSensors: records, bleCSCClient: Self.recordingClient(into: log))
+
+        let found = [
+            // Holds one of the two roles it advertises — what choosing Speed at the
+            // prompt looks like, not a contradiction.
+            Self.sensor(id: Self.pairedID, name: "Wahoo RPM", roles: [.speed],
+                        state: .active, capabilities: Self.combo),
+            // Never answered the 0x2A5C read. Silence is not evidence it cannot do
+            // cadence, so the record stands.
+            Self.sensor(id: Self.availableID, name: "GSC-10", roles: [.cadence], state: .active)
+        ]
+        await store.send(.devicesUpdated(found)) { $0.devices = found }
+        await store.finish()
+
+        #expect(log.value.isEmpty)
+        #expect(store.state.preferences.pairedSensors == records)
+    }
+
+    @Test("Reconciliation does not disturb a pairing in flight")
+    func reconciliationLeavesPendingPairingAlone() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [
+                PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM"),
+                PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM")
+            ],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.pairButtonTapped(Self.availableID))
+
+        // One broadcast carrying both a correction for the incumbent and the answer
+        // the pairing is waiting on.
+        let found = [
+            Self.sensor(id: Self.pairedID, name: "Wahoo RPM", roles: [.speed],
+                        state: .active, capabilities: Self.wheelOnly),
+            Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.crankOnly)
+        ]
+        await store.send(.devicesUpdated(found))
+        await store.finish()
+
+        // Both ran, and the assignment map built last is the one that landed last.
+        #expect(store.state.preferences.pairedSensors == [
+            PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: Self.availableID, role: .cadence, displayName: "GSC-10")
+        ])
+        #expect(log.value == [
+            .setPairedSensors([Self.pairedID: [.speed]]),
+            .setPairedSensors([Self.pairedID: [.speed], Self.availableID: [.cadence]]),
+            .setRoles(Self.availableID, [.cadence])
+        ])
+        #expect(store.state.pendingPairing == nil)
     }
 }

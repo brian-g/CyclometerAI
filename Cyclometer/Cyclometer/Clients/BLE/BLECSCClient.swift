@@ -619,8 +619,10 @@ private final class CSCClientState: @unchecked Sendable {
     /// `disconnect()`, which tears down everything and stops scanning.
     ///
     /// Nothing here stops the sensor being reconnected on its next advertisement:
-    /// that is governed by `pairedAssignments`, so the caller must also drop its
-    /// `PairedSensor` records and push the new set via `setPairedSensors`.
+    /// that is governed by `pairedAssignments`. The caller must drop its `PairedSensor`
+    /// records and push the reduced set via `setPairedSensors` **before** calling this
+    /// — the lock is dropped across the disconnect below, so pushing afterwards leaves
+    /// a window in which `.discovered` reconnects the sensor under the old map.
     func unpair(peripheralID: UUID) async {
         lock.withLock {
             slots[peripheralID]?.reconnectTask?.cancel()

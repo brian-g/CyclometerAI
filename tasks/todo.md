@@ -112,6 +112,44 @@ checklist for the PR:
 - [ ] Reassigning Both → Cadence actually releases the speed role
 - [ ] Pairing a second sensor leaves the first connected and working
 
+## Review feedback (PR #89)
+
+Three comments, all valid, all fixed on the branch.
+
+**Two write-ordering races.** `pairedAssignments` is the gate `.discovered` consults before
+reconnecting, and `CSCClientState` is a lock-guarded class, not an actor — the lock is dropped across
+every `connect`/`disconnect`, so the event loop really does interleave with a feature effect. Both
+call sites tore down before pushing the narrowed map:
+
+- `unpairButtonTapped` — the sensor's next advertisement reconnected it holding roles, with no record
+  behind it.
+- `apply` — worse. `setRoles` strips an incumbent's last role and disconnects it; the incumbent then
+  advertised, reconnected under the stale map, and took the role straight back off the sensor the
+  rider had just chosen. The reassignment silently reversed itself.
+
+Both now push `setPairedSensors` first. The window is one advertising interval with the pairing scan
+running, so this was routine, not theoretical.
+
+*Why the tests missed it:* they used one `LockIsolated` spy per endpoint, which can only assert that
+both were called. `unpairSticks` in the client suite even drives the safe order by hand. Added
+`ClientCall` — a single interleaved log across `setPairedSensors` / `setRoles` / `unpair` — and two
+tests that pin the sequence.
+
+**Capability narrowing did not reach persistence.** The client narrowed its own slot and stopped
+there, so a pairing that outlived a firmware change would reconnect, re-narrow and re-claim on every
+launch, with the paired row advertising a role the hardware refuses. Fixed in the feature, not with a
+new client endpoint: `recomputeRoleStatesLocked` already ends in `broadcastDiscoveredLocked`, so the
+narrowed capabilities arrive on `.devicesUpdated` — `reconcileCapabilities` drops the contradicted
+records through the existing `apply` funnel and unpairs a peripheral left holding nothing (`setRoles`
+rejects an empty set). It converges on the second pass. Capabilities that were never read correct
+nothing.
+
+`.devicesUpdated` uses `.concatenate` rather than `.merge` where reconciliation and a pending pairing
+coincide: both effects push an assignment map, and the one built last has to land last.
+
+Suite: 302 passing, same single pre-existing `HeroNumberSnapshotTests.testCustomColor()` failure.
+BLE.md §5.0 gained the ordering rule as a table, §12 five test rows.
+
 ## Left for the follow-ups
 - `ConnectedService` ownership is still open — its Keychain-identifier pattern is a different problem
   and nothing consumes it yet (DataModel.md §3.6).

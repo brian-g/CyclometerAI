@@ -250,6 +250,25 @@ All CSC sensors (`0x1816`) go through role assignment when paired in S11 (Device
 > - **The read can go unanswered.** A failed read produces no event at all, so a sensor that doesn't
 >   expose 0x2A5C never reaches step 3. The measurement-flags inference survives as the fallback for
 >   exactly that case — one pedal stroke later, and only while no authoritative capabilities exist.
+> - **Capabilities correct the record, not just the connection.** If a sensor reports it cannot fill a
+>   role it is persisted in — a pairing that outlived a firmware change — the client narrows its own
+>   slot *and* `DeviceManagementFeature` drops the record. Without the second half every launch
+>   reconnects, re-narrows, and the paired row goes on claiming a role the hardware refuses. A
+>   peripheral that narrows to no roles at all is unpaired outright, since `setRoles` rejects an empty
+>   set. Capabilities that were never read say nothing and correct nothing.
+
+**Write ordering rule.** `pairedAssignments` inside `BLECSCClient` is the gate `.discovered` consults
+before reconnecting anything, and the client drops its lock across every connect and disconnect. So
+**`setPairedSensors` must be pushed before any teardown**, never after:
+
+| Action | Correct order | What the other order does |
+|---|---|---|
+| Unpair | `setPairedSensors` → `unpair` | `unpair` drops the slot but leaves the peripheral in the assignment map; its next advertisement reconnects it holding roles, with no record behind it |
+| Reassign a role | `setPairedSensors` → `setRoles` | `setRoles` strips the incumbent's last role and disconnects it; until the new map lands, its next advertisement reconnects it under the old one and takes the role straight back off the sensor the rider chose |
+
+The window is about one advertising interval wide, and the pairing scan is running throughout — this
+is a routine race, not a theoretical one. Tests must assert a single interleaved call log; one spy per
+endpoint can only show that both were called, which is what let both orderings through review on #67.
 
 **Key rules:**
 - The same physical device (same `CBPeripheral.identifier`) may fill both the Speed and Cadence roles simultaneously. Both `SpeedFeature` and `CadenceFeature` will connect to and subscribe to the same peripheral; each reads only its relevant data fields from the shared CSC notification stream.
@@ -736,6 +755,11 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | Role reassignment releases the old role | Both → Cadence strips Speed from the same peripheral (`setRoles` assigns, never unions) |
 | Unpaired sensors are never connected | A discovered peripheral with no `PairedSensor` record is listed but not connected |
 | Pairings survive relaunch | Records pushed via `setPairedSensors` at launch reconnect on the next advertisement |
+| Unpair pushes before releasing | The call log is `setPairedSensors` then `unpair`, not merely both — see the ordering rule below |
+| Reassignment pushes before moving the role | The call log is `setPairedSensors` then `setRoles` |
+| Narrowed capabilities correct the record | A persisted role the hardware reports it cannot fill is dropped from `pairedSensors`, not only from the live slot |
+| Narrowing to no roles releases the sensor | The last surviving role going away unpairs the peripheral outright |
+| Narrowing is silent without a contradiction | Records inside the advertised capabilities, and peripherals that never answered the read, are left alone |
 | Combo sensor assigned Both | SpeedFeature and CadenceFeature both connect to same peripheral UUID |
 | Speed-only peripheral + combo Cadence-only | Both features active simultaneously on different peripherals |
 | Radar sidebar hidden when no radar paired | `RadarFeature.State.isPaired == false` → sidebar absent |

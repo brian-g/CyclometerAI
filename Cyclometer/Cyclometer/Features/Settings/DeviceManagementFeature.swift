@@ -104,26 +104,33 @@ struct DeviceManagementFeature {
 
             case .devicesUpdated(let devices):
                 state.devices = devices
+                let reconcile = reconcileCapabilities(devices, in: &state)
+
                 // A pairing in flight is waiting on the 0x2A5C read; the answer
                 // arrives here, on the device list, rather than as its own event.
                 guard let id = state.pendingPairing,
                       let capabilities = devices.first(where: { $0.id == id })?.capabilities
-                else { return .none }
+                else { return reconcile }
 
                 if capabilities.requiresRoleSelection {
                     state.roleDialog = Self.roleDialog(
                         for: id, name: devices.first { $0.id == id }?.name
                     )
-                    return .none
+                    return reconcile
                 }
                 state.pendingPairing = nil
                 let supported = capabilities.supportedRoles
                 guard !supported.isEmpty else {
                     // Reports neither wheel nor crank — nothing it can be used for.
-                    return .run { [bleCSCClient] _ in await bleCSCClient.unpair(id) }
+                    return .concatenate(
+                        reconcile,
+                        .run { [bleCSCClient] _ in await bleCSCClient.unpair(id) }
+                    )
                 }
                 // Single capability: assign it and ask nothing (BLE.md §5.0).
-                return apply(supported, to: id, in: &state)
+                // Sequential, not merged: both effects push an assignment map, and
+                // the one built last is the one that must land last.
+                return .concatenate(reconcile, apply(supported, to: id, in: &state))
 
             case .pairButtonTapped(let id):
                 state.pendingPairing = id
@@ -152,8 +159,14 @@ struct DeviceManagementFeature {
                 state.$preferences.withLock { $0.pairedSensors.removeAll { $0.peripheralID == id } }
                 let assignments = state.preferences.sensorAssignments
                 return .run { [bleCSCClient] _ in
-                    await bleCSCClient.unpair(id)
+                    // Close the reconnect gate *before* tearing the connection down.
+                    // `unpair` only drops the slot; `.discovered` consults
+                    // `pairedAssignments`, so the other order leaves a window in which
+                    // the sensor's next advertisement reconnects it — holding roles,
+                    // with no record behind it. The pairing scan is running, so that
+                    // window is about one advertising interval wide.
                     await bleCSCClient.setPairedSensors(assignments)
+                    await bleCSCClient.unpair(id)
                 }
             }
         }
@@ -182,8 +195,52 @@ struct DeviceManagementFeature {
         }
         let assignments = state.preferences.sensorAssignments
         return .run { [bleCSCClient] _ in
-            await bleCSCClient.setRoles(id, roles)
+            // Assignments first, for the same reason as unpair: `setRoles` can strip
+            // an incumbent's last role and disconnect it, and until the new map lands
+            // its next advertisement reconnects it under the old one — taking the role
+            // straight back off the sensor the rider just chose.
             await bleCSCClient.setPairedSensors(assignments)
+            await bleCSCClient.setRoles(id, roles)
+        }
+    }
+
+    /// Drop persisted roles the hardware has since reported it cannot fill.
+    ///
+    /// The rider can't create this state — the prompt only offers roles the
+    /// capabilities advertise — but a pairing can outlive a firmware change. The
+    /// client narrows its own slot when that happens (`narrowRolesLocked`); without
+    /// this the record never follows, so every launch reconnects, re-narrows, and the
+    /// paired row goes on claiming a role the sensor refuses.
+    ///
+    /// Only peripherals that published capabilities are considered: a read that never
+    /// answered says nothing about what the sensor can do.
+    private func reconcileCapabilities(
+        _ devices: [BLECSCClient.DiscoveredSensor], in state: inout State
+    ) -> Effect<Action> {
+        let corrections = devices.compactMap { device -> (id: UUID, surviving: Set<BLECSCClient.SensorRole>)? in
+            guard let supported = device.capabilities?.supportedRoles else { return nil }
+            let held = Set(
+                state.preferences.pairedSensors.filter { $0.peripheralID == device.id }.map(\.role)
+            )
+            guard !held.subtracting(supported).isEmpty else { return nil }
+            return (device.id, held.intersection(supported))
+        }
+        guard !corrections.isEmpty else { return .none }
+
+        state.$preferences.withLock { preferences in
+            for correction in corrections {
+                preferences.pairedSensors.removeAll {
+                    $0.peripheralID == correction.id && !correction.surviving.contains($0.role)
+                }
+            }
+        }
+        let assignments = state.preferences.sensorAssignments
+        // Nothing left to hold means the pairing is over: `setRoles` rejects an empty
+        // set, so releasing it has to go through `unpair`.
+        let orphaned = corrections.filter(\.surviving.isEmpty).map(\.id)
+        return .run { [bleCSCClient] _ in
+            await bleCSCClient.setPairedSensors(assignments)
+            for id in orphaned { await bleCSCClient.unpair(id) }
         }
     }
 
