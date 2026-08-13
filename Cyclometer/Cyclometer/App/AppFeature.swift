@@ -7,8 +7,11 @@ import SwiftData
 @Reducer
 struct AppFeature {
 
+    @Dependency(\.bleCSCClient) var bleCSCClient
+
     @ObservableState
     struct State: Equatable {
+        @SharedReader(.appPreferences) var preferences
         var selectedTab: Tab = .rides
         var activeRide: ActiveRideFeature.State? = nil
         @Presents var startSheet: StartSheetFeature.State? = nil
@@ -23,6 +26,7 @@ struct AppFeature {
     }
 
     enum Action {
+        case task
         case tabSelected(Tab)
         case startRideButtonTapped
         case startSheet(PresentationAction<StartSheetFeature.Action>)
@@ -42,6 +46,15 @@ struct AppFeature {
 
         Reduce { state, action in
             switch action {
+            case .task:
+                // The client holds no persistence, so the rider's pairings have to be
+                // handed to it before any scan can act on them. Here rather than in
+                // DeviceManagementFeature: sensors must reconnect on launch, not only
+                // while the Sensors screen happens to be open.
+                return .run { [bleCSCClient, assignments = state.preferences.sensorAssignments] _ in
+                    await bleCSCClient.setPairedSensors(assignments)
+                }
+
             case .tabSelected(let tab):
                 state.selectedTab = tab
                 return .none

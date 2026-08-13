@@ -94,7 +94,9 @@ struct AppView: View {
             }
         }
         .animation(.smooth, value: store.isDashboardPresented)
-
+        // Hands the rider's persisted pairings to BLECSCClient, which connects
+        // nothing it hasn't been told about.
+        .task { await store.send(.task).finish() }
     }
 }
 

@@ -231,11 +231,44 @@ All CSC sensors (`0x1816`) go through role assignment when paired in S11 (Device
      → Auto-assign: wheel-only → Speed; crank-only → Cadence
      → No prompt shown
 
-4. Store PairedSensor record(s) in Preferences:
-   - Role .speed  → pairedSpeedSensorId = peripheral.id
-   - Role .cadence → pairedCadenceSensorId = peripheral.id
-   - Role .both   → both fields set to same peripheral.id
+4. Store PairedSensor record(s) in AppPreferences — one per role:
+   - Speed   → one record, role .speed
+   - Cadence → one record, role .cadence
+   - Both    → two records, same peripheralID, different role
 ```
+
+> **Implemented (#67).** The `pairedSpeedSensorId` / `pairedCadenceSensorId` fields this step used to
+> name were replaced by role-keyed `PairedSensor` records (OQDM6); "Both" is a button, not a stored
+> value. Records live in the AppPreferences JSON document — DataModel.md §3.7.
+>
+> Two behaviours worth reading alongside the flow above:
+>
+> - **Pairing connects holding no roles.** Capabilities aren't known until 0x2A5C answers, and taking
+>   roles before the rider has chosen would strip them off whichever sensor currently holds them —
+>   knocking a working sensor offline to interrogate a new one. `pair` therefore connects with an
+>   empty role set (`Slot.isInterrogating`), and the rider's answer commits via `setRoles`.
+> - **The read can go unanswered.** A failed read produces no event at all, so a sensor that doesn't
+>   expose 0x2A5C never reaches step 3. The measurement-flags inference survives as the fallback for
+>   exactly that case — one pedal stroke later, and only while no authoritative capabilities exist.
+> - **Capabilities correct the record, not just the connection.** If a sensor reports it cannot fill a
+>   role it is persisted in — a pairing that outlived a firmware change — the client narrows its own
+>   slot *and* `DeviceManagementFeature` drops the record. Without the second half every launch
+>   reconnects, re-narrows, and the paired row goes on claiming a role the hardware refuses. A
+>   peripheral that narrows to no roles at all is unpaired outright, since `setRoles` rejects an empty
+>   set. Capabilities that were never read say nothing and correct nothing.
+
+**Write ordering rule.** `pairedAssignments` inside `BLECSCClient` is the gate `.discovered` consults
+before reconnecting anything, and the client drops its lock across every connect and disconnect. So
+**`setPairedSensors` must be pushed before any teardown**, never after:
+
+| Action | Correct order | What the other order does |
+|---|---|---|
+| Unpair | `setPairedSensors` → `unpair` | `unpair` drops the slot but leaves the peripheral in the assignment map; its next advertisement reconnects it holding roles, with no record behind it |
+| Reassign a role | `setPairedSensors` → `setRoles` | `setRoles` strips the incumbent's last role and disconnects it; until the new map lands, its next advertisement reconnects it under the old one and takes the role straight back off the sensor the rider chose |
+
+The window is about one advertising interval wide, and the pairing scan is running throughout — this
+is a routine race, not a theoretical one. Tests must assert a single interleaved call log; one spy per
+endpoint can only show that both were called, which is what let both orderings through review on #67.
 
 **Key rules:**
 - The same physical device (same `CBPeripheral.identifier`) may fill both the Speed and Cadence roles simultaneously. Both `SpeedFeature` and `CadenceFeature` will connect to and subscribe to the same peripheral; each reads only its relevant data fields from the shared CSC notification stream.
@@ -483,21 +516,25 @@ struct DiscoveredPeripheral: Sendable, Identifiable {
 }
 
 /// Capabilities read from CSC Feature characteristic (0x2A5C) on connect.
+/// Shipped as `BLECSCClient.Capabilities` (#67), with two corrections to the sketch below:
+/// the init is failable, and the field is read as 16-bit little-endian.
 struct CSCCapabilities: Sendable {
     let supportsWheelRevolutions: Bool    // bit 0 — can serve Speed role
     let supportsCrankRevolutions: Bool    // bit 1 — can serve Cadence role
 
-    init(featureData: Data) {
-        let flags = featureData.first ?? 0
-        supportsWheelRevolutions = (flags & 0x01) != 0
-        supportsCrankRevolutions = (flags & 0x02) != 0
-    }
+    /// Failable, not `featureData.first ?? 0`. An empty payload is a broken frame,
+    /// not a sensor reporting "supports nothing" — defaulting it to zero would strip
+    /// both roles off a working sensor.
+    init?(featureData: Data) { … }
 
     /// Role assignment behavior based on capabilities:
     /// - Both true  → ask rider: Speed, Cadence, or Both
     /// - Wheel only → auto-assign Speed; no question asked
     /// - Crank only → auto-assign Cadence; no question asked
     var requiresRoleSelection: Bool { supportsWheelRevolutions && supportsCrankRevolutions }
+
+    /// The roles this hardware can fill — what `setRoles` is validated against.
+    var supportedRoles: Set<SensorRole> { … }
 }
 
 /// The role a BLE peripheral plays in Cyclometer.
@@ -711,6 +748,18 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | CSC capabilities: wheel-only sensor | Auto-assigned Speed role; no role sheet shown |
 | CSC capabilities: crank-only sensor | Auto-assigned Cadence role; no role sheet shown |
 | CSC capabilities: combo sensor | Role sheet shown with Speed / Cadence / Both options |
+| 0x2A5C read is issued | Requested against 0x1816 when the CSC characteristics are discovered, independently of whether 0x2A5B is present |
+| Malformed 0x2A5C payload | Ignored — capabilities stay unknown and no role is released |
+| Sensor never answers 0x2A5C | Measurement flags narrow the roles instead, once data flows |
+| Pairing does not disturb a working sensor | Interrogating a new peripheral leaves the incumbent's roles and connection untouched |
+| Role reassignment releases the old role | Both → Cadence strips Speed from the same peripheral (`setRoles` assigns, never unions) |
+| Unpaired sensors are never connected | A discovered peripheral with no `PairedSensor` record is listed but not connected |
+| Pairings survive relaunch | Records pushed via `setPairedSensors` at launch reconnect on the next advertisement |
+| Unpair pushes before releasing | The call log is `setPairedSensors` then `unpair`, not merely both — see the ordering rule below |
+| Reassignment pushes before moving the role | The call log is `setPairedSensors` then `setRoles` |
+| Narrowed capabilities correct the record | A persisted role the hardware reports it cannot fill is dropped from `pairedSensors`, not only from the live slot |
+| Narrowing to no roles releases the sensor | The last surviving role going away unpairs the peripheral outright |
+| Narrowing is silent without a contradiction | Records inside the advertised capabilities, and peripherals that never answered the read, are left alone |
 | Combo sensor assigned Both | SpeedFeature and CadenceFeature both connect to same peripheral UUID |
 | Speed-only peripheral + combo Cadence-only | Both features active simultaneously on different peripherals |
 | Radar sidebar hidden when no radar paired | `RadarFeature.State.isPaired == false` → sidebar absent |
@@ -826,7 +875,7 @@ Recorded now so the M7 issue can be written from it rather than re-derived.
 | Pass `CBCentralManagerOptionRestoreIdentifierKey` at manager construction | `BLECentral.init` — `Clients/BLE/BLEClient.swift` |
 | Implement `centralManager(_:willRestoreState:)`, rehydrating `discovered` from `CBCentralManagerRestoredStatePeripheralsKey` | `BLECentral` |
 | Reassign `peripheral.delegate = self` on every restored peripheral — CoreBluetooth does not restore delegates | `BLECentral` |
-| Rebuild `connectionOwners`, which is **not** restorable from CoreBluetooth — the owner set is Cyclometer's own ref-count and must be reconstructed from persisted `PairedSensor` records (#67) | `BLECentral` + persistence |
+| Rebuild `connectionOwners`, which is **not** restorable from CoreBluetooth — the owner set is Cyclometer's own ref-count and must be reconstructed from persisted `PairedSensor` records. **The data exists as of #67**: `AppPreferences.sensorAssignments` gives peripheral → roles, and `BLECSCClient.setPairedSensors` is already the launch-time path that consumes it | `BLECentral` + persistence |
 | Rebuild per-client state: `CSCClientState.slots` (roles, calculators, names) and the radar client's target peripheral | `BLECSCClient`, `VariaRadarClient` |
 | Re-establish notification subscriptions, or verify restored peripherals arrive with `isNotifying` already true | all three sensor clients |
 | Decide restoration behavior when no ride is active — a relaunch that reconnects sensors with no ride running should stand down rather than hold connections open | `AppFeature` |
