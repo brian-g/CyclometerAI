@@ -40,12 +40,12 @@ struct RideDashboardView: View {
             VStack(spacing: Spacing.xs) {
                 grabber()
                     .gesture(dismissDrag)
-                if let banner = store.speed.sourceSwitchBanner {
-                    SourceSwitchBanner(text: banner)
+                if let banner = activeBanner {
+                    RideBanner(text: banner.text, icon: banner.icon)
                         .transition(bannerTransition)
                 }
             }
-            .animation(.default, value: store.speed.sourceSwitchBanner)
+            .animation(.default, value: activeBanner?.text)
         }
         .overlay(alignment: .bottom) {
             VStack(spacing: Spacing.xs) {
@@ -249,6 +249,16 @@ struct RideDashboardView: View {
     /// Reduce Motion swaps the slide-in for a plain fade.
     private var bannerTransition: AnyTransition {
         reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity)
+    }
+
+    /// The banner slot holds exactly one notice. Two sources can be armed at once —
+    /// a speed-source switch and a wheel auto-calibration — so they are resolved to a
+    /// single value here rather than each rendering its own capsule and stacking.
+    /// Source switching wins: it changes what the rider is currently reading.
+    private var activeBanner: (text: String, icon: String)? {
+        if let text = store.speed.sourceSwitchBanner { return (text, "shuffle") }
+        if let text = store.calibration.banner { return (text, "ruler") }
+        return nil
     }
 
     private func ringBell() {

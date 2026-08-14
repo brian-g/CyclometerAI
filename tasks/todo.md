@@ -160,3 +160,124 @@ BLE.md §5.0 gained the ordering rule as a table, §12 five test rows.
 - #70 (wheel auto-calibration) is unblocked: its gate is
   `bleCSCClient.connectionState(.speed) == .active`, which is now only ever true for a sensor the
   rider deliberately paired.
+
+---
+
+# #70 — WheelCalibrationFeature: GPS auto-calibration (M6)
+
+PRD §8.9's third way to set wheel circumference: compare BLE wheel distance against GPS distance
+while riding and correct the stored value when they disagree materially.
+
+- [x] `BLECSCClient.wheelRevolutions()` — per-measurement revolution deltas for the speed role
+- [x] `CSCCalculator.lastCountedRevolutions` — counts travel on paths that emit no rate
+- [x] `WheelCalibration` — thresholds + correction arithmetic, pure and standalone
+- [x] `WheelCalibrationFeature` — windowing, gates, confirmation, commit
+- [x] `ActiveRideFeature` wiring — scope, GPS forward, suspension via `onChange`
+- [x] `SourceSwitchBanner` → `RideBanner` with an `icon` parameter; one resolved banner slot
+- [x] Tests: 11 math, 11 reducer, 7 revolution-counting, 2 client-stream, plus parent updates
+
+## Review
+
+**Three findings changed the design mid-plan.**
+
+1. **GPS distance is `Σ speed × Δt`, not summed coordinate hops.** Summing `CLLocation.distance(from:)`
+   between ~1 Hz fixes measures `|true + noise|`, which is biased *upward* by roughly the size of the
+   5% trigger threshold itself at realistic fix noise — it would have inflated the circumference on
+   every window under tree cover. Doppler speed error is zero-mean and averages out. This also
+   deleted the last-coordinate anchor entirely.
+2. **Revolutions must be counted where `update` returns nil.** The calculator drops the first moving
+   sample after a stop because the 16-bit event time wrapped and the *rate* is unknowable — but the
+   revolution *count* is exact. Losing it costs ~10 m per stop; three stops in a 500 m window is a 6%
+   fabricated discrepancy, biased the same way as (1). Split via a `lastCountedRevolutions`
+   companion property rather than changing `update`'s return type, which also left all 14 existing
+   calculator assertions untouched.
+3. **A reconnect gap voids the window.** The client resets the wheel calculator on disconnect while
+   GPS keeps flowing; a 20 s dropout at 25 km/h is a 28% phantom discrepancy.
+
+**The invariant worth remembering:** every gate suppresses *both* accumulators. Rejecting a
+poor-accuracy fix while revolutions keep accruing is bug (2) wearing a different hat. Gates are
+sticky flags read at sample time, not per-sample filters.
+
+**Two things the tests forced.** `TestStore.state` is get-only, so a parent-written flag can't be
+exercised from the child's own store — suspension became a real action with a change-guard
+(`Reducer.onChange`) in the parent. And an explicit `stopListening` at ride end *raced* `AppFeature`'s
+`ifLet` teardown, which already cancels child effects; the action arrived after child state was nil.
+Removing it fixed a genuine ordering bug rather than a test artifact.
+
+**Deliberately not built:** no `AlertLevel`/`Comparable` ordering on `ThreatLevel` (only `.allClear` is
+non-alerting, so `contains` is the whole requirement — and inventing an ordering would collide with
+M4); no new `AppPreferences` field, since `lastCalibrationAt` and the commit counter are ride-scoped;
+turn-alert suspension deferred until `NavigationFeature` exists.
+
+**Verification:** 325 unit tests, 324 passing — the one failure is the documented pre-existing
+`HeroNumberSnapshotTests.testCustomColor()`, confirmed still failing with the branch stashed.
+Not verified on hardware: no rider, no paired CSC sensor, no GPS. The commit path, the ±10% cap and
+the accuracy/gap gates are exercised only against synthetic fixes.
+
+## Left for the follow-ups
+- #72 (M6 unit tests) should add the source-switching cases; the calibration math and wiring are
+  covered here.
+- Residual accepted error: BLE notifications and GPS fixes land on independent ~1 Hz phases, so up to
+  ~1 s of revolutions (≈7 m, ~1.4% of a window) can fall on the wrong side of a boundary. Under the
+  threshold, and the two-window confirmation covers the rest.
+- A store constructed directly at `.paused`/`.idle` (tests only) starts with the child's
+  `isSuspended` default rather than the parent's derived value; the app always transitions through
+  `.task`, so this never happens in practice.
+
+### Field test 1 (2026-08-14) — both rides correct, but unobservable
+
+Rode 1 mi at 700 x 25c (no correction), then 1 mi at 26 x 2.0 (no correction, distance under-reported).
+**Both outcomes were right.** 26 x 2.0 is 2051 mm against a ~2105 mm wheel — a 2.57% discrepancy,
+under the 5% trigger. The ~2.6% distance error observed is the same number seen from the other side.
+
+The real defect the test exposed is that **a correctly-silent ride and a broken one looked identical**:
+the only log line was on commit. Added `.notice` logging for each completed window (GPS metres,
+revolutions, measured vs stored mm, discrepancy against threshold), for the confirmation streak, and
+for every gate transition (sensor, GPS accuracy/speed). A ride that never accumulates now says so.
+
+To actually exercise the trigger, a preset >5% off is needed — **29 x 2.1 (2288 mm) is 8.69% against a
+700 x 25c wheel**, inside the ±10% cap, so one correction lands it. Needs ~1 km for two windows.
+
+### Threshold research (2026-08-14) — 5% → 2%, window 500 m → 1500 m
+
+**5% excluded everything the feature exists for.** PRD §8.9 justifies auto-calibration as correcting
+tread wear (0.3–0.8%), inflation (0.3–1%) and rider weight (0.3–0.5%) — all an order of magnitude
+under the trigger. Sheldon Brown puts the target population, riders on a default or charted wheel
+size, at "2% or more". A real Edge 830 field report was 60 mm ≈ 2.85%. None of it was reachable.
+
+The preset table is the clearest evidence: of 28 pairs, only 8 were catchable at 5%, **and every one
+involved 29×2.1 or 26×2.0**. The whole 700c range spans 3.44%, so no road rider who picked the wrong
+700c preset could ever be corrected. At 2% it is 18/28 pairs, 5 of them road-only.
+
+Headroom was never the constraint — GPS speed error is zero-mean and averages down as √N, so the
+floor is far below 5%. At 1500 m: boundary sd 0.27%, GPS sd 0.41%, combined **0.49%**. 2% is 4.1σ,
+and it must hold across two consecutive windows in the same direction.
+
+**A boundary "fix" was proposed, approved, implemented — and then reverted, because it was wrong.**
+The reasoning was that the delta straddling a window start hands the wheel a free head start, so it
+should be discarded. It does — but the riding *after* the last delta before the window closes is
+symmetrically uncounted, and the two truncations cancel. A Monte Carlo of the two boundaries settled
+it: counting the straddling delta gives mean −0.001 s (sd 0.41 s); discarding it gives mean
+**−1.000 s**, i.e. a systematic −0.67% at 1500 m, biasing every correction toward a larger wheel.
+The original code already had the property being paid for. Reverted; the reasoning is now a comment
+on `wheelRevolutionsReceived` so nobody re-proposes it.
+
+Sources: [Sheldon Brown on cyclecomputer accuracy](https://sheldonbrown.com/cyclecomputer-accuracy.html),
+[calibration](https://sheldonbrown.com/cyclecomputer-calibration.html),
+[Garmin forum — auto-calibration is a slow moving average, no threshold](https://forums.garmin.com/sports-fitness/cycling/f/accessories-sensors/157669/re-calibration-of-the-speed-sensor).
+Per-factor magnitudes are from corroborating cycling-calculator sites, not instrumented measurement.
+PRD §8.9 still documents 5% / 500 m — **the spec needs updating to match.**
+
+### PRD updated to match (2026-08-14) — v0.4.3
+
+`assets/PRD.md` §8.9 now documents 2% / 1,500 m, the two-window confirmation, the 3-per-ride cap,
+out-of-range rejection, Doppler-speed integration, and pause-vs-discard suspension semantics.
+New **§8.9.2** research note records the evidence, the Garmin contrast, and the rejected boundary
+"fix" so it is not re-proposed. Acceptance criteria ticked except hardware verification. OQ13
+resolution line, revision history (0.4.3) and version header updated; `TCA.md` §4.11 and
+`DataModel.md` §10 test table brought in line.
+
+One claim was corrected while writing it up: the preset-pair count is over **56 ordered
+(stored, actual) combinations**, not 28 unordered ones — the discrepancy divides by the *true*
+circumference, so it is not symmetric. 17/56 catchable at 5% (none road-only) vs 36/56 at 2%
+(10 road-only).

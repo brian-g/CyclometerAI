@@ -1,6 +1,6 @@
 # Cyclometer — Product Requirements Document
-**Version:** 0.4.2 Draft  
-**Date:** 2026-07-07  
+**Version:** 0.4.3 Draft  
+**Date:** 2026-08-14  
 **Status:** Fourth Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
 **Platform:** iOS 26+ · iPhone-first · Apple Watch companion  
@@ -19,6 +19,7 @@
 | 0.4 | 2026-05-20 | Brian / Claude | iOS minimum updated to 26.0; S05.4, S05.5, S19, S20 added to screen inventory; OQ14 resolved (Option F sidebar); L3 haptic updated to Core Haptics; Routes tab added and promoted to Phase 2; deferred alert-configuration fields removed from UserProfile |
 | 0.4.1 | 2026-06-12 | Brian / Claude | OQBLE1 resolved (separate Speed/Cadence roles per `BLE.md`); M6 milestone wording clarified — CSC client is built in M2 (#20), M6 wires it into the metrics pipeline; wheel circumference presets + manual entry moved from M10 to M6 to align with GitHub milestone scoping |
 | 0.4.2 | 2026-07-07 | Brian / Claude | Milestone execution order re-sequenced: M3 -> M6 -> M10 -> M4 -> M5 -> M7-M12; GitHub milestone due dates updated to match; minimal BLE pairing sheet + CSC role assignment pulled forward into M6 (full S11 device management remains in M10); M6 issue set created (#65-#72) |
+| 0.4.3 | 2026-08-14 | Brian / Claude | §8.9 auto-calibration revised after the first field test (#70): discrepancy threshold 5% -> 2%, measurement window 500 m -> 1,500 m, two-window confirmation and a 3-per-ride cap added, out-of-range results rejected rather than clamped, GPS distance specified as Doppler-speed integration rather than position differencing; §8.9.2 added recording the evidence |
 
 ---
 
@@ -602,25 +603,31 @@ Riders can configure wheel circumference using one of three methods:
 
 **GPS Auto-Calibration Algorithm:**
 - Runs continuously during active ride when both BLE speed sensor and GPS are active
-- Measurement window: rolling 500-meter GPS distance minimum (to accumulate sufficient data for reliable comparison)
-- Discrepancy threshold: if `|BLE distance − GPS distance| / GPS distance > 5%` over the measurement window, trigger calibration
+- Measurement window: rolling 1,500-meter GPS distance minimum (revised from 500 m — see §8.9.2)
+- Discrepancy threshold: if `|BLE distance − GPS distance| / GPS distance > 2%` over the measurement window, trigger calibration (revised from 5% — see §8.9.2)
+- Confirmation: the discrepancy must exceed the threshold in the **same direction across two consecutive windows** before a correction is committed. A single anomalous window changes nothing
 - Calibration adjustment: `new circumference = stored circumference × (GPS distance / BLE distance)`
 - Maximum single adjustment: ±10% of stored value (guards against GPS spikes causing overcorrection)
+- Results outside the 1,500–3,000 mm sanity range are **rejected, not clamped** — a value that implausible means the measurement was wrong, and pinning it to a boundary would commit garbage while looking deliberate
+- Maximum 3 corrections per ride
+- GPS distance is derived by integrating Doppler ground speed over time, **not** by summing the distance between successive position fixes. Position differencing measures `|true + noise|`, which is biased *upward* by roughly the size of the trigger threshold itself at realistic fix noise; speed error is zero-mean and averages out across the window
 - After calibration: updated circumference is saved to `AppPreferences.wheelCircumferenceMM`; rider is notified via a brief non-intrusive banner: "Wheel size auto-adjusted to [N] mm"
-- Calibration is suspended during L2/L3 radar alerts, map-following turn alerts, or when GPS horizontal accuracy is > 10 meters (unreliable GPS)
+- Calibration is suspended during L2/L3 radar alerts, map-following turn alerts, or when GPS horizontal accuracy is > 10 meters (unreliable GPS). Suspension *pauses* the window rather than discarding it — a rider in traffic would otherwise never complete one, which is exactly the rider who uses radar most
+- The window is discarded outright when the BLE speed sensor leaves its connected state: a reconnect gap loses revolutions that GPS kept counting through, which would fabricate a large discrepancy
 
-**Rationale:** GPS is not precise enough for per-second speed measurement (hence BLE priority) but is accurate enough over 500-meter windows for circumference calibration. A 5% discrepancy threshold prevents constant micro-adjustments while catching meaningful drift from tire pressure changes or load.
+**Rationale:** GPS is not precise enough for per-second speed measurement (hence BLE priority) but is accurate enough over a window of this length for circumference calibration, because its error is zero-mean and averages down as `√N`. The threshold prevents constant micro-adjustments while staying low enough to catch the drift the feature exists for; §8.9.2 records why the original 5% did not.
 
 **Acceptance Criteria:**
 - [x] All preset sizes available in S12, labelled as printed on the tire sidewall ("700 x 25c", "650b x 47", "29 x 2.1"). Circumference in mm is *not* shown against each preset — riders choose by tire size, and surfacing both made the row wrap; the mm value appears only when Custom is selected, where it is the thing being edited
 - [x] Manual entry accepts values in range 1,500–3,000 mm (reasonable sanity bounds); out-of-range entries are rejected and the field reverts to the stored value
-- [ ] Auto-calibration triggers correctly when 5% discrepancy sustained over 500m GPS window
-- [ ] Auto-calibration does not trigger when GPS horizontal accuracy > 10m
-- [ ] Calibration adjustment capped at ±10% per event
-- [ ] Updated circumference persisted to AppPreferences immediately (#70; UserProfile was split into RiderProfile + AppPreferences — see DataModel.md §3.6)
-- [ ] Banner notification displayed when auto-calibration fires
-- [ ] Calibration disabled when GPS-only speed mode is active (no BLE sensor connected)
-- [ ] Unit tested: calibration math correct for a range of known discrepancy scenarios
+- [x] Auto-calibration triggers correctly when 2% discrepancy sustained over two consecutive 1,500 m GPS windows; a single qualifying window does not commit
+- [x] Auto-calibration does not trigger when GPS horizontal accuracy > 10m
+- [x] Calibration adjustment capped at ±10% per event, and a result outside 1,500–3,000 mm is rejected rather than clamped
+- [x] Updated circumference persisted to AppPreferences immediately (#70; UserProfile was split into RiderProfile + AppPreferences — see DataModel.md §3.6)
+- [x] Banner notification displayed when auto-calibration fires
+- [x] Calibration disabled when GPS-only speed mode is active (no BLE sensor connected)
+- [x] Unit tested: calibration math correct for a range of known discrepancy scenarios
+- [ ] Verified on hardware: no ride has yet exercised a commit. The first field test (2026-08-14) used presets 2.57% apart, which was correctly silent under the then-current 5% threshold but proved nothing about the commit path
 
 ---
 
@@ -673,6 +680,70 @@ page would not render for retrieval). No user research was conducted with Cyclom
 audience — point 3 is reasoning from the product's price point and positioning, not measured data.
 The decision is biased toward the option that stays cheap to reverse: adding a `Wheelset` entity
 later is additive, whereas removing one that riders have populated is not.
+
+---
+
+### 8.9.2 Why the Trigger Threshold Moved from 5% to 2% — Research Note
+
+**Question (raised by the first field test, 2026-08-14):** a rider deliberately set the wrong preset,
+rode a mile, and saw no correction — only a wrong distance. Was 5% too coarse to be useful?
+
+**Finding: yes. 5% excluded every cause this feature was written to correct.**
+
+**1. The spec's own rationale sat an order of magnitude below its own threshold.** §8.9 justifies
+auto-calibration as correcting "tire wear, inflation changes, and rider weight variations". Measured
+magnitudes: tread wear over a tyre's life 0.3–0.8%, inflation low-vs-high 0.3–1.0%, rider weight
+150 lb vs 200 lb about 0.5%. None of it is visible at 5%.
+
+**2. The population that most needs it is at ~2%.** Sheldon Brown, the standard reference on
+cyclecomputer calibration:
+
+> "Many if not most cyclists set cyclecomputers to a default value for wheel size, which can easily
+> be off by 2% or more."
+> — [Sheldon Brown, cyclecomputer accuracy](https://sheldonbrown.com/cyclecomputer-accuracy.html)
+
+Chart- and ETRTO-derived values are quoted as accurate "to within one or two percent". A field report
+on a Garmin Edge 830 put one rider's discrepancy at 60 mm — about 2.85%. All of it invisible at 5%.
+
+**3. The preset table proves it independently.** Take every way a rider could store one preset while
+actually rolling another — 56 ordered (stored, actual) combinations from §8.9's own list, since the
+discrepancy is measured against the true wheel and so is not symmetric. Only 17 exceed 5%, **and
+every one of them involves 29 × 2.1 or 26 × 2.0**. Not a single road-only combination is catchable:
+the entire 700c range spans 3.44%, so a rider who picked the wrong 700c preset — the most likely
+configuration mistake there is — could never be corrected. At 2% it is 36 of 56, 10 of them
+road-only.
+
+**4. The headroom was never needed.** GPS distance is integrated from Doppler ground speed, whose
+error is zero-mean and averages down as `√N`. Over a 1,500 m window the measurement floor is about
+0.49% (1σ): ~0.41% from GPS, ~0.27% from where the window boundaries fall relative to the ~1 Hz BLE
+notifications. A 2% threshold sits 4.1σ above that, and must additionally hold across two consecutive
+windows in the same direction. 5% was roughly 10σ — margin bought by giving up the use case.
+
+**5. For contrast, Garmin uses no threshold at all** — wheel size is "adjusted using GPS data that is
+run through a slow moving average", recomputed continuously throughout the activity
+([Garmin forums](https://forums.garmin.com/sports-fitness/cycling/f/accessories-sensors/157669/re-calibration-of-the-speed-sensor)).
+A step correction behind a threshold is the more conservative design; it just has to be reachable.
+
+**Decision:**
+- Threshold **5% → 2%**; window **500 m → 1,500 m**. The window grew because the boundary term is a
+  fixed *duration*, so it shrinks only with distance — at 500 m its spread is ~0.8%, too close to a
+  2% threshold. Cost: a correction now needs ~3 km of clean riding rather than ~1 km.
+- Two-window confirmation and a 3-per-ride cap added, since a lower threshold fires more readily and
+  a commit silently rewrites a setting the rider chose.
+
+**A rejected change, recorded so it is not re-proposed.** It was argued that the revolution delta
+straddling a window start should be discarded, since it covers ground partly ridden before the window
+opened. It does — but the riding after the *last* delta before the window closes is symmetrically
+uncounted, and the two truncations cancel. Monte Carlo over both boundaries: counting the straddling
+delta gives a mean error of −0.001 s (sd 0.41 s); discarding it gives **−1.000 s**, a systematic
+−0.67% at 1,500 m that would bias every correction toward a larger wheel. The straddling delta is
+counted.
+
+**Evidence quality — stated plainly.** The Sheldon Brown figures and the Garmin mechanism are from
+authoritative or primary sources. The per-factor magnitudes in point 1 come from corroborating
+cycling-calculator sites, **not** instrumented measurement — treat them as order-of-magnitude. The
+noise-floor and boundary figures are calculated from the implementation and simulated, not measured
+on hardware; no ride has yet exercised a commit at any threshold.
 
 ---
 
@@ -1162,7 +1233,7 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detec
 | OQ10 | TestFlight beta: open or closed? | Product | Low | ✅ **Resolved: Open beta** |
 | OQ11 | Does Garmin Varia RTL515/RCT715 expose radar return signal amplitude over BLE for vehicle size inference? | Engineering | Medium | ✅ **Resolved: No it does not** |
 | OQ12 | Navigation: `MKDirections` routing or GPX import only? | Design | Medium | ✅ **Resolved: GPX import only. No in-app route creation in MVP.** |
-| OQ13 | Wheel circumference presets and calibration? | Design | Low | ✅ **Resolved: Common presets (700c, 650b, 29", 26") + manual entry + GPS auto-calibration at 5% discrepancy threshold over 500m window. See §8.9.** |
+| OQ13 | Wheel circumference presets and calibration? | Design | Low | ✅ **Resolved: Common presets (700c, 650b, 29", 26") + manual entry + GPS auto-calibration at 2% discrepancy threshold over two consecutive 1,500 m windows (revised from 5% / 500 m — see §8.9.2). See §8.9.** |
 | OQ14 | Radar visualization approach: arc, strip, ring, adaptive, or map overlay? | Design | High | ✅ **Resolved: Option F — right-side sidebar strip with car icons; vehicle position encodes relative distance. See §8.2 and `assets/design/Design.sketch` — S06.** |
 | OQ15 | Vehicle pass detection: minimum approach distance threshold before qualifying as a pass vs. turn-off? | Engineering | Medium | Open — requires field testing with RTL515/RCT715 to determine realistic detection parameters |
 | OQ16 | Audio tone fine-tuning: exact frequencies, durations, and waveforms validated on real ride (phone in jersey pocket at speed)? | Design | Medium | Open — `Audio.md §Acceptance Criteria` defines test requirements; field test required before M4 freeze |
