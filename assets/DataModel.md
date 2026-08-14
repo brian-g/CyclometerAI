@@ -335,6 +335,12 @@ final class VehiclePassEvent {
 
 Stores the rider's physiological data for Karvonen HR zone calculation. Exactly one record exists, created during onboarding.
 
+> **M10 lands this entity with manual entry** (UX.md §S12 HR Zones). M10 runs before M5, so HealthKit does
+> not exist yet: the rider types max and resting HR, `heartRateSourceIsAppleHealth` stays `false`, and the
+> zones are computed by Karvonen (§8). M5 adds the Health read in front of the same fields and flips the flag
+> when values come from there — no schema change, which is why the entity is worth landing in full now rather
+> than shimming it.
+
 ```swift
 /// OQDM5 resolved: split from UserProfile. Physiology only.
 @Model
@@ -445,11 +451,19 @@ var preferredUnit: UnitSystem       // Defaults from iOS device locale.
 var mapOrientation: MapOrientation
 var isAutoPauseEnabled: Bool
 var isAutoDimEnabled: Bool
-var shouldSetDoNotDisturb: Bool
 
 enum UnitSystem: String, Codable { case metric, imperial }
 enum MapOrientation: String, Codable { case headingUp, northUp }
 ```
+
+> **`shouldSetDoNotDisturb` removed 2026-08-14 (M10).** iOS exposes no public API for an app to enable a
+> Focus, so the field had no behavior to persist and the S12 toggle it backed has been deleted (UX.md §S12).
+> Nothing has shipped reading or writing it, so there is no migration — the decode-strictness rule below
+> would reject a document containing it, and none exists.
+
+> **`isAutoDimEnabled` is real and implementable**, unlike its neighbor: `UIApplication.shared
+> .isIdleTimerDisabled` is public API, and auto-dim means declining to hold the idle timer open during a
+> ride rather than setting screen brightness directly.
 
 **Resolved (#67) — PairedSensor is a nested `Codable` array, not a `@Model`.** §3.6 previously held
 these as cascade-deleting `@Relationship` collections. With AppPreferences out of SwiftData that is
@@ -480,6 +494,21 @@ One BLE sensor in a specific role. A single physical device may appear twice —
 > **Not a SwiftData `@Model` (#67).** A `Codable` struct nested in the AppPreferences document — the reasoning is in §3.6's resolved note.
 
 > **Role-keyed lookup is an MVP simplification.** One sensor per role, app-wide. Phase 2 gives every bike its own speed, cadence, radar and power sensors, so the lookup key becomes (bike, role) — see §3.9. Heart rate is the exception: the strap follows the rider, not the bike.
+
+**One record per role, enforced by a prompt (2026-08-14, M10).** Pairing a sensor into an occupied role does
+not append a second record and does not silently overwrite the first. S11 raises a replace-or-cancel
+confirmation naming the incumbent, and only Replace writes (UX.md §S11). The consequences for this entity:
+
+- **The collection stays keyed by role.** `pairedSensor(for:)` returns at most one record, and no arbitration
+  rule is needed at connect time. An earlier reading of UX.md §S11 — "active source by connection order,
+  first wins" — was taken to mean several sensors of one type could be paired simultaneously. It does not:
+  the rider resolves the collision at pairing time, so there is never more than one candidate to arbitrate
+  between.
+- **Replace is a two-part write.** The incumbent's record for the colliding role is removed and the new one
+  added in the same `withLock` mutation, so no intermediate state has the role vacant or doubly occupied.
+- **A partial replace can leave a peripheral holding no roles**, when a combo sensor is displaced on one role
+  and never held the other. That peripheral is unpaired outright — `setRoles` rejects an empty set (BLE.md
+  §5.0), so a zero-role record is not representable.
 
 **Implemented today** (`Cyclometer/Cyclometer/Models/PairedSensor.swift`):
 
@@ -527,6 +556,11 @@ enum SensorRole: String, Codable, Sendable {
 ### 3.8 ConnectedService
 
 A connected third-party service. OAuth tokens live in the iOS Keychain; this entity holds only the lookup key and display metadata.
+
+> **Deferred to Phase 2 (M13), 2026-08-14.** The S12 Accounts section that would create these records has
+> moved out of MVP (UX.md §S12), and its only other consumer — the Ride Summary sync sheet — was already
+> Phase 2. Nothing in MVP reads or writes this entity, so it stays specified and unimplemented. The ownership
+> question below is deferred with it.
 
 > Same open ownership question as §3.7 — no `@Relationship` owner since #69.
 
@@ -898,4 +932,4 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 
 ---
 
-*Cyclometer Data Model Spec v1.2 · 2026-08-03*
+*Cyclometer Data Model Spec v1.3 · 2026-08-14*
