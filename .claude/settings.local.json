@@ -23,7 +23,9 @@
       "Bash(find \"/Applications/SF Symbols.app/Contents\" -name \"symbolTemplate*\" -o -name \"SymbolTemplate*\" 2>/dev/null | head -10)",
       "Bash(python3 -)",
       "Bash(git checkout *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(xcrun xcresulttool *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d\\)[:3000]\\)\")"
     ]
   },
   "spinnerTipsEnabled": false
