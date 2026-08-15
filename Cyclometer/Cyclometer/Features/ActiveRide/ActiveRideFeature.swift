@@ -32,6 +32,7 @@ struct ActiveRideFeature {
         var maxHeartRate: Int = 190
         var restingHeartRate: Int = 55
         var speed = SpeedFeature.State()
+        var calibration = WheelCalibrationFeature.State()
         var maxSpeedKPH: Double = 0
         var speedSampleCount: Int = 0
         var speedSampleSum: Double = 0
@@ -63,6 +64,13 @@ struct ActiveRideFeature {
         var isLocationAvailable: Bool = false
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
+        /// Wheel auto-calibration stands down while the rider has something more
+        /// urgent to attend to, and whenever the ride isn't actively recording — a
+        /// paused ride still receives GPS fixes, and stationary scatter would poison
+        /// the window (PRD §8.9).
+        var isCalibrationSuspended: Bool {
+            recordingState != .active || radarTargets.contains { $0.threatLevel != .allClear }
+        }
         // Defaults to the device locale's measurement system. This is a *read*
         // preference, so in TCA it ideally lives as shared state (`@Shared`) or
         // behind a settings dependency rather than per-feature State — that move
@@ -88,6 +96,7 @@ struct ActiveRideFeature {
         case radarConnectionChanged(VariaRadarClient.ConnectionState)
         case radarReconnectTimedOut
         case speed(SpeedFeature.Action)
+        case calibration(WheelCalibrationFeature.Action)
         case locationUpdated(LocationUpdate)
         case locationAuthorizationResult(CLAuthorizationStatus)
 
@@ -106,6 +115,9 @@ struct ActiveRideFeature {
         Scope(state: \.cadence, action: \.cadence) {
             CadenceFeature()
         }
+        Scope(state: \.calibration, action: \.calibration) {
+            WheelCalibrationFeature()
+        }
         Reduce { state, action in
             switch action {
             case .task:
@@ -113,6 +125,7 @@ struct ActiveRideFeature {
                 return .merge(
                     .send(.speed(.startListening)),
                     .send(.cadence(.startListening)),
+                    .send(.calibration(.startListening)),
                     .run { send in
                         for await _ in clock.timer(interval: .seconds(1)) {
                             await send(.elapsedTick)
@@ -262,12 +275,25 @@ struct ActiveRideFeature {
                     state.speedSampleSum += kph
                 }
                 if kph > state.maxSpeedKPH { state.maxSpeedKPH = kph }
-                return .send(.speed(.gpsSpeedReceived(update.speed)))
+                return .merge(
+                    .send(.speed(.gpsSpeedReceived(update.speed))),
+                    .send(.calibration(.locationUpdated(update)))
+                )
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = (status == .authorizedWhenInUse || status == .authorizedAlways)
                 return .none
             case .speed:
                 return .none
+            case .calibration:
+                return .none
+            }
+        }
+        // Radar targets arrive continuously and recording state changes from five
+        // places, but suspension itself flips rarely — so it is forwarded on the
+        // transition rather than on every input that feeds it.
+        .onChange(of: \.isCalibrationSuspended) { _, isSuspended in
+            Reduce { _, _ in
+                .send(.calibration(.suspensionChanged(isSuspended)))
             }
         }
         .ifLet(\.$finishAlert, action: \.finishAlert)

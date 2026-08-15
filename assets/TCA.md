@@ -613,7 +613,7 @@ struct TrackPointRecorderFeature {
 
 ### 4.11 WheelCalibrationFeature
 
-Compares BLE-derived distance against GPS-derived distance over 500m windows and adjusts `wheelCircumferenceMM`.
+Compares BLE-derived distance against GPS-derived distance over 1,500 m windows and adjusts `wheelCircumferenceMM`. Thresholds and their rationale are in PRD §8.9 / §8.9.2; the constants live on `WheelCalibration`.
 
 ```swift
 @Reducer
@@ -623,8 +623,8 @@ struct WheelCalibrationFeature {
         var isActive: Bool = true
         var bleDistanceAccumulator: Double = 0     // meters since window start
         var gpsDistanceAccumulator: Double = 0     // meters since window start
-        var windowThresholdMeters: Double = 500
-        var discrepancyThresholdPct: Double = 0.05
+        var windowThresholdMeters: Double = 1500
+        var discrepancyThresholdPct: Double = 0.02
         var currentCircumferenceMM: Int = 2096
         var lastCalibrationAt: Date? = nil
     }
@@ -1066,7 +1066,7 @@ func testL3AlertFiresHapticAndAudio() async {
 | `SpeedFeature` | BLE, GPS fallback, CSC wheel calc, source badge; shared-peripheral scenarios |
 | `CadenceFeature` | BLE, CSC crank calc; "--" when no source; shared-peripheral with SpeedFeature |
 | `TrackPointRecorderFeature` | 30s checkpoint flush; ride end flush; paused intervals excluded |
-| `WheelCalibrationFeature` | 5% trigger; ±10% cap; GPS accuracy gating; calibration suspension during L3 |
+| `WheelCalibrationFeature` | 2% trigger over two consecutive windows; correction averaged across the confirming windows; ±10% cap; out-of-range rejection; GPS accuracy gating; calibration suspension during L3 |
 | `AlertOrchestratorFeature` | Effect dispatched at `userInteractive` priority; < 200ms mock latency |
 | `GPXExporter` | Schema validation; absent fields (not zero) for missing sensors; vehicle pass waypoints |
 | `VehiclePassDetection` | Overtake vs. turn-off discrimination; 2s minimum tracking |
