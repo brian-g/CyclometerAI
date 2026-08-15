@@ -129,6 +129,18 @@ struct BLECSCClient: Sendable {
     var setWheelCircumference: @Sendable (Int) async -> Void
     var speed:                 @Sendable () -> AsyncStream<Double>            // m/s
     var cadence:               @Sendable () -> AsyncStream<Double>            // rpm
+    /// Wheel revolutions travelled since the previous emission, for the peripheral
+    /// holding the speed role. Circumference-independent by design: GPS
+    /// auto-calibration divides GPS distance by revolutions (PRD §8.9), so the
+    /// stored circumference cancels out of the result and a mid-window change to it
+    /// cannot corrupt the answer — which `speed()`, already scaled, cannot offer.
+    ///
+    /// Emits on every measurement carrying genuine travel, *including* ones that
+    /// produce no speed value (see `CSCCalculator.lastCountedRevolutions`). A
+    /// reconnect gap shows up as revolutions that are simply never emitted, so
+    /// consumers must also watch `connectionState(.speed)` and discard any window
+    /// spanning a gap.
+    var wheelRevolutions:      @Sendable () -> AsyncStream<Double>            // revolutions
     var connectionState:       @Sendable (SensorRole) -> AsyncStream<ConnectionState>
     /// Advertised name of the peripheral currently holding this role, or nil if
     /// unheld or the peripheral didn't advertise one. Replays on subscribe, same
@@ -253,8 +265,25 @@ struct CSCCalculator<Revs: FixedWidthInteger & UnsignedInteger & Sendable>: Send
     /// huge positive delta; anything above this is rejected and re-primes the state.
     let maxRevsPerSecond: Double
 
+    /// Revolutions this call counted as genuine travel — 0 when it counted none.
+    /// Rewritten by every `update`, so callers read it immediately afterwards.
+    ///
+    /// Deliberately *not* folded into `update`'s return value: distance accounting
+    /// and rate emission disagree about which samples matter. The first moving
+    /// sample after a stop yields no rate — the 16-bit event time wrapped, so the
+    /// interval is unknowable — but its revolutions are exact and were really
+    /// ridden. Dropping them costs ~10 m per stop, and three stops inside
+    /// auto-calibration's 500 m window fabricate a 6% discrepancy in the direction
+    /// that inflates the rider's wheel size (PRD §8.9, #70).
+    private(set) var lastCountedRevolutions: Double = 0
+
     private var previous: (revs: Revs, time: UInt16)?
     private var duplicateCount = 0
+
+    /// Rejects a counter reset on the re-prime path, where no event-time interval
+    /// exists to sanity-check the delta against. 64 s is the 16-bit event-time wrap,
+    /// so this is the most revolutions a legitimate stop could possibly hide.
+    private var maxRevsPerRePrime: Double { maxRevsPerSecond * 64 }
 
     /// Consecutive unchanged samples before emitting 0. Sensors notify ~1 Hz; the
     /// threshold stops slow pedalling from flickering to zero between strokes.
@@ -269,9 +298,12 @@ struct CSCCalculator<Revs: FixedWidthInteger & UnsignedInteger & Sendable>: Send
     mutating func reset() {
         previous = nil
         duplicateCount = 0
+        lastCountedRevolutions = 0
     }
 
     mutating func update(revs: Revs, eventTime: UInt16) -> Double? {
+        lastCountedRevolutions = 0
+
         guard let prev = previous else {
             previous = (revs, eventTime)   // prime; no rate from a single sample
             return nil
@@ -291,15 +323,20 @@ struct CSCCalculator<Revs: FixedWidthInteger & UnsignedInteger & Sendable>: Send
 
         if timeDelta == 0 {
             // Revolutions advanced but event time didn't — a glitch. Drop without
-            // updating state so the next valid pair averages across the gap.
+            // updating state so the next valid pair averages across the gap. The
+            // revolutions aren't lost: `previous` still holds the earlier sample,
+            // so the next valid pair counts the whole span.
             return nil
         }
 
         // First moving sample after a confirmed stop: the pre-stop event time (16-bit,
         // wraps every 64s) makes this delta meaningless. Re-prime and skip one sample.
+        // The revolution *count* is unaffected by the wrap and is still counted —
+        // see `lastCountedRevolutions`.
         if duplicateCount >= Self.zeroThreshold {
             previous = (revs, eventTime)
             duplicateCount = 0
+            if Double(revDelta) <= maxRevsPerRePrime { lastCountedRevolutions = Double(revDelta) }
             return nil
         }
 
@@ -307,6 +344,7 @@ struct CSCCalculator<Revs: FixedWidthInteger & UnsignedInteger & Sendable>: Send
         previous = (revs, eventTime)
         duplicateCount = 0
         guard rps <= maxRevsPerSecond else { return nil }   // reset spike — re-primed above
+        lastCountedRevolutions = Double(revDelta)
         return rps
     }
 }
@@ -332,6 +370,7 @@ extension BLECSCClient: DependencyKey {
             setWheelCircumference: { mm in await state.setWheelCircumference(mm) },
             speed:                 { state.makeSpeedStream() },
             cadence:               { state.makeCadenceStream() },
+            wheelRevolutions:      { state.makeWheelRevolutionsStream() },
             connectionState:       { role in state.makeConnectionStateStream(role: role) },
             sensorName:            { role in state.makeSensorNameStream(role: role) },
             batteryLevel:          { role in state.makeBatteryStream(role: role) }
@@ -354,6 +393,7 @@ extension BLECSCClient: DependencyKey {
         setWheelCircumference: { _ in },
         speed:                 { AsyncStream { $0.finish() } },
         cadence:               { AsyncStream { $0.finish() } },
+        wheelRevolutions:      { AsyncStream { $0.finish() } },
         connectionState:       { _ in AsyncStream { $0.finish() } },
         sensorName:            { _ in AsyncStream { $0.finish() } },
         batteryLevel:          { _ in AsyncStream { $0.finish() } }
@@ -428,6 +468,7 @@ private final class CSCClientState: @unchecked Sendable {
 
     private var speedContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
     private var cadenceContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
+    private var wheelRevolutionContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
     private var stateContinuations: [Int: (role: BLECSCClient.SensorRole, continuation: AsyncStream<BLECSCClient.ConnectionState>.Continuation)] = [:]
     private var nameContinuations: [Int: (role: BLECSCClient.SensorRole, continuation: AsyncStream<String?>.Continuation)] = [:]
     private var batteryContinuations: [Int: (role: BLECSCClient.SensorRole, continuation: AsyncStream<Int?>.Continuation)] = [:]
@@ -459,6 +500,16 @@ private final class CSCClientState: @unchecked Sendable {
         lock.withLock { cadenceContinuations[id] = continuation }
         continuation.onTermination = { [weak self] _ in
             _ = self?.lock.withLock { self?.cadenceContinuations.removeValue(forKey: id) }
+        }
+        return stream
+    }
+
+    func makeWheelRevolutionsStream() -> AsyncStream<Double> {
+        let id = lock.withLock { () -> Int in let current = nextID; nextID += 1; return current }
+        let (stream, continuation) = AsyncStream<Double>.makeStream()
+        lock.withLock { wheelRevolutionContinuations[id] = continuation }
+        continuation.onTermination = { [weak self] _ in
+            _ = self?.lock.withLock { self?.wheelRevolutionContinuations.removeValue(forKey: id) }
         }
         return stream
     }
@@ -870,7 +921,7 @@ private final class CSCClientState: @unchecked Sendable {
             // supplies speed. Compute under the lock to keep calculator state and the
             // circumference read consistent.
             var emptiedSlot = false
-            let (speedVal, cadenceVal): (Double?, Double?) = lock.withLock {
+            let (speedVal, cadenceVal, wheelRevolutions): (Double?, Double?, Double) = lock.withLock {
                 // Fallback for a sensor that never answered the 0x2A5C read: which
                 // fields the measurement actually carries reveals what it supports.
                 // Only runs while no authoritative capabilities have arrived, and
@@ -887,14 +938,18 @@ private final class CSCClientState: @unchecked Sendable {
                     // on the state it held before the sensor gave it up.
                     recomputeRoleStatesLocked()
                 }
-                guard var slot = slots[id] else { return (nil, nil) }
+                guard var slot = slots[id] else { return (nil, nil, 0) }
                 var s: Double?
                 var c: Double?
+                var revolutions: Double = 0
                 if slot.roles.contains(.speed),
                    let revs = measurement.cumulativeWheelRevolutions,
-                   let time = measurement.lastWheelEventTime,
-                   let rps = slot.wheel.update(revs: revs, eventTime: time) {
-                    s = rps * Double(wheelCircumferenceMM) / 1000.0
+                   let time = measurement.lastWheelEventTime {
+                    // Rate and revolutions are read separately: `update` withholds a
+                    // rate on samples whose revolutions still count as travel (#70).
+                    let rps = slot.wheel.update(revs: revs, eventTime: time)
+                    revolutions = slot.wheel.lastCountedRevolutions
+                    if let rps { s = rps * Double(wheelCircumferenceMM) / 1000.0 }
                 }
                 if slot.roles.contains(.cadence),
                    let revs = measurement.cumulativeCrankRevolutions,
@@ -909,11 +964,14 @@ private final class CSCClientState: @unchecked Sendable {
                 } else {
                     slots[id] = slot   // write back mutated calculator state
                 }
-                return (s, c)
+                return (s, c, revolutions)
             }
             if let speedVal {
                 broadcastSpeed(speedVal)
                 logger.info("speed \(speedVal, format: .fixed(precision: 2)) m/s")
+            }
+            if wheelRevolutions > 0 {
+                broadcastWheelRevolutions(wheelRevolutions)
             }
             if let cadenceVal {
                 broadcastCadence(cadenceVal)
@@ -1073,5 +1131,10 @@ private final class CSCClientState: @unchecked Sendable {
     private func broadcastCadence(_ cadence: Double) {
         let active = lock.withLock { Array(cadenceContinuations.values) }
         for continuation in active { continuation.yield(cadence) }
+    }
+
+    private func broadcastWheelRevolutions(_ revolutions: Double) {
+        let active = lock.withLock { Array(wheelRevolutionContinuations.values) }
+        for continuation in active { continuation.yield(revolutions) }
     }
 }

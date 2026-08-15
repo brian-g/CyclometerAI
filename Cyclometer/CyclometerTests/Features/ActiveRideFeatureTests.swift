@@ -172,6 +172,11 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.latestGPSSpeedMPS = 8.5
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
+        // Calibration tracks fix quality independently of whether it is accumulating.
+        await store.receive(\.calibration.locationUpdated) {
+            $0.calibration.isGPSUsable = true
+            $0.calibration.lastFixTimestamp = Self.sampleUpdate.timestamp
+        }
     }
 
     @Test("Location updates continue while paused")
@@ -194,8 +199,15 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.latestGPSSpeedMPS = 8.5
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
+        await store.receive(\.calibration.locationUpdated) {
+            $0.calibration.isGPSUsable = true
+            $0.calibration.lastFixTimestamp = Self.sampleUpdate.timestamp
+        }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
         }
 
         let pausedUpdate = LocationUpdate(
@@ -226,6 +238,9 @@ struct ActiveRideFeatureLocationTests {
                 SpeedSample(time: testDate, mps: 8.5),
                 SpeedSample(time: testDate, mps: 12.0)
             ]
+        }
+        await store.receive(\.calibration.locationUpdated) {
+            $0.calibration.lastFixTimestamp = pausedUpdate.timestamp
         }
     }
 
@@ -261,6 +276,8 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.activeSpeedSource = .none
             $0.speed.latestGPSSpeedMPS = nil
         }
+        // An invalid-speed fix is rejected outright, so nothing about the window moves.
+        await store.receive(\.calibration.locationUpdated)
     }
 
     @Test("Authorization denied sets isLocationAvailable false")
@@ -305,6 +322,9 @@ struct ActiveRideFeatureLocationTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
         }
         await store.send(.finishTapped) {
             $0.finishAlert = AlertState {
@@ -371,6 +391,9 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
         await store.send(.elapsedTick)
     }
 
@@ -392,6 +415,9 @@ struct ActiveRideFeatureTimerTests {
         let store = makeStore(speedMPS: 10.0)
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
         }
         await store.send(.elapsedTick)
         await store.send(.elapsedTick)
@@ -416,9 +442,15 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
         await store.send(.elapsedTick)
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = false
         }
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
@@ -481,6 +513,9 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
     }
 
     @Test("pauseTapped ignored when idle")
@@ -501,6 +536,9 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.resumeTapped) {
             $0.recordingState = .active
         }
+        // A store built directly at .paused never ran the .idle → .active transition,
+        // so the child is still on its unsuspended default and this lands as a no-op.
+        await store.receive(\.calibration.suspensionChanged)
     }
 
     @Test("resumeTapped ignored when active")
@@ -618,6 +656,8 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(.autoEndTriggered) {
             $0.recordingState = .paused
         }
+        // .autoEndTriggered's own effect (.finishTapped) is merged ahead of the
+        // suspension notice that `onChange` appends for the same state change.
         await store.receive(.finishTapped) {
             $0.finishAlert = AlertState {
                 TextState("Finish Ride")
@@ -629,6 +669,9 @@ struct ActiveRideFeatureStateMachineTests {
                     TextState("Cancel")
                 }
             }
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
         }
     }
 
@@ -682,14 +725,15 @@ struct ActiveRideFeatureStateMachineTests {
             $0.locationClient = .testValue
         }
 
-        await store.send(.locationUpdated(LocationUpdate(
+        let update = LocationUpdate(
             coordinate: Coordinate(latitude: 43.0, longitude: -89.0),
             altitude: 280.0,
             speed: 8.0,
             horizontalAccuracy: 5.0,
             heading: 0,
-            timestamp: Date()
-        ))) {
+            timestamp: testDate
+        )
+        await store.send(.locationUpdated(update)) {
             $0.coordinate = Coordinate(latitude: 43.0, longitude: -89.0)
             $0.trackCoordinates = [Coordinate(latitude: 43.0, longitude: -89.0)]
             $0.altitude = 280.0
@@ -705,6 +749,10 @@ struct ActiveRideFeatureStateMachineTests {
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.0
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.0)]
+        }
+        await store.receive(\.calibration.locationUpdated) {
+            $0.calibration.isGPSUsable = true
+            $0.calibration.lastFixTimestamp = update.timestamp
         }
 
         await store.send(.elapsedTick) {

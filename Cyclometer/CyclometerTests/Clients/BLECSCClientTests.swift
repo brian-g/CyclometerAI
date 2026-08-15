@@ -190,6 +190,94 @@ struct BLECSCCalculatorTests {
     }
 }
 
+// MARK: - Distance accounting
+//
+// `lastCountedRevolutions` feeds GPS auto-calibration (#70), which divides GPS
+// distance by revolutions. It deliberately does not track the emitted rate: some
+// samples carry real travel but no usable interval to derive a rate from.
+
+@Suite("BLECSCClient — revolution counting")
+struct BLECSCRevolutionCountingTests {
+
+    @Test("A normal sample counts its revolutions")
+    func normalSampleCounts() {
+        var calc = CSCCalculator<UInt32>(maxRevsPerSecond: 15)
+        _ = calc.update(revs: 100, eventTime: 0)
+        #expect(calc.lastCountedRevolutions == 0)      // priming is not travel
+        _ = calc.update(revs: 102, eventTime: 1024)
+        #expect(calc.lastCountedRevolutions == 2)
+    }
+
+    @Test("Resuming after a stop counts the revolutions ridden, though it emits no rate")
+    func rePrimeAfterStopCounts() {
+        var calc = CSCCalculator<UInt32>(maxRevsPerSecond: 15)
+        _ = calc.update(revs: 100, eventTime: 1024)
+        _ = calc.update(revs: 100, eventTime: 1024)
+        _ = calc.update(revs: 100, eventTime: 1024)
+        _ = calc.update(revs: 100, eventTime: 1024)               // confirmed stopped
+
+        // Rider pulls away from the light: no rate (the event time wrapped), but
+        // five revolutions of ground really did pass under the wheel. Losing these
+        // is what would fabricate a discrepancy in stop-start riding.
+        #expect(calc.update(revs: 105, eventTime: 5120) == nil)
+        #expect(calc.lastCountedRevolutions == 5)
+    }
+
+    @Test("A stopped wheel counts nothing")
+    func stoppedCountsNothing() {
+        var calc = CSCCalculator<UInt32>(maxRevsPerSecond: 15)
+        _ = calc.update(revs: 100, eventTime: 1024)
+        for _ in 0..<3 {
+            _ = calc.update(revs: 100, eventTime: 1024)
+            #expect(calc.lastCountedRevolutions == 0)
+        }
+    }
+
+    @Test("A rejected reset spike counts nothing on either path")
+    func resetSpikeCountsNothing() {
+        var calc = CSCCalculator<UInt32>(maxRevsPerSecond: 15)
+        _ = calc.update(revs: 50_000, eventTime: 0)
+        #expect(calc.update(revs: 5, eventTime: 1024) == nil)      // wrapped delta over cap
+        #expect(calc.lastCountedRevolutions == 0)
+
+        // Same spike arriving on the re-prime path, where no interval exists to
+        // sanity-check against, is rejected by the 64 s event-time-wrap bound.
+        var afterStop = CSCCalculator<UInt32>(maxRevsPerSecond: 15)
+        _ = afterStop.update(revs: 100, eventTime: 1024)
+        for _ in 0..<3 { _ = afterStop.update(revs: 100, eventTime: 1024) }
+        _ = afterStop.update(revs: 50_000, eventTime: 5120)
+        #expect(afterStop.lastCountedRevolutions == 0)
+    }
+
+    @Test("A zero-time-delta glitch counts nothing, then the next pair counts the full span")
+    func glitchDefersCount() {
+        var calc = CSCCalculator<UInt32>(maxRevsPerSecond: 15)
+        _ = calc.update(revs: 100, eventTime: 1024)
+        _ = calc.update(revs: 102, eventTime: 1024)               // revs moved, time didn't
+        #expect(calc.lastCountedRevolutions == 0)
+        _ = calc.update(revs: 104, eventTime: 2048)
+        #expect(calc.lastCountedRevolutions == 4)                 // both revolutions recovered
+    }
+
+    @Test("Counter rollover counts the wrapped delta, not the raw difference")
+    func rolloverCounts() {
+        var calc = CSCCalculator<UInt32>(maxRevsPerSecond: 15)
+        _ = calc.update(revs: .max, eventTime: 0)
+        _ = calc.update(revs: 1, eventTime: 1024)
+        #expect(calc.lastCountedRevolutions == 2)
+    }
+
+    @Test("reset() clears the counter")
+    func resetClearsCounter() {
+        var calc = CSCCalculator<UInt32>(maxRevsPerSecond: 15)
+        _ = calc.update(revs: 100, eventTime: 0)
+        _ = calc.update(revs: 102, eventTime: 1024)
+        #expect(calc.lastCountedRevolutions == 2)
+        calc.reset()
+        #expect(calc.lastCountedRevolutions == 0)
+    }
+}
+
 // MARK: - Reconnect backoff
 
 @Suite("BLECSCClient — reconnect backoff")
@@ -413,6 +501,57 @@ struct BLECSCIntegrationTests {
         ))
         let speed = await speeds.next()
         #expect(abs((speed ?? 0) - 4.192) < 0.0001)
+    }
+
+    @Test("Wheel revolutions are published alongside speed, unscaled by circumference")
+    func wheelRevolutionsPublished() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.setRoles(id, [.speed])
+
+        var revolutions = harness.client.wheelRevolutions().makeAsyncIterator()
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: id, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 100, wheelTime: 0)
+        ))
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: id, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 102, wheelTime: 1024)
+        ))
+        #expect(await revolutions.next() == 2.0)
+    }
+
+    @Test("A cadence-only sensor publishes no wheel revolutions")
+    func cadenceOnlySensorPublishesNoRevolutions() async {
+        let harness = Harness()
+        let cadenceID = UUID()
+        let speedID = UUID()
+        await harness.client.setRoles(cadenceID, [.cadence])
+        await harness.client.setRoles(speedID, [.speed])
+
+        var revolutions = harness.client.wheelRevolutions().makeAsyncIterator()
+
+        // A combo device assigned cadence only still reports wheel data; it must not
+        // reach calibration, or a wheel the rider didn't nominate would drive their
+        // circumference.
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: cadenceID, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 500, wheelTime: 0, crankRevs: 50, crankTime: 0)
+        ))
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: cadenceID, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 900, wheelTime: 1024, crankRevs: 52, crankTime: 2048)
+        ))
+        // The speed-role sensor's much smaller delta is what should come through.
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: speedID, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 100, wheelTime: 0)
+        ))
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: speedID, characteristicUUID: cscMeasurementUUID,
+            value: cscPayload(wheelRevs: 103, wheelTime: 1024)
+        ))
+        #expect(await revolutions.next() == 3.0)
     }
 
     @Test("Cadence-only sensor emits cadence from crank data")

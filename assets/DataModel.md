@@ -907,7 +907,7 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 | RideDataBuffer concurrency | Unit — RideDataBufferTests | Concurrent appends; drain ordering; capacity ring behaviour |
 | Ride summary aggregates | Unit — RideAggregateTests | Running avg/max; zone duration accumulation; paused interval exclusion |
 | SensorSource priority switching | Unit via TCA TestStore | All transitions in priority chain; source badge updates |
-| Wheel auto-calibration math | Unit — WheelCalibrationTests | 5% trigger; 10% cap; GPS accuracy gating |
+| Wheel auto-calibration math | Unit — WheelCalibrationTests | 2% trigger; 10% cap; out-of-range rejection; GPS accuracy gating |
 | PairedSensor role lookup | Unit — AppPreferencesTests | Correct sensor per role; nil when role unpaired; combo sensor at two roles |
 | ConnectedService Keychain round-trip | Integration — ConnectedServiceTests | Token stored in Keychain; keychainIdentifier retrieves correct token |
 | RideWeather encoding/decoding | Unit — RideWeatherTests | Round-trips through JSON; nil fields handled; partial data graceful |
