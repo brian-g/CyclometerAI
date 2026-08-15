@@ -4,9 +4,9 @@ import os
 
 private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "ble")
 
-/// Compares BLE wheel distance against GPS distance over rolling 500 m windows and
+/// Compares BLE wheel distance against GPS distance over rolling 1,500 m windows and
 /// corrects `AppPreferences.wheelCircumferenceMM` when they disagree materially
-/// (PRD §8.9, TCA.md §4.11).
+/// (PRD §8.9, thresholds and their rationale in §8.9.2, TCA.md §4.11).
 ///
 /// This reducer writes a setting the rider chose, without asking, and the change
 /// outlives the ride — a false correction silently distorts speed and distance on
@@ -21,9 +21,17 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "ble")
 /// sample lands, never per-sample filters.
 ///
 /// Accepted residual: BLE notifications and GPS fixes arrive on independent ~1 Hz
-/// phases, so up to a second of revolutions (≈7 m, ~1.4% of the window) can fall on
-/// the wrong side of a boundary. That is comfortably under the 5% threshold, and the
-/// two-window confirmation covers what is left.
+/// phases, so where a window's boundaries fall relative to each stream shifts what it
+/// counts. The error is zero-mean (see `wheelRevolutionsReceived`) with a spread of
+/// ~0.27% of a 1,500 m window.
+///
+/// **Field-verified 2026-08-15.** Six windows across two rides on the same bike
+/// measured 2057, 2069, 2069, 2055, 2051 and 2069 mm — mean 2061.8, sd 8.4 mm
+/// (0.41%), against the ~0.49% predicted floor. A ride started at 2288 mm (29 × 2.1)
+/// corrected to 2069 mm after two confirming windows, persisted, and showed the
+/// banner; Settings then read Custom 2069 mm. That ride is also why `commit` averages
+/// the confirming windows: it committed the second window's 2069 where the mean of
+/// both was 2060, and the pooled evidence puts the truth near 2062.
 @Reducer
 struct WheelCalibrationFeature {
     /// How long the calibration banner stays up. Matches `SpeedFeature`.
@@ -57,10 +65,15 @@ struct WheelCalibrationFeature {
         var revolutions = 0.0
         var lastFixTimestamp: Date?
 
-        /// Direction the last qualifying window pointed, and how many consecutive
-        /// windows have now agreed on it. Reset by a sign flip or a clean window.
+        /// Direction the last qualifying window pointed, and the measurement from
+        /// every consecutive window that has agreed with it. Reset by a sign flip or a
+        /// clean window.
+        ///
+        /// The measurements are kept, not just counted: two windows agreeing is what
+        /// licenses the correction, so both should inform its value.
         var pendingOverReading: Bool?
-        var confirmedWindows = 0
+        var pendingMeasurements: [Double] = []
+        var confirmedWindows: Int { pendingMeasurements.count }
 
         var commitCount = 0
         var lastCalibrationAt: Date?
@@ -173,6 +186,14 @@ struct WheelCalibrationFeature {
                 return evaluateWindow(&state)
 
             case .suspensionChanged(let isSuspended):
+                // Logged for the same reason the other two gates are: a ride whose
+                // windows never complete has to say which gate held them up, and
+                // radar-driven suspension is otherwise invisible in a collected log.
+                if state.isSuspended != isSuspended {
+                    logger.notice(
+                        "calibration suspension gate \(isSuspended ? "shut — radar alert or ride not recording" : "open", privacy: .public)"
+                    )
+                }
                 state.isSuspended = isSuspended
                 return .none
 
@@ -209,7 +230,7 @@ struct WheelCalibrationFeature {
     private func resetWindow(_ state: inout State) {
         resetMeasurements(&state)
         state.pendingOverReading = nil
-        state.confirmedWindows = 0
+        state.pendingMeasurements = []
     }
 
     private func evaluateWindow(_ state: inout State) -> Effect<Action> {
@@ -217,14 +238,18 @@ struct WheelCalibrationFeature {
         let gpsMeters = state.gpsMeters
         let revolutions = state.revolutions
 
+        guard let measuredMM = WheelCalibration.measuredCircumferenceMM(
+            gpsMeters: gpsMeters, revolutions: revolutions
+        ) else {
+            resetWindow(&state)
+            return .none
+        }
+
         // One line per completed window, at notice so it survives `log collect` after
         // an untethered ride. Without it a silent ride is indistinguishable from a
-        // broken one — a window that closes inside the 5% band and a window that never
+        // broken one — a window that closes inside the band and a window that never
         // accumulated at all both look like "nothing happened".
-        let measuredMM = revolutions > 0 ? gpsMeters * 1000 / revolutions : 0
-        let discrepancy = WheelCalibration.discrepancy(
-            storedMM: storedMM, gpsMeters: gpsMeters, revolutions: revolutions
-        ) ?? 0
+        let discrepancy = WheelCalibration.discrepancy(storedMM: storedMM, measuredMM: measuredMM)
         logger.notice(
             """
             calibration window: gps \(gpsMeters, format: .fixed(precision: 1), privacy: .public) m, \
@@ -236,26 +261,24 @@ struct WheelCalibrationFeature {
             """
         )
 
-        guard let newMM = WheelCalibration.newCircumferenceMM(
-            storedMM: storedMM, gpsMeters: gpsMeters, revolutions: revolutions
-        ) else {
+        guard WheelCalibration.exceedsThreshold(storedMM: storedMM, measuredMM: measuredMM) else {
             resetWindow(&state)
             return .none
         }
 
-        let isOverReading = WheelCalibration.isOverReading(
-            storedMM: storedMM, gpsMeters: gpsMeters, revolutions: revolutions
-        )
         // A window that disagrees with its predecessor about which way the wheel is
-        // wrong is evidence of noise, not drift — start the count over.
-        state.confirmedWindows = state.pendingOverReading == isOverReading
-            ? state.confirmedWindows + 1
-            : 1
+        // wrong is evidence of noise, not drift — start the streak over.
+        let isOverReading = WheelCalibration.isOverReading(storedMM: storedMM, measuredMM: measuredMM)
+        if state.pendingOverReading == isOverReading {
+            state.pendingMeasurements.append(measuredMM)
+        } else {
+            state.pendingMeasurements = [measuredMM]
+        }
         state.pendingOverReading = isOverReading
 
         guard state.confirmedWindows >= WheelCalibration.confirmationWindows else {
-            // The streak carries forward; the measurements do not. The next window
-            // must stand on its own data.
+            // The streak and its measurements carry forward; the accumulators do not.
+            // The next window must stand on its own data.
             let streak = state.confirmedWindows
             logger.notice(
                 """
@@ -268,20 +291,33 @@ struct WheelCalibrationFeature {
             return .none
         }
 
+        // Every window that confirmed the correction informs its value. Committing the
+        // last window's measurement alone would discard half the evidence that
+        // licensed the change.
+        let measurements = state.pendingMeasurements
+        let averagedMM = measurements.reduce(0, +) / Double(measurements.count)
+
+        guard let newMM = WheelCalibration.correctedCircumferenceMM(
+            storedMM: storedMM, measuredMM: averagedMM
+        ) else {
+            resetWindow(&state)
+            return .none
+        }
+
         guard state.commitCount < WheelCalibration.maxCommitsPerRide else {
             logger.notice("calibration refused — per-ride cap of \(WheelCalibration.maxCommitsPerRide, privacy: .public) reached")
             resetWindow(&state)
             return .none
         }
 
-        return commit(newMM, storedMM: storedMM, gpsMeters: gpsMeters,
-                      revolutions: revolutions, to: &state)
+        return commit(newMM, storedMM: storedMM, averagedMM: averagedMM,
+                      measurements: measurements, to: &state)
     }
 
     /// Persist and push together, mirroring `SettingsFeature.apply(_:to:)` — the
     /// stored value and the value driving the speed derivation must never drift apart.
     private func commit(
-        _ mm: Int, storedMM: Int, gpsMeters: Double, revolutions: Double, to state: inout State
+        _ mm: Int, storedMM: Int, averagedMM: Double, measurements: [Double], to state: inout State
     ) -> Effect<Action> {
         state.$preferences.withLock { $0.wheelCircumferenceMM = mm }
         state.lastCalibrationAt = now
@@ -289,11 +325,14 @@ struct WheelCalibrationFeature {
         state.banner = WheelCalibration.bannerText(mm: mm)
         resetWindow(&state)
 
+        let windows = measurements
+            .map { String(format: "%.0f", $0) }
+            .joined(separator: ", ")
         logger.notice(
             """
             wheel auto-calibrated \(storedMM, privacy: .public) → \(mm, privacy: .public) mm \
-            (gps \(gpsMeters, format: .fixed(precision: 1), privacy: .public) m, \
-            \(revolutions, format: .fixed(precision: 1), privacy: .public) rev)
+            (mean \(averagedMM, format: .fixed(precision: 1), privacy: .public) mm \
+            of \(measurements.count, privacy: .public) windows: \(windows, privacy: .public))
             """
         )
 

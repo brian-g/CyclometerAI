@@ -7,133 +7,126 @@ import Foundation
 @Suite("WheelCalibration math")
 struct WheelCalibrationTests {
 
-    /// 700c × 23. Every fixture below is built by choosing a revolution count that
-    /// makes the BLE distance miss 500 m by a stated percentage.
+    /// 700c × 23. Fixtures are built by choosing a measurement that misses it by a
+    /// stated fraction.
     private static let stored = 2096
 
-    /// Revolutions that make `stored` report exactly `gpsMeters × (1 + error)`.
-    private func revolutions(forError error: Double, gpsMeters: Double = 1500) -> Double {
-        gpsMeters * (1 + error) * 1000 / Double(Self.stored)
+    /// The measurement a window produces when the stored circumference over-reports
+    /// distance by `error` (negative = under-reports).
+    private func measured(offBy error: Double, from storedMM: Int = stored) -> Double {
+        Double(storedMM) / (1 + error)
+    }
+
+    /// One window end to end: nil unless it clears the threshold.
+    private func correction(offBy error: Double, from storedMM: Int = stored) -> Int? {
+        let m = measured(offBy: error, from: storedMM)
+        guard WheelCalibration.exceedsThreshold(storedMM: storedMM, measuredMM: m) else { return nil }
+        return WheelCalibration.correctedCircumferenceMM(storedMM: storedMM, measuredMM: m)
+    }
+
+    // MARK: Measurement
+
+    @Test("Measurement is the stored value divided out — GPS metres per revolution")
+    func measurementIsStoredIndependent() {
+        // 1500 m over 715.65 revolutions is a 2096 mm wheel, whatever is stored.
+        let revs = 1500.0 * 1000 / 2096
+        #expect(abs(WheelCalibration.measuredCircumferenceMM(
+            gpsMeters: 1500, revolutions: revs
+        )! - 2096) < 0.001)
+    }
+
+    @Test("Degenerate inputs produce no measurement")
+    func degenerateInputs() {
+        #expect(WheelCalibration.measuredCircumferenceMM(gpsMeters: 1500, revolutions: 0) == nil)
+        #expect(WheelCalibration.measuredCircumferenceMM(gpsMeters: 0, revolutions: 700) == nil)
+        #expect(WheelCalibration.measuredCircumferenceMM(gpsMeters: -5, revolutions: 700) == nil)
     }
 
     // MARK: Trigger threshold
 
     @Test("A discrepancy inside the 2% band is left alone")
     func withinThresholdDoesNothing() {
-        let revs = revolutions(forError: 0.01)
-        #expect(WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revs
-        ) == nil)
+        #expect(correction(offBy: 0.01) == nil)
     }
 
     @Test("Exactly 2.0% does not trigger — the threshold is strictly greater")
     func exactThresholdDoesNotTrigger() {
-        let revs = revolutions(forError: 0.02)
-        let discrepancy = WheelCalibration.discrepancy(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revs
-        )
-        #expect(abs((discrepancy ?? 0) - 0.02) < 1e-9)
-        #expect(WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revs
-        ) == nil)
+        let m = measured(offBy: 0.02)
+        #expect(abs(WheelCalibration.discrepancy(storedMM: Self.stored, measuredMM: m) - 0.02) < 1e-9)
+        #expect(!WheelCalibration.exceedsThreshold(storedMM: Self.stored, measuredMM: m))
+        #expect(correction(offBy: 0.02) == nil)
     }
 
     @Test("1.9% is quiet, 2.1% acts")
     func straddlingTheThreshold() {
-        #expect(WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revolutions(forError: 0.019)
-        ) == nil)
-        #expect(WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revolutions(forError: 0.021)
-        ) != nil)
+        #expect(correction(offBy: 0.019) == nil)
+        #expect(correction(offBy: 0.021) != nil)
     }
 
-    // MARK: Correction
+    // MARK: Direction
 
-    @Test("BLE over-reading by 6% shrinks the circumference to match GPS")
-    func overReadingShrinksCircumference() {
-        let revs = revolutions(forError: 0.06)
-        let result = WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revs
-        )
-        // new = gps × 1000 / revs, which is stored / 1.06
-        #expect(result == Int((Double(Self.stored) / 1.06).rounded()))
-        #expect(result! < Self.stored)
-        #expect(WheelCalibration.isOverReading(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revs
-        ))
+    @Test("Over-reading shrinks the circumference, under-reading grows it")
+    func directionOfCorrection() {
+        let long = measured(offBy: 0.06)     // stored claims more distance than GPS saw
+        let short = measured(offBy: -0.06)
+        #expect(WheelCalibration.isOverReading(storedMM: Self.stored, measuredMM: long))
+        #expect(!WheelCalibration.isOverReading(storedMM: Self.stored, measuredMM: short))
+        #expect(correction(offBy: 0.06)! < Self.stored)
+        #expect(correction(offBy: -0.06)! > Self.stored)
     }
 
-    @Test("BLE under-reading by 6% grows the circumference symmetrically")
-    func underReadingGrowsCircumference() {
-        let revs = revolutions(forError: -0.06)
-        let result = WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revs
-        )
-        #expect(result == Int((Double(Self.stored) / 0.94).rounded()))
-        #expect(result! > Self.stored)
-        #expect(!WheelCalibration.isOverReading(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revs
-        ))
+    @Test("A 6% over-read corrects to the measured value")
+    func correctsToMeasured() {
+        let m = measured(offBy: 0.06)
+        #expect(correction(offBy: 0.06) == Int(m.rounded()))
     }
+
+    // MARK: Cap and rejection
 
     @Test("A 30% over-read is capped at −10% of the stored value")
     func largeOverReadIsCapped() {
-        let revs = revolutions(forError: 0.30)
-        let result = WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revs
-        )
-        #expect(result == Int((Double(Self.stored) * 0.90).rounded()))
+        #expect(correction(offBy: 0.30) == Int((Double(Self.stored) * 0.90).rounded()))
     }
 
     @Test("A 30% under-read is capped at +10% of the stored value")
     func largeUnderReadIsCapped() {
-        let revs = revolutions(forError: -0.30)
-        let result = WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revs
-        )
-        #expect(result == Int((Double(Self.stored) * 1.10).rounded()))
+        #expect(correction(offBy: -0.30) == Int((Double(Self.stored) * 1.10).rounded()))
     }
-
-    // MARK: Rejections
 
     @Test("A result outside the sanity range is rejected, not clamped to the boundary")
     func implausibleResultIsRejected() {
-        // 700 revolutions over 1500 m is a plausible-looking wheel. The ±10% cap would pull it
-        // back to a plausible-looking 2306 mm, which is exactly the failure mode this
-        // guard exists to prevent — so instead verify the range check with a stored
-        // value close enough to the boundary that the capped result escapes it.
+        // Stored near the top of the range: the +10% cap lands above 3,000 mm, which
+        // is the case the range check exists for. Clamping would quietly commit it.
         let stored = WheelPreset.validRange.upperBound - 50   // 2950
-        let revs = revolutions(forError: -0.30, gpsMeters: 1500)
-            * Double(Self.stored) / Double(stored)
-        let capped = Double(stored) * 1.10                     // 3245 — out of range
+        let capped = Double(stored) * 1.10                    // 3245
         #expect(!WheelPreset.validRange.contains(Int(capped.rounded())))
-        #expect(WheelCalibration.newCircumferenceMM(
-            storedMM: stored, gpsMeters: 1500, revolutions: revs
-        ) == nil)
-    }
-
-    @Test("Degenerate inputs yield no correction")
-    func degenerateInputs() {
-        #expect(WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: 0
-        ) == nil)
-        #expect(WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 0, revolutions: 700
-        ) == nil)
-        #expect(WheelCalibration.discrepancy(
-            storedMM: Self.stored, gpsMeters: 0, revolutions: 700
-        ) == nil)
+        #expect(correction(offBy: -0.30, from: stored) == nil)
     }
 
     @Test("A correction that rounds back to the stored value is not a change")
     func noOpCorrectionIsRejected() {
-        // Contrived: a discrepancy over threshold whose capped result rounds to the
-        // stored value can only happen at cap boundaries, so assert the guard
-        // directly rather than constructing one.
-        #expect(WheelCalibration.newCircumferenceMM(
-            storedMM: Self.stored, gpsMeters: 1500, revolutions: revolutions(forError: 0)
+        #expect(WheelCalibration.correctedCircumferenceMM(
+            storedMM: Self.stored, measuredMM: Double(Self.stored) + 0.2
         ) == nil)
+    }
+
+    // MARK: Averaging confirming windows
+
+    @Test("Averaging two confirming windows lands between them")
+    func averagedCorrection() {
+        // The shipped field case: windows measured 2051 and 2069 against a stored
+        // 2288. Committing the second alone gave 2069; the mean is 2060.
+        let mean = (2051.0 + 2069.0) / 2
+        #expect(WheelCalibration.correctedCircumferenceMM(storedMM: 2288, measuredMM: mean) == 2060)
+        #expect(WheelCalibration.correctedCircumferenceMM(storedMM: 2288, measuredMM: 2069) == 2069)
+    }
+
+    @Test("The ±10% cap still binds after averaging")
+    func averagingDoesNotEscapeTheCap() {
+        // Both windows agree the wheel is far smaller than stored; the cap holds.
+        let mean = (1700.0 + 1720.0) / 2
+        #expect(WheelCalibration.correctedCircumferenceMM(storedMM: 2288, measuredMM: mean)
+                == Int((2288.0 * 0.90).rounded()))
     }
 
     // MARK: Presentation

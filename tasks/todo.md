@@ -281,3 +281,33 @@ One claim was corrected while writing it up: the preset-pair count is over **56 
 (stored, actual) combinations**, not 28 unordered ones — the discrepancy divides by the *true*
 circumference, so it is not symmetric. 17/56 catchable at 5% (none road-only) vs 36/56 at 2%
 (10 road-only).
+
+### Field-verified, and two fixes it prompted (2026-08-15)
+
+**It works end to end.** A ride started at 2288 mm (29 × 2.1) logged window 1 → 2051 mm (11.56%,
+"wheel reads long", 1 of 2), window 2 → 2069 mm (10.56%), then committed 2288 → 2069, pushed to the
+CSC client, and showed the banner. Settings verified as Custom 2069 mm afterwards.
+
+Six windows across two rides on the same bike: 2057, 2069, 2069, 2055, 2051, 2069 mm — mean 2061.8,
+sd 8.4 mm (**0.41%**, against the ~0.49% predicted floor). The estimator behaves as designed, and
+the two brief GPS pauses were the sub-2 m/s stop gate working correctly.
+
+**Fix 1 — the commit was discarding half its evidence.** Confirmation needs two windows but `commit`
+used only the second one's measurement: it took 2069 where the mean of both was 2060, and the pooled
+six-window evidence puts the truth near 2062. `WheelCalibration` was restructured around a
+measurement (`measuredCircumferenceMM` → `exceedsThreshold` / `isOverReading` →
+`correctedCircumferenceMM`) so the averaging can happen between the raw measurement and the cap, and
+`State.pendingMeasurements` now keeps the values instead of just counting them. `confirmedWindows`
+became a computed property over that array, so there is one source of truth.
+
+**Fix 2 — suspension transitions were unlogged.** The sensor and GPS gates logged; radar-driven
+suspension did not, so a ride whose windows never completed could not say why. The RTL515 was
+connected for this ride and was demonstrably not interfering (both windows ran at a steady ~6.3 m/s),
+but that was inference rather than evidence. Now logged on change like the other two gates.
+
+328 tests, 327 passing — the one failure remains the pre-existing `HeroNumberSnapshotTests.testCustomColor()`.
+
+Also corrected in the docs: I had asserted this bike rolls ~2105 mm (assuming 700 × 25c) and built two
+rides of predictions on it. Measured, it is ~2062. The threshold research was unaffected — it rests on
+the preset table and Sheldon Brown, not on this bike — but the field-test predictions derived from
+the invented number were worthless.

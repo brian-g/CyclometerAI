@@ -22,7 +22,7 @@ struct WheelCalibrationFeatureTests {
         bleCSCClient: BLECSCClient = .testValue,
         circumferenceMM: Int = storedMM,
         commitCount: Int = 0,
-        confirmedWindows: Int = 0,
+        pendingMeasurements: [Double] = [],
         pendingOverReading: Bool? = nil
     ) -> TestStoreOf<WheelCalibrationFeature> {
         let storage = FileStorage.inMemory
@@ -33,7 +33,7 @@ struct WheelCalibrationFeatureTests {
             $preferences.withLock { $0.wheelCircumferenceMM = circumferenceMM }
             var state = WheelCalibrationFeature.State()
             state.commitCount = commitCount
-            state.confirmedWindows = confirmedWindows
+            state.pendingMeasurements = pendingMeasurements
             state.pendingOverReading = pendingOverReading
             return TestStore(initialState: state) {
                 WheelCalibrationFeature()
@@ -298,12 +298,15 @@ struct WheelCalibrationFeatureTests {
         var ble = BLECSCClient.testValue
         ble.setWheelCircumference = { mm in pushed.withValue { $0.append(mm) } }
 
-        // Seeded one window into the streak so only the confirming window has to be
-        // driven here; `singleWindowDoesNotCommit` covers the first one.
+        // Seeded with one prior window's measurement so only the confirming window
+        // has to be driven here; `singleWindowDoesNotCommit` covers the first one.
+        // Deliberately *different* from what this window will measure, so the commit
+        // value proves the two were averaged rather than the last one taken.
+        let priorMeasurement = 1950.0
         let store = makeStore(
             clock: ImmediateClock(),
             bleCSCClient: ble,
-            confirmedWindows: WheelCalibration.confirmationWindows - 1,
+            pendingMeasurements: [priorMeasurement],
             pendingOverReading: true
         )
         store.exhaustivity = .off
@@ -321,7 +324,10 @@ struct WheelCalibrationFeatureTests {
         // Exhaustive from here: the committing send emits the banner-dismissal
         // effect, and a non-exhaustive `send` would sweep that action away before it
         // could be asserted.
-        let expected = Int((Double(Self.storedMM) / 1.06).rounded())
+        let drivenMeasurement = WheelCalibration.windowThresholdMeters * 1000
+            / (rate * Double(Self.windowSeconds))
+        let expected = Int(((priorMeasurement + drivenMeasurement) / 2).rounded())
+        #expect(expected != Int(drivenMeasurement.rounded()))   // averaging is observable
         let closingFix = TimeInterval(Self.windowSeconds)
         store.exhaustivity = .on
         await store.send(.wheelRevolutionsReceived(rate)) { $0.revolutions += rate }
@@ -334,7 +340,7 @@ struct WheelCalibrationFeatureTests {
             // still seeds the next interval, so no riding is lost between windows.
             $0.gpsMeters = 0
             $0.revolutions = 0
-            $0.confirmedWindows = 0
+            $0.pendingMeasurements = []
             $0.pendingOverReading = nil
             $0.lastFixTimestamp = Self.start.addingTimeInterval(closingFix)
         }
@@ -366,7 +372,7 @@ struct WheelCalibrationFeatureTests {
         // one that would otherwise commit.
         let store = makeStore(
             commitCount: WheelCalibration.maxCommitsPerRide,
-            confirmedWindows: WheelCalibration.confirmationWindows - 1,
+            pendingMeasurements: [2000.0],
             pendingOverReading: true
         )
         store.exhaustivity = .off

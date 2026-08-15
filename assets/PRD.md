@@ -605,7 +605,7 @@ Riders can configure wheel circumference using one of three methods:
 - Runs continuously during active ride when both BLE speed sensor and GPS are active
 - Measurement window: rolling 1,500-meter GPS distance minimum (revised from 500 m — see §8.9.2)
 - Discrepancy threshold: if `|BLE distance − GPS distance| / GPS distance > 2%` over the measurement window, trigger calibration (revised from 5% — see §8.9.2)
-- Confirmation: the discrepancy must exceed the threshold in the **same direction across two consecutive windows** before a correction is committed. A single anomalous window changes nothing
+- Confirmation: the discrepancy must exceed the threshold in the **same direction across two consecutive windows** before a correction is committed. A single anomalous window changes nothing. The correction is derived from the **mean of the confirming windows' measurements** — two windows agreeing is what licenses the change, so both inform its value
 - Calibration adjustment: `new circumference = stored circumference × (GPS distance / BLE distance)`
 - Maximum single adjustment: ±10% of stored value (guards against GPS spikes causing overcorrection)
 - Results outside the 1,500–3,000 mm sanity range are **rejected, not clamped** — a value that implausible means the measurement was wrong, and pinning it to a boundary would commit garbage while looking deliberate
@@ -627,7 +627,7 @@ Riders can configure wheel circumference using one of three methods:
 - [x] Banner notification displayed when auto-calibration fires
 - [x] Calibration disabled when GPS-only speed mode is active (no BLE sensor connected)
 - [x] Unit tested: calibration math correct for a range of known discrepancy scenarios
-- [ ] Verified on hardware: no ride has yet exercised a commit. The first field test (2026-08-14) used presets 2.57% apart, which was correctly silent under the then-current 5% threshold but proved nothing about the commit path
+- [x] Verified on hardware (2026-08-15): a ride started at 2288 mm (29 × 2.1) corrected to 2069 mm after two confirming windows, persisted, showed the banner, and Settings then read Custom 2069 mm. Six windows across two rides on the same bike measured 2057/2069/2069/2055/2051/2069 mm — mean 2061.8, sd 8.4 mm (0.41%), against the ~0.49% predicted floor
 
 ---
 

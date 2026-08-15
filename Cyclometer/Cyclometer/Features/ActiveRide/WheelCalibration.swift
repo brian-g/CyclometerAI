@@ -56,44 +56,54 @@ enum WheelCalibration {
         revolutions * Double(circumferenceMM) / 1000.0
     }
 
-    /// `|BLE − GPS| / GPS` over the window, or nil if the inputs can't support a
-    /// comparison. Unsigned; use `isOverReading` for the direction.
-    static func discrepancy(storedMM: Int, gpsMeters: Double, revolutions: Double) -> Double? {
+    /// What this window says the wheel actually rolls, in millimetres — nil if the
+    /// inputs can't support a measurement.
+    ///
+    /// PRD §8.9 states the correction as `stored × (GPS / BLE)`. Substituting
+    /// `BLE = revolutions × stored / 1000` cancels `stored` entirely, leaving
+    /// `GPS × 1000 / revolutions`. The stored value survives only in the trigger test
+    /// and the ±10% cap, which is what makes the measurement immune to the
+    /// circumference being changed in Settings partway through a window — and what
+    /// lets measurements from several windows be averaged before a correction is
+    /// derived from them.
+    static func measuredCircumferenceMM(gpsMeters: Double, revolutions: Double) -> Double? {
         guard gpsMeters > 0, revolutions > 0 else { return nil }
-        let ble = bleDistance(revolutions: revolutions, circumferenceMM: storedMM)
-        return abs(ble - gpsMeters) / gpsMeters
+        return gpsMeters * 1000.0 / revolutions
+    }
+
+    /// `|BLE − GPS| / GPS` over the window, which reduces to
+    /// `|stored − measured| / measured`. Unsigned; use `isOverReading` for direction.
+    static func discrepancy(storedMM: Int, measuredMM: Double) -> Double {
+        abs(Double(storedMM) - measuredMM) / measuredMM
+    }
+
+    /// Whether a window missed by enough to be worth acting on.
+    static func exceedsThreshold(storedMM: Int, measuredMM: Double) -> Bool {
+        discrepancy(storedMM: storedMM, measuredMM: measuredMM) > discrepancyThreshold
     }
 
     /// True when the stored circumference makes the wheel claim more distance than
     /// GPS saw — i.e. the correction will shrink it. Used to require that consecutive
     /// windows agree on the direction before committing.
-    static func isOverReading(storedMM: Int, gpsMeters: Double, revolutions: Double) -> Bool {
-        bleDistance(revolutions: revolutions, circumferenceMM: storedMM) > gpsMeters
+    static func isOverReading(storedMM: Int, measuredMM: Double) -> Bool {
+        Double(storedMM) > measuredMM
     }
 
-    /// The corrected circumference in millimetres, or nil when none is warranted.
+    /// The value to commit for a confirmed measurement, or nil when none is warranted.
     ///
-    /// PRD §8.9 states the correction as `stored × (GPS / BLE)`. Substituting
-    /// `BLE = revolutions × stored / 1000` cancels `stored` entirely, leaving
-    /// `GPS × 1000 / revolutions` — the stored value survives only in the trigger
-    /// test and the ±10% cap. That is what makes the result immune to the
-    /// circumference being changed in Settings partway through a window.
+    /// Takes the measurement rather than raw window data so the caller can average the
+    /// windows that confirmed each other first — two windows agreeing is what licenses
+    /// the correction, so discarding the first one's measurement throws away half the
+    /// evidence and leaves `√2` of avoidable error on the table.
     ///
-    /// Returns nil when the discrepancy is within threshold, when the inputs are
-    /// degenerate, or when the result lands outside `WheelPreset.validRange`. That
-    /// last case is a *rejection*, not a clamp: a value that implausible means the
-    /// measurement was wrong, and pinning it to a boundary would commit garbage
-    /// while looking deliberate.
-    static func newCircumferenceMM(storedMM: Int, gpsMeters: Double, revolutions: Double) -> Int? {
-        guard let discrepancy = discrepancy(
-            storedMM: storedMM, gpsMeters: gpsMeters, revolutions: revolutions
-        ) else { return nil }
-        guard discrepancy > discrepancyThreshold else { return nil }
-
-        let raw = gpsMeters * 1000.0 / revolutions
+    /// Returns nil when the result lands outside `WheelPreset.validRange`. That is a
+    /// *rejection*, not a clamp: a value that implausible means the measurement was
+    /// wrong, and pinning it to a boundary would commit garbage while looking
+    /// deliberate.
+    static func correctedCircumferenceMM(storedMM: Int, measuredMM: Double) -> Int? {
         let lower = Double(storedMM) * (1 - maxAdjustmentFraction)
         let upper = Double(storedMM) * (1 + maxAdjustmentFraction)
-        let capped = min(max(raw, lower), upper)
+        let capped = min(max(measuredMM, lower), upper)
 
         let rounded = Int(capped.rounded())
         guard WheelPreset.validRange.contains(rounded) else { return nil }

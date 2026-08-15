@@ -1066,7 +1066,7 @@ func testL3AlertFiresHapticAndAudio() async {
 | `SpeedFeature` | BLE, GPS fallback, CSC wheel calc, source badge; shared-peripheral scenarios |
 | `CadenceFeature` | BLE, CSC crank calc; "--" when no source; shared-peripheral with SpeedFeature |
 | `TrackPointRecorderFeature` | 30s checkpoint flush; ride end flush; paused intervals excluded |
-| `WheelCalibrationFeature` | 2% trigger over two consecutive windows; ±10% cap; out-of-range rejection; GPS accuracy gating; calibration suspension during L3 |
+| `WheelCalibrationFeature` | 2% trigger over two consecutive windows; correction averaged across the confirming windows; ±10% cap; out-of-range rejection; GPS accuracy gating; calibration suspension during L3 |
 | `AlertOrchestratorFeature` | Effect dispatched at `userInteractive` priority; < 200ms mock latency |
 | `GPXExporter` | Schema validation; absent fields (not zero) for missing sensors; vehicle pass waypoints |
 | `VehiclePassDetection` | Overtake vs. turn-off discrimination; 2s minimum tracking |
