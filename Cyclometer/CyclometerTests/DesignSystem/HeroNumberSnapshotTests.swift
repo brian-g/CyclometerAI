@@ -79,9 +79,16 @@ final class HeroNumberSnapshotTests: XCTestCase {
         )
     }
 
+    // Deliberately a design-system token rather than `.accentColor`. The accent
+    // resolves against the host bundle's asset catalog, where `AccentColor` is
+    // currently pure white — so this rendered white on `systemBackground` and
+    // asserted an invisible number against a reference recorded back when the
+    // accent was still the SwiftUI default blue. What the modifier is for is
+    // overriding the default `.primary`, and a fixed token tests that without
+    // depending on an ambient value no caller here passes.
     func testCustomColor() {
         assertSnapshot(
-            of: wrap(HeroNumber(28.4, unit: "mph").valueColor(.accentColor)),
+            of: wrap(HeroNumber(28.4, unit: "mph").valueColor(.cyPrimary)),
             as: .image(layout: horizontalCanvas)
         )
     }

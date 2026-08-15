@@ -395,3 +395,27 @@ Folded into the same follow-up:
 - `WheelCalibration.swift:7,13,23` still frames 1,500 m / 2% as deliberate deviations from a PRD that
   "specifies" 500 m / 5%. PRD §8.9.2 has since adopted both, so the values agree and only the prose is
   stale. Same framing in this file at the #70 entry above.
+
+## Also in this change — the long-standing snapshot failure
+
+`HeroNumberSnapshotTests.testCustomColor()` was documented in CLAUDE.md as a known pre-existing
+failure. It was a real bug in the test, not simulator drift.
+
+The test rendered `HeroNumber(...).valueColor(.accentColor)`. `.accentColor` resolves against the host
+bundle's asset catalog, and `Assets.xcassets/AccentColor.colorset` is pure white in both appearances —
+so the view drew a white number on `systemBackground`, i.e. an invisible one. The reference PNG showed
+SwiftUI's default blue, recorded before that asset existed. The test had therefore been asserting the
+ambient accent rather than the modifier, and would have been worthless even had the pixels matched.
+
+Fixed by pinning the case to `.cyPrimary`, which is what the modifier is actually for — overriding the
+default `.primary` — and re-recording the reference. The whole local suite now passes: 348 tests, no
+failures, snapshot suites included.
+
+CI still skips the four snapshot suites. That skip is about SwiftUI pixel output varying across runner
+images, which this fix does not address; the workflow comment no longer cites `testCustomColor` as its
+example, and needs its own issue (record-on-CI or a per-pixel tolerance).
+
+**Not touched:** the white `AccentColor` asset itself. Any stock SwiftUI control tinting off the accent
+renders white today, and `HeroNumber.swift:225`'s own `#Preview` uses `.valueColor(.accentColor)`, so it
+previews invisibly too. That looks like an unfilled placeholder rather than a decision, but it is a
+production asset and outside a test-only change.
