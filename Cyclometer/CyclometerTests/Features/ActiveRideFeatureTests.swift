@@ -853,3 +853,308 @@ struct ActiveRideFeatureHeartRateTests {
         }
     }
 }
+
+// MARK: - Calibration suspension
+
+/// PRD §8.9 suspends wheel auto-calibration during radar alerts. The parent derives
+/// that from `isCalibrationSuspended` and forwards it on the transition
+/// (`ActiveRideFeature.swift:294`).
+///
+/// The pause/resume half of that `||` is already asserted incidentally by the state
+/// machine suite. The radar half was not reachable there: those stores start from
+/// `ActiveRideFeature.State()`, whose `recordingState` defaults to `.idle`, so
+/// suspension is already on before a target ever lands. These stores start recording.
+@MainActor
+@Suite("ActiveRideFeature — calibration suspension")
+struct ActiveRideFeatureCalibrationSuspensionTests {
+
+    private static func target(
+        _ threatLevel: RadarTarget.ThreatLevel, slot: Int = 0
+    ) -> RadarTarget {
+        RadarTarget(
+            id: VariaRadarClient.vehicleSlotIDs[slot],
+            relativeVelocityMPS: 8,
+            rangeMetres: 40,
+            threatLevel: threatLevel
+        )
+    }
+
+    /// A clean fix one second apart from its predecessor at 10 m/s — inside the
+    /// accuracy, moving-speed and gap gates, so it opens and holds the GPS gate.
+    private static func fix(at second: TimeInterval) -> LocationUpdate {
+        LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
+            altitude: 280,
+            speed: 10,
+            horizontalAccuracy: 5,
+            heading: 192,
+            timestamp: testDate.addingTimeInterval(second)
+        )
+    }
+
+    private func makeStore() -> TestStoreOf<ActiveRideFeature> {
+        TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.bleCSCClient = .testValue
+        }
+    }
+
+    @Test("A radar target above all-clear suspends calibration mid-ride")
+    func radarAlertSuspendsCalibration() async {
+        let store = makeStore()
+        let targets = [Self.target(.danger)]
+
+        await store.send(.radarTargetsUpdated(targets)) {
+            $0.radarTargets = targets
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+    }
+
+    @Test("Returning to all-clear resumes calibration")
+    func allClearResumesCalibration() async {
+        let store = makeStore()
+        let approaching = [Self.target(.warning)]
+
+        await store.send(.radarTargetsUpdated(approaching)) {
+            $0.radarTargets = approaching
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+
+        await store.send(.radarTargetsUpdated([])) {
+            $0.radarTargets = []
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = false
+        }
+    }
+
+    @Test("Suspension is forwarded on the transition, not on every radar update")
+    func suspensionForwardedOnlyOnTransition() async {
+        let store = makeStore()
+        let approaching = [Self.target(.warning)]
+
+        await store.send(.radarTargetsUpdated(approaching)) {
+            $0.radarTargets = approaching
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+
+        // Radar notifies continuously. The threat escalating, or the vehicle closing,
+        // must not re-send a flag that has not changed — the whole point of routing
+        // this through `.onChange` rather than the target handler itself.
+        let closing = [Self.target(.danger)]
+        await store.send(.radarTargetsUpdated(closing)) {
+            $0.radarTargets = closing
+        }
+        // No second .calibration(.suspensionChanged) fires — an unasserted receive
+        // fails the test.
+    }
+
+    @Test("A radar alert pauses the window; clearing it resumes from the preserved totals")
+    func radarAlertPausesAndResumesTheWindow() async {
+        let store = makeStore()
+
+        // Open both gates: the speed sensor is delivering, and a first clean fix
+        // seeds the integration interval.
+        await store.send(.calibration(.bleConnectionChanged(.active))) {
+            $0.calibration.isSensorActive = true
+        }
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 0)))) {
+            $0.calibration.isGPSUsable = true
+            $0.calibration.lastFixTimestamp = Self.fix(at: 0).timestamp
+        }
+
+        // One second of riding: 10 m of GPS distance against 5 wheel revolutions.
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 1)))) {
+            $0.calibration.gpsMeters = 10
+            $0.calibration.lastFixTimestamp = Self.fix(at: 1).timestamp
+        }
+        await store.send(.calibration(.wheelRevolutionsReceived(5))) {
+            $0.calibration.revolutions = 5
+        }
+
+        let targets = [Self.target(.danger)]
+        await store.send(.radarTargetsUpdated(targets)) {
+            $0.radarTargets = targets
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+
+        // Both accumulators freeze together — suppressing only one would manufacture
+        // exactly the discrepancy this feature exists to detect. Only the fix
+        // timestamp advances, which is what stops the resumed window integrating
+        // across the alert.
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 2)))) {
+            $0.calibration.lastFixTimestamp = Self.fix(at: 2).timestamp
+        }
+        await store.send(.calibration(.wheelRevolutionsReceived(5)))
+
+        await store.send(.radarTargetsUpdated([])) {
+            $0.radarTargets = []
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = false
+        }
+
+        // The road clears and the window carries on from where it stopped rather than
+        // starting over: a rider in traffic would otherwise never complete one, and
+        // that is exactly the rider who uses radar most (PRD §8.9).
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 3)))) {
+            $0.calibration.gpsMeters = 20
+            $0.calibration.lastFixTimestamp = Self.fix(at: 3).timestamp
+        }
+        await store.send(.calibration(.wheelRevolutionsReceived(5))) {
+            $0.calibration.revolutions = 10
+        }
+    }
+}
+
+// MARK: - Shared CSC peripheral
+
+/// One combo sensor assigned Both holds the Speed and Cadence roles at once
+/// (BLE.md §5.0). Nothing at the feature layer correlates them — `SpeedFeature` and
+/// `CadenceFeature` watch separate `connectionState(role:)` streams and never learn
+/// they are watching the same device — so a single unplug reaches the ride as two
+/// role-scoped events. These tests pin what that produces today.
+@MainActor
+@Suite("ActiveRideFeature — shared CSC peripheral")
+struct ActiveRideFeatureSharedPeripheralTests {
+
+    /// Mid-ride on one combo sensor: BLE speed on screen with a GPS shadow behind it,
+    /// a live cadence reading, and a calibration window part-accumulated with one
+    /// confirming measurement already banked.
+    private static var midRide: ActiveRideFeature.State {
+        var state = ActiveRideFeature.State(recordingState: .active)
+        state.speed = SpeedFeature.State(
+            speedMPS: 6.0,
+            activeSpeedSource: .bleWheel,
+            latestGPSSpeedMPS: 5.0,
+            pairedSensorName: "Wahoo SPEED"
+        )
+        state.cadence = CadenceFeature.State(cadenceRPM: 82)
+        state.calibration.isSensorActive = true
+        state.calibration.isGPSUsable = true
+        state.calibration.gpsMeters = 400
+        state.calibration.revolutions = 195
+        state.calibration.lastFixTimestamp = testDate
+        state.calibration.pendingOverReading = true
+        state.calibration.pendingMeasurements = [2051]
+        return state
+    }
+
+    private func makeStore(clock: TestClock<Duration>) -> TestStoreOf<ActiveRideFeature> {
+        TestStore(initialState: Self.midRide) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = clock
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.bleCSCClient = .testValue
+        }
+    }
+
+    @Test("A combo sensor disconnecting fires speed fallback and cadence \"--\" together")
+    func comboDisconnectFiresBothConsequences() async {
+        let clock = TestClock()
+        let store = makeStore(clock: clock)
+
+        await store.send(.speed(.bleConnectionChanged(.disconnected))) {
+            $0.speed.connectionState = .disconnected
+            $0.speed.speedMPS = 5.0
+            $0.speed.activeSpeedSource = .gps
+            $0.speed.sourceSwitchBanner =
+                SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
+        }
+        await store.send(.cadence(.bleConnectionChanged(.disconnected))) {
+            $0.cadence.connectionState = .disconnected
+            $0.cadence.cadenceRPM = nil
+        }
+
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.speed.bannerDismissed) {
+            $0.speed.sourceSwitchBanner = nil
+        }
+
+        // Cadence cleared on the spot and had no timer to fire: the 10 s grace window
+        // guards a *reconnect*, and there is no fallback source to switch to
+        // (BLE.md §6.2). Nothing arrives here — an unasserted receive fails the test.
+        await clock.advance(by: CadenceFeature.reconnectGraceDelay)
+    }
+
+    @Test("One banner, not two, across a shared disconnect")
+    func sharedDisconnectArmsASingleBanner() async {
+        let clock = TestClock()
+        let store = makeStore(clock: clock)
+
+        await store.send(.speed(.bleConnectionChanged(.disconnected))) {
+            $0.speed.connectionState = .disconnected
+            $0.speed.speedMPS = 5.0
+            $0.speed.activeSpeedSource = .gps
+            $0.speed.sourceSwitchBanner =
+                SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
+        }
+        await store.send(.cadence(.bleConnectionChanged(.disconnected))) {
+            $0.cadence.connectionState = .disconnected
+            $0.cadence.cadenceRPM = nil
+        }
+        await store.send(.calibration(.bleConnectionChanged(.disconnected))) {
+            $0.calibration.isSensorActive = false
+            $0.calibration.gpsMeters = 0
+            $0.calibration.revolutions = 0
+            $0.calibration.lastFixTimestamp = nil
+            $0.calibration.pendingOverReading = nil
+            $0.calibration.pendingMeasurements = []
+        }
+
+        // All three children reacted, and exactly one banner is armed —
+        // `RideDashboardView.activeBanner` resolves the slot to a single capsule, so
+        // a second armed banner would be silently dropped rather than stacked.
+        //
+        // Shipping behaviour, not the spec's: BLE.md §6.2 asks for one *combined*
+        // notice, "Speed sensor disconnected — using GPS speed; cadence unavailable."
+        // Cadence has no banner state at all today, and neither feature knows the two
+        // roles share a peripheral. Tracked separately; asserted here so the gap is
+        // visible at the assertion rather than only in a tracker.
+        #expect(store.state.speed.sourceSwitchBanner != nil)
+        #expect(store.state.calibration.banner == nil)
+
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.speed.bannerDismissed) {
+            $0.speed.sourceSwitchBanner = nil
+        }
+    }
+
+    @Test("A combo sensor disconnecting also voids the calibration window")
+    func sharedDisconnectVoidsTheCalibrationWindow() async {
+        let store = makeStore(clock: TestClock())
+
+        // The speed role leaving `.active` discards the window outright, streak and
+        // all — unlike a suspension, which pauses both accumulators together. A
+        // reconnect gap loses revolutions that GPS kept counting through, and the
+        // calculator will never replay them, so the window would read long (PRD §8.9).
+        await store.send(.calibration(.bleConnectionChanged(.disconnected))) {
+            $0.calibration.isSensorActive = false
+            $0.calibration.gpsMeters = 0
+            $0.calibration.revolutions = 0
+            $0.calibration.lastFixTimestamp = nil
+            $0.calibration.pendingOverReading = nil
+            $0.calibration.pendingMeasurements = []
+        }
+    }
+}

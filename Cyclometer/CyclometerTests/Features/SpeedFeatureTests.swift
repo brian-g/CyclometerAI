@@ -297,6 +297,101 @@ struct SpeedFeatureTests {
         }
     }
 
+    @Test("BLE → GPS → BLE: the source returns to the sensor when data resumes")
+    func bleToGPSToBLERoundTrip() async {
+        let clock = TestClock()
+        let store = makeStore(
+            initialState: SpeedFeature.State(
+                speedMPS: 6.0,
+                activeSpeedSource: .bleWheel,
+                latestGPSSpeedMPS: 5.0,
+                pairedSensorName: "Wahoo SPEED"
+            ),
+            clock: clock
+        )
+
+        // Outbound leg: the sensor drops and the shadow value is promoted.
+        await store.send(.bleConnectionChanged(.disconnected)) {
+            $0.connectionState = .disconnected
+            $0.speedMPS = 5.0
+            $0.activeSpeedSource = .gps
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
+        }
+
+        // Return leg: data arriving *is* the promotion — there is no separate action
+        // for it, so nothing else in the suite would catch this regressing. The
+        // displayed value must be the sensor's, not the GPS shadow it replaces.
+        await store.send(.bleSpeedReceived(6.4)) {
+            $0.speedMPS = 6.4
+            $0.activeSpeedSource = .bleWheel
+            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.4)]
+        }
+
+        // Recovery does not retract the notice: the rider was told the source moved,
+        // so the banner still runs its full dismissal delay.
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
+    }
+
+    @Test("A completed fallback cycle leaves no stale timer — the next drop arms a fresh one")
+    func fallbackTimerRearmsAfterACompletedCycle() async {
+        let clock = TestClock()
+        let store = makeStore(
+            initialState: SpeedFeature.State(
+                speedMPS: 6.0,
+                activeSpeedSource: .bleWheel,
+                latestGPSSpeedMPS: 5.0
+            ),
+            clock: clock
+        )
+
+        // First cycle: drop, fall back, dismiss.
+        await store.send(.bleConnectionChanged(.reconnecting)) {
+            $0.connectionState = .reconnecting
+        }
+        await clock.advance(by: SpeedFeature.fallbackDelay)
+        await store.receive(\.bleFallbackTimedOut) {
+            $0.speedMPS = 5.0
+            $0.activeSpeedSource = .gps
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil)
+        }
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
+
+        // The sensor comes back: the link is restored first, then data reclaims the
+        // display. Going straight from `.reconnecting` to data would skip the
+        // optimistic cancel on `.active` that a real reconnection always passes
+        // through.
+        await store.send(.bleConnectionChanged(.active)) {
+            $0.connectionState = .active
+        }
+        await store.send(.bleSpeedReceived(6.2)) {
+            $0.speedMPS = 6.2
+            $0.activeSpeedSource = .bleWheel
+            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.2)]
+        }
+
+        // Second cycle: the fallback must arm again. A dropout mid-ride is routine —
+        // one sensor glitch must not leave the rider permanently unprotected.
+        await store.send(.bleConnectionChanged(.reconnecting)) {
+            $0.connectionState = .reconnecting
+        }
+        await clock.advance(by: SpeedFeature.fallbackDelay)
+        await store.receive(\.bleFallbackTimedOut) {
+            $0.speedMPS = 5.0
+            $0.activeSpeedSource = .gps
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil)
+        }
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
+    }
+
     @Test("Terminal disconnect while still BLE-sourced falls back immediately")
     func terminalDisconnectFallsBackImmediately() async {
         let clock = TestClock()

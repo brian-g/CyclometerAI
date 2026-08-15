@@ -311,3 +311,87 @@ Also corrected in the docs: I had asserted this bike rolls ~2105 mm (assuming 70
 rides of predictions on it. Measured, it is ~2062. The threshold research was unaffected — it rests on
 the preset table and Sheldon Brown, not on this bike — but the field-test predictions derived from
 the invented number were worthless.
+
+---
+
+# #72 — M6 unit tests: CSC pipeline wiring, source switching, calibration math
+
+## What the issue asked for vs. what was missing
+
+Three of the issue's four bullets were already covered by tests that shipped with #65–#70, so this was
+not the broad sweep the title implies:
+
+| Issue bullet | Status on arrival |
+|---|---|
+| Role matrix (wheel-only / crank-only / combo) per BLE.md §5.0 | Covered — `DeviceManagementFeatureTests` (18) + `BLECSCClientTests` live state machine (~30) |
+| CSC parsing, calculator, backoff, 0x2A5C capabilities | Covered — `BLECSCClientTests` (~70 tests) |
+| Calibration trigger, ±10% cap, accuracy gating, suspension | Covered — `WheelCalibrationTests` (15) + `WheelCalibrationFeatureTests` (12) |
+| Speed source switching, cadence "--", shared peripheral | Partial — the gaps below |
+
+The issue text also predates two spec revisions: it says "5% trigger", but PRD §8.9.2 moved that to 2%
+over a 1,500 m window, and the code and its tests already track the current numbers. No test changed
+on account of the wording.
+
+## Tasks
+
+- [x] SpeedFeature: BLE → GPS → BLE round trip (the return leg was untested)
+- [x] SpeedFeature: a completed fallback cycle re-arms on the next drop
+- [x] ActiveRideFeature: radar-driven calibration suspension (4 tests)
+- [x] ActiveRideFeature: shared CSC peripheral disconnect (3 tests)
+- [x] Prove each new test fails against an inverted reducer
+- [x] Full CI-equivalent run green
+
+## Review
+
+**The real gap was cross-feature wiring, not client or math coverage.** Two holes, both invisible from
+inside the child suites:
+
+1. **Promotion back to BLE had no test.** `SpeedFeatureTests` covered the outbound leg five ways but
+   never the return. `.bleSpeedReceived` sets `activeSpeedSource = .bleWheel` with no dedicated
+   action — the arrival of data *is* the promotion — so deleting that line broke nothing that was
+   asserted. It now fails `bleToGPSToBLERoundTrip`. `activeSpeedSource` is also the badge input, so
+   this doubles as the badge-transition coverage DataModel.md §10 asks for.
+
+2. **Radar-driven suspension had no test.** `suspensionChanged` was asserted only incidentally, and
+   only on the pause/resume half of `isCalibrationSuspended`. The radar half was unreachable from
+   `ActiveRideFeatureRadarTests`, whose stores start from `ActiveRideFeature.State()` — `recordingState`
+   defaults to `.idle`, so suspension is already on before a target ever lands, and adding a `.danger`
+   target changes nothing. The new suite starts recording, which is what makes the transition
+   observable. Dropping the `radarTargets.contains` clause now fails all four of its tests.
+
+**One test was wrong on the first run, for a reason worth keeping.** `fallbackTimerRearmsAfterACompletedCycle`
+drove `.reconnecting` → data → `.reconnecting`, and the second send asserted a `connectionState` change
+that never happened — it was already `.reconnecting`. A real reconnection passes through `.active`
+first. Adding that step both fixed the test and made it exercise the optimistic cancel on `.active`
+that the original sequence skipped.
+
+**Deviation from the approved plan.** The plan called for the `FileStorage.inMemory` quarantine on the
+new `ActiveRideFeature` suites. Dropped: neither suite reads or asserts on `wheelCircumferenceMM`, no
+window reaches 1,500 m so `evaluateWindow` is never entered, and nothing writes preferences. Adding the
+idiom would have been ceremony that implies a hazard that isn't there, and it would have diverged from
+the four sibling suites in the same file, none of which use it.
+
+**Verification.** Every new test was proved to bite by temporarily inverting the reducer it guards —
+dropping the radar clause from `isCalibrationSuspended`, removing `activeSpeedSource = .bleWheel` from
+`.bleSpeedReceived`, removing the cadence clear on `.disconnected`, and swapping `resetWindow` for
+`resetMeasurements` on sensor loss. Each failed exactly the intended tests and nothing unrelated; all
+four reverted. 317 tests pass under the CI selection (the four snapshot suites CI skips, skipped).
+
+## Left for the follow-ups
+
+**The combined disconnect banner is specified but not built.** BLE.md §6.2 and the §12 acceptance table
+require one notice for a shared peripheral — "Speed sensor disconnected — using GPS speed; cadence
+unavailable." Today `CadenceFeature` has no banner state at all, and neither feature knows the two roles
+share a device: they watch separate `connectionState(role:)` streams. Per the decision on this issue the
+new tests pin shipping behaviour and carry a comment naming the gap at the assertion.
+
+Folded into the same follow-up:
+- §12 also asks for a cadence-disconnection banner; §6.2's own table says only "no fallback source
+  available". The two rows disagree — resolve which is intended before building either.
+- `SpeedFeature.State.pairedPeripheralId` and `CadenceFeature.State.pairedPeripheralId` are never
+  written or read. They are the natural hook for detecting the shared-peripheral case: populate or delete.
+- PRD §8.4 specifies a third string ("Switched to GPS speed — BLE sensor disconnected"). Three specs,
+  three strings.
+- `WheelCalibration.swift:7,13,23` still frames 1,500 m / 2% as deliberate deviations from a PRD that
+  "specifies" 500 m / 5%. PRD §8.9.2 has since adopted both, so the values agree and only the prose is
+  stale. Same framing in this file at the #70 entry above.
