@@ -23,6 +23,9 @@ struct AppFeatureTests {
         await store.send(.dashboardDismissed) {
             $0.isDashboardPresented = false
         }
+        // Dropping to the accessory strip also hands the screen back to the system
+        // (#110) — see AppScreenPowerTests for what that transition actually does.
+        await store.receive(\.screenVisibilityChanged)
         #expect(store.state.activeRide != nil)
     }
 
@@ -36,11 +39,21 @@ struct AppFeatureTests {
             )
         ) {
             AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.screenClient = .testValue
         }
 
         await store.send(.dashboardOpened) {
             $0.isDashboardPresented = true
         }
+        // Presenting takes the screen (#110), which arms the auto-dim countdown;
+        // minimizing again releases it so the countdown doesn't outlive the test.
+        await store.receive(\.screenVisibilityChanged)
+        await store.send(.dashboardDismissed) {
+            $0.isDashboardPresented = false
+        }
+        await store.receive(\.screenVisibilityChanged)
     }
 
     /// With no active ride, `dashboardOpened` is a no-op (accessory can't be shown).

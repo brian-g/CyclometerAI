@@ -31,6 +31,14 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// so an existing install simply starts unpaired.
     var pairedSensors: [PairedSensor] = []
 
+    /// Whether the dashboard dims itself after an idle period (#110, S12). On by
+    /// default — a multi-hour ride is the case that needs the battery back, and the
+    /// rider can turn it off in Settings.
+    ///
+    /// Only gates the dim. The wake lock is not a preference: a bicycle computer that
+    /// blanks mid-ride is broken, not configurable.
+    var isAutoDimEnabled: Bool = true
+
     /// The sensor filling `role`, or nil when the role is unpaired. Role-keyed rather
     /// than peripheral-keyed because that is how every consumer asks: one sensor per
     /// role, app-wide, for MVP (DataModel.md §3.9 gives roles a bike dimension in
@@ -63,6 +71,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
         pairedSensors = try container.decodeIfPresent(
             [PairedSensor].self, forKey: .pairedSensors
         ) ?? []
+        isAutoDimEnabled = try container.decodeIfPresent(
+            Bool.self, forKey: .isAutoDimEnabled
+        ) ?? true
     }
 }
 
