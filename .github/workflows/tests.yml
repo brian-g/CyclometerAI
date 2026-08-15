@@ -35,9 +35,8 @@ jobs:
       # Snapshot suites are excluded deliberately, not by oversight. Their reference
       # images were recorded against a local simulator and SwiftUI pixel output
       # varies across runner images, so gating merges on them would be flaky from
-      # day one (HeroNumberSnapshotTests.testCustomColor is a known local failure
-      # already). Running them in CI needs its own issue — record-on-CI or a
-      # per-pixel tolerance.
+      # day one. Running them in CI needs its own issue — record-on-CI or a
+      # per-pixel tolerance. They all pass locally.
       - name: Run unit tests
         working-directory: Cyclometer
         run: |

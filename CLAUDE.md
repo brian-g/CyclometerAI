@@ -145,7 +145,8 @@ xcodebuild test  -project Cyclometer.xcodeproj -scheme Cyclometer \
 **Testing conventions** (target `CyclometerTests`):
 - Reducer logic — Swift Testing (`@Suite`/`@Test`/`#expect`) + TCA `TestStore` with `withDependencies` for mocks (e.g. `SpeedFeatureTests.swift`).
 - UI — `pointfreeco/swift-snapshot-testing` via XCTest, fixed-size canvases, light + dark variants (e.g. `SpeedWidgetSnapshotTests.swift`).
-- Known pre-existing failure: `HeroNumberSnapshotTests.testCustomColor()`.
+- Snapshot references are recorded against a local simulator, so the four snapshot suites are skipped in CI (see `.github/workflows/tests.yml`). The full local suite passes.
+- Don't snapshot against ambient environment values (`.accentColor`, `.primary` where the token matters) — pass an explicit `cy*` token, or the reference silently encodes whatever the host bundle resolved at record time.
 
 **Open Questions (resolve before or during M2):**
 - OQ2: Garmin mobile SDK vs. raw CoreBluetooth for Varia BLE integration
