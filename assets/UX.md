@@ -1,7 +1,8 @@
 # Cyclometer — UX Specification
-**Version:** 0.6  
+**Version:** 0.7  
 **Date:** 2026-03-31  
-**Updated:** 2026-05-21 — Dashboard vision rewritten; S05.4 reframed as factory default; S05.5 removed  
+**Updated:** 2026-08-14 — M10 scope pass: S11 rewritten as the flat device list the Sketch frame shows; S12 loses Set Do Not Disturb, defers Accounts to Phase 2, and moves wheel size to a detail screen; S01 drops the Files permission and asks for Location When In Use  
+**Previously updated:** 2026-05-21 — Dashboard vision rewritten; S05.4 reframed as factory default; S05.5 removed  
 **Status:** In Progress  
 **Author:** Brian (UX Design)  
 **Companion Document:** `PRD.md` — defines *what* each screen must do; this document defines *how* it is structured.
@@ -148,20 +149,35 @@ This convention matches the frame naming in `Design.sketch`.
 
 ### Permissions Flow
 - Bluetooth (required for BLE sensors)
-- Location Always (required for GPS track + background recording)
-- HealthKit read (HR, resting HR, max HR, date of birth)
+- Location **When In Use** (required for GPS track)
 - Motion and Fitness (required for activity detection)
-- Files / Documents directory (for GPX export)
+- HealthKit read (HR, resting HR, max HR, date of birth)
+
+> **Revised 2026-08-14 (M10).** Two corrections to the list this screen used to show.
+>
+> - **Files is not a permission.** The app writes ride GPX into its own `Documents/Rides/`, which needs no
+>   authorization — visibility in the Files app comes from the `UIFileSharingEnabled` and
+>   `LSSupportsOpeningDocumentsInPlace` Info.plist keys, set at build time. There is no prompt to present, so
+>   an oval that can never turn green was removed rather than left showing a permanent question mark.
+>   The Files row is still present in `Design.sketch` — S01 and needs deleting there.
+> - **Always cannot be asked for here.** iOS grants When In Use first and only allows escalation to Always
+>   afterwards, from a running app that is already using location. Onboarding therefore requests When In Use;
+>   the escalation prompt is raised at the first ride start, where background recording is the thing the rider
+>   is asking for and the reason for the upgrade is legible.
 
 ### Interactions
 For each permission item, when the user taps it, the system permission prompt will be displayed. When permission has been successfully granted for an item, the circle to the left of the item will become a filled circular checkmark. If they deny a permission, it will be a red X.
 
-If the user blocks Bluetooth, Location, or Motion and Fitness, they will not be able to proceed. Health and Files are optional; that functionality will not be available if denied. There is no skip affordance — users who have denied a required permission must go to iOS Settings to re-enable it.
+If the user blocks Bluetooth, Location, or Motion and Fitness, they will not be able to proceed. Health is optional; HR zones are unavailable if denied. There is no skip affordance — users who have denied a required permission must go to iOS Settings to re-enable it.
+
+The primary button reads **Next** and is enabled once the three required permissions are granted.
 
 ### Open UX Questions
 - [x] Single permission-per-screen carousel, or batched permission request? Single permission request per item, all shown on the same screen.
 - [x] What happens if the user denies Bluetooth? Cannot proceed.
 - [x] Skip / come back later affordance? No.
+- [x] Files permission? There isn't one — see the revision note above.
+- [x] Location Always or When In Use at onboarding? When In Use; escalate at first ride start.
 
 ---
 
@@ -179,9 +195,14 @@ If the user blocks Bluetooth, Location, or Motion and Fitness, they will not be 
 ### Layout
 > *Refer to `assets/design/Design.sketch` — S02.*
 
+Title **Add Sensors**, helper text "Nearby sensors, tap to pair, pull to refresh.", the device list, and a
+primary **Next** button. The list is the same component as S11 (§S11) with every row in its unpaired state —
+the screen differs only in its title, its helper text and the presence of Next.
+
 ### Interactions
 - BLE scan + discovered device list
-- Tap "Pair" for each device; confirm pairing
+- Tap a row to pair; role assignment and the replace-or-cancel prompt behave exactly as in S11
+- Pull to refresh restarts the scan
 - "Next" without pairing any sensor is a valid exit path
 
 ### Open UX Questions
@@ -742,58 +763,104 @@ An `HKWorkout` is written to Apple Health automatically when the ride ends, befo
 ### Layout
 > *Refer to `assets/design/Design.sketch` — S11.*
 
-### Sensor Sections
-1. Radar (Garmin Varia RTL515 / RCT715)
-2. Heart Rate sensor
-3. Speed sensor
-4. Cadence sensor
-5. Power meter (Phase 3 — hidden in MVP)
+Title **Manage Sensors**, helper text "Tap to pair, pull to refresh.", then a **single grouped list of
+devices** — not one section per role. Each row carries a sensor-type icon, the device name, and a trailing
+text button reading **Pair** or **Unpair**.
+
+> **Revised 2026-08-14 (M10).** This section previously specified five sections keyed by role (Radar, HR,
+> Speed, Cadence, Power). The Sketch frame shows one flat list mixing device types, and the Sketch frame is
+> authoritative. A role-sectioned list would also have had to invent an answer for where an unpaired device
+> of unknown capability sits before its 0x2A5C read returns — the flat list has no such problem.
+
+Role is therefore not a section header. It is established at pairing time (BLE.md §5.0) and surfaced in the
+row subtitle, not by position.
 
 ### Per-Sensor Row
 - Sensor name and model (from BLE advertisement if identifiable)
 - Connection status
+- Battery level where the device exposes `0x180F` (BLE.md §14)
 - Pair / Unpair action
-- Unpaired sensors sorted to the top
+- Paired sensors sorted to the top, then discovered-but-unpaired devices
 - When pairing a sensor with multiple profiles (e.g., combined speed+cadence), the rider is prompted to choose which type it represents. Implemented (#67) as a confirmation dialog — "What should this sensor do?" with Speed / Cadence / Both — raised only when the sensor's 0x2A5C capabilities say it can do both. A single-capability sensor is assigned silently. Tapping an already-paired combo sensor re-opens the same prompt, which is how a role is reassigned without re-pairing (BLE.md §5.0)
-- A paired sensor that is out of range stays in the Paired section, showing Disconnected, so it can still be unpaired
+- A paired sensor that is out of range stays in the list, showing Disconnected, so it can still be unpaired
+
+### One Sensor Per Role — Replace or Cancel
+
+Exactly one sensor is paired per role, app-wide in MVP and per-bike in Phase 2 (DataModel.md §3.9); heart
+rate is rider-scoped and stays app-wide in both. Pairing a sensor into a role that is already occupied raises
+a confirmation:
+
+> **Speed is already assigned to Wahoo SPEED.**  
+> [Replace] [Cancel]
+
+- **Order of prompts.** Role selection runs first, so the app knows which roles are actually being claimed
+  before asking what to displace. A single-capability sensor skips straight to the collision check
+- **One prompt, not two.** A combo sensor claiming Both against two occupied roles raises one confirmation
+  naming both incumbents
+- **Partial collision replaces only the colliding role.** An incumbent combo holding Speed and Cadence that
+  is displaced on Speed keeps Cadence. A peripheral left holding no roles at all is unpaired outright
+- **Cancel releases the interrogated peripheral** — it does not stay connected holding an empty role set
+- MVP copy names the role, not the bike. Phase 2 adds the bike
 
 ### Open UX Questions
-- [x] Multiple sensors of same type: active source by connection order — first wins.
+- [x] Multiple sensors of the same type paired at once? No — one per role, with the replace-or-cancel prompt
+  above. (This supersedes the earlier "active source by connection order — first wins" note, which described
+  arbitration between several paired sensors of one type. With one record per role there is nothing to
+  arbitrate.)
 - [x] RSSI display: none.
+- [ ] The Sketch frame lists a power meter and ENGO 3 glasses, both Phase 3 hardware. Does MVP filter the
+  scan to radar / HR / CSC, or list every discovered device and refuse to pair the unsupported ones?
 
 ---
 
 ## S12 — App Settings
 
 **Phase:** MVP  
-**Purpose:** Configure units, wheel size, alert behavior, haptic intensity, audio alerts, and accounts.
+**Purpose:** Configure units, wheel size, ride behavior, HR zones, and the entry point to device management.
+
+### Layout
+> *Refer to `assets/design/Design.sketch` — S12.*
 
 ### Settings Sections
 
-**General**
+**General** (no section header)
 - Units: Metric (km) | Imperial (miles) [Defaults from iOS]
-- Wheel circumference (mm) — numeric entry with preset selector. One app-wide value in MVP. Phase 2 moves this off the Settings screen: circumference belongs to the speed sensor, and sensors belong to a bike (DataModel.md §3.9). Expect this row to become a "Bikes" navigation link — or to move into the per-sensor detail under Sensors (S11) — rather than gaining more controls in place
-- Auto-pause
-- Auto-dim
-- Set Do Not Disturb
-- Sensors (navigates to S11)
+- Wheel size — a **navigation row** showing the current value as a tyre designation (`700x28`), not an inline
+  editor. Presets, manual entry in millimetres and the auto-calibration status live on the detail screen it
+  pushes. One app-wide value in MVP. Phase 2 moves this row off Settings entirely: circumference belongs to
+  the speed sensor, and sensors belong to a bike (DataModel.md §3.9), so expect it to become a "Bikes"
+  navigation link — or to move into the per-sensor detail under Sensors (S11) — rather than gaining more
+  controls in place
+- Auto-pause (toggle)
+- Auto-dim (toggle)
+- Sensors — navigates to S11, with the count of paired sensors as the trailing value
 
 **HR Zones**
-- Each zone listed with a Stepper control for adjustment
+- Five rows: Recovery/Light, Endurance, Aerobic, Threshold, Anaerobic
+- Each shows its bpm range and carries a Stepper for adjustment
 - Footer: "HR Zone data is derived from data collected by Apple Health."
-
-**Accounts**
-- List of connected accounts (Strava, Ride with GPS, etc.)
-- Each row navigates to account detail (S12.1)
-- Last row: "Add Account" with confirmation dialog for service selection
+- MVP derives the zones from a manually entered `RiderProfile` (max HR, resting HR) using Karvonen; M5
+  replaces the entry with HealthKit-sourced values and keeps manual entry as the fallback when Health is
+  denied or empty. The footer copy is therefore accurate only from M5 onward
 
 **About**
 - Version (read from bundle, shown as `CFBundleShortVersionString (CFBundleVersion)`)
 - Privacy Policy (navigates to inline policy view)
 
+### Deferred to Phase 2
+
+**Accounts** — connected services (Strava, Ride with GPS), each row navigating to account detail (S12.1),
+with "Add account" as the last row. Deferred out of MVP with the rest of service sync: `ConnectedService` has
+no consumer until the Ride Summary sync sheet exists (DataModel.md §3.8), so an account that can be connected
+but not used would be dead weight on the MVP settings screen. The section remains in the Sketch frame.
+
 ### Open UX Questions
 - [x] Silent Mode override toggle: not a setting at this time.
 - [x] Danger threshold: not a setting at this time.
+- [x] Set Do Not Disturb: removed 2026-08-14. iOS exposes no public API for an app to enable a Focus, so the
+  toggle could not have done what it said. The row is still present in `Design.sketch` — S12 and needs
+  deleting there.
+- [x] Accounts in MVP? No — Phase 2, see above.
 
 ---
 

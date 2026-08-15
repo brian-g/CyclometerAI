@@ -231,7 +231,16 @@ All CSC sensors (`0x1816`) go through role assignment when paired in S11 (Device
      → Auto-assign: wheel-only → Speed; crank-only → Cadence
      → No prompt shown
 
-4. Store PairedSensor record(s) in AppPreferences — one per role:
+4. Check each claimed role against the existing records:
+
+   If a claimed role is already held by another peripheral:
+     → Present the replace-or-cancel confirmation, naming the incumbent:
+         "Speed is already assigned to Wahoo SPEED."
+         [Replace]   [Cancel]
+     → Two occupied roles claimed at once ("Both") raise one confirmation naming both
+     → Cancel releases the interrogated peripheral and writes nothing
+
+5. Store PairedSensor record(s) in AppPreferences — one per role:
    - Speed   → one record, role .speed
    - Cadence → one record, role .cadence
    - Both    → two records, same peripheralID, different role
@@ -257,6 +266,22 @@ All CSC sensors (`0x1816`) go through role assignment when paired in S11 (Device
 >   peripheral that narrows to no roles at all is unpaired outright, since `setRoles` rejects an empty
 >   set. Capabilities that were never read say nothing and correct nothing.
 
+> **Role collision — replace or cancel (2026-08-14, M10).** Step 4 above. One sensor is paired per role
+> (DataModel.md §3.7), so a second claimant on an occupied role is a decision the rider makes, not one the
+> app makes silently. Three details the flow depends on:
+>
+> - **Role selection runs before the collision check.** Until 0x2A5C answers and the rider has chosen, the
+>   app does not know which roles are being claimed, and so cannot name what would be displaced. A
+>   single-capability sensor skips straight to the check.
+> - **A partial collision replaces only the colliding role.** An incumbent combo holding Speed and Cadence,
+>   displaced on Speed, keeps Cadence and stays connected under it. A peripheral left holding no roles is
+>   unpaired outright — same rule as the narrowing case above.
+> - **Cancel takes the interrogation path back out.** The peripheral is released rather than left connected
+>   holding an empty role set, reusing the release path #68 built for a dismissed role sheet.
+>
+> The write ordering rule below applies unchanged: Replace pushes `setPairedSensors` first, then `setRoles`
+> for both the incumbent and the new sensor.
+
 **Write ordering rule.** `pairedAssignments` inside `BLECSCClient` is the gate `.discovered` consults
 before reconnecting anything, and the client drops its lock across every connect and disconnect. So
 **`setPairedSensors` must be pushed before any teardown**, never after:
@@ -271,6 +296,7 @@ is a routine race, not a theoretical one. Tests must assert a single interleaved
 endpoint can only show that both were called, which is what let both orderings through review on #67.
 
 **Key rules:**
+- Exactly one sensor fills a given role at a time. A second claimant raises the replace-or-cancel confirmation above rather than being appended — there is no arbitration between two paired sensors of the same type, because that state is not reachable.
 - The same physical device (same `CBPeripheral.identifier`) may fill both the Speed and Cadence roles simultaneously. Both `SpeedFeature` and `CadenceFeature` will connect to and subscribe to the same peripheral; each reads only its relevant data fields from the shared CSC notification stream.
 - When a dedicated speed sensor and a combo sensor are both paired, and the combo is assigned Cadence-only, `SpeedFeature` connects to the dedicated sensor and `CadenceFeature` connects to the combo sensor. Both are active simultaneously.
 - Role can be reassigned in S11 without re-pairing; the peripheral UUID is retained.
@@ -385,6 +411,19 @@ struct CSCCalculator: Sendable {  // shared base — specialised below
 ## 6. Connection State Machine
 
 Each BLE peripheral (Radar, HR, CSC) manages its own connection state independently. The state machine is identical for all sensor types.
+
+> **Discovery is not adoption (2026-08-14, M10).** `.discovered` connects only to a peripheral the rider has
+> paired — the client consults its paired-record map first, and a device that is merely nearby is reported to
+> the discovery stream and otherwise ignored. `BLECSCClient` works this way since #67 (`pairedAssignments`
+> gates every reconnect).
+>
+> `VariaRadarClient` and `BLEHRClient` do not. Both currently connect to the first peripheral advertising
+> their service whenever `targetPeripheralID` is nil, which is how M2 got data on screen before any pairing UI
+> existed. It has two consequences worth naming, since neither is visible until a second device is in range:
+> the app will adopt a stranger's Varia or a training-partner's strap at a group start, and there is no record
+> behind the connection for S11 to show or the rider to unpair. M10 brings both clients under the same gate,
+> with `setPairedSensor` mirroring `setPairedSensors`, and the same write-ordering rule in §5.0 applies to
+> them once it exists.
 
 ```
                     ┌──────────────┐
@@ -956,4 +995,4 @@ SF Symbol by level and tints at or below 20% with `cyRatingBad`.
 
 ---
 
-*Cyclometer BLE Integration Spec v1.2 · 2026-08-03*
+*Cyclometer BLE Integration Spec v1.3 · 2026-08-14*

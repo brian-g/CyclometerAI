@@ -1,5 +1,5 @@
 # Cyclometer — Product Requirements Document
-**Version:** 0.4.3 Draft  
+**Version:** 0.4.4 Draft  
 **Date:** 2026-08-14  
 **Status:** Fourth Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
@@ -19,7 +19,7 @@
 | 0.4 | 2026-05-20 | Brian / Claude | iOS minimum updated to 26.0; S05.4, S05.5, S19, S20 added to screen inventory; OQ14 resolved (Option F sidebar); L3 haptic updated to Core Haptics; Routes tab added and promoted to Phase 2; deferred alert-configuration fields removed from UserProfile |
 | 0.4.1 | 2026-06-12 | Brian / Claude | OQBLE1 resolved (separate Speed/Cadence roles per `BLE.md`); M6 milestone wording clarified — CSC client is built in M2 (#20), M6 wires it into the metrics pipeline; wheel circumference presets + manual entry moved from M10 to M6 to align with GitHub milestone scoping |
 | 0.4.2 | 2026-07-07 | Brian / Claude | Milestone execution order re-sequenced: M3 -> M6 -> M10 -> M4 -> M5 -> M7-M12; GitHub milestone due dates updated to match; minimal BLE pairing sheet + CSC role assignment pulled forward into M6 (full S11 device management remains in M10); M6 issue set created (#65-#72) |
-| 0.4.3 | 2026-08-14 | Brian / Claude | §8.9 auto-calibration revised after the first field test (#70): discrepancy threshold 5% -> 2%, measurement window 500 m -> 1,500 m, two-window confirmation and a 3-per-ride cap added, out-of-range results rejected rather than clamped, GPS distance specified as Doppler-speed integration rather than position differencing; §8.9.2 added recording the evidence |
+| 0.4.4 | 2026-08-14 | Brian / Claude | M10 scope pass. S11 corrected to the flat device list in `Design.sketch` (no role sections); one sensor per role confirmed, with a replace-or-cancel prompt on collision; S12 loses Set Do Not Disturb (no public iOS API for enabling a Focus) and defers Accounts to Phase 2; wheel size becomes a navigation row to a detail screen; S01 drops the Files permission (there is no such prompt) and requests Location When In Use, escalating to Always at first ride start; HR zone entry moves to a manually entered `RiderProfile` in M10, HealthKit-sourced in M5; route service integrations follow Accounts to Phase 2, leaving GPX file import as the MVP source; M10 issue set created. Version 0.4.3 is the wheel auto-calibration revision on `feat/70-wheel-auto-calibration`, unmerged at the time of writing |
 
 ---
 
@@ -216,8 +216,8 @@ Controls must be large enough to tap without looking. The active ride screen mus
 | S08 | Add Widget | Phase 2 | Widget picker sheet; previews all available widgets in supported sizes |
 | S09 | Ride Paused | MVP | Pause state with live map frozen; resume / end ride options |
 | S10 | Ride Summary | MVP | Distance, time, avg speed, HR zone breakdown, cadence avg, map thumbnail, vehicle pass count, GPX export action |
-| S11 | Device Management | MVP | BLE device list; signal strength; pair / unpair; sensor source priority |
-| S12 | App Settings | MVP | Units, alert thresholds, haptic intensity, audio alert toggles, Silent Mode override toggle |
+| S11 | Device Management | MVP | Single flat BLE device list; pair / unpair; role assignment at pairing; one sensor per role with replace-or-cancel on collision |
+| S12 | App Settings | MVP | Units, wheel size (navigation row), auto-pause, auto-dim, sensors, HR zones, about. Accounts deferred to Phase 2 |
 | S13 | HR Zone Configuration | Deprecated | Pulled from Apple Health; manual override; Karvonen calculation display. See S12 - App Settings for details. |
 | S14 | Ride History List | Phase 2 | Scrollable list of past rides with summary stats |
 | S15 | Ride Detail | Phase 2 | Full ride: map replay, HR graph, cadence graph, radar event + vehicle pass timeline |
@@ -434,7 +434,7 @@ Zone boundaries:
 
 **HR Profile Data Source:**
 - `maxHeartRate` and `restingHeartRate` are read from **Apple Health** at app launch and at the start of each ride
-- If Apple Health does not have these values, the user is prompted to enter them manually in S03 / S13
+- If Apple Health does not have these values, the user is prompted to enter them manually in the HR Zones section of S12 (S03 and S13 are both retired; see UX.md §S12). M10 ships manual entry against `RiderProfile`; M5 adds the Apple Health read in front of it
 - App-stored values are always considered overrides; Apple Health is the source of truth unless the user has manually overridden
 
 **Color Mapping:**
@@ -473,9 +473,14 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 | Source | Method | Notes |
 |---|---|---|
 | iOS Files app | Import GPX file | Rider selects a `.gpx` or `.fit` file from any location accessible via the Files app (iCloud Drive, local storage, imported from another app) |
-| tribos.studio | Service integration | Rider connects their tribos.studio account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
-| Strava | Service integration | Rider connects their Strava account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
-| Ride with GPS | Service integration | Rider connects their Ride with GPS account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
+| tribos.studio | Service integration — **Phase 2** | Rider connects their tribos.studio account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
+| Strava | Service integration — **Phase 2** | Rider connects their Strava account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
+| Ride with GPS | Service integration — **Phase 2** | Rider connects their Ride with GPS account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
+
+> **Revised 2026-08-14.** The three service integrations move to Phase 2 along with the Accounts section that
+> authenticates them (UX.md §S12). MVP loads routes from the Files app only. This is a consequence of
+> deferring Accounts rather than a separate decision — a route service cannot be browsed without a connected
+> account, so the two ship together or not at all.
 
 > **Resolved (OQ12):** MVP does not use `MKDirections` (Apple Maps routing). Route creation is not an in-app feature in MVP — riders plan routes externally using tools like tribos.studio, Komoot, Strava, or OnTheGoMap.com and import the resulting GPX file.
 
@@ -488,7 +493,7 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 - [ ] Map renders current position within 5 seconds of ride start (GPS lock)
 - [ ] Position updates smoothly at 1Hz minimum with no jumping
 - [ ] Route overlay renders correctly from imported GPX file
-- [ ] tribos.studio route browsing and import functional (service integration)
+- [ ] tribos.studio route browsing and import functional (service integration — Phase 2)
 - [ ] Turn notification fires within ±10m of configured distance from turn
 - [ ] "Off route" banner displays within 5 seconds of deviation from route polyline
 - [ ] Map remains functional when radar BLE and HR BLE are simultaneously active (no resource contention)
@@ -1203,9 +1208,9 @@ Cyclometer/
 | M5 | HealthKit integration; HR zone display; BLE HR fallback to Apple Watch |
 | M6 | Wire CSC client (built in M2, #20) into the metrics pipeline; GPS fallback for speed; wheel circumference presets + manual entry + GPS auto-calibration; minimal BLE pairing UI + CSC role assignment (precursor to full S11 in M10) |
 | M7 | TrackPoint recording; vehicle pass event detection; GPX export with `gpxtpx` + `cyc:` extensions |
-| M8 | Navigation: live map; GPX route import; tribos.studio integration; turn alerts |
+| M8 | Navigation: live map; GPX route import; turn alerts (tribos.studio integration moves to Phase 2 with Accounts) |
 | M9 | Ride summary; ride history persistence; vehicle pass event count in summary |
-| M10 | Settings, full device management (S11, extended M6 pairing UI), onboarding flow |
+| M10 | Settings (S12, less Accounts); full device management (S11 flat list, extending the M6 pairing sheet); replace-or-cancel on role collision; radar and HR pairing brought under the paired-record gate; `RiderProfile` + HR zones; onboarding (S01, S02) |
 | M11 | QA; TestFlight open beta; bug fixes |
 | M12 | App Store submission |
 
