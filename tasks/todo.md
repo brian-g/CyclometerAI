@@ -419,3 +419,96 @@ example, and needs its own issue (record-on-CI or a per-pixel tolerance).
 renders white today, and `HeroNumber.swift:225`'s own `#Preview` uses `.valueColor(.accentColor)`, so it
 previews invisibly too. That looks like an unfilled placeholder rather than a decision, but it is a
 production asset and outside a test-only change.
+
+## #110 — Screen wake lock + idle auto-dim (2026-08-15)
+
+- [x] `ScreenClient` dependency — idle timer + backlight, resolved via `connectedScenes`
+- [x] `AppFeature` screen state, 30 s countdown, brightness capture/restore
+- [x] `AppView` — scene-phase wiring, interaction gesture, dim blocker overlay
+- [x] Tests: wake lock, pill carve-out, dim, restart-on-touch, wake, backgrounding, clamp
+
+### Review
+
+A bicycle computer that blanks mid-ride is useless, and nothing in the app touched the idle
+timer before this. Two behaviours: hold the screen awake while the dashboard is the visible
+surface and the app is foregrounded, and dim after 30 s of no interaction.
+
+**iOS exposes no public API for the system Auto-Lock interval**, which the issue had assumed
+was readable — so the timeout is a fixed `AppFeature.dimAfterSeconds = 30`, paired with
+`dimBrightness = 0.1`. Both are single constants destined for `AppPreferences` once they
+become rider settings.
+
+Everything hangs off one derived condition, `State.isDashboardVisible`
+(`isDashboardPresented && activeRide != nil && isForeground`), forwarded on the transition via
+`.onChange(of:)` — the same idiom `ActiveRideFeature` uses for `isCalibrationSuspended`. That
+gives exactly one place where the wake lock, the countdown, and the brightness restore are kept
+consistent, instead of five call sites each remembering to clean up. Minimizing to the accessory
+pill releases everything, per the issue's explicit carve-out.
+
+**The dim commits in two steps, not one.** Reading the backlight is async, so the first draft set
+`isDimmed = true` immediately and filled `preDimBrightness` when the read returned. That admits a
+state — dimmed, with nothing to restore to — where the wake path silently gives up and strands the
+rider's phone at 10% brightness. `dimTimerFired` now only kicks off the read; `preDimBrightnessCaptured`
+re-checks visibility and sets both fields together, so the two are inseparable by construction.
+
+**Dimming clamps rather than sets**: `min(current, dimBrightness)`, so a rider already at 5% in the
+dark is never *brightened* by the dim.
+
+Lowering the backlight does not block touches, so an invisible `Color.clear` blocker at `zIndex(2)`
+is what makes the dim modal. It uses `DragGesture(minimumDistance: 0)` rather than `onTapGesture` so
+swipes are swallowed too, and it swallows the wake touch so that touch can't also fire whatever sits
+under it.
+
+**Accepted risk, stated plainly**: `UIScreen.brightness` is a user-visible system setting. Restore
+fires on backgrounding, which covers app-switcher kills (`.active → .inactive → .background`). A hard
+crash while dimmed will not restore.
+
+All tests passing (written pre-rebase, when `testCustomColor` was still red; #111 has since fixed it).
+
+**Not verifiable in the simulator**: it neither auto-locks nor honours brightness writes, so nothing
+about the wake lock or the dim is observable there — the automated suite only reaches reducer level.
+**Brian verified both on device (2026-08-15)**, which is the only evidence either behaviour actually
+works. Treat that as a required step for future screen-power changes, not a formality.
+
+### Follow-up — auto-dim honours the Settings toggle (2026-08-15)
+
+The "Auto-dim" toggle already existed in S12, but it was backed by ephemeral
+`SettingsFeature.State.isAutoDimEnabled`: nothing read it and it reset on every relaunch.
+So the toggle looked implemented and did nothing.
+
+- `AppPreferences.isAutoDimEnabled` (default `true`), decoded with `decodeIfPresent` like
+  every other field, so a document written before #110 still decodes and starts with
+  auto-dim on.
+- `SettingsFeature.State.isAutoDimEnabled` became a computed read-through to `preferences`,
+  and `autoDimToggled` writes via `$preferences.withLock` — the same funnel the wheel
+  circumference uses.
+- `AppFeature.armDimTimer` is gated on the preference.
+
+**The wake lock is deliberately not gated.** Turning auto-dim off means "stop dimming", not
+"let the phone sleep mid-ride" — those are different requests, and only one of them is a
+preference. A bicycle computer that blanks mid-ride is broken, not configurable.
+
+Also fixed while here: `AppScreenPowerTests` were reading the developer's real
+`app-preferences.json`. They now use `FileStorage.inMemory` per store, matching
+`SettingsFeatureTests`.
+
+### Follow-up — the white AccentColor asset itself (2026-08-15)
+
+#111 fixed `testCustomColor` the right way — by pinning the case to `.cyPrimary` instead of
+asserting the ambient accent — and explicitly left the asset alone as "outside a test-only
+change". This is that follow-up.
+
+`Assets.xcassets/AccentColor.colorset` held explicit white `(1,1,1)` in both appearances. It was
+empty (→ system blue) until `88bd65c` "Feat/custom sf pro icon (#57)" on 2026-06-26 added 27
+lines writing white into it — a commit whose message is entirely about SF Symbols and SVG bike
+icons. Xcode's asset editor wrote it as a byproduct of the icon work, which is why it read as an
+unfilled placeholder rather than a decision.
+
+AccentColor now carries the same values as `cyPrimary` (`#60BD10` light / `#6FD11E` dark, per
+`assets/design/colors.md`). The app-wide default tint is brand green instead of white, so the
+scattered explicit `.tint(.cyPrimary)` calls become redundant reinforcement rather than the only
+thing holding the tint up — anything outside `AppView`'s TabView hierarchy previously fell back to
+white, including `HeroNumber.swift`'s own `#Preview`, which previewed invisibly.
+
+No snapshot churn: #111's re-recorded reference already renders `#60BD10`, so the PNG this change
+produces is byte-identical to the one on main.

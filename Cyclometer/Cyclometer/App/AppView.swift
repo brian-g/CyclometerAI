@@ -5,6 +5,7 @@ import ComposableArchitecture
 struct AppView: View {
     @Bindable var store: StoreOf<AppFeature>
     @Query(sort: \Item.timestamp, order: .reverse) private var items: [Item]
+    @Environment(\.scenePhase) private var scenePhase
 
     /// The accessory strip shows only while a ride is active or paused (S05.3).
     private var hasVisibleRide: Bool {
@@ -90,10 +91,36 @@ struct AppView: View {
                     )
                     .transition(.move(edge: .bottom)) // Animates beautifully when appearing/dismissing
                     .zIndex(1) // Ensures it sits above the TabView
+                    // Any touch resets the auto-dim countdown (#110). Simultaneous so
+                    // it observes the touch without stealing it from the ride controls
+                    // or the dashboard's page swipe.
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onEnded { _ in store.send(.userInteracted) }
+                    )
                 }
+            }
+
+            // ── Auto-Dim Blocker (#110) ─────────────────────────────────────────
+            // Lowering the backlight does not block touches, so this invisible layer
+            // is what makes the dim modal: it swallows the wake touch — taps *and*
+            // swipes — so it can't also trigger whatever sits underneath it.
+            if store.isDimmed {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onEnded { _ in store.send(.userInteracted) }
+                    )
+                    .accessibilityLabel("Screen dimmed. Tap to wake.")
+                    .zIndex(2)
             }
         }
         .animation(.smooth, value: store.isDashboardPresented)
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            store.send(.scenePhaseChanged(isActive: phase == .active))
+        }
         // Hands the rider's persisted pairings to BLECSCClient, which connects
         // nothing it hasn't been told about.
         .task { await store.send(.task).finish() }

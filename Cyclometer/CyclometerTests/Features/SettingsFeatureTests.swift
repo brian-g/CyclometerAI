@@ -136,4 +136,23 @@ struct SettingsFeatureTests {
         #expect(store.state.wheelSelection == .preset(.c700x23))
         #expect(store.state.customCircumferenceText == "2096")
     }
+
+    /// The toggle writes through to storage rather than to feature state, because
+    /// `AppFeature` reads the same document to decide whether to run the auto-dim
+    /// countdown (#110) — and because it has to survive a relaunch.
+    @Test("Auto-dim toggles persist rather than living in feature state")
+    func autoDimTogglePersists() async {
+        let store = makeStore()
+        #expect(store.state.isAutoDimEnabled)
+
+        await store.send(.autoDimToggled) {
+            $0.$preferences.withLock { $0.isAutoDimEnabled = false }
+        }
+        #expect(store.state.isAutoDimEnabled == false)
+
+        await store.send(.autoDimToggled) {
+            $0.$preferences.withLock { $0.isAutoDimEnabled = true }
+        }
+        #expect(store.state.isAutoDimEnabled)
+    }
 }

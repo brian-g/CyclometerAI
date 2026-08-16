@@ -26,10 +26,14 @@ struct SettingsFeature {
         /// it keeps the custom field on screen while the rider is typing.
         var userChoseCustom: Bool = false
         var isAutoPauseEnabled: Bool = true
-        var isAutoDimEnabled: Bool = true
         var shouldSetDoNotDisturb: Bool = false
         var heartRateZones: [HeartRateZoneSetting] = HeartRateZoneSetting.standardZones
         var isShowingAddAccountOptions: Bool = false
+
+        /// Reads through to storage rather than mirroring it in feature state: the
+        /// toggle has to survive a relaunch, and `AppFeature` — which actually runs
+        /// the countdown — reads the same document (#110).
+        var isAutoDimEnabled: Bool { preferences.isAutoDimEnabled }
 
         /// Derived from the stored value, so a manual or auto-calibrated (#70)
         /// circumference still reads as Custom after a relaunch.
@@ -102,7 +106,8 @@ struct SettingsFeature {
             case .autoPauseToggled:
                 state.isAutoPauseEnabled.toggle(); return .none
             case .autoDimToggled:
-                state.isAutoDimEnabled.toggle(); return .none
+                state.$preferences.withLock { $0.isAutoDimEnabled.toggle() }
+                return .none
             case .doNotDisturbToggled:
                 state.shouldSetDoNotDisturb.toggle(); return .none
             case .hrZoneUpperBoundAdjusted(let id, let delta):

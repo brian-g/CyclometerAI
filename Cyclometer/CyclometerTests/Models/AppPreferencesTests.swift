@@ -70,6 +70,7 @@ struct AppPreferencesTests {
     func jsonRoundTrip() throws {
         var preferences = AppPreferences()
         preferences.wheelCircumferenceMM = 2155
+        preferences.isAutoDimEnabled = false
         preferences.pairedSensors = [
             PairedSensor(peripheralID: Self.comboID, role: .speed, displayName: "Wahoo RPM"),
             PairedSensor(peripheralID: Self.cadenceID, role: .cadence, displayName: nil)
@@ -90,6 +91,8 @@ struct AppPreferencesTests {
 
         #expect(decoded.wheelCircumferenceMM == 2136)
         #expect(decoded.pairedSensors.isEmpty)
+        // Added by #110, so an older document has no key — auto-dim starts on.
+        #expect(decoded.isAutoDimEnabled)
     }
 
     /// The raw values are what land in the file, so renaming a case silently orphans
