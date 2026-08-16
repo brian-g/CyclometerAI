@@ -141,7 +141,8 @@ struct AppPreferencesTests {
         (SensorRole.radar, "radar"),
         (SensorRole.heartRate, "heartRate"),
         (SensorRole.speed, "speed"),
-        (SensorRole.cadence, "cadence")
+        (SensorRole.cadence, "cadence"),
+        (SensorRole.power, "power")
     ])
     func roleRawValues(role: SensorRole, raw: String) {
         #expect(role.rawValue == raw)
@@ -153,8 +154,22 @@ struct AppPreferencesTests {
     /// order records are written in (`DeviceManagementFeature.apply`).
     @Test("Every role is pinned, in DataModel §3.7 order")
     func roleCasesAreExhaustive() {
-        #expect(SensorRole.allCases.map(\.rawValue) == ["radar", "heartRate", "speed", "cadence"])
-        // `power` is reserved for Phase 3 but not declared — see SensorRole's doc.
-        #expect(!SensorRole.allCases.contains { $0.rawValue == "power" })
+        #expect(SensorRole.allCases.map(\.rawValue) == [
+            "radar", "heartRate", "speed", "cadence", "power"
+        ])
+    }
+
+    /// `cscRoles` is what keeps radar, HR and power peripherals away from a client that
+    /// only speaks 0x1816. Pinned because the set is written out by hand, so a role
+    /// added to the enum does not join it automatically.
+    @Test("Only speed and cadence are CSC roles")
+    func cscRolesMembership() {
+        #expect(SensorRole.cscRoles == [.speed, .cadence])
+        // `PairedSensor.isCSC` is the predicate every write site on the Sensors screen
+        // scopes itself with, so it has to agree with the set for all five roles.
+        for role in SensorRole.allCases {
+            let record = PairedSensor(peripheralID: Self.comboID, role: role, displayName: nil)
+            #expect(record.isCSC == SensorRole.cscRoles.contains(role))
+        }
     }
 }

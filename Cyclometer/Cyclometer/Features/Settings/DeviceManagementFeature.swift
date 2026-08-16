@@ -48,8 +48,11 @@ struct DeviceManagementFeature {
                 .sorted { ($0.name ?? "").localizedCaseInsensitiveCompare($1.name ?? "") == .orderedAscending }
         }
 
+        /// Keyed on CSC pairings, not on `pairedSensors` membership: a CSC-capable
+        /// peripheral already paired for radar or heart rate holds no CSC role, so it
+        /// belongs here with a Pair button rather than vanishing from both sections.
         var availableDevices: [BLECSCClient.DiscoveredSensor] {
-            let paired = Set(preferences.pairedSensors.map(\.peripheralID))
+            let paired = preferences.cscPairedIDs
             return devices.filter { !paired.contains($0.id) }
         }
 
@@ -57,7 +60,7 @@ struct DeviceManagementFeature {
         /// re-prompting. A property rather than a method so the view can reach it
         /// through the store's dynamic member lookup.
         var reassignableIDs: Set<UUID> {
-            let paired = Set(preferences.pairedSensors.map(\.peripheralID))
+            let paired = preferences.cscPairedIDs
             return Set(
                 devices
                     .filter { paired.contains($0.id) && $0.capabilities?.requiresRoleSelection == true }
@@ -156,7 +159,12 @@ struct DeviceManagementFeature {
                 return .run { [bleCSCClient] _ in await bleCSCClient.unpair(id) }
 
             case .unpairButtonTapped(let id):
-                state.$preferences.withLock { $0.pairedSensors.removeAll { $0.peripheralID == id } }
+                // CSC records only. Unpair on this screen means "release the speed and
+                // cadence roles"; the same peripheral's radar or HR pairing was made
+                // elsewhere and is not this button's to revoke (#93).
+                state.$preferences.withLock {
+                    $0.pairedSensors.removeAll { $0.peripheralID == id && $0.isCSC }
+                }
                 let assignments = state.preferences.cscAssignments
                 return .run { [bleCSCClient] _ in
                     // Close the reconnect gate *before* tearing the connection down.
@@ -186,7 +194,13 @@ struct DeviceManagementFeature {
             // Drop this peripheral's records, and any other peripheral's claim on a
             // role being reassigned — the same rule the client applies to slots, so
             // the two representations stay in step.
-            preferences.pairedSensors.removeAll { $0.peripheralID == id || roles.contains($0.role) }
+            //
+            // Scoped to CSC records: `roles` only ever holds CSC roles, but the
+            // `peripheralID` clause would otherwise take a radar or HR pairing down
+            // with it when a device serving both profiles is assigned a CSC role (#93).
+            preferences.pairedSensors.removeAll {
+                $0.isCSC && ($0.peripheralID == id || roles.contains($0.role))
+            }
             // Iterate `allCases` rather than the set: `Set` has no stable order, and
             // the persisted file should not churn between writes.
             preferences.pairedSensors += SensorRole.allCases
@@ -224,7 +238,7 @@ struct DeviceManagementFeature {
             // correction made on this evidence (#93).
             let held = Set(
                 state.preferences.pairedSensors
-                    .filter { $0.peripheralID == device.id && SensorRole.cscRoles.contains($0.role) }
+                    .filter { $0.peripheralID == device.id && $0.isCSC }
                     .map(\.role)
             )
             guard !held.subtracting(supported).isEmpty else { return nil }
@@ -236,7 +250,7 @@ struct DeviceManagementFeature {
             for correction in corrections {
                 preferences.pairedSensors.removeAll {
                     $0.peripheralID == correction.id
-                        && SensorRole.cscRoles.contains($0.role)
+                        && $0.isCSC
                         && !correction.surviving.contains($0.role)
                 }
             }

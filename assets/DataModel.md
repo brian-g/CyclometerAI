@@ -545,7 +545,7 @@ enum SensorRole: String, Codable, Hashable, CaseIterable, Sendable {
     case heartRate
     case speed      // CSC profile — wheel revolution data
     case cadence    // CSC profile — crank revolution data
-    // case power   — Phase 3; the raw value is reserved, the case is not declared
+    case power      // Phase 3
 
     /// The roles BLECSCClient can fill; `AppPreferences.cscAssignments` filters on it.
     static let cscRoles: Set<SensorRole> = [.speed, .cadence]
@@ -557,8 +557,15 @@ first, and `allCases` supplies both the S11 row subtitle's role order and the or
 in, so `Set`'s non-determinism never reaches the file. Declaration order is therefore part of the
 contract too, and `AppPreferencesTests` pins it.
 
-`power` is reserved but *not* declared. A case no hardware can fill would still surface in `allCases`
-and in every exhaustive switch, which costs a dead branch at each one for no benefit before Phase 3.
+`power` is declared now though Phase 3 owns the hardware: the raw value is then fixed by the same test
+that pins the rest, rather than being chosen later against live records.
+
+**Not every role is a CSC role.** `cscRoles` is what keeps radar, HR and power peripherals away from a
+client that only speaks 0x1816, and `PairedSensor.isCSC` is the per-record form of the same test. Both
+matter because the collection is shared: S11 is CSC-only until #98 unifies discovery, so every
+membership test and every removal that screen performs has to scope itself, or a peripheral serving
+more than one profile loses its other pairings — or is hidden from the screen because something else
+already claimed it (#93).
 
 > **The raw values are the persisted contract.** Renaming a case silently orphans every record that
 > used it; `AppPreferencesTests` pins them for that reason.

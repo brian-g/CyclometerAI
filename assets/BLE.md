@@ -581,13 +581,14 @@ struct CSCCapabilities: Sendable {
 /// Shipped as `Models/SensorRole.swift` (#93), with two corrections to the sketch below:
 /// `Hashable, CaseIterable` are required (Set<SensorRole> and the S11 subtitle order),
 /// and `unknown` is gone — a role not representable in a PairedSensor has no persisted
-/// raw value worth reserving. `power` stays reserved but undeclared until Phase 3.
-/// DataModel.md §3.7 is authoritative for the persisted contract.
+/// raw value worth reserving. DataModel.md §3.7 is authoritative for the persisted
+/// contract; `SensorRole.cscRoles` is what gates this client's half of it.
 enum SensorRole: String, Codable, Hashable, CaseIterable, Sendable {
     case radar
     case heartRate
     case speed      // CSC profile — reads wheel revolution data only
     case cadence    // CSC profile — reads crank revolution data only
+    case power      // Phase 3
 }
 
 enum BLEConnectionEvent: Sendable {

@@ -55,12 +55,15 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// radar and heart rate records live here too (#93), and handing their peripheral
     /// IDs to the CSC client would have it connect to a radar looking for 0x1816.
     var cscAssignments: [UUID: Set<SensorRole>] {
-        Dictionary(
-            grouping: pairedSensors.filter { SensorRole.cscRoles.contains($0.role) },
-            by: \.peripheralID
-        )
-        .mapValues { Set($0.map(\.role)) }
+        Dictionary(grouping: pairedSensors.filter(\.isCSC), by: \.peripheralID)
+            .mapValues { Set($0.map(\.role)) }
     }
+
+    /// Peripherals holding at least one CSC role — the membership test the CSC pairing
+    /// screen means when it asks whether a device is already paired. A peripheral
+    /// paired only for radar or heart rate is *not* in here, so the screen still offers
+    /// it a speed or cadence role.
+    var cscPairedIDs: Set<UUID> { Set(cscAssignments.keys) }
 
     init() {}
 

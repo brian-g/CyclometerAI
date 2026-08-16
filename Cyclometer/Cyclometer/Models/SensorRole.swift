@@ -13,14 +13,15 @@ import Foundation
 /// order records are written to the preferences file — and follows DataModel.md §3.7's
 /// device-list order rather than alphabetical.
 ///
-/// `power` is reserved for Phase 3 and deliberately absent rather than declared: a case
-/// no hardware can fill would still surface in `allCases` and in every exhaustive
-/// switch. Adding it later needs no migration (DataModel.md §9).
+/// `power` is declared now though Phase 3 owns the hardware, so the persisted raw value
+/// is fixed by the same test that pins the rest rather than being chosen later against
+/// live records.
 enum SensorRole: String, Codable, Hashable, CaseIterable, Sendable {
     case radar
     case heartRate
     case speed      // CSC profile — wheel revolution data
     case cadence    // CSC profile — crank revolution data
+    case power      // Phase 3
 
     /// The roles `BLECSCClient` can fill. `AppPreferences.cscAssignments` filters on
     /// this so the CSC client is never handed a radar or HR peripheral to connect to.
@@ -32,6 +33,7 @@ enum SensorRole: String, Codable, Hashable, CaseIterable, Sendable {
         case .heartRate: "Heart Rate"
         case .speed:     "Speed"
         case .cadence:   "Cadence"
+        case .power:     "Power"
         }
     }
 }
