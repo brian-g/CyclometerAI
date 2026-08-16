@@ -627,6 +627,34 @@ If the rider answered in between, the delegate ran, found no waiter, and never f
 caller hung forever. Now the re-read happens *inside* the same lock acquisition that parks the
 continuation, and a status that resolved meanwhile resumes immediately.
 
+### Second bug, found in PR review
+
+`statuses()` promised "every authorization transition, including changes made in iOS Settings" and
+delivered that for **no** domain: the live implementation only replayed current values and broadcast
+what `request(_:)` itself returned. `makeAuthorizationStream()` was written and then never consumed.
+A rider who denied location, went to Settings and granted it would have seen S01 sit unchanged — the
+documented recovery path, broken.
+
+Now observed properly, from three sources, because the four domains do not report alike:
+
+- **Location** — `LocationManagerState.shared.makeAuthorizationStream()`, now actually consumed.
+- **Bluetooth** — `BLEClient.events()` `.stateChanged`, re-reading authorization rather than mapping
+  `CBManagerState`, which is the radio and not the permission.
+- **Motion and HealthKit** — no framework callback exists for either, so the only way to honour the
+  contract is a re-read on `UIApplication.didBecomeActiveNotification`, which is exactly when a rider
+  returning from Settings arrives. The re-poll covers all four, since the transition filter makes a
+  redundant read free.
+
+`broadcastIfChanged` keeps it a state feed rather than an event storm — `centralManagerDidUpdateState`
+fires on every radio toggle and the foreground re-poll on every activation. Observation is started on
+the first subscriber and cancelled on the last, so it costs nothing when no one is listening.
+
+Two regression tests cover this, driven through an injected `BLEClient` with a scriptable
+authorization answer and a test-driven event stream. `externalChangeIsBroadcast` was confirmed to
+**fail** against the unwired version and pass against the fix; `unchangedCallbackIsNotRebroadcast`
+pins the transition filter. Both assert on a collected log rather than arrival order, because the
+replay and the location observer's opening yield interleave freely.
+
 ### Not done here
 
 S01 and `OnboardingFeature` (#106, #105). Always-escalation at first ride start. Any real HealthKit
@@ -635,7 +663,7 @@ and `.motion` has no consumer at all yet.
 
 ### Verification
 
-405 tests pass, 0 fail, including all five snapshot suites locally. Five of the new tests run the
+407 tests pass, 0 fail, including all five snapshot suites locally. Five of the new tests run the
 live client against the real frameworks — the main-actor hop into CoreLocation, the CoreMotion
 availability probe, the HealthKit request-status query — asserting agreement with the framework
 rather than a fixed value, so they hold on Simulator and device alike. The app was installed and

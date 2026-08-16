@@ -281,6 +281,116 @@ struct PermissionsClientTests {
         #expect(await client.status(.bluetooth) == .granted)
     }
 
+    /// A `BLEClient` whose authorization answer is scriptable and whose event stream is
+    /// driven by the test — enough to prove the observe → re-read → broadcast wiring
+    /// without a radio.
+    private static func scriptableBLE(
+        authorization: LockIsolated<CBManagerAuthorization>,
+        events: AsyncStream<BLEEvent>
+    ) -> BLEClient {
+        BLEClient(
+            startScanning: { _ in },
+            stopScanning: { _ in },
+            connect: { _, _ in },
+            disconnect: { _, _ in },
+            discoverServices: { _, _ in },
+            discoverCharacteristics: { _, _, _ in },
+            setNotifyValue: { _, _, _, _ in },
+            readValue: { _, _, _ in },
+            events: { events },
+            authorization: { authorization.value },
+            requestAuthorization: { authorization.value }
+        )
+    }
+
+    /// Collects everything a stream emits, so assertions can be made on the record
+    /// rather than on arrival order. The four replayed values and the location
+    /// observer's opening yield interleave freely, so position-based assertions on
+    /// this stream are inherently racy.
+    private static func collect(
+        _ stream: AsyncStream<PermissionChange>
+    ) -> (log: LockIsolated<[PermissionChange]>, task: Task<Void, Never>) {
+        let log = LockIsolated<[PermissionChange]>([])
+        let task = Task {
+            for await change in stream {
+                log.withValue { $0.append(change) }
+            }
+        }
+        return (log, task)
+    }
+
+    /// Polls until `condition` holds, or gives up. A broken observer would otherwise
+    /// hang the suite rather than fail it.
+    private static func waitUntil(
+        _ condition: @Sendable () -> Bool,
+        timeout: Duration = .seconds(2)
+    ) async -> Bool {
+        let deadline = ContinuousClock().now.advanced(by: timeout)
+        while ContinuousClock().now < deadline {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
+    @Test("An authorization change made outside the app reaches subscribers")
+    func externalChangeIsBroadcast() async {
+        // The Settings-recovery path: the rider denies, leaves for iOS Settings, grants,
+        // and comes back. Nothing in the app called request(), so the only way the row
+        // updates is a framework callback the client is actually listening to. Before
+        // the observers were wired this test hung on the second wait.
+        let authorization = LockIsolated<CBManagerAuthorization>(.denied)
+        let (events, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
+        let client = PermissionsClient.live(
+            bleClient: Self.scriptableBLE(authorization: authorization, events: events)
+        )
+
+        let (log, task) = Self.collect(client.statuses())
+        defer { task.cancel() }
+
+        // The seeded denial must land first, so the grant below is observed rather than
+        // merely replayed.
+        let sawDenial = await Self.waitUntil {
+            log.value.contains(PermissionChange(domain: .bluetooth, state: .denied))
+        }
+        #expect(sawDenial)
+
+        authorization.setValue(.allowedAlways)
+        eventContinuation.yield(.stateChanged(.poweredOn))
+
+        let sawGrant = await Self.waitUntil {
+            log.value.contains(PermissionChange(domain: .bluetooth, state: .granted))
+        }
+        #expect(sawGrant)
+    }
+
+    @Test("A framework callback carrying no change is not rebroadcast")
+    func unchangedCallbackIsNotRebroadcast() async {
+        // centralManagerDidUpdateState fires for radio power too, which is not a
+        // permission change. Without the transition filter, S01 would rebuild its rows
+        // on every Bluetooth toggle.
+        let authorization = LockIsolated<CBManagerAuthorization>(.allowedAlways)
+        let (events, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
+        let client = PermissionsClient.live(
+            bleClient: Self.scriptableBLE(authorization: authorization, events: events)
+        )
+
+        let (log, task) = Self.collect(client.statuses())
+        defer { task.cancel() }
+
+        _ = await Self.waitUntil {
+            log.value.contains(PermissionChange(domain: .bluetooth, state: .granted))
+        }
+
+        // Radio cycles twice, permission untouched.
+        eventContinuation.yield(.stateChanged(.poweredOff))
+        eventContinuation.yield(.stateChanged(.poweredOn))
+        _ = await Self.waitUntil({ false }, timeout: .milliseconds(200))
+
+        let bluetoothChanges = log.value.filter { $0.domain == .bluetooth }
+        #expect(bluetoothChanges.count == 1)
+    }
+
     @Test("Live stream replays all four domains")
     func liveStreamReplays() async {
         let client = PermissionsClient.live(bleClient: .testValue)

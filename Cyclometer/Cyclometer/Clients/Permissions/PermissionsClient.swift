@@ -3,6 +3,7 @@ import ComposableArchitecture
 import CoreLocation
 import CoreMotion
 import HealthKit
+import UIKit
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
@@ -24,9 +25,13 @@ struct PermissionsClient: Sendable {
     /// then return the resolved state.
     var request:  @Sendable (PermissionDomain) async -> PermissionState
     /// Every authorization transition, including changes the rider makes in iOS
-    /// Settings while the app is backgrounded. Each call returns a new stream; every
-    /// active stream sees the same changes, and each replays the current state of all
-    /// four domains on subscribe.
+    /// Settings while the app is backgrounded — which is the only way back from a
+    /// denial, so S01's recovery path depends on it.
+    ///
+    /// Each call returns a new stream; every active stream sees the same changes, and
+    /// each replays the current state of all four domains on subscribe. This is a
+    /// *state* feed rather than an event feed: a repeated value is meaningless but
+    /// harmless, and only changes are broadcast.
     var statuses: @Sendable () -> AsyncStream<PermissionChange>
 }
 
@@ -167,6 +172,11 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
 
     private var subscribers: [Int: AsyncStream<PermissionChange>.Continuation] = [:]
     private var nextSubscriberID = 0
+    /// Last value broadcast per domain, so observers emit transitions rather than a
+    /// repeat every time a framework callback fires. Guarded by `lock`.
+    private var lastKnown: [PermissionDomain: PermissionState] = [:]
+    /// Runs only while someone is subscribed. Guarded by `lock`.
+    private var observationTask: Task<Void, Never>?
     private let lock = NSLock()
 
     init(bleClient: BLEClient) {
@@ -241,8 +251,7 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
             resolved = await requestHealth()
         }
 
-        logger.notice("\(domain.rawValue, privacy: .public) → \(String(describing: resolved), privacy: .public)")
-        broadcast(PermissionChange(domain: domain, state: resolved))
+        broadcastIfChanged(domain, resolved)
         return resolved
     }
 
@@ -304,15 +313,26 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
 
     func makeStatusStream() -> AsyncStream<PermissionChange> {
         let (stream, continuation) = AsyncStream<PermissionChange>.makeStream()
-        let id = lock.withLock { () -> Int in
+        let (id, isFirstSubscriber) = lock.withLock { () -> (Int, Bool) in
             let current = nextSubscriberID
             nextSubscriberID += 1
+            let wasEmpty = subscribers.isEmpty
             subscribers[current] = continuation
-            return current
+            return (current, wasEmpty)
         }
         continuation.onTermination = { [weak self] _ in
-            _ = self?.lock.withLock { self?.subscribers.removeValue(forKey: id) }
+            guard let self else { return }
+            let isLastSubscriber = self.lock.withLock { () -> Bool in
+                self.subscribers.removeValue(forKey: id)
+                return self.subscribers.isEmpty
+            }
+            if isLastSubscriber { self.stopObserving() }
         }
+
+        // Framework observation costs a CLLocationManager delegate, a BLE event
+        // subscription and a notification observer, so it runs only while someone is
+        // listening rather than for the process lifetime.
+        if isFirstSubscriber { startObserving() }
 
         // Replay every domain's current state. Without this, a row whose status
         // resolved before the view subscribed would render as an unanswered oval until
@@ -321,15 +341,82 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
         Task { [weak self] in
             guard let self else { return }
             for domain in PermissionDomain.allCases {
-                continuation.yield(PermissionChange(domain: domain, state: await status(for: domain)))
+                let state = await status(for: domain)
+                lock.withLock { lastKnown[domain] = state }
+                continuation.yield(PermissionChange(domain: domain, state: state))
             }
         }
 
         return stream
     }
 
-    private func broadcast(_ change: PermissionChange) {
-        let active = lock.withLock { Array(subscribers.values) }
-        for continuation in active { continuation.yield(change) }
+    /// Broadcast only on an actual transition.
+    ///
+    /// Every source here re-reads the whole domain rather than being handed a delta —
+    /// `centralManagerDidUpdateState` fires for radio power, the foreground re-poll
+    /// fires on every app activation — so without this filter subscribers would see a
+    /// storm of repeats and S01 would rebuild its rows for nothing.
+    private func broadcastIfChanged(_ domain: PermissionDomain, _ state: PermissionState) {
+        let observers = lock.withLock { () -> [AsyncStream<PermissionChange>.Continuation]? in
+            guard lastKnown[domain] != state else { return nil }
+            lastKnown[domain] = state
+            return Array(subscribers.values)
+        }
+        guard let observers else { return }
+        logger.notice(
+            "\(domain.rawValue, privacy: .public) changed → \(String(describing: state), privacy: .public)"
+        )
+        let change = PermissionChange(domain: domain, state: state)
+        for continuation in observers { continuation.yield(change) }
+    }
+
+    // MARK: Framework observation
+
+    /// Three sources, because the four domains do not report alike.
+    ///
+    /// Location and Bluetooth have real framework callbacks and are observed directly.
+    /// Motion and HealthKit have none at all — nothing tells an app that Motion & Fitness
+    /// was switched off in Settings — so the only way to honour the stream's contract for
+    /// them is to re-read on return to the foreground, which is exactly when a rider
+    /// coming back from Settings arrives. The re-poll covers all four rather than just
+    /// the two, since `broadcastIfChanged` makes a redundant read free.
+    private func startObserving() {
+        let task = Task { [self] in
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    for await status in LocationManagerState.shared.makeAuthorizationStream() {
+                        broadcastIfChanged(.locationWhenInUse, PermissionsClient.state(cl: status))
+                    }
+                }
+                group.addTask {
+                    for await event in bleClient.events() {
+                        guard case .stateChanged = event else { continue }
+                        // The event carries CBManagerState, which is the radio, not the
+                        // permission — re-read authorization rather than mapping it.
+                        broadcastIfChanged(.bluetooth, PermissionsClient.state(cb: bleClient.authorization()))
+                    }
+                }
+                group.addTask {
+                    let foregrounded = NotificationCenter.default.notifications(
+                        named: await UIApplication.didBecomeActiveNotification
+                    )
+                    for await _ in foregrounded {
+                        for domain in PermissionDomain.allCases {
+                            broadcastIfChanged(domain, await status(for: domain))
+                        }
+                    }
+                }
+            }
+        }
+        lock.withLock { observationTask = task }
+    }
+
+    private func stopObserving() {
+        let task = lock.withLock { () -> Task<Void, Never>? in
+            let t = observationTask
+            observationTask = nil
+            return t
+        }
+        task?.cancel()
     }
 }
