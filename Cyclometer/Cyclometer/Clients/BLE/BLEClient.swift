@@ -72,6 +72,21 @@ struct BLEClient: Sendable {
     /// Returns an `AsyncStream` of BLE events. Each call returns a new stream;
     /// all active streams receive the same broadcast events.
     var events: @Sendable () -> AsyncStream<BLEEvent>
+    /// The app's current Bluetooth authorization, read without side effects.
+    ///
+    /// Distinct from `CBManagerState`, which `.stateChanged` already carries: a
+    /// powered-off radio is not a refusal, and conflating the two would have S01
+    /// show a red X for a rider who simply has Bluetooth switched off in Control
+    /// Centre. Only this value speaks to permission.
+    var authorization: @Sendable () -> CBManagerAuthorization
+    /// Present the system Bluetooth prompt if it has not been answered, and return
+    /// the resolved authorization.
+    ///
+    /// Lives here rather than in `PermissionsClient` because the prompt is fired by
+    /// a `CBCentralManager` existing at all, and this client owns the app's only
+    /// one. A second central raised for permissions would be a second scan budget
+    /// and a second delegate bridge for no gain.
+    var requestAuthorization: @Sendable () async -> CBManagerAuthorization
 }
 
 // MARK: - DependencyKey
@@ -88,7 +103,9 @@ extension BLEClient: DependencyKey {
             discoverCharacteristics: { central.discoverCharacteristics(peripheralID: $0, serviceUUID: $1, characteristicUUIDs: $2) },
             setNotifyValue: { central.setNotifyValue($0, peripheralID: $1, serviceUUID: $2, characteristicUUID: $3) },
             readValue: { central.readValue(peripheralID: $0, serviceUUID: $1, characteristicUUID: $2) },
-            events: { central.makeEventStream() }
+            events: { central.makeEventStream() },
+            authorization: { CBCentralManager.authorization },
+            requestAuthorization: { await central.requestAuthorization() }
         )
     }()
 
@@ -101,7 +118,9 @@ extension BLEClient: DependencyKey {
         discoverCharacteristics: { _, _, _ in },
         setNotifyValue: { _, _, _, _ in },
         readValue: { _, _, _ in },
-        events: { AsyncStream { $0.finish() } }
+        events: { AsyncStream { $0.finish() } },
+        authorization: { .allowedAlways },
+        requestAuthorization: { .allowedAlways }
     )
 }
 
@@ -146,6 +165,10 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
     private var nextSubscriberID = 0
     private let lock = NSLock()
 
+    // Parked by requestAuthorization() while the system prompt is on screen, resumed
+    // from centralManagerDidUpdateState. Guarded by `lock`.
+    private var authContinuation: CheckedContinuation<CBManagerAuthorization, Never>?
+
     override private init() {
         super.init()
         // No CBCentralManagerOptionRestoreIdentifierKey: state restoration was evaluated in the
@@ -155,6 +178,54 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
         // what adopting it would require. The app does declare the bluetooth-central background
         // mode, so background scanning and reconnection work without restoration.
         manager = CBCentralManager(delegate: self, queue: bleQueue)
+    }
+
+    // MARK: Authorization
+
+    /// Await the rider's answer to the system Bluetooth prompt.
+    ///
+    /// Nothing here *presents* the prompt: iOS raises it when a `CBCentralManager`
+    /// first needs authorization, and this class built one in `init`. So the work is
+    /// purely waiting for the answer — hence no request call to pair with the
+    /// continuation, unlike CoreLocation.
+    func requestAuthorization() async -> CBManagerAuthorization {
+        let current = CBCentralManager.authorization
+        guard current == .notDetermined else {
+            logger.notice("bluetooth authorization already resolved: \(current.rawValue)")
+            return current
+        }
+
+        return await withCheckedContinuation { continuation in
+            enum Disposition { case parked, alreadyPending, resolvedMeanwhile(CBManagerAuthorization) }
+
+            let disposition = lock.withLock { () -> Disposition in
+                // One prompt, one waiter. A second concurrent caller would otherwise
+                // overwrite the first's continuation and leak it — S01 can plausibly
+                // produce this by double-tapping the Bluetooth row.
+                guard authContinuation == nil else { return .alreadyPending }
+
+                // Re-read inside the lock. The rider may have answered between the
+                // check above and this point, in which case the delegate has already
+                // run, found no waiter, and will not fire again — parking here would
+                // hang the caller forever.
+                let now = CBCentralManager.authorization
+                guard now == .notDetermined else { return .resolvedMeanwhile(now) }
+
+                authContinuation = continuation
+                return .parked
+            }
+
+            switch disposition {
+            case .parked:
+                logger.notice("awaiting bluetooth authorization")
+            case .alreadyPending:
+                logger.warning("bluetooth authorization already pending — returning current state")
+                continuation.resume(returning: CBCentralManager.authorization)
+            case .resolvedMeanwhile(let authorization):
+                logger.notice("bluetooth authorization resolved while parking: \(authorization.rawValue)")
+                continuation.resume(returning: authorization)
+            }
+        }
     }
 
     // MARK: Subscriber management
@@ -282,6 +353,24 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
             // Resume scans requested before power-on or cleared by a radio cycle.
             rescan()
         }
+
+        // CoreBluetooth fires this once on creation carrying the current state. If a
+        // caller is waiting on the prompt, that first callback arrives with
+        // authorization still .notDetermined, before the rider has answered — ignore
+        // it, the same way LocationClient ignores CoreLocation's opening callback.
+        let authorization = CBCentralManager.authorization
+        if authorization != .notDetermined {
+            let pending = lock.withLock { () -> CheckedContinuation<CBManagerAuthorization, Never>? in
+                let c = authContinuation
+                authContinuation = nil
+                return c
+            }
+            if pending != nil {
+                logger.notice("bluetooth authorization resolved: \(authorization.rawValue)")
+            }
+            pending?.resume(returning: authorization)
+        }
+
         broadcast(.stateChanged(central.state))
     }
 

@@ -1,5 +1,5 @@
 import ComposableArchitecture
-import CoreLocation
+import Foundation
 
 enum RideRecordingState: Equatable, Sendable {
     case idle, active, paused, ended
@@ -17,6 +17,7 @@ struct ActiveRideFeature {
     @Dependency(\.variaRadarClient) var variaRadarClient
     @Dependency(\.hapticsClient) var hapticsClient
     @Dependency(\.locationClient) var locationClient
+    @Dependency(\.permissionsClient) var permissionsClient
 
     @ObservableState
     struct State: Equatable {
@@ -98,7 +99,7 @@ struct ActiveRideFeature {
         case speed(SpeedFeature.Action)
         case calibration(WheelCalibrationFeature.Action)
         case locationUpdated(LocationUpdate)
-        case locationAuthorizationResult(CLAuthorizationStatus)
+        case locationAuthorizationResult(PermissionState)
 
         @CasePathable
         enum FinishAlert: Equatable {
@@ -153,10 +154,10 @@ struct ActiveRideFeature {
                             await send(.radarConnectionChanged(connectionState))
                         }
                     },
-                    .run { [locationClient] send in
-                        let status = await locationClient.requestAuthorization()
+                    .run { [locationClient, permissionsClient] send in
+                        let status = await permissionsClient.request(.locationWhenInUse)
                         await send(.locationAuthorizationResult(status))
-                        guard status == .authorizedWhenInUse || status == .authorizedAlways else { return }
+                        guard status.isGranted else { return }
                         for await update in locationClient.startUpdates() {
                             await send(.locationUpdated(update))
                         }
@@ -280,7 +281,7 @@ struct ActiveRideFeature {
                     .send(.calibration(.locationUpdated(update)))
                 )
             case .locationAuthorizationResult(let status):
-                state.isLocationAvailable = (status == .authorizedWhenInUse || status == .authorizedAlways)
+                state.isLocationAvailable = status.isGranted
                 return .none
             case .speed:
                 return .none

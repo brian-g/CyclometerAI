@@ -845,7 +845,8 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 - `HKQuantityTypeIdentifierHeartRate` (read)
 - `HKQuantityTypeIdentifierRestingHeartRate` (read)
 - `HKCharacteristicTypeIdentifierDateOfBirth` (read — for max HR estimation if not available)
-- `HKWorkoutType` (write — for workout session recording in Phase 2)
+- `HKWorkoutType` (write — MVP; the ride is written back at ride end per UX.md §S10, and the share
+  authorization is requested alongside the reads at S01 so the rider answers one sheet, not two)
 
 **Profile Data Read at Onboarding and Ride Start:**
 - `restingHeartRate` → `HKQuantityTypeIdentifierRestingHeartRate`
@@ -1175,7 +1176,7 @@ Cyclometer/
 - High contrast: tested with iOS Increase Contrast enabled
 
 ### Privacy
-- HealthKit data: read-only; no data transmitted to any server
+- HealthKit data: read-only, apart from the `HKWorkout` the app writes back at ride end (UX.md §S10); no data transmitted to any server
 - GPS and ride data: stored locally only
 - BLE device identifiers: not transmitted externally
 - No analytics or crash reporting without explicit user consent

@@ -569,3 +569,76 @@ through a throwaway `assertSnapshot` harness to confirm the General section is e
 rows UX.md §S12 specifies — Units, Wheel Size, Auto-pause, Auto-dim, Sensors — with Do Not Disturb
 gone; the harness was deleted afterwards. (`ImageRenderer` is no use here: it cannot render `Form`
 or `NavigationStack` and emits a placeholder glyph.)
+
+---
+
+## #95 — PermissionsClient: CoreBluetooth, CoreLocation, CoreMotion, HealthKit (2026-08-16)
+
+Wave 1 of M10. A single `@Dependency` over the four authorization domains S01 presents, so no
+feature has to know which framework backs which row. No UI — that is #106.
+
+### Tasks
+
+- [x] `PermissionDomain` / `PermissionState` / `PermissionChange` in `Models/`
+- [x] `PermissionsClient` with `status` / `request` / `statuses`, plus pure per-framework mappers
+- [x] `PermissionsClient+Mock` — scriptable per domain, models the short-circuit
+- [x] `BLEClient` gains `authorization` / `requestAuthorization`
+- [x] Location authorization consolidated out of `LocationClient`
+- [x] `NSMotionUsageDescription` + `NSHealthUpdateUsageDescription`
+- [x] 29 new tests; five of them drive the live client against real frameworks
+- [x] Spec corrections in PRD, UX and CLAUDE.md
+
+### Four decisions the issue did not settle
+
+**`.unavailable` is a sixth state, and it earns its place.** `CMMotionActivityManager.isActivityAvailable()`
+is false on the Simulator — verified, not assumed — so motion authorization never leaves
+`notDetermined` there however often it is asked. With only the four states the issue lists, S01's
+"Motion denied blocks Next" would have deadlocked every Simulator run. `.unavailable` says *no such
+hardware*, which is not a refusal, and #106 must treat it as non-blocking.
+
+**Bluetooth authorization went onto `BLEClient`, not into `PermissionsClient`.** The prompt is fired
+by a `CBCentralManager` existing at all, and `BLECentral` owns the app's only one. A second central
+raised for permissions would have been a second scan budget and a second delegate bridge for nothing.
+`PermissionsClient` delegates through the injected transport, matching `BLEHRClient.live(bleClient:)`.
+
+**Location authorization left `LocationClient` entirely.** It is now data-only; `LocationManagerState`
+moved to its own file as a `shared` singleton, mirroring `BLECentral.shared`, so there is still exactly
+one `CLLocationManager`. `ActiveRideFeature` asks `permissionsClient.request(.locationWhenInUse)` — same
+When In Use request at the same moment, so behaviour is unchanged.
+
+**HealthKit asks for the workout write now.** UX.md §S10 has an `HKWorkout` written at ride end in MVP,
+while PRD §11 called HealthKit read-only and §9.4 called the write Phase 2. Requesting read and share
+together means one sheet in the rider's lifetime rather than a second one months later at the end of
+their first ride. All three docs corrected.
+
+### The honesty requirement, and why it is structural
+
+`.health` **cannot** return `.denied`. HealthKit deliberately will not tell an app that a read was
+refused — `authorizationStatus(for:)` reports `notDetermined` both before the sheet and after a
+refusal, and an empty query means the same thing. So the client reads
+`getRequestStatusForAuthorization(toShare:read:)` instead and maps `.unnecessary` to `.granted`
+("we asked; iOS will not say more"). #106's "HealthKit does not render as a red X" is therefore true
+by construction rather than by the view remembering to special-case it.
+
+### One bug found in review
+
+The first cut of `BLECentral.requestAuthorization` read authorization, then parked a continuation.
+If the rider answered in between, the delegate ran, found no waiter, and never fired again — the
+caller hung forever. Now the re-read happens *inside* the same lock acquisition that parks the
+continuation, and a status that resolved meanwhile resumes immediately.
+
+### Not done here
+
+S01 and `OnboardingFeature` (#106, #105). Always-escalation at first ride start. Any real HealthKit
+read — `HealthKitClient` is still the M5 stub, so `.health` is a prompt with no consumer until then,
+and `.motion` has no consumer at all yet.
+
+### Verification
+
+405 tests pass, 0 fail, including all five snapshot suites locally. Five of the new tests run the
+live client against the real frameworks — the main-actor hop into CoreLocation, the CoreMotion
+availability probe, the HealthKit request-status query — asserting agreement with the framework
+rather than a fixed value, so they hold on Simulator and device alike. The app was installed and
+launched on the Simulator to confirm no startup regression from the `LocationManagerState` move.
+A throwaway probe confirmed the Simulator really does report motion unavailable, and the live client
+really does map it to `.unavailable`; the probe was deleted afterwards.

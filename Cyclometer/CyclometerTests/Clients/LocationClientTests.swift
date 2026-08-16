@@ -66,13 +66,6 @@ struct LocationClientTests {
 
     // MARK: - testValue behaviour
 
-    @Test("testValue requestAuthorization returns authorizedWhenInUse")
-    func testValueAuth() async {
-        let client = LocationClient.testValue
-        let status = await client.requestAuthorization()
-        #expect(status == .authorizedWhenInUse)
-    }
-
     @Test("testValue startUpdates stream completes immediately")
     func testValueStream() async {
         let client = LocationClient.testValue

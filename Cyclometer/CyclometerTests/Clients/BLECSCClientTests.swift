@@ -358,7 +358,9 @@ struct BLECSCIntegrationTests {
                 readValue: { id, serviceUUID, charUUID in
                     reads.withValue { $0.append((id, serviceUUID, charUUID)) }
                 },
-                events: { eventStream }
+                events: { eventStream },
+                authorization: { .allowedAlways },
+                requestAuthorization: { .allowedAlways }
             )
 
             self.client = BLECSCClient.live(bleClient: bleClient, clock: clock)

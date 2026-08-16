@@ -153,7 +153,9 @@ struct VariaRadarIntegrationTests {
                 readValue: { _, _, charUUID in
                     reads.withValue { $0.append(charUUID) }
                 },
-                events: { eventStream }
+                events: { eventStream },
+                authorization: { .allowedAlways },
+                requestAuthorization: { .allowedAlways }
             )
 
             self.client = VariaRadarClient.live(bleClient: bleClient, clock: clock)
