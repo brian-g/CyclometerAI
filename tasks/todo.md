@@ -512,3 +512,60 @@ white, including `HeroNumber.swift`'s own `#Preview`, which previewed invisibly.
 
 No snapshot churn: #111's re-recorded reference already renders `#60BD10`, so the PNG this change
 produces is byte-identical to the one on main.
+
+## #94 — AppPreferences: preferredUnit + isAutoPauseEnabled (2026-08-16)
+
+Two of the four fields the issue names actually needed adding. Corrections found while planning:
+
+**`isAutoDimEnabled` had already landed** in `e759d22` (#110) — field, `decodeIfPresent` shim
+and consumer all present — so the issue was one field stale.
+
+**`mapOrientation` was deferred.** It has no consumer and none planned in M10: PRD §8.6 puts the
+heading-up/north-up choice on the map's own compass, not in Settings, and UX.md §S12 has no row
+for it. Persisting a value nothing writes and nothing reads is not foundation, it is dead weight.
+It lands with the issue that makes `ActiveRideMapView`'s camera orientation survive a relaunch.
+
+**There is no "strict decode", and the issue's third acceptance criterion asked us to build one.**
+It wanted a document containing `shouldSetDoNotDisturb` to be *rejected*. `init(from:)` is lenient
+by construction — every field is `decodeIfPresent` with an explicit default, and unknown keys are
+ignored by `KeyedDecodingContainer`. That leniency is the entire reason the initializer is
+hand-written (DataModel.md §9): the synthesised one throws `keyNotFound`, `.fileStorage` swallows
+the throw and returns a fresh `AppPreferences()`, and the rider silently loses every *other*
+preference. Adding unknown-key rejection would have made one stray key — including one written by
+a newer build after a downgrade — wipe the whole document. The criterion was dropped rather than
+implemented, and DataModel.md §3.6's note claiming such a rule exists was corrected.
+
+### The locale seam
+
+`preferredUnit` defaults to the device locale, so the default needed to be assertable against
+something other than the test machine's region. `UnitSystem.system` read `Locale.current` inline;
+the mapping is now a pure `init(_ locale: Locale)` and `system` is a one-line delegation to it.
+`UnitSystemTests` pins eight named locales — including Liberia (`ussystem`) and Myanmar
+(`uksystem`), which are what make it a measurement-system test rather than a "US or GB" test.
+
+**`@Dependency(\.locale)` was rejected.** swift-dependencies' `LocaleKey` declares only
+`liveValue`, so the default `testValue` calls `reportIssue` from a test context. `AppPreferences()`
+is the `.fileStorage` default and is constructed across six test suites; every one would have
+needed a `withDependencies` override. Too viral for one default value.
+
+### Also removed
+
+`shouldSetDoNotDisturb` was still live in `SettingsFeature` and `SettingsView` despite UX.md §S12
+recording the row as removed on 2026-08-14. Deleted — state, action, reducer case and `Toggle`.
+It never reached `AppPreferences`, so there was nothing to migrate.
+
+### Not done here
+
+No consumer wiring, per the issue. `SettingsFeature.State.isAutoPauseEnabled` stays ephemeral and
+the units picker stays a disconnected `String` — #102 owns both, alongside the sensor-count row in
+the same section. Until then `isAutoPauseEnabled` exists in two places with two meanings; whoever
+takes #102 should collapse it the way `isAutoDimEnabled` already is (a read-through computed
+property plus `withLock` in the reducer).
+
+### Verification
+
+376 tests pass, 0 fail, including all five snapshot suites locally. `SettingsView` was rendered
+through a throwaway `assertSnapshot` harness to confirm the General section is exactly the five
+rows UX.md §S12 specifies — Units, Wheel Size, Auto-pause, Auto-dim, Sensors — with Do Not Disturb
+gone; the harness was deleted afterwards. (`ImageRenderer` is no use here: it cannot render `Form`
+or `NavigationStack` and emits a placeholder glyph.)

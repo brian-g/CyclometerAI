@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import Cyclometer
 
-@Suite("AppPreferences — paired sensor lookup")
+@Suite("AppPreferences")
 struct AppPreferencesTests {
 
     private static let comboID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
@@ -68,11 +68,18 @@ struct AppPreferencesTests {
         #expect(AppPreferences().pairedSensor(for: .speed) == nil)
     }
 
+    /// Every field is set away from its default, so a field left out of the hand-written
+    /// `init(from:)` fails here instead of passing because both sides happen to hold the
+    /// default.
     @Test("Preferences round-trip through JSON")
     func jsonRoundTrip() throws {
         var preferences = AppPreferences()
         preferences.wheelCircumferenceMM = 2155
         preferences.isAutoDimEnabled = false
+        preferences.isAutoPauseEnabled = false
+        // Whichever unit the machine's locale is not — a literal would be the default
+        // on half of all machines, and prove nothing there.
+        preferences.preferredUnit = UnitSystem.system == .metric ? .imperial : .metric
         preferences.pairedSensors = [
             PairedSensor(peripheralID: Self.comboID, role: .speed, displayName: "Wahoo RPM"),
             PairedSensor(peripheralID: Self.cadenceID, role: .cadence, displayName: nil)
@@ -95,6 +102,14 @@ struct AppPreferencesTests {
         #expect(decoded.pairedSensors.isEmpty)
         // Added by #110, so an older document has no key — auto-dim starts on.
         #expect(decoded.isAutoDimEnabled)
+        // Added by #94, likewise absent from an older document.
+        #expect(decoded.isAutoPauseEnabled)
+        // Compared against `.system` rather than a literal because the decode fallback
+        // reads `Locale.current` and has no seam to stub — asserting `.imperial` here
+        // would only pass on a US/UK machine. `UnitSystemTests` covers the mapping
+        // itself against named locales; this pins that the fallback is the locale
+        // default rather than a hardcoded case.
+        #expect(decoded.preferredUnit == .system)
     }
 
     /// #93 moved `SensorRole` out of `BLECSCClient` and added `.radar` / `.heartRate`.

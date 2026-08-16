@@ -858,8 +858,9 @@ but not used would be dead weight on the MVP settings screen. The section remain
 - [x] Silent Mode override toggle: not a setting at this time.
 - [x] Danger threshold: not a setting at this time.
 - [x] Set Do Not Disturb: removed 2026-08-14. iOS exposes no public API for an app to enable a Focus, so the
-  toggle could not have done what it said. The row is still present in `Design.sketch` — S12 and needs
-  deleting there.
+  toggle could not have done what it said. Deleted from `SettingsFeature` and `SettingsView` at #94
+  (2026-08-16); it never reached `AppPreferences`, so there was nothing to migrate. The row is still
+  present in `Design.sketch` — S12 and needs deleting there.
 - [x] Accounts in MVP? No — Phase 2, see above.
 
 ---

@@ -39,6 +39,23 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// blanks mid-ride is broken, not configurable.
     var isAutoDimEnabled: Bool = true
 
+    /// Speed and distance display units (DataModel.md §3.6). Defaults to the device
+    /// locale's measurement system, so a rider who never opens Settings still gets
+    /// the units their phone is configured for.
+    ///
+    /// Nothing reads this yet. `ActiveRideFeature.unitSystem` is still seeded from
+    /// `Locale` per-feature and the S12 picker is still a disconnected `String` —
+    /// pointing both at this field is #102 and #8.
+    var preferredUnit: UnitSystem = .system
+
+    /// Whether the ride recorder pauses itself when the rider stops (PRD §8.8, S12).
+    /// On by default, matching the value the S12 toggle has carried since it was
+    /// ephemeral feature state.
+    ///
+    /// Nothing reads this yet: `SettingsFeature` still toggles its own copy, and the
+    /// stop detection the ride state machine needs lands with #102.
+    var isAutoPauseEnabled: Bool = true
+
     /// The sensor filling `role`, or nil when the role is unpaired. Role-keyed rather
     /// than peripheral-keyed because that is how every consumer asks: one sensor per
     /// role, app-wide, for MVP (DataModel.md §3.9 gives roles a bike dimension in
@@ -83,6 +100,12 @@ struct AppPreferences: Codable, Equatable, Sendable {
         ) ?? []
         isAutoDimEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isAutoDimEnabled
+        ) ?? true
+        preferredUnit = try container.decodeIfPresent(
+            UnitSystem.self, forKey: .preferredUnit
+        ) ?? .system
+        isAutoPauseEnabled = try container.decodeIfPresent(
+            Bool.self, forKey: .isAutoPauseEnabled
         ) ?? true
     }
 }

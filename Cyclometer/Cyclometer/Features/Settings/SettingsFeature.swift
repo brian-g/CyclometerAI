@@ -26,7 +26,6 @@ struct SettingsFeature {
         /// it keeps the custom field on screen while the rider is typing.
         var userChoseCustom: Bool = false
         var isAutoPauseEnabled: Bool = true
-        var shouldSetDoNotDisturb: Bool = false
         var heartRateZones: [HeartRateZoneSetting] = HeartRateZoneSetting.standardZones
         var isShowingAddAccountOptions: Bool = false
 
@@ -63,7 +62,6 @@ struct SettingsFeature {
         case customCircumferenceCommitted
         case autoPauseToggled
         case autoDimToggled
-        case doNotDisturbToggled
         case hrZoneUpperBoundAdjusted(id: Int, delta: Int)
         case addAccountTapped
         case addAccountDismissed
@@ -108,8 +106,6 @@ struct SettingsFeature {
             case .autoDimToggled:
                 state.$preferences.withLock { $0.isAutoDimEnabled.toggle() }
                 return .none
-            case .doNotDisturbToggled:
-                state.shouldSetDoNotDisturb.toggle(); return .none
             case .hrZoneUpperBoundAdjusted(let id, let delta):
                 guard let index = state.heartRateZones.firstIndex(where: { $0.id == id }) else { return .none }
                 let zone = state.heartRateZones[index]
