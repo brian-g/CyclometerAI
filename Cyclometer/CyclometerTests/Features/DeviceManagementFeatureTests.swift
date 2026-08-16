@@ -23,7 +23,7 @@ struct DeviceManagementFeatureTests {
     private static func sensor(
         id: UUID,
         name: String?,
-        roles: Set<BLECSCClient.SensorRole> = [],
+        roles: Set<SensorRole> = [],
         state: BLECSCClient.ConnectionState? = nil,
         battery: Int? = nil,
         capabilities: BLECSCClient.Capabilities? = nil
@@ -38,8 +38,8 @@ struct DeviceManagementFeatureTests {
     /// thing under test — a separate `LockIsolated` per endpoint can only show that
     /// each was called, which is what let two ordering races through review.
     private enum ClientCall: Equatable {
-        case setPairedSensors([UUID: Set<BLECSCClient.SensorRole>])
-        case setRoles(UUID, Set<BLECSCClient.SensorRole>)
+        case setPairedSensors([UUID: Set<SensorRole>])
+        case setRoles(UUID, Set<SensorRole>)
         case unpair(UUID)
     }
 
@@ -167,15 +167,15 @@ struct DeviceManagementFeatureTests {
         "A single-capability sensor is assigned without a prompt",
         arguments: [
             (BLECSCClient.Capabilities(supportsWheelRevolutions: true, supportsCrankRevolutions: false),
-             BLECSCClient.SensorRole.speed),
+             SensorRole.speed),
             (BLECSCClient.Capabilities(supportsWheelRevolutions: false, supportsCrankRevolutions: true),
-             BLECSCClient.SensorRole.cadence)
+             SensorRole.cadence)
         ]
     )
     func singleCapabilityAutoAssigns(
-        capabilities: BLECSCClient.Capabilities, expected: BLECSCClient.SensorRole
+        capabilities: BLECSCClient.Capabilities, expected: SensorRole
     ) async {
-        let assigned = LockIsolated<[(UUID, Set<BLECSCClient.SensorRole>)]>([])
+        let assigned = LockIsolated<[(UUID, Set<SensorRole>)]>([])
         var ble = BLECSCClient.testValue
         ble.setRoles = { id, roles in assigned.withValue { $0.append((id, roles)) } }
 
@@ -205,8 +205,8 @@ struct DeviceManagementFeatureTests {
 
     @Test("Choosing Both persists two records and pushes them to the client")
     func choosingBothPersistsAndPushes() async {
-        let assigned = LockIsolated<[(UUID, Set<BLECSCClient.SensorRole>)]>([])
-        let pushed = LockIsolated<[[UUID: Set<BLECSCClient.SensorRole>]]>([])
+        let assigned = LockIsolated<[(UUID, Set<SensorRole>)]>([])
+        let pushed = LockIsolated<[[UUID: Set<SensorRole>]]>([])
         var ble = BLECSCClient.testValue
         ble.setRoles = { id, roles in assigned.withValue { $0.append((id, roles)) } }
         ble.setPairedSensors = { map in pushed.withValue { $0.append(map) } }
@@ -277,7 +277,7 @@ struct DeviceManagementFeatureTests {
 
     @Test("Tapping a paired combo sensor re-opens the prompt; Cadence releases Speed")
     func reassignmentReleasesTheOtherRole() async {
-        let assigned = LockIsolated<[(UUID, Set<BLECSCClient.SensorRole>)]>([])
+        let assigned = LockIsolated<[(UUID, Set<SensorRole>)]>([])
         var ble = BLECSCClient.testValue
         ble.setRoles = { id, roles in assigned.withValue { $0.append((id, roles)) } }
 
@@ -371,7 +371,7 @@ struct DeviceManagementFeatureTests {
     @Test("Unpairing drops the records and pushes the reduced set to the client")
     func unpairDropsRecordsAndPushes() async {
         let unpaired = LockIsolated<[UUID]>([])
-        let pushed = LockIsolated<[[UUID: Set<BLECSCClient.SensorRole>]]>([])
+        let pushed = LockIsolated<[[UUID: Set<SensorRole>]]>([])
         var ble = BLECSCClient.testValue
         ble.unpair = { id in unpaired.withValue { $0.append(id) } }
         ble.setPairedSensors = { map in pushed.withValue { $0.append(map) } }

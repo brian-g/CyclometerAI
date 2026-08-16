@@ -17,7 +17,7 @@ import Foundation
 struct PairedSensor: Codable, Equatable, Sendable {
     /// `CBPeripheral.identifier` — stable per device per iOS install.
     var peripheralID: UUID
-    var role: BLECSCClient.SensorRole
+    var role: SensorRole
     /// Advertised name at pairing time. Retained so a paired sensor that is out of
     /// range still has something to show on the Sensors screen, where no live
     /// advertisement is available to name it.

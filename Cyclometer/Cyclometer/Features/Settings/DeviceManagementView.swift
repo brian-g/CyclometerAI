@@ -91,7 +91,7 @@ private struct DeviceRow: View {
         case .active, .connected, .none:
             // Declaration order (speed, then cadence), not alphabetical — it matches
             // how the pair is named everywhere else in the app and the specs.
-            return BLECSCClient.SensorRole.allCases
+            return SensorRole.allCases
                 .filter(device.roles.contains)
                 .map(\.displayName)
                 .joined(separator: " · ")
@@ -99,15 +99,6 @@ private struct DeviceRow: View {
         case .reconnecting:  return "Reconnecting…"
         case .scanning:      return "Searching…"
         case .disconnected:  return "Disconnected"
-        }
-    }
-}
-
-extension BLECSCClient.SensorRole {
-    var displayName: String {
-        switch self {
-        case .speed:   "Speed"
-        case .cadence: "Cadence"
         }
     }
 }

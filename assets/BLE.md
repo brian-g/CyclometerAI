@@ -578,13 +578,16 @@ struct CSCCapabilities: Sendable {
 
 /// The role a BLE peripheral plays in Cyclometer.
 /// Speed and Cadence are separate roles even when served by a single physical CSC device.
-enum SensorRole: String, Codable, Sendable {
+/// Shipped as `Models/SensorRole.swift` (#93), with two corrections to the sketch below:
+/// `Hashable, CaseIterable` are required (Set<SensorRole> and the S11 subtitle order),
+/// and `unknown` is gone — a role not representable in a PairedSensor has no persisted
+/// raw value worth reserving. `power` stays reserved but undeclared until Phase 3.
+/// DataModel.md §3.7 is authoritative for the persisted contract.
+enum SensorRole: String, Codable, Hashable, CaseIterable, Sendable {
     case radar
     case heartRate
     case speed      // CSC profile — reads wheel revolution data only
     case cadence    // CSC profile — reads crank revolution data only
-    case power      // Phase 3
-    case unknown
 }
 
 enum BLEConnectionEvent: Sendable {
@@ -914,7 +917,7 @@ Recorded now so the M7 issue can be written from it rather than re-derived.
 | Pass `CBCentralManagerOptionRestoreIdentifierKey` at manager construction | `BLECentral.init` — `Clients/BLE/BLEClient.swift` |
 | Implement `centralManager(_:willRestoreState:)`, rehydrating `discovered` from `CBCentralManagerRestoredStatePeripheralsKey` | `BLECentral` |
 | Reassign `peripheral.delegate = self` on every restored peripheral — CoreBluetooth does not restore delegates | `BLECentral` |
-| Rebuild `connectionOwners`, which is **not** restorable from CoreBluetooth — the owner set is Cyclometer's own ref-count and must be reconstructed from persisted `PairedSensor` records. **The data exists as of #67**: `AppPreferences.sensorAssignments` gives peripheral → roles, and `BLECSCClient.setPairedSensors` is already the launch-time path that consumes it | `BLECentral` + persistence |
+| Rebuild `connectionOwners`, which is **not** restorable from CoreBluetooth — the owner set is Cyclometer's own ref-count and must be reconstructed from persisted `PairedSensor` records. **The data exists as of #67**: `AppPreferences.cscAssignments` gives peripheral → roles, and `BLECSCClient.setPairedSensors` is already the launch-time path that consumes it. Radar and HR owners come from the same records via their own clients (#97) | `BLECentral` + persistence |
 | Rebuild per-client state: `CSCClientState.slots` (roles, calculators, names) and the radar client's target peripheral | `BLECSCClient`, `VariaRadarClient` |
 | Re-establish notification subscriptions, or verify restored peripherals arrive with `isNotifying` already true | all three sensor clients |
 | Decide restoration behavior when no ride is active — a relaunch that reconnects sensors with no ride running should stand down rather than hold connections open | `AppFeature` |

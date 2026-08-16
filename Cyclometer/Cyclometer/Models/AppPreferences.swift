@@ -43,16 +43,23 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// than peripheral-keyed because that is how every consumer asks: one sensor per
     /// role, app-wide, for MVP (DataModel.md §3.9 gives roles a bike dimension in
     /// Phase 2).
-    func pairedSensor(for role: BLECSCClient.SensorRole) -> PairedSensor? {
+    func pairedSensor(for role: SensorRole) -> PairedSensor? {
         pairedSensors.first { $0.role == role }
     }
 
-    /// The same records grouped the way `BLECSCClient.setPairedSensors` wants them —
-    /// one entry per peripheral, so a combo device assigned Both is connected once
+    /// The CSC-role records grouped the way `BLECSCClient.setPairedSensors` wants them
+    /// — one entry per peripheral, so a combo device assigned Both is connected once
     /// holding two roles rather than connected twice.
-    var sensorAssignments: [UUID: Set<BLECSCClient.SensorRole>] {
-        Dictionary(grouping: pairedSensors, by: \.peripheralID)
-            .mapValues { Set($0.map(\.role)) }
+    ///
+    /// Filtered to `SensorRole.cscRoles` because the collection is no longer CSC-only:
+    /// radar and heart rate records live here too (#93), and handing their peripheral
+    /// IDs to the CSC client would have it connect to a radar looking for 0x1816.
+    var cscAssignments: [UUID: Set<SensorRole>] {
+        Dictionary(
+            grouping: pairedSensors.filter { SensorRole.cscRoles.contains($0.role) },
+            by: \.peripheralID
+        )
+        .mapValues { Set($0.map(\.role)) }
     }
 
     init() {}
