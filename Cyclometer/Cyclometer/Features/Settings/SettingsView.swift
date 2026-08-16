@@ -51,10 +51,6 @@ struct SettingsView: View {
                     get: { store.isAutoDimEnabled },
                     set: { _ in store.send(.autoDimToggled) }
                 ))
-                Toggle("Set Do Not Disturb", isOn: Binding(
-                    get: { store.shouldSetDoNotDisturb },
-                    set: { _ in store.send(.doNotDisturbToggled) }
-                ))
                 NavigationLink("Sensors") {
                     DeviceManagementView(
                         store: store.scope(state: \.deviceManagement, action: \.deviceManagement)

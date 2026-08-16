@@ -6,16 +6,22 @@ import Foundation
 enum UnitSystem: String, Equatable, Sendable, Codable {
     case metric, imperial
 
-    /// Default resolved from the device locale (Settings → General → Language &
-    /// Region → Measurement System). US/UK use mph + miles for road distances;
+    /// The unit system a locale implies. US/UK use mph + miles for road distances;
     /// everything else is metric. Mixed locales (e.g. Canada) fall back to the
-    /// system's primary measurement system.
-    static var system: UnitSystem {
-        switch Locale.current.measurementSystem {
-        case .us, .uk: return .imperial
-        default:       return .metric
+    /// system's primary measurement system, which is metric.
+    ///
+    /// Split out from `system` so the mapping can be asserted against named locales
+    /// rather than whatever region the test machine happens to be set to.
+    init(_ locale: Locale) {
+        switch locale.measurementSystem {
+        case .us, .uk: self = .imperial
+        default:       self = .metric
         }
     }
+
+    /// Default resolved from the device locale (Settings → General → Language &
+    /// Region → Measurement System).
+    static var system: UnitSystem { UnitSystem(.current) }
 
     private var speedUnit: UnitSpeed { self == .metric ? .kilometersPerHour : .milesPerHour }
     private var lengthUnit: UnitLength { self == .metric ? .kilometers : .miles }

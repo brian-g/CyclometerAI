@@ -415,6 +415,16 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// BLECSCClient adopts nothing on its own and is told via setPairedSensors.
     var pairedSensors: [PairedSensor] = []
 
+    /// #110. Gates the idle dim only — the wake lock is not a preference.
+    var isAutoDimEnabled: Bool = true
+    /// #94. Defaults to the device locale's measurement system via `UnitSystem(.current)`.
+    /// Not yet read: ActiveRideFeature.unitSystem is still seeded from Locale per-feature
+    /// and the S12 picker is still a disconnected String — unifying them is #102 and #8.
+    var preferredUnit: UnitSystem = .system
+    /// #94. Not yet read: SettingsFeature still toggles its own copy, and the stop
+    /// detection the ride state machine needs lands with #102.
+    var isAutoPauseEnabled: Bool = true
+
     func pairedSensor(for role: SensorRole) -> PairedSensor?
     /// CSC-role records only (#93). The collection also holds radar and HR records,
     /// and BLECSCClient only speaks 0x1816 — see §3.7's role enum note.
@@ -441,27 +451,28 @@ Consumed by `SettingsFeature` (read/write, pushing each change to
 `BLECSCClient.setPairedSensors`) and `AppFeature` (`@SharedReader`, pushing the assignments once at
 launch so paired sensors reconnect without the Sensors screen being open).
 
-**Still to land**, each with the feature that consumes it:
+**Still to land**, with the feature that consumes it:
 
 ```swift
-var preferredUnit: UnitSystem       // Defaults from iOS device locale.
-                                    // Today ActiveRideFeature.unitSystem is seeded from
-                                    // Locale per-feature and Settings' picker is a
-                                    // disconnected String — unifying them is follow-up work.
 // OQDM8 resolved: mapOrientation is real — PRD section 8.6 specifies heading-up vs north-up
 // as a user-toggleable setting. Persisted so the rider's choice survives app restarts.
-var mapOrientation: MapOrientation
-var isAutoPauseEnabled: Bool
-var isAutoDimEnabled: Bool
+var mapOrientation: MapOrientation  // default .headingUp
 
-enum UnitSystem: String, Codable { case metric, imperial }
 enum MapOrientation: String, Codable { case headingUp, northUp }
 ```
 
+> **`mapOrientation` deferred at #94 (2026-08-16).** The other three fields of that issue landed;
+> this one did not, because it has no consumer and none planned in M10. PRD §8.6 puts the
+> heading-up/north-up choice on the map's own compass, not in Settings, and UX.md §S12 has no row
+> for it — so the field would persist a value nothing writes and nothing reads. It lands with the
+> issue that makes `ActiveRideMapView`'s camera orientation survive a relaunch.
+
 > **`shouldSetDoNotDisturb` removed 2026-08-14 (M10).** iOS exposes no public API for an app to enable a
-> Focus, so the field had no behavior to persist and the S12 toggle it backed has been deleted (UX.md §S12).
-> Nothing has shipped reading or writing it, so there is no migration — the decode-strictness rule below
-> would reject a document containing it, and none exists.
+> Focus, so the field had no behavior to persist and the S12 toggle it backed has been deleted — from
+> UX.md §S12 then, and from `SettingsFeature`/`SettingsView` at #94. Nothing ever shipped reading or
+> writing it, so there is no migration and no shim: §9's rule is *leniency*, not strictness, so a
+> document carrying an unrecognised key decodes normally with the key ignored and every other
+> preference intact. No such document exists in the first place.
 
 > **`isAutoDimEnabled` is real and implementable**, unlike its neighbor: `UIApplication.shared
 > .isIdleTimerDisabled` is public API, and auto-dim means declining to hold the idle timer open during a
