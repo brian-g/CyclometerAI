@@ -61,7 +61,7 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 **Core Apple Frameworks:**
 - `CoreLocation` — GPS and location
 - `CoreBluetooth` — BLE sensor connectivity (Garmin Varia RTL515/RCT715, HR strap, CSC sensor)
-- `HealthKit` — Resting HR, max HR, date of birth (read-only)
+- `HealthKit` — Resting HR, max HR, date of birth (read); `HKWorkout` (write, at ride end)
 - `MapKit` — Live map, route overlay
 - `WeatherKit` - Current weather, wind overlaw
 - `AVFoundation` — Audio tone alerts (L3 danger override)

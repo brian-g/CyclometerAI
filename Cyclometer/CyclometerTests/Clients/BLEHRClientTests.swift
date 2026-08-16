@@ -147,7 +147,9 @@ struct BLEHRIntegrationTests {
                     notified.withValue { $0.append((enabled, charUUID)) }
                 },
                 readValue: { _, _, charUUID in reads.withValue { $0.append(charUUID) } },
-                events: { eventStream }
+                events: { eventStream },
+                authorization: { .allowedAlways },
+                requestAuthorization: { .allowedAlways }
             )
 
             self.client = BLEHRClient.live(bleClient: bleClient)

@@ -78,7 +78,9 @@ struct BLEClientTests {
             discoverCharacteristics: { _, _, _ in },
             setNotifyValue: { _, _, _, _ in },
             readValue: { _, _, _ in },
-            events: { stream }
+            events: { stream },
+            authorization: { .allowedAlways },
+            requestAuthorization: { .allowedAlways }
         )
 
         Task {
@@ -132,7 +134,9 @@ struct BLEClientTests {
             discoverCharacteristics: { _, _, _ in },
             setNotifyValue: { _, _, _, _ in },
             readValue: { _, _, _ in },
-            events: { stream }
+            events: { stream },
+            authorization: { .allowedAlways },
+            requestAuthorization: { .allowedAlways }
         )
 
         Task {
@@ -188,7 +192,9 @@ struct BLEClientTests {
                 ))
                 continuation.finish()
             },
-            events: { stream }
+            events: { stream },
+            authorization: { .allowedAlways },
+            requestAuthorization: { .allowedAlways }
         )
 
         await client.readValue(peripheralID, cscService, cscFeature)

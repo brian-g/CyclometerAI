@@ -142,7 +142,7 @@ This convention matches the frame naming in `Design.sketch`.
 ## S01 — Onboarding — Welcome
 
 **Phase:** MVP  
-**Purpose:** Introduce Cyclometer, establish trust, and request system permissions (Bluetooth, Location, HealthKit, Motion and Fitness, Files).
+**Purpose:** Introduce Cyclometer, establish trust, and request system permissions (Bluetooth, Location, Motion and Fitness, HealthKit).
 
 ### Layout
 > *Refer to `assets/design/Design.sketch` — S01.*
@@ -150,8 +150,10 @@ This convention matches the frame naming in `Design.sketch`.
 ### Permissions Flow
 - Bluetooth (required for BLE sensors)
 - Location **When In Use** (required for GPS track)
-- Motion and Fitness (required for activity detection)
-- HealthKit read (HR, resting HR, max HR, date of birth)
+- Motion and Fitness (required for activity detection, *where the hardware exists* — see the
+  availability note below)
+- HealthKit (read: HR, resting HR, max HR, date of birth; write: the `HKWorkout` recorded at ride end
+  per §S10 — both are requested together so the rider answers one sheet)
 
 > **Revised 2026-08-14 (M10).** Two corrections to the list this screen used to show.
 >
@@ -164,6 +166,17 @@ This convention matches the frame naming in `Design.sketch`.
 >   afterwards, from a running app that is already using location. Onboarding therefore requests When In Use;
 >   the escalation prompt is raised at the first ride start, where background recording is the thing the rider
 >   is asking for and the reason for the upgrade is legible.
+
+> **Revised 2026-08-16 (M10, #95).** A permission can be *unavailable* as well as granted or denied.
+> `CMMotionActivityManager.isActivityAvailable()` is false on the Simulator and on devices without a
+> motion coprocessor, and in that state the authorization never leaves `notDetermined` however often it
+> is asked. `PermissionsClient` reports this as `.unavailable`, and S01 must treat it as **non-blocking**
+> — otherwise Next can never enable and the app cannot be run in the Simulator at all. `.unavailable` is
+> not a refusal, so it is drawn neither as a checkmark nor as a red X.
+>
+> HealthKit is the mirror case: its read authorization is *undeterminable by design*, so `.health` can
+> never report `denied`. It shows a checkmark once asked and never a red X, which is why it stays
+> optional for Next.
 
 ### Interactions
 For each permission item, when the user taps it, the system permission prompt will be displayed. When permission has been successfully granted for an item, the circle to the left of the item will become a filled circular checkmark. If they deny a permission, it will be a red X.

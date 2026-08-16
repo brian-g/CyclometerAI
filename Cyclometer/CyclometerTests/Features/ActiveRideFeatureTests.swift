@@ -289,15 +289,15 @@ struct ActiveRideFeatureLocationTests {
     @Test("Authorization granted sets isLocationAvailable true")
     func authGranted() async {
         let store = makeStore()
-        await store.send(.locationAuthorizationResult(.authorizedWhenInUse)) {
+        await store.send(.locationAuthorizationResult(.granted)) {
             $0.isLocationAvailable = true
         }
     }
 
-    @Test("Authorization authorizedAlways also sets isLocationAvailable true")
+    @Test("Authorization grantedAlways also sets isLocationAvailable true")
     func authAlways() async {
         let store = makeStore()
-        await store.send(.locationAuthorizationResult(.authorizedAlways)) {
+        await store.send(.locationAuthorizationResult(.grantedAlways)) {
             $0.isLocationAvailable = true
         }
     }
@@ -314,8 +314,8 @@ struct ActiveRideFeatureLocationTests {
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
+            $0.permissionsClient = .mock(initial: [.locationWhenInUse: .granted])
             $0.locationClient = LocationClient(
-                requestAuthorization: { .authorizedWhenInUse },
                 startUpdates: { AsyncStream { $0.finish() } },
                 stopUpdates: { stopCalled.setValue(true) }
             )
@@ -582,8 +582,8 @@ struct ActiveRideFeatureStateMachineTests {
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
+            $0.permissionsClient = .mock(initial: [.locationWhenInUse: .granted])
             $0.locationClient = LocationClient(
-                requestAuthorization: { .authorizedWhenInUse },
                 startUpdates: { AsyncStream { $0.finish() } },
                 stopUpdates: { disconnectCalled.setValue(true) }
             )

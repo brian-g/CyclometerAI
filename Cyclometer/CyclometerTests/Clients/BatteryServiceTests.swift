@@ -73,7 +73,9 @@ struct BatteryServiceHandshakeTests {
                 readValue: { id, service, characteristic in
                     reads.withValue { $0.append((id, service, characteristic)) }
                 },
-                events: { AsyncStream { $0.finish() } }
+                events: { AsyncStream { $0.finish() } },
+                authorization: { .allowedAlways },
+                requestAuthorization: { .allowedAlways }
             )
             self.discoveredCharacteristics = discoveredCharacteristics
             self.reads = reads
