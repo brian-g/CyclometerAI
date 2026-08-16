@@ -303,68 +303,47 @@ struct PermissionsClientTests {
         )
     }
 
-    /// Collects everything a stream emits, so assertions can be made on the record
-    /// rather than on arrival order. The four replayed values and the location
-    /// observer's opening yield interleave freely, so position-based assertions on
-    /// this stream are inherently racy.
-    private static func collect(
-        _ stream: AsyncStream<PermissionChange>
-    ) -> (log: LockIsolated<[PermissionChange]>, task: Task<Void, Never>) {
-        let log = LockIsolated<[PermissionChange]>([])
-        let task = Task {
-            for await change in stream {
-                log.withValue { $0.append(change) }
-            }
+    /// Awaits the next change for one domain, skipping the other three.
+    ///
+    /// The four replayed values and the location observer's opening yield interleave
+    /// freely, so position-based assertions on this stream are racy. Filtering by domain
+    /// is order-independent *and* carries no wall-clock budget: on a loaded CI runner a
+    /// polling deadline measures scheduler contention rather than the behaviour under
+    /// test. The `.timeLimit` trait on each test bounds a genuine hang.
+    private static func nextChange(
+        for domain: PermissionDomain,
+        from iterator: inout AsyncStream<PermissionChange>.Iterator
+    ) async -> PermissionState? {
+        while let change = await iterator.next() {
+            if change.domain == domain { return change.state }
         }
-        return (log, task)
+        return nil
     }
 
-    /// Polls until `condition` holds, or gives up. A broken observer would otherwise
-    /// hang the suite rather than fail it.
-    private static func waitUntil(
-        _ condition: @Sendable () -> Bool,
-        timeout: Duration = .seconds(2)
-    ) async -> Bool {
-        let deadline = ContinuousClock().now.advanced(by: timeout)
-        while ContinuousClock().now < deadline {
-            if condition() { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return condition()
-    }
-
-    @Test("An authorization change made outside the app reaches subscribers")
+    @Test("An authorization change made outside the app reaches subscribers", .timeLimit(.minutes(1)))
     func externalChangeIsBroadcast() async {
         // The Settings-recovery path: the rider denies, leaves for iOS Settings, grants,
         // and comes back. Nothing in the app called request(), so the only way the row
-        // updates is a framework callback the client is actually listening to. Before
-        // the observers were wired this test hung on the second wait.
+        // updates is a framework callback the client is actually listening to.
         let authorization = LockIsolated<CBManagerAuthorization>(.denied)
         let (events, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
         let client = PermissionsClient.live(
             bleClient: Self.scriptableBLE(authorization: authorization, events: events)
         )
 
-        let (log, task) = Self.collect(client.statuses())
-        defer { task.cancel() }
+        var iterator = client.statuses().makeAsyncIterator()
 
-        // The seeded denial must land first, so the grant below is observed rather than
-        // merely replayed.
-        let sawDenial = await Self.waitUntil {
-            log.value.contains(PermissionChange(domain: .bluetooth, state: .denied))
-        }
-        #expect(sawDenial)
+        // Wait for the seeded denial to be replayed before changing anything, so what
+        // follows is observed rather than merely read at subscribe time.
+        #expect(await Self.nextChange(for: .bluetooth, from: &iterator) == .denied)
 
         authorization.setValue(.allowedAlways)
         eventContinuation.yield(.stateChanged(.poweredOn))
 
-        let sawGrant = await Self.waitUntil {
-            log.value.contains(PermissionChange(domain: .bluetooth, state: .granted))
-        }
-        #expect(sawGrant)
+        #expect(await Self.nextChange(for: .bluetooth, from: &iterator) == .granted)
     }
 
-    @Test("A framework callback carrying no change is not rebroadcast")
+    @Test("A framework callback carrying no change is not rebroadcast", .timeLimit(.minutes(1)))
     func unchangedCallbackIsNotRebroadcast() async {
         // centralManagerDidUpdateState fires for radio power too, which is not a
         // permission change. Without the transition filter, S01 would rebuild its rows
@@ -375,20 +354,19 @@ struct PermissionsClientTests {
             bleClient: Self.scriptableBLE(authorization: authorization, events: events)
         )
 
-        let (log, task) = Self.collect(client.statuses())
-        defer { task.cancel() }
+        var iterator = client.statuses().makeAsyncIterator()
+        #expect(await Self.nextChange(for: .bluetooth, from: &iterator) == .granted)
 
-        _ = await Self.waitUntil {
-            log.value.contains(PermissionChange(domain: .bluetooth, state: .granted))
-        }
-
-        // Radio cycles twice, permission untouched.
+        // Radio cycles twice, permission untouched — neither may reach the stream.
         eventContinuation.yield(.stateChanged(.poweredOff))
         eventContinuation.yield(.stateChanged(.poweredOn))
-        _ = await Self.waitUntil({ false }, timeout: .milliseconds(200))
+        // Then a real change. Asserting that *this* is the next Bluetooth value the
+        // subscriber sees proves the two above were filtered, with no sleeping: were
+        // they rebroadcast, the next value would be a repeated .granted instead.
+        authorization.setValue(.denied)
+        eventContinuation.yield(.stateChanged(.poweredOn))
 
-        let bluetoothChanges = log.value.filter { $0.domain == .bluetooth }
-        #expect(bluetoothChanges.count == 1)
+        #expect(await Self.nextChange(for: .bluetooth, from: &iterator) == .denied)
     }
 
     @Test("Live stream replays all four domains")

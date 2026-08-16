@@ -650,10 +650,26 @@ fires on every radio toggle and the foreground re-poll on every activation. Obse
 the first subscriber and cancelled on the last, so it costs nothing when no one is listening.
 
 Two regression tests cover this, driven through an injected `BLEClient` with a scriptable
-authorization answer and a test-driven event stream. `externalChangeIsBroadcast` was confirmed to
-**fail** against the unwired version and pass against the fix; `unchangedCallbackIsNotRebroadcast`
-pins the transition filter. Both assert on a collected log rather than arrival order, because the
-replay and the location observer's opening yield interleave freely.
+authorization answer and a test-driven event stream. Both were confirmed to **fail** against the
+unwired version and pass against the fix.
+
+### Third bug: my own tests were load-sensitive, and CI caught it
+
+The first cut of those two tests polled with a 2-second wall-clock deadline. That passed locally
+three times running and failed on CI, where the runner is contended enough that tests taking 0.001s
+locally take 80–109 seconds. A 2s budget for a `Task` to be scheduled measures runner load, not
+behaviour.
+
+Raising the timeout would have been the wrong fix. Both tests now `await` the stream until a change
+for the domain under test arrives, filtering the other three — order-independent, and with no
+wall-clock budget at all, so starvation can only make them slower, never wrong. Swift Testing's
+`.timeLimit(.minutes(1))` bounds a genuine hang.
+
+The rewrite also exposed that `unchangedCallbackIsNotRebroadcast` had been passing **vacuously**: it
+slept 200ms and counted, so on a slow machine it would count one event because nothing had been
+processed yet, not because the filter worked. It now sends a real change after the two no-ops and
+asserts that change is the next value seen — if the no-ops leaked, the next value would be a repeated
+`.granted`. Both tests now fail when the observer is disconnected; before, only one did.
 
 ### Not done here
 

@@ -381,28 +381,36 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
     /// coming back from Settings arrives. The re-poll covers all four rather than just
     /// the two, since `broadcastIfChanged` makes a redundant read free.
     private func startObserving() {
-        let task = Task { [self] in
+        // `weak` so that dropping the client stops observation on its own. The strong
+        // reference is re-established for the duration of each loop, which is bounded by
+        // `stopObserving` cancelling the group.
+        let task = Task { [weak self] in
+            guard let self else { return }
             await withTaskGroup(of: Void.self) { group in
-                group.addTask {
+                group.addTask { [weak self] in
                     for await status in LocationManagerState.shared.makeAuthorizationStream() {
-                        broadcastIfChanged(.locationWhenInUse, PermissionsClient.state(cl: status))
+                        guard let self else { return }
+                        self.broadcastIfChanged(.locationWhenInUse, PermissionsClient.state(cl: status))
                     }
                 }
-                group.addTask {
+                group.addTask { [weak self] in
+                    guard let bleClient = self?.bleClient else { return }
                     for await event in bleClient.events() {
                         guard case .stateChanged = event else { continue }
+                        guard let self else { return }
                         // The event carries CBManagerState, which is the radio, not the
                         // permission — re-read authorization rather than mapping it.
-                        broadcastIfChanged(.bluetooth, PermissionsClient.state(cb: bleClient.authorization()))
+                        self.broadcastIfChanged(.bluetooth, PermissionsClient.state(cb: bleClient.authorization()))
                     }
                 }
-                group.addTask {
+                group.addTask { [weak self] in
                     let foregrounded = NotificationCenter.default.notifications(
-                        named: await UIApplication.didBecomeActiveNotification
+                        named: UIApplication.didBecomeActiveNotification
                     )
                     for await _ in foregrounded {
+                        guard let self else { return }
                         for domain in PermissionDomain.allCases {
-                            broadcastIfChanged(domain, await status(for: domain))
+                            self.broadcastIfChanged(domain, await self.status(for: domain))
                         }
                     }
                 }
