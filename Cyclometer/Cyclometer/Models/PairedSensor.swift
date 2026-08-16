@@ -17,9 +17,18 @@ import Foundation
 struct PairedSensor: Codable, Equatable, Sendable {
     /// `CBPeripheral.identifier` — stable per device per iOS install.
     var peripheralID: UUID
-    var role: BLECSCClient.SensorRole
+    var role: SensorRole
     /// Advertised name at pairing time. Retained so a paired sensor that is out of
     /// range still has something to show on the Sensors screen, where no live
     /// advertisement is available to name it.
     var displayName: String?
+
+    /// Whether this record is one `BLECSCClient` can act on.
+    ///
+    /// The Sensors screen is CSC-only until #98 unifies discovery, but the collection
+    /// it reads and writes is not: radar and heart rate records live here too (#93).
+    /// Every membership test and every removal it performs has to scope itself this
+    /// way, or a peripheral serving more than one profile loses its other pairings —
+    /// or is hidden from the screen entirely because something else already claimed it.
+    var isCSC: Bool { SensorRole.cscRoles.contains(role) }
 }

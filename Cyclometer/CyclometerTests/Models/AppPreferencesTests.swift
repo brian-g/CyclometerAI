@@ -7,6 +7,8 @@ struct AppPreferencesTests {
 
     private static let comboID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
     private static let cadenceID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!
+    private static let radarID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C3")!
+    private static let hrID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D4")!
 
     @Test("Each role resolves to the sensor holding it")
     func lookupPerRole() {
@@ -43,7 +45,7 @@ struct AppPreferencesTests {
         #expect(preferences.pairedSensor(for: .speed)?.peripheralID == Self.comboID)
         #expect(preferences.pairedSensor(for: .cadence)?.peripheralID == Self.comboID)
         // One peripheral, two roles — not two connections.
-        #expect(preferences.sensorAssignments == [Self.comboID: [.speed, .cadence]])
+        #expect(preferences.cscAssignments == [Self.comboID: [.speed, .cadence]])
     }
 
     @Test("Assignments group by peripheral")
@@ -54,7 +56,7 @@ struct AppPreferencesTests {
             PairedSensor(peripheralID: Self.cadenceID, role: .cadence, displayName: "GSC-10")
         ]
 
-        #expect(preferences.sensorAssignments == [
+        #expect(preferences.cscAssignments == [
             Self.comboID: [.speed],
             Self.cadenceID: [.cadence]
         ])
@@ -62,7 +64,7 @@ struct AppPreferencesTests {
 
     @Test("No pairings means nothing to connect")
     func emptyAssignments() {
-        #expect(AppPreferences().sensorAssignments.isEmpty)
+        #expect(AppPreferences().cscAssignments.isEmpty)
         #expect(AppPreferences().pairedSensor(for: .speed) == nil)
     }
 
@@ -95,13 +97,79 @@ struct AppPreferencesTests {
         #expect(decoded.isAutoDimEnabled)
     }
 
+    /// #93 moved `SensorRole` out of `BLECSCClient` and added `.radar` / `.heartRate`.
+    /// The `speed` and `cadence` raw values did not change, so a document written
+    /// before the move must still decode with its pairings intact (DataModel.md §3.7).
+    @Test("A document written before the role enum moved still decodes")
+    func decodesDocumentWrittenBeforeRoleMove() throws {
+        let legacy = Data(#"""
+        {"wheelCircumferenceMM":2096,"pairedSensors":[\#
+        {"peripheralID":"00000000-0000-0000-0000-0000000000A1",\#
+        "role":"speed","displayName":"Wahoo RPM"},\#
+        {"peripheralID":"00000000-0000-0000-0000-0000000000A1",\#
+        "role":"cadence","displayName":"Wahoo RPM"}]}
+        """#.utf8)
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: legacy)
+
+        #expect(decoded.pairedSensor(for: .speed)?.peripheralID == Self.comboID)
+        #expect(decoded.pairedSensor(for: .cadence)?.displayName == "Wahoo RPM")
+        #expect(decoded.cscAssignments == [Self.comboID: [.speed, .cadence]])
+    }
+
+    /// The CSC client is told what to reconnect via this map, and it only speaks
+    /// 0x1816 — a radar or HR peripheral reaching it would have it chase a service the
+    /// device does not advertise (#93).
+    @Test("Radar and heart rate records stay out of the CSC assignments")
+    func cscAssignmentsExcludeNonCSCRoles() {
+        var preferences = AppPreferences()
+        preferences.pairedSensors = [
+            PairedSensor(peripheralID: Self.radarID, role: .radar, displayName: "RTL515"),
+            PairedSensor(peripheralID: Self.hrID, role: .heartRate, displayName: "HRM-Dual"),
+            PairedSensor(peripheralID: Self.comboID, role: .speed, displayName: "Wahoo RPM")
+        ]
+
+        #expect(preferences.cscAssignments == [Self.comboID: [.speed]])
+        // Still reachable by role — the filter is about who gets connected, not what
+        // is persisted.
+        #expect(preferences.pairedSensor(for: .radar)?.peripheralID == Self.radarID)
+    }
+
     /// The raw values are what land in the file, so renaming a case silently orphans
     /// every record that used it.
     @Test("Role raw values are stable", arguments: [
-        (BLECSCClient.SensorRole.speed, "speed"),
-        (BLECSCClient.SensorRole.cadence, "cadence")
+        (SensorRole.radar, "radar"),
+        (SensorRole.heartRate, "heartRate"),
+        (SensorRole.speed, "speed"),
+        (SensorRole.cadence, "cadence"),
+        (SensorRole.power, "power")
     ])
-    func roleRawValues(role: BLECSCClient.SensorRole, raw: String) {
+    func roleRawValues(role: SensorRole, raw: String) {
         #expect(role.rawValue == raw)
+    }
+
+    /// `roleRawValues` hardcodes its rows, so a case added without one would go
+    /// unpinned. This is the test that fails when that happens. It also pins
+    /// declaration order, which `allCases` exposes to the S11 row subtitle and to the
+    /// order records are written in (`DeviceManagementFeature.apply`).
+    @Test("Every role is pinned, in DataModel §3.7 order")
+    func roleCasesAreExhaustive() {
+        #expect(SensorRole.allCases.map(\.rawValue) == [
+            "radar", "heartRate", "speed", "cadence", "power"
+        ])
+    }
+
+    /// `cscRoles` is what keeps radar, HR and power peripherals away from a client that
+    /// only speaks 0x1816. Pinned because the set is written out by hand, so a role
+    /// added to the enum does not join it automatically.
+    @Test("Only speed and cadence are CSC roles")
+    func cscRolesMembership() {
+        #expect(SensorRole.cscRoles == [.speed, .cadence])
+        // `PairedSensor.isCSC` is the predicate every write site on the Sensors screen
+        // scopes itself with, so it has to agree with the set for all five roles.
+        for role in SensorRole.allCases {
+            let record = PairedSensor(peripheralID: Self.comboID, role: role, displayName: nil)
+            #expect(record.isCSC == SensorRole.cscRoles.contains(role))
+        }
     }
 }

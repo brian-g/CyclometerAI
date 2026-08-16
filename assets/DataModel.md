@@ -415,8 +415,10 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// BLECSCClient adopts nothing on its own and is told via setPairedSensors.
     var pairedSensors: [PairedSensor] = []
 
-    func pairedSensor(for role: BLECSCClient.SensorRole) -> PairedSensor?
-    var sensorAssignments: [UUID: Set<BLECSCClient.SensorRole>]   // peripheral → roles
+    func pairedSensor(for role: SensorRole) -> PairedSensor?
+    /// CSC-role records only (#93). The collection also holds radar and HR records,
+    /// and BLECSCClient only speaks 0x1816 — see §3.7's role enum note.
+    var cscAssignments: [UUID: Set<SensorRole>]   // peripheral → roles
 
     /// Hand-written: the synthesised init(from:) throws on a missing key rather
     /// than using the property default. See §9.
@@ -516,7 +518,7 @@ confirmation naming the incumbent, and only Replace writes (UX.md §S11). The co
 /// OQDM6 resolved: replaces fixed UUID string fields on AppPreferences.
 struct PairedSensor: Codable, Equatable, Sendable {
     var peripheralID: UUID            // CBPeripheral.identifier — stable per device per iOS install
-    var role: BLECSCClient.SensorRole
+    var role: SensorRole
     var displayName: String?          // From BLE advertisement, at pairing time
 }
 ```
@@ -533,20 +535,37 @@ JSON document rather than a row:
 `displayName` is retained rather than always read live so a paired sensor that is out of range still
 has a name on the Sensors screen, where there is no advertisement to name it.
 
-**Role enum.** MVP persists CSC roles only, so `SensorRole` is still `BLECSCClient.SensorRole`
-(`speed`, `cadence`), given `String` raw values and `Codable` by #67. M10 brings radar and heart rate
-into S11, at which point it moves to `Models/` and gains their cases — additive, and enum cases need
-no migration (§9). The full target shape:
+**Role enum.** Nested inside `BLECSCClient` with two cases until #93, which moved it to
+`Cyclometer/Cyclometer/Models/SensorRole.swift` and added radar and heart rate for S11 — additive, and
+enum cases need no migration (§9). Shipped shape:
 
 ```swift
-enum SensorRole: String, Codable, Sendable {
+enum SensorRole: String, Codable, Hashable, CaseIterable, Sendable {
     case radar
     case heartRate
     case speed      // CSC profile — wheel revolution data
     case cadence    // CSC profile — crank revolution data
     case power      // Phase 3
+
+    /// The roles BLECSCClient can fill; `AppPreferences.cscAssignments` filters on it.
+    static let cscRoles: Set<SensorRole> = [.speed, .cadence]
 }
 ```
+
+`Hashable` and `CaseIterable` are load-bearing rather than incidental: `Set<SensorRole>` needs the
+first, and `allCases` supplies both the S11 row subtitle's role order and the order records are written
+in, so `Set`'s non-determinism never reaches the file. Declaration order is therefore part of the
+contract too, and `AppPreferencesTests` pins it.
+
+`power` is declared now though Phase 3 owns the hardware: the raw value is then fixed by the same test
+that pins the rest, rather than being chosen later against live records.
+
+**Not every role is a CSC role.** `cscRoles` is what keeps radar, HR and power peripherals away from a
+client that only speaks 0x1816, and `PairedSensor.isCSC` is the per-record form of the same test. Both
+matter because the collection is shared: S11 is CSC-only until #98 unifies discovery, so every
+membership test and every removal that screen performs has to scope itself, or a peripheral serving
+more than one profile loses its other pairings — or is hidden from the screen because something else
+already claimed it (#93).
 
 > **The raw values are the persisted contract.** Renaming a case silently orphans every record that
 > used it; `AppPreferencesTests` pins them for that reason.
@@ -826,7 +845,7 @@ let speedSensor = preferences.pairedSensor(for: .speed)
 let cadenceSensor = preferences.pairedSensor(for: .cadence)
 // These may return the same peripheralID for a combo sensor assigned both roles.
 // Grouped the other way for the client, which connects per peripheral, not per role:
-let assignments = preferences.sensorAssignments   // [UUID: Set<SensorRole>]
+let assignments = preferences.cscAssignments   // [UUID: Set<SensorRole>], CSC roles only
 ```
 
 ### TrackPoints for GPX / Ride Detail

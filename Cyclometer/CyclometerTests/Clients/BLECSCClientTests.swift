@@ -402,7 +402,7 @@ struct BLECSCIntegrationTests {
         }
 
         /// Tell the client this peripheral is paired, the way the feature layer does.
-        func pair(_ id: UUID, roles: Set<BLECSCClient.SensorRole>) async {
+        func pair(_ id: UUID, roles: Set<SensorRole>) async {
             await client.setPairedSensors([id: roles])
         }
 

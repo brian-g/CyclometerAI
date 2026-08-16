@@ -33,7 +33,7 @@ struct DeviceManagementFeature {
         /// paired sensor that is out of range holds no roles in the client, and would
         /// otherwise drop into Available with a Pair button.
         var pairedDevices: [BLECSCClient.DiscoveredSensor] {
-            preferences.sensorAssignments
+            preferences.cscAssignments
                 .map { id, roles in
                     devices.first { $0.id == id }
                         ?? BLECSCClient.DiscoveredSensor(
@@ -48,8 +48,11 @@ struct DeviceManagementFeature {
                 .sorted { ($0.name ?? "").localizedCaseInsensitiveCompare($1.name ?? "") == .orderedAscending }
         }
 
+        /// Keyed on CSC pairings, not on `pairedSensors` membership: a CSC-capable
+        /// peripheral already paired for radar or heart rate holds no CSC role, so it
+        /// belongs here with a Pair button rather than vanishing from both sections.
         var availableDevices: [BLECSCClient.DiscoveredSensor] {
-            let paired = Set(preferences.pairedSensors.map(\.peripheralID))
+            let paired = preferences.cscPairedIDs
             return devices.filter { !paired.contains($0.id) }
         }
 
@@ -57,7 +60,7 @@ struct DeviceManagementFeature {
         /// re-prompting. A property rather than a method so the view can reach it
         /// through the store's dynamic member lookup.
         var reassignableIDs: Set<UUID> {
-            let paired = Set(preferences.pairedSensors.map(\.peripheralID))
+            let paired = preferences.cscPairedIDs
             return Set(
                 devices
                     .filter { paired.contains($0.id) && $0.capabilities?.requiresRoleSelection == true }
@@ -79,7 +82,7 @@ struct DeviceManagementFeature {
         /// the reducer doesn't have to remember which row raised it.
         @CasePathable
         enum RoleChoice: Equatable {
-            case chose(peripheralID: UUID, roles: Set<BLECSCClient.SensorRole>)
+            case chose(peripheralID: UUID, roles: Set<SensorRole>)
         }
     }
 
@@ -156,8 +159,13 @@ struct DeviceManagementFeature {
                 return .run { [bleCSCClient] _ in await bleCSCClient.unpair(id) }
 
             case .unpairButtonTapped(let id):
-                state.$preferences.withLock { $0.pairedSensors.removeAll { $0.peripheralID == id } }
-                let assignments = state.preferences.sensorAssignments
+                // CSC records only. Unpair on this screen means "release the speed and
+                // cadence roles"; the same peripheral's radar or HR pairing was made
+                // elsewhere and is not this button's to revoke (#93).
+                state.$preferences.withLock {
+                    $0.pairedSensors.removeAll { $0.peripheralID == id && $0.isCSC }
+                }
+                let assignments = state.preferences.cscAssignments
                 return .run { [bleCSCClient] _ in
                     // Close the reconnect gate *before* tearing the connection down.
                     // `unpair` only drops the slot; `.discovered` consults
@@ -177,7 +185,7 @@ struct DeviceManagementFeature {
     /// together, so the records and the connections cannot drift apart. Mirrors
     /// `SettingsFeature.apply(_:to:)`.
     private func apply(
-        _ roles: Set<BLECSCClient.SensorRole>,
+        _ roles: Set<SensorRole>,
         to id: UUID,
         in state: inout State
     ) -> Effect<Action> {
@@ -186,14 +194,20 @@ struct DeviceManagementFeature {
             // Drop this peripheral's records, and any other peripheral's claim on a
             // role being reassigned — the same rule the client applies to slots, so
             // the two representations stay in step.
-            preferences.pairedSensors.removeAll { $0.peripheralID == id || roles.contains($0.role) }
+            //
+            // Scoped to CSC records: `roles` only ever holds CSC roles, but the
+            // `peripheralID` clause would otherwise take a radar or HR pairing down
+            // with it when a device serving both profiles is assigned a CSC role (#93).
+            preferences.pairedSensors.removeAll {
+                $0.isCSC && ($0.peripheralID == id || roles.contains($0.role))
+            }
             // Iterate `allCases` rather than the set: `Set` has no stable order, and
             // the persisted file should not churn between writes.
-            preferences.pairedSensors += BLECSCClient.SensorRole.allCases
+            preferences.pairedSensors += SensorRole.allCases
                 .filter(roles.contains)
                 .map { PairedSensor(peripheralID: id, role: $0, displayName: name) }
         }
-        let assignments = state.preferences.sensorAssignments
+        let assignments = state.preferences.cscAssignments
         return .run { [bleCSCClient] _ in
             // Assignments first, for the same reason as unpair: `setRoles` can strip
             // an incumbent's last role and disconnect it, and until the new map lands
@@ -217,10 +231,15 @@ struct DeviceManagementFeature {
     private func reconcileCapabilities(
         _ devices: [BLECSCClient.DiscoveredSensor], in state: inout State
     ) -> Effect<Action> {
-        let corrections = devices.compactMap { device -> (id: UUID, surviving: Set<BLECSCClient.SensorRole>)? in
+        let corrections = devices.compactMap { device -> (id: UUID, surviving: Set<SensorRole>)? in
             guard let supported = device.capabilities?.supportedRoles else { return nil }
+            // CSC roles only. 0x2A5C says nothing about whether the same peripheral is
+            // also a radar or an HR strap, so a record for one of those must survive a
+            // correction made on this evidence (#93).
             let held = Set(
-                state.preferences.pairedSensors.filter { $0.peripheralID == device.id }.map(\.role)
+                state.preferences.pairedSensors
+                    .filter { $0.peripheralID == device.id && $0.isCSC }
+                    .map(\.role)
             )
             guard !held.subtracting(supported).isEmpty else { return nil }
             return (device.id, held.intersection(supported))
@@ -230,11 +249,13 @@ struct DeviceManagementFeature {
         state.$preferences.withLock { preferences in
             for correction in corrections {
                 preferences.pairedSensors.removeAll {
-                    $0.peripheralID == correction.id && !correction.surviving.contains($0.role)
+                    $0.peripheralID == correction.id
+                        && $0.isCSC
+                        && !correction.surviving.contains($0.role)
                 }
             }
         }
-        let assignments = state.preferences.sensorAssignments
+        let assignments = state.preferences.cscAssignments
         // Nothing left to hold means the pairing is over: `setRoles` rejects an empty
         // set, so releasing it has to go through `unpair`.
         let orphaned = corrections.filter(\.surviving.isEmpty).map(\.id)

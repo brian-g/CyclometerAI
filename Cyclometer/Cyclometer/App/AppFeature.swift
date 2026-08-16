@@ -89,7 +89,7 @@ struct AppFeature {
                 // handed to it before any scan can act on them. Here rather than in
                 // DeviceManagementFeature: sensors must reconnect on launch, not only
                 // while the Sensors screen happens to be open.
-                return .run { [bleCSCClient, assignments = state.preferences.sensorAssignments] _ in
+                return .run { [bleCSCClient, assignments = state.preferences.cscAssignments] _ in
                     await bleCSCClient.setPairedSensors(assignments)
                 }
 
