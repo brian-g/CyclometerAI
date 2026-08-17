@@ -385,11 +385,15 @@ func resolvedRestingBPM(healthResting: Int? = nil) -> Int   // default 60
 func resolvedMaxBPM(healthMax: Int? = nil) -> Int           // default 190
 ```
 
-`heartRateSourceIsAppleHealth` is **derived, not stored** (`isSourcedFromAppleHealth(...)`): the source
-is Health exactly when no override is set and Health supplied a value, so there is no flag to drift
-out of step with the values it describes. It is false throughout M10, since nothing supplies the
-Health terms yet. `dateOfBirth` is not stored either — it is a HealthKit characteristic type, read
-via `dateOfBirthComponents()` when M5 needs the 220 − age estimate.
+`heartRateSourceIsAppleHealth` is **not stored, and not a single flag.** It was one Bool over a pair
+of values that can have different provenance, which under this model is ill-defined — max HR can
+never come from HealthKit at all, so a `true` would routinely mean "resting is from Health, max is a
+220 − age estimate". Provenance is a per-field question and reads directly off the profile where a
+caller needs it (`restingOverrideBPM == nil && healthResting != nil`). It is false either way
+throughout M10, since nothing supplies the Health terms yet.
+
+`dateOfBirth` is not stored either — it is a HealthKit characteristic type, read via
+`dateOfBirthComponents()` when M5 needs the 220 − age estimate.
 
 **Validation** (manual entry, in the spirit of `WheelPreset.validRange`):
 
@@ -399,9 +403,16 @@ via `dateOfBirthComponents()` when M5 needs the 220 − age estimate.
 | `maxValidRange` | `100...230` | Junior riders record maxima above 200; 220 − age tops out near 220 |
 | `minimumHRReserve` | `8` | **Derived, not chosen.** Karvonen bands are 10% of reserve wide, so below a reserve of 8 the rounding collapses two zone boundaries onto the same bpm and a band exists with no bpm of its own. Subsumes "resting < max" |
 
-Rejection is non-destructive: `settingRestingOverride(_:)` / `settingMaxOverride(_:)` return a new
-profile or throw `ValidationError`, so a caller that gets nothing back still holds what it started
-with. Passing `nil` clears an override and is always allowed — deferring to Health cannot be invalid.
+Rejection is non-destructive: `settingRestingOverride(_:healthMax:)` /
+`settingMaxOverride(_:healthResting:)` return a new profile or throw `ValidationError`, so a caller
+that gets nothing back still holds what it started with. They copy the profile rather than rebuilding
+it field by field, so a field added later survives an HR edit. Passing `nil` clears an override and is
+always allowed — deferring to Health cannot be invalid.
+
+**The `health*` terms must be the ones the caller reads with.** The reserve floor is otherwise checked
+against a value the app will not use: with a Health resting of 100 and no override, validating a max
+of 105 against the *default* resting of 60 sees a reserve of 45 and accepts, while the live reserve is
+5 — below the floor, and back in the range where the zone table degenerates.
 
 ---
 
@@ -955,7 +966,11 @@ static func bounds(for zone: HeartRateZone, maxHR: Int, restingHR: Int) -> Close
 ```
 
 `bounds` uses integer arithmetic — `restingHR + ⌈percent × HRR / 100⌉` — rather than rounding a
-`Double` product back to a bpm, so it is the *exact* inverse of the forward formula. Ceiling, not
+`Double` product back to a bpm, so **within the reserve** it is the exact inverse of the forward
+formula. Both ends are closed at the profile (zone 1 opens at `restingHR`, zone 5 closes at `maxHR`)
+because that is what a table should show; a reading outside the reserve is still classified — below
+`restingHR` is zone 1, above `maxHR` is zone 5 — but falls outside the range returned. Display uses
+the closed form; membership tests use the forward formula. Ceiling, not
 rounding: a threshold is inclusive at the bottom, so a boundary bpm belongs to the zone it opens.
 Ranges are contiguous by construction (each zone ends one bpm below the next one's start), which is
 what makes "no gaps or overlaps are representable" true for the S12 steppers rather than merely

@@ -51,14 +51,19 @@ struct RiderProfile: Codable, Equatable, Sendable {
     ///
     /// The double-optional flattening is deliberate: a key that is absent and a key
     /// explicitly written as `null` both mean "no override".
+    ///
+    /// `try?` per field, not `try`: `decodeIfPresent` is lenient about a *missing*
+    /// key but still throws on a type mismatch, which would fail the whole decode
+    /// and lose the other field — the exact outcome this initialiser exists to
+    /// prevent. A field the app cannot read falls back to "no override" on its own.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        restingOverrideBPM = try container.decodeIfPresent(
+        restingOverrideBPM = (try? container.decodeIfPresent(
             Int?.self, forKey: .restingOverrideBPM
-        ) ?? nil
-        maxOverrideBPM = try container.decodeIfPresent(
+        )) ?? nil
+        maxOverrideBPM = (try? container.decodeIfPresent(
             Int?.self, forKey: .maxOverrideBPM
-        ) ?? nil
+        )) ?? nil
     }
 }
 
@@ -86,16 +91,6 @@ extension RiderProfile {
     /// `healthMax`; there is no HealthKit max-HR type to read directly.
     func resolvedMaxBPM(healthMax: Int? = nil) -> Int {
         maxOverrideBPM ?? healthMax ?? Self.defaultMaxBPM
-    }
-
-    /// Whether the resolved pair came from Apple Health rather than manual entry —
-    /// DataModel.md §3.5's `heartRateSourceIsAppleHealth`, derived rather than
-    /// stored so it cannot drift out of step with the values it describes.
-    ///
-    /// False throughout M10, since nothing supplies the Health terms yet.
-    func isSourcedFromAppleHealth(healthResting: Int? = nil, healthMax: Int? = nil) -> Bool {
-        (restingOverrideBPM == nil && healthResting != nil)
-            || (maxOverrideBPM == nil && healthMax != nil)
     }
 
     /// The rider's heart-rate reserve — the denominator of the Karvonen formula
@@ -153,26 +148,53 @@ extension RiderProfile {
     ///
     /// Returning a new value rather than mutating in place is what makes rejection
     /// non-destructive: a caller that does not get a value back still holds the
-    /// profile it started with.
+    /// profile it started with. It copies `self` rather than rebuilding from the
+    /// memberwise initialiser so a field added later survives an HR edit — the same
+    /// "adding a field is free" property `init(from:)` gives decoding.
     ///
     /// Passing `nil` clears the override and is always allowed — deferring to Health
     /// cannot be invalid.
-    func settingRestingOverride(_ bpm: Int?) throws(ValidationError) -> RiderProfile {
-        guard let bpm else { return RiderProfile(restingOverrideBPM: nil, maxOverrideBPM: maxOverrideBPM) }
+    ///
+    /// The `health*` terms must be the same ones the caller reads with, or the
+    /// reserve floor is checked against a value the app will not use: with a Health
+    /// resting of 100 and no override, validating a max of 105 against the *default*
+    /// resting of 60 sees a reserve of 45 and accepts, while the live reserve is 5.
+    func settingRestingOverride(
+        _ bpm: Int?,
+        healthMax: Int? = nil
+    ) throws(ValidationError) -> RiderProfile {
+        var copy = self
+        guard let bpm else {
+            copy.restingOverrideBPM = nil
+            return copy
+        }
         guard Self.restingValidRange.contains(bpm) else { throw .restingOutOfRange }
         // Checked against the *resolved* max so the pair is coherent whether or not
         // the rider has overridden the other field.
-        guard resolvedMaxBPM() - bpm >= Self.minimumHRReserve else { throw .reserveTooSmall }
-        return RiderProfile(restingOverrideBPM: bpm, maxOverrideBPM: maxOverrideBPM)
+        guard resolvedMaxBPM(healthMax: healthMax) - bpm >= Self.minimumHRReserve else {
+            throw .reserveTooSmall
+        }
+        copy.restingOverrideBPM = bpm
+        return copy
     }
 
     /// A copy with the max override applied, or a thrown reason and no change.
-    /// `nil` clears the override.
-    func settingMaxOverride(_ bpm: Int?) throws(ValidationError) -> RiderProfile {
-        guard let bpm else { return RiderProfile(restingOverrideBPM: restingOverrideBPM, maxOverrideBPM: nil) }
+    /// `nil` clears the override. See `settingRestingOverride` on `health*`.
+    func settingMaxOverride(
+        _ bpm: Int?,
+        healthResting: Int? = nil
+    ) throws(ValidationError) -> RiderProfile {
+        var copy = self
+        guard let bpm else {
+            copy.maxOverrideBPM = nil
+            return copy
+        }
         guard Self.maxValidRange.contains(bpm) else { throw .maxOutOfRange }
-        guard bpm - resolvedRestingBPM() >= Self.minimumHRReserve else { throw .reserveTooSmall }
-        return RiderProfile(restingOverrideBPM: restingOverrideBPM, maxOverrideBPM: bpm)
+        guard bpm - resolvedRestingBPM(healthResting: healthResting) >= Self.minimumHRReserve else {
+            throw .reserveTooSmall
+        }
+        copy.maxOverrideBPM = bpm
+        return copy
     }
 }
 

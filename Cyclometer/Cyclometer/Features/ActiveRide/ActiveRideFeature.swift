@@ -32,14 +32,12 @@ struct ActiveRideFeature {
         var distanceKM: Double { distanceMeters / 1000.0 }
         /// The rider's HR overrides (#96). Read-only here — the dashboard derives
         /// zones from the profile but never edits it; that is Settings' job.
+        ///
+        /// Zones resolve from this on each reading rather than from a seeded copy, so
+        /// a profile edit needs no lifecycle action. Max and resting were hardcoded
+        /// to 190/55 before #96, which disagreed with the 60 that DataModel.md §3.5
+        /// has always specified as the resting default.
         @SharedReader(.riderProfile) var riderProfile
-
-        /// Resolved rather than stored, so a profile edit mid-ride is reflected on
-        /// the next reading without a lifecycle action to re-seed state. Both were
-        /// hardcoded to 190/55 before #96, which disagreed with the 60 that
-        /// DataModel.md §3.5 has always specified as the resting default.
-        var maxHeartRate: Int { riderProfile.resolvedMaxBPM() }
-        var restingHeartRate: Int { riderProfile.resolvedRestingBPM() }
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
         var maxSpeedKPH: Double = 0
@@ -210,9 +208,10 @@ struct ActiveRideFeature {
                 return .send(.finishTapped)
             case .heartRateUpdated(let bpm):
                 state.heartRateBPM = bpm
-                state.hrZone = HeartRateZone.zone(
-                    bpm: bpm, maxHR: state.maxHeartRate, restingHR: state.restingHeartRate
-                ).rawValue
+                // Through the profile's own facade rather than unpacking it into
+                // maxHR/restingHR here — M5's HealthKit terms then thread through one
+                // place instead of every call site that re-assembles the pair.
+                state.hrZone = state.riderProfile.zone(forBPM: bpm).rawValue
                 return .none
             case .hrPairingChanged(let paired):
                 state.isHRPaired = paired

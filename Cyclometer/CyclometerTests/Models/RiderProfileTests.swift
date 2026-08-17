@@ -53,19 +53,6 @@ struct RiderProfileTests {
         #expect(RiderProfile(restingOverrideBPM: 50, maxOverrideBPM: 200).hrReserve() == 150)
     }
 
-    /// §3.5's `heartRateSourceIsAppleHealth`, derived rather than stored. False
-    /// throughout M10 because nothing supplies the Health terms yet.
-    @Test("The Apple Health source flag is derived, and false without Health values")
-    func healthSourceFlagIsDerived() {
-        #expect(RiderProfile().isSourcedFromAppleHealth() == false)
-        #expect(RiderProfile().isSourcedFromAppleHealth(healthResting: 48) == true)
-        // Both fields overridden — Health contributed nothing even though it answered.
-        #expect(
-            RiderProfile(restingOverrideBPM: 52, maxOverrideBPM: 185)
-                .isSourcedFromAppleHealth(healthResting: 48, healthMax: 178) == false
-        )
-    }
-
     // MARK: - Validation
 
     @Test("A resting override inside the bounds is applied")
@@ -86,7 +73,8 @@ struct RiderProfileTests {
 
     @Test("The resting bounds are inclusive at both edges", arguments: [30, 100])
     func restingBoundsAreInclusive(_ bpm: Int) throws {
-        // 100 resting only clears restingNotBelowMax because the default max is 190.
+        // A resting of 100 clears the reserve floor only because the default max is
+        // 190, leaving 90 — well above minimumHRReserve.
         let updated = try RiderProfile().settingRestingOverride(bpm)
         #expect(updated.restingOverrideBPM == bpm)
     }
@@ -131,6 +119,41 @@ struct RiderProfileTests {
         #expect(throws: RiderProfile.ValidationError.reserveTooSmall) {
             try profile.settingMaxOverride(107)
         }
+    }
+
+    /// Validation must resolve the *other* field the same way a read will, or the
+    /// reserve floor is checked against a value the app never uses — accepting a
+    /// profile whose live reserve is below the floor the moment M5 supplies a Health
+    /// resting rate.
+    @Test("The reserve check honours the HealthKit term the caller reads with")
+    func reserveChecksAgainstTheHealthSourcedValue() {
+        let profile = RiderProfile()
+
+        // Health says the rider's resting is 100. A max of 105 leaves a live reserve
+        // of 5 — rejected. Without the term it would be checked against the default
+        // resting of 60, see a reserve of 45, and accept.
+        #expect(throws: RiderProfile.ValidationError.reserveTooSmall) {
+            try profile.settingMaxOverride(105, healthResting: 100)
+        }
+        #expect(throws: Never.self) {
+            try profile.settingMaxOverride(105)
+        }
+
+        // Symmetrically for the resting field against a Health-sourced max.
+        #expect(throws: RiderProfile.ValidationError.reserveTooSmall) {
+            try profile.settingRestingOverride(100, healthMax: 105)
+        }
+    }
+
+    /// Rejection is non-destructive; acceptance must be non-destructive about
+    /// *everything else*. Copying `self` rather than rebuilding from the memberwise
+    /// initialiser is what keeps that true when a field is added later.
+    @Test("Setting one override preserves the other")
+    func settingOnePreservesTheOther() throws {
+        let profile = RiderProfile(restingOverrideBPM: 52, maxOverrideBPM: 185)
+
+        #expect(try profile.settingRestingOverride(48).maxOverrideBPM == 185)
+        #expect(try profile.settingMaxOverride(200).restingOverrideBPM == 52)
     }
 
     /// The reserve floor is exactly the point below which `HeartRateZone.bounds`
@@ -280,6 +303,18 @@ struct RiderProfileTests {
     func emptyDocumentDecodes() throws {
         let decoded = try JSONDecoder().decode(RiderProfile.self, from: Data("{}".utf8))
         #expect(decoded == RiderProfile())
+    }
+
+    /// The same rule, for a key the app can see but not read. `decodeIfPresent` is
+    /// lenient about a missing key but throws on a type mismatch, which would fail
+    /// the whole decode and lose the sibling field — so leniency is applied per field.
+    @Test("A field of the wrong type falls back without taking the document with it")
+    func typeMismatchIsPerField() throws {
+        let wrongType = Data(#"{"restingOverrideBPM": "forty-eight", "maxOverrideBPM": 200}"#.utf8)
+        let decoded = try JSONDecoder().decode(RiderProfile.self, from: wrongType)
+
+        #expect(decoded.restingOverrideBPM == nil)
+        #expect(decoded.maxOverrideBPM == 200)
     }
 
     /// Leniency, not strictness — §9's rule for a key the app no longer knows.

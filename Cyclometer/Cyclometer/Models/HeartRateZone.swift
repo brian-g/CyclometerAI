@@ -47,12 +47,18 @@ enum HeartRateZone: Int, CaseIterable, Equatable {
         return restingHR + (zone.lowerThresholdPercent * hrr + 99) / 100
     }
 
-    /// The bpm range this zone covers — the inverse of `zone(bpm:maxHR:restingHR:)`,
-    /// and what a zone table displays (UX.md §S12).
+    /// The bpm range this zone covers — what a zone table displays (UX.md §S12).
     ///
     /// Ranges are contiguous by construction: each zone ends one bpm below the next
-    /// one's start, so no gap or overlap is representable. Zone 5 is closed at
-    /// `maxHR`, though a rider can of course exceed it.
+    /// one's start, so no gap or overlap is representable.
+    ///
+    /// **Inverts `zone(bpm:maxHR:restingHR:)` within the reserve only.** The two ends
+    /// are closed at the profile — zone 1 opens at `restingHR`, zone 5 closes at
+    /// `maxHR` — because that is what a table should show. Readings outside the
+    /// reserve are still classified: the forward formula puts a bpm below `restingHR`
+    /// in zone 1 and one above `maxHR` in zone 5, and neither falls inside the range
+    /// this returns. A caller displaying the table wants the closed form; one testing
+    /// membership must use the forward formula.
     static func bounds(for zone: HeartRateZone, maxHR: Int, restingHR: Int) -> ClosedRange<Int> {
         let lower = lowerBoundBPM(for: zone, maxHR: maxHR, restingHR: restingHR)
         guard let next = HeartRateZone(rawValue: zone.rawValue + 1) else {

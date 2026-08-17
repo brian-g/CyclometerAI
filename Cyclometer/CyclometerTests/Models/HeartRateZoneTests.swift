@@ -6,8 +6,10 @@ import Foundation
 struct HeartRateZoneTests {
 
     /// The §8 worked example: resting 60, max 190, HRR 130.
+    /// Named `maxHR`, not `max` — the latter would shadow `Swift.max` for every test
+    /// in this type.
     private static let resting = 60
-    private static let max = 190
+    private static let maxHR = 190
 
     @Test(
         "Zone ranges match the §8 worked example",
@@ -20,16 +22,16 @@ struct HeartRateZoneTests {
         ]
     )
     func workedExampleRanges(_ zone: HeartRateZone, _ expected: ClosedRange<Int>) {
-        #expect(HeartRateZone.bounds(for: zone, maxHR: Self.max, restingHR: Self.resting) == expected)
+        #expect(HeartRateZone.bounds(for: zone, maxHR: Self.maxHR, restingHR: Self.resting) == expected)
     }
 
     @Test("Zone 1 opens at the resting rate and zone 5 closes at the max")
     func endZonesAnchorToTheProfile() {
-        let z1 = HeartRateZone.bounds(for: .zone1, maxHR: Self.max, restingHR: Self.resting)
-        let z5 = HeartRateZone.bounds(for: .zone5, maxHR: Self.max, restingHR: Self.resting)
+        let z1 = HeartRateZone.bounds(for: .zone1, maxHR: Self.maxHR, restingHR: Self.resting)
+        let z5 = HeartRateZone.bounds(for: .zone5, maxHR: Self.maxHR, restingHR: Self.resting)
 
         #expect(z1.lowerBound == Self.resting)
-        #expect(z5.upperBound == Self.max)
+        #expect(z5.upperBound == Self.maxHR)
     }
 
     /// A threshold landing between two bpm must round *up*, or the boundary bpm
@@ -52,46 +54,57 @@ struct HeartRateZoneTests {
     /// `minimumHRReserve` floor, which exists precisely because the two directions
     /// stop agreeing below it (a reserve of 7 or less collapses two zone boundaries
     /// onto one bpm). Widening this sweep past validation will fail, and correctly so.
-    @Test("Every range endpoint maps back to its own zone across the valid profiles")
-    func rangesRoundTripAgainstTheForwardFormula() {
-        for resting in RiderProfile.restingValidRange {
-            for maxHR in RiderProfile.maxValidRange
-            where maxHR - resting >= RiderProfile.minimumHRReserve {
-                for zone in HeartRateZone.allCases {
-                    let bounds = HeartRateZone.bounds(for: zone, maxHR: maxHR, restingHR: resting)
-
-                    #expect(
-                        HeartRateZone.zone(bpm: bounds.lowerBound, maxHR: maxHR, restingHR: resting) == zone,
-                        "lower edge \(bounds.lowerBound) of \(zone) at resting \(resting) / max \(maxHR)"
-                    )
-                    // Zone 5's upper edge is maxHR, which is still zone 5.
-                    #expect(
-                        HeartRateZone.zone(bpm: bounds.upperBound, maxHR: maxHR, restingHR: resting) == zone,
-                        "upper edge \(bounds.upperBound) of \(zone) at resting \(resting) / max \(maxHR)"
-                    )
-                }
-            }
-        }
-    }
-
-    /// No gap and no overlap is representable — the invariant #103's steppers rely
-    /// on when they adjust a boundary.
-    @Test("Ranges are contiguous across zones 1–5")
-    func rangesAreContiguous() {
+    /// Both invariants share one pass over the profile space — the sweep is the
+    /// expensive part, and splitting it would mean keeping the same nested loop and
+    /// `minimumHRReserve` filter in step in two places.
+    ///
+    /// Contiguity (no gap, no overlap) is the invariant #103's steppers rely on when
+    /// they adjust a boundary.
+    @Test("Ranges round-trip and stay contiguous across every valid profile")
+    func rangesRoundTripAndAreContiguous() {
         for resting in RiderProfile.restingValidRange {
             for maxHR in RiderProfile.maxValidRange
             where maxHR - resting >= RiderProfile.minimumHRReserve {
                 let ranges = HeartRateZone.allCases.map {
                     HeartRateZone.bounds(for: $0, maxHR: maxHR, restingHR: resting)
                 }
+                let profile = "at resting \(resting) / max \(maxHR)"
+
+                for (zone, bounds) in zip(HeartRateZone.allCases, ranges) {
+                    #expect(
+                        HeartRateZone.zone(bpm: bounds.lowerBound, maxHR: maxHR, restingHR: resting) == zone,
+                        "lower edge \(bounds.lowerBound) of \(zone) \(profile)"
+                    )
+                    // Zone 5's upper edge is maxHR, which is still zone 5.
+                    #expect(
+                        HeartRateZone.zone(bpm: bounds.upperBound, maxHR: maxHR, restingHR: resting) == zone,
+                        "upper edge \(bounds.upperBound) of \(zone) \(profile)"
+                    )
+                }
+
                 for (lower, upper) in zip(ranges, ranges.dropFirst()) {
                     #expect(
                         upper.lowerBound == lower.upperBound + 1,
-                        "gap between \(lower) and \(upper) at resting \(resting) / max \(maxHR)"
+                        "gap between \(lower) and \(upper) \(profile)"
                     )
                 }
             }
         }
+    }
+
+    /// `bounds` closes at the profile's ends, so it does *not* invert the forward
+    /// formula outside the reserve — the doc comment says so, and this pins it rather
+    /// than leaving a reader to assume the round-trip above covers the open ends.
+    @Test("Readings outside the reserve are classified but fall outside the ranges")
+    func boundsAreClosedAtBothEnds() {
+        let belowResting = 45
+        let aboveMax = 210
+
+        #expect(HeartRateZone.zone(bpm: belowResting, maxHR: Self.maxHR, restingHR: Self.resting) == .zone1)
+        #expect(!HeartRateZone.bounds(for: .zone1, maxHR: Self.maxHR, restingHR: Self.resting).contains(belowResting))
+
+        #expect(HeartRateZone.zone(bpm: aboveMax, maxHR: Self.maxHR, restingHR: Self.resting) == .zone5)
+        #expect(!HeartRateZone.bounds(for: .zone5, maxHR: Self.maxHR, restingHR: Self.resting).contains(aboveMax))
     }
 
     @Test("The forward formula places the §8 boundaries in the upper zone")

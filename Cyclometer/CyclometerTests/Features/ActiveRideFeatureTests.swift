@@ -856,8 +856,8 @@ struct ActiveRideFeatureHeartRateTests {
             $0.heartRateBPM = 165
             $0.hrZone = 3
         }
-        #expect(store.state.maxHeartRate == 200)
-        #expect(store.state.restingHeartRate == 45)
+        #expect(store.state.riderProfile.resolvedMaxBPM() == 200)
+        #expect(store.state.riderProfile.resolvedRestingBPM() == 45)
     }
 
     @Test("Unpairing clears both bpm and zone")
