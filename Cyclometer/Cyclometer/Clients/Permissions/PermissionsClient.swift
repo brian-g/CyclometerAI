@@ -3,7 +3,6 @@ import ComposableArchitecture
 import CoreLocation
 import CoreMotion
 import HealthKit
-import UIKit
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
@@ -132,8 +131,16 @@ extension PermissionsClient: DependencyKey {
     /// Bluetooth authorization is delegated rather than reimplemented because
     /// `BLEClient` owns the app's only `CBCentralManager`, and it is that manager's
     /// existence which raises the prompt.
-    static func live(bleClient: BLEClient) -> PermissionsClient {
-        let state = PermissionsLiveState(bleClient: bleClient)
+    ///
+    /// `probes` carries the other three domains' framework reads (#117). It defaults to
+    /// the real ones, so this stays a one-argument factory everywhere in the app; tests
+    /// of the subscriber table and the transition filter pass `.fixed(...)` instead and
+    /// touch no framework at all.
+    static func live(
+        bleClient: BLEClient,
+        probes: PermissionProbes = .live
+    ) -> PermissionsClient {
+        let state = PermissionsLiveState(bleClient: bleClient, probes: probes)
         return PermissionsClient(
             status:   { await state.status(for: $0) },
             request:  { await state.request($0) },
@@ -159,16 +166,16 @@ extension DependencyValues {
 
 // MARK: - Live implementation
 
+/// The subscriber table, the transition filter and the observation lifecycle. Framework
+/// contact lives in `PermissionProbes` (#117) — apart from Bluetooth, which is delegated
+/// to `BLEClient` because that type owns the app's only `CBCentralManager`.
+///
 /// `@unchecked Sendable`: thread safety is enforced manually — `lock` guards the
-/// subscriber table and the motion query's one-shot flag; CoreLocation work is confined
-/// to the main queue inside `LocationManagerState`.
+/// subscriber table, and every framework call is confined to a probe.
 private final class PermissionsLiveState: NSObject, @unchecked Sendable {
 
     private let bleClient: BLEClient
-    private let healthStore = HKHealthStore()
-    /// Retained for the lifetime of the object: `queryActivityStarting` calls its
-    /// handler asynchronously, and a manager released in the meantime never delivers.
-    private let motionManager = CMMotionActivityManager()
+    private let probes: PermissionProbes
 
     private var subscribers: [Int: AsyncStream<PermissionChange>.Continuation] = [:]
     private var nextSubscriberID = 0
@@ -179,8 +186,9 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
     private var observationTask: Task<Void, Never>?
     private let lock = NSLock()
 
-    init(bleClient: BLEClient) {
+    init(bleClient: BLEClient, probes: PermissionProbes) {
         self.bleClient = bleClient
+        self.probes = probes
         super.init()
     }
 
@@ -188,36 +196,10 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
 
     func status(for domain: PermissionDomain) async -> PermissionState {
         switch domain {
-        case .bluetooth:
-            return PermissionsClient.state(cb: bleClient.authorization())
-
-        case .locationWhenInUse:
-            return PermissionsClient.state(cl: await LocationManagerState.shared.authorizationStatus())
-
-        case .motion:
-            return PermissionsClient.state(
-                cm: CMMotionActivityManager.authorizationStatus(),
-                isAvailable: CMMotionActivityManager.isActivityAvailable()
-            )
-
-        case .health:
-            return await healthStatus()
-        }
-    }
-
-    private func healthStatus() async -> PermissionState {
-        guard HKHealthStore.isHealthDataAvailable() else { return .unavailable }
-        do {
-            let requestStatus = try await healthStore.statusForAuthorizationRequest(
-                toShare: PermissionsClient.healthShareTypes,
-                read: PermissionsClient.healthReadTypes
-            )
-            return PermissionsClient.state(health: requestStatus, isAvailable: true)
-        } catch {
-            // A failure here says nothing about the rider's answer, so it must not be
-            // reported as one. notDetermined keeps the row tappable.
-            logger.error("health request status failed: \(error.localizedDescription)")
-            return .notDetermined
+        case .bluetooth:        return PermissionsClient.state(cb: bleClient.authorization())
+        case .locationWhenInUse: return await probes.locationStatus()
+        case .motion:           return await probes.motionStatus()
+        case .health:           return await probes.healthStatus()
         }
     }
 
@@ -238,75 +220,14 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
         let resolved: PermissionState
 
         switch domain {
-        case .bluetooth:
-            resolved = PermissionsClient.state(cb: await bleClient.requestAuthorization())
-
-        case .locationWhenInUse:
-            resolved = PermissionsClient.state(cl: await LocationManagerState.shared.requestAuthorization())
-
-        case .motion:
-            resolved = await requestMotion()
-
-        case .health:
-            resolved = await requestHealth()
+        case .bluetooth:        resolved = PermissionsClient.state(cb: await bleClient.requestAuthorization())
+        case .locationWhenInUse: resolved = await probes.requestLocation()
+        case .motion:           resolved = await probes.requestMotion()
+        case .health:           resolved = await probes.requestHealth()
         }
 
         broadcastIfChanged(domain, resolved)
         return resolved
-    }
-
-    /// CoreMotion has no request API. The prompt is raised by the first query against
-    /// activity data, so a throwaway one-second query over the past is the documented
-    /// way to ask; the handler fires once the rider has answered, and the real answer is
-    /// then read back from `authorizationStatus()`.
-    ///
-    /// Requires `NSMotionUsageDescription` in Info.plist — without it this call traps.
-    private func requestMotion() async -> PermissionState {
-        guard CMMotionActivityManager.isActivityAvailable() else { return .unavailable }
-
-        let end = Date()
-        let start = end.addingTimeInterval(-1)
-        let queue = OperationQueue()
-
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let hasResumed = LockIsolated(false)
-            motionManager.queryActivityStarting(from: start, to: end, to: queue) { _, error in
-                // The handler is documented as one-shot, but a double resume is a crash
-                // rather than a bug report — guard it rather than trust it.
-                let shouldResume = hasResumed.withValue { resumed -> Bool in
-                    guard !resumed else { return false }
-                    resumed = true
-                    return true
-                }
-                guard shouldResume else { return }
-                if let error {
-                    // A refusal surfaces here as CMErrorMotionActivityNotAuthorized.
-                    // Not an error condition — authorizationStatus() has the answer.
-                    logger.notice("motion query returned \(error.localizedDescription, privacy: .public)")
-                }
-                continuation.resume()
-            }
-        }
-
-        return PermissionsClient.state(
-            cm: CMMotionActivityManager.authorizationStatus(),
-            isAvailable: CMMotionActivityManager.isActivityAvailable()
-        )
-    }
-
-    private func requestHealth() async -> PermissionState {
-        guard HKHealthStore.isHealthDataAvailable() else { return .unavailable }
-        do {
-            try await healthStore.requestAuthorization(
-                toShare: PermissionsClient.healthShareTypes,
-                read: PermissionsClient.healthReadTypes
-            )
-        } catch {
-            logger.error("health authorization failed: \(error.localizedDescription)")
-        }
-        // Re-read rather than assume: the sheet having been dismissed says nothing
-        // about which switches the rider left on, and HealthKit will not say either.
-        return await healthStatus()
     }
 
     // MARK: Change stream
@@ -388,9 +309,10 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
             guard let self else { return }
             await withTaskGroup(of: Void.self) { group in
                 group.addTask { [weak self] in
-                    for await status in LocationManagerState.shared.makeAuthorizationStream() {
+                    guard let probes = self?.probes else { return }
+                    for await state in probes.locationChanges() {
                         guard let self else { return }
-                        self.broadcastIfChanged(.locationWhenInUse, PermissionsClient.state(cl: status))
+                        self.broadcastIfChanged(.locationWhenInUse, state)
                     }
                 }
                 group.addTask { [weak self] in
@@ -404,10 +326,8 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
                     }
                 }
                 group.addTask { [weak self] in
-                    let foregrounded = NotificationCenter.default.notifications(
-                        named: UIApplication.didBecomeActiveNotification
-                    )
-                    for await _ in foregrounded {
+                    guard let probes = self?.probes else { return }
+                    for await _ in probes.foregrounded() {
                         guard let self else { return }
                         for domain in PermissionDomain.allCases {
                             self.broadcastIfChanged(domain, await self.status(for: domain))
