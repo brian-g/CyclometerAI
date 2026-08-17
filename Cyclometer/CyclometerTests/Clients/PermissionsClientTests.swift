@@ -305,20 +305,21 @@ struct PermissionsClientTests {
 
     /// Awaits the next change for one domain, skipping the other three.
     ///
-    /// The four replayed values and the location observer's opening yield interleave
-    /// freely, so position-based assertions on this stream are racy. Filtering by domain
-    /// is order-independent *and* carries no wall-clock budget: on a loaded CI runner a
-    /// polling deadline measures scheduler contention rather than the behaviour under
-    /// test. The `.timeLimit` trait on each test bounds a genuine hang.
+    /// The four replayed values interleave freely with observer yields, so
+    /// position-based assertions on this stream are racy. Filtering by domain is
+    /// order-independent and carries no wall-clock budget.
     ///
-    /// **That trait is subject to the same contention it guards against**, which is why
-    /// it is three minutes and not one. CI run 32037935488 stalled a whole simulator
-    /// clone: `isGranted()` and `bluetoothMapping()` — pure enum switches with no I/O —
-    /// took 90.3 seconds each, and the job logged `Failed to launch app with identifier:
-    /// com.xavier.cyclometer`. Every test on that clone blocked and then completed at
-    /// once; the only casualty was the one test with a 60-second deadline, which was
-    /// killed rather than merely delayed. A hang guard has to sit above the
-    /// environment's noise floor, and 90 seconds is the measured floor.
+    /// **The tests below carried `.timeLimit` traits until #117; they are gone because
+    /// there is nothing left for them to bound.** The traits guarded against a hang that
+    /// could only come from the frameworks in the path, and `.fixed` probes take those
+    /// out. They also had to go: a deadline is subject to the same contention it guards
+    /// against. CI run 32037935488 stalled an entire simulator clone — `isGranted()` and
+    /// `bluetoothMapping()`, pure enum switches with no I/O, took 90.3 seconds each, and
+    /// the job logged `Failed to launch app with identifier: com.xavier.cyclometer`.
+    /// Every test on that clone blocked and then completed at once; the only casualty
+    /// was the one carrying a 60-second deadline, killed rather than merely delayed. A
+    /// later passing run showed `isGranted()` at 544 seconds, so no threshold was ever
+    /// going to be safe.
     private static func nextChange(
         for domain: PermissionDomain,
         from iterator: inout AsyncStream<PermissionChange>.Iterator
@@ -329,7 +330,7 @@ struct PermissionsClientTests {
         return nil
     }
 
-    @Test("An authorization change made outside the app reaches subscribers", .timeLimit(.minutes(3)))
+    @Test("An authorization change made outside the app reaches subscribers")
     func externalChangeIsBroadcast() async {
         // The Settings-recovery path: the rider denies, leaves for iOS Settings, grants,
         // and comes back. Nothing in the app called request(), so the only way the row
@@ -337,7 +338,8 @@ struct PermissionsClientTests {
         let authorization = LockIsolated<CBManagerAuthorization>(.denied)
         let (events, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
         let client = PermissionsClient.live(
-            bleClient: Self.scriptableBLE(authorization: authorization, events: events)
+            bleClient: Self.scriptableBLE(authorization: authorization, events: events),
+            probes: .fixed()
         )
 
         var iterator = client.statuses().makeAsyncIterator()
@@ -352,7 +354,7 @@ struct PermissionsClientTests {
         #expect(await Self.nextChange(for: .bluetooth, from: &iterator) == .granted)
     }
 
-    @Test("A framework callback carrying no change is not rebroadcast", .timeLimit(.minutes(3)))
+    @Test("A framework callback carrying no change is not rebroadcast")
     func unchangedCallbackIsNotRebroadcast() async {
         // centralManagerDidUpdateState fires for radio power too, which is not a
         // permission change. Without the transition filter, S01 would rebuild its rows
@@ -360,7 +362,8 @@ struct PermissionsClientTests {
         let authorization = LockIsolated<CBManagerAuthorization>(.allowedAlways)
         let (events, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
         let client = PermissionsClient.live(
-            bleClient: Self.scriptableBLE(authorization: authorization, events: events)
+            bleClient: Self.scriptableBLE(authorization: authorization, events: events),
+            probes: .fixed()
         )
 
         var iterator = client.statuses().makeAsyncIterator()
@@ -378,15 +381,32 @@ struct PermissionsClientTests {
         #expect(await Self.nextChange(for: .bluetooth, from: &iterator) == .denied)
     }
 
-    @Test("Live stream replays all four domains")
+    /// The replay contract through the *live* state machine rather than the mock — the
+    /// mock has its own replay implementation, so `streamReplaysOnSubscribe` above does
+    /// not cover this code path.
+    ///
+    /// Probed rather than live (#117): a subscriber must see all four domains, and each
+    /// one's value must be what its source reported. Distinct seeded states prove the
+    /// second half, which the old version could not — against the real frameworks every
+    /// domain tended to report the same thing, so a replay that mixed up domains would
+    /// have passed.
+    @Test("The live stream replays every domain with the value its source reported")
     func liveStreamReplays() async {
-        let client = PermissionsClient.live(bleClient: .testValue)
-        var seen: Set<PermissionDomain> = []
+        let client = PermissionsClient.live(
+            bleClient: .testValue,
+            probes: .fixed(location: .denied, motion: .unavailable, health: .granted)
+        )
+
+        var seen: [PermissionDomain: PermissionState] = [:]
         for await change in client.statuses() {
-            seen.insert(change.domain)
+            seen[change.domain] = change.state
             if seen.count == PermissionDomain.allCases.count { break }
         }
-        #expect(seen == Set(PermissionDomain.allCases))
+
+        #expect(seen[.bluetooth] == .granted)          // .testValue's authorization
+        #expect(seen[.locationWhenInUse] == .denied)
+        #expect(seen[.motion] == .unavailable)
+        #expect(seen[.health] == .granted)
     }
 
     @Test("A request that presents no prompt yields nothing to the stream")
