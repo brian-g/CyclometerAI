@@ -686,3 +686,81 @@ rather than a fixed value, so they hold on Simulator and device alike. The app w
 launched on the Simulator to confirm no startup regression from the `LocationManagerState` move.
 A throwaway probe confirmed the Simulator really does report motion unavailable, and the live client
 really does map it to `.unavailable`; the probe was deleted afterwards.
+
+---
+
+## #96 — RiderProfile: HR overrides and Karvonen zone derivation (2026-08-17)
+
+Branch `feat/96-rider-profile`, from `main` at `7d0e0eb` (#95 merged). Milestone M10, Wave 1.
+
+### Tasks
+- [x] 1. `Models/RiderProfile.swift` — two `Int?` overrides, hand-written `init(from:)`, `.riderProfile`
+      shared key, resolution, validation.
+- [x] 2. `HeartRateZone.bounds(for:maxHR:restingHR:)` — the zone → bpm inverse #103 seeds from.
+- [x] 3. `ActiveRideFeature` reads the profile instead of hardcoding 190/55.
+- [x] 4. `RiderProfileTests` + `HeartRateZoneTests`; quarantine the ActiveRide HR suite's storage.
+- [x] 5. Spec corrections — DataModel §3.5/§3.6/§8/§9/§10, PRD §8.5/§9.4, UX §S12.
+
+### Three departures from the issue as written
+
+The issue specified a SwiftData `@Model` storing resting HR, max HR and date of birth, and made this
+the place the `ModelContainer` and its test fixture land. It shipped as none of those.
+
+**It is not a `@Model`.** One record of scalar fields with nothing to `@Query` is the exact shape
+§3.6 pulled `AppPreferences` out of SwiftData for, and a `@Model` would put an async load in front of
+the S12 HR Zones section. `SwiftDataStack` is still unreferenced with an empty schema; that
+infrastructure now lands with M7's `Ride`, the first entity that needs querying.
+
+**It stores overrides, not values.** This came from the user, and it was right: resting HR and date
+of birth are HealthKit's — both real HealthKit types, resting HR rewritten daily by an Apple Watch,
+so an app-owned copy is stale by construction. Where the instinct needed qualifying is max HR:
+**HealthKit has no max-heart-rate type.** `.discreteMax` over historical `heartRate` samples returns
+*highest ever observed*, which understates any rider who has never gone near their limit wearing a
+watch — which is why PRD §9.4 already fell back to 220 − age. So both fields are `Int?`, resolution
+is `override ?? healthKit ?? default` at read time, and a rider with a Watch who never opens Settings
+persists nothing at all. PRD §8.5 had said "app-stored values are always considered overrides" since
+0.2; the entity shape had simply never matched its own PRD.
+
+**No UI.** §S03 is Cut and §S12's controls are steppers on zone boundaries, not HR fields, so "manual
+entry" in the title means manually *sourced*. #103 owns the section.
+
+### What the round-trip test found
+
+`bounds` uses integer ceiling arithmetic rather than rounding a `Double` product back to a bpm, so it
+should be the exact inverse of §8's forward formula. Sweeping every validated profile to prove that
+failed — and the failures were real, not test noise: **at a heart-rate reserve of 7 or less** the
+ceiling collapses two zone boundaries onto the same bpm, leaving a band no reading can fall in, so
+`bounds` returned a non-empty range for an empty zone. The forward formula was right; validation was
+letting an incoherent profile through.
+
+Fixed at the source rather than by narrowing the sweep: `minimumHRReserve = 8` is now a validation
+rule, derived from where the zone model stops being well-defined rather than from a guess about
+physiology, and it subsumes the issue's "resting < max". The sweep now runs over exactly what
+validation admits, so widening it past that will fail, correctly.
+
+### Also in this change
+
+`heartRateSourceIsAppleHealth` is derived, not stored — the source is Health exactly when no override
+is set and Health answered — so there is no flag to drift out of step with the values it describes.
+
+`ActiveRideFeature`'s HR suite now quarantines file storage with `FileStorage.inMemory`. It needed
+that already: `SpeedFeature.State` has carried `@SharedReader(.appPreferences)` since #69 and those
+tests were reading the real Documents directory.
+
+⚠️ **The §8 worked example the issue's acceptance criterion cites never existed** — §8 held the
+formula and nothing else. Written into §8 and now asserted in both directions.
+
+### Not done here
+
+The S12 HR Zones section (#103) and any HealthKit read (M5) — `HealthKitClient` is still the stub
+returning 190/55, so the Health term in the resolver is always absent and
+`isSourcedFromAppleHealth` is false throughout M10. `SwiftDataStack` and
+`CyclometerApp.sharedModelContainer`'s `Schema([Item.self])` are untouched; consolidating those two
+competing containers is M7's.
+
+### Verification
+
+459 tests pass, 0 fail, including all five snapshot suites locally. Snapshot references are
+unchanged — the accessory strip does not render an HR zone, so the 55 → 60 default change did not
+move them. The disagreement between the two zone directions was found by test, fixed in the model,
+and re-proven across the full validated profile sweep (71 × 131 profiles × 5 zones).

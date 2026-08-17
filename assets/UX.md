@@ -852,9 +852,12 @@ a confirmation:
 - Five rows: Recovery/Light, Endurance, Aerobic, Threshold, Anaerobic
 - Each shows its bpm range and carries a Stepper for adjustment
 - Footer: "HR Zone data is derived from data collected by Apple Health."
-- MVP derives the zones from a manually entered `RiderProfile` (max HR, resting HR) using Karvonen; M5
-  replaces the entry with HealthKit-sourced values and keeps manual entry as the fallback when Health is
-  denied or empty. The footer copy is therefore accurate only from M5 onward
+- MVP derives the zones from `RiderProfile` (DataModel.md §3.5) using Karvonen. **Since #96 that type
+  holds only overrides**, resolving `override ?? healthKit ?? default` at read time — so M5 does not
+  replace the entry, it supplies the middle term, and manual entry stays as the fallback when Health
+  is denied or empty. Max HR is the field riders will actually set: HealthKit has no max-HR type, so
+  there is nothing for it to defer to until M5 can offer 220 − age. The footer copy is therefore
+  accurate only from M5 onward
 
 **About**
 - Version (read from bundle, shown as `CFBundleShortVersionString (CFBundleVersion)`)

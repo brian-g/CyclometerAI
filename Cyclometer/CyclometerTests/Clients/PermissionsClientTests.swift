@@ -309,12 +309,17 @@ struct PermissionsClientTests {
     /// position-based assertions on this stream are racy. Filtering by domain is
     /// order-independent and carries no wall-clock budget.
     ///
-    /// The tests below carried `.timeLimit` traits until #117, to bound a hang that
-    /// could only come from the frameworks in the path. With `.fixed` probes there is
-    /// no framework in the path, so there is nothing left to hang and no deadline to
-    /// misfire on a stalled runner — which is what the traits were doing: CI run
-    /// 32037935488 killed one of these at 60.000s while `isGranted()`, a pure enum
-    /// switch, took 90.3s on the same clone.
+    /// **The tests below carried `.timeLimit` traits until #117; they are gone because
+    /// there is nothing left for them to bound.** The traits guarded against a hang that
+    /// could only come from the frameworks in the path, and `.fixed` probes take those
+    /// out. They also had to go: a deadline is subject to the same contention it guards
+    /// against. CI run 32037935488 stalled an entire simulator clone — `isGranted()` and
+    /// `bluetoothMapping()`, pure enum switches with no I/O, took 90.3 seconds each, and
+    /// the job logged `Failed to launch app with identifier: com.xavier.cyclometer`.
+    /// Every test on that clone blocked and then completed at once; the only casualty
+    /// was the one carrying a 60-second deadline, killed rather than merely delayed. A
+    /// later passing run showed `isGranted()` at 544 seconds, so no threshold was ever
+    /// going to be safe.
     private static func nextChange(
         for domain: PermissionDomain,
         from iterator: inout AsyncStream<PermissionChange>.Iterator
