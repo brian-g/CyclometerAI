@@ -310,6 +310,15 @@ struct PermissionsClientTests {
     /// is order-independent *and* carries no wall-clock budget: on a loaded CI runner a
     /// polling deadline measures scheduler contention rather than the behaviour under
     /// test. The `.timeLimit` trait on each test bounds a genuine hang.
+    ///
+    /// **That trait is subject to the same contention it guards against**, which is why
+    /// it is three minutes and not one. CI run 32037935488 stalled a whole simulator
+    /// clone: `isGranted()` and `bluetoothMapping()` — pure enum switches with no I/O —
+    /// took 90.3 seconds each, and the job logged `Failed to launch app with identifier:
+    /// com.xavier.cyclometer`. Every test on that clone blocked and then completed at
+    /// once; the only casualty was the one test with a 60-second deadline, which was
+    /// killed rather than merely delayed. A hang guard has to sit above the
+    /// environment's noise floor, and 90 seconds is the measured floor.
     private static func nextChange(
         for domain: PermissionDomain,
         from iterator: inout AsyncStream<PermissionChange>.Iterator
@@ -320,7 +329,7 @@ struct PermissionsClientTests {
         return nil
     }
 
-    @Test("An authorization change made outside the app reaches subscribers", .timeLimit(.minutes(1)))
+    @Test("An authorization change made outside the app reaches subscribers", .timeLimit(.minutes(3)))
     func externalChangeIsBroadcast() async {
         // The Settings-recovery path: the rider denies, leaves for iOS Settings, grants,
         // and comes back. Nothing in the app called request(), so the only way the row
@@ -343,7 +352,7 @@ struct PermissionsClientTests {
         #expect(await Self.nextChange(for: .bluetooth, from: &iterator) == .granted)
     }
 
-    @Test("A framework callback carrying no change is not rebroadcast", .timeLimit(.minutes(1)))
+    @Test("A framework callback carrying no change is not rebroadcast", .timeLimit(.minutes(3)))
     func unchangedCallbackIsNotRebroadcast() async {
         // centralManagerDidUpdateState fires for radio power too, which is not a
         // permission change. Without the transition filter, S01 would rebuild its rows
