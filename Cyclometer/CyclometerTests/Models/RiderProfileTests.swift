@@ -1,0 +1,312 @@
+import Testing
+import Foundation
+import ComposableArchitecture
+@testable import Cyclometer
+
+@Suite("RiderProfile")
+struct RiderProfileTests {
+
+    // MARK: - Resolution
+
+    @Test("An empty profile resolves to the defaults")
+    func emptyProfileResolvesToDefaults() {
+        let profile = RiderProfile()
+
+        #expect(profile.restingOverrideBPM == nil)
+        #expect(profile.maxOverrideBPM == nil)
+        #expect(profile.resolvedRestingBPM() == 60)
+        #expect(profile.resolvedMaxBPM() == 190)
+    }
+
+    /// The point of the override model: a rider with a Watch and no opinion stores
+    /// nothing, so a Health value reaches the zones with no local copy to re-sync.
+    @Test("A HealthKit value beats the default when no override is set")
+    func healthValueBeatsDefault() {
+        let profile = RiderProfile()
+
+        #expect(profile.resolvedRestingBPM(healthResting: 48) == 48)
+        #expect(profile.resolvedMaxBPM(healthMax: 178) == 178)
+    }
+
+    @Test("An override beats a HealthKit value")
+    func overrideBeatsHealthValue() {
+        let profile = RiderProfile(restingOverrideBPM: 52, maxOverrideBPM: 185)
+
+        #expect(profile.resolvedRestingBPM(healthResting: 48) == 52)
+        #expect(profile.resolvedMaxBPM(healthMax: 178) == 185)
+    }
+
+    /// Each field resolves independently — overriding max must not drag resting off
+    /// Health, which is the whole reason they are two optionals rather than one
+    /// "manual entry" flag.
+    @Test("Overriding one field leaves the other on its HealthKit value")
+    func fieldsResolveIndependently() {
+        let profile = RiderProfile(restingOverrideBPM: nil, maxOverrideBPM: 200)
+
+        #expect(profile.resolvedRestingBPM(healthResting: 48) == 48)
+        #expect(profile.resolvedMaxBPM(healthMax: 178) == 200)
+    }
+
+    @Test("hrReserve is the resolved max less the resolved resting")
+    func hrReserveUsesResolvedValues() {
+        #expect(RiderProfile().hrReserve() == 130)
+        #expect(RiderProfile(restingOverrideBPM: 50, maxOverrideBPM: 200).hrReserve() == 150)
+    }
+
+    /// §3.5's `heartRateSourceIsAppleHealth`, derived rather than stored. False
+    /// throughout M10 because nothing supplies the Health terms yet.
+    @Test("The Apple Health source flag is derived, and false without Health values")
+    func healthSourceFlagIsDerived() {
+        #expect(RiderProfile().isSourcedFromAppleHealth() == false)
+        #expect(RiderProfile().isSourcedFromAppleHealth(healthResting: 48) == true)
+        // Both fields overridden — Health contributed nothing even though it answered.
+        #expect(
+            RiderProfile(restingOverrideBPM: 52, maxOverrideBPM: 185)
+                .isSourcedFromAppleHealth(healthResting: 48, healthMax: 178) == false
+        )
+    }
+
+    // MARK: - Validation
+
+    @Test("A resting override inside the bounds is applied")
+    func restingOverrideWithinBounds() throws {
+        let updated = try RiderProfile().settingRestingOverride(45)
+        #expect(updated.restingOverrideBPM == 45)
+    }
+
+    @Test(
+        "A resting override outside the bounds is rejected at either edge",
+        arguments: [29, 101]
+    )
+    func restingOverrideOutOfRange(_ bpm: Int) {
+        #expect(throws: RiderProfile.ValidationError.restingOutOfRange) {
+            try RiderProfile().settingRestingOverride(bpm)
+        }
+    }
+
+    @Test("The resting bounds are inclusive at both edges", arguments: [30, 100])
+    func restingBoundsAreInclusive(_ bpm: Int) throws {
+        // 100 resting only clears restingNotBelowMax because the default max is 190.
+        let updated = try RiderProfile().settingRestingOverride(bpm)
+        #expect(updated.restingOverrideBPM == bpm)
+    }
+
+    @Test("A max override outside the bounds is rejected at either edge", arguments: [99, 231])
+    func maxOverrideOutOfRange(_ bpm: Int) {
+        #expect(throws: RiderProfile.ValidationError.maxOutOfRange) {
+            try RiderProfile().settingMaxOverride(bpm)
+        }
+    }
+
+    @Test("The max bounds are inclusive at both edges", arguments: [100, 230])
+    func maxBoundsAreInclusive(_ bpm: Int) throws {
+        let updated = try RiderProfile().settingMaxOverride(bpm)
+        #expect(updated.maxOverrideBPM == bpm)
+    }
+
+    /// Individually plausible, jointly nonsense — the case the two range checks
+    /// cannot catch on their own.
+    @Test("A resting too close to the resolved max is rejected")
+    func restingLeavesTooLittleReserve() {
+        let profile = RiderProfile(maxOverrideBPM: 100)
+
+        // Equal to the max: no reserve at all.
+        #expect(throws: RiderProfile.ValidationError.reserveTooSmall) {
+            try profile.settingRestingOverride(100)
+        }
+        // Inside the resting range and below the max, but only just — five zones
+        // cannot fit in a reserve of 5.
+        #expect(throws: RiderProfile.ValidationError.reserveTooSmall) {
+            try profile.settingRestingOverride(95)
+        }
+    }
+
+    @Test("A max too close to the resolved resting is rejected")
+    func maxLeavesTooLittleReserve() {
+        let profile = RiderProfile(restingOverrideBPM: 100)
+
+        #expect(throws: RiderProfile.ValidationError.reserveTooSmall) {
+            try profile.settingMaxOverride(100)
+        }
+        #expect(throws: RiderProfile.ValidationError.reserveTooSmall) {
+            try profile.settingMaxOverride(107)
+        }
+    }
+
+    /// The reserve floor is exactly the point below which `HeartRateZone.bounds`
+    /// stops being the inverse of the forward formula, so it is pinned at its edge
+    /// rather than left to drift.
+    @Test("The minimum reserve is accepted at its exact edge")
+    func minimumReserveIsInclusive() throws {
+        let profile = RiderProfile(restingOverrideBPM: 100)
+        let updated = try profile.settingMaxOverride(108)
+
+        #expect(updated.hrReserve() == RiderProfile.minimumHRReserve)
+
+        // And every zone still holds at least one bpm at that floor.
+        let bounds = HeartRateZone.allCases.map {
+            HeartRateZone.bounds(for: $0, maxHR: 108, restingHR: 100)
+        }
+        #expect(Set(bounds.map(\.lowerBound)).count == 5)
+    }
+
+    /// The issue's "rejection is non-destructive" criterion. Returning a new value
+    /// rather than mutating means a rejected entry cannot have written anything.
+    @Test("A rejected entry leaves the profile untouched")
+    func rejectionIsNonDestructive() {
+        let profile = RiderProfile(restingOverrideBPM: 52, maxOverrideBPM: 185)
+
+        #expect(throws: RiderProfile.ValidationError.self) {
+            try profile.settingRestingOverride(500)
+        }
+        #expect(throws: RiderProfile.ValidationError.self) {
+            try profile.settingMaxOverride(1)
+        }
+        #expect(profile == RiderProfile(restingOverrideBPM: 52, maxOverrideBPM: 185))
+    }
+
+    /// Deferring to Health can never be invalid, so clearing skips the bounds
+    /// entirely — including from a state the bounds would now reject.
+    @Test("Clearing an override to nil is always allowed")
+    func clearingIsAlwaysAllowed() throws {
+        let profile = RiderProfile(restingOverrideBPM: 52, maxOverrideBPM: 185)
+
+        let clearedResting = try profile.settingRestingOverride(nil)
+        #expect(clearedResting.restingOverrideBPM == nil)
+        #expect(clearedResting.maxOverrideBPM == 185)
+
+        let clearedMax = try profile.settingMaxOverride(nil)
+        #expect(clearedMax.maxOverrideBPM == nil)
+        #expect(clearedMax.restingOverrideBPM == 52)
+    }
+
+    // MARK: - Karvonen (DataModel.md §8)
+
+    /// The worked example from §8: resting 60, max 190, HRR 130.
+    @Test(
+        "Zone boundaries match the §8 worked example",
+        arguments: [
+            (60, HeartRateZone.zone1), (137, .zone1),
+            (138, .zone2), (150, .zone2),
+            (151, .zone3), (163, .zone3),
+            (164, .zone4), (176, .zone4),
+            (177, .zone5), (190, .zone5)
+        ]
+    )
+    func workedExampleBoundaries(_ bpm: Int, _ expected: HeartRateZone) {
+        #expect(RiderProfile().zone(forBPM: bpm) == expected)
+    }
+
+    @Test("Readings below resting and above max clamp to the end zones")
+    func readingsOutsideTheReserve() {
+        let profile = RiderProfile()
+
+        #expect(profile.zone(forBPM: 40) == .zone1)
+        #expect(profile.zone(forBPM: 0) == .zone1)
+        #expect(profile.zone(forBPM: 250) == .zone5)
+    }
+
+    /// A non-positive reserve makes the Karvonen quotient undefined. §8 guards it;
+    /// this pins the guard so a nonsense profile degrades rather than divides by zero.
+    @Test("A non-positive HR reserve resolves to zone 1")
+    func nonPositiveReserve() {
+        // Not reachable through validation — constructed directly.
+        let profile = RiderProfile(restingOverrideBPM: 190, maxOverrideBPM: 190)
+
+        #expect(profile.hrReserve() == 0)
+        #expect(profile.zone(forBPM: 190) == .zone1)
+    }
+
+    @Test("Zones follow a HealthKit value the rider has not overridden")
+    func zonesFollowHealthValues() {
+        let profile = RiderProfile()
+
+        // resting 50, max 180 → HRR 130, zone 2 opens at 50 + 78 = 128.
+        #expect(profile.zone(forBPM: 127, healthResting: 50, healthMax: 180) == .zone1)
+        #expect(profile.zone(forBPM: 128, healthResting: 50, healthMax: 180) == .zone2)
+    }
+
+    // MARK: - Persistence
+
+    /// Storage is quarantined per test with `FileStorage.inMemory`, the idiom
+    /// SettingsFeatureTests uses, so a written override cannot leak between runs.
+    @Test("An override survives a re-read of the shared key")
+    func overridePersists() {
+        let storage = FileStorage.inMemory
+
+        withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.riderProfile) var profile
+            $profile.withLock { $0 = RiderProfile(restingOverrideBPM: 48, maxOverrideBPM: 200) }
+        }
+
+        withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.riderProfile) var reread
+            #expect(reread.restingOverrideBPM == 48)
+            #expect(reread.maxOverrideBPM == 200)
+            #expect(reread.resolvedMaxBPM() == 200)
+        }
+    }
+
+    @Test("An untouched profile is empty, so nothing is persisted for a rider with no opinion")
+    func untouchedProfileIsEmpty() {
+        withDependencies {
+            $0.defaultFileStorage = FileStorage.inMemory
+        } operation: {
+            @Shared(.riderProfile) var profile
+            #expect(profile == RiderProfile())
+        }
+    }
+
+    // MARK: - Decoding leniency (DataModel.md §9)
+
+    /// The rule the hand-written `init(from:)` exists to satisfy: a document written
+    /// before a field existed must decode with every *other* field intact. The
+    /// synthesised initialiser throws `keyNotFound` here, `.fileStorage` swallows it,
+    /// and the rider silently loses the rest of the document.
+    @Test("A document missing a key decodes with the other field intact")
+    func decodingIsLenientAboutMissingKeys() throws {
+        let onlyMax = Data(#"{"maxOverrideBPM":  200}"#.utf8)
+        let decoded = try JSONDecoder().decode(RiderProfile.self, from: onlyMax)
+
+        #expect(decoded.maxOverrideBPM == 200)
+        #expect(decoded.restingOverrideBPM == nil)
+    }
+
+    @Test("An empty document decodes to an empty profile")
+    func emptyDocumentDecodes() throws {
+        let decoded = try JSONDecoder().decode(RiderProfile.self, from: Data("{}".utf8))
+        #expect(decoded == RiderProfile())
+    }
+
+    /// Leniency, not strictness — §9's rule for a key the app no longer knows.
+    @Test("An unrecognised key is ignored rather than failing the decode")
+    func unrecognisedKeyIsIgnored() throws {
+        let withExtra = Data(#"{"restingOverrideBPM": 48, "dateOfBirth": 12345}"#.utf8)
+        let decoded = try JSONDecoder().decode(RiderProfile.self, from: withExtra)
+
+        #expect(decoded.restingOverrideBPM == 48)
+    }
+
+    /// An explicit null and an absent key both mean "defer to Health" — the
+    /// double-optional flattening in `init(from:)`.
+    @Test("An explicit null decodes as no override")
+    func explicitNullDecodesAsNoOverride() throws {
+        let withNull = Data(#"{"restingOverrideBPM": null, "maxOverrideBPM": 200}"#.utf8)
+        let decoded = try JSONDecoder().decode(RiderProfile.self, from: withNull)
+
+        #expect(decoded.restingOverrideBPM == nil)
+        #expect(decoded.maxOverrideBPM == 200)
+    }
+
+    @Test("A profile round-trips through JSON")
+    func roundTripsThroughJSON() throws {
+        let profile = RiderProfile(restingOverrideBPM: 48, maxOverrideBPM: 200)
+        let data = try JSONEncoder().encode(profile)
+
+        #expect(try JSONDecoder().decode(RiderProfile.self, from: data) == profile)
+    }
+}

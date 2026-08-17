@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
-**Version:** 1.2
+**Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-08-08 (PR #83 review) — §3.9 revised: no Wheelset entity; wheel circumference moves onto the speed-role PairedSensor; Bike gains stravaGearID; Ride gains a bikeName snapshot. §3.6 records why JSON over plist. Research basis: PRD §8.9.1
+**Updated:** 2026-08-17 (#96) — §3.5 revised: RiderProfile leaves SwiftData for a `@Shared(.fileStorage)` JSON document, and stores HR *overrides* rather than values, since resting HR and date of birth are HealthKit's to own and max HR has no HealthKit type at all. `heartRateSourceIsAppleHealth` becomes derived; `dateOfBirth` is not stored. §8 gains the worked example it was already cited for, plus the zone → bpm inverse and the `minimumHRReserve` floor it requires. SwiftData now lands with M7's Ride
+**Previously:** 2026-08-08 (PR #83 review) — §3.9 revised: no Wheelset entity; wheel circumference moves onto the speed-role PairedSensor; Bike gains stravaGearID; Ride gains a bikeName snapshot. §3.6 records why JSON over plist. Research basis: PRD §8.9.1
 **Previously:** 2026-08-03 (#69) — AppPreferences moved out of SwiftData to a `@Shared(.fileStorage)` JSON document; PairedSensor / ConnectedService ownership reopened for #67; §3.9 added
 **Previously:** 2026-05-22 — UserProfile split into RiderProfile, AppPreferences, PairedSensor, ConnectedService; all OQDMs resolved
 **Status:** Draft — Ready for Engineering Review
@@ -21,12 +22,12 @@
 │  Ride (summary)                       TrackPoint (1 Hz series)  │
 │  RadarEvent (discrete events)         (NSBatchInsertRequest)    │
 │  VehiclePassEvent (discrete events)                             │
-│  RiderProfile                                                   │
 │  ConnectedService (still open — §3.8)                           │
 │                                                                 │
 │  JSON document (@Shared / .fileStorage)                         │
 │  AppPreferences (singleton)                                     │
 │    └─ PairedSensor[]  (nested value, #67)                       │
+│  RiderProfile (singleton, HR overrides — #96, §3.5)             │
 │                                                                 │
 │  In-Memory (RideDataBuffer)                                     │
 │  Active TrackPoint ring buffer                                  │
@@ -38,8 +39,8 @@
 
 | Concern | Decision |
 |---|---|
-| Ride, RiderProfile UI queries | SwiftData — ergonomic @Query macros in SwiftUI |
-| AppPreferences — exactly one record, no queries | `@Shared(.fileStorage)` Codable struct — synchronous reads, no ModelContainer, no migration plan (see §3.6) |
+| Ride UI queries | SwiftData — ergonomic @Query macros in SwiftUI |
+| AppPreferences, RiderProfile — exactly one record, no queries | `@Shared(.fileStorage)` Codable structs, one document each — synchronous reads, no ModelContainer, no migration plan (see §3.6, §3.5) |
 | TrackPoint — up to 3,600 rows/hour at 1 Hz | CoreData NSBatchInsertRequest — batch write avoids per-object overhead |
 | Active-ride telemetry buffering | In-memory ring buffer; never written until checkpoint/end |
 | RadarEvent, VehiclePassEvent — discrete | SwiftData — low frequency; UI-queryable |
@@ -60,7 +61,7 @@
 
 ```
 RiderProfile (1)          AppPreferences (1) [JSON document]
-                               ┆
+[JSON document]                ┆
                     ┌──────────┴──────────┐
                     │                     │
                 (∞) PairedSensor    (∞) ConnectedService
@@ -84,7 +85,7 @@ TrackPoint    RadarEvent   VehiclePassEvent
 **Key relationships:**
 - AppPreferences is no longer a SwiftData entity, so it cannot own a SwiftData `@Relationship`. #67 settled PairedSensor by folding it into the AppPreferences JSON document as a nested `Codable` array; ConnectedService is still open — see §3.6
 - **PairedSensor is app-wide only for MVP.** In Phase 2 sensors belong to a bike: each bike has its own speed, cadence, radar and power sensors, and the speed sensor also carries that wheel's circumference. Heart rate is the exception and stays rider-scoped, since the strap follows the rider across bikes. The MVP ownership #67 picked has to survive gaining that bike dimension — as a nested value it does: the array grows a `bikeID` field and the lookup key becomes (bike, role), which is a decode shim rather than a schema stage — see §3.9
-- Ride and RiderProfile have no SwiftData relationship — single rider; rides queried by date range
+- Ride and RiderProfile have no relationship — single rider; rides queried by date range. Since #96 RiderProfile is its own JSON document (§3.5), so a relationship is not expressible in any case
 - RadarVehicle is a value type embedded as JSON in RadarEvent, not a separate table
 - Phase 2: Ride gains a route: Route? relationship when Route becomes a first-class entity
 
@@ -333,32 +334,74 @@ final class VehiclePassEvent {
 
 ### 3.5 RiderProfile
 
-Stores the rider's physiological data for Karvonen HR zone calculation. Exactly one record exists, created during onboarding.
+The rider's physiological inputs to the Karvonen zone calculation (§8). Exactly one record exists.
 
-> **M10 lands this entity with manual entry** (UX.md §S12 HR Zones). M10 runs before M5, so HealthKit does
-> not exist yet: the rider types max and resting HR, `heartRateSourceIsAppleHealth` stays `false`, and the
-> zones are computed by Karvonen (§8). M5 adds the Health read in front of the same fields and flips the flag
-> when values come from there — no schema change, which is why the entity is worth landing in full now rather
-> than shimming it.
+> **Revised 2026-08-17 (#96): stores *overrides*, and is not a SwiftData `@Model`.** Two changes from
+> the original shape, for two separate reasons.
+>
+> **It is not a `@Model`,** for the reason §3.6 gives for `AppPreferences`: exactly one record exists,
+> so there is nothing to `@Query` and no relationship worth traversing, while a `@Model` would put an
+> async load in front of the S12 HR Zones section and flash defaults on each appearance. It is a
+> `Codable` struct persisted as a single JSON document via `@Shared(.fileStorage)`, in its own
+> `rider-profile.json` — a separate document from the preferences one because OQDM5 split physiology
+> from preferences deliberately, and M5's Health read should have one file to touch. SwiftData
+> infrastructure therefore does **not** land with this entity; it lands with M7's `Ride`, the first
+> entity that genuinely needs querying.
+>
+> **It stores overrides rather than values.** Resting heart rate and date of birth are HealthKit's to
+> own — `HKQuantityTypeIdentifier.restingHeartRate` is rewritten daily by an Apple Watch, and an
+> app-owned copy goes stale the moment the rider's fitness changes. A field here is `nil` until the
+> rider disagrees with Health or Health cannot answer. A rider wearing a Watch who never opens
+> Settings persists nothing at all.
+>
+> Max heart rate is the exception that makes the type necessary rather than redundant: **HealthKit has
+> no max-heart-rate type.** Only `heartRate`, `restingHeartRate`, `walkingHeartRateAverage`,
+> `heartRateVariabilitySDNN` and `heartRateRecoveryOneMinute` exist. `.discreteMax` over historical
+> `heartRate` samples yields *highest ever observed*, which is meaningless for a rider who has never
+> gone near their limit wearing a watch — which is why PRD §9.4 falls back to 220 − age and UX.md §S12
+> keeps manual entry as the fallback "when Health is denied or empty".
 
 ```swift
 /// OQDM5 resolved: split from UserProfile. Physiology only.
-@Model
-final class RiderProfile {
-    var id: UUID
-    var restingHeartRateBPM: Int               // From HealthKit or manual entry
-    var maxHeartRateBPM: Int                   // From HealthKit, age estimate, or manual
-    var heartRateSourceIsAppleHealth: Bool
-    var dateOfBirth: Date?                     // For age-based max HR estimate (220 - age)
+struct RiderProfile: Codable, Equatable, Sendable {
+    var restingOverrideBPM: Int?      // nil = defer to HealthKit (M5), then the default
+    var maxOverrideBPM: Int?          // nil = defer to the 220 − age estimate, then the default
 
-    init() {
-        self.id = UUID()
-        self.restingHeartRateBPM = 60
-        self.maxHeartRateBPM = 190
-        self.heartRateSourceIsAppleHealth = false
-    }
+    /// Hand-written, per §9 — decodeIfPresent with an explicit default per field.
+    init(from decoder: any Decoder) throws
+}
+
+extension SharedReaderKey where Self == FileStorageKey<RiderProfile>.Default {
+    static var riderProfile: Self { /* Documents/rider-profile.json */ }
 }
 ```
+
+**Resolution happens at read time** — `override ?? healthKit ?? default` — so zone boundaries follow a
+Health value the moment it changes, with no local copy to re-sync. The HealthKit terms are
+defaulted-`nil` parameters, so M5 supplies them without the resolver changing shape:
+
+```swift
+func resolvedRestingBPM(healthResting: Int? = nil) -> Int   // default 60
+func resolvedMaxBPM(healthMax: Int? = nil) -> Int           // default 190
+```
+
+`heartRateSourceIsAppleHealth` is **derived, not stored** (`isSourcedFromAppleHealth(...)`): the source
+is Health exactly when no override is set and Health supplied a value, so there is no flag to drift
+out of step with the values it describes. It is false throughout M10, since nothing supplies the
+Health terms yet. `dateOfBirth` is not stored either — it is a HealthKit characteristic type, read
+via `dateOfBirthComponents()` when M5 needs the 220 − age estimate.
+
+**Validation** (manual entry, in the spirit of `WheelPreset.validRange`):
+
+| Rule | Value | Reason |
+|---|---|---|
+| `restingValidRange` | `30...100` | Elite endurance athletes reach the low 30s; above 100 is tachycardic, not resting |
+| `maxValidRange` | `100...230` | Junior riders record maxima above 200; 220 − age tops out near 220 |
+| `minimumHRReserve` | `8` | **Derived, not chosen.** Karvonen bands are 10% of reserve wide, so below a reserve of 8 the rounding collapses two zone boundaries onto the same bpm and a band exists with no bpm of its own. Subsumes "resting < max" |
+
+Rejection is non-destructive: `settingRestingOverride(_:)` / `settingMaxOverride(_:)` return a new
+profile or throw `ValidationError`, so a caller that gets nothing back still holds what it started
+with. Passing `nil` clears an override and is always allowed — deferring to Health cannot be invalid.
 
 ---
 
@@ -372,8 +415,12 @@ All non-physiological preferences. Exactly one record exists.
 > value on each appearance. It is instead a `Codable` struct persisted as a single JSON document
 > via swift-sharing's `.fileStorage` strategy, which TCA already vends (`@Shared`). Reads are
 > synchronous, tests get quarantined storage for free, and there is no `ModelContainer` or
-> `SchemaMigrationPlan` in the path. SwiftData remains the store for Ride, RadarEvent,
-> VehiclePassEvent and RiderProfile, which do need querying.
+> `SchemaMigrationPlan` in the path. SwiftData remains the store for Ride, RadarEvent and
+> VehiclePassEvent, which do need querying.
+>
+> > **RiderProfile left this list at #96 (2026-08-17).** It is one record of two scalars, so every
+> > word of the reasoning above applied to it verbatim — see §3.5. SwiftData now has no entity in
+> > MVP until M7's `Ride`.
 
 **Why JSON rather than a plist** (asked in the PR #83 review). Both are available — swift-sharing's
 `fileStorage(_:decoder:encoder:)` overload is JSON-specific, but the lower-level
@@ -493,7 +540,9 @@ no longer possible as written, and the choice was between standalone `@Model`s q
 - **The infrastructure already exists.** #69 shipped `@Shared(.fileStorage)` with a proven
   test-quarantine idiom (`FileStorage.inMemory`). SwiftData has no `@Model` in the app but the
   Xcode template's `Item`, no `ModelContainer` test fixture, and `SwiftDataStack` is unreferenced
-  with an empty schema.
+  with an empty schema. **Still true after #96** — `RiderProfile` was expected to land that
+  infrastructure and did not, having gone the same way for the same reasons (§3.5). M7's `Ride` is
+  now the first entity that needs it.
 
 `ConnectedService` is untouched and still open — its Keychain-identifier pattern is a different
 problem, and nothing consumes it yet.
@@ -882,23 +931,55 @@ request.fetchBatchSize = 500
 
 Zone is computed at query time from stored BPM. Computing at query time means zone boundaries automatically update if the rider adjusts their HR profile — no historical data becomes stale.
 
-```swift
-extension RiderProfile {
-    var hrReserve: Int { maxHeartRateBPM - restingHeartRateBPM }
+Implemented as `HeartRateZone` (`Models/HeartRateZone.swift`), which owns both directions. Callers go
+through `RiderProfile.zone(forBPM:)`, which feeds it the resolved values from §3.5.
 
-    func hrZone(forBPM bpm: Int) -> Int {
-        guard hrReserve > 0 else { return 0 }
-        let pct = Double(bpm - restingHeartRateBPM) / Double(hrReserve)
-        switch pct {
-        case ..<0.60: return 1   // Recovery
-        case ..<0.70: return 2   // Endurance
-        case ..<0.80: return 3   // Tempo
-        case ..<0.90: return 4   // Threshold
-        default:      return 5   // VO2 Max
-        }
+```swift
+enum HeartRateZone: Int { case zone1 = 1, zone2, zone3, zone4, zone5 }
+
+/// bpm → zone. intensity = (bpm − restingHR) / (maxHR − restingHR)
+static func zone(bpm: Int, maxHR: Int, restingHR: Int) -> HeartRateZone {
+    let hrr = Double(maxHR - restingHR)
+    guard hrr > 0 else { return .zone1 }
+    switch Double(bpm - restingHR) / hrr {
+    case ..<0.60: return .zone1   // Recovery
+    case ..<0.70: return .zone2   // Endurance
+    case ..<0.80: return .zone3   // Tempo
+    case ..<0.90: return .zone4   // Threshold
+    default:      return .zone5   // VO2 Max
     }
 }
+
+/// zone → bpm range, the inverse. What a zone table displays (UX.md §S12).
+static func bounds(for zone: HeartRateZone, maxHR: Int, restingHR: Int) -> ClosedRange<Int>
 ```
+
+`bounds` uses integer arithmetic — `restingHR + ⌈percent × HRR / 100⌉` — rather than rounding a
+`Double` product back to a bpm, so it is the *exact* inverse of the forward formula. Ceiling, not
+rounding: a threshold is inclusive at the bottom, so a boundary bpm belongs to the zone it opens.
+Ranges are contiguous by construction (each zone ends one bpm below the next one's start), which is
+what makes "no gaps or overlaps are representable" true for the S12 steppers rather than merely
+intended.
+
+> The two directions agree exactly **only above `RiderProfile.minimumHRReserve` (8)**. At a reserve of
+> 7 or less the ceiling collapses two zone boundaries onto one bpm, leaving a band with no bpm of its
+> own, and `bounds` would return a range for a zone no reading can fall in. That is why the floor is a
+> validation rule (§3.5) rather than a rounding tweak here.
+
+### Worked example
+
+Resting 60, max 190 — the §3.5 defaults. HRR = 130.
+
+| Zone | Name | % HRR | Lower bpm | Range |
+|---|---|---|---|---|
+| 1 | Recovery | < 60% | resting | **60–137** |
+| 2 | Endurance | 60% | 60 + ⌈78.0⌉ = 138 | **138–150** |
+| 3 | Tempo | 70% | 60 + ⌈91.0⌉ = 151 | **151–163** |
+| 4 | Threshold | 80% | 60 + ⌈104.0⌉ = 164 | **164–176** |
+| 5 | VO2 Max | ≥ 90% | 60 + ⌈117.0⌉ = 177 | **177–190** |
+
+Readings below resting resolve to zone 1 and above max to zone 5. A non-positive reserve resolves to
+zone 1 rather than dividing by zero — unreachable through validation, but the guard is pinned by test.
 
 ---
 
@@ -913,7 +994,7 @@ extension RiderProfile {
 
 Key rules:
 - Never rename SwiftData properties without a SchemaMigrationPlan stage
-- AppPreferences is outside the SwiftData schema (§3.6), but **adding a field is only free because it has a hand-written `init(from:)`**. The synthesised `Decodable` does *not* fall back to a property's default when its key is absent — it throws `keyNotFound`, `.fileStorage` swallows that and hands back a default-constructed value, and the rider silently loses every *other* preference in the document. #67 found this the first time a second field was added. Every field is decoded with `decodeIfPresent` and an explicit default; new fields must follow. Renaming or removing one still needs a shim on top of that
+- AppPreferences **and RiderProfile** are outside the SwiftData schema (§3.6, §3.5), but **adding a field is only free because they have a hand-written `init(from:)`**. The synthesised `Decodable` does *not* fall back to a property's default when its key is absent — it throws `keyNotFound`, `.fileStorage` swallows that and hands back a default-constructed value, and the rider silently loses every *other* preference in the document. #67 found this the first time a second field was added. Every field is decoded with `decodeIfPresent` and an explicit default; new fields must follow. Renaming or removing one still needs a shim on top of that
 - CoreData TrackPoint changes require a NSMigrationManager mapping model
 - ExternalService and SensorRole enum cases can be added without migration
 
@@ -930,7 +1011,8 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 
 | Component | Test Type | Coverage Target |
 |---|---|---|
-| Karvonen zone calculation | Unit — RiderProfileTests | All 5 zone boundaries; HR below resting; HR above max |
+| Karvonen zone calculation | Unit — RiderProfileTests, HeartRateZoneTests | All 5 zone boundaries against §8's worked example; HR below resting; HR above max; non-positive reserve. `bounds` round-trips through `zone(bpm:)` at every range endpoint across the full validated profile sweep, and the ranges are contiguous |
+| RiderProfile resolution and validation | Unit — RiderProfileTests | `override ?? health ?? default` per field, resolved independently; both ranges at their edges; `reserveTooSmall`; rejection leaves the profile untouched; clearing to nil always allowed; decode leniency for a missing key, an explicit null and an unrecognised key |
 | VehiclePassEvent detection | Unit — VehiclePassDetectionTests | Overtake vs turn-off; 2s minimum tracking; closing speed sign |
 | NSBatchInsertRequest flush | Integration — PersistenceTests | 3,600 rows (1 hour); count and rideId linkage verified |
 | GPXExporter output | Unit — GPXExporterTests | Schema validation; namespace declarations; absent vs zero fields |
@@ -953,7 +1035,7 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 | OQDM2 | Why store speedSourceAtEnd? | Resolved — removed. Active source is recorded per TrackPoint in speedSourceRaw; derivable from last TrackPoint |
 | OQDM3 | Is RadarVehicle persisted? | Resolved — yes. Embedded as JSON-encoded Data in RadarEvent via @Attribute(.externalStorage) |
 | OQDM4 | VehiclePassEvent should be persisted | Resolved — it is. Full @Model with initializer |
-| OQDM5 | Why is the entity called UserProfile? | Resolved — split into RiderProfile (physiology) and AppPreferences (preferences, sensors, services) |
+| OQDM5 | Why is the entity called UserProfile? | Resolved — split into RiderProfile (physiology) and AppPreferences (preferences, sensors, services). #96 kept them separate documents and narrowed RiderProfile to HR overrides: the rest of "physiology" (resting HR, date of birth) is HealthKit's, not the app's |
 | OQDM6 | Sensor storage limited to fixed fields | Resolved. PairedSensor @Model with role: SensorRole. Any number of sensors of any role |
 | OQDM7 | Connected services list is fixed | Resolved. ConnectedService @Model with serviceType: ExternalService. New services add an enum case |
 | OQDM8 | What is mapOrientation for? | Resolved — it is real. PRD section 8.6 specifies heading-up vs north-up as a user-toggleable setting; stored in AppPreferences to persist across sessions |
@@ -962,4 +1044,4 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 
 ---
 
-*Cyclometer Data Model Spec v1.3 · 2026-08-14*
+*Cyclometer Data Model Spec v1.4 · 2026-08-17*
