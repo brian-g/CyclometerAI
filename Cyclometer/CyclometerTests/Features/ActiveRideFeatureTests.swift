@@ -803,29 +803,61 @@ struct ActiveRideFeatureStateMachineTests {
 @Suite("ActiveRideFeature — heart rate")
 struct ActiveRideFeatureHeartRateTests {
 
+    /// Storage is quarantined per store because the zone now derives from the shared
+    /// `RiderProfile` (#96) — without this the assertions would depend on whatever
+    /// `rider-profile.json` happens to exist on the machine. The state is built
+    /// inside the same scope as the seed, since `@SharedReader` resolves when the
+    /// state is constructed.
     private func makeStore(
-        _ state: ActiveRideFeature.State = ActiveRideFeature.State(recordingState: .active)
+        profile: RiderProfile = RiderProfile(),
+        _ state: @autoclosure () -> ActiveRideFeature.State
+            = ActiveRideFeature.State(recordingState: .active)
     ) -> TestStoreOf<ActiveRideFeature> {
-        TestStore(initialState: state) {
-            ActiveRideFeature()
-        } withDependencies: {
-            $0.continuousClock = TestClock()
-            $0.hapticsClient = .testValue
-            $0.variaRadarClient = .testValue
-            $0.bleHRClient = .testValue
-            $0.locationClient = .testValue
+        let storage = FileStorage.inMemory
+        return withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.riderProfile) var stored
+            $stored.withLock { $0 = profile }
+            return TestStore(initialState: state()) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.continuousClock = TestClock()
+                $0.hapticsClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.defaultFileStorage = storage
+            }
         }
     }
 
     @Test("heartRateUpdated stores bpm and derives the Karvonen zone")
     func heartRateUpdatesZone() async {
         let store = makeStore()
-        // Defaults maxHR 190 / restingHR 55 → HRR 135.
-        // (150 − 55) / 135 = 0.704 → zone 3 (tempo, 70–80% HRR).
+        // An empty profile resolves to maxHR 190 / restingHR 60 → HRR 130.
+        // (150 − 60) / 130 = 0.692 → zone 2 (endurance, 60–70% HRR).
         await store.send(.heartRateUpdated(150)) {
             $0.heartRateBPM = 150
+            $0.hrZone = 2
+        }
+    }
+
+    /// The wiring #96 added: the dashboard reads the rider's profile rather than a
+    /// hardcoded pair, so the same bpm lands in a different zone for a fitter rider.
+    @Test("An override moves the same reading into a different zone")
+    func overrideChangesDerivedZone() async {
+        let store = makeStore(
+            profile: RiderProfile(restingOverrideBPM: 45, maxOverrideBPM: 200)
+        )
+        // HRR 155 → (165 − 45) / 155 = 0.774 → zone 3. The same reading is zone 4
+        // under the defaults ((165 − 60) / 130 = 0.808), which is the point.
+        await store.send(.heartRateUpdated(165)) {
+            $0.heartRateBPM = 165
             $0.hrZone = 3
         }
+        #expect(store.state.riderProfile.resolvedMaxBPM() == 200)
+        #expect(store.state.riderProfile.resolvedRestingBPM() == 45)
     }
 
     @Test("Unpairing clears both bpm and zone")

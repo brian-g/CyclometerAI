@@ -20,6 +20,7 @@
 | 0.4.1 | 2026-06-12 | Brian / Claude | OQBLE1 resolved (separate Speed/Cadence roles per `BLE.md`); M6 milestone wording clarified — CSC client is built in M2 (#20), M6 wires it into the metrics pipeline; wheel circumference presets + manual entry moved from M10 to M6 to align with GitHub milestone scoping |
 | 0.4.2 | 2026-07-07 | Brian / Claude | Milestone execution order re-sequenced: M3 -> M6 -> M10 -> M4 -> M5 -> M7-M12; GitHub milestone due dates updated to match; minimal BLE pairing sheet + CSC role assignment pulled forward into M6 (full S11 device management remains in M10); M6 issue set created (#65-#72) |
 | 0.4.4 | 2026-08-14 | Brian / Claude | M10 scope pass. S11 corrected to the flat device list in `Design.sketch` (no role sections); one sensor per role confirmed, with a replace-or-cancel prompt on collision; S12 loses Set Do Not Disturb (no public iOS API for enabling a Focus) and defers Accounts to Phase 2; wheel size becomes a navigation row to a detail screen; S01 drops the Files permission (there is no such prompt) and requests Location When In Use, escalating to Always at first ride start; HR zone entry moves to a manually entered `RiderProfile` in M10, HealthKit-sourced in M5; route service integrations follow Accounts to Phase 2, leaving GPX file import as the MVP source; M10 issue set created. Version 0.4.3 is the wheel auto-calibration revision on `feat/70-wheel-auto-calibration`, unmerged at the time of writing |
+| 0.4.5 | 2026-08-17 | Brian / Claude | §8.5 corrected: **HealthKit has no max-heart-rate type**, so max HR comes from the 220 − age estimate or manual entry, never from a `.discreteMax` query over historical samples. §9.4 acceptance criteria updated to match. `RiderProfile` (#96) narrowed to storing HR *overrides* only — resting HR and date of birth stay HealthKit's, resolution is `override ?? healthKit ?? default` at read time — which makes §8.5's long-standing "app-stored values are always considered overrides" literally true rather than aspirational |
 
 ---
 
@@ -433,9 +434,10 @@ Zone boundaries:
 ```
 
 **HR Profile Data Source:**
-- `maxHeartRate` and `restingHeartRate` are read from **Apple Health** at app launch and at the start of each ride
-- If Apple Health does not have these values, the user is prompted to enter them manually in the HR Zones section of S12 (S03 and S13 are both retired; see UX.md §S12). M10 ships manual entry against `RiderProfile`; M5 adds the Apple Health read in front of it
-- App-stored values are always considered overrides; Apple Health is the source of truth unless the user has manually overridden
+- `restingHeartRate` is read from **Apple Health** at app launch and at the start of each ride
+- **`maxHeartRate` cannot be read from Apple Health — there is no max-heart-rate type.** Only `heartRate`, `restingHeartRate`, `walkingHeartRateAverage`, `heartRateVariabilitySDNN` and `heartRateRecoveryOneMinute` exist. A `.discreteMax` query over historical samples returns *highest ever observed*, which understates any rider who has not gone near their limit wearing a watch, so it is not used. Max HR comes from the 220 − age estimate (§9.4) or manual entry
+- If Apple Health does not have these values, the user is prompted to enter them manually in the HR Zones section of S12 (S03 and S13 are both retired; see UX.md §S12)
+- App-stored values are always considered overrides; Apple Health is the source of truth unless the user has manually overridden. **This is literal since #96**: `RiderProfile` (DataModel.md §3.5) stores *only* overrides, as two optionals, and resolves `override ?? healthKit ?? default` at read time. A rider who never disagrees with Health persists nothing at all. M10 ships the storage and the Karvonen derivation; M5 supplies the Apple Health term
 
 **Color Mapping:**
 | Zone | Token | Hex (Light) |
@@ -858,8 +860,9 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 - Fallback: Apple Watch is secondary to BLE HR strap (see §8.4)
 
 **Acceptance Criteria:**
-- [ ] App correctly reads `restingHeartRate` and `maxHeartRate` from HealthKit on ride start
-- [ ] Falls back to age-based max HR estimate (220 − age) if HealthKit max HR is unavailable
+- [ ] App correctly reads `restingHeartRate` from HealthKit on ride start
+- [ ] Max HR uses the age-based estimate (220 − age) from the HealthKit `dateOfBirth` characteristic — there is no HealthKit max-HR type to read (§8.5)
+- [ ] A manual override in S12 wins over both, and clearing it returns to the Health-sourced value (`RiderProfile`, DataModel.md §3.5)
 - [ ] App functions with HealthKit permission denied (HR zone tile shows "No HR Source")
 - [ ] HR stream from Apple Watch feeds zone display within 2 seconds
 
