@@ -38,11 +38,29 @@ struct VariaRadarClient: Sendable {
         case reconnecting
     }
 
-    /// Scan for and auto-connect to the first advertising Varia radar.
+    /// Scan for radars and reconnect the one the rider has paired. Nothing is adopted
+    /// speculatively: a peripheral is connected only if `setPairedSensor` has named it,
+    /// so an unknown radar advertising nearby is listed and ignored (BLE.md §6).
     var startScanning:   @Sendable () async -> Void
     var stopScanning:    @Sendable () async -> Void
     var connect:         @Sendable (UUID) async -> Void   // explicit device selection (future settings UI)
+    /// Stop using the radar for now; the pairing survives. This is what ride finish
+    /// calls — contrast `setPairedSensor(nil)`, which forgets the radar entirely.
     var disconnect:      @Sendable () async -> Void
+    /// The rider's durable radar pairing, or nil when none. The client holds no
+    /// persistence; `AppPreferences` owns the record and pushes it here at launch and on
+    /// every change, the same way wheel circumference is pushed to the CSC client. Only
+    /// this peripheral is connected on discovery.
+    ///
+    /// Passing nil — or a different peripheral — tears the current connection down in
+    /// the same call. The gate and the connection identity move in one critical section,
+    /// so BLE.md §5.0's "records before teardown" holds without the caller having to
+    /// order two calls. `BLECSCClient` needs the separate `unpair` only because its map
+    /// covers several peripherals and one can shed a role yet stay connected; a
+    /// single-slot client has no such ambiguity.
+    var setPairedSensor: @Sendable (UUID?) async -> Void
+    /// Every radar seen this session, paired or not. Replays on subscribe.
+    var discoveredDevices: @Sendable () -> AsyncStream<[DiscoveredDevice]>
     var radarTargets:    @Sendable () -> AsyncStream<[RadarTarget]>
     var connectionState: @Sendable () -> AsyncStream<ConnectionState>
     /// Battery percentage of the connected radar, or `nil` when unknown — nothing
@@ -111,10 +129,12 @@ extension VariaRadarClient: DependencyKey {
     static func live(bleClient: BLEClient, clock: any Clock<Duration>) -> VariaRadarClient {
         let state = RadarClientState(bleClient: bleClient, clock: clock)
         return VariaRadarClient(
-            startScanning:   { await state.startScanning() },
-            stopScanning:    { await state.stopScanning() },
-            connect:         { id in await state.connect(peripheralID: id) },
-            disconnect:      { await state.disconnect() },
+            startScanning:     { await state.startScanning() },
+            stopScanning:      { await state.stopScanning() },
+            connect:           { id in await state.connect(peripheralID: id) },
+            disconnect:        { await state.disconnect() },
+            setPairedSensor:   { id in await state.setPairedSensor(id) },
+            discoveredDevices: { state.makeDiscoveredDevicesStream() },
             radarTargets:    { state.makeTargetsStream() },
             connectionState: { state.makeConnectionStateStream() },
             batteryLevel:    { state.makeBatteryStream() }
@@ -124,10 +144,12 @@ extension VariaRadarClient: DependencyKey {
     static let liveValue = VariaRadarClient.live(bleClient: .liveValue, clock: ContinuousClock())
 
     static let testValue = VariaRadarClient(
-        startScanning:   { },
-        stopScanning:    { },
-        connect:         { _ in },
-        disconnect:      { },
+        startScanning:     { },
+        stopScanning:      { },
+        connect:           { _ in },
+        disconnect:        { },
+        setPairedSensor:   { _ in },
+        discoveredDevices: { AsyncStream { $0.finish() } },
         radarTargets:    { AsyncStream { $0.finish() } },
         connectionState: { AsyncStream { $0.finish() } },
         batteryLevel:    { AsyncStream { $0.finish() } }
@@ -150,14 +172,30 @@ private final class RadarClientState: @unchecked Sendable {
     private let bleClient: BLEClient
     private let clock: any Clock<Duration>
 
+    /// Who we are currently talking to. Cleared by `disconnect()` and by `.stateChanged`
+    /// so the `.disconnected` event that follows can't match and start a reconnect.
     private var targetPeripheralID: UUID?
+    /// The rider's durable pairing, and the entire basis on which `.discovered` decides
+    /// whether to connect. Deliberately *not* the same field as `targetPeripheralID`:
+    /// ride finish calls `disconnect()`, which clears the connection identity, and a
+    /// pairing that died with it would never reconnect for the next ride.
+    private var pairedPeripheralID: UUID?
     private var connectionState: VariaRadarClient.ConnectionState = .disconnected
     private var batteryPercent: Int?
     private var reconnectTask: Task<Void, Never>?
 
+    /// Every radar seen this session. The inventory the pairing list is built from, and
+    /// what lets `setPairedSensor` connect a device discovered before it was paired —
+    /// CoreBluetooth won't redeliver `.discovered` for a peripheral already seen.
+    private var discoveredIDs: Set<UUID> = []
+    /// Separate from `discoveredIDs` because a nil name can't be stored in a dictionary,
+    /// and an unnamed radar still needs a row.
+    private var discoveredNames: [UUID: String] = [:]
+
     private var targetsContinuations: [Int: AsyncStream<[RadarTarget]>.Continuation] = [:]
     private var stateContinuations: [Int: AsyncStream<VariaRadarClient.ConnectionState>.Continuation] = [:]
     private var batteryContinuations: [Int: AsyncStream<Int?>.Continuation] = [:]
+    private var discoveredContinuations: [Int: AsyncStream<[DiscoveredDevice]>.Continuation] = [:]
     private var nextID = 0
     private let lock = NSLock()
 
@@ -218,6 +256,25 @@ private final class RadarClientState: @unchecked Sendable {
         return stream
     }
 
+    func makeDiscoveredDevicesStream() -> AsyncStream<[DiscoveredDevice]> {
+        let id = lock.withLock { () -> Int in
+            let current = nextID; nextID += 1; return current
+        }
+        let (stream, continuation) = AsyncStream<[DiscoveredDevice]>.makeStream()
+        // Replay + register in one critical section, same as the state streams. The
+        // replay matters more here: CoreBluetooth won't redeliver `.discovered` for a
+        // peripheral already seen this session, so a sheet opened after discovery would
+        // otherwise show an empty list until something changed.
+        lock.withLock {
+            continuation.yield(discoveredDevicesLocked())
+            discoveredContinuations[id] = continuation
+        }
+        continuation.onTermination = { [weak self] _ in
+            _ = self?.lock.withLock { self?.discoveredContinuations.removeValue(forKey: id) }
+        }
+        return stream
+    }
+
     // MARK: Scanning
 
     func startScanning() async {
@@ -267,6 +324,59 @@ private final class RadarClientState: @unchecked Sendable {
         await bleClient.stopScanning([radarServiceUUID])
     }
 
+    /// Cache the rider's durable pairing, tearing down whatever no longer matches it and
+    /// connecting the new radar if it has already been seen this session.
+    ///
+    /// Deliberately does not start a scan. `BLEClient.connect` is a no-op for a
+    /// peripheral CoreBluetooth hasn't discovered, so at launch this call only *arms*
+    /// the gate; the reconnect happens on the next scan. Scanning from here would leave
+    /// the radio running from launch to termination and paper over the real gap, which
+    /// is state restoration plus retrieve-by-identifier (BLE.md §13, M7).
+    func setPairedSensor(_ id: UUID?) async {
+        // Outside the critical section below: it takes the lock.
+        cancelReconnect()
+
+        // The gate and the connection identity move together in one acquisition, so a
+        // `.discovered` racing on the event-loop task sees either both old or both new
+        // and can never act on an open gate with a stale target. The state broadcasts
+        // and transport calls that follow are consequences, not inputs to that decision,
+        // and every broadcast helper takes this same non-recursive lock anyway.
+        let (toDisconnect, toConnect): (UUID?, UUID?) = lock.withLock {
+            guard pairedPeripheralID != id else { return (nil, nil) }
+            pairedPeripheralID = id
+
+            // Both halves, not either/or: swapping A for B has to release A *and* pick
+            // up B. Returning after the teardown would leave the rider's new radar
+            // unconnected until it next advertised.
+            var toDisconnect: UUID?
+            if let current = targetPeripheralID, current != id {
+                targetPeripheralID = nil
+                toDisconnect = current
+            }
+            // The new radar is already in the session inventory: connect it now rather
+            // than waiting for an advertisement that won't come.
+            var toConnect: UUID?
+            if let id, targetPeripheralID == nil, discoveredIDs.contains(id) {
+                targetPeripheralID = id
+                toConnect = id
+            }
+            broadcastDiscoveredLocked()
+            return (toDisconnect, toConnect)
+        }
+
+        if let toDisconnect {
+            setConnectionState(.disconnected)
+            broadcastTargets([])   // clear stale vehicles from the sidebar
+            setBattery(nil)
+            await bleClient.disconnect(toDisconnect, radarOwnerID)
+        }
+        if let toConnect {
+            setConnectionState(.connecting)
+            await bleClient.connect(toConnect, radarOwnerID)
+        }
+        logger.notice("paired radar → \(id?.uuidString ?? "none", privacy: .public)")
+    }
+
     // MARK: Event loop
 
     private func startEventLoop() {
@@ -288,14 +398,45 @@ private final class RadarClientState: @unchecked Sendable {
         }
 
         switch event {
-        case .discovered(let id, _, _, let services):
-            // Auto-connect the first discovered radar. The shared central may be
-            // scanning for several sensor types at once, so filter on the
-            // advertised service rather than assuming every discovery is a radar.
+        case .discovered(let id, let name, _, let services):
+            // Reconnect only what the rider has paired. Nothing is adopted
+            // speculatively: an unknown radar is listed for the pairing UI and otherwise
+            // left alone, so a stranger's Varia at a group start can never take over the
+            // sidebar. The shared central may be scanning several sensor types, so
+            // filter on the service first.
             guard services.contains(radarServiceUUID) else { return }
-            let shouldConnect = lock.withLock { targetPeripheralID == nil }
+            let (shouldConnect, firstSighting): (Bool, Bool) = lock.withLock {
+                // Record every radar seen, named or not — the pairing list is built from
+                // this inventory, and an unnamed unit still needs a row.
+                let firstSighting = discoveredIDs.insert(id).inserted
+                if let name { discoveredNames[id] = name }
+                broadcastDiscoveredLocked()
+                // `targetPeripheralID == nil` is load-bearing, not defensive:
+                // `BLECentral.rescan` re-issues the scan for the whole requested union,
+                // which restarts the CoreBluetooth session and redelivers peripherals
+                // every client has already seen — HR's `.disconnected` branch triggers
+                // exactly that. Claiming the target here rather than in `connect` keeps
+                // the check and the claim in one acquisition, so two redeliveries can't
+                // both pass it.
+                guard targetPeripheralID == nil, pairedPeripheralID == id else {
+                    return (false, firstSighting)
+                }
+                targetPeripheralID = id
+                return (true, firstSighting)
+            }
+            // Announce the gate's verdict, once per peripheral per scan session. Without
+            // this an ignored radar is indistinguishable from one that never advertised:
+            // before the gate existed, "connecting" was the only evidence discovery had
+            // happened at all, and gating it away took the diagnostic with it.
+            if firstSighting {
+                logger.notice("""
+                    discovered "\(name ?? "?", privacy: .public)" \(id, privacy: .public) — \
+                    \(shouldConnect ? "paired, connecting" : "not paired, ignoring", privacy: .public)
+                    """)
+            }
             guard shouldConnect else { return }
-            await connect(peripheralID: id)
+            setConnectionState(.connecting)
+            await bleClient.connect(id, radarOwnerID)
 
         case .connected(let id):
             guard lock.withLock({ targetPeripheralID }) == id else { return }
@@ -345,7 +486,9 @@ private final class RadarClientState: @unchecked Sendable {
         case .stateChanged(let managerState):
             switch managerState {
             case .poweredOff, .unauthorized, .unsupported:
-                // Permission denied / radio off: stand down cleanly, never crash.
+                // Permission denied / radio off: stand down cleanly, never crash. The
+                // pairing survives — the rider didn't unpair, the radio went off — so
+                // only the connection identity is cleared.
                 cancelReconnect()
                 lock.withLock { targetPeripheralID = nil }
                 broadcastTargets([])
@@ -405,6 +548,9 @@ private final class RadarClientState: @unchecked Sendable {
             guard connectionState != newState else { return false }
             connectionState = newState
             for continuation in stateContinuations.values { continuation.yield(newState) }
+            // `DiscoveredDevice.isConnected` is derived from this, and every transition
+            // in and out of a connection runs through here.
+            broadcastDiscoveredLocked()
             return true
         }
         if changed {
@@ -426,5 +572,32 @@ private final class RadarClientState: @unchecked Sendable {
         lock.withLock {
             for continuation in targetsContinuations.values { continuation.yield(targets) }
         }
+    }
+
+    /// Every radar seen this session, paired first then the rest, each group alphabetical
+    /// so the list doesn't reshuffle as advertisements arrive. Built from `discoveredIDs`,
+    /// an inventory that is never pruned — and a `Set`, so without this sort the order
+    /// would be nondeterministic. Must hold the lock.
+    private func discoveredDevicesLocked() -> [DiscoveredDevice] {
+        discoveredIDs.map { id in
+            DiscoveredDevice(
+                id: id,
+                name: discoveredNames[id],
+                isPaired: pairedPeripheralID == id,
+                isConnected: targetPeripheralID == id
+                    && (connectionState == .connected || connectionState == .active)
+            )
+        }
+        .sorted {
+            if $0.isPaired != $1.isPaired { return $0.isPaired }
+            return ($0.name ?? "").localizedCaseInsensitiveCompare($1.name ?? "") == .orderedAscending
+        }
+    }
+
+    /// Fan the device list out to pairing-UI subscribers. Must hold the lock.
+    private func broadcastDiscoveredLocked() {
+        guard !discoveredContinuations.isEmpty else { return }
+        let devices = discoveredDevicesLocked()
+        for continuation in discoveredContinuations.values { continuation.yield(devices) }
     }
 }
