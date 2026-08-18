@@ -17,6 +17,8 @@ struct AppFeature {
     static let dimBrightness: Double = 0.1
 
     @Dependency(\.bleCSCClient) var bleCSCClient
+    @Dependency(\.variaRadarClient) var variaRadarClient
+    @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.screenClient) var screenClient
     @Dependency(\.continuousClock) var clock
 
@@ -85,12 +87,26 @@ struct AppFeature {
         Reduce { state, action in
             switch action {
             case .task:
-                // The client holds no persistence, so the rider's pairings have to be
-                // handed to it before any scan can act on them. Here rather than in
+                // The clients hold no persistence, so the rider's pairings have to be
+                // handed to them before any scan can act on them. Here rather than in
                 // DeviceManagementFeature: sensors must reconnect on launch, not only
                 // while the Sensors screen happens to be open.
-                return .run { [bleCSCClient, assignments = state.preferences.cscAssignments] _ in
+                //
+                // Pushing nil is meaningful, not a no-op skipped for tidiness: these
+                // client state objects are process-global, so nil is how a gate left
+                // open by an earlier state gets closed.
+                //
+                // Sequential rather than merged — a deterministic order is what makes
+                // the launch push assertable as one interleaved call log (BLE.md §5.0).
+                return .run { [
+                    bleCSCClient, variaRadarClient, bleHRClient,
+                    assignments = state.preferences.cscAssignments,
+                    radarID = state.preferences.pairedSensor(for: .radar)?.peripheralID,
+                    hrID = state.preferences.pairedSensor(for: .heartRate)?.peripheralID
+                ] _ in
                     await bleCSCClient.setPairedSensors(assignments)
+                    await variaRadarClient.setPairedSensor(radarID)
+                    await bleHRClient.setPairedSensor(hrID)
                 }
 
             case .tabSelected(let tab):

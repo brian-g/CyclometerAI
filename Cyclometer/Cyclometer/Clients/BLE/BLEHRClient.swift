@@ -18,11 +18,26 @@ private let hrOwnerID = "hr"
 /// Connects to any compliant HR strap (Polar H10, Wahoo TICKR, Garmin HRM-Pro, etc.)
 /// and delivers real-time BPM. Uses BLEClient as the CoreBluetooth transport.
 struct BLEHRClient: Sendable {
-    /// Scan for and auto-connect to the first advertising HR strap.
+    /// Scan for HR straps and reconnect the one the rider has paired. Nothing is adopted
+    /// speculatively: a peripheral is connected only if `setPairedSensor` has named it,
+    /// so an unknown strap advertising nearby is listed and ignored (BLE.md §6).
     var startScanning:  @Sendable () async -> Void
     var stopScanning:   @Sendable () async -> Void
     var connect:        @Sendable (UUID) async -> Void   // explicit device selection (future settings UI)
+    /// Stop using the strap for now; the pairing survives. This is what ride finish
+    /// calls — contrast `setPairedSensor(nil)`, which forgets the strap entirely.
     var disconnect:     @Sendable () async -> Void
+    /// The rider's durable HR pairing, or nil when none. The client holds no persistence;
+    /// `AppPreferences` owns the record and pushes it here at launch and on every change.
+    /// Only this peripheral is connected on discovery.
+    ///
+    /// Passing nil — or a different peripheral — tears the current connection down in
+    /// the same call, so BLE.md §5.0's "records before teardown" holds without the caller
+    /// having to order two calls. See `VariaRadarClient.setPairedSensor` for why a
+    /// single-slot client needs no separate `unpair`.
+    var setPairedSensor: @Sendable (UUID?) async -> Void
+    /// Every HR strap seen this session, paired or not. Replays on subscribe.
+    var discoveredDevices: @Sendable () -> AsyncStream<[DiscoveredDevice]>
     var heartRate:      @Sendable () -> AsyncStream<Int>
     var pairingStatus:  @Sendable () -> AsyncStream<Bool>
     /// Battery percentage of the connected strap, or `nil` when unknown — nothing
@@ -51,10 +66,12 @@ extension BLEHRClient: DependencyKey {
     static func live(bleClient: BLEClient) -> BLEHRClient {
         let state = HRClientState(bleClient: bleClient)
         return BLEHRClient(
-            startScanning:  { await state.startScanning() },
-            stopScanning:   { await state.stopScanning() },
-            connect:        { id in await state.connect(peripheralID: id) },
-            disconnect:     { await state.disconnect() },
+            startScanning:     { await state.startScanning() },
+            stopScanning:      { await state.stopScanning() },
+            connect:           { id in await state.connect(peripheralID: id) },
+            disconnect:        { await state.disconnect() },
+            setPairedSensor:   { id in await state.setPairedSensor(id) },
+            discoveredDevices: { state.makeDiscoveredDevicesStream() },
             heartRate:      { state.makeHeartRateStream() },
             pairingStatus:  { state.makePairingStream() },
             batteryLevel:   { state.makeBatteryStream() }
@@ -64,10 +81,12 @@ extension BLEHRClient: DependencyKey {
     static let liveValue = BLEHRClient.live(bleClient: .liveValue)
 
     static let testValue = BLEHRClient(
-        startScanning:  { },
-        stopScanning:   { },
-        connect:        { _ in },
-        disconnect:     { },
+        startScanning:     { },
+        stopScanning:      { },
+        connect:           { _ in },
+        disconnect:        { },
+        setPairedSensor:   { _ in },
+        discoveredDevices: { AsyncStream { $0.finish() } },
         heartRate:      { AsyncStream { $0.finish() } },
         pairingStatus:  { AsyncStream { $0.finish() } },
         batteryLevel:   { AsyncStream { $0.finish() } }
@@ -87,13 +106,29 @@ extension DependencyValues {
 /// Follows the same @unchecked Sendable + NSLock pattern as BLECentral.
 private final class HRClientState: @unchecked Sendable {
     private let bleClient: BLEClient
+    /// Who we are currently talking to.
     private var targetPeripheralID: UUID?
+    /// The rider's durable pairing, and the entire basis on which `.discovered` decides
+    /// whether to connect. Deliberately *not* the same field as `targetPeripheralID`:
+    /// ride finish calls `disconnect()`, which clears the connection identity, and a
+    /// pairing that died with it would never reconnect for the next ride.
+    private var pairedPeripheralID: UUID?
+    /// Notifications are enabled and BPM is flowing — this client's connected signal.
+    /// Note this is *not* `DiscoveredDevice.isPaired`, which is the gate above.
     private var isPaired = false
     private var batteryPercent: Int?
+
+    /// Every strap seen this session. The inventory the pairing list is built from, and
+    /// what lets `setPairedSensor` connect a strap discovered before it was paired —
+    /// CoreBluetooth won't redeliver `.discovered` for a peripheral already seen.
+    private var discoveredIDs: Set<UUID> = []
+    /// Separate from `discoveredIDs` because a nil name can't be stored in a dictionary.
+    private var discoveredNames: [UUID: String] = [:]
 
     private var heartRateContinuations: [Int: AsyncStream<Int>.Continuation] = [:]
     private var pairingContinuations: [Int: AsyncStream<Bool>.Continuation] = [:]
     private var batteryContinuations: [Int: AsyncStream<Int?>.Continuation] = [:]
+    private var discoveredContinuations: [Int: AsyncStream<[DiscoveredDevice]>.Continuation] = [:]
     private var nextID = 0
     private let lock = NSLock()
 
@@ -152,6 +187,25 @@ private final class HRClientState: @unchecked Sendable {
         return stream
     }
 
+    func makeDiscoveredDevicesStream() -> AsyncStream<[DiscoveredDevice]> {
+        let id = lock.withLock { () -> Int in
+            let current = nextID; nextID += 1; return current
+        }
+        let (stream, continuation) = AsyncStream<[DiscoveredDevice]>.makeStream()
+        // Replay + register in one critical section, same as the pairing stream. The
+        // replay matters more here: CoreBluetooth won't redeliver `.discovered` for a
+        // peripheral already seen this session, so a sheet opened after discovery would
+        // otherwise show an empty list until something changed.
+        lock.withLock {
+            continuation.yield(discoveredDevicesLocked())
+            discoveredContinuations[id] = continuation
+        }
+        continuation.onTermination = { [weak self] _ in
+            _ = self?.lock.withLock { self?.discoveredContinuations.removeValue(forKey: id) }
+        }
+        return stream
+    }
+
     // MARK: Scanning
 
     func startScanning() async {
@@ -173,17 +227,71 @@ private final class HRClientState: @unchecked Sendable {
     }
 
     func disconnect() async {
-        let id = lock.withLock { targetPeripheralID }
-        guard let id else { return }
-        lock.withLock { targetPeripheralID = nil }
+        // Read and clear atomically, as the radar client does: a `.disconnected` event
+        // processed between a separate read and clear would still match the target and
+        // restart the scan.
+        //
         // Clearing here is the only chance: the `.disconnected` event that follows
         // guard-fails on the now-nil target, so its clearing branch never runs.
         // Left set, the replayed state tells the next subscriber that a strap the
         // rider just disconnected is still connected, at its last known battery.
+        let id = lock.withLock { () -> UUID? in
+            let current = targetPeripheralID
+            targetPeripheralID = nil
+            return current
+        }
         broadcastPairing(false)
         setBattery(nil)
-        await bleClient.disconnect(id, hrOwnerID)
+        if let id {
+            await bleClient.disconnect(id, hrOwnerID)
+        }
+        // Outside the `if`: a ride that finished with no strap connected must still stop
+        // the scan, or the radio keeps looking for a strap this client will now refuse
+        // to adopt anyway.
         await bleClient.stopScanning([hrServiceUUID])
+    }
+
+    /// Cache the rider's durable pairing, tearing down whatever no longer matches it and
+    /// connecting the new strap if it has already been seen this session.
+    ///
+    /// Deliberately does not start a scan — see `VariaRadarClient.setPairedSensor` for
+    /// why.
+    func setPairedSensor(_ id: UUID?) async {
+        // The gate and the connection identity move together in one acquisition, so a
+        // `.discovered` racing on the event-loop task sees either both old or both new
+        // and can never act on an open gate with a stale target.
+        let (toDisconnect, toConnect): (UUID?, UUID?) = lock.withLock {
+            guard pairedPeripheralID != id else { return (nil, nil) }
+            pairedPeripheralID = id
+
+            // Both halves, not either/or: swapping A for B has to release A *and* pick
+            // up B. Returning after the teardown would leave the rider's new strap
+            // unconnected until it next advertised.
+            var toDisconnect: UUID?
+            if let current = targetPeripheralID, current != id {
+                targetPeripheralID = nil
+                toDisconnect = current
+            }
+            // The new strap is already in the session inventory: connect it now rather
+            // than waiting for an advertisement that won't come.
+            var toConnect: UUID?
+            if let id, targetPeripheralID == nil, discoveredIDs.contains(id) {
+                targetPeripheralID = id
+                toConnect = id
+            }
+            broadcastDiscoveredLocked()
+            return (toDisconnect, toConnect)
+        }
+
+        if let toDisconnect {
+            broadcastPairing(false)
+            setBattery(nil)
+            await bleClient.disconnect(toDisconnect, hrOwnerID)
+        }
+        if let toConnect {
+            await bleClient.connect(toConnect, hrOwnerID)
+        }
+        logger.notice("paired strap → \(id?.uuidString ?? "none", privacy: .public)")
     }
 
     // MARK: Event loop
@@ -207,14 +315,39 @@ private final class HRClientState: @unchecked Sendable {
         }
 
         switch event {
-        case .discovered(let id, _, _, let services):
-            // Auto-connect the first discovered HR device. The shared central may
-            // be scanning for several sensor types at once, so filter on the
-            // advertised service rather than assuming every discovery is a strap.
+        case .discovered(let id, let name, _, let services):
+            // Reconnect only what the rider has paired. Nothing is adopted
+            // speculatively: an unknown strap is listed for the pairing UI and otherwise
+            // left alone, so a training partner's strap at a group start can never take
+            // over the HR reading. The shared central may be scanning several sensor
+            // types, so filter on the service first.
             guard services.contains(hrServiceUUID) else { return }
-            let shouldConnect = lock.withLock { targetPeripheralID == nil }
+            let (shouldConnect, firstSighting): (Bool, Bool) = lock.withLock {
+                let firstSighting = discoveredIDs.insert(id).inserted
+                if let name { discoveredNames[id] = name }
+                broadcastDiscoveredLocked()
+                // `targetPeripheralID == nil` is load-bearing: the `.disconnected` branch
+                // below restarts the scan, and `BLECentral.rescan` redelivers peripherals
+                // already seen. Claiming the target in the same acquisition as the check
+                // keeps two redeliveries from both passing it.
+                guard targetPeripheralID == nil, pairedPeripheralID == id else {
+                    return (false, firstSighting)
+                }
+                targetPeripheralID = id
+                return (true, firstSighting)
+            }
+            // Announce the gate's verdict, once per peripheral per scan session. Without
+            // this an ignored strap is indistinguishable from one that never advertised:
+            // before the gate existed, "connect requested" was the only evidence
+            // discovery had happened at all.
+            if firstSighting {
+                logger.notice("""
+                    discovered "\(name ?? "?", privacy: .public)" \(id, privacy: .public) — \
+                    \(shouldConnect ? "paired, connecting" : "not paired, ignoring", privacy: .public)
+                    """)
+            }
             guard shouldConnect else { return }
-            await connect(peripheralID: id)
+            await bleClient.connect(id, hrOwnerID)
 
         case .connected(let id):
             guard lock.withLock({ targetPeripheralID }) == id else { return }
@@ -243,10 +376,21 @@ private final class HRClientState: @unchecked Sendable {
             logger.info("bpm \(bpm)")
 
         case .disconnected(let id, _):
-            guard lock.withLock({ targetPeripheralID }) == id else { return }
-            lock.withLock { targetPeripheralID = nil }
+            // Rescanning *is* this client's reconnect: `BLECentral.rescan` restarts the
+            // CoreBluetooth session, the paired strap re-advertises, and `.discovered`
+            // above lets exactly it back in. That is why HR needs no backoff ladder, and
+            // why the rescan is now safe — it can no longer adopt a stranger.
+            let stillPaired: Bool? = lock.withLock {
+                guard targetPeripheralID == id else { return nil }
+                targetPeripheralID = nil
+                return pairedPeripheralID != nil
+            }
+            guard let stillPaired else { return }
             broadcastPairing(false)
             setBattery(nil)   // re-read on reconnect rather than show a stale level
+            // Nothing paired — an explicit `connect(_:)` selection that dropped. Scanning
+            // on would leave the radio looking for a strap the gate would refuse.
+            guard stillPaired else { return }
             await bleClient.startScanning([hrServiceUUID])
 
         default:
@@ -267,7 +411,35 @@ private final class HRClientState: @unchecked Sendable {
         lock.withLock {
             isPaired = paired
             for continuation in pairingContinuations.values { continuation.yield(paired) }
+            // `DiscoveredDevice.isConnected` is derived from this.
+            broadcastDiscoveredLocked()
         }
+    }
+
+    /// Every strap seen this session, paired first then the rest, each group alphabetical
+    /// so the list doesn't reshuffle as advertisements arrive. Built from `discoveredIDs`,
+    /// an inventory that is never pruned — and a `Set`, so without this sort the order
+    /// would be nondeterministic. Must hold the lock.
+    private func discoveredDevicesLocked() -> [DiscoveredDevice] {
+        discoveredIDs.map { id in
+            DiscoveredDevice(
+                id: id,
+                name: discoveredNames[id],
+                isPaired: pairedPeripheralID == id,
+                isConnected: targetPeripheralID == id && isPaired
+            )
+        }
+        .sorted {
+            if $0.isPaired != $1.isPaired { return $0.isPaired }
+            return ($0.name ?? "").localizedCaseInsensitiveCompare($1.name ?? "") == .orderedAscending
+        }
+    }
+
+    /// Fan the device list out to pairing-UI subscribers. Must hold the lock.
+    private func broadcastDiscoveredLocked() {
+        guard !discoveredContinuations.isEmpty else { return }
+        let devices = discoveredDevicesLocked()
+        for continuation in discoveredContinuations.values { continuation.yield(devices) }
     }
 
     private func setBattery(_ level: Int?) {

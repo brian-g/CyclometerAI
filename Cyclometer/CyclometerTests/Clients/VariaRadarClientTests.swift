@@ -108,8 +108,22 @@ struct VariaRadarBackoffTests {
 
 // MARK: - Integration (controllable BLEClient + TestClock)
 
-@Suite("VariaRadarClient — live state machine")
+/// Time-limited: every assertion here awaits a broadcast stream that never finishes, so
+/// a client that fails to emit hangs the test rather than failing it — which stalls the
+/// whole suite instead of pointing at the bug. Individual tests run in ~1s.
+@Suite("VariaRadarClient — live state machine", .timeLimit(.minutes(1)))
 struct VariaRadarIntegrationTests {
+
+    /// One log across every transport endpoint the pairing gate touches. The ordering
+    /// *between* connect and disconnect is what BLE.md §5.0 is about — a separate
+    /// `LockIsolated` per endpoint can only show that each was called, which is what let
+    /// two ordering races through review on #67.
+    private enum BLECall: Equatable {
+        case startScanning([CBUUID])
+        case stopScanning([CBUUID])
+        case connect(UUID)
+        case disconnect(UUID, String)
+    }
 
     /// Controllable transport: events are injected by the test; every operation
     /// is recorded. `connectCalls` is a stream so backoff tests can await each
@@ -123,6 +137,7 @@ struct VariaRadarIntegrationTests {
         let notified: LockIsolated<[(Bool, CBUUID)]>
         let servicesDiscovered: LockIsolated<[[CBUUID]?]>
         let reads: LockIsolated<[CBUUID]>
+        let calls: LockIsolated<[BLECall]>
         let clock: TestClock<Duration>
 
         init() {
@@ -133,16 +148,23 @@ struct VariaRadarIntegrationTests {
             let notified = LockIsolated<[(Bool, CBUUID)]>([])
             let servicesDiscovered = LockIsolated<[[CBUUID]?]>([])
             let reads = LockIsolated<[CBUUID]>([])
+            let calls = LockIsolated<[BLECall]>([])
             let clock = TestClock()
 
             let bleClient = BLEClient(
-                startScanning: { uuids in scanned.withValue { $0.append(uuids) } },
-                stopScanning: { _ in },
+                startScanning: { uuids in
+                    scanned.withValue { $0.append(uuids) }
+                    calls.withValue { $0.append(.startScanning(uuids)) }
+                },
+                stopScanning: { uuids in calls.withValue { $0.append(.stopScanning(uuids)) } },
                 connect: { id, _ in
                     connectCount.withValue { $0 += 1 }
+                    calls.withValue { $0.append(.connect(id)) }
                     connectContinuation.yield(id)
                 },
-                disconnect: { _, _ in },
+                disconnect: { id, owner in
+                    calls.withValue { $0.append(.disconnect(id, owner)) }
+                },
                 discoverServices: { _, uuids in
                     servicesDiscovered.withValue { $0.append(uuids) }
                 },
@@ -166,7 +188,25 @@ struct VariaRadarIntegrationTests {
             self.notified = notified
             self.servicesDiscovered = servicesDiscovered
             self.reads = reads
+            self.calls = calls
             self.clock = clock
+        }
+
+        /// Tell the client this radar is paired, the way `AppFeature` does at launch.
+        func pair(_ id: UUID?) async {
+            await client.setPairedSensor(id)
+        }
+
+        /// Wait until the device list satisfies `predicate`, and return it.
+        ///
+        /// Events are handled on the client's own task, so yielding one and reading the
+        /// list on the next line is a race. Tests that assert on connection state get a
+        /// sync point for free from the state stream; device-list assertions need this.
+        func devices(
+            matching predicate: @Sendable ([DiscoveredDevice]) -> Bool
+        ) async -> [DiscoveredDevice] {
+            for await list in client.discoveredDevices() where predicate(list) { return list }
+            return []
         }
     }
 
@@ -178,6 +218,7 @@ struct VariaRadarIntegrationTests {
         var states = harness.client.connectionState().makeAsyncIterator()
         #expect(await states.next() == .disconnected)  // replayed current state
 
+        await harness.pair(peripheralID)
         await harness.client.startScanning()
         #expect(await states.next() == .scanning)
         #expect(harness.scanned.value == [[radarServiceUUID]])
@@ -402,6 +443,7 @@ struct VariaRadarIntegrationTests {
 
         var states = harness.client.connectionState().makeAsyncIterator()
         _ = await states.next()  // .disconnected
+        await harness.pair(radarID)
         await harness.client.startScanning()
         _ = await states.next()  // .scanning
 
@@ -427,6 +469,7 @@ struct VariaRadarIntegrationTests {
 
         var states = harness.client.connectionState().makeAsyncIterator()
         _ = await states.next()  // .disconnected
+        await harness.pair(peripheralID)
         await harness.client.startScanning()
         _ = await states.next()  // .scanning
 
@@ -469,6 +512,234 @@ struct VariaRadarIntegrationTests {
         await harness.client.startScanning()
         #expect(await states.next() == .scanning)
     }
+
+    // MARK: Paired-record gate (#97)
+
+    @Test("Two unpaired radars in range: neither is connected, both are listed")
+    func unpairedRadarsAreListedButNotConnected() async {
+        let harness = Harness()
+        let strangerA = UUID()
+        let strangerB = UUID()
+
+        await harness.client.startScanning()
+        harness.events.yield(.discovered(
+            id: strangerA, name: "Varia A", rssi: -50, services: [radarServiceUUID]
+        ))
+        harness.events.yield(.discovered(
+            id: strangerB, name: "Varia B", rssi: -70, services: [radarServiceUUID]
+        ))
+
+        let listed = await harness.devices { $0.count == 2 }   // sync point
+        #expect(listed.allSatisfy { !$0.isPaired && !$0.isConnected })
+        #expect(listed.map(\.name) == ["Varia A", "Varia B"])
+        #expect(harness.connectCount.value == 0)
+
+        // Nothing was adopted, so the client is still looking.
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .scanning)
+    }
+
+    @Test("With one radar paired, a stranger advertising alongside it is listed but not connected")
+    func onlyThePairedRadarIsConnected() async {
+        let harness = Harness()
+        let paired = UUID()
+        let stranger = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()  // .disconnected
+        await harness.pair(paired)
+        await harness.client.startScanning()
+        _ = await states.next()  // .scanning
+
+        // The stranger advertises first — under the old rule it would have been adopted.
+        harness.events.yield(.discovered(
+            id: stranger, name: "Someone else's Varia", rssi: -40, services: [radarServiceUUID]
+        ))
+        harness.events.yield(.discovered(
+            id: paired, name: "My Varia", rssi: -80, services: [radarServiceUUID]
+        ))
+
+        #expect(await states.next() == .connecting)
+        #expect(harness.calls.value.contains(.connect(paired)))
+        #expect(!harness.calls.value.contains(.connect(stranger)))
+        #expect(harness.connectCount.value == 1)
+
+        let listed = await harness.devices { $0.count == 2 }
+        #expect(listed.first { $0.id == paired }?.isPaired == true)
+        #expect(listed.first { $0.id == stranger }?.isPaired == false)
+        // Paired sorts first regardless of advertisement order or name.
+        #expect(listed.first?.id == paired)
+    }
+
+    @Test("Unpairing disconnects, and the next advertisement does not reconnect")
+    func unpairDisconnectsAndDoesNotReadopt() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()  // .disconnected
+        await harness.pair(peripheralID)
+        await harness.client.startScanning()
+        _ = await states.next()  // .scanning
+
+        harness.events.yield(.discovered(
+            id: peripheralID, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]
+        ))
+        _ = await states.next()  // .connecting
+        harness.events.yield(.connected(id: peripheralID))
+        #expect(await states.next() == .connected)
+
+        await harness.pair(nil)
+        #expect(await states.next() == .disconnected)
+
+        // One interleaved log, not one spy per endpoint: the point is that nothing
+        // reconnects *after* the teardown, which separate counters cannot show.
+        #expect(harness.calls.value == [
+            .startScanning([radarServiceUUID]),
+            .connect(peripheralID),
+            .disconnect(peripheralID, "radar"),
+        ])
+
+        harness.events.yield(.discovered(
+            id: peripheralID, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]
+        ))
+        harness.events.yield(.discovered(
+            id: peripheralID, name: "Varia RTL515", rssi: -55, services: [radarServiceUUID]
+        ))
+        _ = await harness.devices { $0.contains { !$0.isPaired } }   // sync point
+        #expect(harness.calls.value.filter { $0 == .connect(peripheralID) }.count == 1)
+
+        // The backoff ladder must not resurrect it either.
+        await harness.clock.advance(by: .seconds(120))
+        await Task.yield()
+        #expect(harness.connectCount.value == 1)
+    }
+
+    /// CoreBluetooth won't redeliver `.discovered` for a peripheral already seen this
+    /// session, so without this path S11's Pair button does nothing until the radar
+    /// next advertises.
+    @Test("Pairing a radar already seen this session connects it without a new advertisement")
+    func pairingConnectsARadarAlreadySeen() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()  // .disconnected
+        await harness.client.startScanning()
+        _ = await states.next()  // .scanning
+
+        harness.events.yield(.discovered(
+            id: peripheralID, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]
+        ))
+        _ = await harness.devices { $0.count == 1 }   // sync point: seen, not connected
+        #expect(harness.connectCount.value == 0)
+
+        await harness.pair(peripheralID)
+        #expect(await states.next() == .connecting)
+        #expect(harness.calls.value.last == .connect(peripheralID))
+    }
+
+    @Test("Switching the gate tears the old radar down before connecting the new one")
+    func switchingTheGateTearsDownFirst() async {
+        let harness = Harness()
+        let first = UUID()
+        let second = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()  // .disconnected
+        await harness.pair(first)
+        await harness.client.startScanning()
+        _ = await states.next()  // .scanning
+
+        harness.events.yield(.discovered(id: first, name: "A", rssi: -60, services: [radarServiceUUID]))
+        _ = await states.next()  // .connecting
+        harness.events.yield(.connected(id: first))
+        #expect(await states.next() == .connected)
+
+        // The replacement has been seen, so the switch both disconnects and connects.
+        harness.events.yield(.discovered(id: second, name: "B", rssi: -60, services: [radarServiceUUID]))
+        _ = await harness.devices { $0.count == 2 }
+
+        await harness.pair(second)
+        #expect(await states.next() == .disconnected)
+        #expect(await states.next() == .connecting)
+
+        let tail = harness.calls.value.suffix(2)
+        #expect(Array(tail) == [.disconnect(first, "radar"), .connect(second)])
+    }
+
+    /// Ride finish calls `disconnect()`. If that cleared the pairing too, the radar
+    /// would need re-pairing before every ride.
+    @Test("Ride-finish disconnect keeps the pairing")
+    func rideFinishDisconnectKeepsThePairing() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()  // .disconnected
+        await harness.pair(peripheralID)
+        await harness.client.startScanning()
+        _ = await states.next()  // .scanning
+
+        harness.events.yield(.discovered(
+            id: peripheralID, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]
+        ))
+        _ = await states.next()  // .connecting
+        harness.events.yield(.connected(id: peripheralID))
+        _ = await states.next()  // .connected
+
+        await harness.client.disconnect()
+        #expect(await states.next() == .disconnected)
+
+        // Next ride.
+        await harness.client.startScanning()
+        _ = await states.next()  // .scanning
+        harness.events.yield(.discovered(
+            id: peripheralID, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]
+        ))
+        #expect(await states.next() == .connecting)
+        #expect(harness.connectCount.value == 2)
+    }
+
+    /// The rider didn't unpair — the radio went off.
+    @Test("Standing down for a permission denial keeps the pairing")
+    func permissionDenialKeepsThePairing() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()  // .disconnected
+        await harness.pair(peripheralID)
+        await harness.client.connect(peripheralID)
+        _ = await states.next()  // .connecting
+
+        harness.events.yield(.stateChanged(.unauthorized))
+        #expect(await states.next() == .disconnected)
+
+        await harness.client.startScanning()
+        _ = await states.next()  // .scanning
+        harness.events.yield(.discovered(
+            id: peripheralID, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]
+        ))
+        #expect(await states.next() == .connecting)
+    }
+
+    @Test("A late discovery subscriber gets the current device list replayed")
+    func discoveredDevicesReplaysForALateSubscriber() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        await harness.client.startScanning()
+        harness.events.yield(.discovered(
+            id: peripheralID, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]
+        ))
+        _ = await harness.devices { $0.count == 1 }   // sync point
+
+        var late = harness.client.discoveredDevices().makeAsyncIterator()
+        let replayed = await late.next()
+        #expect(replayed?.map(\.id) == [peripheralID])
+        #expect(replayed?.first?.name == "Varia RTL515")
+    }
 }
 
 // MARK: - Test value
@@ -483,6 +754,8 @@ struct VariaRadarTestValueTests {
         await client.stopScanning()
         await client.connect(UUID())
         await client.disconnect()
+        await client.setPairedSensor(UUID())
+        await client.setPairedSensor(nil)
     }
 
     @Test("Test value streams complete immediately")
