@@ -281,7 +281,13 @@ struct DeviceManagementFeature {
                 return .run { _ in await bleCSCClient.pair(id) }
 
             case .rowTapped(let id):
-                guard state.reassignableIDs.contains(id) else { return .none }
+                // Not while a pairing is in flight. `pendingPairing` names the
+                // interrogated peripheral, and the dismiss path reads it to decide what
+                // to release — so a reassignment prompt raised on top of one would make
+                // its Cancel unpair the *other* sensor, and its answer would clear the
+                // in-flight marker and strand that peripheral connected holding no roles.
+                guard state.pendingPairing == nil, state.reassignableIDs.contains(id)
+                else { return .none }
                 state.roleDialog = Self.roleDialog(
                     for: id, name: state.devices.first { $0.id == id }?.name
                 )
@@ -350,7 +356,7 @@ struct DeviceManagementFeature {
         // `pendingPairing` deliberately survives into the alert. It is the only record
         // that this peripheral is connected holding no roles, and so the only thing
         // that lets Cancel release it rather than leave a half-pairing behind.
-        state.collisionAlert = Self.collisionAlert(for: id, roles: roles, incumbents: incumbents)
+        state.collisionAlert = Self.collisionAlert(for: id, roles: roles, displacing: incumbents)
         return .none
     }
 
@@ -364,14 +370,14 @@ struct DeviceManagementFeature {
         of roles: Set<SensorRole>,
         excluding id: UUID,
         in preferences: AppPreferences
-    ) -> [(role: SensorRole, peripheralID: UUID, name: String?)] {
+    ) -> [PairedSensor] {
         // `allCases` order, not `Set` order — the copy must not reorder between runs.
         SensorRole.allCases
             .filter(roles.contains)
             .compactMap { role in
                 guard let held = preferences.pairedSensor(for: role), held.peripheralID != id
                 else { return nil }
-                return (role, held.peripheralID, held.displayName)
+                return held
             }
     }
 
@@ -384,22 +390,24 @@ struct DeviceManagementFeature {
     private static func collisionAlert(
         for id: UUID,
         roles: Set<SensorRole>,
-        incumbents: [(role: SensorRole, peripheralID: UUID, name: String?)]
+        displacing incumbents: [PairedSensor]
     ) -> AlertState<Action.CollisionChoice> {
         // Grammatical inside a sentence, unlike the role prompt's "This sensor" — this
         // copy always names the incumbent mid-clause.
-        func name(_ incumbent: (role: SensorRole, peripheralID: UUID, name: String?)) -> String {
-            incumbent.name ?? "an unnamed sensor"
+        func name(_ incumbent: PairedSensor) -> String {
+            incumbent.displayName ?? "an unnamed sensor"
         }
         let itemised = incumbents
             .map { "\($0.role.displayName) is assigned to \(name($0))." }
             .joined(separator: "\n")
+        let displacedPeripherals = Set(incumbents.map(\.peripheralID)).count
         let title: String
         let message: String?
         if incumbents.count == 1, let only = incumbents.first {
             title = "\(only.role.displayName) is already assigned to \(name(only))."
             message = nil
-        } else if let sole = incumbents.first, Set(incumbents.map(\.peripheralID)).count == 1 {
+        } else if displacedPeripherals == 1, let sole = incumbents.first {
+            // "two sensors" would be false when one combo holds both roles.
             title = "Replace \(name(sole))?"
             message = itemised
         } else {

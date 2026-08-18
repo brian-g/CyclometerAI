@@ -684,11 +684,13 @@ struct DeviceManagementFeatureTests {
 
     @Test("Both against one combo holding both names that sensor, not \"two sensors\"")
     func bothAgainstOneComboNamesIt() async {
+        let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
             pairedSensors: [
                 PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM"),
                 PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM")
-            ]
+            ],
+            bleCSCClient: Self.recordingClient(into: log)
         )
         store.exhaustivity = .off(showSkippedAssertions: false)
 
@@ -709,6 +711,7 @@ struct DeviceManagementFeatureTests {
             )
         }
         await store.finish()
+        #expect(log.value == [])
     }
 
     @Test("A partial collision replaces only the colliding role")
@@ -776,7 +779,11 @@ struct DeviceManagementFeatureTests {
     func outOfRangeIncumbentIsNamed() async {
         // Only the new sensor is advertising; the incumbent appears on no stream, so
         // its name can come from nowhere but its own record.
-        let store = makeStore(pairedSensors: [Self.speedIncumbent])
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [Self.speedIncumbent],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.pairButtonTapped(Self.availableID))
@@ -789,6 +796,43 @@ struct DeviceManagementFeatureTests {
             )
         }
         await store.finish()
+
+        // The displaced incumbent is not here to be re-paired, so writing before the
+        // rider answers would be the most damaging version of this bug.
+        #expect(log.value == [])
+        #expect(store.state.preferences.pairedSensors == [Self.speedIncumbent])
+    }
+
+    @Test("A reassignment prompt is refused while a pairing is in flight")
+    func reassignmentIsRefusedDuringAnInterrogation() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let records = [
+            PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: Self.otherPairedID, role: .speed, displayName: "Wahoo SPEED")
+        ]
+        let store = makeStore(
+            devices: [
+                Self.sensor(id: Self.pairedID, name: "Wahoo RPM", roles: [.cadence],
+                            state: .active, capabilities: Self.combo),
+                Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.combo)
+            ],
+            pairedSensors: records,
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // Pair tap on GSC-10 starts a 0x2A5C read; the list stays interactive, so the
+        // rider can reach a paired combo row before it answers.
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.rowTapped(Self.pairedID))
+        await store.finish()
+
+        // Raising it would put `pendingPairing` and the prompt on screen out of step:
+        // Cancel would then unpair GSC-10, which the rider never cancelled.
+        #expect(store.state.roleDialog == nil)
+        #expect(store.state.pendingPairing == Self.availableID)
+        #expect(log.value == [])
+        #expect(store.state.preferences.pairedSensors == records)
     }
 
     @Test("A device update while the confirmation is up does not clobber it")
