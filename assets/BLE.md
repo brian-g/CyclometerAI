@@ -878,6 +878,14 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | Pairings survive relaunch | Records pushed via `setPairedSensors` at launch reconnect on the next advertisement |
 | Unpair pushes before releasing | The call log is `setPairedSensors` then `unpair`, not merely both — see the ordering rule below |
 | Reassignment pushes before moving the role | The call log is `setPairedSensors` then `setRoles` |
+| Occupied role raises the confirmation | Claiming a role another peripheral holds writes nothing and presents replace-or-cancel; the call log is empty until the rider answers |
+| A single-capability sensor still collides | Auto-assignment skips the role sheet but not the check — the confirmation is raised with no role prompt before it |
+| One confirmation, never one per role | Both against two occupied roles raises a single prompt naming both incumbents |
+| Replace pushes before moving the role | The call log is `setPairedSensors` then one `setRoles` for the claimant — the client subtracts the role from the incumbent's slot in the same lock |
+| A partial collision keeps the other role | An incumbent combo displaced on Speed retains its Cadence record and stays connected under it |
+| Cancel releases the interrogated peripheral | The call log is `unpair` alone — no `setPairedSensors`, because nothing was ever written for an in-flight pairing |
+| Cancelling a reassignment releases nothing | With no pairing in flight the incumbent keeps what it had; the call log is empty |
+| An out-of-range incumbent is still named | The confirmation names it from `PairedSensor.displayName`, since it appears on no discovery stream |
 | Narrowed capabilities correct the record | A persisted role the hardware reports it cannot fill is dropped from `pairedSensors`, not only from the live slot |
 | Narrowing to no roles releases the sensor | The last surviving role going away unpairs the peripheral outright |
 | Narrowing is silent without a contradiction | Records inside the advertised capabilities, and peripherals that never answered the read, are left alone |
