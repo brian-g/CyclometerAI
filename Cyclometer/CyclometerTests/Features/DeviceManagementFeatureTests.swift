@@ -11,6 +11,8 @@ struct DeviceManagementFeatureTests {
     private static let availableID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!
     private static let radarID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C3")!
     private static let hrID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D4")!
+    /// A second paired CSC sensor, for the collisions that displace two incumbents.
+    private static let otherPairedID = UUID(uuidString: "00000000-0000-0000-0000-0000000000E5")!
 
     private static let combo = BLECSCClient.Capabilities(
         supportsWheelRevolutions: true, supportsCrankRevolutions: true
@@ -86,6 +88,28 @@ struct DeviceManagementFeatureTests {
         } message: {
             TextState("\(name ?? "This sensor") reports both wheel and crank data.")
         }
+    }
+
+    /// The collision alert literal, rebuilt here for the same reason as
+    /// `expectedDialog`. The title and message are passed in rather than derived, so
+    /// each test states the exact copy it expects instead of re-deriving the reducer's
+    /// branching and agreeing with whatever it produces.
+    private static func expectedCollisionAlert(
+        for id: UUID,
+        roles: Set<SensorRole>,
+        title: String,
+        message: String? = nil
+    ) -> AlertState<DeviceManagementFeature.Action.CollisionChoice> {
+        AlertState(
+            title: { TextState(title) },
+            actions: {
+                ButtonState(role: .destructive, action: .replace(peripheralID: id, roles: roles)) {
+                    TextState("Replace")
+                }
+                ButtonState(role: .cancel) { TextState("Cancel") }
+            },
+            message: message.map { text in { TextState(text) } }
+        )
     }
 
     /// Each store gets its own in-memory file system so persisted pairings cannot
@@ -492,11 +516,371 @@ struct DeviceManagementFeatureTests {
         await store.send(.pairButtonTapped(Self.availableID))
         await store.send(.devicesUpdated(.speedCadence, found))
         await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed]))))
+        // Speed was occupied, so the move is now the rider's to confirm (#99).
+        await store.send(.collisionAlert(.presented(.replace(peripheralID: Self.availableID, roles: [.speed]))))
         await store.finish()
 
         // The incumbent's speed record is gone — one sensor per role, app-wide.
         #expect(store.state.preferences.pairedSensors == [
             PairedSensor(peripheralID: Self.availableID, role: .speed, displayName: "GSC-10")
+        ])
+    }
+
+    // MARK: Role collision — replace or cancel (#99)
+
+    /// Speed occupied by `pairedID`, and `availableID` interrogated and claiming it.
+    /// The shape every collision test below starts from.
+    private static func speedCollisionDevices() -> [DiscoveredDevice] {
+        [
+            Self.sensor(id: Self.pairedID, name: "Wahoo SPEED", roles: [.speed],
+                        state: .active, capabilities: Self.wheelOnly),
+            Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.combo)
+        ]
+    }
+
+    private static let speedIncumbent = PairedSensor(
+        peripheralID: pairedID, role: .speed, displayName: "Wahoo SPEED"
+    )
+
+    @Test("Claiming an occupied role raises the confirmation instead of writing")
+    func collisionRaisesConfirmation() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [Self.speedIncumbent],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, Self.speedCollisionDevices()))
+        await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed])))) {
+            $0.collisionAlert = Self.expectedCollisionAlert(
+                for: Self.availableID, roles: [.speed],
+                title: "Speed is already assigned to Wahoo SPEED."
+            )
+        }
+        await store.finish()
+
+        // Nothing is written until the rider answers, and the interrogated peripheral
+        // stays in flight — that is what lets Cancel release it.
+        #expect(log.value == [])
+        #expect(store.state.preferences.pairedSensors == [Self.speedIncumbent])
+        #expect(store.state.pendingPairing == Self.availableID)
+    }
+
+    @Test("Replace pushes the assignments before moving the role")
+    func replaceCommitsTheWrite() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [Self.speedIncumbent],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, Self.speedCollisionDevices()))
+        await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed]))))
+        await store.send(.collisionAlert(.presented(.replace(peripheralID: Self.availableID, roles: [.speed]))))
+        await store.finish()
+
+        // One `setRoles` moves the role for *both* peripherals: the client subtracts it
+        // from the incumbent's slot inside the same lock, and disconnects a slot left
+        // holding nothing. A second call naming the incumbent would be dead code.
+        #expect(log.value == [
+            .setPairedSensors([Self.availableID: [.speed]]),
+            .setRoles(Self.availableID, [.speed])
+        ])
+        #expect(store.state.preferences.pairedSensors == [
+            PairedSensor(peripheralID: Self.availableID, role: .speed, displayName: "GSC-10")
+        ])
+        #expect(store.state.pendingPairing == nil)
+    }
+
+    @Test("Cancel releases the interrogated peripheral and writes nothing")
+    func cancelReleasesTheInterrogatedPeripheral() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [Self.speedIncumbent],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, Self.speedCollisionDevices()))
+        await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed]))))
+        await store.send(.collisionAlert(.dismiss))
+        await store.finish()
+
+        // It is connected holding no roles; leaving it there is an invisible
+        // half-pairing. No `setPairedSensors` — nothing was ever written for it.
+        #expect(log.value == [.unpair(Self.availableID)])
+        #expect(store.state.preferences.pairedSensors == [Self.speedIncumbent])
+        #expect(store.state.pendingPairing == nil)
+    }
+
+    @Test("Cancelling a reassignment releases nothing — it keeps what it had")
+    func cancelOnReassignmentKeepsWhatItHad() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let records = [
+            PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: Self.availableID, role: .speed, displayName: "Wahoo SPEED")
+        ]
+        let store = makeStore(
+            devices: [
+                Self.sensor(id: Self.pairedID, name: "Wahoo RPM", roles: [.cadence],
+                            state: .active, capabilities: Self.combo),
+                Self.sensor(id: Self.availableID, name: "Wahoo SPEED", roles: [.speed],
+                            state: .active, capabilities: Self.wheelOnly)
+            ],
+            pairedSensors: records,
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.rowTapped(Self.pairedID))
+        await store.send(.roleDialog(.presented(.chose(peripheralID: Self.pairedID, roles: [.speed]))))
+        await store.send(.collisionAlert(.dismiss))
+        await store.finish()
+
+        // No pairing was in flight — `pendingPairing` is what tells the two cases
+        // apart, and unpairing here would drop a working sensor the rider never touched.
+        #expect(log.value == [])
+        #expect(store.state.preferences.pairedSensors == records)
+    }
+
+    @Test("Both against two occupied roles raises one confirmation naming both")
+    func bothAgainstTwoIncumbentsRaisesOneConfirmation() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [
+                Self.speedIncumbent,
+                PairedSensor(peripheralID: Self.otherPairedID, role: .cadence, displayName: "Garmin GSC-10")
+            ],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, [
+            Self.sensor(id: Self.availableID, name: "Wahoo RPM", capabilities: Self.combo)
+        ]))
+        await store.send(.roleDialog(.presented(
+            .chose(peripheralID: Self.availableID, roles: [.speed, .cadence])
+        ))) {
+            // One alert, not two. Roles are listed in `SensorRole.allCases` order so
+            // the copy cannot reorder between runs.
+            $0.collisionAlert = Self.expectedCollisionAlert(
+                for: Self.availableID, roles: [.speed, .cadence],
+                title: "Replace two sensors?",
+                message: """
+                    Speed is assigned to Wahoo SPEED.
+                    Cadence is assigned to Garmin GSC-10.
+                    """
+            )
+        }
+        await store.finish()
+        #expect(log.value == [])
+    }
+
+    @Test("Both against one combo holding both names that sensor, not \"two sensors\"")
+    func bothAgainstOneComboNamesIt() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [
+                PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM"),
+                PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM")
+            ],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, [
+            Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.combo)
+        ]))
+        await store.send(.roleDialog(.presented(
+            .chose(peripheralID: Self.availableID, roles: [.speed, .cadence])
+        ))) {
+            $0.collisionAlert = Self.expectedCollisionAlert(
+                for: Self.availableID, roles: [.speed, .cadence],
+                title: "Replace Wahoo RPM?",
+                message: """
+                    Speed is assigned to Wahoo RPM.
+                    Cadence is assigned to Wahoo RPM.
+                    """
+            )
+        }
+        await store.finish()
+        #expect(log.value == [])
+    }
+
+    @Test("A partial collision replaces only the colliding role")
+    func partialCollisionKeepsTheOtherRole() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [
+                PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM"),
+                PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM")
+            ],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, [
+            Self.sensor(id: Self.pairedID, name: "Wahoo RPM", roles: [.speed, .cadence],
+                        state: .active, capabilities: Self.combo),
+            Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.wheelOnly)
+        ]))
+        await store.send(.collisionAlert(.presented(.replace(peripheralID: Self.availableID, roles: [.speed]))))
+        await store.finish()
+
+        // The incumbent keeps cadence and stays connected under it — the client
+        // subtracts only the claimed role, and the slot survives because it is not empty.
+        #expect(store.state.preferences.pairedSensors == [
+            PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: Self.availableID, role: .speed, displayName: "GSC-10")
+        ])
+        #expect(log.value == [
+            .setPairedSensors([Self.pairedID: [.cadence], Self.availableID: [.speed]]),
+            .setRoles(Self.availableID, [.speed])
+        ])
+    }
+
+    @Test("A single-capability sensor skips the role prompt but not the collision check")
+    func singleCapabilitySkipsPromptNotCollisionCheck() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let found = [
+            Self.sensor(id: Self.pairedID, name: "Wahoo SPEED", roles: [.speed],
+                        state: .active, capabilities: Self.wheelOnly),
+            Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.wheelOnly)
+        ]
+        let store = makeStore(
+            pairedSensors: [Self.speedIncumbent],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, found)) {
+            $0.collisionAlert = Self.expectedCollisionAlert(
+                for: Self.availableID, roles: [.speed],
+                title: "Speed is already assigned to Wahoo SPEED."
+            )
+        }
+        await store.finish()
+
+        // Nothing to ask about the role, everything to ask about the incumbent.
+        #expect(store.state.roleDialog == nil)
+        #expect(log.value == [])
+    }
+
+    @Test("An incumbent that is out of range is still named")
+    func outOfRangeIncumbentIsNamed() async {
+        // Only the new sensor is advertising; the incumbent appears on no stream, so
+        // its name can come from nowhere but its own record.
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [Self.speedIncumbent],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, [
+            Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.wheelOnly)
+        ])) {
+            $0.collisionAlert = Self.expectedCollisionAlert(
+                for: Self.availableID, roles: [.speed],
+                title: "Speed is already assigned to Wahoo SPEED."
+            )
+        }
+        await store.finish()
+
+        // The displaced incumbent is not here to be re-paired, so writing before the
+        // rider answers would be the most damaging version of this bug.
+        #expect(log.value == [])
+        #expect(store.state.preferences.pairedSensors == [Self.speedIncumbent])
+    }
+
+    @Test("A reassignment prompt is refused while a pairing is in flight")
+    func reassignmentIsRefusedDuringAnInterrogation() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let records = [
+            PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: Self.otherPairedID, role: .speed, displayName: "Wahoo SPEED")
+        ]
+        let store = makeStore(
+            devices: [
+                Self.sensor(id: Self.pairedID, name: "Wahoo RPM", roles: [.cadence],
+                            state: .active, capabilities: Self.combo),
+                Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.combo)
+            ],
+            pairedSensors: records,
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // Pair tap on GSC-10 starts a 0x2A5C read; the list stays interactive, so the
+        // rider can reach a paired combo row before it answers.
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.rowTapped(Self.pairedID))
+        await store.finish()
+
+        // Raising it would put `pendingPairing` and the prompt on screen out of step:
+        // Cancel would then unpair GSC-10, which the rider never cancelled.
+        #expect(store.state.roleDialog == nil)
+        #expect(store.state.pendingPairing == Self.availableID)
+        #expect(log.value == [])
+        #expect(store.state.preferences.pairedSensors == records)
+    }
+
+    @Test("A device update while the confirmation is up does not clobber it")
+    func deviceUpdateDoesNotClobberTheConfirmation() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let found = Self.speedCollisionDevices()
+        let store = makeStore(
+            pairedSensors: [Self.speedIncumbent],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, found))
+        await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed]))))
+        let raised = store.state.collisionAlert
+        #expect(raised != nil)
+
+        // The sweep timer re-broadcasts every 10s and `pendingPairing` is still set,
+        // so without the prompt guard this re-raises the role sheet over the alert.
+        await store.send(.devicesUpdated(.speedCadence, found))
+        await store.finish()
+
+        #expect(store.state.roleDialog == nil)
+        #expect(store.state.collisionAlert == raised)
+        #expect(log.value == [])
+    }
+
+    @Test("A free role is written without a confirmation")
+    func noCollisionWritesWithoutPrompting() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            pairedSensors: [Self.speedIncumbent],
+            bleCSCClient: Self.recordingClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        // Cadence is unheld, so claiming it displaces nobody.
+        await store.send(.devicesUpdated(.speedCadence, [
+            Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.crankOnly)
+        ]))
+        await store.finish()
+
+        #expect(store.state.collisionAlert == nil)
+        #expect(log.value == [
+            .setPairedSensors([Self.pairedID: [.speed], Self.availableID: [.cadence]]),
+            .setRoles(Self.availableID, [.cadence])
         ])
     }
 
@@ -671,6 +1055,7 @@ struct DeviceManagementFeatureTests {
         await store.send(.pairButtonTapped(Self.availableID))
         await store.send(.devicesUpdated(.speedCadence, found))
         await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed]))))
+        await store.send(.collisionAlert(.presented(.replace(peripheralID: Self.availableID, roles: [.speed]))))
         await store.finish()
 
         // `setRoles` strips the incumbent's last role and disconnects it. Pushing

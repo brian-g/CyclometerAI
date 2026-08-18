@@ -57,6 +57,12 @@ struct DeviceManagementFeature {
         /// client's own removal.
         var sources: [SensorKind: [DiscoveredDevice]] = [:]
         @Presents var roleDialog: ConfirmationDialogState<Action.RoleChoice>?
+        /// Raised when the roles a sensor is claiming are already held by another
+        /// peripheral (BLE.md §5.0 step 4). An alert rather than a second
+        /// confirmation dialog: it is a destructive binary confirm with a title, and a
+        /// distinct SwiftUI modifier is what keeps it from racing the role sheet's
+        /// dismissal when the two are raised back to back.
+        @Presents var collisionAlert: AlertState<Action.CollisionChoice>?
         /// The peripheral currently being interrogated for capabilities after a Pair
         /// tap. Non-nil means a pairing is mid-flight, which is what makes a cancelled
         /// prompt release the sensor rather than leave it connected holding no role.
@@ -135,12 +141,20 @@ struct DeviceManagementFeature {
         case unpairButtonTapped(UUID)
         case rowTapped(UUID)
         case roleDialog(PresentationAction<RoleChoice>)
+        case collisionAlert(PresentationAction<CollisionChoice>)
 
         /// The peripheral travels with the choice so the dialog is self-contained —
         /// the reducer doesn't have to remember which row raised it.
         @CasePathable
         enum RoleChoice: Equatable {
             case chose(peripheralID: UUID, roles: Set<SensorRole>)
+        }
+
+        /// Same reason as `RoleChoice`: the claim survives inside the alert, so the
+        /// reducer needs no second field holding what is waiting to be written.
+        @CasePathable
+        enum CollisionChoice: Equatable {
+            case replace(peripheralID: UUID, roles: Set<SensorRole>)
         }
     }
 
@@ -227,7 +241,14 @@ struct DeviceManagementFeature {
 
                 // A pairing in flight is waiting on the 0x2A5C read; the answer
                 // arrives here, on the device list, rather than as its own event.
-                guard let id = state.pendingPairing,
+                //
+                // A prompt already on screen owns that pairing, so this must not
+                // re-derive it. `pendingPairing` stays set across both prompts — it is
+                // what lets Cancel release the peripheral — and the sweep timer
+                // re-broadcasts every 10s, so without this the rider's collision alert
+                // is replaced by the role sheet again a few seconds after answering it.
+                guard state.roleDialog == nil, state.collisionAlert == nil,
+                      let id = state.pendingPairing,
                       let capabilities = merged.first(where: { $0.id == id })?.capabilities
                 else { return reconcile }
 
@@ -237,39 +258,56 @@ struct DeviceManagementFeature {
                     )
                     return reconcile
                 }
-                state.pendingPairing = nil
                 let supported = capabilities.supportedRoles
                 guard !supported.isEmpty else {
                     // Reports neither wheel nor crank — nothing it can be used for.
+                    state.pendingPairing = nil
                     return .concatenate(
                         reconcile,
                         .run { [bleCSCClient] _ in await bleCSCClient.unpair(id) }
                     )
                 }
-                // Single capability: assign it and ask nothing (BLE.md §5.0).
+                // Single capability: assign it and ask nothing about the role
+                // (BLE.md §5.0) — but still run the collision check, which is what
+                // "skips straight to the check" means. `commit` clears
+                // `pendingPairing` itself, and only once nothing is left to confirm.
+                //
                 // Sequential, not merged: both effects push an assignment map, and
                 // the one built last is the one that must land last.
-                return .concatenate(reconcile, apply(supported, to: id, in: &state))
+                return .concatenate(reconcile, commit(supported, to: id, in: &state))
 
             case .pairButtonTapped(let id):
                 state.pendingPairing = id
                 return .run { _ in await bleCSCClient.pair(id) }
 
             case .rowTapped(let id):
-                guard state.reassignableIDs.contains(id) else { return .none }
+                // Not while a pairing is in flight. `pendingPairing` names the
+                // interrogated peripheral, and the dismiss path reads it to decide what
+                // to release — so a reassignment prompt raised on top of one would make
+                // its Cancel unpair the *other* sensor, and its answer would clear the
+                // in-flight marker and strand that peripheral connected holding no roles.
+                guard state.pendingPairing == nil, state.reassignableIDs.contains(id)
+                else { return .none }
                 state.roleDialog = Self.roleDialog(
                     for: id, name: state.devices.first { $0.id == id }?.name
                 )
                 return .none
 
             case .roleDialog(.presented(.chose(let id, let roles))):
+                return commit(roles, to: id, in: &state)
+
+            case .collisionAlert(.presented(.replace(let id, let roles))):
                 state.pendingPairing = nil
                 return apply(roles, to: id, in: &state)
 
-            case .roleDialog(.dismiss):
+            case .roleDialog(.dismiss), .collisionAlert(.dismiss):
                 // Cancelling a *new* pairing must release the sensor: it is connected
                 // holding no roles, and leaving it there would be an invisible
                 // half-pairing. Cancelling a reassignment just keeps what it had.
+                //
+                // Both prompts share this: whichever of them the rider backs out of,
+                // the peripheral behind an in-flight pairing has to be released, and
+                // `pendingPairing` is the only thing that distinguishes the two cases.
                 guard let id = state.pendingPairing else { return .none }
                 state.pendingPairing = nil
                 return .run { [bleCSCClient] _ in await bleCSCClient.unpair(id) }
@@ -295,6 +333,101 @@ struct DeviceManagementFeature {
             }
         }
         .ifLet(\.$roleDialog, action: \.roleDialog)
+        .ifLet(\.$collisionAlert, action: \.collisionAlert)
+    }
+
+    /// Step 4 of the pairing flow (BLE.md §5.0): gate the write on the rider when a
+    /// claimed role already belongs to someone else.
+    ///
+    /// Every path that assigns roles comes through here rather than calling `apply`
+    /// directly — the role prompt's answer, and the auto-assignment a single-capability
+    /// sensor gets without being asked. Role selection therefore always runs *first*,
+    /// which is what makes it possible to name what would be displaced.
+    private func commit(
+        _ roles: Set<SensorRole>,
+        to id: UUID,
+        in state: inout State
+    ) -> Effect<Action> {
+        let incumbents = Self.incumbents(of: roles, excluding: id, in: state.preferences)
+        guard !incumbents.isEmpty else {
+            state.pendingPairing = nil
+            return apply(roles, to: id, in: &state)
+        }
+        // `pendingPairing` deliberately survives into the alert. It is the only record
+        // that this peripheral is connected holding no roles, and so the only thing
+        // that lets Cancel release it rather than leave a half-pairing behind.
+        state.collisionAlert = Self.collisionAlert(for: id, roles: roles, displacing: incumbents)
+        return .none
+    }
+
+    /// The sensors that would be displaced by claiming `roles`, one entry per occupied
+    /// role. Empty when nothing collides.
+    ///
+    /// Read from the durable records rather than the live device list: an incumbent
+    /// that is out of range appears on no discovery stream, and naming it is exactly
+    /// what `PairedSensor.displayName` is retained for.
+    private static func incumbents(
+        of roles: Set<SensorRole>,
+        excluding id: UUID,
+        in preferences: AppPreferences
+    ) -> [PairedSensor] {
+        // `allCases` order, not `Set` order — the copy must not reorder between runs.
+        SensorRole.allCases
+            .filter(roles.contains)
+            .compactMap { role in
+                guard let held = preferences.pairedSensor(for: role), held.peripheralID != id
+                else { return nil }
+                return held
+            }
+    }
+
+    /// One confirmation naming every incumbent, never one per role (UX.md §S11).
+    ///
+    /// A single collision uses the spec's sentence as the title and needs no message.
+    /// Two of them need the itemised form, and the title then depends on whether one
+    /// combo holds both roles or two separate sensors do — "two sensors" would simply
+    /// be false in the first case.
+    private static func collisionAlert(
+        for id: UUID,
+        roles: Set<SensorRole>,
+        displacing incumbents: [PairedSensor]
+    ) -> AlertState<Action.CollisionChoice> {
+        // Grammatical inside a sentence, unlike the role prompt's "This sensor" — this
+        // copy always names the incumbent mid-clause.
+        func name(_ incumbent: PairedSensor) -> String {
+            incumbent.displayName ?? "an unnamed sensor"
+        }
+        let itemised = incumbents
+            .map { "\($0.role.displayName) is assigned to \(name($0))." }
+            .joined(separator: "\n")
+        let displacedPeripherals = Set(incumbents.map(\.peripheralID)).count
+        let title: String
+        let message: String?
+        if incumbents.count == 1, let only = incumbents.first {
+            title = "\(only.role.displayName) is already assigned to \(name(only))."
+            message = nil
+        } else if displacedPeripherals == 1, let sole = incumbents.first {
+            // "two sensors" would be false when one combo holds both roles.
+            title = "Replace \(name(sole))?"
+            message = itemised
+        } else {
+            title = "Replace two sensors?"
+            message = itemised
+        }
+        return AlertState(
+            title: { TextState(title) },
+            actions: {
+                ButtonState(role: .destructive, action: .replace(peripheralID: id, roles: roles)) {
+                    TextState("Replace")
+                }
+                ButtonState(role: .cancel) {
+                    TextState("Cancel")
+                }
+            },
+            // The single-collision title is a whole sentence on its own; a message
+            // repeating it would just be noise, so that case carries none.
+            message: message.map { text in { TextState(text) } }
+        )
     }
 
     /// The single write funnel: persist the decision and push it to the client

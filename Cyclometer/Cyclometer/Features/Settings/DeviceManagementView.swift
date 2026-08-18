@@ -49,6 +49,10 @@ struct DeviceManagementView: View {
         .navigationTitle("Sensors")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog($store.scope(state: \.roleDialog, action: \.roleDialog))
+        // A separate modifier from the role sheet on purpose: the two are raised back
+        // to back on a collision, and one `.confirmationDialog` cannot present the
+        // second while the first is still dismissing.
+        .alert($store.scope(state: \.collisionAlert, action: \.collisionAlert))
         .refreshable { await store.send(.refreshRequested).finish() }
         .task { await store.send(.task).finish() }
         .onDisappear { store.send(.onDisappear) }
