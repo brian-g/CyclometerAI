@@ -417,13 +417,36 @@ Each BLE peripheral (Radar, HR, CSC) manages its own connection state independen
 > the discovery stream and otherwise ignored. `BLECSCClient` works this way since #67 (`pairedAssignments`
 > gates every reconnect).
 >
-> `VariaRadarClient` and `BLEHRClient` do not. Both currently connect to the first peripheral advertising
-> their service whenever `targetPeripheralID` is nil, which is how M2 got data on screen before any pairing UI
-> existed. It has two consequences worth naming, since neither is visible until a second device is in range:
-> the app will adopt a stranger's Varia or a training-partner's strap at a group start, and there is no record
-> behind the connection for S11 to show or the rider to unpair. M10 brings both clients under the same gate,
-> with `setPairedSensor` mirroring `setPairedSensors`, and the same write-ordering rule in §5.0 applies to
-> them once it exists.
+> `VariaRadarClient` and `BLEHRClient` did not. Both connected to the first peripheral advertising
+> their service whenever `targetPeripheralID` was nil, which is how M2 got data on screen before any pairing UI
+> existed. It had two consequences worth naming, since neither is visible until a second device is in range:
+> the app would adopt a stranger's Varia or a training-partner's strap at a group start, and there was no record
+> behind the connection for S11 to show or the rider to unpair.
+
+> **Implemented (#97).** Both clients now hold a `pairedPeripheralID` gate, pushed by `AppFeature` at launch
+> from `AppPreferences.pairedSensor(for:)`, and report every peripheral they see on a `discoveredDevices`
+> stream whether or not it is paired. Three details the shipped shape adds to the sketch above:
+>
+> - **`setPairedSensor` is one endpoint, and §5.0's ordering rule does not apply to it.** The rule exists
+>   because `pairedAssignments` and the CSC teardown are separate calls the caller has to order. A
+>   single-slot client has no partial-role case — "removed from the gate" and "should be disconnected" are
+>   the same question — so `setPairedSensor(nil)` moves the gate and the connection identity in one
+>   critical section. Records-before-teardown holds structurally, and there is no caller obligation to get
+>   wrong. There is no `unpair` on either client.
+> - **The gate is a separate field from `targetPeripheralID`.** Ride finish calls `disconnect()`, which
+>   clears the connection identity; a pairing stored in the same field would silently die every ride. The
+>   same split is why `.stateChanged(.poweredOff)` clears the target and leaves the gate alone.
+> - **The launch push arms the gate; it does not connect.** `BLECentral.connect` is a no-op for a peripheral
+>   CoreBluetooth has not discovered, and there is no retrieve-by-identifier or state restoration (§13). So
+>   "reconnects with no screen open" means the next scan reconnects without the Sensors screen having to be
+>   open — the same guarantee `BLECSCClient` gives. `setPairedSensor` connects immediately only when the
+>   peripheral is already in the client's session inventory, which is what makes S11's Pair button act at
+>   once instead of waiting for the next advertisement.
+>
+> Until #100 writes `.radar` and `.heartRate` records, both gates are permanently closed and neither sensor
+> connects. That is the intended M10 sequencing, not a regression to fix in a hurry: no migration is
+> possible, because the auto-adopted peripheral was never persisted and inferring a record from "whatever is
+> connected" would reintroduce exactly the bug this removed.
 
 ```
                     ┌──────────────┐
