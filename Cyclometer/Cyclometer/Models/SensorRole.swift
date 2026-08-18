@@ -27,6 +27,10 @@ enum SensorRole: String, Codable, Hashable, CaseIterable, Sendable {
     /// this so the CSC client is never handed a radar or HR peripheral to connect to.
     static let cscRoles: Set<SensorRole> = [.speed, .cadence]
 
+    /// The kind of hardware that fills this role, or nil when no MVP profile does.
+    /// The inverse of `SensorKind.init(role:)` — see there for why `.power` is nil.
+    var kind: SensorKind? { SensorKind(role: self) }
+
     var displayName: String {
         switch self {
         case .radar:     "Radar"

@@ -95,6 +95,13 @@ struct BLEHRClientTests {
         await client.setPairedSensor(nil)
     }
 
+    @Test("testValue pairing scan endpoints do not crash")
+    func testValuePairingScan() async {
+        let client = BLEHRClient.testValue
+        await client.beginPairingScan()
+        await client.endPairingScan()
+    }
+
     @Test("testValue discoveredDevices stream completes immediately")
     func testValueDiscoveredDevicesStream() async {
         let client = BLEHRClient.testValue
@@ -585,5 +592,103 @@ struct BLEHRIntegrationTests {
         let replayed = await late.next()
         #expect(replayed?.map(\.id) == [id])
         #expect(replayed?.first?.name == "HRM-Dual")
+    }
+
+    // MARK: - Pairing scan (S11, #98)
+
+    /// This client has no cold-state guard to bypass — `startScanning` is
+    /// unconditional — but it still needs the refcount, because `stopScanning` and
+    /// `disconnect` release the HR UUID from a set the whole app shares.
+    @Test("Ending a pairing scan leaves the ambient dashboard scan running")
+    func endPairingScanRespectsAmbientScan() async {
+        let harness = Harness()
+        await harness.client.startScanning()
+        await harness.client.beginPairingScan()
+
+        await harness.client.endPairingScan()
+        #expect(!harness.calls.value.contains(.stopScanning([hrServiceUUID])))
+
+        await harness.client.beginPairingScan()
+        await harness.client.stopScanning()
+        #expect(!harness.calls.value.contains(.stopScanning([hrServiceUUID])))
+
+        await harness.client.endPairingScan()
+        #expect(harness.calls.value.last == .stopScanning([hrServiceUUID]))
+    }
+
+    /// The one that bites. `BLEClient.requestedServices` is a plain set with no
+    /// per-caller refcount, so ride finish releasing the HR UUID would silently blind
+    /// an open Sensors screen.
+    @Test("Finishing a ride does not kill an open pairing scan")
+    func disconnectRespectsPairingScan() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        await harness.client.startScanning()
+        harness.bringToPaired(id)
+        _ = await harness.devices { $0.contains { $0.id == id } }
+
+        await harness.client.beginPairingScan()
+        await harness.client.disconnect()
+        #expect(!harness.calls.value.contains(.stopScanning([hrServiceUUID])))
+
+        await harness.client.endPairingScan()
+        #expect(harness.calls.value.last == .stopScanning([hrServiceUUID]))
+    }
+
+    /// A strap that drops mid-ride reconnects by rescanning, and that rescan bypasses
+    /// `startScanning()`. If it did not register as an ambient scan, closing the Sensors
+    /// screen would release the radio and strand the reconnect.
+    @Test("A reconnect rescan survives the Sensors screen closing")
+    func reconnectRescanCountsAsAmbient() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        await harness.client.beginPairingScan()
+        harness.bringToPaired(id)
+        _ = await harness.devices { $0.contains { $0.id == id } }
+
+        harness.events.yield(.disconnected(id: id, error: nil))
+        // Sync point: the rescan is the last transport call the handler makes.
+        while harness.calls.value.last != .startScanning([hrServiceUUID]) { await Task.yield() }
+
+        await harness.client.endPairingScan()
+        #expect(!harness.calls.value.contains(.stopScanning([hrServiceUUID])))
+    }
+
+    @Test("A pairing scan re-issues the hardware scan, which is what refresh restarts")
+    func pairingScanReissuesTheScan() async {
+        let harness = Harness()
+        await harness.client.beginPairingScan()
+        await harness.client.beginPairingScan()
+        #expect(harness.calls.value == [.startScanning([hrServiceUUID]), .startScanning([hrServiceUUID])])
+
+        await harness.client.endPairingScan()
+        #expect(!harness.calls.value.contains(.stopScanning([hrServiceUUID])))
+    }
+
+    @Test("Discovery rows carry the heart-rate tag, its role and its lifecycle")
+    func discoveryRowsAreTagged() async {
+        let harness = Harness()
+        let paired = UUID()
+        let stranger = UUID()
+        await harness.pair(paired)
+
+        harness.events.yield(.discovered(id: stranger, name: "Training partner", rssi: -70, services: [hrServiceUUID]))
+        harness.bringToPaired(paired, name: "Polar H10")
+
+        let devices = await harness.devices { list in
+            list.first { $0.id == paired }?.connectionState == .active && list.count == 2
+        }
+        let mine = devices.first { $0.id == paired }!
+        #expect(mine.kinds == [.heartRate])
+        #expect(mine.roles == [.heartRate])
+        #expect(mine.isPaired)
+
+        let theirs = devices.first { $0.id == stranger }!
+        #expect(theirs.kinds == [.heartRate])
+        #expect(theirs.roles.isEmpty)
+        // Nothing is tracked about a strap this client will not adopt.
+        #expect(theirs.connectionState == nil)
     }
 }

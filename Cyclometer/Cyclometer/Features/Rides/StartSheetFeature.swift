@@ -126,17 +126,10 @@ struct StartSheetFeature {
         }
     }
 
-    // The two client `ConnectionState` enums are identical in shape but distinct types;
-    // map each to the sheet's three-state badge model.
-    private static func status(from state: VariaRadarClient.ConnectionState) -> SensorRow.Status {
-        switch state {
-        case .disconnected: .notPaired
-        case .scanning, .connecting, .reconnecting: .searching
-        case .connected, .active: .connected
-        }
-    }
-
-    private static func status(from state: BLECSCClient.ConnectionState) -> SensorRow.Status {
+    // Map the shared client lifecycle onto the sheet's three-state badge model. This
+    // was two identical overloads until #98 gave the radar and CSC clients one
+    // `SensorConnectionState` between them.
+    private static func status(from state: SensorConnectionState) -> SensorRow.Status {
         switch state {
         case .disconnected: .notPaired
         case .scanning, .connecting, .reconnecting: .searching

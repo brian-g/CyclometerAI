@@ -82,6 +82,18 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// it a speed or cadence role.
     var cscPairedIDs: Set<UUID> { Set(cscAssignments.keys) }
 
+    /// Every pairing grouped by peripheral, radar and heart rate included — what the
+    /// Sensors screen asks now that it lists all three kinds in one list (#98).
+    ///
+    /// Unfiltered, unlike `cscAssignments`: that one exists to keep non-CSC peripherals
+    /// away from a client that only speaks 0x1816, whereas the screen has to show a
+    /// paired device whatever profile it serves, including one that is out of range and
+    /// so appears on no discovery stream at all.
+    var pairedRoles: [UUID: Set<SensorRole>] {
+        Dictionary(grouping: pairedSensors, by: \.peripheralID)
+            .mapValues { Set($0.map(\.role)) }
+    }
+
     init() {}
 
     /// Written by hand because the synthesised `init(from:)` does *not* fall back to

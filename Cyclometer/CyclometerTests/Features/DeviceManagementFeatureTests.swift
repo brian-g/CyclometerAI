@@ -9,6 +9,8 @@ struct DeviceManagementFeatureTests {
 
     private static let pairedID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
     private static let availableID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!
+    private static let radarID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C3")!
+    private static let hrID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D4")!
 
     private static let combo = BLECSCClient.Capabilities(
         supportsWheelRevolutions: true, supportsCrankRevolutions: true
@@ -20,18 +22,35 @@ struct DeviceManagementFeatureTests {
         supportsWheelRevolutions: false, supportsCrankRevolutions: true
     )
 
+    /// A CSC row as `BLECSCClient` would emit it. Kind is fixed here because the CSC
+    /// stream only ever carries `.speedCadence`; the radar and HR helpers below are the
+    /// other two sources the merge draws on.
     private static func sensor(
         id: UUID,
         name: String?,
         roles: Set<SensorRole> = [],
-        state: BLECSCClient.ConnectionState? = nil,
+        state: SensorConnectionState? = nil,
         battery: Int? = nil,
-        capabilities: BLECSCClient.Capabilities? = nil
-    ) -> BLECSCClient.DiscoveredSensor {
+        capabilities: CSCCapabilities? = nil
+    ) -> DiscoveredDevice {
         .init(
-            id: id, name: name, roles: roles, connectionState: state,
-            batteryPercent: battery, capabilities: capabilities
+            id: id, name: name, kinds: [.speedCadence], roles: roles,
+            connectionState: state, batteryPercent: battery, capabilities: capabilities
         )
+    }
+
+    private static func radar(
+        id: UUID, name: String?, paired: Bool = false, state: SensorConnectionState? = nil
+    ) -> DiscoveredDevice {
+        .init(id: id, name: name, kinds: [.radar],
+              roles: paired ? [.radar] : [], connectionState: state)
+    }
+
+    private static func strap(
+        id: UUID, name: String?, paired: Bool = false, state: SensorConnectionState? = nil
+    ) -> DiscoveredDevice {
+        .init(id: id, name: name, kinds: [.heartRate],
+              roles: paired ? [.heartRate] : [], connectionState: state)
     }
 
     /// One log across all three write endpoints. The ordering *between* them is the
@@ -73,22 +92,32 @@ struct DeviceManagementFeatureTests {
     /// leak between tests. Seeding happens inside the same scope, otherwise the seed
     /// and the store would read different storage — same idiom as SettingsFeatureTests.
     private func makeStore(
-        devices: [BLECSCClient.DiscoveredSensor] = [],
+        devices: [DiscoveredDevice] = [],
+        radarDevices: [DiscoveredDevice] = [],
+        hrDevices: [DiscoveredDevice] = [],
         pairedSensors: [PairedSensor] = [],
-        bleCSCClient: BLECSCClient = .testValue
+        bleCSCClient: BLECSCClient = .testValue,
+        variaRadarClient: VariaRadarClient = .testValue,
+        bleHRClient: BLEHRClient = .testValue
     ) -> TestStoreOf<DeviceManagementFeature> {
         let storage = FileStorage.inMemory
+        var sources: [SensorKind: [DiscoveredDevice]] = [:]
+        if !devices.isEmpty { sources[.speedCadence] = devices }
+        if !radarDevices.isEmpty { sources[.radar] = radarDevices }
+        if !hrDevices.isEmpty { sources[.heartRate] = hrDevices }
         return withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
             $preferences.withLock { $0.pairedSensors = pairedSensors }
             return TestStore(
-                initialState: DeviceManagementFeature.State(devices: devices)
+                initialState: DeviceManagementFeature.State(sources: sources)
             ) {
                 DeviceManagementFeature()
             } withDependencies: {
                 $0.bleCSCClient = bleCSCClient
+                $0.variaRadarClient = variaRadarClient
+                $0.bleHRClient = bleHRClient
                 $0.defaultFileStorage = storage
             }
         }
@@ -96,39 +125,132 @@ struct DeviceManagementFeatureTests {
 
     // MARK: Scanning
 
-    @Test("Appearing starts a pairing scan and pipes the device stream into state")
-    func taskStartsScanAndSubscribes() async {
-        let (stream, continuation) = AsyncStream<[BLECSCClient.DiscoveredSensor]>.makeStream()
-        let scansStarted = LockIsolated(0)
-        var ble = BLECSCClient.testValue
-        ble.beginPairingScan = { scansStarted.withValue { $0 += 1 } }
-        ble.discoveredSensors = { stream }
+    /// One log across all three clients' scan endpoints. The point is the *balance*
+    /// between them: three separate counters can each show "begun once, ended once"
+    /// while the screen has in fact left one client scanning forever.
+    private enum ScanCall: Equatable {
+        case begin(SensorKind)
+        case end(SensorKind)
+    }
 
-        let store = makeStore(bleCSCClient: ble)
+    /// The three clients, each recording into one shared log and serving one stream.
+    private static func recordingClients(
+        into log: LockIsolated<[ScanCall]>,
+        csc: AsyncStream<[DiscoveredDevice]> = AsyncStream { $0.finish() },
+        radar: AsyncStream<[DiscoveredDevice]> = AsyncStream { $0.finish() },
+        hr: AsyncStream<[DiscoveredDevice]> = AsyncStream { $0.finish() }
+    ) -> (BLECSCClient, VariaRadarClient, BLEHRClient) {
+        var cscClient = BLECSCClient.testValue
+        cscClient.beginPairingScan = { log.withValue { $0.append(.begin(.speedCadence)) } }
+        cscClient.endPairingScan = { log.withValue { $0.append(.end(.speedCadence)) } }
+        cscClient.discoveredDevices = { csc }
+
+        var radarClient = VariaRadarClient.testValue
+        radarClient.beginPairingScan = { log.withValue { $0.append(.begin(.radar)) } }
+        radarClient.endPairingScan = { log.withValue { $0.append(.end(.radar)) } }
+        radarClient.discoveredDevices = { radar }
+
+        var hrClient = BLEHRClient.testValue
+        hrClient.beginPairingScan = { log.withValue { $0.append(.begin(.heartRate)) } }
+        hrClient.endPairingScan = { log.withValue { $0.append(.end(.heartRate)) } }
+        hrClient.discoveredDevices = { hr }
+
+        return (cscClient, radarClient, hrClient)
+    }
+
+    @Test("Appearing starts a pairing scan on every client and pipes each stream into state")
+    func taskStartsScanAndSubscribes() async {
+        let (stream, continuation) = AsyncStream<[DiscoveredDevice]>.makeStream()
+        let log = LockIsolated<[ScanCall]>([])
+        let (csc, radar, hr) = Self.recordingClients(into: log, csc: stream)
+
+        let store = makeStore(bleCSCClient: csc, variaRadarClient: radar, bleHRClient: hr)
         await store.send(.task)
-        #expect(scansStarted.value == 1)
+        #expect(log.value == [.begin(.speedCadence), .begin(.radar), .begin(.heartRate)])
 
         let found = [Self.sensor(id: Self.availableID, name: "GSC-10")]
         continuation.yield(found)
         await store.receive(\.devicesUpdated) {
-            $0.devices = found
+            $0.sources[.speedCadence] = found
         }
 
         continuation.finish()
         await store.finish()
     }
 
-    @Test("Leaving the screen ends the pairing scan")
-    func onDisappearEndsScan() async {
-        let scansEnded = LockIsolated(0)
-        var ble = BLECSCClient.testValue
-        ble.endPairingScan = { scansEnded.withValue { $0 += 1 } }
+    @Test("Each client's stream lands in its own slice of state")
+    func eachStreamFeedsItsOwnSource() async {
+        let (radarStream, radarContinuation) = AsyncStream<[DiscoveredDevice]>.makeStream()
+        let (hrStream, hrContinuation) = AsyncStream<[DiscoveredDevice]>.makeStream()
+        let log = LockIsolated<[ScanCall]>([])
+        let (csc, radar, hr) = Self.recordingClients(into: log, radar: radarStream, hr: hrStream)
 
-        let store = makeStore(bleCSCClient: ble)
+        let store = makeStore(bleCSCClient: csc, variaRadarClient: radar, bleHRClient: hr)
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.task)
+
+        let varia = [Self.radar(id: Self.radarID, name: "Varia RTL515")]
+        radarContinuation.yield(varia)
+        await store.receive(\.devicesUpdated) { $0.sources[.radar] = varia }
+
+        let polar = [Self.strap(id: Self.hrID, name: "Polar H10")]
+        hrContinuation.yield(polar)
+        await store.receive(\.devicesUpdated) { $0.sources[.heartRate] = polar }
+
+        #expect(store.state.devices.map(\.name) == ["Polar H10", "Varia RTL515"])
+
+        radarContinuation.finish()
+        hrContinuation.finish()
+        await store.finish()
+    }
+
+    @Test("Leaving the screen ends the pairing scan on every client")
+    func onDisappearEndsScan() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let (csc, radar, hr) = Self.recordingClients(into: log)
+
+        let store = makeStore(bleCSCClient: csc, variaRadarClient: radar, bleHRClient: hr)
         await store.send(.onDisappear)
         await store.finish()
 
-        #expect(scansEnded.value == 1)
+        #expect(log.value == [.end(.speedCadence), .end(.radar), .end(.heartRate)])
+    }
+
+    @Test("Appear and disappear balance across all three clients")
+    func scanLifecycleBalances() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let (csc, radar, hr) = Self.recordingClients(into: log)
+
+        let store = makeStore(bleCSCClient: csc, variaRadarClient: radar, bleHRClient: hr)
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.task)
+        await store.send(.onDisappear)
+        await store.finish()
+
+        for kind in SensorKind.allCases {
+            #expect(log.value.filter { $0 == .begin(kind) }.count == 1)
+            #expect(log.value.filter { $0 == .end(kind) }.count == 1)
+        }
+    }
+
+    /// Refresh takes the extra reference *before* releasing it, per client. The other
+    /// order would let the refcount reach zero between the two calls and drop the radio
+    /// mid-refresh — and on a client with no other holder, that is a real scan restart
+    /// the rider would see as an empty list.
+    @Test("Pull to refresh re-issues the scan on every client, staying balanced")
+    func refreshRestartsEveryScan() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let (csc, radar, hr) = Self.recordingClients(into: log)
+
+        let store = makeStore(bleCSCClient: csc, variaRadarClient: radar, bleHRClient: hr)
+        await store.send(.refreshRequested)
+        await store.finish()
+
+        #expect(log.value == [
+            .begin(.speedCadence), .end(.speedCadence),
+            .begin(.radar), .end(.radar),
+            .begin(.heartRate), .end(.heartRate)
+        ])
     }
 
     // MARK: Pairing and role selection
@@ -156,8 +278,8 @@ struct DeviceManagementFeatureTests {
         }
 
         let found = [Self.sensor(id: Self.availableID, name: "Wahoo RPM", capabilities: Self.combo)]
-        await store.send(.devicesUpdated(found)) {
-            $0.devices = found
+        await store.send(.devicesUpdated(.speedCadence, found)) {
+            $0.sources[.speedCadence] = found
             $0.roleDialog = Self.expectedDialog(for: Self.availableID, name: "Wahoo RPM")
         }
         await store.finish()
@@ -185,8 +307,8 @@ struct DeviceManagementFeatureTests {
         }
 
         let found = [Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: capabilities)]
-        await store.send(.devicesUpdated(found)) {
-            $0.devices = found
+        await store.send(.devicesUpdated(.speedCadence, found)) {
+            $0.sources[.speedCadence] = found
             $0.pendingPairing = nil
             $0.$preferences.withLock {
                 $0.pairedSensors = [
@@ -217,7 +339,7 @@ struct DeviceManagementFeatureTests {
         await store.send(.pairButtonTapped(Self.availableID))
         // The capabilities arriving is what raises the prompt; sending the choice
         // without it would be a presentation action with no presented state.
-        await store.send(.devicesUpdated(found))
+        await store.send(.devicesUpdated(.speedCadence, found))
         #expect(store.state.roleDialog != nil)
         await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed, .cadence]))))
         await store.finish()
@@ -242,7 +364,7 @@ struct DeviceManagementFeatureTests {
         let store = makeStore(bleCSCClient: ble)
         store.exhaustivity = .off(showSkippedAssertions: false)
         await store.send(.pairButtonTapped(Self.availableID))
-        await store.send(.devicesUpdated(found))
+        await store.send(.devicesUpdated(.speedCadence, found))
         await store.send(.roleDialog(.dismiss))
         await store.finish()
 
@@ -326,7 +448,7 @@ struct DeviceManagementFeatureTests {
         )
         store.exhaustivity = .off(showSkippedAssertions: false)
         await store.send(.pairButtonTapped(Self.availableID))
-        await store.send(.devicesUpdated(found))
+        await store.send(.devicesUpdated(.speedCadence, found))
         await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed]))))
         await store.finish()
 
@@ -352,7 +474,80 @@ struct DeviceManagementFeatureTests {
         #expect(store.state.availableDevices.map(\.id) == [Self.availableID])
     }
 
-    /// The case `DiscoveredSensor.isPaired` cannot express: the sensor is paired but
+    // MARK: Unified discovery (#98)
+
+    @Test("Mixed advertisements produce one list, paired records first")
+    func mixedFixturesProduceOneList() {
+        let store = makeStore(
+            devices: [Self.sensor(id: Self.availableID, name: "GSC-10")],
+            radarDevices: [Self.radar(id: Self.radarID, name: "Varia RTL515")],
+            hrDevices: [Self.strap(id: Self.hrID, name: "Polar H10", paired: true, state: .active)],
+            pairedSensors: [
+                PairedSensor(peripheralID: Self.hrID, role: .heartRate, displayName: "Polar H10")
+            ]
+        )
+
+        #expect(store.state.pairedDevices.map(\.id) == [Self.hrID])
+        #expect(store.state.availableDevices.map(\.name) == ["GSC-10", "Varia RTL515"])
+    }
+
+    /// The dedupe AC. A device advertising two supported services arrives on two
+    /// streams; appending both would give the rider two rows for one piece of hardware,
+    /// each claiming half of what it can do.
+    @Test("A device advertising two supported services is one row carrying both tags")
+    func multiProfileDeviceIsOneRow() {
+        let combo = UUID(uuidString: "00000000-0000-0000-0000-0000000000E5")!
+        let store = makeStore(
+            devices: [Self.sensor(id: combo, name: "Combo", capabilities: Self.wheelOnly)],
+            hrDevices: [Self.strap(id: combo, name: "Combo", paired: true, state: .active)]
+        )
+
+        #expect(store.state.devices.count == 1)
+        let row = store.state.devices[0]
+        #expect(row.kinds == [.speedCadence, .heartRate])
+        #expect(row.roles == [.heartRate])
+        // The CSC stream had no connection to report; HR's `.active` is the liveliest
+        // answer and the one the row shows.
+        #expect(row.connectionState == .active)
+        // Capabilities survive the fold even though only one source could answer.
+        #expect(row.capabilities == Self.wheelOnly)
+    }
+
+    /// A merge that dropped the disconnected half would be equally wrong — the point is
+    /// that the row reflects whichever client is actually talking to the hardware.
+    @Test("The liveliest connection state wins a merge")
+    func mergePicksTheLiveliestState() {
+        let combo = UUID(uuidString: "00000000-0000-0000-0000-0000000000E5")!
+        let store = makeStore(
+            devices: [Self.sensor(id: combo, name: "Combo", roles: [.speed], state: .reconnecting)],
+            radarDevices: [Self.radar(id: combo, name: "Combo", paired: true, state: .disconnected)]
+        )
+
+        let row = store.state.devices[0]
+        #expect(row.connectionState == .reconnecting)
+        #expect(row.roles == [.speed, .radar])
+    }
+
+    /// AC3 for a kind nothing can pair yet: #100 writes `.radar` records, but the list
+    /// has to be able to show one the moment it exists, or that issue lands blind.
+    @Test("A paired radar that is out of range is listed and marked disconnected")
+    func outOfRangePairedRadarStillListed() {
+        let store = makeStore(
+            pairedSensors: [
+                PairedSensor(peripheralID: Self.radarID, role: .radar, displayName: "Varia RTL515")
+            ]
+        )
+
+        let row = try! #require(store.state.pairedDevices.first)
+        #expect(store.state.pairedDevices.count == 1)
+        #expect(row.id == Self.radarID)
+        #expect(row.name == "Varia RTL515")
+        #expect(row.kinds == [.radar])
+        #expect(row.connectionState == .disconnected)
+        #expect(store.state.availableDevices.isEmpty)
+    }
+
+    /// The case `DiscoveredDevice.isPaired` cannot express: the sensor is paired but
     /// out of range, so it holds no roles in the client. It must still appear under
     /// Paired — with a Disconnected subtitle — or the rider cannot unpair it.
     @Test("A paired sensor that is out of range still shows as paired")
@@ -432,7 +627,7 @@ struct DeviceManagementFeatureTests {
         )
         store.exhaustivity = .off(showSkippedAssertions: false)
         await store.send(.pairButtonTapped(Self.availableID))
-        await store.send(.devicesUpdated(found))
+        await store.send(.devicesUpdated(.speedCadence, found))
         await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed]))))
         await store.finish()
 
@@ -464,8 +659,8 @@ struct DeviceManagementFeatureTests {
 
         let found = [Self.sensor(id: Self.pairedID, name: "Wahoo RPM", roles: [.speed],
                                  state: .active, capabilities: Self.wheelOnly)]
-        await store.send(.devicesUpdated(found)) {
-            $0.devices = found
+        await store.send(.devicesUpdated(.speedCadence, found)) {
+            $0.sources[.speedCadence] = found
             $0.$preferences.withLock {
                 $0.pairedSensors = [
                     PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM")
@@ -486,8 +681,8 @@ struct DeviceManagementFeatureTests {
         )
 
         let found = [Self.sensor(id: Self.pairedID, name: "GSC-10", capabilities: Self.wheelOnly)]
-        await store.send(.devicesUpdated(found)) {
-            $0.devices = found
+        await store.send(.devicesUpdated(.speedCadence, found)) {
+            $0.sources[.speedCadence] = found
             $0.$preferences.withLock { $0.pairedSensors = [] }
         }
         await store.finish()
@@ -516,7 +711,7 @@ struct DeviceManagementFeatureTests {
             // cadence, so the record stands.
             Self.sensor(id: Self.availableID, name: "GSC-10", roles: [.cadence], state: .active)
         ]
-        await store.send(.devicesUpdated(found)) { $0.devices = found }
+        await store.send(.devicesUpdated(.speedCadence, found)) { $0.sources[.speedCadence] = found }
         await store.finish()
 
         #expect(log.value.isEmpty)
@@ -543,7 +738,7 @@ struct DeviceManagementFeatureTests {
                         state: .active, capabilities: Self.wheelOnly),
             Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.crankOnly)
         ]
-        await store.send(.devicesUpdated(found))
+        await store.send(.devicesUpdated(.speedCadence, found))
         await store.finish()
 
         // Both ran, and the assignment map built last is the one that landed last.
@@ -584,7 +779,7 @@ struct DeviceManagementFeatureTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.pairButtonTapped(Self.pairedID))
-        await store.send(.devicesUpdated(found))
+        await store.send(.devicesUpdated(.speedCadence, found))
         #expect(store.state.roleDialog != nil)
         await store.send(.roleDialog(.presented(.chose(peripheralID: Self.pairedID, roles: [.speed]))))
         await store.finish()
@@ -635,8 +830,14 @@ struct DeviceManagementFeatureTests {
             ]
         )
 
-        #expect(store.state.pairedDevices.isEmpty)
-        #expect(store.state.availableDevices.map(\.id) == [Self.pairedID])
+        // It sorts into Paired now that the list spans all three kinds (#98) — it *is*
+        // paired, and leaving it under Available would have contradicted the section.
+        // What #93 protects is that it stays *claimable*: the record it holds is not a
+        // CSC one, so both CSC roles are still free and the row keeps a Pair button
+        // (`DeviceRow.holdsCSCRole`), not an Unpair one that would do nothing.
+        #expect(store.state.pairedDevices.map(\.id) == [Self.pairedID])
+        #expect(store.state.availableDevices.isEmpty)
+        #expect(store.state.pairedDevices[0].roles.isDisjoint(with: SensorRole.cscRoles))
         // Not re-promptable either: there is no CSC pairing here to reassign.
         #expect(store.state.reassignableIDs.isEmpty)
     }
@@ -654,7 +855,7 @@ struct DeviceManagementFeatureTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         // Firmware now reports wheel data only — the cadence record has to go.
-        await store.send(.devicesUpdated([
+        await store.send(.devicesUpdated(.speedCadence, [
             Self.sensor(id: Self.pairedID, name: "Varia RCT715", roles: [.cadence],
                         state: .active, capabilities: Self.wheelOnly)
         ]))

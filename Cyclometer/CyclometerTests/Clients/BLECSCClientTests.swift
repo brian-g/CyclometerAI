@@ -415,9 +415,9 @@ struct BLECSCIntegrationTests {
         /// get a sync point for free from the state stream; device-list assertions
         /// need this instead.
         func devices(
-            matching predicate: @Sendable ([BLECSCClient.DiscoveredSensor]) -> Bool
-        ) async -> [BLECSCClient.DiscoveredSensor] {
-            for await list in client.discoveredSensors() where predicate(list) { return list }
+            matching predicate: @Sendable ([DiscoveredDevice]) -> Bool
+        ) async -> [DiscoveredDevice] {
+            for await list in client.discoveredDevices() where predicate(list) { return list }
             return []
         }
 
@@ -959,7 +959,7 @@ struct BLECSCIntegrationTests {
         #expect(await cadenceBattery.next() == 15)
 
         // And the device list carries each peripheral's own level for the S11 rows.
-        var devices = harness.client.discoveredSensors().makeAsyncIterator()
+        var devices = harness.client.discoveredDevices().makeAsyncIterator()
         let listed = await devices.next() ?? []
         #expect(listed.first { $0.id == speedSensor }?.batteryPercent == 90)
         #expect(listed.first { $0.id == cadenceSensor }?.batteryPercent == 15)
@@ -1117,7 +1117,7 @@ struct BLECSCIntegrationTests {
 
         await harness.client.setRoles(id, [.cadence])
 
-        var devices = harness.client.discoveredSensors().makeAsyncIterator()
+        var devices = harness.client.discoveredDevices().makeAsyncIterator()
         let listed = await devices.next() ?? []
         #expect(listed.first { $0.id == id }?.roles == [.cadence])
     }
@@ -1130,7 +1130,7 @@ struct BLECSCIntegrationTests {
 
         await harness.client.setRoles(id, [])
 
-        var devices = harness.client.discoveredSensors().makeAsyncIterator()
+        var devices = harness.client.discoveredDevices().makeAsyncIterator()
         let listed = await devices.next() ?? []
         #expect(listed.first { $0.id == id }?.roles == [.speed])
         #expect(harness.disconnected.value.isEmpty)
@@ -1255,7 +1255,7 @@ struct BLECSCIntegrationTests {
     }
 
     @Test("Discovered-sensors replays a discovery that happened before subscribing")
-    func discoveredSensorsReplaysPriorDiscovery() async {
+    func discoveredDevicesReplaysPriorDiscovery() async {
         let harness = Harness()
         let id = UUID()
         await harness.pair(id, roles: [.speed, .cadence])
@@ -1268,7 +1268,7 @@ struct BLECSCIntegrationTests {
         // Sync point: the event has been fully processed once the role reacts to it.
         #expect(await speedStates.next() == .connecting)
 
-        var devices = harness.client.discoveredSensors().makeAsyncIterator()
+        var devices = harness.client.discoveredDevices().makeAsyncIterator()
         let list = await devices.next()
         #expect(list?.count == 1)
         #expect(list?.first?.id == id)
@@ -1277,12 +1277,12 @@ struct BLECSCIntegrationTests {
     }
 
     @Test("Discovered-sensors reports a sensor as holding no roles after unpair")
-    func discoveredSensorsTracksUnpair() async {
+    func discoveredDevicesTracksUnpair() async {
         let harness = Harness()
         let id = UUID()
         await harness.pair(id, roles: [.speed, .cadence])
 
-        var devices = harness.client.discoveredSensors().makeAsyncIterator()
+        var devices = harness.client.discoveredDevices().makeAsyncIterator()
         #expect(await devices.next()?.isEmpty == true)
 
         harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -55, services: [cscServiceUUID]))

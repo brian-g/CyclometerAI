@@ -1,13 +1,20 @@
 import ComposableArchitecture
 import Foundation
 
-/// S11 (subset) — Device Management. Scans for CSC sensors, lists what was found,
-/// and pairs, unpairs or reassigns one at a time.
+/// S11 — Device Management. Scans for every supported sensor, lists what was found as
+/// one deduped device list, and pairs, unpairs or reassigns one at a time.
 ///
-/// Scope is deliberately narrow (#68): CSC only, no sorting beyond paired-first, no
-/// per-row status detail. M10 extends this screen with radar / HR sections and richer
-/// status rather than replacing it, so the list is built from a device stream that can
-/// carry other sensor types later.
+/// Discovery spans all three clients (#98). Each reports the peripherals its own scan
+/// filter admitted, tagged with its `SensorKind`; this feature merges them into one row
+/// per `CBPeripheral.identifier`, so a device speaking two supported profiles is one row
+/// carrying both tags rather than two rows the rider has to reconcile. It also owns the
+/// pairing-scan lifecycle: without a `beginPairingScan` per client, `BLECentral`'s
+/// filtered scan never looks for a radar or a strap outside a ride, and no pairing
+/// record for either could ever be created.
+///
+/// Pairing itself is still CSC-only. Writing `.radar` and `.heartRate` records is #100's,
+/// along with the flat Sketch layout that replaces the two sections below — so a row
+/// holding only those roles lists and shows its status, but carries no action.
 ///
 /// Pairings are durable (#67): this feature owns the `PairedSensor` records and pushes
 /// them into `BLECSCClient`, which holds no persistence and connects only what it has
@@ -16,49 +23,79 @@ import Foundation
 struct DeviceManagementFeature {
 
     @Dependency(\.bleCSCClient) var bleCSCClient
+    @Dependency(\.variaRadarClient) var variaRadarClient
+    @Dependency(\.bleHRClient) var bleHRClient
 
     @ObservableState
     struct State: Equatable {
         @Shared(.appPreferences) var preferences
-        /// Live discovery, mirrored from the client. Membership here means "seen this
-        /// scan session", not "paired" — that is `preferences.pairedSensors`.
-        var devices: [BLECSCClient.DiscoveredSensor] = []
+        /// Live discovery, mirrored per client. Membership here means "seen this scan
+        /// session", not "paired" — that is `preferences.pairedSensors`.
+        ///
+        /// Kept split by source rather than merged on arrival: each client re-sends its
+        /// whole list on every change, so the last list from each is the current truth
+        /// for that kind, and merging on read means a stale entry can never survive a
+        /// client's own removal.
+        var sources: [SensorKind: [DiscoveredDevice]] = [:]
         @Presents var roleDialog: ConfirmationDialogState<Action.RoleChoice>?
         /// The peripheral currently being interrogated for capabilities after a Pair
         /// tap. Non-nil means a pairing is mid-flight, which is what makes a cancelled
         /// prompt release the sensor rather than leave it connected holding no role.
         var pendingPairing: UUID? = nil
 
-        /// Built from the persisted records, not from `DiscoveredSensor.isPaired`: a
-        /// paired sensor that is out of range holds no roles in the client, and would
+        /// Every peripheral seen this session, one row each.
+        ///
+        /// The dedupe is the point: a combo device advertising CSC and heart rate
+        /// arrives on two streams, and appending both would give the rider two rows for
+        /// one piece of hardware, each claiming half of what it can do.
+        var devices: [DiscoveredDevice] {
+            sources.values.flatMap { $0 }
+                .reduce(into: [UUID: DiscoveredDevice]()) { merged, device in
+                    merged[device.id] = merged[device.id].map { $0.merged(with: device) } ?? device
+                }
+                .values
+                .sorted { ($0.name ?? "").localizedCaseInsensitiveCompare($1.name ?? "") == .orderedAscending }
+        }
+
+        /// Built from the persisted records, not from `DiscoveredDevice.isPaired`: a
+        /// paired sensor that is out of range holds no roles in its client, and would
         /// otherwise drop into Available with a Pair button.
-        var pairedDevices: [BLECSCClient.DiscoveredSensor] {
-            preferences.cscAssignments
+        ///
+        /// Covers every role now that the list spans all three kinds (#98) — a paired
+        /// radar has to appear here, and be marked disconnected, even though nothing
+        /// writes such a record until #100.
+        var pairedDevices: [DiscoveredDevice] {
+            let seen = devices
+            return preferences.pairedRoles
                 .map { id, roles in
-                    devices.first { $0.id == id }
-                        ?? BLECSCClient.DiscoveredSensor(
+                    seen.first { $0.id == id }
+                        ?? DiscoveredDevice(
                             id: id,
                             name: preferences.pairedSensors.first { $0.peripheralID == id }?.displayName,
+                            // No advertisement to classify it, so the record's own roles
+                            // are the only evidence of what it is.
+                            kinds: Set(roles.compactMap(\.kind)),
                             roles: roles,
-                            connectionState: .disconnected,
-                            batteryPercent: nil,
-                            capabilities: nil
+                            connectionState: .disconnected
                         )
                 }
                 .sorted { ($0.name ?? "").localizedCaseInsensitiveCompare($1.name ?? "") == .orderedAscending }
         }
 
-        /// Keyed on CSC pairings, not on `pairedSensors` membership: a CSC-capable
-        /// peripheral already paired for radar or heart rate holds no CSC role, so it
-        /// belongs here with a Pair button rather than vanishing from both sections.
-        var availableDevices: [BLECSCClient.DiscoveredSensor] {
-            let paired = preferences.cscPairedIDs
+        /// Everything seen but not paired in any role. A peripheral already paired for
+        /// one role stays out of here even when another kind it also serves is free —
+        /// it has a row above, and #99 is what will let a second role be claimed on it.
+        var availableDevices: [DiscoveredDevice] {
+            let paired = Set(preferences.pairedRoles.keys)
             return devices.filter { !paired.contains($0.id) }
         }
 
         /// Paired sensors whose hardware can fill either role, and so are worth
         /// re-prompting. A property rather than a method so the view can reach it
         /// through the store's dynamic member lookup.
+        ///
+        /// Still keyed on `cscPairedIDs`: only a CSC pairing has a role to reassign, and
+        /// only a CSC sensor ever publishes capabilities.
         var reassignableIDs: Set<UUID> {
             let paired = preferences.cscPairedIDs
             return Set(
@@ -72,7 +109,9 @@ struct DeviceManagementFeature {
     enum Action: Equatable {
         case task
         case onDisappear
-        case devicesUpdated([BLECSCClient.DiscoveredSensor])
+        /// Pull to refresh. Restarts the scan on every client.
+        case refreshRequested
+        case devicesUpdated(SensorKind, [DiscoveredDevice])
         case pairButtonTapped(UUID)
         case unpairButtonTapped(UUID)
         case rowTapped(UUID)
@@ -91,33 +130,75 @@ struct DeviceManagementFeature {
             switch action {
             case .task:
                 return .merge(
-                    .run { _ in await bleCSCClient.beginPairingScan() },
+                    // Sequential inside one effect, not three merged ones: a
+                    // deterministic order is what makes the whole lifecycle assertable
+                    // as a single interleaved call log (BLE.md §5.0). Same order as
+                    // `AppFeature.task`'s launch push.
+                    .run { _ in
+                        await bleCSCClient.beginPairingScan()
+                        await variaRadarClient.beginPairingScan()
+                        await bleHRClient.beginPairingScan()
+                    },
                     .run { send in
-                        for await devices in bleCSCClient.discoveredSensors() {
-                            await send(.devicesUpdated(devices))
+                        for await devices in bleCSCClient.discoveredDevices() {
+                            await send(.devicesUpdated(.speedCadence, devices))
+                        }
+                    },
+                    .run { send in
+                        for await devices in variaRadarClient.discoveredDevices() {
+                            await send(.devicesUpdated(.radar, devices))
+                        }
+                    },
+                    .run { send in
+                        for await devices in bleHRClient.discoveredDevices() {
+                            await send(.devicesUpdated(.heartRate, devices))
                         }
                     }
                 )
 
             case .onDisappear:
-                // Explicit rather than relying on effect cancellation: the client's
+                // Explicit rather than relying on effect cancellation: each client's
                 // scan refcount has to be balanced deterministically, and an action
                 // is what a TestStore can assert.
-                return .run { _ in await bleCSCClient.endPairingScan() }
+                return .run { _ in
+                    await bleCSCClient.endPairingScan()
+                    await variaRadarClient.endPairingScan()
+                    await bleHRClient.endPairingScan()
+                }
 
-            case .devicesUpdated(let devices):
-                state.devices = devices
-                let reconcile = reconcileCapabilities(devices, in: &state)
+            case .refreshRequested:
+                // Begin *then* end, per client. `beginPairingScan` unconditionally
+                // re-issues the hardware scan, which is what makes CoreBluetooth
+                // re-advertise peripherals it has already reported — the actual
+                // mechanism behind "restarts the scan". Taking the extra reference
+                // first means the refcount never reaches zero, so the radio is never
+                // dropped mid-refresh, and the pair balances on its own.
+                return .run { _ in
+                    await bleCSCClient.beginPairingScan()
+                    await bleCSCClient.endPairingScan()
+                    await variaRadarClient.beginPairingScan()
+                    await variaRadarClient.endPairingScan()
+                    await bleHRClient.beginPairingScan()
+                    await bleHRClient.endPairingScan()
+                }
+
+            case .devicesUpdated(let kind, let devices):
+                state.sources[kind] = devices
+                // Reconciliation reads the *merged* list, not just the kind that
+                // changed: capabilities only ever arrive from the CSC stream, and a row
+                // sourced elsewhere carries nil and is skipped.
+                let merged = state.devices
+                let reconcile = reconcileCapabilities(merged, in: &state)
 
                 // A pairing in flight is waiting on the 0x2A5C read; the answer
                 // arrives here, on the device list, rather than as its own event.
                 guard let id = state.pendingPairing,
-                      let capabilities = devices.first(where: { $0.id == id })?.capabilities
+                      let capabilities = merged.first(where: { $0.id == id })?.capabilities
                 else { return reconcile }
 
                 if capabilities.requiresRoleSelection {
                     state.roleDialog = Self.roleDialog(
-                        for: id, name: devices.first { $0.id == id }?.name
+                        for: id, name: merged.first { $0.id == id }?.name
                     )
                     return reconcile
                 }
@@ -229,7 +310,7 @@ struct DeviceManagementFeature {
     /// Only peripherals that published capabilities are considered: a read that never
     /// answered says nothing about what the sensor can do.
     private func reconcileCapabilities(
-        _ devices: [BLECSCClient.DiscoveredSensor], in state: inout State
+        _ devices: [DiscoveredDevice], in state: inout State
     ) -> Effect<Action> {
         let corrections = devices.compactMap { device -> (id: UUID, surviving: Set<SensorRole>)? in
             guard let supported = device.capabilities?.supportedRoles else { return nil }

@@ -740,6 +740,131 @@ struct VariaRadarIntegrationTests {
         #expect(replayed?.map(\.id) == [peripheralID])
         #expect(replayed?.first?.name == "Varia RTL515")
     }
+    // MARK: - Pairing scan (S11, #98)
+
+    /// The Sensors screen holds one pairing scan open per client. Radar's ambient
+    /// `startScanning` refuses once anything is connected — deliberately, so a
+    /// re-entered dashboard `.task` can't stomp a live connection back to `.scanning`
+    /// — which is exactly the guard a pairing scan has to get past.
+    @Test("Pairing scan runs even with a radar already connected")
+    func pairingScanBypassesColdStateGuard() async {
+        let harness = Harness()
+        let id = UUID()
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)
+
+        await harness.pair(id)
+        await harness.client.startScanning()
+        #expect(await states.next() == .scanning)
+        harness.events.yield(.discovered(id: id, name: "Varia", rssi: -60, services: [radarServiceUUID]))
+        #expect(await states.next() == .connecting)
+        harness.events.yield(.connected(id: id))
+        #expect(await states.next() == .connected)
+
+        harness.scanned.withValue { $0.removeAll() }
+        await harness.client.startScanning()
+        #expect(harness.scanned.value.isEmpty)   // ambient guard holds
+
+        await harness.client.beginPairingScan()
+        #expect(harness.scanned.value == [[radarServiceUUID]])
+    }
+
+    @Test("A pairing scan does not move the radar's connection state")
+    func pairingScanDoesNotAffectConnectionState() async {
+        let harness = Harness()
+        let id = UUID()
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)
+
+        await harness.pair(id)
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Varia", rssi: -60, services: [radarServiceUUID]))
+
+        // `.connecting` because the gate admitted it — never `.scanning`, which would
+        // read as "Searching" on the ride sidebar behind a settings screen.
+        #expect(await states.next() == .connecting)
+    }
+
+    @Test("Ending a pairing scan leaves the ambient dashboard scan running")
+    func endPairingScanRespectsAmbientScan() async {
+        let harness = Harness()
+        await harness.client.startScanning()      // ambient, from a cold state
+        await harness.client.beginPairingScan()
+
+        await harness.client.endPairingScan()
+        #expect(!harness.calls.value.contains(.stopScanning([radarServiceUUID])))
+
+        // ...and the ambient stop is likewise deferred while a pairing scan is open.
+        await harness.client.beginPairingScan()
+        await harness.client.stopScanning()
+        #expect(!harness.calls.value.contains(.stopScanning([radarServiceUUID])))
+
+        await harness.client.endPairingScan()
+        #expect(harness.calls.value.last == .stopScanning([radarServiceUUID]))
+    }
+
+    /// The one that bites. `BLEClient.requestedServices` is a plain set with no
+    /// per-caller refcount, so ride finish releasing the radar UUID would silently
+    /// blind an open Sensors screen.
+    @Test("Finishing a ride does not kill an open pairing scan")
+    func disconnectRespectsPairingScan() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        await harness.client.startScanning()
+        harness.events.yield(.discovered(id: id, name: "Varia", rssi: -60, services: [radarServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == id } }
+
+        await harness.client.beginPairingScan()
+        await harness.client.disconnect()
+        #expect(!harness.calls.value.contains(.stopScanning([radarServiceUUID])))
+
+        await harness.client.endPairingScan()
+        #expect(harness.calls.value.last == .stopScanning([radarServiceUUID]))
+    }
+
+    @Test("A pairing scan re-issues the hardware scan, which is what refresh restarts")
+    func pairingScanReissuesTheScan() async {
+        let harness = Harness()
+        await harness.client.beginPairingScan()
+        await harness.client.beginPairingScan()
+        #expect(harness.scanned.value == [[radarServiceUUID], [radarServiceUUID]])
+
+        // Balanced back down to one holder: the radio stays up.
+        await harness.client.endPairingScan()
+        #expect(!harness.calls.value.contains(.stopScanning([radarServiceUUID])))
+    }
+
+    @Test("Discovery rows carry the radar tag, its role and its lifecycle")
+    func discoveryRowsAreTagged() async {
+        let harness = Harness()
+        let paired = UUID()
+        let stranger = UUID()
+        await harness.pair(paired)
+
+        harness.events.yield(.discovered(id: stranger, name: "Someone else's Varia", rssi: -70, services: [radarServiceUUID]))
+        harness.events.yield(.discovered(id: paired, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        harness.events.yield(.connected(id: paired))
+        harness.events.yield(.servicesDiscovered(peripheralID: paired, serviceUUIDs: [radarServiceUUID]))
+        harness.events.yield(.characteristicsDiscovered(
+            peripheralID: paired, serviceUUID: radarServiceUUID, characteristicUUIDs: [radarAlertUUID]
+        ))
+
+        let devices = await harness.devices { list in
+            list.first { $0.id == paired }?.connectionState == .active && list.count == 2
+        }
+        let mine = devices.first { $0.id == paired }!
+        #expect(mine.kinds == [.radar])
+        #expect(mine.roles == [.radar])
+        #expect(mine.isPaired)
+
+        let theirs = devices.first { $0.id == stranger }!
+        #expect(theirs.kinds == [.radar])
+        #expect(theirs.roles.isEmpty)
+        // Nothing is tracked about a radar this client will not adopt, so it has no
+        // lifecycle to report — not even `.disconnected`.
+        #expect(theirs.connectionState == nil)
+    }
 }
 
 // MARK: - Test value
@@ -756,6 +881,8 @@ struct VariaRadarTestValueTests {
         await client.disconnect()
         await client.setPairedSensor(UUID())
         await client.setPairedSensor(nil)
+        await client.beginPairingScan()
+        await client.endPairingScan()
     }
 
     @Test("Test value streams complete immediately")
