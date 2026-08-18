@@ -27,7 +27,9 @@
       "Bash(xcrun xcresulttool *)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d\\)[:3000]\\)\")",
       "Bash(git fetch *)",
-      "Bash(git merge *)"
+      "Bash(git merge *)",
+      "Bash(xcodebuild build-for-testing *)",
+      "Bash(echo \"exit=$?\")"
     ]
   },
   "spinnerTipsEnabled": false
