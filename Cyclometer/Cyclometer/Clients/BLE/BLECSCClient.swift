@@ -32,47 +32,18 @@ private let defaultWheelCircumferenceMM = 2096
 /// only its relevant fields from the shared CSC notification stream, so the client
 /// supports up to one peripheral per role simultaneously.
 struct BLECSCClient: Sendable {
-    /// Connection lifecycle per BLE.md §6. `.active` means notifications are
-    /// enabled and measurement data is flowing. State is tracked per role: a role's
-    /// state is the state of the peripheral fulfilling it, or `.disconnected` /
-    /// `.scanning` when no peripheral holds it.
-    enum ConnectionState: Equatable, Sendable {
-        case disconnected
-        case scanning
-        case connecting
-        case connected
-        case active
-        case reconnecting
-    }
-
-    /// A CSC peripheral seen during this scan session, for the pairing UI (S11 subset).
+    /// Connection lifecycle per BLE.md §6. State is tracked per role: a role's state
+    /// is the state of the peripheral fulfilling it, or `.disconnected` / `.scanning`
+    /// when no peripheral holds it.
     ///
-    /// No RSSI field: UX.md S11 resolves "RSSI display: none", and the transport's
-    /// value is discarded at the `.discovered` handler. Add it here if a future
-    /// screen actually renders signal strength.
-    struct DiscoveredSensor: Equatable, Sendable, Identifiable {
-        /// `CBPeripheral.identifier` — stable per device per iOS install.
-        let id: UUID
-        /// Advertised name, or nil if the peripheral didn't advertise one.
-        let name: String?
-        /// Roles this peripheral currently holds. Empty means discovered but unpaired.
-        let roles: Set<SensorRole>
-        /// Connection lifecycle, or nil when unpaired.
-        let connectionState: ConnectionState?
-        /// Battery percentage, or nil when unknown — unpaired, or a sensor that
-        /// doesn't expose the Battery Service.
-        let batteryPercent: Int?
-        /// What the sensor reported via 0x2A5C, or nil until it has been connected
-        /// and read at least once this session. Drives the role prompt: only a
-        /// `requiresRoleSelection` sensor is worth asking about.
-        let capabilities: Capabilities?
+    /// The enum itself moved to `Models/SensorConnectionState.swift` in #98, where
+    /// `DiscoveredDevice` — shared with radar and HR — could refer to it. Kept spelled
+    /// this way so every existing call site and stream reads unchanged.
+    typealias ConnectionState = SensorConnectionState
 
-        /// Holds at least one role in the client right now. Note this is a *live*
-        /// state, not the durable pairing — a persisted sensor that is out of range
-        /// has no roles here. The Sensors screen builds its Paired section from
-        /// `AppPreferences.pairedSensors` for exactly that reason.
-        var isPaired: Bool { !roles.isEmpty }
-    }
+    /// Decoded 0x2A5C payload. Moved to `Models/CSCCapabilities.swift` in #98 for the
+    /// same reason as `ConnectionState`.
+    typealias Capabilities = CSCCapabilities
 
     /// Scan for CSC sensors and reconnect the ones the rider has paired. Nothing is
     /// adopted speculatively: a peripheral is connected only if `setPairedSensors`
@@ -95,8 +66,9 @@ struct BLECSCClient: Sendable {
     /// Disconnect every CSC peripheral. For releasing a single device from the
     /// pairing UI, use `unpair`.
     var disconnect:            @Sendable () async -> Void
-    /// Every CSC peripheral seen this session, paired or not. Replays on subscribe.
-    var discoveredSensors:     @Sendable () -> AsyncStream<[DiscoveredSensor]>
+    /// Every CSC peripheral seen this session, paired or not, tagged
+    /// `.speedCadence`. Replays on subscribe.
+    var discoveredDevices:     @Sendable () -> AsyncStream<[DiscoveredDevice]>
     /// Scan on behalf of the pairing UI. Refcounted and independent of the ambient
     /// dashboard scan, so it still scans while sensors are connected — unlike
     /// `startScanning`, which only starts from a cold state.
@@ -107,7 +79,7 @@ struct BLECSCClient: Sendable {
     /// The rider tapped Pair. Connects the peripheral holding *no* roles, purely to
     /// read its capabilities — taking roles here would strip them off whichever
     /// sensor currently holds them, before the rider has decided anything. The
-    /// capabilities surface on `discoveredSensors()`; the caller then commits the
+    /// capabilities surface on `discoveredDevices()`; the caller then commits the
     /// decision with `setRoles`, or abandons it with `unpair`.
     var pair:                  @Sendable (UUID) async -> Void
     /// Release one peripheral: drop its roles and disconnect it. The caller is
@@ -151,53 +123,6 @@ struct BLECSCClient: Sendable {
     /// After this many failed attempts the sensor is considered lost: its slot is
     /// released and the role falls back to `.disconnected` (BLE.md §6.1).
     static let maxReconnectAttempts = 10
-}
-
-// MARK: - Capability parsing
-
-extension BLECSCClient {
-    /// Decoded CSC Feature (0x2A5C) payload — what the sensor is physically able to
-    /// report, and therefore which roles it can fill (BLE.md §5.0).
-    ///
-    /// Authoritative and available as soon as the characteristic is read, unlike the
-    /// measurement-flags inference it supersedes, which cannot answer until the rider
-    /// starts moving. The flags path survives as a fallback for sensors that don't
-    /// answer the read — see `narrowCapabilitiesLocked`.
-    struct Capabilities: Equatable, Sendable {
-        var supportsWheelRevolutions: Bool   // bit 0 — can fill the Speed role
-        var supportsCrankRevolutions: Bool   // bit 1 — can fill the Cadence role
-
-        init(supportsWheelRevolutions: Bool, supportsCrankRevolutions: Bool) {
-            self.supportsWheelRevolutions = supportsWheelRevolutions
-            self.supportsCrankRevolutions = supportsCrankRevolutions
-        }
-
-        /// Returns nil for malformed payloads. Failable rather than defaulting an
-        /// empty payload to "supports nothing" (as BLE.md §7's sketch did): a frame
-        /// too short to read is a broken frame, and treating it as a real answer
-        /// would strip both roles off a working sensor.
-        init?(featureData: Data) {
-            // Spec'd as 16-bit little-endian. Only the low byte carries bits 0–1, but
-            // read the field as declared rather than assuming a one-byte payload.
-            let bytes = [UInt8](featureData)
-            guard let low = bytes.first else { return nil }
-            let flags = UInt16(low) | (bytes.count > 1 ? UInt16(bytes[1]) << 8 : 0)
-            supportsWheelRevolutions = flags & 0x0001 != 0
-            supportsCrankRevolutions = flags & 0x0002 != 0
-        }
-
-        /// The roles this sensor could fill.
-        var supportedRoles: Set<SensorRole> {
-            var roles: Set<SensorRole> = []
-            if supportsWheelRevolutions { roles.insert(.speed) }
-            if supportsCrankRevolutions { roles.insert(.cadence) }
-            return roles
-        }
-
-        /// Only a sensor that can do both leaves the rider a decision to make; a
-        /// single-capability sensor is auto-assigned with no prompt (BLE.md §5.0).
-        var requiresRoleSelection: Bool { supportsWheelRevolutions && supportsCrankRevolutions }
-    }
 }
 
 // MARK: - Measurement parsing
@@ -352,7 +277,7 @@ extension BLECSCClient: DependencyKey {
             setRoles:              { id, roles in await state.setRoles(peripheralID: id, roles: roles) },
             setPairedSensors:      { assignments in await state.setPairedSensors(assignments) },
             disconnect:            { await state.disconnect() },
-            discoveredSensors:     { state.makeDiscoveredSensorsStream() },
+            discoveredDevices:     { state.makeDiscoveredDevicesStream() },
             beginPairingScan:      { await state.beginPairingScan() },
             endPairingScan:        { await state.endPairingScan() },
             pair:                  { id in await state.pair(peripheralID: id) },
@@ -375,7 +300,7 @@ extension BLECSCClient: DependencyKey {
         setRoles:              { _, _ in },
         setPairedSensors:      { _ in },
         disconnect:            { },
-        discoveredSensors:     { AsyncStream { $0.finish() } },
+        discoveredDevices:     { AsyncStream { $0.finish() } },
         beginPairingScan:      { },
         endPairingScan:        { },
         pair:                  { _ in },
@@ -443,6 +368,13 @@ private final class CSCClientState: @unchecked Sendable {
     /// because that dictionary can't represent a peripheral that advertised no name
     /// (assigning nil removes the key), and the pairing list still needs a row for it.
     private var discoveredIDs: Set<UUID> = []
+    /// Peripherals that have advertised since the current scan generation began.
+    ///
+    /// CoreBluetooth reports a peripheral once per scan session, so "still there" can
+    /// only be re-established by restarting the session — which `beginPairingScan`
+    /// already does. Each restart rotates the generation: whatever failed to re-report
+    /// during the one just ended is gone and leaves the list (#98 follow-up).
+    private var sightedThisGeneration: Set<UUID> = []
     /// What each peripheral told us via 0x2A5C. Keyed separately from `slots` because
     /// it must outlive the connection: the Sensors screen still wants to know a
     /// sensor can do both roles after it has gone out of range.
@@ -462,7 +394,7 @@ private final class CSCClientState: @unchecked Sendable {
     private var stateContinuations: [Int: (role: SensorRole, continuation: AsyncStream<BLECSCClient.ConnectionState>.Continuation)] = [:]
     private var nameContinuations: [Int: (role: SensorRole, continuation: AsyncStream<String?>.Continuation)] = [:]
     private var batteryContinuations: [Int: (role: SensorRole, continuation: AsyncStream<Int?>.Continuation)] = [:]
-    private var discoveredContinuations: [Int: AsyncStream<[BLECSCClient.DiscoveredSensor]>.Continuation] = [:]
+    private var discoveredContinuations: [Int: AsyncStream<[DiscoveredDevice]>.Continuation] = [:]
     private var nextID = 0
     private let lock = NSLock()
 
@@ -504,15 +436,15 @@ private final class CSCClientState: @unchecked Sendable {
         return stream
     }
 
-    func makeDiscoveredSensorsStream() -> AsyncStream<[BLECSCClient.DiscoveredSensor]> {
+    func makeDiscoveredDevicesStream() -> AsyncStream<[DiscoveredDevice]> {
         let id = lock.withLock { () -> Int in let current = nextID; nextID += 1; return current }
-        let (stream, continuation) = AsyncStream<[BLECSCClient.DiscoveredSensor]>.makeStream()
+        let (stream, continuation) = AsyncStream<[DiscoveredDevice]>.makeStream()
         // Replay + register in one critical section, same as the state streams. The
         // replay matters more here: CoreBluetooth won't redeliver `.discovered` for a
         // peripheral already seen this session, so a sheet opened after discovery
         // would otherwise show an empty list until something changed.
         lock.withLock {
-            continuation.yield(discoveredSensorsLocked())
+            continuation.yield(discoveredDevicesLocked())
             discoveredContinuations[id] = continuation
         }
         continuation.onTermination = { [weak self] _ in
@@ -614,7 +546,10 @@ private final class CSCClientState: @unchecked Sendable {
     /// is connected. Deliberately does not touch `isScanning`, so dashboard role
     /// tiles don't flip to `.scanning` behind a settings screen.
     func beginPairingScan() async {
-        lock.withLock { pairingScanCount += 1 }
+        lock.withLock {
+            pairingScanCount += 1
+            rotateDiscoveryGenerationLocked()
+        }
         // Re-issuing the scan restarts the CoreBluetooth session, so peripherals
         // already seen are re-advertised to us rather than being suppressed as
         // duplicates. Subscribers also get the existing inventory replayed on
@@ -695,6 +630,28 @@ private final class CSCClientState: @unchecked Sendable {
 
     /// Lock-free read for log interpolation only.
     private var pairingScanCountSnapshot: Int { lock.withLock { pairingScanCount } }
+
+    /// Close the current scan generation and drop whatever stopped advertising.
+    ///
+    /// Peripherals holding a slot are exempt, and that exemption is the whole reason
+    /// this can't just clear the inventory: **a connected peripheral stops advertising**.
+    /// Sweeping it would delete the row for the very sensor the rider is using.
+    ///
+    /// Must hold the lock.
+    private func rotateDiscoveryGenerationLocked() {
+        let stale = discoveredIDs
+            .subtracting(sightedThisGeneration)
+            .subtracting(slots.keys)
+        sightedThisGeneration = []
+        guard !stale.isEmpty else { return }
+        discoveredIDs.subtract(stale)
+        for id in stale { discoveredNames.removeValue(forKey: id) }
+        // Capabilities survive deliberately: 0x2A5C describes the hardware, so a sensor
+        // that walks away and comes back has not changed what it can do, and keeping the
+        // answer saves re-reading it.
+        logger.notice("discovery sweep dropped \(stale.count) stale peripheral(s)")
+        broadcastDiscoveredLocked()
+    }
 
     /// Set the roles this peripheral holds, replacing whatever it held before.
     ///
@@ -833,6 +790,7 @@ private final class CSCClientState: @unchecked Sendable {
                 // is built from this inventory, and an unnamed sensor still needs a
                 // row.
                 discoveredIDs.insert(id)
+                sightedThisGeneration.insert(id)
                 if let name { discoveredNames[id] = name }
                 broadcastDiscoveredLocked()
                 guard slots[id] == nil, let roles = pairedAssignments[id] else { return nil }
@@ -1048,13 +1006,18 @@ private final class CSCClientState: @unchecked Sendable {
     /// group alphabetical so the list doesn't reshuffle as advertisements arrive.
     /// Built from `discoveredIDs`, an inventory that is never pruned. Must hold the
     /// lock.
-    private func discoveredSensorsLocked() -> [BLECSCClient.DiscoveredSensor] {
+    private func discoveredDevicesLocked() -> [DiscoveredDevice] {
         let ids = discoveredIDs.union(slots.keys)
         return ids.map { id in
             let slot = slots[id]
-            return BLECSCClient.DiscoveredSensor(
+            return DiscoveredDevice(
                 id: id,
                 name: slot?.name ?? discoveredNames[id],
+                // Every peripheral on this stream reached it through the 0x1816 scan
+                // filter, so the tag is constant here. The set only ever gains a second
+                // member once `DeviceManagementFeature` merges this stream with the
+                // radar and HR ones (#98).
+                kinds: [.speedCadence],
                 roles: slot?.roles ?? [],
                 connectionState: slot?.connectionState,
                 batteryPercent: slot?.batteryPercent,
@@ -1071,8 +1034,8 @@ private final class CSCClientState: @unchecked Sendable {
     /// Called wherever `slots` or `discoveredNames` change.
     private func broadcastDiscoveredLocked() {
         guard !discoveredContinuations.isEmpty else { return }
-        let sensors = discoveredSensorsLocked()
-        for continuation in discoveredContinuations.values { continuation.yield(sensors) }
+        let devices = discoveredDevicesLocked()
+        for continuation in discoveredContinuations.values { continuation.yield(devices) }
     }
 
     /// Recompute each role's published state from the slots and broadcast changes.

@@ -1,7 +1,9 @@
 import SwiftUI
 import ComposableArchitecture
 
-/// S11 (subset) — the Sensors screen pushed from Settings.
+/// S11 — the Sensors screen pushed from Settings. Lists radar, heart rate and CSC
+/// devices in one merged list (#98); #100 replaces the two sections below with the flat
+/// Sketch layout and adds pairing for the first two kinds.
 struct DeviceManagementView: View {
     @Bindable var store: StoreOf<DeviceManagementFeature>
 
@@ -41,12 +43,13 @@ struct DeviceManagementView: View {
             } header: {
                 Text("Available")
             } footer: {
-                Text("Speed and cadence sensors only. Radar and heart rate pairing arrive with full device management.")
+                Text("Radar and heart rate sensors are listed here; pairing them arrives with full device management.")
             }
         }
         .navigationTitle("Sensors")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog($store.scope(state: \.roleDialog, action: \.roleDialog))
+        .refreshable { await store.send(.refreshRequested).finish() }
         .task { await store.send(.task).finish() }
         .onDisappear { store.send(.onDisappear) }
     }
@@ -57,7 +60,7 @@ struct DeviceManagementView: View {
 /// *device* that appears and disappears as scanning proceeds and carries a
 /// pair/unpair action, rather than a fixed sensor category.
 private struct DeviceRow: View {
-    let device: BLECSCClient.DiscoveredSensor
+    let device: DiscoveredDevice
     let onAction: () -> Void
 
     var body: some View {
@@ -69,18 +72,34 @@ private struct DeviceRow: View {
             // Only for a device that is actually up: a reconnecting sensor's last
             // known level would sit next to a "Reconnecting…" subtitle and read as
             // current.
-            if let battery = device.batteryPercent, isUp {
+            if let battery = device.batteryPercent, device.isConnected {
                 SensorBatteryLabel(percent: battery)
             }
-            SensorRowButton(device.isPaired ? "Unpair" : "Pair",
-                            tint: device.isPaired ? .cyDestructive : .cyPrimary,
-                            action: onAction)
+            // Pairing is CSC-only until #100 writes `.radar` and `.heartRate` records,
+            // so a radar or a strap lists and reports its status but offers no action —
+            // a button that cannot do anything would be worse than none.
+            if isActionable {
+                SensorRowButton(holdsCSCRole ? "Unpair" : "Pair",
+                                tint: holdsCSCRole ? .cyDestructive : .cyPrimary,
+                                action: onAction)
+            }
         }
     }
 
-    /// Connected, whatever it is doing with its roles.
-    private var isUp: Bool {
-        device.connectionState == .connected || device.connectionState == .active
+    /// Whether this row's button can do anything. True for a device advertising CSC,
+    /// and for one already holding a CSC role — which covers the out-of-range paired
+    /// sensor, whose row is synthesised from the record and so carries no advertised
+    /// kinds beyond what the record implies.
+    private var isActionable: Bool {
+        device.kinds.contains(.speedCadence) || holdsCSCRole
+    }
+
+    /// Keyed on CSC tenancy rather than `isPaired`, because this button only ever acts
+    /// on CSC records (#93). A combo already paired for heart rate sorts into Paired —
+    /// it *is* paired — but its speed and cadence roles are still free, so it keeps a
+    /// Pair button rather than an Unpair one that would silently do nothing.
+    private var holdsCSCRole: Bool {
+        !device.roles.isDisjoint(with: SensorRole.cscRoles)
     }
 
     /// Roles held, or the connection state while it is still settling — a paired
@@ -89,8 +108,8 @@ private struct DeviceRow: View {
         guard device.isPaired else { return nil }
         switch device.connectionState {
         case .active, .connected, .none:
-            // Declaration order (speed, then cadence), not alphabetical — it matches
-            // how the pair is named everywhere else in the app and the specs.
+            // Declaration order (radar, HR, speed, then cadence), not alphabetical — it
+            // matches how roles are named everywhere else in the app and the specs.
             return SensorRole.allCases
                 .filter(device.roles.contains)
                 .map(\.displayName)
@@ -105,31 +124,51 @@ private struct DeviceRow: View {
 
 // MARK: - Previews
 
-// Both previews must override `bleCSCClient`. Previews resolve dependencies to
-// `liveValue` — there is no `previewValue` on this client — so without an override
-// the screen spins up a real CBCentralManager, and the live stream's empty replay
-// clears the list on appear. Seeding `State.devices` alone cannot survive that.
+// All three clients must be overridden. Previews resolve dependencies to `liveValue`
+// — there is no `previewValue` on any of them — so without an override the screen
+// spins up a real CBCentralManager, and each live stream's empty replay clears its
+// slice of the list on appear. Seeding `State.sources` alone cannot survive that.
 //
-// The populated preview does both: the stub stream is what actually feeds the screen
+// The populated preview does both: the stub streams are what actually feed the screen
 // once `.task` runs, and the seeded state means the rows are still there in any host
 // that renders without running `.task` (an image snapshot, for one).
+
+private func stubbedDevices<Client>(
+    _ client: inout Client,
+    _ keyPath: WritableKeyPath<Client, @Sendable () -> AsyncStream<[DiscoveredDevice]>>,
+    _ devices: [DiscoveredDevice]
+) {
+    client[keyPath: keyPath] = {
+        AsyncStream { continuation in
+            continuation.yield(devices)
+            continuation.finish()
+        }
+    }
+}
 
 #Preview("Sensors") {
     NavigationStack {
         DeviceManagementView(
             store: Store(
-                initialState: DeviceManagementFeature.State(devices: DeviceDemoData.sensors)
+                initialState: DeviceManagementFeature.State(sources: [
+                    .speedCadence: DeviceDemoData.cscSensors,
+                    .radar: DeviceDemoData.radarDevices,
+                    .heartRate: DeviceDemoData.hrDevices
+                ])
             ) {
                 DeviceManagementFeature()
             } withDependencies: {
-                var client = BLECSCClient.testValue
-                client.discoveredSensors = {
-                    AsyncStream { continuation in
-                        continuation.yield(DeviceDemoData.sensors)
-                        continuation.finish()
-                    }
-                }
-                $0.bleCSCClient = client
+                var csc = BLECSCClient.testValue
+                stubbedDevices(&csc, \.discoveredDevices, DeviceDemoData.cscSensors)
+                $0.bleCSCClient = csc
+
+                var radar = VariaRadarClient.testValue
+                stubbedDevices(&radar, \.discoveredDevices, DeviceDemoData.radarDevices)
+                $0.variaRadarClient = radar
+
+                var hr = BLEHRClient.testValue
+                stubbedDevices(&hr, \.discoveredDevices, DeviceDemoData.hrDevices)
+                $0.bleHRClient = hr
             }
         )
     }
@@ -141,8 +180,10 @@ private struct DeviceRow: View {
             store: Store(initialState: DeviceManagementFeature.State()) {
                 DeviceManagementFeature()
             } withDependencies: {
-                // testValue's stream finishes without yielding — the empty case.
+                // Every testValue stream finishes without yielding — the empty case.
                 $0.bleCSCClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
             }
         )
     }

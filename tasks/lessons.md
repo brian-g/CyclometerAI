@@ -56,3 +56,35 @@ unrepresentable, with the sweep then derived from what validation admits.
 **Rule.** A property test failing at an edge is evidence about the model, not about the test. Fix the
 model so the edge is unreachable, then tie the test's range to the model's own constraint — so
 widening it later fails loudly instead of silently re-admitting the bug.
+
+---
+
+## A per-test deadline can't guard against the thing that trips it (2026-08-18, #98)
+
+**What happened.** CI went red on #98 and Brian flagged it — "once again". It was not #98's fault:
+`main` and `feat/97` were already failing the same way. Three runs, three *different* arbitrary tests
+from `VariaRadarIntegrationTests`, each dying at exactly 60.000s — the `.timeLimit(.minutes(1))` that
+#97 had added to the BLE integration suites a few hours earlier. The last green `main` predates that
+merge.
+
+**Why the obvious fix was wrong.** My first instinct was to raise the limit to 5 or 10 minutes. The
+repo had already disproved that: #117 left a note in `PermissionsClientTests` recording a stalled CI
+simulator clone where `isGranted()` — a pure enum switch with no I/O — took 90s once and **544s on a
+passing run**. No threshold survives that. A deadline evaluated inside the run is subject to the exact
+contention it is meant to guard against, so it kills tests that were merely delayed.
+
+Worse, Swift Testing **aborts the whole run** when one case trips a `.timeLimit`, so every test
+scheduled after it silently never runs. That bit me twice locally the same day: I read a green-looking
+list that simply hadn't executed the tests I cared about, and nearly concluded a fix was verified when
+its test hadn't run at all.
+
+**Rules.**
+- Don't bound a test with a deadline when the thing that could stall it is the runner, not the code.
+  Put the bound where it has no coupling to the contention — a CI job `timeout-minutes`.
+- A `.timeLimit` is only defensible when a hang can come *from the code alone*, and even then ask what
+  it buys over a hang that is obvious locally in a second.
+- Before trusting a green test list, check the tests you care about are actually *in* it. `grep` for
+  them by name. An aborted run looks like a passing one if you only read the summary.
+- Before reaching for a fix on a CI failure, check whether `main` is already red. Three commands —
+  `gh run list`, then `--log-failed` on your branch and on `main` — separate "my regression" from
+  "pre-existing" and stop you debugging your own diff for nothing.

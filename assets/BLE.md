@@ -1,6 +1,7 @@
 # Cyclometer — BLE Integration Specification
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-05-21  
+**Updated:** 2026-08-18 — Unified discovery (#98): one `DiscoveredDevice` and one `SensorKind` tag across all three clients; the pairing scan is refcounted per client and held by S11 on all three  
 **Updated:** 2026-05-22 — Sensor role model: speed/cadence split at pairing time; `SensorRole` replaces `SensorType.speedCadence`; `SpeedFeature` and `CadenceFeature` replace `SpeedCadenceFeature`  
 **Status:** Draft — Pending M2 Engineering Spike Validation  
 **Author:** Brian (UX Design) + Claude (Specification)  
@@ -448,6 +449,53 @@ Each BLE peripheral (Radar, HR, CSC) manages its own connection state independen
 > possible, because the auto-adopted peripheral was never persisted and inferring a record from "whatever is
 > connected" would reintroduce exactly the bug this removed.
 
+> **Unified discovery (#98).** The gap above was wider than "no rows on S11": `BLECentral` issues a *filtered*
+> scan, and the only pairing scan anyone started was `bleCSCClient.beginPairingScan()`. Radar and HR were
+> therefore not scanned for at all outside a ride, so there was no route to a record of either even once #100
+> could write one. `DeviceManagementFeature` now depends on all three clients and holds one pairing scan open
+> per client. Three things the shape depends on:
+>
+> - **One `DiscoveredDevice` across all three clients.** `BLECSCClient.DiscoveredSensor` was folded into it —
+>   a screen showing one flat list cannot hold two row types — and it gained `kinds: Set<SensorKind>`, the
+>   service tag §8 below now names. Each client emits a single-element set; the feature unions them when it
+>   dedupes by `CBPeripheral.identifier`, so a peripheral advertising two supported services is one row
+>   carrying both tags rather than two rows each claiming half of what it can do. `ConnectionState` and
+>   `Capabilities` moved to `Models/` to make that possible, with typealiases left inside the clients.
+> - **`roles` is live tenancy; the durable record is `AppPreferences`.** The single-slot clients report
+>   `[.radar]` / `[.heartRate]` whenever the peripheral matches their gate, which is what their old `isPaired`
+>   flag meant; `BLECSCClient` reports the slot's roles, so a paired sensor out of range reports none. The
+>   Paired section is therefore built from `pairedSensors`, never from the streams — that is what keeps an
+>   out-of-range sensor listed and unpairable rather than dropping it into Available with a Pair button.
+> - **`stopScanning` *and* `disconnect` are both refcounted now.** `BLEClient.requestedServices` is a plain
+>   set with no per-caller refcount, and both endpoints on both single-slot clients released their service
+>   UUID unconditionally. Ride finish would have silently blinded an open Sensors screen. Each client now
+>   carries `pairingScanCount` beside an explicit `isScanning`, and only their sum releases the radio — the
+>   pattern `BLECSCClient` has held since #68. Pull-to-refresh is `beginPairingScan` then `endPairingScan` per
+>   client: `beginPairingScan` unconditionally re-issues the hardware scan, which is what makes CoreBluetooth
+>   re-advertise peripherals it has already reported, and taking the extra reference first means the refcount
+>   never reaches zero mid-refresh.
+>
+> Pairing is still CSC-only. A radar or a strap lists and reports its status but carries no action until #100.
+
+> **Discovery has to expire (#98 follow-up).** `discoveredIDs` was an inventory that was never pruned, so a
+> sensor switched off stayed in Available for the life of the process. There is no "lost peripheral" callback
+> to react to: `BLECentral` scans without `CBCentralManagerScanOptionAllowDuplicatesKey`, so CoreBluetooth
+> reports each peripheral **once per scan session** and a device that goes quiet simply stops arriving.
+>
+> Restarting the session is therefore the only way to re-establish what is still there — and `beginPairingScan`
+> already restarts it. Each call now rotates a **scan generation**: whatever failed to re-advertise during the
+> generation just ended is dropped. `DeviceManagementFeature` drives a `clock.timer` at
+> `sweepInterval` (10s) while S11 is open, sending the same `.refreshRequested` the rider's pull sends, so a
+> device leaves the list at worst two intervals after it actually went. Duplicate-allowed scanning was rejected:
+> it would give per-second precision at a battery cost Apple explicitly warns against, for a screen the rider
+> has open for seconds at a time.
+>
+> **A connected peripheral stops advertising.** That is normal BLE behaviour, not evidence it has gone, so the
+> sweep exempts whatever the client currently holds — `slots.keys` for CSC, `targetPeripheralID` for the
+> single-slot clients. Without that exemption the sweep would delete the row for the very sensor in use. A
+> paired peripheral that is merely *absent* is not exempt: it has genuinely left, and the Paired section is
+> rebuilt from `AppPreferences.pairedSensors` anyway, so it stays listed and unpairable regardless.
+
 ```
                     ┌──────────────┐
           ┌────────▶│ disconnected │◀────────────────────────┐
@@ -648,6 +696,13 @@ extension DependencyValues {
 ## 8. Sensor Discovery — Service UUID Lookup
 
 During scan, Cyclometer advertises interest in all three sensor service UUIDs simultaneously. Discovered peripherals are classified by the services they advertise.
+
+> **Implemented (#98)** as `SensorKind` (`Models/`) plus its `serviceUUID` mapping and
+> `SensorKind.kinds(advertising:)` in `Clients/BLE/BLEServiceUUIDs.swift`, replacing the file-private copies
+> each client used to keep. Two departures from the sketch below: the enum holds only the kinds the app
+> actually scans for, so Phase 3 power is absent rather than filtered out at the call site; and the
+> characteristic UUIDs stayed private to their clients, since nothing outside a client needs them. The
+> classification result is the `kinds` tag on `DiscoveredDevice` — see §6.
 
 ```swift
 extension BluetoothClient {

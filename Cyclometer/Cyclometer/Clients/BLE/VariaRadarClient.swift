@@ -29,14 +29,12 @@ private let radarCapabilityUUID = CBUUID(string: "6A4E3201-667B-11E3-949A-080020
 struct VariaRadarClient: Sendable {
     /// Connection lifecycle, per PRD §9.1 state machine. `.active` means
     /// notifications are enabled and radar data is flowing.
-    enum ConnectionState: Equatable, Sendable {
-        case disconnected
-        case scanning
-        case connecting
-        case connected
-        case active
-        case reconnecting
-    }
+    ///
+    /// The enum itself moved to `Models/SensorConnectionState.swift` in #98, where
+    /// `DiscoveredDevice` — shared with CSC and HR — could refer to it. It was already
+    /// character-identical to `BLECSCClient.ConnectionState`; both keep the typealias so
+    /// every existing call site and stream reads unchanged.
+    typealias ConnectionState = SensorConnectionState
 
     /// Scan for radars and reconnect the one the rider has paired. Nothing is adopted
     /// speculatively: a peripheral is connected only if `setPairedSensor` has named it,
@@ -61,6 +59,17 @@ struct VariaRadarClient: Sendable {
     var setPairedSensor: @Sendable (UUID?) async -> Void
     /// Every radar seen this session, paired or not. Replays on subscribe.
     var discoveredDevices: @Sendable () -> AsyncStream<[DiscoveredDevice]>
+    /// Scan on behalf of the pairing UI. Refcounted and independent of the ambient
+    /// dashboard scan, so it still scans while the radar is connected — unlike
+    /// `startScanning`, which only starts from a cold state. Mirrors
+    /// `BLECSCClient.beginPairingScan` (#68); the Sensors screen holds one of these
+    /// open per client for as long as it is on screen (#98).
+    var beginPairingScan: @Sendable () async -> Void
+    /// Balance a `beginPairingScan`. The hardware scan stops only when no pairing
+    /// scan and no ambient scan remain — `BLEClient.requestedServices` is a plain set
+    /// with no per-caller refcount, so whoever releases last has to be the one to
+    /// release the radio.
+    var endPairingScan: @Sendable () async -> Void
     var radarTargets:    @Sendable () -> AsyncStream<[RadarTarget]>
     var connectionState: @Sendable () -> AsyncStream<ConnectionState>
     /// Battery percentage of the connected radar, or `nil` when unknown — nothing
@@ -135,6 +144,8 @@ extension VariaRadarClient: DependencyKey {
             disconnect:        { await state.disconnect() },
             setPairedSensor:   { id in await state.setPairedSensor(id) },
             discoveredDevices: { state.makeDiscoveredDevicesStream() },
+            beginPairingScan:  { await state.beginPairingScan() },
+            endPairingScan:    { await state.endPairingScan() },
             radarTargets:    { state.makeTargetsStream() },
             connectionState: { state.makeConnectionStateStream() },
             batteryLevel:    { state.makeBatteryStream() }
@@ -150,6 +161,8 @@ extension VariaRadarClient: DependencyKey {
         disconnect:        { },
         setPairedSensor:   { _ in },
         discoveredDevices: { AsyncStream { $0.finish() } },
+        beginPairingScan:  { },
+        endPairingScan:    { },
         radarTargets:    { AsyncStream { $0.finish() } },
         connectionState: { AsyncStream { $0.finish() } },
         batteryLevel:    { AsyncStream { $0.finish() } }
@@ -184,10 +197,26 @@ private final class RadarClientState: @unchecked Sendable {
     private var batteryPercent: Int?
     private var reconnectTask: Task<Void, Never>?
 
+    /// An ambient (dashboard) scan is running. Tracked separately from
+    /// `connectionState` because a pairing scan must not move that state — see
+    /// `beginPairingScan`.
+    private var isScanning = false
+    /// How many pairing scans are open. Deliberately not folded into `isScanning`:
+    /// the two answer different questions, and only their sum decides whether the
+    /// radio may be released. Mirrors `BLECSCClient.pairingScanCount`.
+    private var pairingScanCount = 0
+
     /// Every radar seen this session. The inventory the pairing list is built from, and
     /// what lets `setPairedSensor` connect a device discovered before it was paired —
     /// CoreBluetooth won't redeliver `.discovered` for a peripheral already seen.
     private var discoveredIDs: Set<UUID> = []
+    /// Peripherals that have advertised since the current scan generation began.
+    ///
+    /// CoreBluetooth reports a peripheral once per scan session, so "still there" can
+    /// only be re-established by restarting the session — which `beginPairingScan`
+    /// already does. Each restart rotates the generation: whatever failed to re-report
+    /// during the one just ended is gone and leaves the list (#98 follow-up).
+    private var sightedThisGeneration: Set<UUID> = []
     /// Separate from `discoveredIDs` because a nil name can't be stored in a dictionary,
     /// and an unnamed radar still needs a row.
     private var discoveredNames: [UUID: String] = [:]
@@ -281,7 +310,11 @@ private final class RadarClientState: @unchecked Sendable {
         // Only start a fresh scan from a cold state. Re-entering (the dashboard's
         // .task re-runs when the view re-appears, while this state object is
         // process-global) must not stomp a live connection back to .scanning.
-        let shouldScan = lock.withLock { connectionState == .disconnected }
+        let shouldScan = lock.withLock { () -> Bool in
+            guard connectionState == .disconnected else { return false }
+            isScanning = true
+            return true
+        }
         guard shouldScan else {
             logger.info("startScanning skipped — not in disconnected state")
             return
@@ -291,7 +324,69 @@ private final class RadarClientState: @unchecked Sendable {
     }
 
     func stopScanning() async {
+        let shouldStopHardware = lock.withLock { () -> Bool in
+            isScanning = false
+            return pairingScanCount == 0
+        }
+        // `BLEClient.requestedServices` is a plain set with no per-caller refcount, so
+        // dropping the radar UUID here would cancel the Sensors screen's scan too.
+        guard shouldStopHardware else {
+            logger.info("stopScanning kept alive — \(self.pairingScanCountSnapshot) pairing scan(s) open")
+            return
+        }
         await bleClient.stopScanning([radarServiceUUID])
+    }
+
+    // MARK: Pairing UI support (S11)
+
+    /// Scan on behalf of the pairing UI, bypassing `startScanning`'s cold-state guard —
+    /// the rider must be able to look for a radar while one is already connected.
+    /// Deliberately does not touch `connectionState`, so the ride sidebar doesn't flip
+    /// to "Searching" behind a settings screen.
+    func beginPairingScan() async {
+        lock.withLock {
+            pairingScanCount += 1
+            rotateDiscoveryGenerationLocked()
+        }
+        // Re-issuing the scan restarts the CoreBluetooth session, so peripherals
+        // already seen are re-advertised to us rather than suppressed as duplicates.
+        // That is also what makes pull-to-refresh work (#98).
+        await bleClient.startScanning([radarServiceUUID])
+        logger.notice("pairing scan started (\(self.pairingScanCountSnapshot) open)")
+    }
+
+    func endPairingScan() async {
+        let shouldStopHardware = lock.withLock { () -> Bool in
+            pairingScanCount = max(0, pairingScanCount - 1)
+            return pairingScanCount == 0 && !isScanning
+        }
+        guard shouldStopHardware else { return }
+        await bleClient.stopScanning([radarServiceUUID])
+        logger.notice("pairing scan stopped")
+    }
+
+    private var pairingScanCountSnapshot: Int { lock.withLock { pairingScanCount } }
+
+    /// Close the current scan generation and drop whatever stopped advertising.
+    ///
+    /// The peripheral this client is connected to is exempt, and that exemption is the
+    /// whole reason this can't just clear the inventory: **a connected peripheral stops
+    /// advertising**. Sweeping it would delete the row for the very radar the rider is using.
+    ///
+    /// A paired-but-absent peripheral is *not* exempt — it has genuinely gone out of
+    /// range, and `DeviceManagementFeature` rebuilds its row from the durable record so
+    /// it stays listed and unpairable regardless.
+    ///
+    /// Must hold the lock.
+    private func rotateDiscoveryGenerationLocked() {
+        var stale = discoveredIDs.subtracting(sightedThisGeneration)
+        if let targetPeripheralID { stale.remove(targetPeripheralID) }
+        sightedThisGeneration = []
+        guard !stale.isEmpty else { return }
+        discoveredIDs.subtract(stale)
+        for id in stale { discoveredNames.removeValue(forKey: id) }
+        logger.notice("discovery sweep dropped \(stale.count) stale peripheral(s)")
+        broadcastDiscoveredLocked()
     }
 
     // MARK: Connection control
@@ -321,6 +416,13 @@ private final class RadarClientState: @unchecked Sendable {
         if let id {
             await bleClient.disconnect(id, radarOwnerID)
         }
+        // Ride finish must not silently kill a pairing scan the Sensors screen is
+        // holding open — same shared-`requestedServices` hazard as `stopScanning`.
+        let shouldStopHardware = lock.withLock { () -> Bool in
+            isScanning = false
+            return pairingScanCount == 0
+        }
+        guard shouldStopHardware else { return }
         await bleClient.stopScanning([radarServiceUUID])
     }
 
@@ -409,6 +511,7 @@ private final class RadarClientState: @unchecked Sendable {
                 // Record every radar seen, named or not — the pairing list is built from
                 // this inventory, and an unnamed unit still needs a row.
                 let firstSighting = discoveredIDs.insert(id).inserted
+                sightedThisGeneration.insert(id)
                 if let name { discoveredNames[id] = name }
                 broadcastDiscoveredLocked()
                 // `targetPeripheralID == nil` is load-bearing, not defensive:
@@ -583,9 +686,20 @@ private final class RadarClientState: @unchecked Sendable {
             DiscoveredDevice(
                 id: id,
                 name: discoveredNames[id],
-                isPaired: pairedPeripheralID == id,
-                isConnected: targetPeripheralID == id
-                    && (connectionState == .connected || connectionState == .active)
+                kinds: [.radar],
+                // A single-slot client has one role and one gate, so "holds the role"
+                // and "is the paired radar" are the same question — which is what
+                // `isPaired` meant here before the shape was unified (#98).
+                roles: pairedPeripheralID == id ? [.radar] : [],
+                // The lifecycle belongs to whoever we are actually talking to. A gated
+                // radar we aren't connected to reads `.disconnected` rather than nil,
+                // so the row can say so; a stranger's radar gets nil, because this
+                // client tracks nothing about it.
+                connectionState: targetPeripheralID == id
+                    ? connectionState
+                    : (pairedPeripheralID == id ? .disconnected : nil),
+                // Client-scoped, so it belongs only to the peripheral it was read from.
+                batteryPercent: targetPeripheralID == id ? batteryPercent : nil
             )
         }
         .sorted {
