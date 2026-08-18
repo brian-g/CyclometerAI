@@ -368,6 +368,13 @@ private final class CSCClientState: @unchecked Sendable {
     /// because that dictionary can't represent a peripheral that advertised no name
     /// (assigning nil removes the key), and the pairing list still needs a row for it.
     private var discoveredIDs: Set<UUID> = []
+    /// Peripherals that have advertised since the current scan generation began.
+    ///
+    /// CoreBluetooth reports a peripheral once per scan session, so "still there" can
+    /// only be re-established by restarting the session — which `beginPairingScan`
+    /// already does. Each restart rotates the generation: whatever failed to re-report
+    /// during the one just ended is gone and leaves the list (#98 follow-up).
+    private var sightedThisGeneration: Set<UUID> = []
     /// What each peripheral told us via 0x2A5C. Keyed separately from `slots` because
     /// it must outlive the connection: the Sensors screen still wants to know a
     /// sensor can do both roles after it has gone out of range.
@@ -539,7 +546,10 @@ private final class CSCClientState: @unchecked Sendable {
     /// is connected. Deliberately does not touch `isScanning`, so dashboard role
     /// tiles don't flip to `.scanning` behind a settings screen.
     func beginPairingScan() async {
-        lock.withLock { pairingScanCount += 1 }
+        lock.withLock {
+            pairingScanCount += 1
+            rotateDiscoveryGenerationLocked()
+        }
         // Re-issuing the scan restarts the CoreBluetooth session, so peripherals
         // already seen are re-advertised to us rather than being suppressed as
         // duplicates. Subscribers also get the existing inventory replayed on
@@ -620,6 +630,28 @@ private final class CSCClientState: @unchecked Sendable {
 
     /// Lock-free read for log interpolation only.
     private var pairingScanCountSnapshot: Int { lock.withLock { pairingScanCount } }
+
+    /// Close the current scan generation and drop whatever stopped advertising.
+    ///
+    /// Peripherals holding a slot are exempt, and that exemption is the whole reason
+    /// this can't just clear the inventory: **a connected peripheral stops advertising**.
+    /// Sweeping it would delete the row for the very sensor the rider is using.
+    ///
+    /// Must hold the lock.
+    private func rotateDiscoveryGenerationLocked() {
+        let stale = discoveredIDs
+            .subtracting(sightedThisGeneration)
+            .subtracting(slots.keys)
+        sightedThisGeneration = []
+        guard !stale.isEmpty else { return }
+        discoveredIDs.subtract(stale)
+        for id in stale { discoveredNames.removeValue(forKey: id) }
+        // Capabilities survive deliberately: 0x2A5C describes the hardware, so a sensor
+        // that walks away and comes back has not changed what it can do, and keeping the
+        // answer saves re-reading it.
+        logger.notice("discovery sweep dropped \(stale.count) stale peripheral(s)")
+        broadcastDiscoveredLocked()
+    }
 
     /// Set the roles this peripheral holds, replacing whatever it held before.
     ///
@@ -758,6 +790,7 @@ private final class CSCClientState: @unchecked Sendable {
                 // is built from this inventory, and an unnamed sensor still needs a
                 // row.
                 discoveredIDs.insert(id)
+                sightedThisGeneration.insert(id)
                 if let name { discoveredNames[id] = name }
                 broadcastDiscoveredLocked()
                 guard slots[id] == nil, let roles = pairedAssignments[id] else { return nil }

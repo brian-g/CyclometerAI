@@ -69,6 +69,33 @@ silently do nothing. The test was updated to assert the new placement *and* the 
 overloads that existed only because the radar and CSC `ConnectionState` enums were distinct types. One
 `SensorConnectionState` collapsed them into one function.
 
+## Follow-up — stale devices never left the list
+
+Reported after the merge: a radar, strap or cadence sensor switched off stayed under Available for the life
+of the process. `discoveredIDs` was an inventory all three clients documented as "never pruned".
+
+There is no lost-peripheral callback to hook: `BLECentral` scans without
+`CBCentralManagerScanOptionAllowDuplicatesKey`, so CoreBluetooth reports each peripheral **once per scan
+session** and a device that goes quiet just stops arriving. Restarting the session is the only way to
+re-establish the truth, and `beginPairingScan` already does exactly that.
+
+- Each `beginPairingScan` rotates a **scan generation** (`sightedThisGeneration`); anything that failed to
+  re-advertise across the generation just ended is dropped, so a device goes at worst two intervals late.
+- `DeviceManagementFeature` runs a `clock.timer` at `sweepInterval` (10s) while S11 is open, sending the same
+  `.refreshRequested` the rider's pull sends — one path, not two that could drift.
+- **A connected peripheral stops advertising**, so the sweep exempts what each client holds (`slots.keys` for
+  CSC, `targetPeripheralID` for the single-slot clients). Without that it would delete the row for the sensor
+  in use. Three `…SurvivesSweep` tests pin it.
+- Duplicate-allowed scanning was considered and rejected — per-second precision at a battery cost Apple warns
+  against, for a screen open seconds at a time.
+
+Two things the tests taught me. `.task` now starts an effect that never finishes, so it took a `CancelID`
+cancelled from `.onDisappear` — worth doing regardless, since the three device streams were previously
+outliving the screen on nothing but SwiftUI tearing down the view's task scope. And the first drafts of the
+sweep tests were racy: `devices { $0.count == 2 }` is already true before a re-advertisement lands, so it
+proves nothing as a sync point — they now re-advertise under a changed name and wait for that. Verified by
+disabling the sweep: the HR and radar cases fail (60s time limit) without it.
+
 **Sequencing note for #100.** Two things are waiting on it, both deliberate. Radar and HR rows render with
 no action, so the gates from #97 are still closed — #100 writes the records that open them. And a peripheral
 paired in one role cannot yet claim a second from this screen (`reassignableIDs` is CSC-keyed); that is the

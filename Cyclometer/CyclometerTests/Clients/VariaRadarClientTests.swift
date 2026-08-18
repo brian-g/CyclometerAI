@@ -835,6 +835,61 @@ struct VariaRadarIntegrationTests {
         #expect(!harness.calls.value.contains(.stopScanning([radarServiceUUID])))
     }
 
+    /// The reported bug: a radar switched off stayed in Available for the life of the
+    /// process, because `discoveredIDs` was never pruned.
+    @Test("A radar that stops advertising leaves the list on the next sweep")
+    func staleRadarIsSweptAway() async {
+        let harness = Harness()
+        let staying = UUID()
+        let leaving = UUID()
+
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: staying, name: "Varia A", rssi: -60, services: [radarServiceUUID]))
+        harness.events.yield(.discovered(id: leaving, name: "Varia B", rssi: -70, services: [radarServiceUUID]))
+        _ = await harness.devices { $0.count == 2 }
+
+        // Rotate the generation, then let only A re-advertise. The name change is the
+        // sync point: events are handled on the client's own task, and `count == 2` is
+        // already true here, so it would prove nothing about A's report having landed —
+        // and rotating again too early would sweep A away with B.
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: staying, name: "Varia A2", rssi: -60, services: [radarServiceUUID]))
+        _ = await harness.devices { list in
+            list.first { $0.id == staying }?.name == "Varia A2"
+        }
+
+        // B stayed silent through that whole generation, so this sweep drops it.
+        await harness.client.beginPairingScan()
+
+        let devices = await harness.devices { $0.map(\.id) == [staying] }
+        #expect(devices.map(\.name) == ["Varia A2"])
+    }
+
+    /// A connected peripheral stops advertising — that is normal BLE behaviour, not a
+    /// sign it has gone. Sweeping it would delete the row for the radar in use.
+    @Test("A connected radar survives a sweep even though it stops advertising")
+    func connectedRadarSurvivesSweep() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        #expect(await states.next() == .connecting)
+        harness.events.yield(.connected(id: id))
+        #expect(await states.next() == .connected)
+
+        // Two full generations with no advertisement at all.
+        await harness.client.beginPairingScan()
+        await harness.client.beginPairingScan()
+
+        let devices = await harness.devices { $0.count == 1 }
+        #expect(devices[0].id == id)
+        #expect(devices[0].name == "Varia RTL515")
+    }
+
     @Test("Discovery rows carry the radar tag, its role and its lifecycle")
     func discoveryRowsAreTagged() async {
         let harness = Harness()

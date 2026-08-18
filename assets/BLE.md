@@ -477,6 +477,25 @@ Each BLE peripheral (Radar, HR, CSC) manages its own connection state independen
 >
 > Pairing is still CSC-only. A radar or a strap lists and reports its status but carries no action until #100.
 
+> **Discovery has to expire (#98 follow-up).** `discoveredIDs` was an inventory that was never pruned, so a
+> sensor switched off stayed in Available for the life of the process. There is no "lost peripheral" callback
+> to react to: `BLECentral` scans without `CBCentralManagerScanOptionAllowDuplicatesKey`, so CoreBluetooth
+> reports each peripheral **once per scan session** and a device that goes quiet simply stops arriving.
+>
+> Restarting the session is therefore the only way to re-establish what is still there — and `beginPairingScan`
+> already restarts it. Each call now rotates a **scan generation**: whatever failed to re-advertise during the
+> generation just ended is dropped. `DeviceManagementFeature` drives a `clock.timer` at
+> `sweepInterval` (10s) while S11 is open, sending the same `.refreshRequested` the rider's pull sends, so a
+> device leaves the list at worst two intervals after it actually went. Duplicate-allowed scanning was rejected:
+> it would give per-second precision at a battery cost Apple explicitly warns against, for a screen the rider
+> has open for seconds at a time.
+>
+> **A connected peripheral stops advertising.** That is normal BLE behaviour, not evidence it has gone, so the
+> sweep exempts whatever the client currently holds — `slots.keys` for CSC, `targetPeripheralID` for the
+> single-slot clients. Without that exemption the sweep would delete the row for the very sensor in use. A
+> paired peripheral that is merely *absent* is not exempt: it has genuinely left, and the Paired section is
+> rebuilt from `AppPreferences.pairedSensors` anyway, so it stays listed and unpairable regardless.
+
 ```
                     ┌──────────────┐
           ┌────────▶│ disconnected │◀────────────────────────┐

@@ -98,7 +98,8 @@ struct DeviceManagementFeatureTests {
         pairedSensors: [PairedSensor] = [],
         bleCSCClient: BLECSCClient = .testValue,
         variaRadarClient: VariaRadarClient = .testValue,
-        bleHRClient: BLEHRClient = .testValue
+        bleHRClient: BLEHRClient = .testValue,
+        clock: any Clock<Duration> = TestClock()
     ) -> TestStoreOf<DeviceManagementFeature> {
         let storage = FileStorage.inMemory
         var sources: [SensorKind: [DiscoveredDevice]] = [:]
@@ -118,6 +119,9 @@ struct DeviceManagementFeatureTests {
                 $0.bleCSCClient = bleCSCClient
                 $0.variaRadarClient = variaRadarClient
                 $0.bleHRClient = bleHRClient
+                // A TestClock leaves the sweep timer suspended, so `.task` tests finish
+                // on their own terms; the sweep test advances it deliberately.
+                $0.continuousClock = clock
                 $0.defaultFileStorage = storage
             }
         }
@@ -175,6 +179,9 @@ struct DeviceManagementFeatureTests {
         }
 
         continuation.finish()
+        // `.onDisappear` is what tears the screen's effects down — the sweep timer never
+        // finishes on its own, so an exhaustive store would otherwise report it in flight.
+        await store.send(.onDisappear)
         await store.finish()
     }
 
@@ -231,6 +238,41 @@ struct DeviceManagementFeatureTests {
             #expect(log.value.filter { $0 == .begin(kind) }.count == 1)
             #expect(log.value.filter { $0 == .end(kind) }.count == 1)
         }
+    }
+
+    /// The sweep is what drops a sensor that has been switched off: each
+    /// `beginPairingScan` rotates the client's scan generation, and anything that fails
+    /// to re-advertise across one is gone. Reusing `.refreshRequested` is deliberate —
+    /// a second path would be free to drift from the one the rider's pull takes.
+    @Test("The list re-checks what is still advertising on a timer while open")
+    func sweepTimerRefreshesPeriodically() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let (csc, radar, hr) = Self.recordingClients(into: log)
+        let clock = TestClock()
+
+        let store = makeStore(
+            bleCSCClient: csc, variaRadarClient: radar, bleHRClient: hr, clock: clock
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.task)
+        log.withValue { $0.removeAll() }   // drop the three opening begins
+
+        await clock.advance(by: DeviceManagementFeature.sweepInterval)
+        await store.receive(\.refreshRequested)
+        #expect(log.value == [
+            .begin(.speedCadence), .end(.speedCadence),
+            .begin(.radar), .end(.radar),
+            .begin(.heartRate), .end(.heartRate)
+        ])
+
+        // ...and it keeps going, rather than firing once.
+        log.withValue { $0.removeAll() }
+        await clock.advance(by: DeviceManagementFeature.sweepInterval)
+        await store.receive(\.refreshRequested)
+        #expect(log.value.filter { $0 == .begin(.radar) }.count == 1)
+
+        await store.send(.onDisappear)
+        await store.finish()
     }
 
     /// Refresh takes the extra reference *before* releasing it, per client. The other

@@ -1033,6 +1033,53 @@ struct BLECSCIntegrationTests {
         #expect(harness.scanStopped.value == [[cscServiceUUID]])
     }
 
+    /// The reported bug: a cadence sensor switched off stayed in Available for the life
+    /// of the process, because `discoveredIDs` was never pruned.
+    @Test("A sensor that stops advertising leaves the list on the next sweep")
+    func staleSensorIsSweptAway() async {
+        let harness = Harness()
+        let staying = UUID()
+        let leaving = UUID()
+
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: staying, name: "Wahoo RPM", rssi: -55, services: [cscServiceUUID]))
+        harness.events.yield(.discovered(id: leaving, name: "GSC-10", rssi: -70, services: [cscServiceUUID]))
+        _ = await harness.devices { $0.count == 2 }
+
+        // The name change is the sync point — see the radar twin for why `count == 2`
+        // cannot serve as one here.
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: staying, name: "Wahoo RPM v2", rssi: -55, services: [cscServiceUUID]))
+        _ = await harness.devices { list in
+            list.first { $0.id == staying }?.name == "Wahoo RPM v2"
+        }
+
+        await harness.client.beginPairingScan()
+
+        let devices = await harness.devices { $0.map(\.id) == [staying] }
+        #expect(devices.map(\.name) == ["Wahoo RPM v2"])
+    }
+
+    /// A connected peripheral stops advertising — normal BLE behaviour, not a sign it
+    /// has gone. Sweeping it would delete the row for the sensor in use.
+    @Test("A sensor holding a role survives a sweep even though it stops advertising")
+    func heldSensorSurvivesSweep() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Wahoo RPM", rssi: -55, services: [cscServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == id && $0.isPaired } }
+
+        await harness.client.beginPairingScan()
+        await harness.client.beginPairingScan()
+
+        let devices = await harness.devices { $0.count == 1 }
+        #expect(devices[0].id == id)
+        #expect(devices[0].name == "Wahoo RPM")
+    }
+
     /// Unpair no longer needs a session exclusion set: nothing is adopted without a
     /// persisted record, so dropping the record is the whole of "stays unpaired".
     @Test("Unpair releases only that peripheral, and it is not re-adopted")

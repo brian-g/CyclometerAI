@@ -210,6 +210,13 @@ private final class RadarClientState: @unchecked Sendable {
     /// what lets `setPairedSensor` connect a device discovered before it was paired —
     /// CoreBluetooth won't redeliver `.discovered` for a peripheral already seen.
     private var discoveredIDs: Set<UUID> = []
+    /// Peripherals that have advertised since the current scan generation began.
+    ///
+    /// CoreBluetooth reports a peripheral once per scan session, so "still there" can
+    /// only be re-established by restarting the session — which `beginPairingScan`
+    /// already does. Each restart rotates the generation: whatever failed to re-report
+    /// during the one just ended is gone and leaves the list (#98 follow-up).
+    private var sightedThisGeneration: Set<UUID> = []
     /// Separate from `discoveredIDs` because a nil name can't be stored in a dictionary,
     /// and an unnamed radar still needs a row.
     private var discoveredNames: [UUID: String] = [:]
@@ -337,7 +344,10 @@ private final class RadarClientState: @unchecked Sendable {
     /// Deliberately does not touch `connectionState`, so the ride sidebar doesn't flip
     /// to "Searching" behind a settings screen.
     func beginPairingScan() async {
-        lock.withLock { pairingScanCount += 1 }
+        lock.withLock {
+            pairingScanCount += 1
+            rotateDiscoveryGenerationLocked()
+        }
         // Re-issuing the scan restarts the CoreBluetooth session, so peripherals
         // already seen are re-advertised to us rather than suppressed as duplicates.
         // That is also what makes pull-to-refresh work (#98).
@@ -356,6 +366,28 @@ private final class RadarClientState: @unchecked Sendable {
     }
 
     private var pairingScanCountSnapshot: Int { lock.withLock { pairingScanCount } }
+
+    /// Close the current scan generation and drop whatever stopped advertising.
+    ///
+    /// The peripheral this client is connected to is exempt, and that exemption is the
+    /// whole reason this can't just clear the inventory: **a connected peripheral stops
+    /// advertising**. Sweeping it would delete the row for the very radar the rider is using.
+    ///
+    /// A paired-but-absent peripheral is *not* exempt — it has genuinely gone out of
+    /// range, and `DeviceManagementFeature` rebuilds its row from the durable record so
+    /// it stays listed and unpairable regardless.
+    ///
+    /// Must hold the lock.
+    private func rotateDiscoveryGenerationLocked() {
+        var stale = discoveredIDs.subtracting(sightedThisGeneration)
+        if let targetPeripheralID { stale.remove(targetPeripheralID) }
+        sightedThisGeneration = []
+        guard !stale.isEmpty else { return }
+        discoveredIDs.subtract(stale)
+        for id in stale { discoveredNames.removeValue(forKey: id) }
+        logger.notice("discovery sweep dropped \(stale.count) stale peripheral(s)")
+        broadcastDiscoveredLocked()
+    }
 
     // MARK: Connection control
 
@@ -479,6 +511,7 @@ private final class RadarClientState: @unchecked Sendable {
                 // Record every radar seen, named or not — the pairing list is built from
                 // this inventory, and an unnamed unit still needs a row.
                 let firstSighting = discoveredIDs.insert(id).inserted
+                sightedThisGeneration.insert(id)
                 if let name { discoveredNames[id] = name }
                 broadcastDiscoveredLocked()
                 // `targetPeripheralID == nil` is load-bearing, not defensive:

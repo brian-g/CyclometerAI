@@ -25,6 +25,25 @@ struct DeviceManagementFeature {
     @Dependency(\.bleCSCClient) var bleCSCClient
     @Dependency(\.variaRadarClient) var variaRadarClient
     @Dependency(\.bleHRClient) var bleHRClient
+    @Dependency(\.continuousClock) var clock
+
+    /// How often the list re-checks what is still advertising while the screen is open.
+    ///
+    /// CoreBluetooth reports a peripheral once per scan session, so a device that is
+    /// switched off simply stops arriving — there is no "lost" callback to react to.
+    /// Restarting the scan is what re-establishes the truth, and a sensor that misses
+    /// one restart is dropped at the next, so a device goes at worst two intervals after
+    /// it actually left. Ten seconds keeps that under half a minute while leaving ample
+    /// margin over the ~1s advertising interval these sensors idle at.
+    static let sweepInterval: Duration = .seconds(10)
+
+    /// Everything `.task` starts, so `.onDisappear` can end all of it in one place.
+    ///
+    /// The three device streams never finish on their own and the sweep timer never
+    /// finishes at all, so without this they outlive the screen — surviving on nothing
+    /// but SwiftUI cancelling the view's `.task` scope. The reducer already prefers
+    /// explicit teardown here for the scan refcount; the effects deserve the same.
+    private enum CancelID { case screen }
 
     @ObservableState
     struct State: Equatable {
@@ -153,18 +172,30 @@ struct DeviceManagementFeature {
                         for await devices in bleHRClient.discoveredDevices() {
                             await send(.devicesUpdated(.heartRate, devices))
                         }
+                    },
+                    // Sweeping stale rows is the same operation as a manual refresh, so
+                    // it reuses that action rather than growing a second path that could
+                    // drift from it.
+                    .run { send in
+                        for await _ in clock.timer(interval: Self.sweepInterval) {
+                            await send(.refreshRequested)
+                        }
                     }
                 )
+                .cancellable(id: CancelID.screen)
 
             case .onDisappear:
                 // Explicit rather than relying on effect cancellation: each client's
                 // scan refcount has to be balanced deterministically, and an action
                 // is what a TestStore can assert.
-                return .run { _ in
-                    await bleCSCClient.endPairingScan()
-                    await variaRadarClient.endPairingScan()
-                    await bleHRClient.endPairingScan()
-                }
+                return .merge(
+                    .cancel(id: CancelID.screen),
+                    .run { _ in
+                        await bleCSCClient.endPairingScan()
+                        await variaRadarClient.endPairingScan()
+                        await bleHRClient.endPairingScan()
+                    }
+                )
 
             case .refreshRequested:
                 // Begin *then* end, per client. `beginPairingScan` unconditionally
@@ -173,6 +204,10 @@ struct DeviceManagementFeature {
                 // mechanism behind "restarts the scan". Taking the extra reference
                 // first means the refcount never reaches zero, so the radio is never
                 // dropped mid-refresh, and the pair balances on its own.
+                //
+                // It also rotates each client's scan generation, which is what drops
+                // peripherals that have stopped advertising. Both the rider's pull and
+                // the sweep timer arrive here.
                 return .run { _ in
                     await bleCSCClient.beginPairingScan()
                     await bleCSCClient.endPairingScan()

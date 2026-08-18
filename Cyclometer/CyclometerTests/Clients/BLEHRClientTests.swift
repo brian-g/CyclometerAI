@@ -667,6 +667,55 @@ struct BLEHRIntegrationTests {
         #expect(!harness.calls.value.contains(.stopScanning([hrServiceUUID])))
     }
 
+    /// The reported bug: a strap switched off stayed in Available for the life of the
+    /// process, because `discoveredIDs` was never pruned.
+    @Test("A strap that stops advertising leaves the list on the next sweep")
+    func staleStrapIsSweptAway() async {
+        let harness = Harness()
+        let staying = UUID()
+        let leaving = UUID()
+
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: staying, name: "Polar H10", rssi: -55, services: [hrServiceUUID]))
+        harness.events.yield(.discovered(id: leaving, name: "Wahoo TICKR", rssi: -70, services: [hrServiceUUID]))
+        _ = await harness.devices { $0.count == 2 }
+
+        // The name change is the sync point — see the radar twin for why `count == 2`
+        // cannot serve as one here.
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: staying, name: "Polar H10 v2", rssi: -55, services: [hrServiceUUID]))
+        _ = await harness.devices { list in
+            list.first { $0.id == staying }?.name == "Polar H10 v2"
+        }
+
+        await harness.client.beginPairingScan()
+
+        let devices = await harness.devices { $0.map(\.id) == [staying] }
+        #expect(devices.map(\.name) == ["Polar H10 v2"])
+    }
+
+    /// A connected peripheral stops advertising — normal BLE behaviour, not a sign it
+    /// has gone. Sweeping it would delete the row for the strap in use.
+    @Test("A connected strap survives a sweep even though it stops advertising")
+    func connectedStrapSurvivesSweep() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+
+        var status = harness.client.pairingStatus().makeAsyncIterator()
+        #expect(await status.next() == false)
+        await harness.client.beginPairingScan()
+        harness.bringToPaired(id, name: "Polar H10")
+        #expect(await status.next() == true)
+
+        await harness.client.beginPairingScan()
+        await harness.client.beginPairingScan()
+
+        let devices = await harness.devices { $0.count == 1 }
+        #expect(devices[0].id == id)
+        #expect(devices[0].name == "Polar H10")
+    }
+
     @Test("Discovery rows carry the heart-rate tag, its role and its lifecycle")
     func discoveryRowsAreTagged() async {
         let harness = Harness()
