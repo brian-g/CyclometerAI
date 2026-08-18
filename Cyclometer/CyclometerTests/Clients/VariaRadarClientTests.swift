@@ -108,10 +108,28 @@ struct VariaRadarBackoffTests {
 
 // MARK: - Integration (controllable BLEClient + TestClock)
 
-/// Time-limited: every assertion here awaits a broadcast stream that never finishes, so
-/// a client that fails to emit hangs the test rather than failing it — which stalls the
-/// whole suite instead of pointing at the bug. Individual tests run in ~1s.
-@Suite("VariaRadarClient — live state machine", .timeLimit(.minutes(1)))
+/// Every assertion here awaits a broadcast stream that never finishes, so a client that
+/// fails to emit hangs rather than fails. Individual tests run in ~1s.
+///
+/// **This suite carried `.timeLimit(.minutes(1))` from #97 until #98.** The trait was
+/// meant to turn that hang into a readable failure, and on a healthy machine it did.
+/// On CI it did the opposite: `main`, `feat/97` and `feat/98` each went red with a
+/// *different* arbitrary test from this suite dying at exactly 60.000s, because a
+/// deadline is subject to the same contention it guards against. #117 had already
+/// reached this conclusion and written it down in `PermissionsClientTests` — a stalled
+/// simulator clone made `isGranted()`, a pure enum switch with no I/O, take 90s once and
+/// 544s on a *passing* run. No threshold is safe against that.
+///
+/// Two things make removal the right call rather than a capitulation. Nothing in this
+/// path can hang on the environment: `Harness` injects a hand-built `BLEClient`, so
+/// CoreBluetooth and the simulator's services are absent and a hang can only mean a
+/// genuine missing emission. And a per-test deadline was the wrong altitude for the
+/// backstop anyway — the CI job now carries `timeout-minutes`, which bounds a real hang
+/// without killing a test that was merely delayed.
+///
+/// The cost, stated plainly: a regression that stops an emission now hangs CI until the
+/// job timeout instead of failing in a minute. Locally it surfaces in ~1s.
+@Suite("VariaRadarClient — live state machine")
 struct VariaRadarIntegrationTests {
 
     /// One log across every transport endpoint the pairing gate touches. The ordering

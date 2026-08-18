@@ -137,9 +137,11 @@ struct BLEHRClientTests {
 
 // MARK: - Integration (controllable BLEClient)
 
-/// Time-limited for the same reason as the radar suite: these assertions await broadcast
-/// streams that never finish, so a missing emission would hang rather than fail.
-@Suite("BLEHRClient — live state machine", .timeLimit(.minutes(1)))
+/// These assertions await broadcast streams that never finish, so a missing emission
+/// hangs rather than fails. This suite carried `.timeLimit(.minutes(1))` from #97 until
+/// #98 for that reason — see the radar suite for why the deadline had to go, and what
+/// replaced it.
+@Suite("BLEHRClient — live state machine")
 struct BLEHRIntegrationTests {
 
     /// One log across every transport endpoint the pairing gate touches. The ordering

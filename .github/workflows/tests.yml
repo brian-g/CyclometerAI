@@ -17,6 +17,15 @@ jobs:
     # ships an iOS 26.5 runtime with iPhone 17 Pro.
     runs-on: macos-26
 
+    # The backstop for a genuinely hung test, and the right altitude for one.
+    #
+    # Per-test `.timeLimit` traits were tried twice (#97 on the BLE suites, before that
+    # on PermissionsClientTests) and removed both times: a deadline inside the run is
+    # subject to the same simulator contention it is meant to guard against, so it kills
+    # tests that were merely delayed while a real hang on a healthy runner is obvious
+    # anyway. A job timeout has no such coupling. Successful runs take 9–12 minutes.
+    timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v4
 
