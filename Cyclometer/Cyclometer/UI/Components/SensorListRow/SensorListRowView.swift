@@ -58,7 +58,12 @@ struct SensorListRowView<Trailing: View>: View {
     }
 }
 
-/// The capsule action button both sensor lists use — "Pair", "Unpair", "Tap to Pair".
+/// The trailing action button in a sensor row — "Pair" or "Unpair" on S11.
+///
+/// Plain text rather than a capsule: S11 puts one on *every* row, paired or not, and a
+/// column of filled capsules would shout. UX.md §S11 specifies text, matching the
+/// Sketch's trailing accessory. The Start sheet carried a capsule "Tap to Pair" until
+/// its rows became paired-only, at which point that button had no reachable state left.
 struct SensorRowButton: View {
     let title: String
     let tint: Color
@@ -72,11 +77,12 @@ struct SensorRowButton: View {
 
     var body: some View {
         Button(title, action: action)
-            .font(.caption.weight(.semibold))
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .controlSize(.small)
-            .tint(tint)
+            .font(.body)
+            .foregroundStyle(tint)
+            // Load-bearing, not cosmetic: the default style in a `List` treats the whole
+            // row as the button's target, which would swallow the row tap that role
+            // reassignment depends on.
+            .buttonStyle(.borderless)
     }
 }
 
@@ -106,8 +112,8 @@ struct SensorRowButton: View {
                 .background(Color.cyPrimary, in: Capsule())
         }
 
-        SensorListRowView(icon: "speedometer", iconTint: .blue, title: "Speed") {
-            SensorRowButton("Tap to Pair") {}
+        SensorListRowView(icon: "speedometer", iconTint: .blue, title: "GSC-10") {
+            SensorRowButton("Pair") {}
         }
     }
 }

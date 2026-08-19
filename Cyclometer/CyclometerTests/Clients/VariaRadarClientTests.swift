@@ -318,6 +318,40 @@ struct VariaRadarIntegrationTests {
         #expect(await battery.next() == Int?.none)
     }
 
+    /// The S11 row reads its level from `DiscoveredDevice.batteryPercent`, and 0x180F
+    /// answers well *after* the connection that carried it. Telling only the
+    /// `batteryLevel()` subscribers left that row holding the nil it was built with, so
+    /// a paired radar never showed a battery at all.
+    @Test("A battery reading refreshes the discovered device list, not just the level stream")
+    func batteryReadRefreshesTheDeviceList() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        await harness.client.setPairedSensor(peripheralID)
+        harness.events.yield(.discovered(
+            id: peripheralID, name: "Varia RTL515", rssi: -50, services: [radarServiceUUID]
+        ))
+        let before = await harness.devices { $0.count == 1 }
+        #expect(before.first?.batteryPercent == nil)
+
+        harness.events.yield(.connected(id: peripheralID))
+        harness.events.yield(.servicesDiscovered(
+            peripheralID: peripheralID, serviceUUIDs: [radarServiceUUID, batteryServiceUUID]
+        ))
+        harness.events.yield(.characteristicsDiscovered(
+            peripheralID: peripheralID, serviceUUID: batteryServiceUUID,
+            characteristicUUIDs: [batteryLevelUUID]
+        ))
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: peripheralID, characteristicUUID: batteryLevelUUID, value: Data([0x52])
+        ))
+
+        // The list has to be re-sent for the row to learn the level; without that
+        // broadcast this waits forever, which is the failure.
+        let after = await harness.devices { $0.first?.batteryPercent != nil }
+        #expect(after.first?.batteryPercent == 82)
+    }
+
     /// Battery is read once per connection, so a subscriber that arrives afterwards —
     /// the Start sheet's `.task`, typically — only learns anything by replay.
     @Test("A late battery subscriber gets the current level replayed")

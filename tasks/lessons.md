@@ -88,3 +88,60 @@ its test hadn't run at all.
 - Before reaching for a fix on a CI failure, check whether `main` is already red. Three commands —
   `gh run list`, then `--log-failed` on your branch and on `main` — separate "my regression" from
   "pre-existing" and stop you debugging your own diff for nothing.
+
+
+---
+
+## A blank snapshot reference is a test that can never fail (2026-08-19, #100 follow-on)
+
+**What happened.** I added a full-screen snapshot suite for the Start sheet, recorded it, and the run
+"succeeded" — six PNGs on disk, second run green. The references were solid white rectangles. Nothing was
+being pinned, and the suite would have stayed green through any change to the screen.
+
+**Why.** `StartSheetView`'s `.toolbar` renders blank inside a `UIHostingController`. A ladder settled it in
+one run: a plain `NavigationStack` + `List` renders; adding the sheet's `.topBarLeading` /
+`.topBarTrailing` items blanks the entire image. Not a bug in the change under test — a limit of the
+harness. The fix was to snapshot the row that actually changed (`SensorStatusRow`, made internal) rather
+than the screen around it.
+
+**Rules.**
+- After recording a new snapshot reference, **look at the image**. "It recorded and the second run passed"
+  proves the render is *stable*, not that it rendered anything. A cheap programmatic guard is the count of
+  distinct bytes in the decompressed IDAT — 1 means one flat colour.
+- When a snapshot comes out empty, bisect the view with a ladder in a single run rather than theorising
+  about the harness. Two or three `assertSnapshot` calls of progressively fuller views name the culprit
+  immediately.
+- Prefer snapshotting the component that changed over the screen that contains it. It renders more
+  reliably, it fails for the right reason, and it matches how the rest of this repo's suites are built.
+
+
+## `-only-testing` with a Swift Testing function name silently runs nothing (2026-08-19)
+
+**What happened.** To prove a new regression test actually caught the bug, I reverted the fix and ran
+`-only-testing:CyclometerTests/BLEHRIntegrationTests/batteryReadRefreshesTheDeviceList`. It exited **0** in
+seconds. For a moment that read as "the test passes without the fix, so it proves nothing". The truth was
+worse and better: the filter matched no test at all, `xcodebuild` ran zero cases, and zero failures is a
+successful run. Filtering to the whole suite instead reproduced the hang immediately.
+
+**Rules.**
+- A filtered `xcodebuild test` that exits 0 proves nothing until you check the case *count*.
+  `grep -cE '^Test case' <log>` — zero means the filter, not the code.
+- Verify a regression test by reverting the fix, not by reasoning about it. Both directions need the same
+  count check.
+
+## Ask what a constraint costs before offering it as an option (2026-08-19)
+
+**What happened.** The Start sheet showed no status for paired sensors. I found that nothing scans while the
+sheet is open, and offered Brian three ways to word a badge that would therefore always read "not connected"
+— with "make the sheet scan" as one option among them. He picked a wording, and the result was a screen that
+said Disconnected on every row, every time. He was rightly unimpressed.
+
+**Why I was wrong.** I treated "nothing scans here" as a fixed constraint and turned the consequence into a
+copy question. It was never fixed: `beginPairingScan` is refcounted and independent of the ride's scan, S11
+already holds one open, and the whole change was ten lines. The screen's stated purpose in UX.md §S05.1 is
+"provide sensor status" — a status that is constant is not status, so two of the three options I offered
+could not satisfy the screen's own spec.
+
+**Rule.** When a finding makes a feature useless, fix the finding — do not offer the rider-visible symptom
+as a menu. Before presenting options, check each one against what the screen is *for*; drop the ones that
+cannot satisfy it rather than letting a choice ratify them.

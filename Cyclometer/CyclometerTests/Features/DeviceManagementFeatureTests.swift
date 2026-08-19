@@ -55,13 +55,32 @@ struct DeviceManagementFeatureTests {
               roles: paired ? [.heartRate] : [], connectionState: state)
     }
 
-    /// One log across all three write endpoints. The ordering *between* them is the
-    /// thing under test — a separate `LockIsolated` per endpoint can only show that
-    /// each was called, which is what let two ordering races through review.
+    /// The unpaired CSC row a Pair tap is sent against.
+    ///
+    /// Seeded rather than implied: the button exists only because discovery put the row
+    /// on screen, and since #100 the reducer reads that row's `kinds` to decide whether
+    /// the sensor needs interrogating at all — a radar has nothing to read. Capabilities
+    /// are absent here, as they are before 0x2A5C answers; each test's next
+    /// `.devicesUpdated` is what delivers them.
+    private static func rowToPair(
+        id: UUID = DeviceManagementFeatureTests.availableID, name: String
+    ) -> [DiscoveredDevice] {
+        [Self.sensor(id: id, name: name)]
+    }
+
+    /// One log across every write endpoint, on all three clients. The ordering *between*
+    /// them is the thing under test — a separate `LockIsolated` per endpoint can only
+    /// show that each was called, which is what let two ordering races through review.
     private enum ClientCall: Equatable {
         case setPairedSensors([UUID: Set<SensorRole>])
         case setRoles(UUID, Set<SensorRole>)
         case unpair(UUID)
+        /// `VariaRadarClient.setPairedSensor`. A single-slot client moves the gate and
+        /// the connection together, so this one call is the whole operation — there is
+        /// no separate `unpair` for it to be ordered against (#100).
+        case setRadarPaired(UUID?)
+        /// `BLEHRClient.setPairedSensor`, same contract as `setRadarPaired`.
+        case setHRPaired(UUID?)
     }
 
     private static func recordingClient(into log: LockIsolated<[ClientCall]>) -> BLECSCClient {
@@ -70,6 +89,20 @@ struct DeviceManagementFeatureTests {
         ble.setRoles = { id, roles in log.withValue { $0.append(.setRoles(id, roles)) } }
         ble.unpair = { id in log.withValue { $0.append(.unpair(id)) } }
         return ble
+    }
+
+    private static func recordingRadarClient(
+        into log: LockIsolated<[ClientCall]>
+    ) -> VariaRadarClient {
+        var radar = VariaRadarClient.testValue
+        radar.setPairedSensor = { id in log.withValue { $0.append(.setRadarPaired(id)) } }
+        return radar
+    }
+
+    private static func recordingHRClient(into log: LockIsolated<[ClientCall]>) -> BLEHRClient {
+        var hr = BLEHRClient.testValue
+        hr.setPairedSensor = { id in log.withValue { $0.append(.setHRPaired(id)) } }
+        return hr
     }
 
     /// The dialog literal, rebuilt here rather than reached through the reducer's
@@ -327,7 +360,7 @@ struct DeviceManagementFeatureTests {
         var ble = BLECSCClient.testValue
         ble.pair = { id in paired.withValue { $0.append(id) } }
 
-        let store = makeStore(bleCSCClient: ble)
+        let store = makeStore(devices: Self.rowToPair(name: "Wahoo RPM"), bleCSCClient: ble)
         await store.send(.pairButtonTapped(Self.availableID)) {
             $0.pendingPairing = Self.availableID
         }
@@ -338,7 +371,7 @@ struct DeviceManagementFeatureTests {
 
     @Test("A combo sensor's capabilities raise the role prompt")
     func comboCapabilitiesPromptForRole() async {
-        let store = makeStore()
+        let store = makeStore(devices: Self.rowToPair(name: "Wahoo RPM"))
         await store.send(.pairButtonTapped(Self.availableID)) {
             $0.pendingPairing = Self.availableID
         }
@@ -367,7 +400,7 @@ struct DeviceManagementFeatureTests {
         var ble = BLECSCClient.testValue
         ble.setRoles = { id, roles in assigned.withValue { $0.append((id, roles)) } }
 
-        let store = makeStore(bleCSCClient: ble)
+        let store = makeStore(devices: Self.rowToPair(name: "GSC-10"), bleCSCClient: ble)
         await store.send(.pairButtonTapped(Self.availableID)) {
             $0.pendingPairing = Self.availableID
         }
@@ -400,7 +433,7 @@ struct DeviceManagementFeatureTests {
         ble.setPairedSensors = { map in pushed.withValue { $0.append(map) } }
 
         let found = [Self.sensor(id: Self.availableID, name: "Wahoo RPM", capabilities: Self.combo)]
-        let store = makeStore(bleCSCClient: ble)
+        let store = makeStore(devices: Self.rowToPair(name: "Wahoo RPM"), bleCSCClient: ble)
         store.exhaustivity = .off(showSkippedAssertions: false)
         await store.send(.pairButtonTapped(Self.availableID))
         // The capabilities arriving is what raises the prompt; sending the choice
@@ -427,7 +460,7 @@ struct DeviceManagementFeatureTests {
         ble.unpair = { id in unpaired.withValue { $0.append(id) } }
 
         let found = [Self.sensor(id: Self.availableID, name: "Wahoo RPM", capabilities: Self.combo)]
-        let store = makeStore(bleCSCClient: ble)
+        let store = makeStore(devices: Self.rowToPair(name: "Wahoo RPM"), bleCSCClient: ble)
         store.exhaustivity = .off(showSkippedAssertions: false)
         await store.send(.pairButtonTapped(Self.availableID))
         await store.send(.devicesUpdated(.speedCadence, found))
@@ -510,6 +543,7 @@ struct DeviceManagementFeatureTests {
             Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.combo)
         ]
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM")]
         )
         store.exhaustivity = .off(showSkippedAssertions: false)
@@ -546,6 +580,7 @@ struct DeviceManagementFeatureTests {
     func collisionRaisesConfirmation() async {
         let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [Self.speedIncumbent],
             bleCSCClient: Self.recordingClient(into: log)
         )
@@ -572,6 +607,7 @@ struct DeviceManagementFeatureTests {
     func replaceCommitsTheWrite() async {
         let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [Self.speedIncumbent],
             bleCSCClient: Self.recordingClient(into: log)
         )
@@ -600,6 +636,7 @@ struct DeviceManagementFeatureTests {
     func cancelReleasesTheInterrogatedPeripheral() async {
         let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [Self.speedIncumbent],
             bleCSCClient: Self.recordingClient(into: log)
         )
@@ -652,6 +689,7 @@ struct DeviceManagementFeatureTests {
     func bothAgainstTwoIncumbentsRaisesOneConfirmation() async {
         let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
+            devices: Self.rowToPair(name: "Wahoo RPM"),
             pairedSensors: [
                 Self.speedIncumbent,
                 PairedSensor(peripheralID: Self.otherPairedID, role: .cadence, displayName: "Garmin GSC-10")
@@ -686,6 +724,7 @@ struct DeviceManagementFeatureTests {
     func bothAgainstOneComboNamesIt() async {
         let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [
                 PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM"),
                 PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM")
@@ -718,6 +757,7 @@ struct DeviceManagementFeatureTests {
     func partialCollisionKeepsTheOtherRole() async {
         let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [
                 PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM"),
                 PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM")
@@ -756,6 +796,7 @@ struct DeviceManagementFeatureTests {
             Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.wheelOnly)
         ]
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [Self.speedIncumbent],
             bleCSCClient: Self.recordingClient(into: log)
         )
@@ -781,6 +822,7 @@ struct DeviceManagementFeatureTests {
         // its name can come from nowhere but its own record.
         let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [Self.speedIncumbent],
             bleCSCClient: Self.recordingClient(into: log)
         )
@@ -840,6 +882,7 @@ struct DeviceManagementFeatureTests {
         let log = LockIsolated<[ClientCall]>([])
         let found = Self.speedCollisionDevices()
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [Self.speedIncumbent],
             bleCSCClient: Self.recordingClient(into: log)
         )
@@ -865,6 +908,7 @@ struct DeviceManagementFeatureTests {
     func noCollisionWritesWithoutPrompting() async {
         let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [Self.speedIncumbent],
             bleCSCClient: Self.recordingClient(into: log)
         )
@@ -884,7 +928,218 @@ struct DeviceManagementFeatureTests {
         ])
     }
 
+    // MARK: Radar and heart rate pairing (#100)
+
+    /// Nothing to interrogate: the service the peripheral advertised is the role it
+    /// fills, so the tap goes straight to the collision gate and writes. No
+    /// `pendingPairing` either — the single-slot client connects on its own once it is
+    /// told the ID, so there is no half-pairing for a cancel to have to release.
+    @Test("Pairing a radar writes the record and points the client at it")
+    func pairingARadarWritesTheRecord() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            radarDevices: [Self.radar(id: Self.radarID, name: "Varia RTL515")],
+            bleCSCClient: Self.recordingClient(into: log),
+            variaRadarClient: Self.recordingRadarClient(into: log)
+        )
+
+        await store.send(.pairButtonTapped(Self.radarID)) {
+            $0.$preferences.withLock {
+                $0.pairedSensors = [
+                    PairedSensor(peripheralID: Self.radarID, role: .radar, displayName: "Varia RTL515")
+                ]
+            }
+        }
+        await store.finish()
+
+        #expect(store.state.roleDialog == nil)
+        #expect(store.state.pendingPairing == nil)
+        // Nothing reaches the CSC client: a claim touching no CSC role cannot change its
+        // map, and a radar must never reach a client looking for 0x1816 in any case.
+        #expect(log.value == [.setRadarPaired(Self.radarID)])
+    }
+
+    @Test("Pairing a heart rate strap writes the record and points the client at it")
+    func pairingAStrapWritesTheRecord() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            hrDevices: [Self.strap(id: Self.hrID, name: "Wahoo TICKR")],
+            bleCSCClient: Self.recordingClient(into: log),
+            bleHRClient: Self.recordingHRClient(into: log)
+        )
+
+        await store.send(.pairButtonTapped(Self.hrID)) {
+            $0.$preferences.withLock {
+                $0.pairedSensors = [
+                    PairedSensor(peripheralID: Self.hrID, role: .heartRate, displayName: "Wahoo TICKR")
+                ]
+            }
+        }
+        await store.finish()
+
+        #expect(log.value == [.setHRPaired(Self.hrID)])
+    }
+
+    /// One sensor per role holds for radar too, so a second one is the rider's call —
+    /// and the incumbent needs no release of its own: pointing the single slot at the
+    /// replacement tears the old connection down inside the same call.
+    @Test("A second radar raises the collision, and Replace moves the slot")
+    func secondRadarRaisesTheCollision() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let incumbent = PairedSensor(
+            peripheralID: Self.pairedID, role: .radar, displayName: "Varia RTL515"
+        )
+        let store = makeStore(
+            radarDevices: [Self.radar(id: Self.radarID, name: "Varia RCT715")],
+            pairedSensors: [incumbent],
+            bleCSCClient: Self.recordingClient(into: log),
+            variaRadarClient: Self.recordingRadarClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.radarID)) {
+            $0.collisionAlert = Self.expectedCollisionAlert(
+                for: Self.radarID, roles: [.radar],
+                title: "Radar is already assigned to Varia RTL515."
+            )
+        }
+        #expect(log.value == [])
+        #expect(store.state.preferences.pairedSensors == [incumbent])
+
+        await store.send(.collisionAlert(.presented(.replace(peripheralID: Self.radarID, roles: [.radar]))))
+        await store.finish()
+
+        #expect(store.state.preferences.pairedSensors == [
+            PairedSensor(peripheralID: Self.radarID, role: .radar, displayName: "Varia RCT715")
+        ])
+        #expect(log.value == [.setRadarPaired(Self.radarID)])
+    }
+
+    /// Cancelling a radar collision must not release anything: unlike a CSC pairing,
+    /// nothing was connected to interrogate, so there is no peripheral in flight.
+    @Test("Cancelling a radar collision leaves the incumbent in place")
+    func cancellingARadarCollisionChangesNothing() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let incumbent = PairedSensor(
+            peripheralID: Self.pairedID, role: .radar, displayName: "Varia RTL515"
+        )
+        let store = makeStore(
+            radarDevices: [Self.radar(id: Self.radarID, name: "Varia RCT715")],
+            pairedSensors: [incumbent],
+            bleCSCClient: Self.recordingClient(into: log),
+            variaRadarClient: Self.recordingRadarClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.radarID))
+        await store.send(.collisionAlert(.dismiss))
+        await store.finish()
+
+        #expect(store.state.preferences.pairedSensors == [incumbent])
+        #expect(store.state.pendingPairing == nil)
+        #expect(log.value == [])
+    }
+
+    /// A radar and a strap are different roles, so pairing both displaces nothing.
+    @Test("Radar and heart rate pairings coexist")
+    func radarAndStrapCoexist() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            radarDevices: [Self.radar(id: Self.radarID, name: "Varia RTL515")],
+            hrDevices: [Self.strap(id: Self.hrID, name: "Wahoo TICKR")],
+            bleCSCClient: Self.recordingClient(into: log),
+            variaRadarClient: Self.recordingRadarClient(into: log),
+            bleHRClient: Self.recordingHRClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.radarID))
+        await store.send(.pairButtonTapped(Self.hrID))
+        await store.finish()
+
+        #expect(store.state.preferences.pairedSensors == [
+            PairedSensor(peripheralID: Self.radarID, role: .radar, displayName: "Varia RTL515"),
+            PairedSensor(peripheralID: Self.hrID, role: .heartRate, displayName: "Wahoo TICKR")
+        ])
+        #expect(store.state.collisionAlert == nil)
+        #expect(log.value == [.setRadarPaired(Self.radarID), .setHRPaired(Self.hrID)])
+    }
+
+    /// Unpairing a radar is one call. `setPairedSensor(nil)` moves the gate and the
+    /// connection together, so there is nothing to order against it.
+    @Test("Unpairing a radar releases the slot")
+    func unpairingARadarReleasesTheSlot() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            radarDevices: [Self.radar(id: Self.radarID, name: "Varia RTL515", paired: true, state: .active)],
+            pairedSensors: [
+                PairedSensor(peripheralID: Self.radarID, role: .radar, displayName: "Varia RTL515")
+            ],
+            bleCSCClient: Self.recordingClient(into: log),
+            variaRadarClient: Self.recordingRadarClient(into: log)
+        )
+
+        await store.send(.unpairButtonTapped(Self.radarID)) {
+            $0.$preferences.withLock { $0.pairedSensors = [] }
+        }
+        await store.finish()
+
+        // No `setPairedSensors` and no `unpair`: the CSC client held nothing here, and
+        // pushing an unchanged map at it would be noise on every radar unpair.
+        #expect(log.value == [.setRadarPaired(nil)])
+    }
+
+    /// A Pair tap on a row that discovery has since swept does nothing. The reducer has
+    /// no evidence of what the peripheral is, and guessing would mean opening a
+    /// connection on the chance it speaks 0x1816.
+    @Test("Pairing an unknown peripheral is a no-op")
+    func pairingAnUnknownPeripheralDoesNothing() async {
+        let log = LockIsolated<[ClientCall]>([])
+        var csc = Self.recordingClient(into: log)
+        csc.pair = { id in log.withValue { $0.append(.unpair(id)) } }
+        let store = makeStore(
+            bleCSCClient: csc,
+            variaRadarClient: Self.recordingRadarClient(into: log),
+            bleHRClient: Self.recordingHRClient(into: log)
+        )
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.finish()
+
+        #expect(store.state.preferences.pairedSensors.isEmpty)
+        #expect(store.state.pendingPairing == nil)
+        #expect(log.value == [])
+    }
+
     // MARK: Sections and unpairing
+
+    /// The flat list S11 renders: paired first, then discovered-but-unpaired, each half
+    /// by name. Not one section per role — role is established at pairing time and shown
+    /// in the subtitle (UX.md §S11).
+    @Test("The flat list puts paired sensors first, then the rest, each half by name")
+    func listedDevicesSortsPairedFirst() {
+        let store = makeStore(
+            devices: [
+                Self.sensor(id: Self.availableID, name: "Wahoo SPEED"),
+                Self.sensor(id: Self.pairedID, name: "Wahoo RPM", roles: [.cadence], state: .active)
+            ],
+            radarDevices: [Self.radar(id: Self.radarID, name: "Varia RTL515", paired: true, state: .active)],
+            hrDevices: [Self.strap(id: Self.hrID, name: "Garmin HRM")],
+            pairedSensors: [
+                PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM"),
+                PairedSensor(peripheralID: Self.radarID, role: .radar, displayName: "Varia RTL515")
+            ]
+        )
+
+        #expect(store.state.listedDevices.map(\.name) == [
+            "Varia RTL515", "Wahoo RPM",   // paired
+            "Garmin HRM", "Wahoo SPEED"    // discovered
+        ])
+        #expect(store.state.pairedRoles == [
+            Self.pairedID: [.cadence],
+            Self.radarID: [.radar]
+        ])
+    }
 
     @Test("Sections come from the persisted records, not from live role state")
     func sectionsComeFromPersistedRecords() {
@@ -954,8 +1209,9 @@ struct DeviceManagementFeatureTests {
         #expect(row.roles == [.speed, .radar])
     }
 
-    /// AC3 for a kind nothing can pair yet: #100 writes `.radar` records, but the list
-    /// has to be able to show one the moment it exists, or that issue lands blind.
+    /// UX.md §S11: a paired sensor that is out of range stays in the list showing
+    /// Disconnected, so it can still be unpaired. Its row exists on no discovery stream
+    /// and is synthesised from the record alone.
     @Test("A paired radar that is out of range is listed and marked disconnected")
     func outOfRangePairedRadarStillListed() {
         let store = makeStore(
@@ -1048,6 +1304,7 @@ struct DeviceManagementFeatureTests {
             Self.sensor(id: Self.availableID, name: "Wahoo RPM", capabilities: Self.combo)
         ]
         let store = makeStore(
+            devices: Self.rowToPair(name: "Wahoo RPM"),
             pairedSensors: [PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "GSC-10")],
             bleCSCClient: Self.recordingClient(into: log)
         )
@@ -1149,6 +1406,7 @@ struct DeviceManagementFeatureTests {
     func reconciliationLeavesPendingPairingAlone() async {
         let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
             pairedSensors: [
                 PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Wahoo RPM"),
                 PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Wahoo RPM")
@@ -1183,30 +1441,33 @@ struct DeviceManagementFeatureTests {
 
     // MARK: Peripherals serving more than one profile
 
-    // `PairedSensor` is one collection across every role (#93), but this screen only
-    // speaks CSC until #98 unifies discovery. A device that also advertises radar or
-    // heart rate therefore has records here that none of these actions may touch.
-    // Every case below fails against a predicate keyed on `peripheralID` alone.
+    // `PairedSensor` is one collection across every role (#93), and one peripheral can
+    // hold records in more than one of them — a device advertising two supported
+    // services is one row carrying both tags (#98). So a decision made about one profile
+    // must be scoped to that profile: every case below fails against a predicate keyed
+    // on `peripheralID` alone.
 
-    /// The radar record shares a UUID with the CSC sensor, so a `peripheralID`-keyed
-    /// removal deletes a pairing the rider made on a different screen.
-    @Test("Assigning a CSC role leaves the same peripheral's radar record alone")
-    func applyKeepsNonCSCRecordsForTheSamePeripheral() async {
-        let pushed = LockIsolated<[[UUID: Set<SensorRole>]]>([])
-        var ble = BLECSCClient.testValue
-        ble.setPairedSensors = { map in pushed.withValue { $0.append(map) } }
-
-        let found = [Self.sensor(id: Self.pairedID, name: "Varia RCT715", capabilities: Self.combo)]
+    /// A combo row's single Pair button has to claim everything the hardware can do, in
+    /// one write — but only the CSC half of it is the CSC client's business.
+    @Test("Pairing a two-profile peripheral claims both, and only CSC reaches that client")
+    func pairingAComboClaimsEveryProfile() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let combo = DiscoveredDevice(
+            id: Self.pairedID, name: "Varia RCT715", kinds: [.speedCadence, .radar]
+        )
         let store = makeStore(
-            pairedSensors: [
-                PairedSensor(peripheralID: Self.pairedID, role: .radar, displayName: "Varia RCT715")
-            ],
-            bleCSCClient: ble
+            devices: [combo],
+            bleCSCClient: Self.recordingClient(into: log),
+            variaRadarClient: Self.recordingRadarClient(into: log)
         )
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.pairButtonTapped(Self.pairedID))
-        await store.send(.devicesUpdated(.speedCadence, found))
+        await store.send(.devicesUpdated(.speedCadence, [
+            DiscoveredDevice(id: Self.pairedID, name: "Varia RCT715",
+                             kinds: [.speedCadence, .radar], capabilities: Self.combo)
+        ]))
+        // The prompt only ever offers the CSC roles; radar rides along on the answer.
         #expect(store.state.roleDialog != nil)
         await store.send(.roleDialog(.presented(.chose(peripheralID: Self.pairedID, roles: [.speed]))))
         await store.finish()
@@ -1215,14 +1476,50 @@ struct DeviceManagementFeatureTests {
             PairedSensor(peripheralID: Self.pairedID, role: .radar, displayName: "Varia RCT715"),
             PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Varia RCT715")
         ])
-        // Only the CSC role reaches the CSC client.
-        #expect(pushed.value == [[Self.pairedID: [.speed]]])
+        #expect(log.value == [
+            .setPairedSensors([Self.pairedID: [.speed]]),
+            .setRoles(Self.pairedID, [.speed]),
+            .setRadarPaired(Self.pairedID)
+        ])
     }
 
-    /// Unpair on a CSC-only screen means "release speed and cadence". The radar pairing
-    /// was made elsewhere and is not this button's to revoke.
-    @Test("Unpairing releases only the CSC roles, not the radar record")
-    func unpairKeepsNonCSCRecords() async {
+    /// The radar record shares a UUID with the CSC sensor, so a `peripheralID`-keyed
+    /// removal would delete a pairing the reassignment never touched.
+    @Test("Reassigning a CSC role leaves the same peripheral's radar record alone")
+    func reassignmentKeepsNonCSCRecordsForTheSamePeripheral() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let combo = DiscoveredDevice(
+            id: Self.pairedID, name: "Varia RCT715", kinds: [.speedCadence, .radar],
+            roles: [.speed, .radar], connectionState: .active, capabilities: Self.combo
+        )
+        let store = makeStore(
+            devices: [combo],
+            pairedSensors: [
+                PairedSensor(peripheralID: Self.pairedID, role: .radar, displayName: "Varia RCT715"),
+                PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Varia RCT715")
+            ],
+            bleCSCClient: Self.recordingClient(into: log),
+            variaRadarClient: Self.recordingRadarClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.rowTapped(Self.pairedID))
+        #expect(store.state.roleDialog != nil)
+        await store.send(.roleDialog(.presented(.chose(peripheralID: Self.pairedID, roles: [.cadence]))))
+        await store.finish()
+
+        // Speed released, cadence taken, radar untouched.
+        #expect(store.state.preferences.pairedSensors == [
+            PairedSensor(peripheralID: Self.pairedID, role: .radar, displayName: "Varia RCT715"),
+            PairedSensor(peripheralID: Self.pairedID, role: .cadence, displayName: "Varia RCT715")
+        ])
+    }
+
+    /// One row, one button (UX.md §S11). The M6 reading — "CSC records only, the radar
+    /// pairing was made elsewhere" — described a screen on which radar could not be
+    /// paired at all; there is no longer an elsewhere.
+    @Test("Unpairing releases every role the peripheral holds, on every client")
+    func unpairReleasesEveryRole() async {
         let log = LockIsolated<[ClientCall]>([])
         let store = makeStore(
             devices: [Self.sensor(id: Self.pairedID, name: "Varia RCT715", roles: [.speed], state: .active)],
@@ -1230,25 +1527,29 @@ struct DeviceManagementFeatureTests {
                 PairedSensor(peripheralID: Self.pairedID, role: .radar, displayName: "Varia RCT715"),
                 PairedSensor(peripheralID: Self.pairedID, role: .speed, displayName: "Varia RCT715")
             ],
-            bleCSCClient: Self.recordingClient(into: log)
+            bleCSCClient: Self.recordingClient(into: log),
+            variaRadarClient: Self.recordingRadarClient(into: log)
         )
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.unpairButtonTapped(Self.pairedID))
         await store.finish()
 
-        #expect(store.state.preferences.pairedSensors == [
-            PairedSensor(peripheralID: Self.pairedID, role: .radar, displayName: "Varia RCT715")
+        #expect(store.state.preferences.pairedSensors.isEmpty)
+        // CSC closes its reconnect gate before the teardown; the radar client does both
+        // in the one call, so nil is all it needs.
+        #expect(log.value == [
+            .setPairedSensors([:]),
+            .unpair(Self.pairedID),
+            .setRadarPaired(nil)
         ])
-        // The CSC client is told the peripheral holds nothing *it* cares about, and the
-        // radar record never reaches it.
-        #expect(log.value == [.setPairedSensors([:]), .unpair(Self.pairedID)])
     }
 
-    /// Membership in `pairedSensors` is not membership in *this screen's* pairings. A
-    /// CSC-capable device already paired for heart rate holds no CSC role, so hiding it
-    /// from both sections leaves the rider no way to give it speed or cadence.
-    @Test("A device paired only for heart rate is still offered a CSC role")
+    /// A peripheral paired in one profile is one row, listed once, whatever else it can
+    /// do. Claiming its other profile is unpair-then-pair, because a Pair tap on a combo
+    /// claims everything the hardware advertises in a single write (#100) — there is no
+    /// longer a reason to claim profiles one at a time.
+    @Test("A device paired only for heart rate is still one paired row")
     func nonCSCPairingDoesNotHideTheDevice() {
         let store = makeStore(
             devices: [Self.sensor(id: Self.pairedID, name: "Wahoo TICKR", capabilities: Self.combo)],
@@ -1257,12 +1558,11 @@ struct DeviceManagementFeatureTests {
             ]
         )
 
-        // It sorts into Paired now that the list spans all three kinds (#98) — it *is*
-        // paired, and leaving it under Available would have contradicted the section.
-        // What #93 protects is that it stays *claimable*: the record it holds is not a
-        // CSC one, so both CSC roles are still free and the row keeps a Pair button
-        // (`DeviceRow.holdsCSCRole`), not an Unpair one that would do nothing.
+        // It sorts to the top of the flat list — it *is* paired — and holds no CSC
+        // record, which is what #93 protects: a CSC decision must not be able to reach
+        // the heart rate record behind the same UUID.
         #expect(store.state.pairedDevices.map(\.id) == [Self.pairedID])
+        #expect(store.state.listedDevices.map(\.id) == [Self.pairedID])
         #expect(store.state.availableDevices.isEmpty)
         #expect(store.state.pairedDevices[0].roles.isDisjoint(with: SensorRole.cscRoles))
         // Not re-promptable either: there is no CSC pairing here to reassign.

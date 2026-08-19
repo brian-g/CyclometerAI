@@ -60,7 +60,7 @@ All design artifacts are in `assets/design/`. These files are the source of trut
 | [S08](#s08-add-widget) | Add Widget | Phase 2 | Stub |
 | [S09](#s09-ride-paused) | Ride Paused | MVP | Stub |
 | [S10](#s10-ride-summary) | Ride Summary | MVP | Stub |
-| [S11](#s11-device-management) | Device Management | MVP | Stub |
+| [S11](#s11-device-management) | Device Management | MVP | Complete |
 | [S12](#s12-app-settings) | App Settings | MVP | Stub |
 | [S13](#s13-hr-zone-configuration) | HR Zone Configuration | Deprecated | Stub |
 | [S14](#s14-ride-history-list) | Ride History List | Phase 2 | Stub |
@@ -287,9 +287,31 @@ the screen differs only in its title, its helper text and the presence of Next.
 
 - Group: Sensors
   - Sensor type (icon)
-  - Sensor name
+  - Sensor name — from the `PairedSensor` record, so a sensor that is out of range is still named
   - Status (Connected, Searching)
   - When Connected, the battery level if supported
+
+**One row per paired role, whatever its connection state.** The list is built from the durable records, not
+from live client status: a rider setting up a ride needs to see that the strap they paired is the one about
+to be used, and whether it is up. An unpaired role has no row, and with nothing paired the group reads
+"No sensors paired".
+
+**The sheet holds a pairing scan open for as long as it is up**, one per client, balanced on dismiss
+(BLE.md §8). Without it the badge would report nothing worth reading: `startScanning` belongs to the active
+ride and ride finish disconnects, so every row would sit at its last known state until the rider had already
+pressed Start. The scan is refcounted and independent of the ride's, the clients connect only what the rider
+has paired, and a connection made here survives the scan ending — so the ride begins with its sensors
+already up.
+
+That is also what makes the second badge state true. Everything short of connected reads **Searching**,
+`.disconnected` included: a paired sensor the client is not talking to is one the sheet is actively looking
+for. No row carries a pairing action — pairing is S11's, and this sheet runs no discovery it could offer to
+pair *from*.
+
+> **Revised 2026-08-19.** Rows were previously keyed on live client status, which mapped `.disconnected` to
+> "Not Paired" and filtered it out — so a paired sensor that was merely out of range vanished from the sheet
+> entirely, and one that was reconnecting offered "Tap to Pair" despite already being paired. Both came from
+> the same mistake: asking the clients who is paired instead of asking the records.
 
 ### Open UX Questions
 
@@ -780,6 +802,16 @@ Title **Manage Sensors**, helper text "Tap to pair, pull to refresh.", then a **
 devices** — not one section per role. Each row carries a sensor-type icon, the device name, and a trailing
 text button reading **Pair** or **Unpair**.
 
+The icon is an SF Symbol chosen by the peripheral's advertised `SensorKind`, not per device — radar
+`dot.radiowaves.forward`, heart rate `heart.fill`, speed/cadence `speedometer`. A device advertising more
+than one service takes the first in `SensorKind.allCases` order.
+
+### Scanning and Empty State
+The scan runs for as long as the screen is open, so there is no state in which it has finished. A row at the
+foot of the list always shows a small progress indicator beside **"Searching for sensors…"**. With nothing
+discovered and nothing paired, that row is the entire list, and the section footer adds **"Make sure your
+sensors are awake and within range."** — the footer appears only in that case.
+
 > **Revised 2026-08-14 (M10).** This section previously specified five sections keyed by role (Radar, HR,
 > Speed, Cadence, Power). The Sketch frame shows one flat list mixing device types, and the Sketch frame is
 > authoritative. A role-sectioned list would also have had to invent an answer for where an unpaired device
@@ -796,6 +828,13 @@ row subtitle, not by position.
 - Paired sensors sorted to the top, then discovered-but-unpaired devices
 - When pairing a sensor with multiple profiles (e.g., combined speed+cadence), the rider is prompted to choose which type it represents. Implemented (#67) as a confirmation dialog — "What should this sensor do?" with Speed / Cadence / Both — raised only when the sensor's 0x2A5C capabilities say it can do both. A single-capability sensor is assigned silently. Tapping an already-paired combo sensor re-opens the same prompt, which is how a role is reassigned without re-pairing (BLE.md §5.0)
 - A paired sensor that is out of range stays in the list, showing Disconnected, so it can still be unpaired
+- **Pair claims everything the peripheral advertises, in one write.** A radar or a heart rate strap has no
+  ambiguity to resolve — the service it advertises is the role it fills — so its Pair goes straight to the
+  collision check. A device serving CSC as well is interrogated for 0x2A5C and the role prompt above covers
+  only the speed/cadence half; the unambiguous roles ride along on the same write
+- **Unpair releases every role that peripheral holds**, on every client. One row, one button: a device paired
+  for both radar and speed is released from both, and claiming one profile of an already-paired device is
+  unpair-then-pair
 
 ### One Sensor Per Role — Replace or Cancel
 
@@ -821,8 +860,12 @@ a confirmation:
   arbitration between several paired sensors of one type. With one record per role there is nothing to
   arbitrate.)
 - [x] RSSI display: none.
-- [ ] The Sketch frame lists a power meter and ENGO 3 glasses, both Phase 3 hardware. Does MVP filter the
+- [x] The Sketch frame lists a power meter and ENGO 3 glasses, both Phase 3 hardware. Does MVP filter the
   scan to radar / HR / CSC, or list every discovered device and refuse to pair the unsupported ones?
+  **Filter.** `BLECentral` already scans by service UUID over `ServiceUUIDs.allMVP` (BLE.md §8), so listing
+  everything would mean a second, unfiltered scan path, a discovery source with no owning client, and a list
+  of phones, watches and beacons the rider cannot act on. The two Phase 3 rows in the frame illustrate the
+  layout, not a requirement; they return when the hardware does.
 
 ---
 
