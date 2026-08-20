@@ -50,18 +50,13 @@ struct DeviceListView: View {
                 // nothing found this row *is* the empty state, which is why the empty
                 // case needs no separate branch — only the footer's extra hint.
                 HStack(spacing: Spacing.sm) {
+                    Spacer()
                     ProgressView().controlSize(.small)
                     Text("Searching for sensors…")
                         .font(.subheadline)
                         .foregroundStyle(Color.cyTextSecondary)
+                    Spacer()
                 }
-            } header: {
-                Text("Tap to pair, pull to refresh.")
-                    // Body text below the title in the Sketch frame, not a section
-                    // caption — so neither the uppercasing nor the caption size.
-                    .textCase(nil)
-                    .font(.body)
-                    .foregroundStyle(Color.cyTextPrimary)
             } footer: {
                 if store.listedDevices.isEmpty {
                     Text("Make sure your sensors are awake and within range.")
@@ -94,8 +89,12 @@ private struct DeviceRow: View {
     private var isPaired: Bool { !pairedRoles.isEmpty }
 
     var body: some View {
-        SensorListRowView(
-            icon: SensorKind.symbolName(for: device.kinds),
+        // Shared with the Start sheet, so a sensor type keeps its colour across both
+        // lists — heart rate is red wherever the rider meets it.
+        let style = SensorRowStyle.device(roles: pairedRoles, kinds: device.kinds)
+        return SensorListRowView(
+            icon: style.symbol,
+            iconTint: style.tint,
             title: device.name ?? "Unknown Sensor",
             subtitle: subtitle
         ) {

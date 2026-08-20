@@ -257,23 +257,12 @@ extension SensorRow.Kind {
         }
     }
 
-    var systemImage: String {
-        switch self {
-        case .radar: "dot.radiowaves.forward"
-        case .heartRate: "heart.fill"
-        case .speed: "speedometer"
-        case .cadence: "dial.medium.fill"
-        }
-    }
+    /// Both defer to `SensorRowStyle`, shared with S11 — the two lists ask different
+    /// questions (a fixed role here, a discovered device there) but must answer with the
+    /// same colour, or the rider learns a palette on one screen that the other ignores.
+    var systemImage: String { role.symbolName }
 
-    var tint: Color {
-        switch self {
-        case .radar: .purple
-        case .heartRate: .red
-        case .speed: .blue
-        case .cadence: .green
-        }
-    }
+    var tint: Color { role.tint }
 }
 
 extension SensorRow.Status {

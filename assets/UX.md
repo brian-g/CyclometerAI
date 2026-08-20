@@ -289,6 +289,7 @@ the screen differs only in its title, its helper text and the presence of Next.
   - Sensor type (icon)
   - Sensor name — from the `PairedSensor` record, so a sensor that is out of range is still named
   - Status (Connected, Searching)
+  - Icon and tint per sensor type, shared with S11 (`SensorRowStyle`)
   - When Connected, the battery level if supported
 
 **One row per paired role, whatever its connection state.** The list is built from the durable records, not
@@ -802,9 +803,17 @@ Title **Manage Sensors**, helper text "Tap to pair, pull to refresh.", then a **
 devices** — not one section per role. Each row carries a sensor-type icon, the device name, and a trailing
 text button reading **Pair** or **Unpair**.
 
-The icon is an SF Symbol chosen by the peripheral's advertised `SensorKind`, not per device — radar
-`dot.radiowaves.forward`, heart rate `heart.fill`, speed/cadence `speedometer`. A device advertising more
-than one service takes the first in `SensorKind.allCases` order.
+The icon and its tint are shared with the Start sheet (§S05.1) so a sensor type keeps its colour wherever
+the rider meets it — radar purple `dot.radiowaves.forward`, heart rate red `heart.fill`, speed blue
+`speedometer`, cadence green `dial.medium.fill`. One table, `SensorRowStyle`.
+
+A row is drawn by the role the rider **assigned** it, falling back to what the peripheral **advertises**
+while it is merely discovered, both resolved in `allCases` order. So a CSC sensor paired as Cadence shows
+the green dial on both screens rather than a blue speedometer on one; an unpaired CSC sensor reads as speed,
+which is the most a single advertised service can say.
+
+> The tints are raw SwiftUI colours, not `cy` tokens — `assets/design/colors.md` has no sensor-type palette.
+> Tokenising them needs a light and dark hex per sensor added there first.
 
 ### Scanning and Empty State
 The scan runs for as long as the screen is open, so there is no state in which it has finished. A row at the
