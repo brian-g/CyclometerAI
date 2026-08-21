@@ -12,9 +12,10 @@ import Foundation
 /// filtered scan never looks for a radar or a strap outside a ride, and no pairing
 /// record for either could ever be created.
 ///
-/// Pairing itself is still CSC-only. Writing `.radar` and `.heartRate` records is #100's,
-/// along with the flat Sketch layout that replaces the two sections below — so a row
-/// holding only those roles lists and shows its status, but carries no action.
+/// Pairing spans all three kinds (#100). A CSC sensor has to be interrogated for 0x2A5C
+/// and may need the role prompt; a radar or a strap has no such ambiguity — the service
+/// it advertises *is* the role it can fill — so its Pair goes straight to the collision
+/// check and writes a record without connecting anything from here.
 ///
 /// Pairings are durable (#67): this feature owns the `PairedSensor` records and pushes
 /// them into `BLECSCClient`, which holds no persistence and connects only what it has
@@ -87,8 +88,8 @@ struct DeviceManagementFeature {
         /// otherwise drop into Available with a Pair button.
         ///
         /// Covers every role now that the list spans all three kinds (#98) — a paired
-        /// radar has to appear here, and be marked disconnected, even though nothing
-        /// writes such a record until #100.
+        /// radar has to appear here, and be marked disconnected, whether or not it is
+        /// advertising.
         var pairedDevices: [DiscoveredDevice] {
             let seen = devices
             return preferences.pairedRoles
@@ -114,6 +115,25 @@ struct DeviceManagementFeature {
             let paired = Set(preferences.pairedRoles.keys)
             return devices.filter { !paired.contains($0.id) }
         }
+
+        /// The flat list S11 actually renders (UX.md §S11): paired sensors first, then
+        /// discovered-but-unpaired. Both halves are already name-sorted, so the order is
+        /// the spec's without a second sort.
+        ///
+        /// The two halves stay separate properties rather than being folded in here —
+        /// each answers a question the reducer asks on its own, and the split is what
+        /// keeps an out-of-range sensor out of the unpaired half.
+        var listedDevices: [DiscoveredDevice] { pairedDevices + availableDevices }
+
+        /// The rider's durable pairings, keyed by peripheral — what each row's
+        /// Pair/Unpair choice and role subtitle read.
+        ///
+        /// This, not `DiscoveredDevice.roles`, because those report live tenancy in the
+        /// reporting client: a paired sensor that is out of range holds none, and would
+        /// otherwise be offered a Pair button and no roles to show. A pass-through to
+        /// `preferences` so the view can reach it through dynamic member lookup, the
+        /// same reason `reassignableIDs` is a property.
+        var pairedRoles: [UUID: Set<SensorRole>] { preferences.pairedRoles }
 
         /// Paired sensors whose hardware can fill either role, and so are worth
         /// re-prompting. A property rather than a method so the view can reach it
@@ -249,23 +269,37 @@ struct DeviceManagementFeature {
                 // is replaced by the role sheet again a few seconds after answering it.
                 guard state.roleDialog == nil, state.collisionAlert == nil,
                       let id = state.pendingPairing,
-                      let capabilities = merged.first(where: { $0.id == id })?.capabilities
+                      let device = merged.first(where: { $0.id == id }),
+                      let capabilities = device.capabilities
                 else { return reconcile }
 
+                // What the same peripheral can be claimed for outside CSC. Non-empty
+                // only for a combo advertising radar or heart rate as well, which
+                // unified discovery merges into this one row (#98) — one Pair button
+                // has to claim everything that row can do, in one write.
+                //
+                // Free roles only: see `freeUnambiguousRoles`.
+                let alsoClaims = Self.freeUnambiguousRoles(
+                    of: device.kinds, excluding: id, in: state.preferences
+                )
+
                 if capabilities.requiresRoleSelection {
-                    state.roleDialog = Self.roleDialog(
-                        for: id, name: merged.first { $0.id == id }?.name
-                    )
+                    state.roleDialog = Self.roleDialog(for: id, name: device.name)
                     return reconcile
                 }
                 let supported = capabilities.supportedRoles
                 guard !supported.isEmpty else {
-                    // Reports neither wheel nor crank — nothing it can be used for.
+                    // Reports neither wheel nor crank — nothing the CSC client can use
+                    // it for, so release it there. `setPairedSensors` only closes the
+                    // reconnect gate; the connection `pair` opened is `unpair`'s to
+                    // drop. A combo still has its other role to claim, and keeps its
+                    // pairing on that side.
                     state.pendingPairing = nil
-                    return .concatenate(
-                        reconcile,
-                        .run { [bleCSCClient] _ in await bleCSCClient.unpair(id) }
-                    )
+                    let release = Effect<Action>.run { [bleCSCClient] _ in
+                        await bleCSCClient.unpair(id)
+                    }
+                    guard !alsoClaims.isEmpty else { return .concatenate(reconcile, release) }
+                    return .concatenate(reconcile, release, commit(alsoClaims, to: id, in: &state))
                 }
                 // Single capability: assign it and ask nothing about the role
                 // (BLE.md §5.0) — but still run the collision check, which is what
@@ -274,9 +308,28 @@ struct DeviceManagementFeature {
                 //
                 // Sequential, not merged: both effects push an assignment map, and
                 // the one built last is the one that must land last.
-                return .concatenate(reconcile, commit(supported, to: id, in: &state))
+                return .concatenate(reconcile, commit(supported.union(alsoClaims), to: id, in: &state))
+
 
             case .pairButtonTapped(let id):
+                // Not while another pairing is in flight — the same rule `rowTapped`
+                // follows below, for the same reason. `pendingPairing` names exactly one
+                // interrogated peripheral and the dismiss path reads it to decide what to
+                // release, so a second tap would either clear it — stranding the first
+                // sensor connected holding no roles, its capabilities arriving to a guard
+                // that no longer matches — or inherit it, releasing the wrong peripheral
+                // on Cancel.
+                guard state.pendingPairing == nil else { return .none }
+                guard let device = state.devices.first(where: { $0.id == id }) else { return .none }
+                guard device.kinds.contains(.speedCadence) else {
+                    // Radar and heart rate publish no capabilities to interrogate: the
+                    // service the peripheral advertised is the role it fills, so there
+                    // is nothing to ask and nothing to wait for. Straight to the
+                    // collision gate, with no `pendingPairing` — the single-slot clients
+                    // connect on their own once `setPairedSensor` names the peripheral,
+                    // so no half-pairing exists for a cancel to have to release.
+                    return commit(Self.unambiguousRoles(of: device.kinds), to: id, in: &state)
+                }
                 state.pendingPairing = id
                 return .run { _ in await bleCSCClient.pair(id) }
 
@@ -294,7 +347,15 @@ struct DeviceManagementFeature {
                 return .none
 
             case .roleDialog(.presented(.chose(let id, let roles))):
-                return commit(roles, to: id, in: &state)
+                // The prompt only ever offers speed and cadence, so a combo that is also
+                // a radar or a strap has to have those folded back in here — otherwise
+                // answering it would silently drop the role the same Pair tap claimed.
+                // Re-affirming a role the peripheral already holds is a no-op in `apply`.
+                let kinds = state.devices.first { $0.id == id }?.kinds ?? []
+                let alsoClaims = Self.freeUnambiguousRoles(
+                    of: kinds, excluding: id, in: state.preferences
+                )
+                return commit(roles.union(alsoClaims), to: id, in: &state)
 
             case .collisionAlert(.presented(.replace(let id, let roles))):
                 state.pendingPairing = nil
@@ -313,22 +374,31 @@ struct DeviceManagementFeature {
                 return .run { [bleCSCClient] _ in await bleCSCClient.unpair(id) }
 
             case .unpairButtonTapped(let id):
-                // CSC records only. Unpair on this screen means "release the speed and
-                // cadence roles"; the same peripheral's radar or HR pairing was made
-                // elsewhere and is not this button's to revoke (#93).
+                // Every record this peripheral holds, across all three kinds. The flat
+                // list gives a device one row and one button (UX.md §S11), so this is
+                // the only thing Unpair can mean — the M6 reading, "CSC records only,
+                // the radar pairing was made elsewhere", described a screen where radar
+                // and heart rate could not be paired at all.
+                let released = Set((state.preferences.pairedRoles[id] ?? []).compactMap(\.kind))
                 state.$preferences.withLock {
-                    $0.pairedSensors.removeAll { $0.peripheralID == id && $0.isCSC }
+                    $0.pairedSensors.removeAll { $0.peripheralID == id }
                 }
                 let assignments = state.preferences.cscAssignments
-                return .run { [bleCSCClient] _ in
-                    // Close the reconnect gate *before* tearing the connection down.
-                    // `unpair` only drops the slot; `.discovered` consults
-                    // `pairedAssignments`, so the other order leaves a window in which
-                    // the sensor's next advertisement reconnects it — holding roles,
-                    // with no record behind it. The pairing scan is running, so that
-                    // window is about one advertising interval wide.
-                    await bleCSCClient.setPairedSensors(assignments)
-                    await bleCSCClient.unpair(id)
+                return .run { [bleCSCClient, variaRadarClient, bleHRClient] _ in
+                    if released.contains(.speedCadence) {
+                        // Close the reconnect gate *before* tearing the connection down.
+                        // `unpair` only drops the slot; `.discovered` consults
+                        // `pairedAssignments`, so the other order leaves a window in which
+                        // the sensor's next advertisement reconnects it — holding roles,
+                        // with no record behind it. The pairing scan is running, so that
+                        // window is about one advertising interval wide.
+                        await bleCSCClient.setPairedSensors(assignments)
+                        await bleCSCClient.unpair(id)
+                    }
+                    // A single-slot client moves gate and connection together, so nil is
+                    // the whole operation — no separate teardown to order against it.
+                    if released.contains(.radar) { await variaRadarClient.setPairedSensor(nil) }
+                    if released.contains(.heartRate) { await bleHRClient.setPairedSensor(nil) }
                 }
             }
         }
@@ -439,16 +509,18 @@ struct DeviceManagementFeature {
         in state: inout State
     ) -> Effect<Action> {
         let name = state.devices.first { $0.id == id }?.name
+        // Which profiles this claim touches. Everything below is scoped to these, so a
+        // decision made about one profile cannot disturb a pairing held in another (#93)
+        // — the rule that used to be spelled `isCSC`, now that a claim can carry
+        // `.radar` or `.heartRate` too.
+        let affected = Set(roles.compactMap(\.kind))
         state.$preferences.withLock { preferences in
-            // Drop this peripheral's records, and any other peripheral's claim on a
-            // role being reassigned — the same rule the client applies to slots, so
-            // the two representations stay in step.
-            //
-            // Scoped to CSC records: `roles` only ever holds CSC roles, but the
-            // `peripheralID` clause would otherwise take a radar or HR pairing down
-            // with it when a device serving both profiles is assigned a CSC role (#93).
+            // Drop this peripheral's records within the affected profiles, and any other
+            // peripheral's claim on a role being reassigned — the same rule the client
+            // applies to slots, so the two representations stay in step.
             preferences.pairedSensors.removeAll {
-                $0.isCSC && ($0.peripheralID == id || roles.contains($0.role))
+                roles.contains($0.role)
+                    || ($0.peripheralID == id && $0.role.kind.map(affected.contains) == true)
             }
             // Iterate `allCases` rather than the set: `Set` has no stable order, and
             // the persisted file should not churn between writes.
@@ -457,14 +529,63 @@ struct DeviceManagementFeature {
                 .map { PairedSensor(peripheralID: id, role: $0, displayName: name) }
         }
         let assignments = state.preferences.cscAssignments
-        return .run { [bleCSCClient] _ in
-            // Assignments first, for the same reason as unpair: `setRoles` can strip
-            // an incumbent's last role and disconnect it, and until the new map lands
-            // its next advertisement reconnects it under the old one — taking the role
-            // straight back off the sensor the rider just chose.
-            await bleCSCClient.setPairedSensors(assignments)
-            await bleCSCClient.setRoles(id, roles)
+        // Read after the write, so a displaced incumbent is torn down by the very call
+        // that adopts its replacement — a single-slot client needs no second call to
+        // release the sensor it is no longer pointing at.
+        let radarID = state.preferences.pairedSensor(for: .radar)?.peripheralID
+        let hrID = state.preferences.pairedSensor(for: .heartRate)?.peripheralID
+        return .run { [bleCSCClient, variaRadarClient, bleHRClient] _ in
+            if affected.contains(.speedCadence) {
+                // Assignments first, for the same reason as unpair: `setRoles` can strip
+                // an incumbent's last role and disconnect it, and until the new map lands
+                // its next advertisement reconnects it under the old one — taking the role
+                // straight back off the sensor the rider just chose.
+                await bleCSCClient.setPairedSensors(assignments)
+                // Only the CSC subset: `roles` can now carry `.radar` or `.heartRate`,
+                // and `setRoles` assigns whatever it is handed to a CSC slot.
+                await bleCSCClient.setRoles(id, roles.intersection(SensorRole.cscRoles))
+            }
+            // Skipped entirely for a claim that touches no CSC role, because such a claim
+            // cannot alter the map: the removal above only reaches a record whose role is
+            // being claimed, or whose peripheral is being reassigned *within* the same
+            // profiles. Pushing an unchanged map would be noise on every radar pairing.
+            if affected.contains(.radar) { await variaRadarClient.setPairedSensor(radarID) }
+            if affected.contains(.heartRate) { await bleHRClient.setPairedSensor(hrID) }
         }
+    }
+
+    /// The unambiguous roles worth folding into an answer about something else — the
+    /// ones nothing is currently using.
+    ///
+    /// A combo advertising CSC *and* heart rate is paired by answering "what should this
+    /// sensor do?", a question about wheel and crank data. That answer is not consent to
+    /// displace the rider's strap: taking an occupied role here would raise a
+    /// replace-or-cancel alert about a role they were never asked about, and cancelling
+    /// it — the natural response to a question you did not expect — runs the in-flight
+    /// release and throws away the speed pairing they *did* choose.
+    ///
+    /// A free role costs nothing to claim and saves a second trip through the list, so it
+    /// still rides along. Moving an occupied one onto the combo stays what it always was:
+    /// a deliberate Pair tap on that row once the incumbent is gone.
+    private static func freeUnambiguousRoles(
+        of kinds: Set<SensorKind>, excluding id: UUID, in preferences: AppPreferences
+    ) -> Set<SensorRole> {
+        unambiguousRoles(of: kinds).filter { role in
+            let held = preferences.pairedSensor(for: role)
+            return held == nil || held?.peripheralID == id
+        }
+    }
+
+    /// The roles a peripheral advertising `kinds` can be claimed for without asking.
+    ///
+    /// Radar and heart rate are one service to one role, so discovery alone settles what
+    /// they do. `.speedCadence` contributes nothing: one service, two roles, and which
+    /// of them applies is exactly what 0x2A5C and the role prompt are for.
+    private static func unambiguousRoles(of kinds: Set<SensorKind>) -> Set<SensorRole> {
+        var roles: Set<SensorRole> = []
+        if kinds.contains(.radar) { roles.insert(.radar) }
+        if kinds.contains(.heartRate) { roles.insert(.heartRate) }
+        return roles
     }
 
     /// Drop persisted roles the hardware has since reported it cannot fill.

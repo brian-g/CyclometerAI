@@ -283,6 +283,24 @@ All CSC sensors (`0x1816`) go through role assignment when paired in S11 (Device
 > The write ordering rule below applies unchanged: Replace pushes `setPairedSensors` first, then `setRoles`
 > for both the incumbent and the new sensor.
 
+> **Radar and heart rate pairing (#100).** The flow above is the CSC flow; the other two kinds take a shorter
+> one, and the difference is that they have nothing to interrogate.
+>
+> - **No steps 1–3.** The advertised service *is* the role, so a Pair tap on a radar or a strap goes straight
+>   to the collision check at step 4 and writes. Nothing is connected first, so there is no in-flight pairing
+>   for Cancel to release — cancelling a radar collision simply leaves the incumbent alone.
+> - **One call, not two.** `VariaRadarClient.setPairedSensor` and `BLEHRClient.setPairedSensor` move the gate
+>   and the connection identity inside one critical section, so records-before-teardown holds structurally
+>   and neither client has an `unpair`. Displacing an incumbent radar is a single `setPairedSensor(newID)`:
+>   the same call that adopts the replacement tears the old connection down.
+> - **A Pair tap claims every profile the peripheral advertises, in one write.** A device serving CSC as well
+>   is still interrogated, and the role prompt still covers only speed and cadence; the unambiguous roles are
+>   folded into the same commit, so the collision check runs once over the whole claim. Unpair is the mirror:
+>   one row, one button, every record for that peripheral released on every client it reached.
+> - **Every write stays scoped to the profiles it touches.** `apply` removes a peripheral's records only
+>   within the kinds being claimed, which is #93's rule generalised — a CSC decision must not reach the radar
+>   record behind the same UUID, and vice versa.
+
 **Write ordering rule.** `pairedAssignments` inside `BLECSCClient` is the gate `.discovered` consults
 before reconnecting anything, and the client drops its lock across every connect and disconnect. So
 **`setPairedSensors` must be pushed before any teardown**, never after:
@@ -444,10 +462,10 @@ Each BLE peripheral (Radar, HR, CSC) manages its own connection state independen
 >   peripheral is already in the client's session inventory, which is what makes S11's Pair button act at
 >   once instead of waiting for the next advertisement.
 >
-> Until #100 writes `.radar` and `.heartRate` records, both gates are permanently closed and neither sensor
-> connects. That is the intended M10 sequencing, not a regression to fix in a hurry: no migration is
-> possible, because the auto-adopted peripheral was never persisted and inferring a record from "whatever is
-> connected" would reintroduce exactly the bug this removed.
+> Between this change and #100 both gates were permanently closed and neither sensor connected. That was the
+> intended M10 sequencing, not a regression left standing: no migration was possible, because the auto-adopted
+> peripheral was never persisted and inferring a record from "whatever is connected" would have reintroduced
+> exactly the bug this removed. S11 now writes both records (#100), so the rider arms each gate deliberately.
 
 > **Unified discovery (#98).** The gap above was wider than "no rows on S11": `BLECentral` issues a *filtered*
 > scan, and the only pairing scan anyone started was `bleCSCClient.beginPairingScan()`. Radar and HR were
@@ -475,7 +493,18 @@ Each BLE peripheral (Radar, HR, CSC) manages its own connection state independen
 >   re-advertise peripherals it has already reported, and taking the extra reference first means the refcount
 >   never reaches zero mid-refresh.
 >
-> Pairing is still CSC-only. A radar or a strap lists and reports its status but carries no action until #100.
+> Pairing spans all three kinds since #100. The radar and HR write path is §5.0's "Radar and heart rate
+pairing" note; a radar or a strap needs no interrogation, so its Pair tap goes straight to the collision
+check.
+
+> **Battery has to re-broadcast the device list (2026-08-19).** `DiscoveredDevice.batteryPercent` is read
+> from a client field, and 0x180F answers well *after* the connection that carried it — so a client that
+> stores the level and tells only its `batteryLevel()` subscribers leaves the S11 row holding the `nil` it
+> was built with, permanently. `BLECSCClient` never had the bug: its level lands in the slot and
+> `recomputeRoleStatesLocked` broadcasts from there. Both single-slot clients did, for radar and heart rate
+> alike, and now call `broadcastDiscoveredLocked()` from `setBattery`. The rule for any new field on
+> `DiscoveredDevice`: whatever mutates it must broadcast, or the list silently pins the value it was born
+> with.
 
 > **Discovery has to expire (#98 follow-up).** `discoveredIDs` was an inventory that was never pruned, so a
 > sensor switched off stayed in Available for the life of the process. There is no "lost peripheral" callback
@@ -889,6 +918,18 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | Narrowed capabilities correct the record | A persisted role the hardware reports it cannot fill is dropped from `pairedSensors`, not only from the live slot |
 | Narrowing to no roles releases the sensor | The last surviving role going away unpairs the peripheral outright |
 | Narrowing is silent without a contradiction | Records inside the advertised capabilities, and peripherals that never answered the read, are left alone |
+| Pairing a radar or a strap needs no interrogation | The record is written and `setPairedSensor(id)` pushed on the tap; no role sheet, nothing left in flight |
+| A radar collides like any other role | A second radar raises replace-or-cancel; Replace is one `setPairedSensor(newID)` and the incumbent needs no release of its own |
+| Cancelling a radar collision releases nothing | Nothing was connected to interrogate, so the incumbent is left exactly as it was and the call log is empty |
+| A Pair tap claims every profile advertised | A peripheral serving CSC and radar writes both records from one answer, and only the CSC role reaches `BLECSCClient` |
+| Unpair releases every role the peripheral holds | Records for all kinds are dropped and each client it reached is told — CSC as `setPairedSensors` then `unpair`, the single-slot clients as `setPairedSensor(nil)` |
+| A write stays inside the profiles it claims | Reassigning a CSC role leaves the same peripheral's radar record intact, and the reverse |
+| Pairing an undiscovered peripheral does nothing | With no row to read `kinds` from there is no evidence of what it is; nothing is written and nothing is connected |
+| A battery reading refreshes the device list | The level arrives after the connection, so `setBattery` re-broadcasts — otherwise the S11 row keeps the nil it was built with |
+| The Start sheet scans while it is open | One `beginPairingScan` per client on appear, so its Connected / Searching badge reports something the rider can act on |
+| That scan is balanced on every exit | Cancel, swipe and Start Ride all release it. Owned by `AppFeature` around the presentation — a release sent from inside a `@Presents` child arrives after the state is nil and is dropped |
+| One pairing is interrogated at a time | A Pair tap while `pendingPairing` is set is refused, so a cancel cannot release the wrong peripheral |
+| A CSC answer does not displace a strap | Unambiguous roles fold into the role prompt's answer only where unoccupied; an occupied one is left alone rather than raising a prompt about a role the rider never chose |
 | Combo sensor assigned Both | SpeedFeature and CadenceFeature both connect to same peripheral UUID |
 | Speed-only peripheral + combo Cadence-only | Both features active simultaneously on different peripherals |
 | Radar sidebar hidden when no radar paired | `RadarFeature.State.isPaired == false` → sidebar absent |

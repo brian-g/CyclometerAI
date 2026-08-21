@@ -58,4 +58,6 @@ jobs:
             -skip-testing:CyclometerTests/HeroNumberSnapshotTests \
             -skip-testing:CyclometerTests/SpeedWidgetSnapshotTests \
             -skip-testing:CyclometerTests/CadenceWidgetSnapshotTests \
-            -skip-testing:CyclometerTests/ActiveRideAccessorySnapshotTests
+            -skip-testing:CyclometerTests/ActiveRideAccessorySnapshotTests \
+            -skip-testing:CyclometerTests/DeviceManagementSnapshotTests \
+            -skip-testing:CyclometerTests/StartSheetSnapshotTests

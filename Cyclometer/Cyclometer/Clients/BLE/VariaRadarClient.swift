@@ -668,6 +668,12 @@ private final class RadarClientState: @unchecked Sendable {
             guard batteryPercent != level else { return }
             batteryPercent = level
             for continuation in batteryContinuations.values { continuation.yield(level) }
+            // The device list carries the level too, and 0x180F answers well after the
+            // connection that carried it — so without this the radar's S11 row keeps the
+            // nil it was built with and never shows a battery at all. `BLECSCClient`
+            // never had the bug: its level lands in the slot, and
+            // `recomputeRoleStatesLocked` broadcasts from there.
+            broadcastDiscoveredLocked()
         }
     }
 

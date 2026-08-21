@@ -1,53 +1,68 @@
 import SwiftUI
 import ComposableArchitecture
 
-/// S11 — the Sensors screen pushed from Settings. Lists radar, heart rate and CSC
-/// devices in one merged list (#98); #100 replaces the two sections below with the flat
-/// Sketch layout and adds pairing for the first two kinds.
+/// S11 — the Manage Sensors screen pushed from Settings.
+///
+/// Nothing but the title: everything that is the list lives in `DeviceListView`, so
+/// S02 — Add Sensors (#107) can present the same list under its own title and helper
+/// text without copying it.
 struct DeviceManagementView: View {
+    let store: StoreOf<DeviceManagementFeature>
+
+    var body: some View {
+        DeviceListView(store: store)
+            .navigationTitle("Manage Sensors")
+    }
+}
+
+/// The device list itself — one flat grouped list of everything discovered or paired,
+/// mixing radar, heart rate and CSC (UX.md §S11, `Design.sketch` — S11).
+///
+/// Flat rather than sectioned by role: role is established at pairing time and shown in
+/// the subtitle, and a role-keyed list would have had to invent somewhere to put an
+/// unpaired device whose 0x2A5C read has not returned yet. Paired sensors sort to the
+/// top, which `listedDevices` already does.
+struct DeviceListView: View {
     @Bindable var store: StoreOf<DeviceManagementFeature>
 
     var body: some View {
+        let paired = store.pairedRoles
         List {
-            if !store.pairedDevices.isEmpty {
-                Section {
-                    ForEach(store.pairedDevices) { device in
-                        DeviceRow(device: device) { store.send(.unpairButtonTapped(device.id)) }
-                            // Tapping a combo sensor re-opens the role prompt —
-                            // BLE.md §5.0's "reassignable without re-pairing". Rows
-                            // with nothing to choose stay inert.
-                            .contentShape(.rect)
-                            .onTapGesture { store.send(.rowTapped(device.id)) }
-                    }
-                } header: {
-                    Text("Paired")
-                } footer: {
-                    if !store.reassignableIDs.isEmpty {
-                        Text("Tap a sensor that measures both to change what it does.")
-                    }
-                }
-            }
-
             Section {
-                if store.availableDevices.isEmpty {
-                    // No empty state for the Paired section: it is hidden entirely
-                    // when nothing is paired, so this is the only "nothing yet" case.
-                    // The section header already says "Available", so the spinner
-                    // alone carries the message.
-                    ProgressView().controlSize(.small)
-                } else {
-                    ForEach(store.availableDevices) { device in
-                        DeviceRow(device: device) { store.send(.pairButtonTapped(device.id)) }
+                ForEach(store.listedDevices) { device in
+                    let roles = paired[device.id] ?? []
+                    DeviceRow(device: device, pairedRoles: roles) {
+                        store.send(
+                            roles.isEmpty
+                                ? .pairButtonTapped(device.id)
+                                : .unpairButtonTapped(device.id)
+                        )
                     }
+                    // Tapping a combo sensor re-opens the role prompt —
+                    // BLE.md §5.0's "reassignable without re-pairing". Rows
+                    // with nothing to choose stay inert.
+                    .contentShape(.rect)
+                    .onTapGesture { store.send(.rowTapped(device.id)) }
                 }
-            } header: {
-                Text("Available")
+
+                // Always last, and always present: the scan runs for as long as this
+                // screen is open, so there is no state in which it has finished. With
+                // nothing found this row *is* the empty state, which is why the empty
+                // case needs no separate branch — only the footer's extra hint.
+                HStack(spacing: Spacing.sm) {
+                    Spacer()
+                    ProgressView().controlSize(.small)
+                    Text("Searching for sensors…")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.cyTextSecondary)
+                    Spacer()
+                }
             } footer: {
-                Text("Radar and heart rate sensors are listed here; pairing them arrives with full device management.")
+                if store.listedDevices.isEmpty {
+                    Text("Make sure your sensors are awake and within range.")
+                }
             }
         }
-        .navigationTitle("Sensors")
-        .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog($store.scope(state: \.roleDialog, action: \.roleDialog))
         // A separate modifier from the role sheet on purpose: the two are raised back
         // to back on a collision, and one `.confirmationDialog` cannot present the
@@ -65,11 +80,21 @@ struct DeviceManagementView: View {
 /// pair/unpair action, rather than a fixed sensor category.
 private struct DeviceRow: View {
     let device: DiscoveredDevice
+    /// The rider's durable record for this peripheral, empty when it is merely
+    /// discovered. Not `device.roles`, which is live tenancy in the reporting client
+    /// and so is empty for a paired sensor that is out of range.
+    let pairedRoles: Set<SensorRole>
     let onAction: () -> Void
 
+    private var isPaired: Bool { !pairedRoles.isEmpty }
+
     var body: some View {
-        SensorListRowView(
-            icon: "sensor.tag.radiowaves.forward",
+        // Shared with the Start sheet, so a sensor type keeps its colour across both
+        // lists — heart rate is red wherever the rider meets it.
+        let style = SensorRowStyle.device(roles: pairedRoles, kinds: device.kinds)
+        return SensorListRowView(
+            icon: style.symbol,
+            iconTint: style.tint,
             title: device.name ?? "Unknown Sensor",
             subtitle: subtitle
         ) {
@@ -79,43 +104,22 @@ private struct DeviceRow: View {
             if let battery = device.batteryPercent, device.isConnected {
                 SensorBatteryLabel(percent: battery)
             }
-            // Pairing is CSC-only until #100 writes `.radar` and `.heartRate` records,
-            // so a radar or a strap lists and reports its status but offers no action —
-            // a button that cannot do anything would be worse than none.
-            if isActionable {
-                SensorRowButton(holdsCSCRole ? "Unpair" : "Pair",
-                                tint: holdsCSCRole ? .cyDestructive : .cyPrimary,
-                                action: onAction)
-            }
+            SensorRowButton(isPaired ? "Unpair" : "Pair",
+                            tint: isPaired ? .cyDestructive : .cyPrimary,
+                            action: onAction)
         }
-    }
-
-    /// Whether this row's button can do anything. True for a device advertising CSC,
-    /// and for one already holding a CSC role — which covers the out-of-range paired
-    /// sensor, whose row is synthesised from the record and so carries no advertised
-    /// kinds beyond what the record implies.
-    private var isActionable: Bool {
-        device.kinds.contains(.speedCadence) || holdsCSCRole
-    }
-
-    /// Keyed on CSC tenancy rather than `isPaired`, because this button only ever acts
-    /// on CSC records (#93). A combo already paired for heart rate sorts into Paired —
-    /// it *is* paired — but its speed and cadence roles are still free, so it keeps a
-    /// Pair button rather than an Unpair one that would silently do nothing.
-    private var holdsCSCRole: Bool {
-        !device.roles.isDisjoint(with: SensorRole.cscRoles)
     }
 
     /// Roles held, or the connection state while it is still settling — a paired
     /// sensor that hasn't delivered a measurement yet would otherwise look idle.
     private var subtitle: String? {
-        guard device.isPaired else { return nil }
+        guard isPaired else { return nil }
         switch device.connectionState {
         case .active, .connected, .none:
             // Declaration order (radar, HR, speed, then cadence), not alphabetical — it
             // matches how roles are named everywhere else in the app and the specs.
             return SensorRole.allCases
-                .filter(device.roles.contains)
+                .filter(pairedRoles.contains)
                 .map(\.displayName)
                 .joined(separator: " · ")
         case .connecting:    return "Connecting…"
@@ -150,7 +154,7 @@ private func stubbedDevices<Client>(
     }
 }
 
-#Preview("Sensors") {
+#Preview("Manage Sensors") {
     NavigationStack {
         DeviceManagementView(
             store: Store(
@@ -178,7 +182,7 @@ private func stubbedDevices<Client>(
     }
 }
 
-#Preview("Sensors — searching") {
+#Preview("Manage Sensors — searching") {
     NavigationStack {
         DeviceManagementView(
             store: Store(initialState: DeviceManagementFeature.State()) {

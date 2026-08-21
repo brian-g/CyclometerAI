@@ -60,7 +60,7 @@ All design artifacts are in `assets/design/`. These files are the source of trut
 | [S08](#s08-add-widget) | Add Widget | Phase 2 | Stub |
 | [S09](#s09-ride-paused) | Ride Paused | MVP | Stub |
 | [S10](#s10-ride-summary) | Ride Summary | MVP | Stub |
-| [S11](#s11-device-management) | Device Management | MVP | Stub |
+| [S11](#s11-device-management) | Device Management | MVP | Complete |
 | [S12](#s12-app-settings) | App Settings | MVP | Stub |
 | [S13](#s13-hr-zone-configuration) | HR Zone Configuration | Deprecated | Stub |
 | [S14](#s14-ride-history-list) | Ride History List | Phase 2 | Stub |
@@ -210,7 +210,8 @@ The primary button reads **Next** and is enabled once the three required permiss
 
 Title **Add Sensors**, helper text "Nearby sensors, tap to pair, pull to refresh.", the device list, and a
 primary **Next** button. The list is the same component as S11 (§S11) with every row in its unpaired state —
-the screen differs only in its title, its helper text and the presence of Next.
+the screen differs only in its title, the **Next** button, and the helper text, which S11 no longer carries
+(§S11, revised 2026-08-21). Onboarding keeps it: this is the first sensor list the rider has ever seen.
 
 ### Interactions
 - BLE scan + discovered device list
@@ -287,9 +288,36 @@ the screen differs only in its title, its helper text and the presence of Next.
 
 - Group: Sensors
   - Sensor type (icon)
-  - Sensor name
+  - Sensor name — from the `PairedSensor` record, so a sensor that is out of range is still named
   - Status (Connected, Searching)
+  - Icon and tint per sensor type, shared with S11 (`SensorRowStyle`)
   - When Connected, the battery level if supported
+
+**One row per paired role, whatever its connection state.** The list is built from the durable records, not
+from live client status: a rider setting up a ride needs to see that the strap they paired is the one about
+to be used, and whether it is up. An unpaired role has no row, and with nothing paired the group reads
+"No paired sensors".
+
+**A pairing scan is held open for as long as the sheet is up**, one per client, balanced on every path the
+sheet can leave by. It is taken by `AppFeature` around the presentation rather than by the sheet itself:
+every dismissal path clears the presented state before SwiftUI runs `onDisappear`, so a release sent from
+inside the sheet reaches an absent destination and is dropped, leaving the radio on for the rest of the
+process. Only the owner of the presentation sees both ends of the lifetime. Without the scan the badge would
+report nothing worth reading: `startScanning` belongs to the active
+ride and ride finish disconnects, so every row would sit at its last known state until the rider had already
+pressed Start. The scan is refcounted and independent of the ride's, the clients connect only what the rider
+has paired, and a connection made here survives the scan ending — so the ride begins with its sensors
+already up.
+
+That is also what makes the second badge state true. Everything short of connected reads **Searching**,
+`.disconnected` included: a paired sensor the client is not talking to is one the sheet is actively looking
+for. No row carries a pairing action — pairing is S11's, and this sheet runs no discovery it could offer to
+pair *from*.
+
+> **Revised 2026-08-19.** Rows were previously keyed on live client status, which mapped `.disconnected` to
+> "Not Paired" and filtered it out — so a paired sensor that was merely out of range vanished from the sheet
+> entirely, and one that was reconnecting offered "Tap to Pair" despite already being paired. Both came from
+> the same mistake: asking the clients who is paired instead of asking the records.
 
 ### Open UX Questions
 
@@ -776,9 +804,33 @@ An `HKWorkout` is written to Apple Health automatically when the ride ends, befo
 ### Layout
 > *Refer to `assets/design/Design.sketch` — S11.*
 
-Title **Manage Sensors**, helper text "Tap to pair, pull to refresh.", then a **single grouped list of
-devices** — not one section per role. Each row carries a sensor-type icon, the device name, and a trailing
-text button reading **Pair** or **Unpair**.
+Title **Manage Sensors**, then a **single grouped list of devices** — not one section per role. Each row
+carries a sensor-type icon, the device name, and a trailing text button reading **Pair** or **Unpair**.
+
+> **Revised 2026-08-21.** The helper text "Tap to pair, pull to refresh." is removed. The Sketch frame still
+> shows it below the title and needs deleting there — a deliberate departure from the frame, not drift. The
+> row's own Pair button says what a tap does, and pull-to-refresh is a system gesture the list already
+> advertises by behaving like every other iOS list; a line of instructions above four self-describing rows
+> earns less than the vertical space it costs. §S02 keeps its own helper text: an onboarding screen is
+> talking to a rider who has not seen this list before.
+
+The icon and its tint are shared with the Start sheet (§S05.1) so a sensor type keeps its colour wherever
+the rider meets it — radar purple `dot.radiowaves.forward`, heart rate red `heart.fill`, speed blue
+`speedometer`, cadence green `dial.medium.fill`. One table, `SensorRowStyle`.
+
+A row is drawn by the role the rider **assigned** it, falling back to what the peripheral **advertises**
+while it is merely discovered, both resolved in `allCases` order. So a CSC sensor paired as Cadence shows
+the green dial on both screens rather than a blue speedometer on one; an unpaired CSC sensor reads as speed,
+which is the most a single advertised service can say.
+
+> The tints are raw SwiftUI colours, not `cy` tokens — `assets/design/colors.md` has no sensor-type palette.
+> Tokenising them needs a light and dark hex per sensor added there first.
+
+### Scanning and Empty State
+The scan runs for as long as the screen is open, so there is no state in which it has finished. A row at the
+foot of the list always shows a small progress indicator beside **"Searching for sensors…"**. With nothing
+discovered and nothing paired, that row is the entire list, and the section footer adds **"Make sure your
+sensors are awake and within range."** — the footer appears only in that case.
 
 > **Revised 2026-08-14 (M10).** This section previously specified five sections keyed by role (Radar, HR,
 > Speed, Cadence, Power). The Sketch frame shows one flat list mixing device types, and the Sketch frame is
@@ -796,6 +848,21 @@ row subtitle, not by position.
 - Paired sensors sorted to the top, then discovered-but-unpaired devices
 - When pairing a sensor with multiple profiles (e.g., combined speed+cadence), the rider is prompted to choose which type it represents. Implemented (#67) as a confirmation dialog — "What should this sensor do?" with Speed / Cadence / Both — raised only when the sensor's 0x2A5C capabilities say it can do both. A single-capability sensor is assigned silently. Tapping an already-paired combo sensor re-opens the same prompt, which is how a role is reassigned without re-pairing (BLE.md §5.0)
 - A paired sensor that is out of range stays in the list, showing Disconnected, so it can still be unpaired
+- **One pairing at a time.** A Pair tap while another sensor is being interrogated is refused, the same rule
+  a reassignment tap follows. Exactly one peripheral is "in flight", and the cancel path reads that to decide
+  what to release — a second tap would either strand the first sensor connected holding no roles, or release
+  the wrong one
+- **Pair claims everything the peripheral advertises, in one write.** A radar or a heart rate strap has no
+  ambiguity to resolve — the service it advertises is the role it fills — so its Pair goes straight to the
+  collision check. A device serving CSC as well is interrogated for 0x2A5C and the role prompt above covers
+  only the speed/cadence half; the unambiguous roles ride along on the same write **only where they are
+  free**. Answering "what should this sensor do?" is a decision about wheel and crank data, not consent to
+  displace the rider's radar or strap, so an occupied role is left alone rather than raising a
+  replace-or-cancel prompt about something they were never asked about. Moving an occupied role onto a combo
+  stays a deliberate Pair tap on that row once the incumbent is gone
+- **Unpair releases every role that peripheral holds**, on every client. One row, one button: a device paired
+  for both radar and speed is released from both, and claiming one profile of an already-paired device is
+  unpair-then-pair
 
 ### One Sensor Per Role — Replace or Cancel
 
@@ -821,8 +888,12 @@ a confirmation:
   arbitration between several paired sensors of one type. With one record per role there is nothing to
   arbitrate.)
 - [x] RSSI display: none.
-- [ ] The Sketch frame lists a power meter and ENGO 3 glasses, both Phase 3 hardware. Does MVP filter the
+- [x] The Sketch frame lists a power meter and ENGO 3 glasses, both Phase 3 hardware. Does MVP filter the
   scan to radar / HR / CSC, or list every discovered device and refuse to pair the unsupported ones?
+  **Filter.** `BLECentral` already scans by service UUID over `ServiceUUIDs.allMVP` (BLE.md §8), so listing
+  everything would mean a second, unfiltered scan path, a discovery source with no owning client, and a list
+  of phones, watches and beacons the rider cannot act on. The two Phase 3 rows in the frame illustrate the
+  layout, not a requirement; they return when the hardware does.
 
 ---
 
