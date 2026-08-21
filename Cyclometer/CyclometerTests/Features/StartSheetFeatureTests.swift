@@ -80,47 +80,7 @@ struct StartSheetFeatureTests {
         #expect(store.state.sensors.first { $0.kind == .speed }?.status == .searching)
     }
 
-    /// The sheet is the only thing scanning while it is up — `startScanning` belongs to
-    /// the active ride — so without this every badge would report a stale state the
-    /// rider could not act on. Balanced on disappear, per client.
-    @Test("The sheet holds a pairing scan open for as long as it is up, and balances it")
-    func sheetScansWhileOpen() async {
-        let log = LockIsolated<[ScanCall]>([])
-        var csc = BLECSCClient.testValue
-        csc.beginPairingScan = { log.withValue { $0.append(.begin(.speedCadence)) } }
-        csc.endPairingScan = { log.withValue { $0.append(.end(.speedCadence)) } }
-        var radar = VariaRadarClient.testValue
-        radar.beginPairingScan = { log.withValue { $0.append(.begin(.radar)) } }
-        radar.endPairingScan = { log.withValue { $0.append(.end(.radar)) } }
-        var hr = BLEHRClient.testValue
-        hr.beginPairingScan = { log.withValue { $0.append(.begin(.heartRate)) } }
-        hr.endPairingScan = { log.withValue { $0.append(.end(.heartRate)) } }
 
-        let store = TestStore(initialState: StartSheetFeature.State()) {
-            StartSheetFeature()
-        } withDependencies: {
-            $0.bleCSCClient = csc
-            $0.variaRadarClient = radar
-            $0.bleHRClient = hr
-        }
-
-        await store.send(.task)
-        await store.send(.onDisappear)
-        await store.finish()
-
-        // Same order as `AppFeature.task`'s launch push, and every begin balanced.
-        #expect(log.value == [
-            .begin(.speedCadence), .begin(.radar), .begin(.heartRate),
-            .end(.speedCadence), .end(.radar), .end(.heartRate)
-        ])
-    }
-
-    /// One log across all three clients' scan endpoints — the *balance* between them is
-    /// the point, which three separate counters cannot show.
-    private enum ScanCall: Equatable {
-        case begin(SensorKind)
-        case end(SensorKind)
-    }
 
     // MARK: Which rows the sheet shows
 

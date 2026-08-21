@@ -115,7 +115,33 @@ struct AppFeature {
 
             case .startRideButtonTapped:
                 state.startSheet = StartSheetFeature.State()
-                return .none
+                // Hold a pairing scan open for as long as the sheet is up, so its sensor
+                // rows report something the rider can act on. `startScanning` belongs to
+                // the active ride and ride finish disconnects, so without this every row
+                // would sit at its last known state — in practice disconnected — until
+                // the rider had already pressed Start. The scan is refcounted and
+                // independent of the ride's (BLE.md §8), the clients connect only what
+                // the rider has paired (#97), and a connection made here survives the
+                // scan ending, so the ride begins with its sensors already up.
+                //
+                // Here rather than inside the sheet, for the same reason the launch push
+                // lives here: the sheet is a `@Presents` child, and every dismissal path
+                // clears `startSheet` *before* SwiftUI runs `onDisappear` — so a release
+                // sent from the sheet arrives at an absent destination and TCA drops it,
+                // leaking a reference on all three clients per open. Only the owner of
+                // the presentation sees both ends of the lifetime.
+                //
+                // Sequential, and in the same order as the launch push, so the whole
+                // lifecycle is assertable as one interleaved call log.
+                return .run { _ in
+                    await bleCSCClient.beginPairingScan()
+                    await variaRadarClient.beginPairingScan()
+                    await bleHRClient.beginPairingScan()
+                }
+
+            case .startSheet(.dismiss):
+                // Cancel and swipe-to-dismiss both arrive here.
+                return Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
 
             case .startSheet(.presented(.delegate(.startRide))):
                 state.activeRide = ActiveRideFeature.State()
@@ -127,7 +153,14 @@ struct AppFeature {
                 // `activeRide` via `.ifLet` and torn down only when the ride
                 // ends. Previously this was driven by RideDashboardView's
                 // `.task`, so minimizing the dashboard cancelled the timer.
-                return .send(.activeRide(.task))
+                // The sheet is going away without a `.dismiss`, so its scan is released
+                // here. The ride takes its own scan in `activeRide(.task)`, and the
+                // refcount never reaches zero in between — the connections the sheet
+                // established stay up.
+                return .merge(
+                    Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient),
+                    .send(.activeRide(.task))
+                )
 
             case .startSheet:
                 return .none
@@ -217,6 +250,20 @@ struct AppFeature {
         }
         .ifLet(\.$startSheet, action: \.startSheet) {
             StartSheetFeature()
+        }
+    }
+
+    /// Balance the scan `startRideButtonTapped` took. Shared by the two paths the sheet
+    /// can leave by, so neither can drift from the other.
+    private static func endStartSheetScan(
+        _ bleCSCClient: BLECSCClient,
+        _ variaRadarClient: VariaRadarClient,
+        _ bleHRClient: BLEHRClient
+    ) -> Effect<Action> {
+        .run { _ in
+            await bleCSCClient.endPairingScan()
+            await variaRadarClient.endPairingScan()
+            await bleHRClient.endPairingScan()
         }
     }
 

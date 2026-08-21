@@ -1111,6 +1111,143 @@ struct DeviceManagementFeatureTests {
         #expect(log.value == [])
     }
 
+    // MARK: One pairing at a time
+
+    /// `pendingPairing` names exactly one interrogated peripheral, and the dismiss path
+    /// reads it to decide what to release. A second Pair tap that cleared it would strand
+    /// the first sensor connected holding no roles — its 0x2A5C answer arriving to a guard
+    /// that no longer matches, so the role prompt is never raised and nothing releases it.
+    @Test("A Pair tap on a radar cannot clobber a CSC pairing already in flight")
+    func radarPairDoesNotClobberAnInterrogation() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            devices: Self.rowToPair(name: "GSC-10"),
+            radarDevices: [Self.radar(id: Self.radarID, name: "Varia RTL515")],
+            bleCSCClient: Self.recordingClient(into: log),
+            variaRadarClient: Self.recordingRadarClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        #expect(store.state.pendingPairing == Self.availableID)
+
+        // The rider taps Pair on the radar while the CSC read is still outstanding —
+        // both rows are unpaired, so both show a Pair button.
+        await store.send(.pairButtonTapped(Self.radarID))
+
+        // Refused outright: the interrogation keeps its marker and nothing is written.
+        #expect(store.state.pendingPairing == Self.availableID)
+        #expect(store.state.preferences.pairedSensors.isEmpty)
+        #expect(log.value == [])
+
+        // And the CSC answer still finds its guard, so the prompt is raised as normal.
+        await store.send(.devicesUpdated(.speedCadence, [
+            Self.sensor(id: Self.availableID, name: "GSC-10", capabilities: Self.combo)
+        ]))
+        #expect(store.state.roleDialog != nil)
+        await store.send(.roleDialog(.dismiss))
+        await store.finish()
+    }
+
+    /// Same rule for a second CSC tap, which is the older half of the hazard.
+    @Test("A second CSC Pair tap is refused while the first is interrogating")
+    func secondCSCPairIsRefused() async {
+        let paired = LockIsolated<[UUID]>([])
+        var ble = BLECSCClient.testValue
+        ble.pair = { id in paired.withValue { $0.append(id) } }
+
+        let store = makeStore(
+            devices: [
+                Self.sensor(id: Self.availableID, name: "GSC-10"),
+                Self.sensor(id: Self.otherPairedID, name: "Wahoo RPM")
+            ],
+            bleCSCClient: ble
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.pairButtonTapped(Self.otherPairedID))
+        await store.finish()
+
+        #expect(paired.value == [Self.availableID])
+        #expect(store.state.pendingPairing == Self.availableID)
+    }
+
+    // MARK: A CSC answer is not consent to displace another sensor
+
+    /// A combo advertising CSC and heart rate is paired by answering a question about
+    /// wheel and crank data. Folding an *occupied* heart rate role into that answer would
+    /// raise a replace-or-cancel alert about a role the rider was never asked about — and
+    /// cancelling it, the natural response, runs the in-flight release and throws away the
+    /// speed pairing they did choose.
+    @Test("An occupied heart rate role is left alone when answering the CSC prompt")
+    func csAnswerDoesNotDisplaceAnIncumbentStrap() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let incumbent = PairedSensor(
+            peripheralID: Self.hrID, role: .heartRate, displayName: "Polar H10"
+        )
+        let combo = DiscoveredDevice(
+            id: Self.availableID, name: "Wahoo RPM", kinds: [.speedCadence, .heartRate]
+        )
+        let store = makeStore(
+            devices: [combo],
+            pairedSensors: [incumbent],
+            bleCSCClient: Self.recordingClient(into: log),
+            bleHRClient: Self.recordingHRClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, [
+            DiscoveredDevice(id: Self.availableID, name: "Wahoo RPM",
+                             kinds: [.speedCadence, .heartRate], capabilities: Self.combo)
+        ]))
+        await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed]))))
+        await store.finish()
+
+        // No alert about a role they never mentioned, and the speed pairing they chose is
+        // written. The strap they paired earlier keeps heart rate.
+        #expect(store.state.collisionAlert == nil)
+        #expect(store.state.preferences.pairedSensors == [
+            incumbent,
+            PairedSensor(peripheralID: Self.availableID, role: .speed, displayName: "Wahoo RPM")
+        ])
+        #expect(log.value == [
+            .setPairedSensors([Self.availableID: [.speed]]),
+            .setRoles(Self.availableID, [.speed])
+        ])
+    }
+
+    /// The free case still rides along — claiming a role nothing is using costs the rider
+    /// nothing and saves a second trip through the list.
+    @Test("A free heart rate role is still claimed alongside the CSC answer")
+    func csAnswerClaimsAFreeStrapRole() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let combo = DiscoveredDevice(
+            id: Self.availableID, name: "Wahoo RPM", kinds: [.speedCadence, .heartRate]
+        )
+        let store = makeStore(
+            devices: [combo],
+            bleCSCClient: Self.recordingClient(into: log),
+            bleHRClient: Self.recordingHRClient(into: log)
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.pairButtonTapped(Self.availableID))
+        await store.send(.devicesUpdated(.speedCadence, [
+            DiscoveredDevice(id: Self.availableID, name: "Wahoo RPM",
+                             kinds: [.speedCadence, .heartRate], capabilities: Self.combo)
+        ]))
+        await store.send(.roleDialog(.presented(.chose(peripheralID: Self.availableID, roles: [.speed]))))
+        await store.finish()
+
+        #expect(store.state.preferences.pairedSensors == [
+            PairedSensor(peripheralID: Self.availableID, role: .heartRate, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: Self.availableID, role: .speed, displayName: "Wahoo RPM")
+        ])
+        #expect(log.value.contains(.setHRPaired(Self.availableID)))
+    }
+
     // MARK: Sections and unpairing
 
     /// The flat list S11 renders: paired first, then discovered-but-unpaired, each half

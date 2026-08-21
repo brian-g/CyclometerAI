@@ -296,10 +296,14 @@ the screen differs only in its title, the **Next** button, and the helper text, 
 **One row per paired role, whatever its connection state.** The list is built from the durable records, not
 from live client status: a rider setting up a ride needs to see that the strap they paired is the one about
 to be used, and whether it is up. An unpaired role has no row, and with nothing paired the group reads
-"No sensors paired".
+"No paired sensors".
 
-**The sheet holds a pairing scan open for as long as it is up**, one per client, balanced on dismiss
-(BLE.md §8). Without it the badge would report nothing worth reading: `startScanning` belongs to the active
+**A pairing scan is held open for as long as the sheet is up**, one per client, balanced on every path the
+sheet can leave by. It is taken by `AppFeature` around the presentation rather than by the sheet itself:
+every dismissal path clears the presented state before SwiftUI runs `onDisappear`, so a release sent from
+inside the sheet reaches an absent destination and is dropped, leaving the radio on for the rest of the
+process. Only the owner of the presentation sees both ends of the lifetime. Without the scan the badge would
+report nothing worth reading: `startScanning` belongs to the active
 ride and ride finish disconnects, so every row would sit at its last known state until the rider had already
 pressed Start. The scan is refcounted and independent of the ride's, the clients connect only what the rider
 has paired, and a connection made here survives the scan ending — so the ride begins with its sensors
@@ -844,10 +848,18 @@ row subtitle, not by position.
 - Paired sensors sorted to the top, then discovered-but-unpaired devices
 - When pairing a sensor with multiple profiles (e.g., combined speed+cadence), the rider is prompted to choose which type it represents. Implemented (#67) as a confirmation dialog — "What should this sensor do?" with Speed / Cadence / Both — raised only when the sensor's 0x2A5C capabilities say it can do both. A single-capability sensor is assigned silently. Tapping an already-paired combo sensor re-opens the same prompt, which is how a role is reassigned without re-pairing (BLE.md §5.0)
 - A paired sensor that is out of range stays in the list, showing Disconnected, so it can still be unpaired
+- **One pairing at a time.** A Pair tap while another sensor is being interrogated is refused, the same rule
+  a reassignment tap follows. Exactly one peripheral is "in flight", and the cancel path reads that to decide
+  what to release — a second tap would either strand the first sensor connected holding no roles, or release
+  the wrong one
 - **Pair claims everything the peripheral advertises, in one write.** A radar or a heart rate strap has no
   ambiguity to resolve — the service it advertises is the role it fills — so its Pair goes straight to the
   collision check. A device serving CSC as well is interrogated for 0x2A5C and the role prompt above covers
-  only the speed/cadence half; the unambiguous roles ride along on the same write
+  only the speed/cadence half; the unambiguous roles ride along on the same write **only where they are
+  free**. Answering "what should this sensor do?" is a decision about wheel and crank data, not consent to
+  displace the rider's radar or strap, so an occupied role is left alone rather than raising a
+  replace-or-cancel prompt about something they were never asked about. Moving an occupied role onto a combo
+  stays a deliberate Pair tap on that row once the incumbent is gone
 - **Unpair releases every role that peripheral holds**, on every client. One row, one button: a device paired
   for both radar and speed is released from both, and claiming one profile of an already-paired device is
   unpair-then-pair

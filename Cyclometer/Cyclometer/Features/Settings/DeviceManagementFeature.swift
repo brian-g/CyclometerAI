@@ -277,7 +277,11 @@ struct DeviceManagementFeature {
                 // only for a combo advertising radar or heart rate as well, which
                 // unified discovery merges into this one row (#98) — one Pair button
                 // has to claim everything that row can do, in one write.
-                let alsoClaims = Self.unambiguousRoles(of: device.kinds)
+                //
+                // Free roles only: see `freeUnambiguousRoles`.
+                let alsoClaims = Self.freeUnambiguousRoles(
+                    of: device.kinds, excluding: id, in: state.preferences
+                )
 
                 if capabilities.requiresRoleSelection {
                     state.roleDialog = Self.roleDialog(for: id, name: device.name)
@@ -306,7 +310,16 @@ struct DeviceManagementFeature {
                 // the one built last is the one that must land last.
                 return .concatenate(reconcile, commit(supported.union(alsoClaims), to: id, in: &state))
 
+
             case .pairButtonTapped(let id):
+                // Not while another pairing is in flight — the same rule `rowTapped`
+                // follows below, for the same reason. `pendingPairing` names exactly one
+                // interrogated peripheral and the dismiss path reads it to decide what to
+                // release, so a second tap would either clear it — stranding the first
+                // sensor connected holding no roles, its capabilities arriving to a guard
+                // that no longer matches — or inherit it, releasing the wrong peripheral
+                // on Cancel.
+                guard state.pendingPairing == nil else { return .none }
                 guard let device = state.devices.first(where: { $0.id == id }) else { return .none }
                 guard device.kinds.contains(.speedCadence) else {
                     // Radar and heart rate publish no capabilities to interrogate: the
@@ -339,7 +352,10 @@ struct DeviceManagementFeature {
                 // answering it would silently drop the role the same Pair tap claimed.
                 // Re-affirming a role the peripheral already holds is a no-op in `apply`.
                 let kinds = state.devices.first { $0.id == id }?.kinds ?? []
-                return commit(roles.union(Self.unambiguousRoles(of: kinds)), to: id, in: &state)
+                let alsoClaims = Self.freeUnambiguousRoles(
+                    of: kinds, excluding: id, in: state.preferences
+                )
+                return commit(roles.union(alsoClaims), to: id, in: &state)
 
             case .collisionAlert(.presented(.replace(let id, let roles))):
                 state.pendingPairing = nil
@@ -535,6 +551,28 @@ struct DeviceManagementFeature {
             // profiles. Pushing an unchanged map would be noise on every radar pairing.
             if affected.contains(.radar) { await variaRadarClient.setPairedSensor(radarID) }
             if affected.contains(.heartRate) { await bleHRClient.setPairedSensor(hrID) }
+        }
+    }
+
+    /// The unambiguous roles worth folding into an answer about something else — the
+    /// ones nothing is currently using.
+    ///
+    /// A combo advertising CSC *and* heart rate is paired by answering "what should this
+    /// sensor do?", a question about wheel and crank data. That answer is not consent to
+    /// displace the rider's strap: taking an occupied role here would raise a
+    /// replace-or-cancel alert about a role they were never asked about, and cancelling
+    /// it — the natural response to a question you did not expect — runs the in-flight
+    /// release and throws away the speed pairing they *did* choose.
+    ///
+    /// A free role costs nothing to claim and saves a second trip through the list, so it
+    /// still rides along. Moving an occupied one onto the combo stays what it always was:
+    /// a deliberate Pair tap on that row once the incumbent is gone.
+    private static func freeUnambiguousRoles(
+        of kinds: Set<SensorKind>, excluding id: UUID, in preferences: AppPreferences
+    ) -> Set<SensorRole> {
+        unambiguousRoles(of: kinds).filter { role in
+            let held = preferences.pairedSensor(for: role)
+            return held == nil || held?.peripheralID == id
         }
     }
 

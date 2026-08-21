@@ -58,7 +58,6 @@ struct StartSheetView: View {
             }
         }
         .task { await store.send(.task).finish() }
-        .onDisappear { store.send(.onDisappear) }
     }
 }
 

@@ -13,9 +13,6 @@ struct StartSheetFeature {
     @Dependency(\.bleCSCClient) var bleCSCClient
     @Dependency(\.dismiss) var dismiss
 
-    /// Everything `.task` starts, so `.onDisappear` can end all of it in one place —
-    /// the same shape `DeviceManagementFeature` uses for S11.
-    private enum CancelID { case screen }
 
     @ObservableState
     struct State: Equatable {
@@ -47,7 +44,6 @@ struct StartSheetFeature {
 
     enum Action: Equatable {
         case task
-        case onDisappear
         case radarStatusUpdated(VariaRadarClient.ConnectionState)
         case hrPairingUpdated(Bool)
         case speedStatusUpdated(BLECSCClient.ConnectionState)
@@ -68,26 +64,15 @@ struct StartSheetFeature {
             case .task:
                 // Reflect live connection status from each client. Streams replay current
                 // state on subscribe, so already-connected sensors show immediately.
+                //
+                // The pairing scan that makes those statuses worth reading is taken by
+                // `AppFeature` around this sheet's presentation, not here. It has to be:
+                // every dismissal path clears the presented state before SwiftUI runs
+                // `onDisappear`, so a release sent from inside the sheet reaches an absent
+                // destination and is dropped — leaving the radio on for the rest of the
+                // process. Only the owner of the presentation knows both ends of the
+                // lifetime.
                 return .merge(
-                    // Hold a pairing scan open for as long as the sheet is up.
-                    //
-                    // Without it this screen reports nothing worth reading: `startScanning`
-                    // belongs to the active ride, and ride finish disconnects, so every
-                    // paired sensor would sit at its last known state — in practice
-                    // disconnected — until the rider had already pressed Start. The scan is
-                    // refcounted and independent of the ride's (BLE.md §8), the clients
-                    // connect only what the rider has paired (#97), and a connection made
-                    // here survives the scan ending, so the ride begins with its sensors
-                    // already up.
-                    //
-                    // Sequential inside one effect, and in the same order as
-                    // `AppFeature.task`'s launch push, so the lifecycle is assertable as
-                    // one interleaved call log.
-                    .run { _ in
-                        await bleCSCClient.beginPairingScan()
-                        await variaRadarClient.beginPairingScan()
-                        await bleHRClient.beginPairingScan()
-                    },
                     .run { send in
                         for await status in variaRadarClient.connectionState() {
                             await send(.radarStatusUpdated(status))
@@ -130,20 +115,6 @@ struct StartSheetFeature {
                         for await level in bleCSCClient.batteryLevel(.cadence) {
                             await send(.batteryUpdated(.cadence, level))
                         }
-                    }
-                )
-                .cancellable(id: CancelID.screen)
-
-            case .onDisappear:
-                // Explicit rather than relying on effect cancellation: each client's scan
-                // refcount has to be balanced deterministically, and an action is what a
-                // TestStore can assert.
-                return .merge(
-                    .cancel(id: CancelID.screen),
-                    .run { _ in
-                        await bleCSCClient.endPairingScan()
-                        await variaRadarClient.endPairingScan()
-                        await bleHRClient.endPairingScan()
                     }
                 )
 

@@ -145,3 +145,31 @@ could not satisfy the screen's own spec.
 **Rule.** When a finding makes a feature useless, fix the finding — do not offer the rider-visible symptom
 as a menu. Before presenting options, check each one against what the screen is *for*; drop the ones that
 cannot satisfy it rather than letting a choice ratify them.
+
+
+## A `@Presents` child never sees its own `onDisappear` (2026-08-21, #100 review)
+
+**What happened.** The Start sheet took a BLE pairing scan on `.task` and released it on `.onDisappear`,
+mirroring what S11 does. S11 is a plain `Scope` behind a `NavigationLink`, so its state is never nil and the
+action always lands. The Start sheet is a `@Presents` child, and **every** dismissal path — Cancel's
+`dismiss()`, the parent nil-ing `startSheet` on ride start, a swipe — clears the presented state *before*
+SwiftUI runs `onDisappear`. The action therefore arrived at an absent destination, TCA dropped it with a
+runtime warning, and the scan was never balanced: a leaked reference on all three clients per sheet open,
+with the radio left on for the rest of the process.
+
+`StartSheetFeatureTests` could not see it. It drives the reducer directly, where sending `.onDisappear`
+works fine — the bug lives entirely in the presentation wiring above it.
+
+**The fix that looked right and wasn't.** Tying the release to the effect's own cancellation
+(`try? await Task.never()` then release) does work, and keeps the concern inside the sheet. But it makes the
+effect immortal, and `TestStore` requires every effect to finish — so it broke an unrelated test and would
+have taxed every future one. The owner of the presentation takes and releases the scan instead: it is the
+only thing that sees both ends of the lifetime.
+
+**Rules.**
+- `onDisappear` is only reliable for a child whose state outlives the view. For a `@Presents` child, put
+  paired setup/teardown in the parent, around presentation.
+- A reducer-level test cannot cover presentation wiring. When the bug is "the action never arrives", the test
+  has to drive the parent.
+- Weigh a fix against the test harness's constraints, not just correctness. An effect that never finishes is
+  a fine runtime pattern and a bad `TestStore` citizen.

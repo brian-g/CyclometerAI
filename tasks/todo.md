@@ -125,8 +125,31 @@ with, permanently. `BLECSCClient` never had the bug: its level lands in the slot
 hang with the fix reverted** rather than assumed to cover it — the first attempt at that check ran zero
 tests, because `-only-testing` with a Swift Testing function name matches nothing and exits 0.
 
-**Still open in #90:** the empty state is plain text ("No sensors paired"), not the progress indicator and
+**Still open in #90:** the empty state is plain text ("No paired sensors"), not the progress indicator and
 quick-pair affordance that issue asks for.
+
+---
+
+## Review pass (`/code-review`, 2026-08-21)
+
+Four findings, all verified in the code before acting and all fixed. Each fix was checked by reverting it
+and watching the new test fail.
+
+1. **The Start sheet's pairing scan was never released.** `.onDisappear` cannot reach a `@Presents` child's
+   reducer — see `lessons.md`. Ownership moved to `AppFeature`, around the presentation.
+   `StartSheetPresentationTests` covers all three exit paths and the two-opens-balance case.
+2. **A second Pair tap clobbered a pairing in flight.** `rowTapped` had guarded this since #99 and
+   documented exactly the hazard; the radar/HR branch I added did not. Both the CSC and the non-CSC path are
+   now behind the same `pendingPairing == nil` guard — the CSC half was a pre-existing hole.
+3. **A CSC answer could displace a strap the rider never mentioned.** Folding unambiguous roles into the
+   role prompt's answer raised a replace-or-cancel alert about heart rate when the rider had been asked
+   about wheel and crank data — and cancelling it, the natural response, ran the in-flight release and threw
+   away the speed pairing they *had* chosen. Unambiguous roles now ride along only where free.
+4. **Empty-state copy** — the spec followed the view rather than the reverse ("No paired sensors").
+
+Not acted on: the `.sketch` → Git LFS migration has no `lfs: true` on `actions/checkout`. CI never reads the
+file, so nothing is broken there, but a fresh clone without `git lfs install` gets a pointer — Brian's
+commit and Brian's call.
 
 **A snapshot that recorded nothing.** The first attempt pinned the whole sheet and produced six blank white
 references — `StartSheetView`'s toolbar renders empty inside a `UIHostingController`, verified by ladder

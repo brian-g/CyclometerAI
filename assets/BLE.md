@@ -926,7 +926,10 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | A write stays inside the profiles it claims | Reassigning a CSC role leaves the same peripheral's radar record intact, and the reverse |
 | Pairing an undiscovered peripheral does nothing | With no row to read `kinds` from there is no evidence of what it is; nothing is written and nothing is connected |
 | A battery reading refreshes the device list | The level arrives after the connection, so `setBattery` re-broadcasts — otherwise the S11 row keeps the nil it was built with |
-| The Start sheet scans while it is open | One `beginPairingScan` per client on appear, balanced on dismiss, so its Connected / Searching badge reports something the rider can act on |
+| The Start sheet scans while it is open | One `beginPairingScan` per client on appear, so its Connected / Searching badge reports something the rider can act on |
+| That scan is balanced on every exit | Cancel, swipe and Start Ride all release it. Owned by `AppFeature` around the presentation — a release sent from inside a `@Presents` child arrives after the state is nil and is dropped |
+| One pairing is interrogated at a time | A Pair tap while `pendingPairing` is set is refused, so a cancel cannot release the wrong peripheral |
+| A CSC answer does not displace a strap | Unambiguous roles fold into the role prompt's answer only where unoccupied; an occupied one is left alone rather than raising a prompt about a role the rider never chose |
 | Combo sensor assigned Both | SpeedFeature and CadenceFeature both connect to same peripheral UUID |
 | Speed-only peripheral + combo Cadence-only | Both features active simultaneously on different peripherals |
 | Radar sidebar hidden when no radar paired | `RadarFeature.State.isPaired == false` → sidebar absent |
