@@ -71,19 +71,28 @@ struct SettingsView: View {
             }
 
             Section {
-                ForEach(store.heartRateZones) { zone in
-                    Stepper {
-                        LabeledContent(zone.name, value: "\(zone.lowerBound)-\(zone.upperBound) bpm")
-                    } onIncrement: {
-                        store.send(.hrZoneUpperBoundAdjusted(id: zone.id, delta: 1))
-                    } onDecrement: {
-                        store.send(.hrZoneUpperBoundAdjusted(id: zone.id, delta: -1))
+                ForEach(store.hrZoneRows) { row in
+                    if row.isSteppable {
+                        Stepper {
+                            LabeledContent(row.displayName, value: "\(row.range.lowerBound)-\(row.range.upperBound) bpm")
+                        } onIncrement: {
+                            store.send(.hrZoneBoundaryStepped(zone: row.zone, delta: 1))
+                        } onDecrement: {
+                            store.send(.hrZoneBoundaryStepped(zone: row.zone, delta: -1))
+                        }
+                    } else {
+                        LabeledContent(row.displayName, value: "\(row.range.lowerBound)-\(row.range.upperBound) bpm")
                     }
                 }
             } header: {
                 Text("HR Zones")
             } footer: {
-                Text("HR Zone data is derived from data collected by Apple Health.")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("HR Zone data is derived from data collected by Apple Health.")
+                    Button("Reset HR Zones to Defaults") {
+                        store.send(.hrZoneResetTapped)
+                    }
+                }
             }
 
             Section("About") {

@@ -367,6 +367,16 @@ struct RiderProfile: Codable, Equatable, Sendable {
     var restingOverrideBPM: Int?      // nil = defer to HealthKit (M5), then the default
     var maxOverrideBPM: Int?          // nil = defer to the 220 − age estimate, then the default
 
+    // #103: the S12 HR Zones table's four internal boundaries. Each nil = defer
+    // to the Karvonen-derived value; once a rider steps one it stays pinned
+    // across a resting/max change until reset. Named by the zone each boundary
+    // closes, not by position, so the field survives a future re-ordering of the
+    // zone table.
+    var zone1CeilingOverrideBPM: Int?  // Recovery/Light ↔ Endurance
+    var zone2CeilingOverrideBPM: Int?  // Endurance ↔ Aerobic
+    var zone3CeilingOverrideBPM: Int?  // Aerobic ↔ Threshold
+    var zone4CeilingOverrideBPM: Int?  // Threshold ↔ Anaerobic
+
     /// Hand-written, per §9 — decodeIfPresent with an explicit default per field.
     init(from decoder: any Decoder) throws
 }
@@ -375,6 +385,23 @@ extension SharedReaderKey where Self == FileStorageKey<RiderProfile>.Default {
     static var riderProfile: Self { /* Documents/rider-profile.json */ }
 }
 ```
+
+**#103 — the four boundary overrides.** Karvonen's fixed 60/70/80/90%-of-reserve thresholds (§8)
+leave no independent value for the zone table's four *internal* boundaries — only resting and max
+are free parameters. The S12 HR Zones section's `Stepper` on each of its first four rows needs one
+anyway, so `RiderProfile` grew four more optionals, one per boundary, each resolved the same way as
+resting/max: `override ?? karvonenDefault`. `RiderProfile.resolvedBoundaryBPM(afterZone:)` is the
+resolver; `RiderProfile.bounds(for:)` is what S12's rows read, and is distinct from
+`HeartRateZone.bounds(for:maxHR:restingHR:)` (§8), which has no override concept and keeps serving
+every other live-zone consumer in the app unchanged.
+
+A boundary override is set through `RiderProfile.settingBoundaryOverride(_:afterZone:)`, which
+clamps strictly between the boundary's *live* neighbours — the adjacent boundary, or resting/max at
+the table's outer edges — throwing `.boundaryOutOfOrder` otherwise. This is what keeps "no gap or
+overlap representable" true for a table with independently-pinnable boundaries, where §8's "contiguous
+by construction" guarantee no longer applies on its own (see §8). `RiderProfile.resettingZoneBoundaries()`
+clears all four at once — the S12 "Reset HR Zones to Defaults" row — without touching
+`restingOverrideBPM`/`maxOverrideBPM`, which have no S12 entry point.
 
 **Resolution happens at read time** — `override ?? healthKit ?? default` — so zone boundaries follow a
 Health value the moment it changes, with no local copy to re-sync. The HealthKit terms are
@@ -973,8 +1000,12 @@ because that is what a table should show; a reading outside the reserve is still
 the closed form; membership tests use the forward formula. Ceiling, not
 rounding: a threshold is inclusive at the bottom, so a boundary bpm belongs to the zone it opens.
 Ranges are contiguous by construction (each zone ends one bpm below the next one's start), which is
-what makes "no gaps or overlaps are representable" true for the S12 steppers rather than merely
-intended.
+what makes "no gaps or overlaps are representable" true for the *unoverridden* table rather than
+merely intended. `RiderProfile.bounds(for:)` (§3.5) is what S12's rows actually read: once a rider
+pins one of the table's four internal boundaries (#103), that boundary no longer moves with resting
+or max HR, and contiguity is guaranteed instead by `RiderProfile.settingBoundaryOverride(_:afterZone:)`
+clamping every write against the boundary's live neighbours — a second guarantee doing the same job
+this construction argument does for the default case.
 
 > The two directions agree exactly **only above `RiderProfile.minimumHRReserve` (8)**. At a reserve of
 > 7 or less the ceiling collapses two zone boundaries onto one bpm, leaving a band with no bpm of its

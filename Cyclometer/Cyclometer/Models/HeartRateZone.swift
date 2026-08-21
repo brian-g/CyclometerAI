@@ -69,4 +69,17 @@ enum HeartRateZone: Int, CaseIterable, Equatable {
         // validation bounds on RiderProfile make unreachable through the UI.
         return lower...max(lower, upper)
     }
+
+    /// S12 HR Zones row name (assets/UX.md §S12, verified against Design.sketch's
+    /// own layer data) — distinct from the PRD §8.5 names in the case comments
+    /// above, which label the same five bands differently and are not UI copy.
+    var s12DisplayName: String {
+        switch self {
+        case .zone1: "Recovery/Light"
+        case .zone2: "Endurance"
+        case .zone3: "Aerobic"
+        case .zone4: "Threshold"
+        case .zone5: "Anaerobic"
+        }
+    }
 }

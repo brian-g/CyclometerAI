@@ -11,9 +11,21 @@ enum WheelSelection: Hashable, Sendable {
 struct SettingsFeature {
     @Dependency(\.bleCSCClient) var bleCSCClient
 
+    /// One row of the S12 HR Zones table — what `SettingsView` reads to build the
+    /// section. Rows 1-4 carry a working `Stepper` on that row's upper boundary;
+    /// row 5 (Anaerobic) is display-only, so `isSteppable` is false only for it.
+    struct HRZoneRow: Identifiable, Equatable {
+        let zone: HeartRateZone
+        var id: Int { zone.rawValue }
+        let displayName: String
+        let range: ClosedRange<Int>
+        let isSteppable: Bool
+    }
+
     @ObservableState
     struct State: Equatable {
         @Shared(.appPreferences) var preferences
+        @Shared(.riderProfile) var riderProfile
         /// S11 subset, pushed from the Sensors row. Non-optional like AppFeature's
         /// tab children — its effects only run while the screen's `.task` is alive.
         var deviceManagement = DeviceManagementFeature.State()
@@ -24,7 +36,6 @@ struct SettingsFeature {
         /// Only matters when the stored circumference happens to equal a preset —
         /// it keeps the custom field on screen while the rider is typing.
         var userChoseCustom: Bool = false
-        var heartRateZones: [HeartRateZoneSetting] = HeartRateZoneSetting.standardZones
 
         /// Read through to storage rather than mirrored in feature state: both have
         /// to survive a relaunch, and `preferredUnit` also has to agree with whatever
@@ -37,6 +48,18 @@ struct SettingsFeature {
         /// Deduped by peripheral (`AppPreferences.pairedRoles`), so a combo
         /// speed+cadence sensor counts once rather than twice.
         var pairedSensorCount: Int { preferences.pairedRoles.count }
+
+        /// The S12 HR Zones table, derived from `riderProfile` via Karvonen (#103).
+        var hrZoneRows: [HRZoneRow] {
+            HeartRateZone.allCases.map { zone in
+                HRZoneRow(
+                    zone: zone,
+                    displayName: zone.s12DisplayName,
+                    range: riderProfile.bounds(for: zone),
+                    isSteppable: zone != .zone5
+                )
+            }
+        }
 
         /// Derived from the stored value, so a manual or auto-calibrated (#70)
         /// circumference still reads as Custom after a relaunch.
@@ -66,7 +89,8 @@ struct SettingsFeature {
         case customCircumferenceCommitted
         case autoPauseToggled
         case autoDimToggled
-        case hrZoneUpperBoundAdjusted(id: Int, delta: Int)
+        case hrZoneBoundaryStepped(zone: HeartRateZone, delta: Int)
+        case hrZoneResetTapped
         case deviceManagement(DeviceManagementFeature.Action)
     }
     var body: some ReducerOf<Self> {
@@ -110,16 +134,16 @@ struct SettingsFeature {
             case .autoDimToggled:
                 state.$preferences.withLock { $0.isAutoDimEnabled.toggle() }
                 return .none
-            case .hrZoneUpperBoundAdjusted(let id, let delta):
-                guard let index = state.heartRateZones.firstIndex(where: { $0.id == id }) else { return .none }
-                let zone = state.heartRateZones[index]
-                state.heartRateZones[index].upperBound = max(zone.lowerBound, zone.upperBound + delta)
-                // Normalize downstream zones
-                for i in (index + 1)..<state.heartRateZones.count {
-                    let lb = state.heartRateZones[i - 1].upperBound + 1
-                    state.heartRateZones[i].lowerBound = lb
-                    state.heartRateZones[i].upperBound = max(state.heartRateZones[i].upperBound, lb)
-                }
+            case .hrZoneBoundaryStepped(let zone, let delta):
+                // An out-of-range step is a silent no-op — what makes the Stepper
+                // stop naturally at a clamp, with no separate disabled-state to track.
+                guard let current = state.riderProfile.resolvedBoundaryBPM(afterZone: zone),
+                      let updated = try? state.riderProfile.settingBoundaryOverride(current + delta, afterZone: zone)
+                else { return .none }
+                state.$riderProfile.withLock { $0 = updated }
+                return .none
+            case .hrZoneResetTapped:
+                state.$riderProfile.withLock { $0 = $0.resettingZoneBoundaries() }
                 return .none
             case .deviceManagement:
                 return .none

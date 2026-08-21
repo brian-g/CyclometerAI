@@ -116,6 +116,14 @@ struct HeartRateZoneTests {
         #expect(HeartRateZone.zone(bpm: 177, maxHR: 190, restingHR: 60) == .zone5)
     }
 
+    /// The S12 HR Zones row names (assets/UX.md §S12) — distinct from the PRD §8.5
+    /// names in the case comments above, which are not UI copy.
+    @Test("s12DisplayName matches the Design.sketch row names, in zone order")
+    func s12DisplayNameMatchesSketchRowNames() {
+        let names = HeartRateZone.allCases.map(\.s12DisplayName)
+        #expect(names == ["Recovery/Light", "Endurance", "Aerobic", "Threshold", "Anaerobic"])
+    }
+
     /// Degenerate profiles cannot arrive through `RiderProfile` validation, but the
     /// helper must not divide by zero or build a backwards range if one is passed.
     @Test("A non-positive reserve degrades instead of trapping")

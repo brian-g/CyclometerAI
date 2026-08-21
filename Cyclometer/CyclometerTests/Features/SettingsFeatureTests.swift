@@ -23,6 +23,7 @@ struct SettingsFeatureTests {
     /// same scope, otherwise the seed and the store would read different storage.
     private func makeStore(
         circumferenceMM: Int = WheelPreset.default.circumferenceMM,
+        riderProfile: RiderProfile = RiderProfile(),
         bleCSCClient: BLECSCClient = .testValue
     ) -> TestStoreOf<SettingsFeature> {
         let storage = FileStorage.inMemory
@@ -31,6 +32,8 @@ struct SettingsFeatureTests {
         } operation: {
             @Shared(.appPreferences) var preferences
             $preferences.withLock { $0.wheelCircumferenceMM = circumferenceMM }
+            @Shared(.riderProfile) var profile
+            $profile.withLock { $0 = riderProfile }
             return TestStore(initialState: SettingsFeature.State()) {
                 SettingsFeature()
             } withDependencies: {
@@ -206,5 +209,56 @@ struct SettingsFeatureTests {
             ]
         }
         #expect(store.state.pairedSensorCount == 2)
+    }
+
+    // MARK: - HR Zones (#103)
+
+    @Test("HR zone rows default to the Karvonen worked example, and only rows 1-4 are steppable")
+    func hrZoneRowsDefaultToKarvonen() {
+        let store = makeStore()
+
+        let ranges = store.state.hrZoneRows.map(\.range)
+        #expect(ranges == [60...137, 138...150, 151...163, 164...176, 177...190])
+        #expect(store.state.hrZoneRows.map(\.isSteppable) == [true, true, true, true, false])
+        #expect(store.state.hrZoneRows.map(\.displayName) == [
+            "Recovery/Light", "Endurance", "Aerobic", "Threshold", "Anaerobic"
+        ])
+    }
+
+    @Test("Stepping a row's boundary persists the override into the shared rider profile")
+    func steppingBoundaryPersists() async {
+        let store = makeStore()
+
+        await store.send(.hrZoneBoundaryStepped(zone: .zone1, delta: 1)) {
+            $0.$riderProfile.withLock { $0.zone1CeilingOverrideBPM = 138 }
+        }
+
+        #expect(store.state.hrZoneRows[0].range == 60...138)
+        #expect(store.state.hrZoneRows[1].range == 139...150)
+    }
+
+    @Test("Stepping past a neighbouring boundary is a no-op")
+    func steppingPastNeighbourIsNoop() async {
+        let profile = try! RiderProfile().settingBoundaryOverride(149, afterZone: .zone1)
+        let store = makeStore(riderProfile: profile)
+
+        // zone2's boundary defaults to 150 — stepping zone1 past it would cross.
+        await store.send(.hrZoneBoundaryStepped(zone: .zone1, delta: 1))
+
+        #expect(store.state.riderProfile.zone1CeilingOverrideBPM == 149)
+    }
+
+    @Test(".hrZoneResetTapped clears every manual boundary override")
+    func resetClearsManualBoundaries() async {
+        var profile = RiderProfile()
+        profile = try! profile.settingBoundaryOverride(130, afterZone: .zone1)
+        profile = try! profile.settingBoundaryOverride(180, afterZone: .zone4)
+        let store = makeStore(riderProfile: profile)
+
+        await store.send(.hrZoneResetTapped) {
+            $0.$riderProfile.withLock { $0 = $0.resettingZoneBoundaries() }
+        }
+
+        #expect(store.state.hrZoneRows.map(\.range) == [60...137, 138...150, 151...163, 164...176, 177...190])
     }
 }
