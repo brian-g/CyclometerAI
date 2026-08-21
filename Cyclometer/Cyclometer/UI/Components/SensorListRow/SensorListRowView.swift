@@ -35,7 +35,7 @@ struct SensorListRowView<Trailing: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: Spacing.md) {
+        HStack(spacing: Spacing.sm) {
             Image(systemName: icon)
                 .font(.headline)
                 .foregroundStyle(iconTint)
@@ -93,7 +93,7 @@ struct SensorRowButton: View {
         SensorListRowView(
             icon: "sensor.tag.radiowaves.forward",
             title: "Wahoo RPM",
-            subtitle: "Speed · Cadence"
+            subtitle: "Speed & Cadence"
         ) {
             SensorRowButton("Unpair", tint: .cyDestructive) {}
         }
@@ -102,14 +102,17 @@ struct SensorRowButton: View {
             icon: "dot.radiowaves.forward",
             iconTint: .purple,
             title: "Radar",
-            subtitle: "Varia RTL515"
+            subtitle: "Varia RTL515 and Longer"
         ) {
-            Text("Connected")
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .foregroundStyle(Color.cyTextOnPrimary)
-                .background(Color.cyPrimary, in: Capsule())
+            VStack(alignment: .trailing) {
+                Text("Connected")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+                    .foregroundStyle(Color.cyTextOnPrimary)
+                    .background(Color.cyPrimary, in: Capsule())
+                SensorBatteryLabel(percent: 70)
+            }
         }
 
         SensorListRowView(icon: "speedometer", iconTint: .blue, title: "GSC-10") {

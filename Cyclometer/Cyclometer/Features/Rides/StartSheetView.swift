@@ -22,8 +22,12 @@ struct StartSheetView: View {
                     // with nothing paired the group says so rather than implying a scan
                     // that is not running.
                     if store.pairedRows.isEmpty {
-                        Text("No sensors paired")
-                            .foregroundStyle(Color.cyTextSecondary)
+                        HStack() {
+                            Spacer()
+                            Text("No paired sensors")
+                                .foregroundStyle(Color.cyTextSecondary)
+                            Spacer()
+                        }
                     } else {
                         ForEach(store.pairedRows) { sensor in
                             SensorStatusRow(sensor: sensor)
@@ -80,10 +84,12 @@ struct SensorStatusRow: View {
             // avoid a subtitle that could contradict it.
             subtitle: sensor.name
         ) {
-            if let battery = sensor.batteryPercent, sensor.status == .connected {
-                SensorBatteryLabel(percent: battery)
+            VStack(alignment: .trailing) {
+                statusControl
+                if let battery = sensor.batteryPercent, sensor.status == .connected {
+                    SensorBatteryLabel(percent: battery)
+                }
             }
-            statusControl
         }
     }
 
@@ -110,8 +116,8 @@ struct SensorStatusRow: View {
         $preferences.withLock {
             $0.pairedSensors = [
                 PairedSensor(peripheralID: UUID(), role: .radar, displayName: "Varia RTL515"),
-                PairedSensor(peripheralID: UUID(), role: .heartRate, displayName: "HRM-Dual"),
-                PairedSensor(peripheralID: UUID(), role: .speed, displayName: "Wahoo RPM")
+                PairedSensor(peripheralID: UUID(), role: .heartRate, displayName: "HRM-Dual with Long Name"),
+                PairedSensor(peripheralID: UUID(), role: .speed, displayName: "Wahoo Cadence 8683")
             ]
         }
         return StartSheetView(
