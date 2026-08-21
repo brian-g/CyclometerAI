@@ -84,14 +84,15 @@ struct SettingsView: View {
                         LabeledContent(row.displayName, value: "\(row.range.lowerBound)-\(row.range.upperBound) bpm")
                     }
                 }
+                Button("Reset HR Zones to Defaults") {
+                    store.send(.hrZoneResetTapped)
+                }
+
             } header: {
                 Text("HR Zones")
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("HR Zone data is derived from data collected by Apple Health.")
-                    Button("Reset HR Zones to Defaults") {
-                        store.send(.hrZoneResetTapped)
-                    }
                 }
             }
 
