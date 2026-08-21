@@ -208,7 +208,11 @@ extension RiderProfile {
         }
         let upper = resolvedBoundaryBPM(afterZone: zone, healthResting: healthResting, healthMax: healthMax)
             ?? resolvedMaxBPM(healthMax: healthMax)
-        return lower...upper
+        // `max` only bites when a boundary pinned before a resting/max change no
+        // longer clears its neighbour — `settingRestingOverride`/`settingMaxOverride`
+        // don't know about these overrides, so nothing rejects that combination
+        // today. Same guard `HeartRateZone.bounds` uses for the analogous case.
+        return lower...max(lower, upper)
     }
 
     /// A copy with the boundary after `zone` (`.zone1`...`.zone4`) set to `bpm`, or
@@ -229,6 +233,11 @@ extension RiderProfile {
             copy.setBoundaryOverride(nil, afterZone: zone)
             return copy
         }
+        // There is no boundary after zone 5 — a caller passing it has nothing
+        // valid to set. Rejecting here, rather than force-unwrapping the `next`
+        // zone below, is what keeps this safe for any future caller beyond the
+        // one guarded call site the S12 reducer has today.
+        guard zone != .zone5 else { throw .boundaryOutOfOrder }
         let lowerNeighbor: Int
         if let previous = HeartRateZone(rawValue: zone.rawValue - 1) {
             lowerNeighbor = resolvedBoundaryBPM(afterZone: previous, healthResting: healthResting, healthMax: healthMax)!

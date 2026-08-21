@@ -268,6 +268,16 @@ struct RiderProfileTests {
         #expect(RiderProfile().resolvedBoundaryBPM(afterZone: .zone5) == nil)
     }
 
+    /// There is nothing valid to set after zone 5 — this must reject rather than
+    /// force-unwrap the (nonexistent) next zone, for any caller beyond the one
+    /// guarded call site the S12 reducer has today.
+    @Test("Setting a boundary after zone 5 is rejected rather than trapping")
+    func settingBoundaryAfterZone5IsRejected() {
+        #expect(throws: RiderProfile.ValidationError.boundaryOutOfOrder) {
+            try RiderProfile().settingBoundaryOverride(200, afterZone: .zone5)
+        }
+    }
+
     @Test("Setting a boundary override is applied and read back")
     func settingBoundaryOverrideIsApplied() throws {
         let updated = try RiderProfile().settingBoundaryOverride(140, afterZone: .zone1)
@@ -365,6 +375,19 @@ struct RiderProfileTests {
 
         #expect(profile.bounds(for: .zone2).upperBound == 145)
         #expect(profile.bounds(for: .zone3).lowerBound == 146)
+    }
+
+    /// `settingRestingOverride`/`settingMaxOverride` don't know about the boundary
+    /// overrides this PR adds, so nothing today stops a live resting/max value
+    /// from passing a previously pinned boundary. `bounds(for:)` must degrade to a
+    /// 1-bpm range rather than build an invalid (lower > upper) `ClosedRange`.
+    @Test("bounds(for:) degrades instead of trapping when a live resting value passes a pinned boundary")
+    func boundsClampsWhenAPinnedBoundaryIsPassedByALiveValue() throws {
+        let profile = try RiderProfile().settingBoundaryOverride(140, afterZone: .zone1)
+
+        let bounds = profile.bounds(for: .zone1, healthResting: 145)
+
+        #expect(bounds.lowerBound <= bounds.upperBound)
     }
 
     @Test("A document missing the boundary keys decodes with them nil")
