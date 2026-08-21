@@ -17,7 +17,6 @@ struct SettingsFeature {
         /// S11 subset, pushed from the Sensors row. Non-optional like AppFeature's
         /// tab children — its effects only run while the screen's `.task` is alive.
         var deviceManagement = DeviceManagementFeature.State()
-        var selectedUnits: String = "Imperial"
         /// In-progress manual entry. `nil` means the rider is not editing, so the
         /// field shows the persisted value — which is why no lifecycle action is
         /// needed to seed it, and why reverting a bad entry is just clearing this.
@@ -25,14 +24,19 @@ struct SettingsFeature {
         /// Only matters when the stored circumference happens to equal a preset —
         /// it keeps the custom field on screen while the rider is typing.
         var userChoseCustom: Bool = false
-        var isAutoPauseEnabled: Bool = true
         var heartRateZones: [HeartRateZoneSetting] = HeartRateZoneSetting.standardZones
-        var isShowingAddAccountOptions: Bool = false
 
-        /// Reads through to storage rather than mirroring it in feature state: the
-        /// toggle has to survive a relaunch, and `AppFeature` — which actually runs
-        /// the countdown — reads the same document (#110).
+        /// Read through to storage rather than mirrored in feature state: both have
+        /// to survive a relaunch, and `preferredUnit` also has to agree with whatever
+        /// `ActiveRideFeature` eventually reads (#8). `isAutoDimEnabled` is read by
+        /// `AppFeature`, which runs the dim countdown, off the same document (#110).
+        var preferredUnit: UnitSystem { preferences.preferredUnit }
+        var isAutoPauseEnabled: Bool { preferences.isAutoPauseEnabled }
         var isAutoDimEnabled: Bool { preferences.isAutoDimEnabled }
+
+        /// Deduped by peripheral (`AppPreferences.pairedRoles`), so a combo
+        /// speed+cadence sensor counts once rather than twice.
+        var pairedSensorCount: Int { preferences.pairedRoles.count }
 
         /// Derived from the stored value, so a manual or auto-calibrated (#70)
         /// circumference still reads as Custom after a relaunch.
@@ -56,15 +60,13 @@ struct SettingsFeature {
         }
     }
     enum Action: Equatable {
-        case unitSelected(String)
+        case unitSelected(UnitSystem)
         case wheelSelectionChanged(WheelSelection)
         case customCircumferenceChanged(String)
         case customCircumferenceCommitted
         case autoPauseToggled
         case autoDimToggled
         case hrZoneUpperBoundAdjusted(id: Int, delta: Int)
-        case addAccountTapped
-        case addAccountDismissed
         case deviceManagement(DeviceManagementFeature.Action)
     }
     var body: some ReducerOf<Self> {
@@ -75,7 +77,8 @@ struct SettingsFeature {
         Reduce { state, action in
             switch action {
             case .unitSelected(let unit):
-                state.selectedUnits = unit; return .none
+                state.$preferences.withLock { $0.preferredUnit = unit }
+                return .none
             case .wheelSelectionChanged(let selection):
                 switch selection {
                 case .preset(let preset):
@@ -102,7 +105,8 @@ struct SettingsFeature {
                 guard mm != state.preferences.wheelCircumferenceMM else { return .none }
                 return apply(mm, to: &state)
             case .autoPauseToggled:
-                state.isAutoPauseEnabled.toggle(); return .none
+                state.$preferences.withLock { $0.isAutoPauseEnabled.toggle() }
+                return .none
             case .autoDimToggled:
                 state.$preferences.withLock { $0.isAutoDimEnabled.toggle() }
                 return .none
@@ -117,10 +121,6 @@ struct SettingsFeature {
                     state.heartRateZones[i].upperBound = max(state.heartRateZones[i].upperBound, lb)
                 }
                 return .none
-            case .addAccountTapped:
-                state.isShowingAddAccountOptions = true; return .none
-            case .addAccountDismissed:
-                state.isShowingAddAccountOptions = false; return .none
             case .deviceManagement:
                 return .none
             }

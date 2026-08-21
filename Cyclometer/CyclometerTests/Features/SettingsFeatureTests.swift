@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 import ComposableArchitecture
 @testable import Cyclometer
 
@@ -154,5 +155,56 @@ struct SettingsFeatureTests {
             $0.$preferences.withLock { $0.isAutoDimEnabled = true }
         }
         #expect(store.state.isAutoDimEnabled)
+    }
+
+    /// Auto-pause used to be a feature-local `Bool` nobody else could read; #102
+    /// moves it through the same document `ActiveRideFeature` consults.
+    @Test("Auto-pause toggles persist rather than living in feature state")
+    func autoPauseTogglePersists() async {
+        let store = makeStore()
+        #expect(store.state.isAutoPauseEnabled)
+
+        await store.send(.autoPauseToggled) {
+            $0.$preferences.withLock { $0.isAutoPauseEnabled = false }
+        }
+        #expect(store.state.isAutoPauseEnabled == false)
+
+        await store.send(.autoPauseToggled) {
+            $0.$preferences.withLock { $0.isAutoPauseEnabled = true }
+        }
+        #expect(store.state.isAutoPauseEnabled)
+    }
+
+    @Test("Selecting a unit persists it")
+    func unitSelectionPersists() async {
+        let store = makeStore()
+        #expect(store.state.preferredUnit == .system)
+
+        await store.send(.unitSelected(.imperial)) {
+            $0.$preferences.withLock { $0.preferredUnit = .imperial }
+        }
+        #expect(store.state.preferredUnit == .imperial)
+
+        await store.send(.unitSelected(.metric)) {
+            $0.$preferences.withLock { $0.preferredUnit = .metric }
+        }
+        #expect(store.state.preferredUnit == .metric)
+    }
+
+    /// A combo sensor holding both the Speed and Cadence roles is one physical
+    /// device — the count must not double it (S12: "count of paired sensors").
+    @Test("Sensor count is deduped by peripheral, not by role record")
+    func pairedSensorCountDedupesByPeripheral() {
+        let comboID = UUID()
+        let radarID = UUID()
+        let store = makeStore()
+        store.state.$preferences.withLock {
+            $0.pairedSensors = [
+                PairedSensor(peripheralID: comboID, role: .speed, displayName: "Combo"),
+                PairedSensor(peripheralID: comboID, role: .cadence, displayName: "Combo"),
+                PairedSensor(peripheralID: radarID, role: .radar, displayName: "Varia")
+            ]
+        }
+        #expect(store.state.pairedSensorCount == 2)
     }
 }

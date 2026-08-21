@@ -17,8 +17,13 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section {
-                Picker("Units", selection: $store.selectedUnits.sending(\.unitSelected)) {
-                    ForEach(SettingsDemoData.units, id: \.self) { Text($0) }
+                Picker("Units", selection: Binding(
+                    get: { store.preferredUnit },
+                    set: { store.send(.unitSelected($0)) }
+                )) {
+                    ForEach(UnitSystem.allCases, id: \.self) { unit in
+                        Text(unit.displayName).tag(unit)
+                    }
                 }
                 Picker("Wheel Size", selection: Binding(
                     get: { store.wheelSelection },
@@ -51,10 +56,12 @@ struct SettingsView: View {
                     get: { store.isAutoDimEnabled },
                     set: { _ in store.send(.autoDimToggled) }
                 ))
-                NavigationLink("Sensors") {
+                NavigationLink {
                     DeviceManagementView(
                         store: store.scope(state: \.deviceManagement, action: \.deviceManagement)
                     )
+                } label: {
+                    LabeledContent("Sensors", value: "\(store.pairedSensorCount)")
                 }
             } footer: {
                 if store.wheelSelection == .custom {
@@ -77,28 +84,6 @@ struct SettingsView: View {
                 Text("HR Zones")
             } footer: {
                 Text("HR Zone data is derived from data collected by Apple Health.")
-            }
-
-            Section("Accounts") {
-                LabeledContent("Strava",        value: SettingsDemoData.stravaAccountStatus)
-                LabeledContent("Ride with GPS", value: SettingsDemoData.rideWithGPSAccountStatus)
-                Button {
-                    store.send(.addAccountTapped)
-                } label: {
-                    Label("Add Account", systemImage: "plus.circle")
-                }
-                .confirmationDialog(
-                    "Add Account",
-                    isPresented: Binding(
-                        get: { store.isShowingAddAccountOptions },
-                        set: { _ in store.send(.addAccountDismissed) }
-                    ),
-                    titleVisibility: .visible
-                ) {
-                    Button("Strava") { }
-                    Button("Ride with GPS") { }
-                    Button("Cancel", role: .cancel) { }
-                }
             }
 
             Section("About") {

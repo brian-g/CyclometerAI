@@ -23,9 +23,6 @@ struct HeartRateZoneSetting: Identifiable, Equatable {
 
 
 struct SettingsDemoData {
-    static let units = ["Imperial", "Metric"]
-    static let stravaAccountStatus = "Not Connected"
-    static let rideWithGPSAccountStatus = "Not Connected"
     static let privacyPolicyParagraphs = [
         "Ride data, sensor readings, and account connections stay on this device unless you choose to connect a third-party service. Connected services may receive the ride details needed to sync your activity.",
         "Location information is used to record and display rides. You can change location, notification, and health permissions in the system Settings app at any time.",

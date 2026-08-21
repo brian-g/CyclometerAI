@@ -481,6 +481,39 @@ struct ActiveRideFeatureStateMachineTests {
         }
     }
 
+    /// Quarantines `AppPreferences` in its own in-memory storage, the same way
+    /// `ActiveRideFeatureHeartRateTests` quarantines `RiderProfile` — otherwise
+    /// `state.preferences.isAutoPauseEnabled` would read whatever
+    /// `app-preferences.json` happens to exist on the machine running the suite.
+    /// Needed only by tests that push `zeroSpeedSeconds` far enough for auto-pause
+    /// (#102) to interact with what the test is actually isolating.
+    ///
+    /// `state` is an autoclosure, evaluated *inside* the dependency scope below —
+    /// otherwise `ActiveRideFeature.State`'s `@SharedReader(.appPreferences)` would
+    /// resolve against the ambient live storage before this function ever runs.
+    private func makeStore(
+        state: @autoclosure () -> ActiveRideFeature.State,
+        isAutoPauseEnabled: Bool
+    ) -> TestStoreOf<ActiveRideFeature> {
+        let storage = FileStorage.inMemory
+        return withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.isAutoPauseEnabled = isAutoPauseEnabled }
+            return TestStore(initialState: state()) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.continuousClock = TestClock()
+                $0.hapticsClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.defaultFileStorage = storage
+            }
+        }
+    }
+
     @Test("Initial state is idle")
     func initialStateIsIdle() async {
         let store = makeStore()
@@ -630,24 +663,19 @@ struct ActiveRideFeatureStateMachineTests {
 
     /// PRD §8.8: auto-end after 5 minutes at zero speed. Seeded one tick below the
     /// threshold rather than ticking up to it — the counter arithmetic is covered by
-    /// the timer suite, so looping here would only make the test slow.
+    /// the timer suite, so looping here would only make the test slow. Auto-pause
+    /// (#102) is disabled so this test isolates auto-end — otherwise the same
+    /// zero-speed counter would trip auto-pause first, long before 300s.
     @Test("Auto-end triggers on the tick that reaches the zero-speed threshold")
     func autoEndTriggersAtThreshold() async {
         let threshold = ActiveRideFeature.autoEndZeroSpeedSeconds
-        let store = TestStore(
-            initialState: ActiveRideFeature.State(
+        let store = makeStore(
+            state: ActiveRideFeature.State(
                 recordingState: .active,
                 zeroSpeedSeconds: threshold - 1
-            )
-        ) {
-            ActiveRideFeature()
-        } withDependencies: {
-            $0.continuousClock = TestClock()
-            $0.hapticsClient = .testValue
-            $0.variaRadarClient = .testValue
-            $0.bleHRClient = .testValue
-            $0.locationClient = .testValue
-        }
+            ),
+            isAutoPauseEnabled: false
+        )
 
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
@@ -678,20 +706,13 @@ struct ActiveRideFeatureStateMachineTests {
     @Test("Auto-end does not trigger one tick below the threshold")
     func autoEndDoesNotTriggerBelowThreshold() async {
         let threshold = ActiveRideFeature.autoEndZeroSpeedSeconds
-        let store = TestStore(
-            initialState: ActiveRideFeature.State(
+        let store = makeStore(
+            state: ActiveRideFeature.State(
                 recordingState: .active,
                 zeroSpeedSeconds: threshold - 2
-            )
-        ) {
-            ActiveRideFeature()
-        } withDependencies: {
-            $0.continuousClock = TestClock()
-            $0.hapticsClient = .testValue
-            $0.variaRadarClient = .testValue
-            $0.bleHRClient = .testValue
-            $0.locationClient = .testValue
-        }
+            ),
+            isAutoPauseEnabled: false
+        )
 
         // Reaches threshold - 1: no .autoEndTriggered follows, and an exhaustive
         // TestStore fails the test if one did.
@@ -764,21 +785,14 @@ struct ActiveRideFeatureStateMachineTests {
 
     @Test("Auto-end disabled skips trigger")
     func autoEndDisabledSkipsTrigger() async {
-        let store = TestStore(
-            initialState: ActiveRideFeature.State(
+        let store = makeStore(
+            state: ActiveRideFeature.State(
                 recordingState: .active,
                 zeroSpeedSeconds: ActiveRideFeature.autoEndZeroSpeedSeconds - 1,
                 isAutoEndEnabled: false
-            )
-        ) {
-            ActiveRideFeature()
-        } withDependencies: {
-            $0.continuousClock = TestClock()
-            $0.hapticsClient = .testValue
-            $0.variaRadarClient = .testValue
-            $0.bleHRClient = .testValue
-            $0.locationClient = .testValue
-        }
+            ),
+            isAutoPauseEnabled: false
+        )
 
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
@@ -796,6 +810,147 @@ struct ActiveRideFeatureStateMachineTests {
     func elapsedTickIgnoredWhenIdle() async {
         let store = makeStore(recordingState: .idle)
         await store.send(.elapsedTick)
+    }
+}
+
+// MARK: - Auto-pause
+
+/// S12/#102: auto-pause fires at a much shorter zero-speed threshold than
+/// auto-end, so a rider stopped at a light pauses rather than waiting five
+/// minutes. Only a pause auto-pause itself triggered is eligible to auto-resume —
+/// a manual Pause tap always requires a manual Resume.
+@MainActor
+@Suite("ActiveRideFeature — auto-pause")
+struct ActiveRideFeatureAutoPauseTests {
+
+    /// Quarantines `AppPreferences` in its own in-memory storage — see the same
+    /// helper on `ActiveRideFeatureStateMachineTests` for why this is necessary,
+    /// and why `state` is an autoclosure.
+    private func makeStore(
+        state: @autoclosure () -> ActiveRideFeature.State,
+        isAutoPauseEnabled: Bool = true
+    ) -> TestStoreOf<ActiveRideFeature> {
+        let storage = FileStorage.inMemory
+        return withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.isAutoPauseEnabled = isAutoPauseEnabled }
+            return TestStore(initialState: state()) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.continuousClock = TestClock()
+                $0.date = .constant(testDate)
+                $0.hapticsClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.defaultFileStorage = storage
+            }
+        }
+    }
+
+    @Test("Auto-pause triggers on the tick that reaches the zero-speed threshold")
+    func autoPauseTriggersAtThreshold() async {
+        let threshold = ActiveRideFeature.autoPauseZeroSpeedSeconds
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active, zeroSpeedSeconds: threshold - 1)
+        )
+
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = threshold
+        }
+        await store.receive(.autoPauseTriggered) {
+            $0.recordingState = .paused
+            $0.isAutoPaused = true
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+    }
+
+    @Test("Auto-pause does not trigger one tick below the threshold")
+    func autoPauseDoesNotTriggerBelowThreshold() async {
+        let threshold = ActiveRideFeature.autoPauseZeroSpeedSeconds
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active, zeroSpeedSeconds: threshold - 2)
+        )
+
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = threshold - 1
+        }
+    }
+
+    @Test("Auto-pause disabled skips trigger")
+    func autoPauseDisabledSkipsTrigger() async {
+        let threshold = ActiveRideFeature.autoPauseZeroSpeedSeconds
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active, zeroSpeedSeconds: threshold - 1),
+            isAutoPauseEnabled: false
+        )
+
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = threshold
+        }
+    }
+
+    /// Both thresholds are eligible on the same tick when a ride sits idle long
+    /// enough; auto-pause is checked first, so it wins and auto-end's own 5-minute
+    /// counter never gets the chance to run (it only advances from `.active`).
+    @Test("Auto-pause preempts auto-end when both thresholds are reached together")
+    func autoPausePreemptsAutoEnd() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(
+                recordingState: .active,
+                zeroSpeedSeconds: ActiveRideFeature.autoEndZeroSpeedSeconds - 1
+            )
+        )
+
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = ActiveRideFeature.autoEndZeroSpeedSeconds
+        }
+        await store.receive(.autoPauseTriggered) {
+            $0.recordingState = .paused
+            $0.isAutoPaused = true
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+    }
+
+    @Test("Motion resumes a ride that auto-pause itself paused")
+    func motionResumesAnAutoPausedRide() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(
+                recordingState: .paused,
+                zeroSpeedSeconds: ActiveRideFeature.autoPauseZeroSpeedSeconds,
+                isAutoPaused: true
+            )
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(5.0)))
+
+        #expect(store.state.recordingState == .active)
+        #expect(store.state.isAutoPaused == false)
+        #expect(store.state.zeroSpeedSeconds == 0)
+    }
+
+    @Test("Motion does not resume a ride the rider paused manually")
+    func motionDoesNotResumeAManuallyPausedRide() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .paused, isAutoPaused: false)
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(5.0)))
+
+        #expect(store.state.recordingState == .paused)
+        #expect(store.state.isAutoPaused == false)
     }
 }
 

@@ -3,7 +3,7 @@ import Foundation
 /// Display unit system for speed and distance. Conversions and unit symbols are
 /// delegated to Foundation's `Measurement` / `UnitSpeed` / `UnitLength` so there
 /// are no hardcoded conversion factors and labels are the OS-localized symbols.
-enum UnitSystem: String, Equatable, Sendable, Codable {
+enum UnitSystem: String, Equatable, Sendable, Codable, CaseIterable {
     case metric, imperial
 
     /// The unit system a locale implies. US/UK use mph + miles for road distances;
@@ -29,6 +29,9 @@ enum UnitSystem: String, Equatable, Sendable, Codable {
     /// OS-localized unit symbols ("km/h"/"mph", "km"/"mi").
     var speedLabel: String { speedUnit.symbol }
     var distanceLabel: String { lengthUnit.symbol }
+
+    /// Title-case name for the S12 units picker.
+    var displayName: String { self == .metric ? "Metric" : "Imperial" }
 
     func speed(fromMPS mps: Double) -> Double {
         Measurement(value: mps, unit: UnitSpeed.metersPerSecond)

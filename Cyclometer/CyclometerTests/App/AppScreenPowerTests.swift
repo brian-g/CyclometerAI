@@ -86,6 +86,30 @@ struct AppScreenPowerTests {
         #expect(calls.value == [.idleTimerDisabled(true), .idleTimerDisabled(false)])
     }
 
+    /// A paused ride is not "actively being ridden" even though the dashboard stays
+    /// on screen — the idle timer has to return to system default the moment the
+    /// rider pauses, not only once the dashboard closes or the ride ends (#102).
+    /// Exhaustivity off: the exact interleaving of `ActiveRideFeature`'s own
+    /// suspension-forwarding effect against `AppFeature`'s visibility-forwarding
+    /// effect isn't what this test is pinning.
+    @Test("Pausing releases the idle timer even though the dashboard stays open")
+    func pausingReleasesTheIdleTimer() async {
+        let clock = TestClock()
+        let calls = LockIsolated<[ScreenCall]>([])
+        let store = Self.makeStore(clock: clock, calls: calls)
+        store.exhaustivity = .off
+
+        await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
+        #expect(calls.value == [.idleTimerDisabled(true)])
+
+        await store.send(.activeRide(.pauseTapped))
+        await store.finish()
+
+        #expect(store.state.isDashboardPresented == true)
+        #expect(store.state.activeRide?.recordingState == .paused)
+        #expect(calls.value == [.idleTimerDisabled(true), .idleTimerDisabled(false)])
+    }
+
     // MARK: - Auto-dim
 
     @Test("Dims after the idle timeout, capturing the rider's own brightness")

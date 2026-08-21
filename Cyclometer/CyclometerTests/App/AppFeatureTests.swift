@@ -34,7 +34,7 @@ struct AppFeatureTests {
     func dashboardOpenedRepresents() async {
         let store = TestStore(
             initialState: AppFeature.State(
-                activeRide: ActiveRideFeature.State(recordingState: .paused),
+                activeRide: ActiveRideFeature.State(recordingState: .active),
                 isDashboardPresented: false
             )
         ) {
