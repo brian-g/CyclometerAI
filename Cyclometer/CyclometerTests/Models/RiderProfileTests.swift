@@ -249,6 +249,173 @@ struct RiderProfileTests {
         #expect(profile.zone(forBPM: 128, healthResting: 50, healthMax: 180) == .zone2)
     }
 
+    // MARK: - Zone boundary overrides (#103)
+
+    /// The §8 worked example: resting 60, max 190 — boundaries sit one bpm below
+    /// each zone's start.
+    @Test(
+        "Untouched boundaries match the §8 worked example",
+        arguments: [
+            (HeartRateZone.zone1, 137), (.zone2, 150), (.zone3, 163), (.zone4, 176)
+        ]
+    )
+    func untouchedBoundariesMatchWorkedExample(_ zone: HeartRateZone, _ expected: Int) {
+        #expect(RiderProfile().resolvedBoundaryBPM(afterZone: zone) == expected)
+    }
+
+    @Test("There is no boundary after zone 5")
+    func noBoundaryAfterZone5() {
+        #expect(RiderProfile().resolvedBoundaryBPM(afterZone: .zone5) == nil)
+    }
+
+    /// There is nothing valid to set after zone 5 — this must reject rather than
+    /// force-unwrap the (nonexistent) next zone, for any caller beyond the one
+    /// guarded call site the S12 reducer has today.
+    @Test("Setting a boundary after zone 5 is rejected rather than trapping")
+    func settingBoundaryAfterZone5IsRejected() {
+        #expect(throws: RiderProfile.ValidationError.boundaryOutOfOrder) {
+            try RiderProfile().settingBoundaryOverride(200, afterZone: .zone5)
+        }
+    }
+
+    @Test("Setting a boundary override is applied and read back")
+    func settingBoundaryOverrideIsApplied() throws {
+        let updated = try RiderProfile().settingBoundaryOverride(140, afterZone: .zone1)
+
+        #expect(updated.zone1CeilingOverrideBPM == 140)
+        #expect(updated.resolvedBoundaryBPM(afterZone: .zone1) == 140)
+    }
+
+    /// A boundary that would cross its live neighbour makes a gap or overlap
+    /// representable, so it is rejected rather than clamped silently.
+    @Test("A boundary set at or beyond a neighbouring boundary is rejected")
+    func boundaryOutOfOrderIsRejected() {
+        let profile = RiderProfile()  // zone1|zone2 boundary at 137, zone2|zone3 at 150
+
+        #expect(throws: RiderProfile.ValidationError.boundaryOutOfOrder) {
+            try profile.settingBoundaryOverride(150, afterZone: .zone1)
+        }
+        #expect(throws: RiderProfile.ValidationError.boundaryOutOfOrder) {
+            try profile.settingBoundaryOverride(151, afterZone: .zone1)
+        }
+    }
+
+    @Test("A boundary set at or below resting is rejected")
+    func zone1BoundaryCannotReachResting() {
+        let profile = RiderProfile()
+
+        #expect(throws: RiderProfile.ValidationError.boundaryOutOfOrder) {
+            try profile.settingBoundaryOverride(60, afterZone: .zone1)
+        }
+    }
+
+    @Test("A boundary set at or above max is rejected")
+    func zone4BoundaryCannotReachMax() {
+        let profile = RiderProfile()
+
+        #expect(throws: RiderProfile.ValidationError.boundaryOutOfOrder) {
+            try profile.settingBoundaryOverride(190, afterZone: .zone4)
+        }
+    }
+
+    @Test("Clearing a boundary override defers back to the Karvonen value")
+    func clearingBoundaryDefersToKarvonen() throws {
+        let profile = try RiderProfile().settingBoundaryOverride(140, afterZone: .zone1)
+        let cleared = try profile.settingBoundaryOverride(nil, afterZone: .zone1)
+
+        #expect(cleared.zone1CeilingOverrideBPM == nil)
+        #expect(cleared.resolvedBoundaryBPM(afterZone: .zone1) == 137)
+    }
+
+    /// The point of pinning: a boundary the rider touched must not silently
+    /// re-derive the next time resting or max HR changes, while an untouched
+    /// neighbour keeps tracking the live value.
+    @Test("A pinned boundary holds its bpm across a max HR change; an unpinned one still recomputes")
+    func pinnedBoundarySurvivesMaxChange() throws {
+        let profile = try RiderProfile().settingBoundaryOverride(140, afterZone: .zone1)
+
+        #expect(profile.resolvedBoundaryBPM(afterZone: .zone1, healthMax: 220) == 140)
+        // zone2's boundary is untouched — it still tracks the new max.
+        let defaultAt220 = RiderProfile().resolvedBoundaryBPM(afterZone: .zone2, healthMax: 220)
+        #expect(profile.resolvedBoundaryBPM(afterZone: .zone2, healthMax: 220) == defaultAt220)
+    }
+
+    @Test("Resetting zone boundaries clears all four and leaves resting/max untouched")
+    func resettingClearsAllFourBoundaries() throws {
+        var profile = RiderProfile(restingOverrideBPM: 50, maxOverrideBPM: 200)
+        profile = try profile.settingBoundaryOverride(130, afterZone: .zone1)
+        profile = try profile.settingBoundaryOverride(150, afterZone: .zone2)
+        profile = try profile.settingBoundaryOverride(170, afterZone: .zone3)
+        profile = try profile.settingBoundaryOverride(190, afterZone: .zone4)
+
+        let reset = profile.resettingZoneBoundaries()
+
+        #expect(reset.zone1CeilingOverrideBPM == nil)
+        #expect(reset.zone2CeilingOverrideBPM == nil)
+        #expect(reset.zone3CeilingOverrideBPM == nil)
+        #expect(reset.zone4CeilingOverrideBPM == nil)
+        #expect(reset.restingOverrideBPM == 50)
+        #expect(reset.maxOverrideBPM == 200)
+    }
+
+    @Test("bounds(for:) matches HeartRateZone.bounds when nothing is overridden")
+    func boundsMatchesHeartRateZoneWhenUnoverridden() {
+        let profile = RiderProfile()
+
+        for zone in HeartRateZone.allCases {
+            #expect(profile.bounds(for: zone) == HeartRateZone.bounds(for: zone, maxHR: 190, restingHR: 60))
+        }
+    }
+
+    /// A manual boundary shows up on both sides of the shared edge — the "editing
+    /// a boundary adjusts the neighbouring band" acceptance criterion.
+    @Test("bounds(for:) reflects a manual boundary on both sides of the shared edge")
+    func boundsReflectsManualBoundaryOnBothSides() throws {
+        let profile = try RiderProfile().settingBoundaryOverride(145, afterZone: .zone2)
+
+        #expect(profile.bounds(for: .zone2).upperBound == 145)
+        #expect(profile.bounds(for: .zone3).lowerBound == 146)
+    }
+
+    /// `settingRestingOverride`/`settingMaxOverride` don't know about the boundary
+    /// overrides this PR adds, so nothing today stops a live resting/max value
+    /// from passing a previously pinned boundary. `bounds(for:)` must degrade to a
+    /// 1-bpm range rather than build an invalid (lower > upper) `ClosedRange`.
+    @Test("bounds(for:) degrades instead of trapping when a live resting value passes a pinned boundary")
+    func boundsClampsWhenAPinnedBoundaryIsPassedByALiveValue() throws {
+        let profile = try RiderProfile().settingBoundaryOverride(140, afterZone: .zone1)
+
+        let bounds = profile.bounds(for: .zone1, healthResting: 145)
+
+        #expect(bounds.lowerBound <= bounds.upperBound)
+    }
+
+    @Test("A document missing the boundary keys decodes with them nil")
+    func decodingIsLenientAboutMissingBoundaryKeys() throws {
+        let onlyResting = Data(#"{"restingOverrideBPM": 48}"#.utf8)
+        let decoded = try JSONDecoder().decode(RiderProfile.self, from: onlyResting)
+
+        #expect(decoded.zone1CeilingOverrideBPM == nil)
+        #expect(decoded.zone2CeilingOverrideBPM == nil)
+        #expect(decoded.zone3CeilingOverrideBPM == nil)
+        #expect(decoded.zone4CeilingOverrideBPM == nil)
+    }
+
+    @Test("A profile with boundary overrides round-trips through JSON")
+    func boundaryOverridesRoundTripThroughJSON() throws {
+        let profile = RiderProfile(
+            restingOverrideBPM: 48,
+            maxOverrideBPM: 200,
+            zone1CeilingOverrideBPM: 120,
+            zone2CeilingOverrideBPM: 140,
+            zone3CeilingOverrideBPM: 160,
+            zone4CeilingOverrideBPM: 180
+        )
+        let data = try JSONEncoder().encode(profile)
+
+        #expect(try JSONDecoder().decode(RiderProfile.self, from: data) == profile)
+    }
+
     // MARK: - Persistence
 
     /// Storage is quarantined per test with `FileStorage.inMemory`, the idiom
