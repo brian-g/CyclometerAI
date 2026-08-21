@@ -40,12 +40,14 @@ struct AppFeature {
         /// restores what they had rather than some app-chosen constant.
         var preDimBrightness: Double? = nil
 
-        /// The app owns the display only while the dashboard is the visible surface
-        /// and the app is foregrounded (#110). A ride minimized to the accessory pill
-        /// deliberately does not count — the rider isn't reading it, so the phone
-        /// should auto-lock as usual.
+        /// The app owns the display only while the dashboard is the visible surface,
+        /// a ride is actively recording, and the app is foregrounded (#110, #102). A
+        /// ride minimized to the accessory pill deliberately does not count — the
+        /// rider isn't reading it, so the phone should auto-lock as usual. Nor does a
+        /// paused ride: the wake lock and any in-progress dim release the moment the
+        /// rider stops, the same as ending the ride or backgrounding the app.
         var isDashboardVisible: Bool {
-            isDashboardPresented && activeRide != nil && isForeground
+            isDashboardPresented && activeRide?.recordingState == .active && isForeground
         }
     }
 
@@ -237,19 +239,22 @@ struct AppFeature {
                 return .none
             }
         }
-        // The inputs to `isDashboardVisible` change from several places, but the
-        // derived value flips rarely — so screen ownership is forwarded on the
-        // transition rather than recomputed at every call site.
-        .onChange(of: \.isDashboardVisible) { _, isVisible in
-            Reduce { _, _ in
-                .send(.screenVisibilityChanged(isVisible))
-            }
-        }
         .ifLet(\.activeRide, action: \.activeRide) {
             ActiveRideFeature()
         }
         .ifLet(\.$startSheet, action: \.startSheet) {
             StartSheetFeature()
+        }
+        // The inputs to `isDashboardVisible` change from several places, but the
+        // derived value flips rarely — so screen ownership is forwarded on the
+        // transition rather than recomputed at every call site. Placed after both
+        // `.ifLet`s (#102): `recordingState` is mutated inside `ActiveRideFeature`,
+        // so `.onChange` has to wrap that reducer too, or a pause/resume/end
+        // reaching the child via `.ifLet` would go unobserved here.
+        .onChange(of: \.isDashboardVisible) { _, isVisible in
+            Reduce { _, _ in
+                .send(.screenVisibilityChanged(isVisible))
+            }
         }
     }
 

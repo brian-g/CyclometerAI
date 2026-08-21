@@ -12,6 +12,13 @@ struct ActiveRideFeature {
     /// PRD §8.8: "Auto-end if speed = 0 for > 5 minutes (configurable, default on)".
     static let autoEndZeroSpeedSeconds = 300
 
+    /// Consecutive zero-speed seconds while active before the ride auto-pauses
+    /// (S12, #102). Shorter than auto-end on purpose — this is the stoplight case,
+    /// not the abandoned-ride case, and it fires first: reaching `.paused` freezes
+    /// `zeroSpeedSeconds`, so auto-end cannot trigger from a stop auto-pause already
+    /// caught. No PRD-specified threshold exists; chosen to match a brief stop.
+    static let autoPauseZeroSpeedSeconds = 10
+
     @Dependency(\.continuousClock) var clock
     @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.variaRadarClient) var variaRadarClient
@@ -38,6 +45,9 @@ struct ActiveRideFeature {
         /// to 190/55 before #96, which disagreed with the 60 that DataModel.md §3.5
         /// has always specified as the resting default.
         @SharedReader(.riderProfile) var riderProfile
+        /// Read-only here — Settings owns the write side (#102). Consulted for
+        /// `isAutoPauseEnabled`.
+        @SharedReader(.appPreferences) var preferences
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
         var maxSpeedKPH: Double = 0
@@ -71,6 +81,9 @@ struct ActiveRideFeature {
         var isLocationAvailable: Bool = false
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
+        /// Whether the *current* pause was auto-triggered rather than a manual Pause
+        /// tap — the only kind motion is allowed to auto-resume (#102).
+        var isAutoPaused: Bool = false
         /// Wheel auto-calibration stands down while the rider has something more
         /// urgent to attend to, and whenever the ride isn't actively recording — a
         /// paused ride still receives GPS fixes, and stationary scatter would poison
@@ -95,6 +108,7 @@ struct ActiveRideFeature {
         case finishTapped
         case finishAlert(PresentationAction<FinishAlert>)
         case autoEndTriggered
+        case autoPauseTriggered
         case heartRateUpdated(Int)
         case hrPairingChanged(Bool)
         case cadence(CadenceFeature.Action)
@@ -178,6 +192,7 @@ struct ActiveRideFeature {
                 guard state.recordingState == .paused else { return .none }
                 state.recordingState = .active
                 state.zeroSpeedSeconds = 0
+                state.isAutoPaused = false
                 return .none
             case .finishTapped:
                 guard state.recordingState == .paused else { return .none }
@@ -206,6 +221,11 @@ struct ActiveRideFeature {
                 guard state.recordingState == .active else { return .none }
                 state.recordingState = .paused
                 return .send(.finishTapped)
+            case .autoPauseTriggered:
+                guard state.recordingState == .active else { return .none }
+                state.recordingState = .paused
+                state.isAutoPaused = true
+                return .none
             case .heartRateUpdated(let bpm):
                 state.heartRateBPM = bpm
                 // Through the profile's own facade rather than unpacking it into
@@ -230,6 +250,9 @@ struct ActiveRideFeature {
                     state.zeroSpeedSeconds += 1
                 } else {
                     state.zeroSpeedSeconds = 0
+                }
+                if state.preferences.isAutoPauseEnabled, state.zeroSpeedSeconds >= Self.autoPauseZeroSpeedSeconds {
+                    return .send(.autoPauseTriggered)
                 }
                 if state.isAutoEndEnabled, state.zeroSpeedSeconds >= Self.autoEndZeroSpeedSeconds {
                     return .send(.autoEndTriggered)
@@ -291,6 +314,13 @@ struct ActiveRideFeature {
                 state.isLocationAvailable = status.isGranted
                 return .none
             case .speed:
+                // Only a pause auto-pause itself made is eligible to auto-resume — a
+                // rider who tapped Pause has to tap Resume (#102).
+                if state.isAutoPaused, (state.speed.speedMPS ?? 0) > 0 {
+                    state.recordingState = .active
+                    state.isAutoPaused = false
+                    state.zeroSpeedSeconds = 0
+                }
                 return .none
             case .calibration:
                 return .none
