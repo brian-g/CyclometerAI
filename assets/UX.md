@@ -210,7 +210,8 @@ The primary button reads **Next** and is enabled once the three required permiss
 
 Title **Add Sensors**, helper text "Nearby sensors, tap to pair, pull to refresh.", the device list, and a
 primary **Next** button. The list is the same component as S11 (§S11) with every row in its unpaired state —
-the screen differs only in its title, its helper text and the presence of Next.
+the screen differs only in its title, the **Next** button, and the helper text, which S11 no longer carries
+(§S11, revised 2026-08-21). Onboarding keeps it: this is the first sensor list the rider has ever seen.
 
 ### Interactions
 - BLE scan + discovered device list
@@ -799,9 +800,15 @@ An `HKWorkout` is written to Apple Health automatically when the ride ends, befo
 ### Layout
 > *Refer to `assets/design/Design.sketch` — S11.*
 
-Title **Manage Sensors**, helper text "Tap to pair, pull to refresh.", then a **single grouped list of
-devices** — not one section per role. Each row carries a sensor-type icon, the device name, and a trailing
-text button reading **Pair** or **Unpair**.
+Title **Manage Sensors**, then a **single grouped list of devices** — not one section per role. Each row
+carries a sensor-type icon, the device name, and a trailing text button reading **Pair** or **Unpair**.
+
+> **Revised 2026-08-21.** The helper text "Tap to pair, pull to refresh." is removed. The Sketch frame still
+> shows it below the title and needs deleting there — a deliberate departure from the frame, not drift. The
+> row's own Pair button says what a tap does, and pull-to-refresh is a system gesture the list already
+> advertises by behaving like every other iOS list; a line of instructions above four self-describing rows
+> earns less than the vertical space it costs. §S02 keeps its own helper text: an onboarding screen is
+> talking to a rider who has not seen this list before.
 
 The icon and its tint are shared with the Start sheet (§S05.1) so a sensor type keeps its colour wherever
 the rider meets it — radar purple `dot.radiowaves.forward`, heart rate red `heart.fill`, speed blue
