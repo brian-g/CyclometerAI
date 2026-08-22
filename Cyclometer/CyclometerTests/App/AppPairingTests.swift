@@ -38,7 +38,12 @@ struct AppPairingTests {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.pairedSensors = pairedSensors }
+            // Onboarding is this suite's business, not this one's (#105) — seeded
+            // complete so `.task` doesn't also construct it alongside the launch push.
+            $preferences.withLock {
+                $0.pairedSensors = pairedSensors
+                $0.hasCompletedOnboarding = true
+            }
 
             var csc = BLECSCClient.testValue
             csc.setPairedSensors = { map in log.withValue { $0.append(.csc(map)) } }
