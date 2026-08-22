@@ -56,6 +56,16 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// stop detection the ride state machine needs lands with #102.
     var isAutoPauseEnabled: Bool = true
 
+    /// Whether the rider has finished onboarding (S01→S02) at least once (#105). Gates
+    /// `AppFeature`'s launch presentation — once true, onboarding never reappears, even
+    /// if a permission it once checked is later revoked.
+    var hasCompletedOnboarding: Bool = false
+
+    /// Whether the rider has passed the Welcome step specifically, so a relaunch
+    /// mid-flow resumes at Sensor Pairing rather than restarting at Welcome (#105).
+    /// Meaningless once `hasCompletedOnboarding` is true.
+    var hasCompletedWelcomeStep: Bool = false
+
     /// The sensor filling `role`, or nil when the role is unpaired. Role-keyed rather
     /// than peripheral-keyed because that is how every consumer asks: one sensor per
     /// role, app-wide, for MVP (DataModel.md §3.9 gives roles a bike dimension in
@@ -119,6 +129,12 @@ struct AppPreferences: Codable, Equatable, Sendable {
         isAutoPauseEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isAutoPauseEnabled
         ) ?? true
+        hasCompletedOnboarding = try container.decodeIfPresent(
+            Bool.self, forKey: .hasCompletedOnboarding
+        ) ?? false
+        hasCompletedWelcomeStep = try container.decodeIfPresent(
+            Bool.self, forKey: .hasCompletedWelcomeStep
+        ) ?? false
     }
 }
 

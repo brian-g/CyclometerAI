@@ -116,6 +116,15 @@ struct AppView: View {
                     .accessibilityLabel("Screen dimmed. Tap to wake.")
                     .zIndex(2)
             }
+
+            // ── Onboarding (S01→S02) ──────────────────────────────────────────────
+            // Non-dismissible by design (#105) — a manual overlay, not a system
+            // presentation, matching the dashboard/dim-blocker idiom above rather than
+            // introducing `.fullScreenCover`.
+            if let onboardingStore = store.scope(state: \.onboarding, action: \.onboarding) {
+                OnboardingView(store: onboardingStore)
+                    .zIndex(3)
+            }
         }
         .animation(.smooth, value: store.isDashboardPresented)
         .onChange(of: scenePhase, initial: true) { _, phase in

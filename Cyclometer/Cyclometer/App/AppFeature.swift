@@ -28,6 +28,7 @@ struct AppFeature {
         var selectedTab: Tab = .rides
         var activeRide: ActiveRideFeature.State? = nil
         @Presents var startSheet: StartSheetFeature.State? = nil
+        var onboarding: OnboardingFeature.State? = nil
         var isDashboardPresented: Bool = false
         var rides: RidesFeature.State = RidesFeature.State()
         var routes: RoutesFeature.State = RoutesFeature.State()
@@ -60,6 +61,7 @@ struct AppFeature {
         case tabSelected(Tab)
         case startRideButtonTapped
         case startSheet(PresentationAction<StartSheetFeature.Action>)
+        case onboarding(OnboardingFeature.Action)
         case dashboardDismissed
         case dashboardOpened
         case rideFinished
@@ -89,6 +91,15 @@ struct AppFeature {
         Reduce { state, action in
             switch action {
             case .task:
+                // Presented until the rider completes it; never reconstructed once
+                // `hasCompletedOnboarding` is true, regardless of what permissions do
+                // afterward (#105).
+                if !state.preferences.hasCompletedOnboarding && state.onboarding == nil {
+                    state.onboarding = OnboardingFeature.State(
+                        step: state.preferences.hasCompletedWelcomeStep ? .sensorPairing : .welcome
+                    )
+                }
+
                 // The clients hold no persistence, so the rider's pairings have to be
                 // handed to them before any scan can act on them. Here rather than in
                 // DeviceManagementFeature: sensors must reconnect on launch, not only
@@ -235,7 +246,13 @@ struct AppFeature {
                     await screenClient.setBrightness(min(level, Self.dimBrightness))
                 }
 
-            case .rides, .routes, .settings, .activeRide:
+            case .onboarding(.delegate(.completed)):
+                // The two preference writes happen inside `OnboardingFeature`, which owns
+                // both fields; this only clears the presentation.
+                state.onboarding = nil
+                return .none
+
+            case .rides, .routes, .settings, .activeRide, .onboarding:
                 return .none
             }
         }
@@ -244,6 +261,9 @@ struct AppFeature {
         }
         .ifLet(\.$startSheet, action: \.startSheet) {
             StartSheetFeature()
+        }
+        .ifLet(\.onboarding, action: \.onboarding) {
+            OnboardingFeature()
         }
         // The inputs to `isDashboardVisible` change from several places, but the
         // derived value flips rarely — so screen ownership is forwarded on the
