@@ -120,7 +120,7 @@ private struct PrivacyPolicyView: View {
     var body: some View {
         List {
             Section("Privacy Policy") {
-                ForEach(SettingsDemoData.privacyPolicyParagraphs, id: \.self) { Text($0) }
+                ForEach(SettingsData.privacyPolicyParagraphs, id: \.self) { Text($0) }
             }
         }
         .navigationTitle("Privacy Policy")
