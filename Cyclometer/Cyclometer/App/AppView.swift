@@ -139,35 +139,47 @@ struct AppView: View {
 // MARK: - Previews
 
 #Preview("Rides Tab") {
-    AppView(
-        store: Store(initialState: AppFeature.State()) {
-            AppFeature()
-        }
-    )
-    .modelContainer(for: Item.self, inMemory: true)
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+    } operation: {
+        @Shared(.appPreferences) var preferences
+        $preferences.withLock { $0.hasCompletedOnboarding = true }
+        return AppView(
+            store: Store(initialState: AppFeature.State()) {
+                AppFeature()
+            }
+        )
+        .modelContainer(for: Item.self, inMemory: true)
+    }
 }
 
 #Preview("Active Ride") {
-    AppView(
-        store: Store(
-            initialState: AppFeature.State(
-                activeRide: ActiveRideFeature.State(
-                    recordingState: .active,
-                    elapsedSeconds: 2340,
-                    speedKPH: 28.4,
-                    heartRateBPM: 155,
-                    hrZone: 4,
-                    cadence: CadenceFeature.State(cadenceRPM: 87),
-                    distanceMeters: 12300,
-                    speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
-                    maxSpeedKPH: 34.1,
-                    speedSampleCount: 120,
-                    speedSampleSum: 3408
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+    } operation: {
+        @Shared(.appPreferences) var preferences
+        $preferences.withLock { $0.hasCompletedOnboarding = true }
+        return AppView(
+            store: Store(
+                initialState: AppFeature.State(
+                    activeRide: ActiveRideFeature.State(
+                        recordingState: .active,
+                        elapsedSeconds: 2340,
+                        speedKPH: 28.4,
+                        heartRateBPM: 155,
+                        hrZone: 4,
+                        cadence: CadenceFeature.State(cadenceRPM: 87),
+                        distanceMeters: 12300,
+                        speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
+                        maxSpeedKPH: 34.1,
+                        speedSampleCount: 120,
+                        speedSampleSum: 3408
+                    )
                 )
-            )
-        ) {
-            AppFeature()
-        }
-    )
-    .modelContainer(for: Item.self, inMemory: true)
+            ) {
+                AppFeature()
+            }
+        )
+        .modelContainer(for: Item.self, inMemory: true)
+    }
 }
