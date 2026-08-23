@@ -9,7 +9,7 @@ struct WelcomeView: View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
             Text("Welcome to Cyclometer").font(Font.largeTitle.bold())
             Text("Ride faster. Arrive safer.")
-                .font(.system(size: 22, weight: .regular))
+                .font(.title2)
                 .foregroundStyle(Color.cyTextPrimary)
 
             Text("""
@@ -17,7 +17,7 @@ struct WelcomeView: View {
 
             Let's get started, first we need you to grant some permissions. Tap on each item to grant permission. When completed, tap Next.
             """)
-                .font(.system(size: 17, weight: .regular))
+                .font(.body)
                 .foregroundStyle(Color.cyTextPrimary)
 
             VStack(spacing: Spacing.md) {
@@ -29,6 +29,12 @@ struct WelcomeView: View {
             }
 
             Spacer()
+
+            if !store.state.isNextEnabled {
+                Text("You must give permissions to use Bluetooth, Location, and Motion. HealthKit is optional.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.cyTextSecondary)
+            }
 
             Button {
                 store.send(.nextButtonTapped)
@@ -63,7 +69,7 @@ private struct PermissionRow: View {
         HStack(spacing: Spacing.md) {
             PermissionStatusOval(state: state)
             Text(title)
-                .font(.system(size: 20, weight: .regular))
+                .font(.title3)
                 .foregroundStyle(Color.cyTextPrimary)
             Spacer()
         }
@@ -84,7 +90,7 @@ private struct PermissionStatusOval: View {
 
     var body: some View {
         Image(systemName: symbolName)
-            .font(.system(size: 32))
+            .font(.largeTitle)
             .foregroundStyle(isBlocked ? .cyDestructive : .cyPrimary)
             .frame(width: Spacing.xxl, height: Spacing.xxl) // 36pt — Spacing.xxl is already "sensor icon size"
     }
