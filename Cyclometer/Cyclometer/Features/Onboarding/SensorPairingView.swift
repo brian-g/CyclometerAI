@@ -10,15 +10,17 @@ struct SensorPairingView: View {
 
     var body: some View {
         VStack(spacing: Spacing.lg) {
-            VStack(spacing: Spacing.sm) {
-                Text("ADD SENSORS")
-                    .font(.title.bold())
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text("Add Sensors")
+                    .font(.largeTitle.bold())
                     .foregroundStyle(Color.cyTextPrimary)
                 Text("Nearby sensors, tap to pair, pull to refresh.")
                     .font(.subheadline)
                     .foregroundStyle(Color.cyTextSecondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, Spacing.lg)
+            .padding(.horizontal, Spacing.lg)
 
             // Onboarding's background is `cyBgPrimary` (white), not the system's
             // grouped-list gray `DeviceListView` paints by default in Settings' own
