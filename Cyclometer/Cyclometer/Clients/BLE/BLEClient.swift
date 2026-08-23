@@ -142,7 +142,23 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
     static let shared = BLECentral()
 
     private let bleQueue = DispatchQueue(label: "name.glaeske.cyclometer.ble", qos: .userInitiated)
-    private var manager: CBCentralManager!
+
+    /// Created lazily, on the first scan/connect/discover/notify/read request or the
+    /// first `requestAuthorization()` call — never merely by reading `authorization()`
+    /// or subscribing to `events()` for observation.
+    ///
+    /// A `CBCentralManager`'s mere existence is what raises the system Bluetooth
+    /// prompt (see `requestAuthorization()`), so a caller that only wants to *display*
+    /// the current authorization — S01's rows, before any tap — must never cause one
+    /// to be created. Confined to `bleQueue`, so the check-then-create below never
+    /// races.
+    private var _manager: CBCentralManager?
+    private var manager: CBCentralManager {
+        if let _manager { return _manager }
+        let created = CBCentralManager(delegate: self, queue: bleQueue)
+        _manager = created
+        return created
+    }
 
     // Retained peripherals — CBCentralManager doesn't hold strong references.
     private var discovered: [UUID: CBPeripheral] = [:]
@@ -177,17 +193,18 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
         // state whose other half is gone buys nothing. See BLE.md §13 for the rationale and for
         // what adopting it would require. The app does declare the bluetooth-central background
         // mode, so background scanning and reconnection work without restoration.
-        manager = CBCentralManager(delegate: self, queue: bleQueue)
     }
 
     // MARK: Authorization
 
     /// Await the rider's answer to the system Bluetooth prompt.
     ///
-    /// Nothing here *presents* the prompt: iOS raises it when a `CBCentralManager`
-    /// first needs authorization, and this class built one in `init`. So the work is
-    /// purely waiting for the answer — hence no request call to pair with the
-    /// continuation, unlike CoreLocation.
+    /// iOS raises the prompt when a `CBCentralManager` first needs authorization —
+    /// creating `manager` below is what does that, deferred until exactly this call
+    /// so that a passive status read never triggers it. Once created, the manager
+    /// persists (CoreBluetooth has no notion of "un-asking"), so the work after that
+    /// is purely waiting for the delegate's answer — hence no request call to pair
+    /// with the continuation, unlike CoreLocation.
     func requestAuthorization() async -> CBManagerAuthorization {
         let current = CBCentralManager.authorization
         guard current == .notDetermined else {
@@ -218,6 +235,10 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
             switch disposition {
             case .parked:
                 logger.notice("awaiting bluetooth authorization")
+                // The manager's existence is what raises the prompt — trigger it only
+                // now, after the continuation is parked, so the delegate callback
+                // never arrives before there is somewhere for it to go.
+                bleQueue.async { [self] in _ = manager }
             case .alreadyPending:
                 logger.warning("bluetooth authorization already pending — returning current state")
                 continuation.resume(returning: CBCentralManager.authorization)

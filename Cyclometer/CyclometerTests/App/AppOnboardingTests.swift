@@ -109,12 +109,24 @@ struct AppOnboardingTests {
 
     @Test("Completing the flow persists and dismisses")
     func completingTheFlowPersistsAndDismisses() async {
-        let store = Self.makeStore()
+        let store = Self.makeStore(permissionsClient: .mock(initial: [
+            .bluetooth: .granted,
+            .locationWhenInUse: .granted,
+            .motion: .granted,
+        ]))
 
         await store.send(.task) {
             $0.onboarding = OnboardingFeature.State(step: .welcome)
         }
         await store.send(.onboarding(.task))
+
+        // Welcome's own `.task` populates its permission state — #106's Next button
+        // is gated on it, so this subscription is required before Next can fire.
+        await store.send(.onboarding(.welcome(.task)))
+        await store.receive(\.onboarding.welcome.permissionChanged) { $0.onboarding?.welcome.permissionStates[.bluetooth] = .granted }
+        await store.receive(\.onboarding.welcome.permissionChanged) { $0.onboarding?.welcome.permissionStates[.locationWhenInUse] = .granted }
+        await store.receive(\.onboarding.welcome.permissionChanged) { $0.onboarding?.welcome.permissionStates[.motion] = .granted }
+        await store.receive(\.onboarding.welcome.permissionChanged) { $0.onboarding?.welcome.permissionStates[.health] = .notDetermined }
 
         // `@Shared` writes become visible to TestStore's exhaustive diffing at the
         // very next call regardless of which hop performs them, so each preference
