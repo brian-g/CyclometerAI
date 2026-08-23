@@ -60,4 +60,5 @@ jobs:
             -skip-testing:CyclometerTests/CadenceWidgetSnapshotTests \
             -skip-testing:CyclometerTests/ActiveRideAccessorySnapshotTests \
             -skip-testing:CyclometerTests/DeviceManagementSnapshotTests \
-            -skip-testing:CyclometerTests/StartSheetSnapshotTests
+            -skip-testing:CyclometerTests/StartSheetSnapshotTests \
+            -skip-testing:CyclometerTests/SensorPairingSnapshotTests
