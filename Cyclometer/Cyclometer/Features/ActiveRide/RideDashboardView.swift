@@ -109,7 +109,7 @@ struct RideDashboardView: View {
                         isRadarPaired: store.isRadarPaired
                     )
                     .frame(height: unit)
-                    PaceWidget(speedKPH: (store.speed.speedMPS ?? 0) * 3.6)
+                    PaceWidget(speedMPS: store.speed.speedMPS ?? 0, unit: store.unitSystem)
                         .frame(height: unit)
                 }
 
@@ -341,15 +341,14 @@ private struct RadarWidget: View {
 }
 
 /// W11 — Pace 1×1
-private struct PaceWidget: View {
-    let speedKPH: Double
+struct PaceWidget: View {
+    let speedMPS: Double
+    let unit: UnitSystem
 
     private var pace: String {
-        guard speedKPH > 0 else { return "--:--" }
-        let milesPerHour = speedKPH * 0.621371
-        let secondsPerMile = 3600.0 / milesPerHour
-        let minutes = Int(secondsPerMile) / 60
-        let seconds = Int(secondsPerMile) % 60
+        guard let paceSeconds = unit.paceSeconds(fromMPS: speedMPS) else { return "--:--" }
+        let minutes = Int(paceSeconds) / 60
+        let seconds = Int(paceSeconds) % 60
         let secondsStr = seconds < 10 ? "0\(seconds)" : "\(seconds)"
         return "\(minutes):\(secondsStr)"
     }
@@ -357,7 +356,7 @@ private struct PaceWidget: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetLabel("Pace")
-            HeroNumber(pace, unit: "/mi").heroNumberSize(.medium)
+            HeroNumber(pace, unit: unit.paceLabel).heroNumberSize(.medium)
             Spacer()
         }
         .padding(Spacing.sm)

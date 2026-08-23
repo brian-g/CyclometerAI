@@ -91,12 +91,10 @@ struct ActiveRideFeature {
         var isCalibrationSuspended: Bool {
             recordingState != .active || radarTargets.contains { $0.threatLevel != .allClear }
         }
-        // Defaults to the device locale's measurement system. This is a *read*
-        // preference, so in TCA it ideally lives as shared state (`@Shared`) or
-        // behind a settings dependency rather than per-feature State — that move
-        // lands with UserProfile/Settings persistence. Kept here (seeded from
-        // locale) until then so the imperial path is reachable today.
-        var unitSystem: UnitSystem = .system
+        /// Reads through to `AppPreferences.preferredUnit` — mirrors
+        /// `SettingsFeature.State.preferredUnit` so a Settings toggle propagates
+        /// immediately to every dashboard widget with no lifecycle action needed.
+        var unitSystem: UnitSystem { preferences.preferredUnit }
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
     }

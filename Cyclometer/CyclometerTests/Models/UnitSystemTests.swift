@@ -35,4 +35,32 @@ struct UnitSystemTests {
     func rawValues(unit: UnitSystem, raw: String) {
         #expect(unit.rawValue == raw)
     }
+
+    // MARK: - Pace (#8)
+
+    /// Built on `speed(fromMPS:)` rather than a separate factor (36 km/h ⇒ 100
+    /// s/km; 36 km/h ≈ 22.37 mph ⇒ ~160.9 s/mi), so this also guards against
+    /// pace and speed ever disagreeing about the conversion.
+    @Test("Pace seconds derive from the same conversion as speed", arguments: [
+        (UnitSystem.metric, 10.0, 100.0),
+        (UnitSystem.imperial, 10.0, 160.9344)
+    ])
+    func paceSecondsMatchesSpeedConversion(unit: UnitSystem, mps: Double, expectedSeconds: Double) throws {
+        let seconds = try #require(unit.paceSeconds(fromMPS: mps))
+        #expect(abs(seconds - expectedSeconds) < 0.01)
+    }
+
+    @Test("Pace is undefined at zero or negative speed", arguments: [0.0, -1.0])
+    func paceSecondsIsNilWhenStopped(mps: Double) {
+        #expect(UnitSystem.metric.paceSeconds(fromMPS: mps) == nil)
+        #expect(UnitSystem.imperial.paceSeconds(fromMPS: mps) == nil)
+    }
+
+    @Test("Pace label pairs the '/' with the distance symbol", arguments: [
+        (UnitSystem.metric, "/km"),
+        (UnitSystem.imperial, "/mi")
+    ])
+    func paceLabelMatchesDistanceLabel(unit: UnitSystem, expected: String) {
+        #expect(unit.paceLabel == expected)
+    }
 }

@@ -43,9 +43,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// locale's measurement system, so a rider who never opens Settings still gets
     /// the units their phone is configured for.
     ///
-    /// Nothing reads this yet. `ActiveRideFeature.unitSystem` is still seeded from
-    /// `Locale` per-feature and the S12 picker is still a disconnected `String` —
-    /// pointing both at this field is #102 and #8.
+    /// The S12 picker (`SettingsFeature.State.preferredUnit`) writes here, and
+    /// `ActiveRideFeature.State.unitSystem` reads through to this same field (#8),
+    /// so a Settings change propagates to the dashboard immediately.
     var preferredUnit: UnitSystem = .system
 
     /// Whether the ride recorder pauses itself when the rider stops (PRD §8.8, S12).

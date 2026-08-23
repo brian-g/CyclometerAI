@@ -1345,3 +1345,69 @@ struct ActiveRideFeatureSharedPeripheralTests {
         }
     }
 }
+
+@MainActor
+@Suite("ActiveRideFeature — units")
+struct ActiveRideFeatureUnitsTests {
+
+    /// Quarantines `AppPreferences` in its own in-memory storage, same as
+    /// `ActiveRideFeatureStateMachineTests` — otherwise `state.unitSystem` would
+    /// read whatever `app-preferences.json` happens to exist on the machine
+    /// running the suite. `preferredUnit` is seeded inside the dependency scope
+    /// so the `@SharedReader` in `ActiveRideFeature.State` resolves against it.
+    private func makeStore(preferredUnit: UnitSystem) -> TestStoreOf<ActiveRideFeature> {
+        let storage = FileStorage.inMemory
+        return withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.preferredUnit = preferredUnit }
+            return TestStore(initialState: ActiveRideFeature.State()) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.continuousClock = TestClock()
+                $0.hapticsClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.defaultFileStorage = storage
+            }
+        }
+    }
+
+    @Test("unitSystem reads through to AppPreferences.preferredUnit", arguments: [
+        UnitSystem.metric, .imperial
+    ])
+    func unitSystemReflectsPreferredUnit(preferredUnit: UnitSystem) {
+        let store = makeStore(preferredUnit: preferredUnit)
+        #expect(store.state.unitSystem == preferredUnit)
+    }
+
+    /// The dashboard reads `state.unitSystem` off the same shared document
+    /// `SettingsFeature` writes to (#8) — a Settings toggle mid-ride must not
+    /// need a lifecycle action to be picked up here.
+    @Test("A Settings unit change propagates without a lifecycle action")
+    func unitSystemPropagatesLiveWithNoAction() {
+        let storage = FileStorage.inMemory
+        withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.preferredUnit = .metric }
+            let store = TestStore(initialState: ActiveRideFeature.State()) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.continuousClock = TestClock()
+                $0.hapticsClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.defaultFileStorage = storage
+            }
+            #expect(store.state.unitSystem == .metric)
+
+            $preferences.withLock { $0.preferredUnit = .imperial }
+            #expect(store.state.unitSystem == .imperial)
+        }
+    }
+}
