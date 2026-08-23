@@ -1,23 +1,34 @@
 import ComposableArchitecture
 import SwiftUI
 
-/// S02 placeholder — the real S11-shared sensor list lands with #107.
+/// S02 — Add Sensors (#107). Title, helper text and a Next button wrap S11's
+/// `DeviceListView` unmodified (UX.md §S02) — an onboarding rider sees the same list,
+/// role prompts and replace-or-cancel behavior as Settings' Manage Sensors, just with
+/// copy that talks to someone seeing it for the first time.
 struct SensorPairingView: View {
     @Bindable var store: StoreOf<SensorPairingFeature>
 
     var body: some View {
         VStack(spacing: Spacing.lg) {
-            Spacer()
-            Text("ADD SENSORS")
-                .font(.title.bold())
-                .foregroundStyle(Color.cyTextPrimary)
-            Text("Nearby sensors, tap to pair, pull to refresh.")
-                .font(.subheadline)
-                .foregroundStyle(Color.cyTextSecondary)
-            Text("The S11 device list lands here (#107).")
-                .font(.caption)
-                .foregroundStyle(Color.cyTextTertiary)
-            Spacer()
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text("Add Sensors")
+                    .font(.largeTitle.bold())
+                    .foregroundStyle(Color.cyTextPrimary)
+                Text("Nearby sensors, tap to pair, pull to refresh.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.cyTextSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, Spacing.lg)
+            .padding(.horizontal, Spacing.lg)
+
+            // Onboarding's background is `cyBgPrimary` (white), not the system's
+            // grouped-list gray `DeviceListView` paints by default in Settings' own
+            // NavigationStack — hidden here so the list sits on the same background as
+            // the title and Next button around it.
+            DeviceListView(store: store.scope(state: \.deviceManagement, action: \.deviceManagement))
+                .scrollContentBackground(.hidden)
+
             Button {
                 store.send(.nextButtonTapped)
             } label: {
@@ -27,11 +38,19 @@ struct SensorPairingView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.cyPrimary)
+            .padding([.horizontal, .bottom], Spacing.lg)
         }
-        .padding(Spacing.lg)
     }
 }
 
 #Preview {
-    SensorPairingView(store: Store(initialState: SensorPairingFeature.State()) { SensorPairingFeature() })
+    SensorPairingView(
+        store: Store(initialState: SensorPairingFeature.State()) {
+            SensorPairingFeature()
+        } withDependencies: {
+            $0.bleCSCClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+        }
+    )
 }
