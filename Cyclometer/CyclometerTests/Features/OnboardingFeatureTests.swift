@@ -26,7 +26,22 @@ struct OnboardingFeatureTests {
 
     @Test("Welcome's next delegate advances the step and marks Welcome complete")
     func welcomeNextAdvancesStep() async {
-        let store = Self.makeStore(step: .welcome)
+        let store = Self.makeStore(
+            step: .welcome,
+            permissionsClient: .mock(initial: [
+                .bluetooth: .granted,
+                .locationWhenInUse: .granted,
+                .motion: .granted,
+            ])
+        )
+
+        // Welcome's own `.task` populates its permission state — #106's Next button
+        // is gated on it, so this subscription is required before Next can fire.
+        let task = await store.send(.welcome(.task))
+        await store.receive(\.welcome.permissionChanged) { $0.welcome.permissionStates[.bluetooth] = .granted }
+        await store.receive(\.welcome.permissionChanged) { $0.welcome.permissionStates[.locationWhenInUse] = .granted }
+        await store.receive(\.welcome.permissionChanged) { $0.welcome.permissionStates[.motion] = .granted }
+        await store.receive(\.welcome.permissionChanged) { $0.welcome.permissionStates[.health] = .notDetermined }
 
         // `@Shared` writes become visible to TestStore's exhaustive diffing at the
         // very next call regardless of which hop performs them, so the preference
@@ -38,6 +53,8 @@ struct OnboardingFeatureTests {
         await store.receive(\.welcome.delegate.next) {
             $0.step = .sensorPairing
         }
+
+        await task.cancel()
     }
 
     @Test("Sensor pairing's next delegate marks onboarding complete and bubbles up")
