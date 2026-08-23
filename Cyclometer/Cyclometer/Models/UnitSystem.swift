@@ -42,4 +42,17 @@ enum UnitSystem: String, Equatable, Sendable, Codable, CaseIterable {
         Measurement(value: meters, unit: UnitLength.meters)
             .converted(to: lengthUnit).value
     }
+
+    /// Seconds required to cover one distance unit (mile or kilometer) at the
+    /// given speed. `nil` when speed is non-positive (pace is undefined).
+    /// Built on `speed(fromMPS:)` rather than a separate factor, so pace and
+    /// speed can never disagree about the conversion.
+    func paceSeconds(fromMPS mps: Double) -> Double? {
+        let unitsPerHour = speed(fromMPS: mps)
+        guard unitsPerHour > 0 else { return nil }
+        return 3600.0 / unitsPerHour
+    }
+
+    /// Pace label ("/mi", "/km") to pair with `paceSeconds(fromMPS:)`.
+    var paceLabel: String { "/" + distanceLabel }
 }
