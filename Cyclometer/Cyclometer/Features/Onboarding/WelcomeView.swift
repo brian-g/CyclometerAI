@@ -7,7 +7,12 @@ struct WelcomeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
-            Text("Welcome to Cyclometer").font(Font.largeTitle.bold())
+            HStack() {
+                Text("Welcome to Cyclometer").font(Font.largeTitle.bold())
+                Spacer()
+                Image("cyclometer.rider").resizable().frame(width:75, height: 75).aspectRatio(contentMode: .fill)
+                    
+            }
             Text("Ride faster. Arrive safer.")
                 .font(.title2)
                 .foregroundStyle(Color.cyTextPrimary)
