@@ -101,6 +101,27 @@ private struct PermissionStatusOval: View {
     }
 }
 
-#Preview {
-    WelcomeView(store: Store(initialState: WelcomeFeature.State()) { WelcomeFeature() })
+#Preview("Welcome — needs permissions") {
+    WelcomeView(
+        store: Store(initialState: WelcomeFeature.State()) {
+            WelcomeFeature()
+        } withDependencies: {
+            $0.permissionsClient = .mock(initial: [.bluetooth: .granted])
+        }
+    )
+}
+
+#Preview("Welcome — all granted") {
+    WelcomeView(
+        store: Store(initialState: WelcomeFeature.State()) {
+            WelcomeFeature()
+        } withDependencies: {
+            $0.permissionsClient = .mock(initial: [
+                .bluetooth: .granted,
+                .locationWhenInUse: .granted,
+                .motion: .granted,
+                .health: .granted
+            ])
+        }
+    )
 }

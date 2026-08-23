@@ -34,6 +34,18 @@ struct RoutesView: View {
     }
 }
 
+#Preview("Routes — List") {
+    NavigationStack {
+        RoutesView(store: Store(initialState: RoutesFeature.State()) { RoutesFeature() })
+    }
+}
+
+#Preview("Routes — Map") {
+    NavigationStack {
+        RoutesView(store: Store(initialState: RoutesFeature.State(showsMap: true)) { RoutesFeature() })
+    }
+}
+
 private struct RouteRow: View {
     let route: RouteStub
 

@@ -43,7 +43,46 @@ struct SensorPairingView: View {
     }
 }
 
-#Preview {
+private func stubbedDevices<Client>(
+    _ client: inout Client,
+    _ keyPath: WritableKeyPath<Client, @Sendable () -> AsyncStream<[DiscoveredDevice]>>,
+    _ devices: [DiscoveredDevice]
+) {
+    client[keyPath: keyPath] = {
+        AsyncStream { continuation in
+            continuation.yield(devices)
+            continuation.finish()
+        }
+    }
+}
+
+#Preview("Add Sensors — found") {
+    SensorPairingView(
+        store: Store(
+            initialState: SensorPairingFeature.State(
+                deviceManagement: DeviceManagementFeature.State(sources: [
+                    .speedCadence: DeviceDemoData.cscSensors,
+                    .radar: DeviceDemoData.radarDevices,
+                    .heartRate: DeviceDemoData.hrDevices
+                ])
+            )
+        ) {
+            SensorPairingFeature()
+        } withDependencies: {
+            var csc = BLECSCClient.testValue
+            stubbedDevices(&csc, \.discoveredDevices, DeviceDemoData.cscSensors)
+            $0.bleCSCClient = csc
+            var radar = VariaRadarClient.testValue
+            stubbedDevices(&radar, \.discoveredDevices, DeviceDemoData.radarDevices)
+            $0.variaRadarClient = radar
+            var hr = BLEHRClient.testValue
+            stubbedDevices(&hr, \.discoveredDevices, DeviceDemoData.hrDevices)
+            $0.bleHRClient = hr
+        }
+    )
+}
+
+#Preview("Add Sensors — searching") {
     SensorPairingView(
         store: Store(initialState: SensorPairingFeature.State()) {
             SensorPairingFeature()

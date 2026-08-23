@@ -230,6 +230,28 @@ struct ElevationPoint: Identifiable {
     let id = UUID(); let distance: Int; let elevation: Double
 }
 
+#Preview("Rides") {
+    NavigationStack {
+        RidesView(
+            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+            recordedItems: [],
+            onStartRide: {}
+        )
+    }
+    .modelContainer(for: Item.self, inMemory: true)
+}
+
+#Preview("Rides — empty") {
+    NavigationStack {
+        RidesView(
+            store: Store(initialState: RidesFeature.State(demoRides: [])) { RidesFeature() },
+            recordedItems: [],
+            onStartRide: {}
+        )
+    }
+    .modelContainer(for: Item.self, inMemory: true)
+}
+
 struct RideSummary: Identifiable {
     enum Source { case demo(UUID); case recorded(Item) }
     let id: String; let title: String; let date: Date

@@ -10,9 +10,28 @@ extension View {
                     Button(action: action) {
                         Label("Start ride", systemImage: "play.fill")
                     }
+                    .labelStyle(.titleAndIcon)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.cyPrimary)
                     .accessibilityLabel("Start ride")
                 }
             }
         }
+    }
+}
+
+#Preview("Start Ride Toolbar") {
+    NavigationStack {
+        Text("Rides")
+            .navigationTitle("Rides")
+            .startRideToolbarItem(isHidden: false) {}
+    }
+}
+
+#Preview("Start Ride Toolbar — hidden") {
+    NavigationStack {
+        Text("Rides")
+            .navigationTitle("Rides")
+            .startRideToolbarItem(isHidden: true) {}
     }
 }
