@@ -19,12 +19,17 @@ struct ActiveRideFeature {
     /// caught. No PRD-specified threshold exists; chosen to match a brief stop.
     static let autoPauseZeroSpeedSeconds = 10
 
+    /// PRD §8.3 "Alert Rules": minimum gap between re-firing the same alert level.
+    static let alertReTriggerInterval: TimeInterval = 3
+
     @Dependency(\.continuousClock) var clock
     @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.variaRadarClient) var variaRadarClient
     @Dependency(\.hapticsClient) var hapticsClient
+    @Dependency(\.audioClient) var audioClient
     @Dependency(\.locationClient) var locationClient
     @Dependency(\.permissionsClient) var permissionsClient
+    @Dependency(\.date.now) var now
 
     @ObservableState
     struct State: Equatable {
@@ -73,6 +78,13 @@ struct ActiveRideFeature {
         }
         var isRadarPaired: Bool = false
         var radarTargets: [RadarTarget] = []
+        /// Ride-level escalation derived from `radarTargets` (PRD §8.3) — distinct
+        /// from any single vehicle's `ThreatLevel` dot color. Exposed for the
+        /// screen-effects and radar-offline-indicator work in companion issues.
+        var activeAlertLevel: AlertLevel = .clear
+        /// Per-level timestamp of the last haptic/audio dispatch, backing the
+        /// minimum-3s same-level re-trigger guard (PRD §8.3 "Alert Rules").
+        var lastAlertDispatchAt: [AlertLevel: Date] = [:]
         var coordinate: Coordinate? = nil
         var trackCoordinates: [Coordinate] = []
         var altitude: Double = 0
@@ -125,7 +137,7 @@ struct ActiveRideFeature {
         }
     }
 
-    private enum CancelID { case radarLossTimer }
+    private enum CancelID { case radarLossTimer, dangerAudioRepeat }
 
     var body: some ReducerOf<Self> {
         Scope(state: \.speed, action: \.speed) {
@@ -258,7 +270,11 @@ struct ActiveRideFeature {
                 return .none
             case .radarTargetsUpdated(let targets):
                 state.radarTargets = targets
-                return .none
+                let newLevel = AlertLevel.level(for: targets)
+                guard newLevel != state.activeAlertLevel else { return .none }
+                let previous = state.activeAlertLevel
+                state.activeAlertLevel = newLevel
+                return dispatchAlert(&state, level: newLevel, previous: previous)
             case .radarConnectionChanged(let connectionState):
                 switch connectionState {
                 case .active:
@@ -276,16 +292,27 @@ struct ActiveRideFeature {
                 case .disconnected:
                     state.isRadarPaired = false
                     state.radarTargets = []
-                    return .cancel(id: CancelID.radarLossTimer)
+                    // A hard unpair is data loss, not a resolved threat — reset
+                    // silently (no All Clear tone) and stop any in-flight danger
+                    // loop rather than leave it repeating with no data feeding it.
+                    state.activeAlertLevel = .clear
+                    return .merge(
+                        .cancel(id: CancelID.radarLossTimer),
+                        .cancel(id: CancelID.dangerAudioRepeat)
+                    )
                 default:
                     return .none
                 }
             case .radarReconnectTimedOut:
                 state.isRadarPaired = false
                 state.radarTargets = []
-                return .run { [hapticsClient] _ in
-                    await hapticsClient.playAdvisory()   // L1 advisory, fires once
-                }
+                // Routed through the same guarded dispatch path as vehicle-based
+                // escalation (#135) rather than firing unconditionally — no `!=`
+                // guard here, since disconnect is a distinct real-world trigger
+                // that must always attempt to fire, same as before.
+                let previous = state.activeAlertLevel
+                state.activeAlertLevel = .advisory
+                return dispatchAlert(&state, level: .advisory, previous: previous)
             case .locationUpdated(let update):
                 state.coordinate = update.coordinate
                 // Only record track points while actively riding, so paused/stopped
@@ -333,5 +360,82 @@ struct ActiveRideFeature {
             }
         }
         .ifLet(\.$finishAlert, action: \.finishAlert)
+    }
+
+    // MARK: - Alert escalation dispatch
+
+    /// Builds the haptic + audio effect(s) for a transition into `level` from
+    /// `previous`, generalizing `Audio.md`'s "Tone Relationships and Progression"
+    /// table (which only documents adjacent-level pairs) to skip-level jumps: haptic
+    /// is purely a function of the new level (PRD §8.3's table is level-keyed, not
+    /// transition-keyed); audio keys off `(level, previous)` with exactly the two
+    /// non-default branches the table calls out.
+    private func dispatchAlert(_ state: inout State, level: AlertLevel, previous: AlertLevel) -> Effect<Action> {
+        var effects: [Effect<Action>] = []
+
+        if previous == .danger, level != .danger {
+            // Stops the loop's ContinuousClock.sleep promptly. A danger tone already
+            // mid-playback can trail up to ~580ms on real hardware — AudioClient's
+            // completion continuation isn't cancellation-aware — which is bounded and
+            // an acceptable failure mode (finishes an alert rather than truncating one).
+            effects.append(.cancel(id: CancelID.dangerAudioRepeat))
+        }
+
+        // L1→L0 is the sole no-op transition (L0 has no haptic; Audio.md explicitly
+        // exempts L1 from ever having a tone). Every other pair always fires at least
+        // the haptic, so this is the only case that must bypass the guard entirely —
+        // otherwise stamping `lastAlertDispatchAt[.clear]` here would wrongly block a
+        // genuine L2→L0/L3→L0 All Clear tone that follows soon after.
+        guard !(level == .clear && previous == .advisory) else {
+            return effects.isEmpty ? .none : .merge(effects)
+        }
+
+        let now = self.now  // read once — an .incrementing test clock must see one value
+        let last = state.lastAlertDispatchAt[level]
+        guard last.map({ now.timeIntervalSince($0) >= Self.alertReTriggerInterval }) ?? true else {
+            return effects.isEmpty ? .none : .merge(effects)
+        }
+        state.lastAlertDispatchAt[level] = now
+
+        effects.append(.run(priority: .userInteractive) { [hapticsClient] _ in
+            switch level {
+            case .clear: break
+            case .advisory: await hapticsClient.playAdvisory()
+            case .caution: await hapticsClient.playWarning()
+            // L3→L2 still fires this double-tap — Audio.md's "downgrade is not
+            // re-alerted" rule is scoped to the *tone*, not the haptic.
+            case .danger: await hapticsClient.playDanger()
+            }
+        })
+
+        switch (level, previous) {
+        case (.caution, .danger):
+            break  // downgrade — Audio.md: "Warning tone does NOT play"
+        case (.caution, _):
+            effects.append(.run(priority: .userInteractive) { [audioClient] _ in
+                await audioClient.playWarning()
+            })
+        case (.clear, .caution), (.clear, .danger):
+            effects.append(.run(priority: .userInteractive) { [audioClient] _ in
+                await audioClient.playAllClear()
+            })
+        case (.danger, _):
+            // The loop's first iteration IS the "begins immediately" tone — a separate
+            // one-shot playDanger() here would race it (both call AudioEngineState.play,
+            // which stop()s the node on entry, glitching whichever call loses the race).
+            effects.append(
+                .run(priority: .userInteractive) { [audioClient, clock] _ in
+                    while true {
+                        await audioClient.playDanger()
+                        try await clock.sleep(for: .milliseconds(800))
+                    }
+                }
+                .cancellable(id: CancelID.dangerAudioRepeat, cancelInFlight: true)
+            )
+        default:
+            break  // .advisory never has a tone (Audio.md), regardless of direction
+        }
+
+        return .merge(effects)
     }
 }
