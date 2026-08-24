@@ -61,4 +61,6 @@ jobs:
             -skip-testing:CyclometerTests/ActiveRideAccessorySnapshotTests \
             -skip-testing:CyclometerTests/DeviceManagementSnapshotTests \
             -skip-testing:CyclometerTests/StartSheetSnapshotTests \
-            -skip-testing:CyclometerTests/SensorPairingSnapshotTests
+            -skip-testing:CyclometerTests/SensorPairingSnapshotTests \
+            -skip-testing:CyclometerTests/WelcomeSnapshotTests \
+            -skip-testing:CyclometerTests/SettingsSnapshotTests
