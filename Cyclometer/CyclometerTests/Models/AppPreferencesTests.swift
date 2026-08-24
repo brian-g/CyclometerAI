@@ -84,6 +84,10 @@ struct AppPreferencesTests {
             PairedSensor(peripheralID: Self.comboID, role: .speed, displayName: "Wahoo RPM"),
             PairedSensor(peripheralID: Self.cadenceID, role: .cadence, displayName: nil)
         ]
+        // Added by #105, both default false — set away from default like every
+        // other field, or a broken decodeIfPresent line for either would pass here.
+        preferences.hasCompletedOnboarding = true
+        preferences.hasCompletedWelcomeStep = true
 
         let data = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
