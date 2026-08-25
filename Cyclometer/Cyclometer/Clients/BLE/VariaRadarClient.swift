@@ -6,18 +6,21 @@ import os
 // Retrieve after an untethered ride: `log collect --device --last 1h` (notice level persists).
 private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "radar")
 
-// UUIDs pending validation against Garmin's official Radar BLE spec
-// (developer program application in progress — see issue #18).
 // Identifies this client to BLEClient's connection ref-count so disconnecting the
 // radar never severs a peripheral another client shares (see BLEClient.connect).
 private let radarOwnerID = "radar"
 
+// radarServiceUUID matched Garmin's assumed numbering on the first RTL15451 tested
+// against; radarAlertUUID and radarCapabilityUUID did not (confirmed against real
+// hardware — see the "characteristics discovered" log from that session) and are
+// corrected here. parseAlert's payload layout is now confirmed too, against a real
+// vehicle pass on that same hardware — see parseAlert's doc comment.
 private let radarServiceUUID    = CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")
-private let radarAlertUUID      = CBUUID(string: "6A4E3202-667B-11E3-949A-0800200C9A66")  // notify
+private let radarAlertUUID      = CBUUID(string: "6A4E3203-667B-11E3-949A-0800200C9A66")  // notify
 // Read-only capability characteristic. `BLEClient.readValue` can fetch it now, but
 // its payload is unvalidated until the developer-program application lands and no
 // acceptance criterion needs it.
-private let radarCapabilityUUID = CBUUID(string: "6A4E3201-667B-11E3-949A-0800200C9A66")
+private let radarCapabilityUUID = CBUUID(string: "6A4E3205-667B-11E3-949A-0800200C9A66")
 
 // MARK: - VariaRadarClient
 
@@ -79,33 +82,35 @@ struct VariaRadarClient: Sendable {
 
     /// Parse vehicle targets from a Radar Alert characteristic value.
     ///
-    /// PAYLOAD ASSUMPTION — VALIDATE AGAINST HARDWARE:
-    /// - byte 0: alert level (0 = clear, 1 = advisory, 2 = caution, 3 = danger)
-    /// - byte 1: vehicle count (0–8)
-    /// - bytes 2+2i, 3+2i: per-vehicle record — uint8 range (m), uint8 closing speed (m/s)
+    /// Confirmed against real RTL15451 hardware — a school bus pass captured on
+    /// 2026-08-25 produced a 4-byte payload with a steadily counting-down range
+    /// byte, matching this layout exactly — and cross-checked against pycycling's
+    /// independent reverse-engineering of the same characteristic (rear_view_radar.py):
+    /// - byte 0: packet/sequence identifier, not vehicle data — ignored
+    /// - per threat, 3 bytes: threat ID (ignored; `vehicleSlotIDs[i]` gives stable
+    ///   identity instead — see its doc comment), uint8 range in whole metres,
+    ///   uint8 closing speed in whole km/h
     ///
-    /// The pycycling RDR reference suggests 3-byte records with per-threat IDs and
-    /// speed in ~3.04 km/h units instead — reconcile once hardware is available.
+    /// No byte carries an alert level. `RadarTarget.ThreatLevel` is derived from
+    /// closing speed instead, reusing `AlertLevel.dangerClosingSpeedKPH` so the
+    /// per-vehicle dot and the ride-level escalation agree on what "danger" means.
+    /// `.allClear` is never produced here — a vehicle only appears in this payload
+    /// while it's being tracked as a threat; "no threats" is an empty array.
     ///
     /// Returns nil for malformed payloads (drop the notification, keep last good state).
     static func parseAlert(from data: Data) -> [RadarTarget]? {
-        guard data.count >= 2 else { return nil }
-        let level = data[0]
-        let count = Int(data[1])
-        guard level <= 3, count <= 8, data.count >= 2 + count * 2 else { return nil }
-
-        let threat: RadarTarget.ThreatLevel = switch level {
-        case 0: .allClear
-        case 3: .danger
-        default: .warning   // advisory (1) and caution (2) collapse to L2
-        }
+        guard !data.isEmpty, (data.count - 1).isMultiple(of: 3) else { return nil }
+        let count = (data.count - 1) / 3
+        guard count <= vehicleSlotIDs.count else { return nil }
 
         return (0..<count).map { i in
-            RadarTarget(
+            let base = 1 + i * 3
+            let closingSpeedKPH = Double(data[base + 2])
+            return RadarTarget(
                 id: vehicleSlotIDs[i],
-                relativeVelocityMPS: Double(data[3 + i * 2]),
-                rangeMetres: Double(data[2 + i * 2]),
-                threatLevel: threat
+                relativeVelocityMPS: closingSpeedKPH / 3.6,
+                rangeMetres: Double(data[base + 1]),
+                threatLevel: closingSpeedKPH >= AlertLevel.dangerClosingSpeedKPH ? .danger : .warning
             )
         }
     }
@@ -551,14 +556,29 @@ private final class RadarClientState: @unchecked Sendable {
             await bleClient.discoverServices(id, [radarServiceUUID, BatteryService.serviceUUID])
 
         case .servicesDiscovered(let id, let uuids):
-            guard lock.withLock({ targetPeripheralID }) == id,
-                  uuids.contains(radarServiceUUID) else { return }
-            await bleClient.discoverCharacteristics(id, radarServiceUUID, [radarAlertUUID])
+            guard lock.withLock({ targetPeripheralID }) == id else { return }
+            // Both prior guard branches (wrong peripheral, service not reported) used
+            // to return silently — if the radar service UUID (#18, unvalidated) is
+            // wrong, this was the only place that would ever have shown it.
+            logger.notice("services discovered on \(id, privacy: .public): \(uuids.map(\.uuidString).joined(separator: ", "), privacy: .public)")
+            guard uuids.contains(radarServiceUUID) else {
+                logger.notice("radar service \(radarServiceUUID.uuidString, privacy: .public) not in that list — characteristic discovery never starts")
+                return
+            }
+            // Discover everything under the service rather than filtering to the
+            // assumed alert UUID (#18, unvalidated) — CoreBluetooth silently returns
+            // an empty list for a filtered discovery that matches nothing, which is
+            // indistinguishable from "no characteristics at all" without this.
+            await bleClient.discoverCharacteristics(id, radarServiceUUID, nil)
 
         case .characteristicsDiscovered(let id, let serviceUUID, let uuids):
             guard lock.withLock({ targetPeripheralID }) == id,
-                  serviceUUID == radarServiceUUID,
-                  uuids.contains(radarAlertUUID) else { return }
+                  serviceUUID == radarServiceUUID else { return }
+            logger.notice("characteristics discovered on \(id, privacy: .public) for radar service: \(uuids.map(\.uuidString).joined(separator: ", "), privacy: .public)")
+            guard uuids.contains(radarAlertUUID) else {
+                logger.notice("radar alert characteristic \(radarAlertUUID.uuidString, privacy: .public) not in that list — notify never enabled")
+                return
+            }
             await bleClient.setNotifyValue(true, id, radarServiceUUID, radarAlertUUID)
             setConnectionState(.active)
 
