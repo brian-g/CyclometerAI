@@ -11,7 +11,7 @@ extension View {
                         Label("Start ride", systemImage: "play.fill")
                     }
                     .labelStyle(.titleAndIcon)
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered)
                     .foregroundStyle(Color.cyPrimary)
                     .accessibilityLabel("Start ride")
                 }
