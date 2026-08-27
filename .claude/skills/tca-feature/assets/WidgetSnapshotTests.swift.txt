@@ -1,0 +1,91 @@
+// Template — adapted from CyclometerTests/Features/CadenceWidgetSnapshotTests.swift.
+// XCTest + swift-snapshot-testing, not Swift Testing (snapshot suites use XCTest
+// throughout this repo).
+//
+// Fill in <Name>/<Area> placeholders and the real grid slot dimensions —
+// look these up from a sibling widget at the same WidgetSize rather than
+// guessing. Add this suite's name to the CI skip-list in
+// .github/workflows/tests.yml (these are recorded against a local simulator).
+
+import XCTest
+import SnapshotTesting
+import SwiftUI
+@testable import Cyclometer
+
+final class <Name>WidgetSnapshotTests: XCTestCase {
+
+    // Grid slots, in points — confirm against a sibling widget's snapshot suite
+    // at the same WidgetSize before trusting these numbers.
+    private let canvas2x1: SwiftUISnapshotLayout = .fixed(width: 393, height: 96)
+    private let canvas1x1: SwiftUISnapshotLayout = .fixed(width: 196, height: 96)
+
+    private func widget(
+        value: Int? = 92,
+        size: WidgetSize,
+        scheme: ColorScheme = .light
+    ) -> some View {
+        let (w, h): (CGFloat, CGFloat) = size == .twoByOne ? (393, 96) : (196, 96)
+        return <Name>Widget(
+            value: value,
+            size: size
+        )
+        .frame(width: w, height: h)
+        .preferredColorScheme(scheme)
+        // IMPORTANT: never rely on ambient .accentColor/.primary here — every
+        // color the widget draws must come from an explicit cy* token, or this
+        // reference silently encodes whatever the host bundle resolved at
+        // record time instead of the token you meant to pin.
+    }
+
+    // MARK: - 2×1
+
+    func testTwoByOneActive() {
+        assertSnapshot(
+            of: widget(size: .twoByOne),
+            as: .image(layout: canvas2x1)
+        )
+    }
+
+    func testTwoByOneNoSignal() {
+        assertSnapshot(
+            of: widget(value: nil, size: .twoByOne),
+            as: .image(layout: canvas2x1)
+        )
+    }
+
+    func testTwoByOneActiveDark() {
+        assertSnapshot(
+            of: widget(size: .twoByOne, scheme: .dark),
+            as: .image(layout: canvas2x1, traits: .init(userInterfaceStyle: .dark))
+        )
+    }
+
+    // MARK: - 1×1
+
+    func testOneByOneActive() {
+        assertSnapshot(
+            of: widget(size: .oneByOne),
+            as: .image(layout: canvas1x1)
+        )
+    }
+
+    func testOneByOneNoSignal() {
+        assertSnapshot(
+            of: widget(value: nil, size: .oneByOne),
+            as: .image(layout: canvas1x1)
+        )
+    }
+
+    func testOneByOneNoSignalDark() {
+        assertSnapshot(
+            of: widget(value: nil, size: .oneByOne, scheme: .dark),
+            as: .image(layout: canvas1x1, traits: .init(userInterfaceStyle: .dark))
+        )
+    }
+}
+
+// After recording (first run creates the reference PNGs, second run asserts
+// against them): open the recorded images and confirm none are blank/solid
+// color before committing. A snapshot that renders nothing still "passes"
+// forever — see tasks/lessons.md, "A blank snapshot reference is a test that
+// can never fail" (2026-08-19).

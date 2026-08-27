@@ -1,0 +1,104 @@
+// Template — adapted from Features/ActiveRide/CadenceFeature.swift, the most
+// complete current example of this codebase's reducer shape.
+//
+// Fill in every <Name>/<name>/<Area> placeholder, then delete anything the
+// feature doesn't need (e.g. the reconnect-grace-window machinery only
+// applies to BLE-backed sensor features — drop CancelID/.cadenceReconnectTimedOut
+// analogues entirely if the feature has no reconnecting hardware source).
+
+import ComposableArchitecture
+import Foundation
+
+@Reducer
+struct <Name>Feature {
+    // Tunables live here as `static let`, not as scattered magic numbers.
+    // static let historyWindow: TimeInterval = 3600
+    // static let reconnectGraceDelay: Duration = .seconds(10)
+
+    @Dependency(\.date.now) var now
+    @Dependency(\.<name>Client) var <name>Client   // swap for this feature's real @DependencyClient
+    @Dependency(\.continuousClock) var clock
+
+    @ObservableState
+    struct State: Equatable {
+        var currentValue: Int? = nil
+        var connectionState: BLECSCClient.ConnectionState = .disconnected   // swap for the real client's connection-state type
+        var pairedPeripheralId: UUID? = nil
+    }
+
+    enum Action: Equatable {
+        case startListening
+        case valueReceived(Double)
+        case bleConnectionChanged(BLECSCClient.ConnectionState)
+        case reconnectTimedOut
+    }
+
+    private enum CancelID { case reconnectTimer }
+
+    var body: some ReducerOf<Self> {
+        Reduce { state, action in
+            switch action {
+            case .startListening:
+                return .merge(
+                    .run { [<name>Client] send in
+                        await <name>Client.startScanning()
+                        for await value in <name>Client.<name>() {
+                            await send(.valueReceived(value))
+                        }
+                    },
+                    .run { [<name>Client] send in
+                        for await connectionState in <name>Client.connectionState(.<name>) {
+                            await send(.bleConnectionChanged(connectionState))
+                        }
+                    }
+                )
+
+            case .valueReceived(let value):
+                guard value >= 0 else {
+                    state.currentValue = nil
+                    return .none
+                }
+                state.currentValue = Int(value.rounded())
+                // Real data flowing back cancels any pending clear-to-"--" timer.
+                return .cancel(id: CancelID.reconnectTimer)
+
+            case .bleConnectionChanged(let connectionState):
+                state.connectionState = connectionState
+                switch connectionState {
+                case .active:
+                    return .cancel(id: CancelID.reconnectTimer)
+                case .reconnecting:
+                    // Only worth protecting if a reading is actually on screen.
+                    guard state.currentValue != nil else { return .none }
+                    return .run { send in
+                        try await clock.sleep(for: Self.reconnectGraceDelay)
+                        await send(.reconnectTimedOut)
+                    }
+                    .cancellable(id: CancelID.reconnectTimer, cancelInFlight: true)
+                case .disconnected:
+                    state.currentValue = nil
+                    return .cancel(id: CancelID.reconnectTimer)
+                case .scanning, .connecting, .connected:
+                    return .none
+                }
+
+            case .reconnectTimedOut:
+                state.currentValue = nil
+                return .none
+            }
+        }
+    }
+}
+
+// --- Composing into a parent feature (e.g. ActiveRideFeature) ---
+//
+// Parent State:   var <name> = <Name>Feature.State()
+// Parent Action:  case <name>(<Name>Feature.Action)
+//
+// Parent body, BEFORE the Reduce:
+//   Scope(state: \.<name>, action: \.<name>) {
+//       <Name>Feature()
+//   }
+//
+// Parent's .task (or equivalent startup) effect, alongside its siblings:
+//   .send(.<name>(.startListening)),
