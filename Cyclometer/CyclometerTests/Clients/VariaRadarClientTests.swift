@@ -4,7 +4,7 @@ import CoreBluetooth
 @testable import Cyclometer
 
 private let radarServiceUUID = CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")
-private let radarAlertUUID   = CBUUID(string: "6A4E3202-667B-11E3-949A-0800200C9A66")
+private let radarAlertUUID   = CBUUID(string: "6A4E3203-667B-11E3-949A-0800200C9A66")
 private let batteryServiceUUID = CBUUID(string: "180F")
 private let batteryLevelUUID   = CBUUID(string: "2A19")
 
@@ -13,79 +13,70 @@ private let batteryLevelUUID   = CBUUID(string: "2A19")
 @Suite("VariaRadarClient — alert payload parsing")
 struct VariaRadarParseTests {
 
-    @Test("Zero vehicles, clear level parses to empty array")
-    func zeroVehiclesClear() {
-        let targets = VariaRadarClient.parseAlert(from: Data([0x00, 0x00]))
+    @Test("Header-only payload (no threats) parses to empty array")
+    func headerOnlyIsEmpty() {
+        let targets = VariaRadarClient.parseAlert(from: Data([0x00]))
         #expect(targets == [])
     }
 
-    @Test("Single vehicle at danger level")
+    @Test("Single vehicle at or above the danger closing speed maps to danger")
     func singleVehicleDanger() throws {
-        let targets = try #require(VariaRadarClient.parseAlert(from: Data([0x03, 0x01, 25, 8])))
+        // header, threat id (ignored), range 25m, closing speed 36 km/h (== 10 m/s)
+        let targets = try #require(VariaRadarClient.parseAlert(from: Data([0x82, 0xFF, 25, 36])))
         #expect(targets.count == 1)
         #expect(targets[0].rangeMetres == 25)
-        #expect(targets[0].relativeVelocityMPS == 8)
+        #expect(targets[0].relativeVelocityMPS == 10)
         #expect(targets[0].threatLevel == .danger)
         #expect(targets[0].id == VariaRadarClient.vehicleSlotIDs[0])
     }
 
-    @Test("Advisory level (1) maps to warning")
-    func advisoryMapsToWarning() throws {
-        let targets = try #require(VariaRadarClient.parseAlert(from: Data([0x01, 0x01, 50, 3])))
+    @Test("Closing speed below the danger threshold maps to warning, not clear")
+    func belowDangerThresholdMapsToWarning() throws {
+        // header, threat id (ignored), range 50m, closing speed 18 km/h (== 5 m/s)
+        let targets = try #require(VariaRadarClient.parseAlert(from: Data([0x02, 0x01, 50, 18])))
         #expect(targets[0].threatLevel == .warning)
+        #expect(targets[0].relativeVelocityMPS == 5)
     }
 
-    @Test("Caution level (2) maps to warning")
-    func cautionMapsToWarning() throws {
-        let targets = try #require(VariaRadarClient.parseAlert(from: Data([0x02, 0x01, 50, 3])))
-        #expect(targets[0].threatLevel == .warning)
+    @Test("Closing speed exactly at the danger threshold is inclusive")
+    func dangerThresholdIsInclusive() throws {
+        let targets = try #require(VariaRadarClient.parseAlert(from: Data([0x02, 0x01, 50, 30])))
+        #expect(targets[0].threatLevel == .danger)
     }
 
     @Test("Eight vehicles parse with stable slot IDs")
     func eightVehicles() throws {
-        var bytes: [UInt8] = [0x02, 0x08]
+        var bytes: [UInt8] = [0x00]
         for i in 0..<8 {
+            bytes.append(UInt8(i))            // threat id (ignored)
             bytes.append(UInt8(10 + i * 10))  // range
-            bytes.append(UInt8(2 + i))        // speed
+            bytes.append(UInt8(20 + i))       // closing speed, km/h
         }
         let targets = try #require(VariaRadarClient.parseAlert(from: Data(bytes)))
         #expect(targets.count == 8)
         for i in 0..<8 {
             #expect(targets[i].id == VariaRadarClient.vehicleSlotIDs[i])
             #expect(targets[i].rangeMetres == Double(10 + i * 10))
-            #expect(targets[i].relativeVelocityMPS == Double(2 + i))
+            #expect(targets[i].relativeVelocityMPS == Double(20 + i) / 3.6)
         }
     }
 
-    @Test("Truncated vehicle record returns nil")
-    func truncatedRecord() {
-        // Count says 2 vehicles but only one record present.
-        #expect(VariaRadarClient.parseAlert(from: Data([0x02, 0x02, 30, 5])) == nil)
+    @Test("A payload not shaped 1+3n returns nil rather than truncating")
+    func misalignedLengthReturnsNil() {
+        // A 3-byte record needs 3 more bytes past the header; only 1 is present.
+        #expect(VariaRadarClient.parseAlert(from: Data([0x00, 0x01, 30])) == nil)
     }
 
-    @Test("Vehicle count above 8 returns nil")
+    @Test("More than 8 threats returns nil")
     func countTooHigh() {
-        var bytes: [UInt8] = [0x02, 0x09]
-        bytes.append(contentsOf: Array(repeating: 0, count: 18))
+        var bytes: [UInt8] = [0x00]
+        bytes.append(contentsOf: Array(repeating: 0, count: 27))  // 9 threats worth
         #expect(VariaRadarClient.parseAlert(from: Data(bytes)) == nil)
     }
 
-    @Test("Alert level above 3 returns nil")
-    func levelTooHigh() {
-        #expect(VariaRadarClient.parseAlert(from: Data([0x04, 0x00])) == nil)
-    }
-
-    @Test("Empty and single-byte payloads return nil")
+    @Test("Empty payload returns nil")
     func tooShort() {
         #expect(VariaRadarClient.parseAlert(from: Data()) == nil)
-        #expect(VariaRadarClient.parseAlert(from: Data([0x02])) == nil)
-    }
-
-    @Test("Trailing extra bytes are ignored")
-    func trailingBytesIgnored() throws {
-        let targets = try #require(VariaRadarClient.parseAlert(from: Data([0x02, 0x01, 50, 3, 99, 99])))
-        #expect(targets.count == 1)
-        #expect(targets[0].rangeMetres == 50)
     }
 }
 
@@ -416,11 +407,11 @@ struct VariaRadarIntegrationTests {
 
         // Malformed first (dropped — no emission), then a valid 2-vehicle payload.
         harness.events.yield(.characteristicValueUpdated(
-            peripheralID: peripheralID, characteristicUUID: radarAlertUUID, value: Data([0x04, 0x00])
+            peripheralID: peripheralID, characteristicUUID: radarAlertUUID, value: Data([0x00, 0x01])
         ))
         harness.events.yield(.characteristicValueUpdated(
             peripheralID: peripheralID, characteristicUUID: radarAlertUUID,
-            value: Data([0x03, 0x02, 20, 10, 80, 4])
+            value: Data([0x00, 0xFF, 20, 36, 0xFE, 80, 10])
         ))
 
         let received = await targets.next()
@@ -428,6 +419,7 @@ struct VariaRadarIntegrationTests {
         #expect(received?[0].rangeMetres == 20)
         #expect(received?[0].threatLevel == .danger)
         #expect(received?[1].rangeMetres == 80)
+        #expect(received?[1].threatLevel == .warning)
     }
 
     @Test("Unexpected disconnect clears targets, enters reconnecting, retries on backoff ladder")
