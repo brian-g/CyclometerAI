@@ -456,14 +456,26 @@ private final class HRClientState: @unchecked Sendable {
             await bleClient.discoverServices(id, [hrServiceUUID, BatteryService.serviceUUID])
 
         case .servicesDiscovered(let id, let uuids):
-            guard lock.withLock({ targetPeripheralID }) == id,
-                  uuids.contains(hrServiceUUID) else { return }
+            guard lock.withLock({ targetPeripheralID }) == id else { return }
+            // A wrong assumed service/characteristic UUID would otherwise fail
+            // silently here — see VariaRadarClient's identical fix (a wrong assumed
+            // radar UUID left notify never enabled for an entire ride with nothing
+            // in the log to show why) and the breadcrumb it left to catch this.
+            logger.notice("services discovered on \(id, privacy: .public): \(uuids.map(\.uuidString).joined(separator: ", "), privacy: .public)")
+            guard uuids.contains(hrServiceUUID) else {
+                logger.notice("HR service \(hrServiceUUID.uuidString, privacy: .public) not in that list — characteristic discovery never starts")
+                return
+            }
             await bleClient.discoverCharacteristics(id, hrServiceUUID, [hrMeasurementUUID])
 
         case .characteristicsDiscovered(let id, let serviceUUID, let uuids):
             guard lock.withLock({ targetPeripheralID }) == id,
-                  serviceUUID == hrServiceUUID,
-                  uuids.contains(hrMeasurementUUID) else { return }
+                  serviceUUID == hrServiceUUID else { return }
+            logger.notice("characteristics discovered on \(id, privacy: .public) for HR service: \(uuids.map(\.uuidString).joined(separator: ", "), privacy: .public)")
+            guard uuids.contains(hrMeasurementUUID) else {
+                logger.notice("HR measurement characteristic \(hrMeasurementUUID.uuidString, privacy: .public) not in that list — notify never enabled")
+                return
+            }
             await bleClient.setNotifyValue(true, id, hrServiceUUID, hrMeasurementUUID)
             broadcastPairing(true)
 

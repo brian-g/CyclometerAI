@@ -420,8 +420,6 @@ struct VariaRadarIntegrationTests {
         #expect(received?[0].threatLevel == .danger)
         #expect(received?[1].rangeMetres == 80)
         #expect(received?[1].threatLevel == .warning)
-        #expect(received?[0].threatLevel == .danger)
-        #expect(received?[1].rangeMetres == 80)
     }
 
     @Test("Unexpected disconnect clears targets, enters reconnecting, retries on backoff ladder")

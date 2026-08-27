@@ -94,8 +94,19 @@ struct VariaRadarClient: Sendable {
     /// No byte carries an alert level. `RadarTarget.ThreatLevel` is derived from
     /// closing speed instead, reusing `AlertLevel.dangerClosingSpeedKPH` so the
     /// per-vehicle dot and the ride-level escalation agree on what "danger" means.
-    /// `.allClear` is never produced here — a vehicle only appears in this payload
-    /// while it's being tracked as a threat; "no threats" is an empty array.
+    /// `.allClear` is intentionally never produced here — a vehicle only appears in
+    /// this payload while it's being tracked as a threat, so "no threats" is an
+    /// empty array rather than a `.allClear`-tagged one. `RadarTarget.ThreatLevel`
+    /// keeps the case anyway: it's still constructible directly (previews, tests)
+    /// and PRD §8.2/UX.md describe it as a real per-vehicle dot state, so removing
+    /// it would be a model change beyond what this parser needs to make.
+    ///
+    /// The exact `1 + 3n` length is required — a payload with a stray trailing
+    /// byte is dropped whole rather than parsed up to the misalignment. Only one
+    /// real hardware capture (a single-vehicle frame) has validated this layout;
+    /// silently tolerating an unexplained extra byte would risk exactly the kind
+    /// of unverified guess this file's header comment already disavows. A rejected
+    /// frame is loud (logged with its raw hex below) rather than quietly wrong.
     ///
     /// Returns nil for malformed payloads (drop the notification, keep last good state).
     static func parseAlert(from data: Data) -> [RadarTarget]? {
@@ -108,7 +119,7 @@ struct VariaRadarClient: Sendable {
             let closingSpeedKPH = Double(data[base + 2])
             return RadarTarget(
                 id: vehicleSlotIDs[i],
-                relativeVelocityMPS: closingSpeedKPH / 3.6,
+                relativeVelocityMPS: closingSpeedKPH / AlertLevel.kphPerMPS,
                 rangeMetres: Double(data[base + 1]),
                 threatLevel: closingSpeedKPH >= AlertLevel.dangerClosingSpeedKPH ? .danger : .warning
             )

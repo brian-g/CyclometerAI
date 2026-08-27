@@ -260,7 +260,9 @@ struct ActiveRideFeatureAlertEscalationTests {
         await store.send(.radarTargetsUpdated([])) {
             $0.radarTargets = []
             $0.activeAlertLevel = .clear
-            $0.lastAlertDispatchAt = [.caution: testDate, .danger: dangerDate, .clear: clearDate]
+            // .danger's stamp is cleared, not carried forward — its loop was just
+            // forcibly cancelled by this same transition (see dispatchAlert).
+            $0.lastAlertDispatchAt = [.caution: testDate, .clear: clearDate]
         }
         #expect(counts.value.audioAllClear == 1)
 
@@ -298,7 +300,8 @@ struct ActiveRideFeatureAlertEscalationTests {
         await store.send(.radarTargetsUpdated(backToCaution)) {
             $0.radarTargets = backToCaution
             $0.activeAlertLevel = .caution
-            $0.lastAlertDispatchAt = [.caution: downgradeDate, .danger: dangerDate]
+            // .danger's stamp is cleared, not carried forward — see dispatchAlert.
+            $0.lastAlertDispatchAt = [.caution: downgradeDate]
         }
         #expect(counts.value.hapticWarning == 2)  // still fires — haptic is level-only
         #expect(counts.value.audioWarning == 1)   // unchanged — no re-alert on downgrade
@@ -306,6 +309,65 @@ struct ActiveRideFeatureAlertEscalationTests {
         // Confirm the repeating danger loop actually stopped.
         await clock.advance(by: .seconds(5))
         #expect(counts.value.audioDanger == 1)
+    }
+
+    @Test("A flap back into danger within the guard window resumes the alert immediately, not muted")
+    func dangerFlapResumesImmediately() async {
+        let clock = TestClock()
+        let counts = LockIsolated(Counts())
+        let store = makeStore(clock: clock, counts: counts)
+
+        let dangerTargets = [Self.vehicle(mps: 30 / 3.6)]
+        await store.send(.radarTargetsUpdated(dangerTargets)) {
+            $0.radarTargets = dangerTargets
+            $0.activeAlertLevel = .danger
+            $0.lastAlertDispatchAt = [.danger: testDate]
+        }
+        #expect(counts.value.hapticDanger == 1)
+        #expect(counts.value.audioDanger == 1)
+
+        // Dips to caution 0.5s later — the loop is cancelled and its guard stamp
+        // cleared (see dispatchAlert's cancel branch). No audio warning here: a
+        // danger→caution downgrade never re-alerts (Audio.md, matching
+        // dangerToCautionNoReAlert above) — only the level-only haptic fires.
+        let cautionDate = testDate.addingTimeInterval(0.5)
+        store.dependencies.date.now = cautionDate
+        let cautionTargets = [Self.vehicle(mps: 20 / 3.6)]
+        await store.send(.radarTargetsUpdated(cautionTargets)) {
+            $0.radarTargets = cautionTargets
+            $0.activeAlertLevel = .caution
+            $0.lastAlertDispatchAt = [.caution: cautionDate]  // .danger entry cleared
+        }
+        #expect(counts.value.hapticWarning == 1)
+        #expect(counts.value.audioWarning == 0)
+
+        // Back to danger only 0.3s later — well inside the 3s guard window. The
+        // alert must still resume immediately: it's the same continuing threat,
+        // not a fresh re-trigger of a stable level (PRD §8.3: "persists until
+        // threat recedes"). Before this fix, the stale `lastAlertDispatchAt[.danger]`
+        // from testDate would have blocked this, leaving the rider unalerted
+        // mid-threat.
+        let backDate = cautionDate.addingTimeInterval(0.3)
+        store.dependencies.date.now = backDate
+        await store.send(.radarTargetsUpdated(dangerTargets)) {
+            $0.radarTargets = dangerTargets
+            $0.activeAlertLevel = .danger
+            $0.lastAlertDispatchAt = [.caution: cautionDate, .danger: backDate]
+        }
+        #expect(counts.value.hapticDanger == 2)
+        #expect(counts.value.audioDanger == 2)  // fired again — not blocked by a stale guard
+
+        await clock.advance(by: .milliseconds(800))
+        #expect(counts.value.audioDanger == 3)  // the resumed loop is actually running
+
+        // Exit L3 so the repeating effect doesn't leak past the end of the test.
+        let clearDate = backDate.addingTimeInterval(ActiveRideFeature.alertReTriggerInterval + 1)
+        store.dependencies.date.now = clearDate
+        await store.send(.radarTargetsUpdated([])) {
+            $0.radarTargets = []
+            $0.activeAlertLevel = .clear
+            $0.lastAlertDispatchAt = [.caution: cautionDate, .clear: clearDate]
+        }
     }
 
     @Test("L2→L0: All Clear tone fires once")
@@ -497,6 +559,7 @@ struct ActiveRideFeatureAlertEscalationTests {
             $0.isRadarPaired = false
             $0.radarTargets = []
             $0.activeAlertLevel = .clear
+            $0.lastAlertDispatchAt = [:]
         }
         #expect(counts.value.hapticAllClear == 0)
         #expect(counts.value.audioAllClear == 0)
@@ -504,6 +567,59 @@ struct ActiveRideFeatureAlertEscalationTests {
         // Confirm the repeating loop actually stopped.
         await clock.advance(by: .seconds(5))
         #expect(counts.value.audioDanger == 1)
+    }
+
+    @Test("A reconnect reporting a fresh danger is not muted by a stale pre-disconnect guard stamp")
+    func reconnectAfterDisconnectIsNotMutedByStaleGuard() async {
+        let clock = TestClock()
+        let counts = LockIsolated(Counts())
+        let store = makeStore(clock: clock, counts: counts)
+
+        await store.send(.radarConnectionChanged(.active)) {
+            $0.isRadarPaired = true
+        }
+
+        let dangerTargets = [Self.vehicle(mps: 30 / 3.6)]
+        await store.send(.radarTargetsUpdated(dangerTargets)) {
+            $0.radarTargets = dangerTargets
+            $0.activeAlertLevel = .danger
+            $0.lastAlertDispatchAt = [.danger: testDate]
+        }
+        #expect(counts.value.audioDanger == 1)
+
+        // Hard disconnect 1s later — data loss, not a resolved threat.
+        let disconnectDate = testDate.addingTimeInterval(1)
+        store.dependencies.date.now = disconnectDate
+        await store.send(.radarConnectionChanged(.disconnected)) {
+            $0.isRadarPaired = false
+            $0.radarTargets = []
+            $0.activeAlertLevel = .clear
+            $0.lastAlertDispatchAt = [:]
+        }
+
+        // Reconnects 0.5s later, immediately reporting the same vehicle still
+        // closing dangerously. Before this fix, the stale `lastAlertDispatchAt[.danger]`
+        // from testDate (only 1.5s earlier) would have silently blocked this — a
+        // threat the rider was never alerted to post-reconnect.
+        let reconnectDate = disconnectDate.addingTimeInterval(0.5)
+        store.dependencies.date.now = reconnectDate
+        await store.send(.radarConnectionChanged(.active)) {
+            $0.isRadarPaired = true
+        }
+        await store.send(.radarTargetsUpdated(dangerTargets)) {
+            $0.radarTargets = dangerTargets
+            $0.activeAlertLevel = .danger
+            $0.lastAlertDispatchAt = [.danger: reconnectDate]
+        }
+        #expect(counts.value.audioDanger == 2)  // fired again — not blocked
+
+        // Exit L3 so the repeating effect doesn't leak past the end of the test.
+        await store.send(.radarConnectionChanged(.disconnected)) {
+            $0.isRadarPaired = false
+            $0.radarTargets = []
+            $0.activeAlertLevel = .clear
+            $0.lastAlertDispatchAt = [:]
+        }
     }
 }
 

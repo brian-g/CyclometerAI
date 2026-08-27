@@ -19,15 +19,30 @@ enum AlertLevel: Int, CaseIterable, Comparable, Hashable, Sendable {
     /// threshold (PRD §8.2/§8.3).
     static let dangerClosingSpeedKPH: Double = 30
 
+    /// Single source of truth for the km/h ↔ m/s factor, shared with
+    /// `VariaRadarClient.parseAlert`'s reverse conversion of the wire's whole-km/h
+    /// speed byte. `Measurement<UnitSpeed>` was tried and rejected here: measured
+    /// empirically, its kilometersPerHour coefficient is a rounded decimal, not
+    /// exactly 1/3.6, and round-trips a whole-km/h value off by ~1e-5 — two orders
+    /// of magnitude worse than plain division/multiplication by this constant.
+    static let kphPerMPS: Double = 3.6
+
+    /// Absorbs the plain-arithmetic round-trip error (~1e-15, per the measurement
+    /// above) between `parseAlert`'s km/h→m/s conversion and this comparison's
+    /// m/s→km/h one, so a genuine boundary value (a wire speed of exactly 15 or 30
+    /// km/h) never misclassifies depending on which direction the round trip's
+    /// float rounding happens to fall.
+    private static let epsilon: Double = 1e-9
+
     /// Only approaching vehicles (positive closing speed) count toward any branch —
     /// a receding/stationary vehicle is "Safe" per PRD §8.2's dot table and
     /// shouldn't itself elevate the ride-level alert.
     static func level(for targets: [RadarTarget]) -> AlertLevel {
         let approaching = targets.filter { $0.relativeVelocityMPS > 0 }
         guard !approaching.isEmpty else { return .clear }
-        let maxClosingSpeedKPH = approaching.map { $0.relativeVelocityMPS * 3.6 }.max() ?? 0
-        if maxClosingSpeedKPH >= dangerClosingSpeedKPH { return .danger }
-        if maxClosingSpeedKPH >= moderateClosingSpeedKPH || approaching.count >= 3 { return .caution }
+        let maxClosingSpeedKPH = approaching.map { $0.relativeVelocityMPS * kphPerMPS }.max() ?? 0
+        if maxClosingSpeedKPH >= dangerClosingSpeedKPH - epsilon { return .danger }
+        if maxClosingSpeedKPH >= moderateClosingSpeedKPH - epsilon || approaching.count >= 3 { return .caution }
         return .advisory
     }
 }

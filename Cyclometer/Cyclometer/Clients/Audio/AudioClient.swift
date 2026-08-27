@@ -228,13 +228,22 @@ private final class AudioEngineState: @unchecked Sendable {
 
         player.volume = kind.volume
         // Tones are interruptible (Audio.md acceptance criteria) — a new tone always
-        // takes priority over whatever is currently scheduled/sounding.
-        player.stop()
+        // takes priority over whatever is currently scheduled/sounding. Two overlapping
+        // `play()` calls (e.g. a fast caution→danger escalation) can each reach this
+        // point concurrently, so the stop/scheduleBuffer/play triple itself runs under
+        // `lock` — otherwise two tasks' calls can interleave on the shared node with no
+        // ordering guarantee. Only the completion await sits outside the lock: an
+        // interrupted call's `stop()` fires the *previous* call's completion callback,
+        // so that call's wait resolves promptly rather than blocking the tone that just
+        // preempted it.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in
-                continuation.resume()
+            lock.withLock {
+                player.stop()
+                player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in
+                    continuation.resume()
+                }
+                player.play()
             }
-            player.play()
         }
     }
 

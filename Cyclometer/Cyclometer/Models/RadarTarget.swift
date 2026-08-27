@@ -12,6 +12,10 @@ struct RadarTarget: Equatable, Identifiable, Sendable {
     var threatLevel: ThreatLevel
 
     enum ThreatLevel: Equatable, Sendable {
+        // Not currently reachable from live BLE data — VariaRadarClient.parseAlert
+        // only ever tags a parsed target .warning or .danger, since the real wire
+        // payload only lists vehicles being actively tracked as a threat. Kept for
+        // previews/tests and because PRD §8.2/UX.md still describe it as a dot state.
         case allClear   // L0 — no active threats
         case warning    // L2 — vehicle approaching, time to act
         case danger     // L3 — immediate threat, full alert

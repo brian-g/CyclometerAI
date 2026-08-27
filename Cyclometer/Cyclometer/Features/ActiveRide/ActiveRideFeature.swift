@@ -295,7 +295,12 @@ struct ActiveRideFeature {
                     // A hard unpair is data loss, not a resolved threat — reset
                     // silently (no All Clear tone) and stop any in-flight danger
                     // loop rather than leave it repeating with no data feeding it.
+                    // Every re-trigger guard stamp is cleared too: without this, a
+                    // reconnect that reports a fresh, genuine threat could be
+                    // silently muted by a timestamp left over from before the data
+                    // feed was lost — the alert context doesn't survive the outage.
                     state.activeAlertLevel = .clear
+                    state.lastAlertDispatchAt = [:]
                     return .merge(
                         .cancel(id: CancelID.radarLossTimer),
                         .cancel(id: CancelID.dangerAudioRepeat)
@@ -309,7 +314,13 @@ struct ActiveRideFeature {
                 // Routed through the same guarded dispatch path as vehicle-based
                 // escalation (#135) rather than firing unconditionally — no `!=`
                 // guard here, since disconnect is a distinct real-world trigger
-                // that must always attempt to fire, same as before.
+                // that must always attempt to fire, same as before. This means a
+                // rapidly flapping BLE link can have its L1 haptic suppressed by
+                // the 3s guard even though PRD §8.2 reads as unconditional
+                // ("Disconnection... triggers L1 advisory haptic") — a deliberate
+                // product choice (favor one haptic over a spam of them for a
+                // flapping connection) over a literal reading of that line; PRD
+                // §8.3's general Alert Rules apply the same guard everywhere else.
                 let previous = state.activeAlertLevel
                 state.activeAlertLevel = .advisory
                 return dispatchAlert(&state, level: .advisory, previous: previous)
@@ -379,6 +390,14 @@ struct ActiveRideFeature {
             // completion continuation isn't cancellation-aware — which is bounded and
             // an acceptable failure mode (finishes an alert rather than truncating one).
             effects.append(.cancel(id: CancelID.dangerAudioRepeat))
+            // The loop was forcibly cut off here, not left to finish naturally — clear
+            // its guard stamp too. Otherwise a flap back into .danger within the 3s
+            // window (sensor noise around the threshold, or a brief reconnect) would
+            // silently mute an active, continuing threat for up to 3s, since the guard
+            // below can't otherwise distinguish "still the same ongoing alert, just
+            // interrupted" from "a separate re-trigger of a stable level" — PRD §8.3:
+            // "L3 alert persists until threat recedes."
+            state.lastAlertDispatchAt[.danger] = nil
         }
 
         // L1→L0 is the sole no-op transition (L0 has no haptic; Audio.md explicitly
@@ -386,56 +405,56 @@ struct ActiveRideFeature {
         // the haptic, so this is the only case that must bypass the guard entirely —
         // otherwise stamping `lastAlertDispatchAt[.clear]` here would wrongly block a
         // genuine L2→L0/L3→L0 All Clear tone that follows soon after.
-        guard !(level == .clear && previous == .advisory) else {
-            return effects.isEmpty ? .none : .merge(effects)
-        }
+        let isNoOpTransition = level == .clear && previous == .advisory
 
         let now = self.now  // read once — an .incrementing test clock must see one value
-        let last = state.lastAlertDispatchAt[level]
-        guard last.map({ now.timeIntervalSince($0) >= Self.alertReTriggerInterval }) ?? true else {
-            return effects.isEmpty ? .none : .merge(effects)
-        }
-        state.lastAlertDispatchAt[level] = now
+        let isReTriggerGuarded = state.lastAlertDispatchAt[level]
+            .map { now.timeIntervalSince($0) < Self.alertReTriggerInterval } ?? false
 
-        effects.append(.run(priority: .userInteractive) { [hapticsClient] _ in
-            switch level {
-            case .clear: break
-            case .advisory: await hapticsClient.playAdvisory()
-            case .caution: await hapticsClient.playWarning()
-            // L3→L2 still fires this double-tap — Audio.md's "downgrade is not
-            // re-alerted" rule is scoped to the *tone*, not the haptic.
-            case .danger: await hapticsClient.playDanger()
-            }
-        })
+        if !isNoOpTransition && !isReTriggerGuarded {
+            state.lastAlertDispatchAt[level] = now
 
-        switch (level, previous) {
-        case (.caution, .danger):
-            break  // downgrade — Audio.md: "Warning tone does NOT play"
-        case (.caution, _):
-            effects.append(.run(priority: .userInteractive) { [audioClient] _ in
-                await audioClient.playWarning()
-            })
-        case (.clear, .caution), (.clear, .danger):
-            effects.append(.run(priority: .userInteractive) { [audioClient] _ in
-                await audioClient.playAllClear()
-            })
-        case (.danger, _):
-            // The loop's first iteration IS the "begins immediately" tone — a separate
-            // one-shot playDanger() here would race it (both call AudioEngineState.play,
-            // which stop()s the node on entry, glitching whichever call loses the race).
-            effects.append(
-                .run(priority: .userInteractive) { [audioClient, clock] _ in
-                    while true {
-                        await audioClient.playDanger()
-                        try await clock.sleep(for: .milliseconds(800))
-                    }
+            effects.append(.run(priority: .userInteractive) { [hapticsClient] _ in
+                switch level {
+                case .clear: break
+                case .advisory: await hapticsClient.playAdvisory()
+                case .caution: await hapticsClient.playWarning()
+                // L3→L2 still fires this double-tap — Audio.md's "downgrade is not
+                // re-alerted" rule is scoped to the *tone*, not the haptic.
+                case .danger: await hapticsClient.playDanger()
                 }
-                .cancellable(id: CancelID.dangerAudioRepeat, cancelInFlight: true)
-            )
-        default:
-            break  // .advisory never has a tone (Audio.md), regardless of direction
+            })
+
+            switch (level, previous) {
+            case (.caution, .danger):
+                break  // downgrade — Audio.md: "Warning tone does NOT play"
+            case (.caution, _):
+                effects.append(.run(priority: .userInteractive) { [audioClient] _ in
+                    await audioClient.playWarning()
+                })
+            case (.clear, .caution), (.clear, .danger):
+                effects.append(.run(priority: .userInteractive) { [audioClient] _ in
+                    await audioClient.playAllClear()
+                })
+            case (.danger, _):
+                // The loop's first iteration IS the "begins immediately" tone — a
+                // separate one-shot playDanger() here would race it (both call
+                // AudioEngineState.play, which stop()s the node on entry, glitching
+                // whichever call loses the race).
+                effects.append(
+                    .run(priority: .userInteractive) { [audioClient, clock] _ in
+                        while true {
+                            await audioClient.playDanger()
+                            try await clock.sleep(for: .milliseconds(800))
+                        }
+                    }
+                    .cancellable(id: CancelID.dangerAudioRepeat, cancelInFlight: true)
+                )
+            default:
+                break  // .advisory never has a tone (Audio.md), regardless of direction
+            }
         }
 
-        return .merge(effects)
+        return effects.isEmpty ? .none : .merge(effects)
     }
 }
