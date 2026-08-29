@@ -70,68 +70,90 @@ struct RideDashboardView: View {
     // (`unit * 2`) bleeds behind the toolbar to the screen bottom.
     // Rows 1-2: Speed (W1 2×2)
     // Row 3:    HR (W4 1×1) + HR Zones (W12 1×1)
-    // Row 4:    Radar (W7 1×1) + Pace (W11 1×1)
+    // Row 4:    Pace (W11), full width — Radar (W7) is not a grid cell
     // Row 5:    Cadence (W5 1×1) + Weather (W10 1×1) [placeholder]
     // Rows 6-7: Map (W8 2×2) — bleeds behind the floating toolbar
+    //
+    // Radar (W7, S06) is a full-height lane beside the grid, not a grid row —
+    // per PRD §8.2/UX.md §S06 it represents the road behind the rider and needs
+    // the dashboard's full height to space vehicles readably, which no single
+    // grid row can give it. `isRadarSidebarVisible` reserves its 24pt only once
+    // radar has ever paired this ride; the grid gets the remaining width.
     private var gridPage: some View {
         GeometryReader { geo in
             let unit = max(geo.size.height, 1) / 7
-            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
-                // W1 — Speed 2×2
-                GridRow {
-                    SpeedWidget(
-                        speed: store.speed.speedMPS,
-                        speedHistory: store.speed.watermarkSamples,
-                        activeSpeedSource: store.speed.activeSpeedSource,
-                        distance: store.distanceMeters,
-                        elapsed: store.elapsedSeconds,
-                        averageSpeed: store.averageSpeedMPS,
-                        maxSpeed: store.maxSpeedMPS,
-                        unit: store.unitSystem,
-                        size: .twoByTwo
-                    )
-                    .gridCellColumns(2)
-                    .frame(height: unit * 2)
-                }
+            HStack(spacing: 0) {
+                Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+                    // W1 — Speed 2×2
+                    GridRow {
+                        SpeedWidget(
+                            speed: store.speed.speedMPS,
+                            speedHistory: store.speed.watermarkSamples,
+                            activeSpeedSource: store.speed.activeSpeedSource,
+                            distance: store.distanceMeters,
+                            elapsed: store.elapsedSeconds,
+                            averageSpeed: store.averageSpeedMPS,
+                            maxSpeed: store.maxSpeedMPS,
+                            unit: store.unitSystem,
+                            size: .twoByTwo
+                        )
+                        .gridCellColumns(2)
+                        .frame(height: unit * 2)
+                    }
 
-                // W4 HR + W12 HR Zones
-                GridRow {
-                    HeartRateWidget(bpm: store.heartRateBPM, zone: store.hrZone)
-                        .frame(height: unit)
-                    HRZonesWidget(zone: store.hrZone)
-                        .frame(height: unit)
-                }
+                    // W4 HR + W12 HR Zones
+                    GridRow {
+                        HeartRateWidget(bpm: store.heartRateBPM, zone: store.hrZone)
+                            .frame(height: unit)
+                        HRZonesWidget(zone: store.hrZone)
+                            .frame(height: unit)
+                    }
 
-                // W7 Radar + W11 Pace
-                GridRow {
-                    RadarWidget(
-                        targets: store.radarTargets,
-                        isRadarPaired: store.isRadarPaired
-                    )
-                    .frame(height: unit)
-                    PaceWidget(speedMPS: store.speed.speedMPS ?? 0, unit: store.unitSystem)
-                        .frame(height: unit)
-                }
+                    // W11 Pace — full width; radar sidebar lives outside the grid
+                    GridRow {
+                        PaceWidget(speedMPS: store.speed.speedMPS ?? 0, unit: store.unitSystem)
+                            .gridCellColumns(2)
+                            .frame(height: unit)
+                    }
 
-                // W5 Cadence + W10 Weather placeholder
-                GridRow {
-                    CadenceWidget(
-                        cadence: store.cadence.cadenceRPM,
-                        cadenceHistory: store.cadence.watermarkSamples,
-                        averageCadence: store.cadence.averageCadenceRPM,
-                        maxCadence: store.cadence.maxCadenceRPM,
-                        size: .oneByOne
-                    )
-                    .frame(height: unit)
-                    WeatherWidget()
+                    // W5 Cadence + W10 Weather placeholder
+                    GridRow {
+                        CadenceWidget(
+                            cadence: store.cadence.cadenceRPM,
+                            cadenceHistory: store.cadence.watermarkSamples,
+                            averageCadence: store.cadence.averageCadenceRPM,
+                            maxCadence: store.cadence.maxCadenceRPM,
+                            size: .oneByOne
+                        )
                         .frame(height: unit)
-                }
+                        WeatherWidget()
+                            .frame(height: unit)
+                    }
 
-                // W8 — Map 2×2 (extends behind the floating toolbar)
-                GridRow {
-                    MapWidget(coordinates: store.trackCoordinates)
-                    .gridCellColumns(2)
-                    .frame(height: unit * 2)
+                    // W8 — Map 2×2 (extends behind the floating toolbar)
+                    GridRow {
+                        MapWidget(coordinates: store.trackCoordinates)
+                        .gridCellColumns(2)
+                        .frame(height: unit * 2)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                // W7 — Radar full-height sidebar (S06), beside the grid, not in it.
+                //
+                // `RadarColumnView`'s body is a `GeometryReader`, which has no
+                // intrinsic height of its own — sitting next to the `Grid` (whose
+                // rows pin it to a fixed, already-full height) in this `HStack`,
+                // it collapses toward a tiny cross-axis size unless told to be
+                // greedy. `.frame(maxHeight: .infinity)` makes it claim the same
+                // full height the `Grid` gets, all the way to the physical top and
+                // bottom edges (the outer `GeometryReader` already measures the
+                // full screen — see the comment at the top of `gridPage`).
+                if store.isRadarSidebarVisible {
+                    RadarColumnView(targets: store.radarTargets, isOffline: store.isRadarOffline)
+                        .frame(width: Spacing.radarColumnWidth)
+                        .frame(maxHeight: .infinity)
+                        .ignoresSafeArea()
                 }
             }
         }
@@ -306,40 +328,6 @@ private struct HRZonesWidget: View {
     }
 }
 
-/// W7 — Radar 1×1 (24pt column on right edge per S06 spec).
-/// When no radar is paired (e.g. M3) the widget shows an em-dash stub,
-/// matching the other unpaired metrics.
-private struct RadarWidget: View {
-    let targets: [RadarTarget]
-    let isRadarPaired: Bool
-
-    var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                WidgetLabel("Radar")
-                if !isRadarPaired {
-                    HeroNumber("—", unit: "").heroNumberSize(.medium)
-                } else if targets.isEmpty {
-                    Text("Clear")
-                        .font(.headline)
-                        .foregroundStyle(Color.cyRatingGood)
-                }
-                Spacer()
-            }
-            .padding(Spacing.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // 24pt radar column (S06) — only when paired
-            if isRadarPaired {
-                RadarColumnView(targets: targets)
-                    .frame(width: Spacing.radarColumnWidth)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .background(Color.cyBgSecondary)
-    }
-}
-
 /// W11 — Pace 1×1
 struct PaceWidget: View {
     let speedMPS: Double
@@ -400,7 +388,34 @@ private struct WeatherWidget: View {
                 radarTargets: [
                     RadarTarget(id: UUID(), relativeVelocityMPS: 8.5, rangeMetres: 45, threatLevel: .warning),
                     RadarTarget(id: UUID(), relativeVelocityMPS: 12.0, rangeMetres: 20, threatLevel: .danger)
-                ]
+                ],
+                radarConnectionState: .active,
+                wasRadarEverPaired: true
+            )
+        ) {
+            ActiveRideFeature()
+        },
+        onClose: { }
+    )
+}
+
+#Preview("No Radar") {
+    RideDashboardView(
+        store: Store(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                elapsedSeconds: 2340,
+                speedKPH: 28.4,
+                heartRateBPM: 155,
+                hrZone: 4,
+                cadence: CadenceFeature.State(cadenceRPM: 87),
+                distanceMeters: 12300,
+                speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
+                maxSpeedKPH: 34.1,
+                speedSampleCount: 120,
+                speedSampleSum: 3408,
+                isRadarPaired: false,
+                wasRadarEverPaired: false
             )
         ) {
             ActiveRideFeature()

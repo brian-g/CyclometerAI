@@ -275,7 +275,6 @@ The radar visualization component is **only shown when a radar device is paired*
 If a radar **was paired** but has **lost connection during an active ride**:
 - The sidebar displays a grayed "Radar offline" indicator (the component remains visible because the rider expects it)
 - An L1 advisory haptic fires once on disconnection
-- A status badge on the dashboard shows the disconnected state
 
 #### Dot Color Mapping
 
@@ -324,7 +323,7 @@ A 24pt-wide vertical strip on the right edge of the active ride dashboard repres
 - [ ] Color transitions animate at 0.3s ease
 - [ ] Radar sidebar is entirely absent when no device is paired
 - [ ] Sidebar degrades to "Radar offline" state (grayed) when device was paired but connection lost during ride
-- [ ] Disconnection during active ride triggers L1 advisory haptic + status badge on dashboard
+- [ ] Disconnection during active ride triggers L1 advisory haptic + grayed "Radar offline" sidebar
 
 ---
 
@@ -789,13 +788,13 @@ disconnected → scanning → connecting → connected → active (notifications
 
 **Reconnection Policy:**
 - Auto-reconnect on signal loss with exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
-- Dashboard status badge shows disconnected state after 10 seconds without reconnect
+- Radar sidebar shows the grayed "Radar offline" indicator after 10 seconds without reconnect
 - L1 advisory haptic fires once on unexpected disconnection during active ride
 
 **Acceptance Criteria:**
 - [ ] App discovers Varia within 10 seconds of BLE scan initiation
 - [ ] Characteristic notifications parse correctly for 0–8 vehicle payloads
-- [ ] Disconnection during active ride triggers status badge + advisory haptic
+- [ ] Disconnection during active ride triggers grayed "Radar offline" sidebar + advisory haptic
 - [ ] All BLE operations testable with mock `BluetoothClient` (no hardware required)
 - [ ] App does not crash when Bluetooth permission is denied
 
