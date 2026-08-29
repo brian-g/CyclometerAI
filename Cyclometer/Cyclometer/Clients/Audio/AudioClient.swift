@@ -45,7 +45,7 @@ extension DependencyValues {
 
 // MARK: - Tone Synthesis (pure — no engine/session state, unit-testable)
 
-/// One tone's identity — the escalation level `AlertOrchestratorFeature` (#135) will drive.
+/// One tone's identity — the escalation level `AlertOrchestratorFeature` drives.
 /// No case for L1 advisory: Audio.md specifies haptic-only for L1, no tone.
 enum ToneKind: CaseIterable, Sendable {
     case allClear, warning, danger
@@ -62,8 +62,8 @@ enum ToneKind: CaseIterable, Sendable {
 
     /// Audio.md's exact segment breakdown for this tone. `playDanger()` renders one
     /// 580ms triple-burst cycle only — the 800ms inter-burst pause and "repeat
-    /// continuously until level drops" behavior belong to the AlertOrchestratorFeature
-    /// (#135) via a cancellable repeating Effect, not this client. Same reasoning for
+    /// continuously until level drops" behavior belong to `AlertOrchestratorFeature`,
+    /// via a cancellable repeating Effect, not this client. Same reasoning for
     /// Warning's "minimum 3s before re-trigger" — that's the orchestrator's guard.
     var segments: [ToneSegment] {
         switch self {
