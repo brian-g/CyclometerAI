@@ -73,7 +73,7 @@ Cyclists using a smartphone as a cycling computer face a dangerous information g
 Steps 1–4 typically take 1–3 seconds of eyes-off-road time. At 30 km/h, that is 8–25 meters of blind riding.
 
 ### The Opportunity
-The Garmin Varia RTL515 and RCT715 expose real-time radar alert data over BLE. Cyclometer's opportunity is to make that data immediately useful **without requiring the rider to look at the phone** — through progressive haptic escalation, peripheral color cues, a three-tone audio alert system (All Clear, Warning, Danger), and future AR glasses integration. Combined with rich BLE sensor integration (HR, speed, cadence) and standards-based GPX export with vehicle pass event recording, Cyclometer replaces a dedicated cycling computer for the majority of cyclists.
+The Garmin Varia RTL515 and RCT715 expose real-time radar alert data over BLE. Cyclometer's opportunity is to make that data immediately useful **without requiring the rider to look at the phone** — through progressive haptic escalation, peripheral color cues, a three-tone audio alert system (All Clear, Warning, Danger), and future Apple Watch and AR glasses integration. Combined with rich BLE sensor integration (HR, speed, cadence) and standards-based GPX export with vehicle pass event recording, Cyclometer replaces a dedicated cycling computer for the majority of cyclists.
 
 ---
 
@@ -133,7 +133,7 @@ When the rider does look, information must be parsed in under one second. Large 
 The app operates in direct sunlight. All color choices must meet WCAG AA contrast ratios under bright ambient conditions. Saturated hues (not pastel) for safety-critical states.
 
 ### P4 — Progressive Escalation
-Radar alerts must escalate proportionally to threat severity. A distant vehicle warrants a gentle haptic pulse. A rapidly closing vehicle warrants a full-screen color wash + continuous haptic + audio alert.
+Radar alerts must escalate proportionally to threat severity. A distant vehicle warrants a gentle haptic pulse. A rapidly closing vehicle warrants an audio alert.
 
 ### P5 — Sensor Hierarchy with Graceful Degradation
 For every metric, the highest-fidelity source is preferred. The app degrades gracefully when any sensor is unavailable, always using the best available source. The rider is never blocked by missing hardware.
@@ -154,7 +154,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Three-tone audio alert system: All Clear, Warning, Danger (spec: `Audio.md`)
 - BLE sensor priority system — HR strap, speed/cadence sensor, with Apple Watch and GPS as fallbacks
 - Heart rate zone display (Zones 1–5) via BLE HR sensor or Apple Watch / HealthKit
-- Haptic alert system (3 escalation levels) with Silent Mode override for Danger
+- Watch haptic alert system (3 escalation levels) with Silent Mode override for Danger
 - GPS track recording with live map view
 - Route loading from GPX file import (Files app) or tribos.studio integration
 - GPX export with `gpxtpx:TrackPointExtension` (HR, cadence, speed per track point) and `cyc:VehiclePassEvent` waypoints
@@ -329,16 +329,16 @@ A 24pt-wide vertical strip on the right edge of the active ride dashboard repres
 
 ### 8.3 Haptic Alert System
 
-**Purpose:** Communicate radar threat severity without requiring the rider to look at the phone.
+**Purpose:** Communicate radar threat severity without requiring the rider to look at the phone, just feel what is going on using their Apple Watch.
 
 #### Three Escalation Levels
 
-| Level | Trigger | Haptic Pattern | Screen Effect | Audio |
-|---|---|---|---|---|
-| L1 — Advisory | 1–2 vehicles, low closing speed | Single tap — `UIImpactFeedbackGenerator` `.light` | Peripheral amber tint (10% opacity overlay) | None |
-| L2 — Caution | Moderate closing speed OR 3+ vehicles | Double tap `.medium`, 0.5s interval | Amber border pulse animation | Warning tone (see `Audio.md`) |
-| L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Core Haptics pattern: three 0.14s `HapticContinuous` bursts at full intensity and sharpness — pattern defined in `UX.md §S06` | Full-screen `brRatingBad` wash | Danger tone — overrides Silent Mode if user opt-in |
-| L0 — Clear | Threat resolves after L2 or L3 | None | — | All Clear tone (see `Audio.md`) |
+| Level | Trigger | Haptic Pattern | Audio |
+|---|---|---|---|
+| L1 — Advisory | 1–2 vehicles, low closing speed | Single tap — `UIImpactFeedbackGenerator` `.light` | None |
+| L2 — Caution | Moderate closing speed OR 3+ vehicles | Double tap `.medium`, 0.5s interval | Warning tone (see `Audio.md`) |
+| L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Core Haptics pattern: three 0.14s `HapticContinuous` bursts at full intensity and sharpness — pattern defined in `UX.md §S06` | Danger tone — overrides Silent Mode if user opt-in |
+| L0 — Clear | Threat resolves after L2 or L3 | None | All Clear tone (see `Audio.md`) |
 
 #### Alert Rules
 - Minimum 3 seconds between same-level re-triggers to prevent alert fatigue
