@@ -15,49 +15,49 @@ struct VariaRadarParseTests {
 
     @Test("Header-only payload (no threats) parses to empty array")
     func headerOnlyIsEmpty() {
-        let targets = VariaRadarClient.parseAlert(from: Data([0x00]))
-        #expect(targets == [])
+        let threats = VariaRadarClient.parseAlert(from: Data([0x00]))
+        #expect(threats == [])
     }
 
     @Test("Single vehicle at or above the danger closing speed maps to danger")
     func singleVehicleDanger() throws {
-        // header, threat id (ignored), range 25m, closing speed 36 km/h (== 10 m/s)
-        let targets = try #require(VariaRadarClient.parseAlert(from: Data([0x82, 0xFF, 25, 36])))
-        #expect(targets.count == 1)
-        #expect(targets[0].rangeMetres == 25)
-        #expect(targets[0].relativeVelocityMPS == 10)
-        #expect(targets[0].threatLevel == .danger)
-        #expect(targets[0].id == VariaRadarClient.vehicleSlotIDs[0])
+        // header, threat id 0xFF, range 25m, closing speed 36 km/h (== 10 m/s)
+        let threats = try #require(VariaRadarClient.parseAlert(from: Data([0x82, 0xFF, 25, 36])))
+        #expect(threats.count == 1)
+        #expect(threats[0].wireThreatID == 0xFF)
+        #expect(threats[0].rangeMetres == 25)
+        #expect(threats[0].relativeVelocityMPS == 10)
+        #expect(threats[0].threatLevel == .danger)
     }
 
     @Test("Closing speed below the danger threshold maps to warning, not clear")
     func belowDangerThresholdMapsToWarning() throws {
-        // header, threat id (ignored), range 50m, closing speed 18 km/h (== 5 m/s)
-        let targets = try #require(VariaRadarClient.parseAlert(from: Data([0x02, 0x01, 50, 18])))
-        #expect(targets[0].threatLevel == .warning)
-        #expect(targets[0].relativeVelocityMPS == 5)
+        // header, threat id 0x01, range 50m, closing speed 18 km/h (== 5 m/s)
+        let threats = try #require(VariaRadarClient.parseAlert(from: Data([0x02, 0x01, 50, 18])))
+        #expect(threats[0].threatLevel == .warning)
+        #expect(threats[0].relativeVelocityMPS == 5)
     }
 
     @Test("Closing speed exactly at the danger threshold is inclusive")
     func dangerThresholdIsInclusive() throws {
-        let targets = try #require(VariaRadarClient.parseAlert(from: Data([0x02, 0x01, 50, 30])))
-        #expect(targets[0].threatLevel == .danger)
+        let threats = try #require(VariaRadarClient.parseAlert(from: Data([0x02, 0x01, 50, 30])))
+        #expect(threats[0].threatLevel == .danger)
     }
 
-    @Test("Eight vehicles parse with stable slot IDs")
+    @Test("Eight vehicles parse, keeping each one's own wire threat ID")
     func eightVehicles() throws {
         var bytes: [UInt8] = [0x00]
         for i in 0..<8 {
-            bytes.append(UInt8(i))            // threat id (ignored)
+            bytes.append(UInt8(i))            // threat id
             bytes.append(UInt8(10 + i * 10))  // range
             bytes.append(UInt8(20 + i))       // closing speed, km/h
         }
-        let targets = try #require(VariaRadarClient.parseAlert(from: Data(bytes)))
-        #expect(targets.count == 8)
+        let threats = try #require(VariaRadarClient.parseAlert(from: Data(bytes)))
+        #expect(threats.count == 8)
         for i in 0..<8 {
-            #expect(targets[i].id == VariaRadarClient.vehicleSlotIDs[i])
-            #expect(targets[i].rangeMetres == Double(10 + i * 10))
-            #expect(targets[i].relativeVelocityMPS == Double(20 + i) / 3.6)
+            #expect(threats[i].wireThreatID == UInt8(i))
+            #expect(threats[i].rangeMetres == Double(10 + i * 10))
+            #expect(threats[i].relativeVelocityMPS == Double(20 + i) / 3.6)
         }
     }
 
@@ -420,6 +420,65 @@ struct VariaRadarIntegrationTests {
         #expect(received?[0].threatLevel == .danger)
         #expect(received?[1].rangeMetres == 80)
         #expect(received?[1].threatLevel == .warning)
+    }
+
+    /// The reported bug: the nearest vehicle passes the rider and drops off the
+    /// list, and the previously-second vehicle becomes nearest. Identity used to
+    /// be assigned by array position (`vehicleSlotIDs[i]`), so the glyph that had
+    /// been tracking the departed vehicle was reassigned to the new nearest one —
+    /// visibly animating from the old vehicle's position to the new one's, even
+    /// though they are two different cars. Identity must instead follow each
+    /// vehicle's own wire threat ID, so a departed vehicle's glyph simply
+    /// disappears and the surviving vehicle keeps its own identity throughout.
+    @Test("A departing lead vehicle's slot is not inherited by the new nearest vehicle")
+    func departingVehicleDoesNotHandOffItsSlotToTheSurvivor() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()
+        await harness.client.connect(peripheralID)
+        _ = await states.next()  // .connecting
+
+        var targets = harness.client.radarTargets().makeAsyncIterator()
+
+        // Wire threat 5 (lead, about to pass) and wire threat 9 (trailing).
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: peripheralID, characteristicUUID: radarAlertUUID,
+            value: Data([0x00, 5, 8, 20, 9, 60, 10])
+        ))
+        let firstFrame = await targets.next()
+        let leadID = firstFrame?.first { $0.rangeMetres == 8 }?.id
+        let trailingID = firstFrame?.first { $0.rangeMetres == 60 }?.id
+        #expect(leadID != nil)
+        #expect(trailingID != nil)
+        #expect(leadID != trailingID)
+
+        // The lead vehicle (wire threat 5) has passed and is no longer reported;
+        // the trailing vehicle (wire threat 9) is now the sole, nearest vehicle.
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: peripheralID, characteristicUUID: radarAlertUUID,
+            value: Data([0x00, 9, 12, 10])
+        ))
+        let secondFrame = await targets.next()
+        #expect(secondFrame?.count == 1)
+        // The survivor keeps its own identity — it does not inherit the departed
+        // vehicle's slot just because it now ranks first.
+        #expect(secondFrame?.first?.id == trailingID)
+        #expect(secondFrame?.first?.id != leadID)
+
+        // A brand-new vehicle (wire threat 12) can reuse the now-freed slot that
+        // belonged to wire threat 5 — recycling a slot is fine; handing it to an
+        // already-tracked different vehicle is the bug.
+        harness.events.yield(.characteristicValueUpdated(
+            peripheralID: peripheralID, characteristicUUID: radarAlertUUID,
+            value: Data([0x00, 9, 5, 10, 12, 90, 8])
+        ))
+        let thirdFrame = await targets.next()
+        let newTrailingID = thirdFrame?.first { $0.rangeMetres == 5 }?.id
+        let newVehicleID = thirdFrame?.first { $0.rangeMetres == 90 }?.id
+        #expect(newTrailingID == trailingID)   // wire threat 9 is still tracked continuously
+        #expect(newVehicleID == leadID)        // recycled the slot wire threat 5 freed
     }
 
     @Test("Unexpected disconnect clears targets, enters reconnecting, retries on backoff ladder")

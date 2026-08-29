@@ -51,6 +51,8 @@ struct ActiveRideFeatureRadarTests {
         let store = makeStore(clock: TestClock(), advisoryCount: LockIsolated(0))
         await store.send(.radarConnectionChanged(.active)) {
             $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+            $0.wasRadarEverPaired = true
         }
     }
 
@@ -62,6 +64,8 @@ struct ActiveRideFeatureRadarTests {
 
         await store.send(.radarConnectionChanged(.active)) {
             $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+            $0.wasRadarEverPaired = true
         }
         // Receding (negative velocity) so this test stays focused on the disconnect
         // haptic path rather than also exercising AlertLevel escalation.
@@ -84,7 +88,9 @@ struct ActiveRideFeatureRadarTests {
         }
 
         // Badge stays paired during the 10s grace window.
-        await store.send(.radarConnectionChanged(.reconnecting))
+        await store.send(.radarConnectionChanged(.reconnecting)) {
+            $0.radarConnectionState = .reconnecting
+        }
         await clock.advance(by: .seconds(10))
         await store.receive(\.radarReconnectTimedOut) {
             $0.isRadarPaired = false
@@ -108,10 +114,16 @@ struct ActiveRideFeatureRadarTests {
 
         await store.send(.radarConnectionChanged(.active)) {
             $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+            $0.wasRadarEverPaired = true
         }
-        await store.send(.radarConnectionChanged(.reconnecting))
+        await store.send(.radarConnectionChanged(.reconnecting)) {
+            $0.radarConnectionState = .reconnecting
+        }
         await clock.advance(by: .seconds(9))
-        await store.send(.radarConnectionChanged(.active))
+        await store.send(.radarConnectionChanged(.active)) {
+            $0.radarConnectionState = .active
+        }
         await clock.advance(by: .seconds(60))
         #expect(advisoryCount.value == 0)
     }
@@ -121,11 +133,89 @@ struct ActiveRideFeatureRadarTests {
         let store = makeStore(clock: TestClock(), advisoryCount: LockIsolated(0))
         await store.send(.radarConnectionChanged(.active)) {
             $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+            $0.wasRadarEverPaired = true
         }
         await store.send(.radarConnectionChanged(.disconnected)) {
             $0.isRadarPaired = false
             $0.radarTargets = []
+            $0.radarConnectionState = .disconnected
         }
+    }
+
+    @Test("Sidebar hidden until radar has ever paired this ride")
+    func sidebarHiddenUntilEverPaired() async {
+        let store = makeStore(clock: TestClock(), advisoryCount: LockIsolated(0))
+        #expect(store.state.isRadarSidebarVisible == false)
+        #expect(store.state.isRadarOffline == false)
+    }
+
+    @Test("Sidebar shows offline during the reconnect grace window, not stale targets")
+    func sidebarOfflineDuringGraceWindow() async {
+        let clock = TestClock()
+        let store = makeStore(clock: clock, advisoryCount: LockIsolated(0))
+
+        await store.send(.radarConnectionChanged(.active)) {
+            $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+            $0.wasRadarEverPaired = true
+        }
+        let targets = [
+            RadarTarget(
+                id: VariaRadarClient.vehicleSlotIDs[0],
+                relativeVelocityMPS: -5,
+                rangeMetres: 60,
+                threatLevel: .warning
+            )
+        ]
+        await store.send(.radarTargetsUpdated(targets)) {
+            $0.radarTargets = targets
+        }
+
+        await store.send(.radarConnectionChanged(.reconnecting)) {
+            $0.radarConnectionState = .reconnecting
+        }
+        // Still "paired" for haptic-timer purposes, and radarTargets is untouched —
+        // but the sidebar must already report offline rather than show these stale
+        // colored targets (#137).
+        #expect(store.state.isRadarPaired == true)
+        #expect(store.state.radarTargets == targets)
+        #expect(store.state.isRadarSidebarVisible == true)
+        #expect(store.state.isRadarOffline == true)
+
+        await clock.advance(by: .seconds(10))
+        await store.receive(\.radarReconnectTimedOut) {
+            $0.isRadarPaired = false
+            $0.radarTargets = []
+            $0.activeAlertLevel = .advisory
+            $0.lastAlertDispatchAt = [.advisory: testDate]
+        }
+        // Sidebar stays visible (grayed), not hidden, past the grace window too.
+        #expect(store.state.isRadarSidebarVisible == true)
+        #expect(store.state.isRadarOffline == true)
+
+        await store.send(.radarConnectionChanged(.active)) {
+            $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+        }
+        #expect(store.state.isRadarOffline == false)
+    }
+
+    @Test("Hard disconnect keeps the sidebar visible (grayed), not hidden")
+    func hardDisconnectKeepsSidebarVisible() async {
+        let store = makeStore(clock: TestClock(), advisoryCount: LockIsolated(0))
+        await store.send(.radarConnectionChanged(.active)) {
+            $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+            $0.wasRadarEverPaired = true
+        }
+        await store.send(.radarConnectionChanged(.disconnected)) {
+            $0.isRadarPaired = false
+            $0.radarTargets = []
+            $0.radarConnectionState = .disconnected
+        }
+        #expect(store.state.isRadarSidebarVisible == true)
+        #expect(store.state.isRadarOffline == true)
     }
 }
 
@@ -496,8 +586,12 @@ struct ActiveRideFeatureAlertEscalationTests {
 
         await store.send(.radarConnectionChanged(.active)) {
             $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+            $0.wasRadarEverPaired = true
         }
-        await store.send(.radarConnectionChanged(.reconnecting))
+        await store.send(.radarConnectionChanged(.reconnecting)) {
+            $0.radarConnectionState = .reconnecting
+        }
         await clock.advance(by: .seconds(10))
         await store.receive(\.radarReconnectTimedOut) {
             $0.isRadarPaired = false
@@ -510,8 +604,11 @@ struct ActiveRideFeatureAlertEscalationTests {
         // Reconnect, then lose it again within 3s of the first advisory dispatch.
         await store.send(.radarConnectionChanged(.active)) {
             $0.isRadarPaired = true
+            $0.radarConnectionState = .active
         }
-        await store.send(.radarConnectionChanged(.reconnecting))
+        await store.send(.radarConnectionChanged(.reconnecting)) {
+            $0.radarConnectionState = .reconnecting
+        }
         await clock.advance(by: .seconds(10))
         await store.receive(\.radarReconnectTimedOut) {
             $0.isRadarPaired = false
@@ -526,8 +623,11 @@ struct ActiveRideFeatureAlertEscalationTests {
         store.dependencies.date.now = laterDate
         await store.send(.radarConnectionChanged(.active)) {
             $0.isRadarPaired = true
+            $0.radarConnectionState = .active
         }
-        await store.send(.radarConnectionChanged(.reconnecting))
+        await store.send(.radarConnectionChanged(.reconnecting)) {
+            $0.radarConnectionState = .reconnecting
+        }
         await clock.advance(by: .seconds(10))
         await store.receive(\.radarReconnectTimedOut) {
             $0.isRadarPaired = false
@@ -545,6 +645,8 @@ struct ActiveRideFeatureAlertEscalationTests {
 
         await store.send(.radarConnectionChanged(.active)) {
             $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+            $0.wasRadarEverPaired = true
         }
 
         let dangerTargets = [Self.vehicle(mps: 30 / 3.6)]
@@ -560,6 +662,7 @@ struct ActiveRideFeatureAlertEscalationTests {
             $0.radarTargets = []
             $0.activeAlertLevel = .clear
             $0.lastAlertDispatchAt = [:]
+            $0.radarConnectionState = .disconnected
         }
         #expect(counts.value.hapticAllClear == 0)
         #expect(counts.value.audioAllClear == 0)
@@ -577,6 +680,8 @@ struct ActiveRideFeatureAlertEscalationTests {
 
         await store.send(.radarConnectionChanged(.active)) {
             $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+            $0.wasRadarEverPaired = true
         }
 
         let dangerTargets = [Self.vehicle(mps: 30 / 3.6)]
@@ -595,6 +700,7 @@ struct ActiveRideFeatureAlertEscalationTests {
             $0.radarTargets = []
             $0.activeAlertLevel = .clear
             $0.lastAlertDispatchAt = [:]
+            $0.radarConnectionState = .disconnected
         }
 
         // Reconnects 0.5s later, immediately reporting the same vehicle still
@@ -605,6 +711,7 @@ struct ActiveRideFeatureAlertEscalationTests {
         store.dependencies.date.now = reconnectDate
         await store.send(.radarConnectionChanged(.active)) {
             $0.isRadarPaired = true
+            $0.radarConnectionState = .active
         }
         await store.send(.radarTargetsUpdated(dangerTargets)) {
             $0.radarTargets = dangerTargets
@@ -619,6 +726,7 @@ struct ActiveRideFeatureAlertEscalationTests {
             $0.radarTargets = []
             $0.activeAlertLevel = .clear
             $0.lastAlertDispatchAt = [:]
+            $0.radarConnectionState = .disconnected
         }
     }
 }

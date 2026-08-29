@@ -78,6 +78,16 @@ struct ActiveRideFeature {
         }
         var isRadarPaired: Bool = false
         var radarTargets: [RadarTarget] = []
+        /// Raw BLE lifecycle, mirrors CadenceFeature/SpeedFeature's `connectionState`
+        /// field. `isRadarPaired` stays as-is (it gates the haptic-timer logic) —
+        /// this is purely for the sidebar's visible/offline presentation (#137).
+        var radarConnectionState: VariaRadarClient.ConnectionState = .disconnected
+        /// True for the rest of this ride once radar has ever gone `.active`. Lets
+        /// the sidebar distinguish "never paired" (hidden, no space reserved) from
+        /// "was paired, lost signal" (grayed, space stays reserved) (#137).
+        var wasRadarEverPaired: Bool = false
+        var isRadarSidebarVisible: Bool { wasRadarEverPaired }
+        var isRadarOffline: Bool { wasRadarEverPaired && radarConnectionState != .active }
         /// Ride-level escalation derived from `radarTargets` (PRD §8.3) — distinct
         /// from any single vehicle's `ThreatLevel` dot color. Exposed for the
         /// screen-effects and radar-offline-indicator work in companion issues.
@@ -276,9 +286,11 @@ struct ActiveRideFeature {
                 state.activeAlertLevel = newLevel
                 return dispatchAlert(&state, level: newLevel, previous: previous)
             case .radarConnectionChanged(let connectionState):
+                state.radarConnectionState = connectionState
                 switch connectionState {
                 case .active:
                     state.isRadarPaired = true
+                    state.wasRadarEverPaired = true
                     return .cancel(id: CancelID.radarLossTimer)
                 case .reconnecting:
                     // Badge stays paired during the 10s grace window (PRD §9.1);
@@ -310,6 +322,7 @@ struct ActiveRideFeature {
                 }
             case .radarReconnectTimedOut:
                 state.isRadarPaired = false
+                state.radarConnectionState = .disconnected
                 state.radarTargets = []
                 // Routed through the same guarded dispatch path as vehicle-based
                 // escalation (#135) rather than firing unconditionally — no `!=`

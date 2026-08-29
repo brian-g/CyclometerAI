@@ -80,16 +80,38 @@ struct VariaRadarClient: Sendable {
     /// current value on subscribe.
     var batteryLevel:    @Sendable () -> AsyncStream<Int?>
 
-    /// Parse vehicle targets from a Radar Alert characteristic value.
+    /// One threat record exactly as the wire reports it, before slot-identity
+    /// resolution. `wireThreatID` is the hardware's own per-threat identifier —
+    /// stable for as long as that vehicle stays tracked, which is the entire reason
+    /// a threat-tracking radar protocol carries one. `RadarClientState.resolveTargets`
+    /// is what turns this into a `RadarTarget` with a stable `UUID`; a stateless
+    /// parser has no notion of "the previous packet" to resolve continuity against.
+    struct RawThreat: Equatable, Sendable {
+        let wireThreatID: UInt8
+        let rangeMetres: Double
+        let relativeVelocityMPS: Double
+        let threatLevel: RadarTarget.ThreatLevel
+    }
+
+    /// Parse vehicle threats from a Radar Alert characteristic value.
     ///
     /// Confirmed against real RTL15451 hardware — a school bus pass captured on
     /// 2026-08-25 produced a 4-byte payload with a steadily counting-down range
     /// byte, matching this layout exactly — and cross-checked against pycycling's
     /// independent reverse-engineering of the same characteristic (rear_view_radar.py):
     /// - byte 0: packet/sequence identifier, not vehicle data — ignored
-    /// - per threat, 3 bytes: threat ID (ignored; `vehicleSlotIDs[i]` gives stable
-    ///   identity instead — see its doc comment), uint8 range in whole metres,
-    ///   uint8 closing speed in whole km/h
+    /// - per threat, 3 bytes: threat ID, uint8 range in whole metres, uint8
+    ///   closing speed in whole km/h
+    ///
+    /// The threat ID used to be discarded in favor of assigning identity by each
+    /// threat's position in the array (`vehicleSlotIDs[i]`). That reuses a SwiftUI
+    /// glyph's identity for whichever vehicle currently ranks *i*-th closest, so
+    /// when the nearest vehicle passed the rider and dropped off the list, the
+    /// glyph that had been tracking it snapped onto the new nearest vehicle
+    /// instead — a visible jump between two unrelated cars. The wire's own threat
+    /// ID exists specifically so a consumer doesn't have to infer identity from
+    /// rank; this parser now keeps it, and `RadarClientState.resolveTargets`
+    /// resolves it into a stable per-vehicle `UUID` across packets.
     ///
     /// No byte carries an alert level. `RadarTarget.ThreatLevel` is derived from
     /// closing speed instead, reusing `AlertLevel.dangerClosingSpeedKPH` so the
@@ -109,26 +131,34 @@ struct VariaRadarClient: Sendable {
     /// frame is loud (logged with its raw hex below) rather than quietly wrong.
     ///
     /// Returns nil for malformed payloads (drop the notification, keep last good state).
-    static func parseAlert(from data: Data) -> [RadarTarget]? {
+    /// A frame with two threats sharing a `wireThreatID` is malformed too: `resolveTargets`
+    /// keys slot identity off that field, so a duplicate within one frame would collapse
+    /// both threats onto the same slot UUID — an `Identifiable` collision downstream.
+    static func parseAlert(from data: Data) -> [RawThreat]? {
         guard !data.isEmpty, (data.count - 1).isMultiple(of: 3) else { return nil }
         let count = (data.count - 1) / 3
         guard count <= vehicleSlotIDs.count else { return nil }
 
-        return (0..<count).map { i in
+        let threats = (0..<count).map { i in
             let base = 1 + i * 3
             let closingSpeedKPH = Double(data[base + 2])
-            return RadarTarget(
-                id: vehicleSlotIDs[i],
-                relativeVelocityMPS: closingSpeedKPH / AlertLevel.kphPerMPS,
+            return RawThreat(
+                wireThreatID: data[base],
                 rangeMetres: Double(data[base + 1]),
+                relativeVelocityMPS: closingSpeedKPH / AlertLevel.kphPerMPS,
                 threatLevel: closingSpeedKPH >= AlertLevel.dangerClosingSpeedKPH ? .danger : .warning
             )
         }
+        guard Set(threats.map(\.wireThreatID)).count == threats.count else { return nil }
+        return threats
     }
 
-    /// Fixed slot UUIDs so vehicle identity is stable across notifications —
-    /// preserves SwiftUI glyph identity for position animation and makes
-    /// parse output deterministic for tests.
+    /// Fixed pool of 8 UUIDs — matches the hardware's 8-target cap. Not indexed by
+    /// position: `RadarClientState.resolveTargets` hands one of these out to each
+    /// distinct `RawThreat.wireThreatID` currently in the packet, keeping the same
+    /// UUID assigned for as long as that wire ID keeps appearing (so its SwiftUI
+    /// glyph identity — and therefore its position animation — carries over
+    /// correctly between notifications), and frees it once that wire ID drops out.
     static let vehicleSlotIDs: [UUID] = [
         UUID(uuidString: "C0000000-0000-0000-0000-000000000001")!,
         UUID(uuidString: "C0000000-0000-0000-0000-000000000002")!,
@@ -212,6 +242,12 @@ private final class RadarClientState: @unchecked Sendable {
     private var connectionState: VariaRadarClient.ConnectionState = .disconnected
     private var batteryPercent: Int?
     private var reconnectTask: Task<Void, Never>?
+
+    /// This connection's live mapping from wire threat ID to the stable slot UUID
+    /// it was handed. Reset whenever `broadcastTargets([])` fires for a real
+    /// connection loss — a wire ID recycled by the hardware after a gap must not
+    /// silently inherit a departed vehicle's identity. See `resolveTargets`.
+    private var slotByWireID: [UInt8: UUID] = [:]
 
     /// An ambient (dashboard) scan is running. Tracked separately from
     /// `connectionState` because a pairing scan must not move that state — see
@@ -423,6 +459,9 @@ private final class RadarClientState: @unchecked Sendable {
         let id = lock.withLock { () -> UUID? in
             let current = targetPeripheralID
             targetPeripheralID = nil
+            // A wire ID recycled by the hardware on the next ride must not inherit
+            // this ride's stale slot — see `slotByWireID`'s doc comment.
+            slotByWireID.removeAll()
             return current
         }
         setConnectionState(.disconnected)
@@ -485,6 +524,7 @@ private final class RadarClientState: @unchecked Sendable {
         if let toDisconnect {
             setConnectionState(.disconnected)
             broadcastTargets([])   // clear stale vehicles from the sidebar
+            lock.withLock { slotByWireID.removeAll() }
             setBattery(nil)
             await bleClient.disconnect(toDisconnect, radarOwnerID)
         }
@@ -599,10 +639,11 @@ private final class RadarClientState: @unchecked Sendable {
             // Raw frame hex is the ground truth for validating the payload-layout
             // assumption in parseAlert — keep failed parses visible.
             let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
-            guard let targets = VariaRadarClient.parseAlert(from: data) else {
+            guard let raw = VariaRadarClient.parseAlert(from: data) else {
                 logger.notice("alert frame [\(hex, privacy: .public)] → parse FAILED — layout assumption likely wrong")
                 return
             }
+            let targets = resolveTargets(raw)
             let summary = targets
                 .map { "(\(Int($0.rangeMetres))m, \(Int($0.relativeVelocityMPS))m/s)" }
                 .joined(separator: " ")
@@ -613,6 +654,7 @@ private final class RadarClientState: @unchecked Sendable {
             // Only unexpected disconnects match — user disconnect() nils the target first.
             guard lock.withLock({ targetPeripheralID }) == id else { return }
             broadcastTargets([])   // clear stale vehicles from the sidebar
+            lock.withLock { slotByWireID.removeAll() }
             setBattery(nil)        // re-read on reconnect rather than show a stale level
             setConnectionState(.reconnecting)
             startReconnect()
@@ -624,7 +666,10 @@ private final class RadarClientState: @unchecked Sendable {
                 // pairing survives — the rider didn't unpair, the radio went off — so
                 // only the connection identity is cleared.
                 cancelReconnect()
-                lock.withLock { targetPeripheralID = nil }
+                lock.withLock {
+                    targetPeripheralID = nil
+                    slotByWireID.removeAll()
+                }
                 broadcastTargets([])
                 setBattery(nil)
                 setConnectionState(.disconnected)
@@ -711,6 +756,39 @@ private final class RadarClientState: @unchecked Sendable {
     private func broadcastTargets(_ targets: [RadarTarget]) {
         lock.withLock {
             for continuation in targetsContinuations.values { continuation.yield(targets) }
+        }
+    }
+
+    /// Resolves this packet's raw wire threats into `RadarTarget`s with a stable
+    /// per-vehicle `UUID`, keyed off `wireThreatID` rather than array position —
+    /// see `VariaRadarClient.parseAlert`'s doc comment for why position was wrong.
+    /// A wire ID keeps the slot it was already given; a wire ID no longer present
+    /// frees its slot back to the pool; a new wire ID is handed the first slot not
+    /// currently in use. `count <= vehicleSlotIDs.count` is already enforced by
+    /// `parseAlert`, so a free slot always exists for a wire ID seeing it for the
+    /// first time.
+    private func resolveTargets(_ raw: [VariaRadarClient.RawThreat]) -> [RadarTarget] {
+        lock.withLock {
+            let liveWireIDs = Set(raw.map(\.wireThreatID))
+            slotByWireID = slotByWireID.filter { liveWireIDs.contains($0.key) }
+
+            var usedSlots = Set(slotByWireID.values)
+            return raw.map { threat in
+                let slot: UUID
+                if let existing = slotByWireID[threat.wireThreatID] {
+                    slot = existing
+                } else {
+                    slot = VariaRadarClient.vehicleSlotIDs.first { !usedSlots.contains($0) }!
+                    slotByWireID[threat.wireThreatID] = slot
+                    usedSlots.insert(slot)
+                }
+                return RadarTarget(
+                    id: slot,
+                    relativeVelocityMPS: threat.relativeVelocityMPS,
+                    rangeMetres: threat.rangeMetres,
+                    threatLevel: threat.threatLevel
+                )
+            }
         }
     }
 
