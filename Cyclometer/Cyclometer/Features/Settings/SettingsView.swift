@@ -6,6 +6,10 @@ struct SettingsView: View {
     /// The number pad has no return key, so the manual circumference commits when
     /// focus leaves the field (via the keyboard's Done button or a tap elsewhere).
     @FocusState private var isCircumferenceFocused: Bool
+    /// Same commit-on-blur wiring as `isCircumferenceFocused`, one per HR override
+    /// field (#162).
+    @FocusState private var isRestingOverrideFocused: Bool
+    @FocusState private var isMaxOverrideFocused: Bool
 
     private var appVersion: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -71,6 +75,40 @@ struct SettingsView: View {
             }
 
             Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    LabeledContent("Resting HR") {
+                        HStack(spacing: 4) {
+                            TextField(store.restingOverridePlaceholder, text: Binding(
+                                get: { store.restingOverrideText },
+                                set: { store.send(.restingOverrideChanged($0)) }
+                            ))
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .focused($isRestingOverrideFocused)
+                            Text("bpm").foregroundStyle(.secondary)
+                        }
+                    }
+                    if let error = store.restingOverrideValidationError {
+                        Text(error.message).font(.caption).foregroundStyle(.red)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    LabeledContent("Max HR") {
+                        HStack(spacing: 4) {
+                            TextField(store.maxOverridePlaceholder, text: Binding(
+                                get: { store.maxOverrideText },
+                                set: { store.send(.maxOverrideChanged($0)) }
+                            ))
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .focused($isMaxOverrideFocused)
+                            Text("bpm").foregroundStyle(.secondary)
+                        }
+                    }
+                    if let error = store.maxOverrideValidationError {
+                        Text(error.message).font(.caption).foregroundStyle(.red)
+                    }
+                }
                 ForEach(store.hrZoneRows) { row in
                     if row.isSteppable {
                         Stepper {
@@ -106,11 +144,21 @@ struct SettingsView: View {
         .onChange(of: isCircumferenceFocused) { _, isFocused in
             if !isFocused { store.send(.customCircumferenceCommitted) }
         }
+        .onChange(of: isRestingOverrideFocused) { _, isFocused in
+            if !isFocused { store.send(.restingOverrideCommitted) }
+        }
+        .onChange(of: isMaxOverrideFocused) { _, isFocused in
+            if !isFocused { store.send(.maxOverrideCommitted) }
+        }
         .toolbar {
-            if isCircumferenceFocused {
+            if isCircumferenceFocused || isRestingOverrideFocused || isMaxOverrideFocused {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("Done") { isCircumferenceFocused = false }
+                    Button("Done") {
+                        isCircumferenceFocused = false
+                        isRestingOverrideFocused = false
+                        isMaxOverrideFocused = false
+                    }
                 }
             }
         }

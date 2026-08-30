@@ -377,6 +377,23 @@ extension RiderProfile {
     }
 }
 
+extension RiderProfile.ValidationError {
+    /// S12's inline field error (#162). Built from the same constants the
+    /// validators enforce, so the message can never drift from the actual check.
+    var message: String {
+        switch self {
+        case .restingOutOfRange:
+            "Enter a resting HR between \(RiderProfile.restingValidRange.lowerBound) and \(RiderProfile.restingValidRange.upperBound) bpm."
+        case .maxOutOfRange:
+            "Enter a max HR between \(RiderProfile.maxValidRange.lowerBound) and \(RiderProfile.maxValidRange.upperBound) bpm."
+        case .reserveTooSmall:
+            "Resting and max HR are too close together — leave at least \(RiderProfile.minimumHRReserve) bpm between them."
+        case .boundaryOutOfOrder:
+            "That boundary would overlap a neighboring zone."
+        }
+    }
+}
+
 // MARK: - Storage
 
 extension SharedReaderKey where Self == FileStorageKey<RiderProfile>.Default {

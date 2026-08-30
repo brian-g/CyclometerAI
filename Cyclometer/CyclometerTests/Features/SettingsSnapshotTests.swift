@@ -35,7 +35,8 @@ final class SettingsSnapshotTests: XCTestCase {
     /// `SettingsFeatureTests.makeStore` / `DeviceManagementSnapshotTests.screen`.
     private func screen(
         wheelCircumferenceMM: Int = WheelPreset.default.circumferenceMM,
-        pairedSensors: [PairedSensor] = []
+        pairedSensors: [PairedSensor] = [],
+        riderProfile profile: RiderProfile = RiderProfile()
     ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
@@ -53,6 +54,7 @@ final class SettingsSnapshotTests: XCTestCase {
                 $0.pairedSensors = pairedSensors
             }
             @Shared(.riderProfile) var riderProfile
+            $riderProfile.withLock { $0 = profile }
             return Store(initialState: SettingsFeature.State()) {
                 SettingsFeature()
             } withDependencies: {
@@ -116,6 +118,15 @@ final class SettingsSnapshotTests: XCTestCase {
                 ]
             ),
             named: "customWheelCircumference"
+        )
+    }
+
+    /// Both HR overrides set (#162) — the two new fields show real committed
+    /// numbers rather than the placeholder hint `testDefault` exercises.
+    func testHRZoneOverridesSet() {
+        assertBothSchemes(
+            screen(riderProfile: RiderProfile(restingOverrideBPM: 52, maxOverrideBPM: 185)),
+            named: "hrZoneOverridesSet"
         )
     }
 }

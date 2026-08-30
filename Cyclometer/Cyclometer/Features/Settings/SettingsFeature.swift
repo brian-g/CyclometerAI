@@ -38,6 +38,14 @@ struct SettingsFeature {
         /// Only matters when the stored circumference happens to equal a preset —
         /// it keeps the custom field on screen while the rider is typing.
         var userChoseCustom: Bool = false
+        /// In-progress manual HR override entry (#162). Same shape as
+        /// `customCircumferenceDraft`, but an invalid commit leaves the draft (and
+        /// its live validation error) in place rather than reverting it — the
+        /// wheel-circumference field silently drops a bad entry, which is exactly
+        /// what this issue's AC rules out for HR ("rejected... not silently
+        /// clamped or dropped").
+        var restingOverrideDraft: String? = nil
+        var maxOverrideDraft: String? = nil
         /// HealthKit-resolved terms fetched once on screen appearance (#160), threaded
         /// into `hrZoneRows` and the boundary stepper instead of the defaulted `nil`.
         var healthRestingBPM: Int? = nil
@@ -87,6 +95,53 @@ struct SettingsFeature {
             guard let mm = Int(customCircumferenceText) else { return true }
             return !WheelPreset.validRange.contains(mm)
         }
+
+        // MARK: - Resting/max HR overrides (#162)
+
+        /// The live draft while editing, otherwise whatever override is on file —
+        /// empty when there is none, so the field falls through to its placeholder.
+        var restingOverrideText: String {
+            restingOverrideDraft ?? riderProfile.restingOverrideBPM.map(String.init) ?? ""
+        }
+
+        /// What the field hints at when no override is set: the resolved
+        /// Health-sourced-or-default value, so clearing an override visibly reverts
+        /// to this rather than to an empty field.
+        var restingOverridePlaceholder: String {
+            String(riderProfile.resolvedRestingBPM(healthResting: healthRestingBPM))
+        }
+
+        /// Computed live off the draft — not just at commit — so the field's error
+        /// text tracks every keystroke the way `isCustomCircumferenceInvalid` does.
+        var restingOverrideValidationError: RiderProfile.ValidationError? {
+            guard let draft = restingOverrideDraft, !draft.isEmpty else { return nil }
+            guard let bpm = Int(draft) else { return .restingOutOfRange }
+            do {
+                _ = try riderProfile.settingRestingOverride(bpm, healthMax: healthMaxBPM)
+                return nil
+            } catch {
+                return error
+            }
+        }
+
+        var maxOverrideText: String {
+            maxOverrideDraft ?? riderProfile.maxOverrideBPM.map(String.init) ?? ""
+        }
+
+        var maxOverridePlaceholder: String {
+            String(riderProfile.resolvedMaxBPM(healthMax: healthMaxBPM))
+        }
+
+        var maxOverrideValidationError: RiderProfile.ValidationError? {
+            guard let draft = maxOverrideDraft, !draft.isEmpty else { return nil }
+            guard let bpm = Int(draft) else { return .maxOutOfRange }
+            do {
+                _ = try riderProfile.settingMaxOverride(bpm, healthResting: healthRestingBPM)
+                return nil
+            } catch {
+                return error
+            }
+        }
     }
     enum Action: Equatable {
         case task
@@ -99,6 +154,10 @@ struct SettingsFeature {
         case autoDimToggled
         case hrZoneBoundaryStepped(zone: HeartRateZone, delta: Int)
         case hrZoneResetTapped
+        case restingOverrideChanged(String)
+        case restingOverrideCommitted
+        case maxOverrideChanged(String)
+        case maxOverrideCommitted
         case deviceManagement(DeviceManagementFeature.Action)
     }
     var body: some ReducerOf<Self> {
@@ -171,6 +230,38 @@ struct SettingsFeature {
                 return .none
             case .hrZoneResetTapped:
                 state.$riderProfile.withLock { $0 = $0.resettingZoneBoundaries() }
+                return .none
+            case .restingOverrideChanged(let text):
+                state.restingOverrideDraft = text
+                return .none
+            case .restingOverrideCommitted:
+                guard let draft = state.restingOverrideDraft else { return .none }
+                guard !draft.isEmpty else {
+                    state.$riderProfile.withLock { $0.restingOverrideBPM = nil }
+                    state.restingOverrideDraft = nil
+                    return .none
+                }
+                guard let bpm = Int(draft),
+                      let updated = try? state.riderProfile.settingRestingOverride(bpm, healthMax: state.healthMaxBPM)
+                else { return .none }   // invalid — the draft and its live error stay exactly as typed
+                state.$riderProfile.withLock { $0 = updated }
+                state.restingOverrideDraft = nil
+                return .none
+            case .maxOverrideChanged(let text):
+                state.maxOverrideDraft = text
+                return .none
+            case .maxOverrideCommitted:
+                guard let draft = state.maxOverrideDraft else { return .none }
+                guard !draft.isEmpty else {
+                    state.$riderProfile.withLock { $0.maxOverrideBPM = nil }
+                    state.maxOverrideDraft = nil
+                    return .none
+                }
+                guard let bpm = Int(draft),
+                      let updated = try? state.riderProfile.settingMaxOverride(bpm, healthResting: state.healthRestingBPM)
+                else { return .none }
+                state.$riderProfile.withLock { $0 = updated }
+                state.maxOverrideDraft = nil
                 return .none
             case .deviceManagement:
                 return .none
