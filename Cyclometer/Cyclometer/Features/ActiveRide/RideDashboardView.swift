@@ -103,9 +103,9 @@ struct RideDashboardView: View {
 
                     // W4 HR + W12 HR Zones
                     GridRow {
-                        HeartRateWidget(bpm: store.heartRateBPM, zone: store.hrZone)
+                        HeartRateWidget(bpm: store.heartRateBPM, zone: store.hrZone, source: store.hrSource)
                             .frame(height: unit)
-                        HRZonesWidget(zone: store.hrZone)
+                        HRZonesWidget(zone: store.hrZone, source: store.hrSource)
                             .frame(height: unit)
                     }
 
@@ -290,15 +290,29 @@ struct RideDashboardView: View {
 
 // MARK: - Dashboard Widgets
 
+/// Shared empty state for W4/W12 when neither BLE nor HealthKit has a reading (#161).
+private struct NoHRSourceLabel: View {
+    var body: some View {
+        Text("No HR Source")
+            .font(.cyCaption)
+            .foregroundStyle(.cyTextTertiary)
+    }
+}
+
 /// W4 — Heart Rate 1×1
 private struct HeartRateWidget: View {
     let bpm: Int
     let zone: Int
+    let source: HRSource
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetLabel("Heart Rate")
-            HeroNumber(bpm > 0 ? "\(bpm)" : "—", unit: "bpm").heroNumberSize(.medium)
+            if source == .none {
+                NoHRSourceLabel()
+            } else {
+                HeroNumber(bpm > 0 ? "\(bpm)" : "—", unit: "bpm").heroNumberSize(.medium)
+            }
             Spacer()
         }
         .padding(Spacing.sm)
@@ -315,11 +329,16 @@ private struct HeartRateWidget: View {
 /// W12 — HR Zones 1×1
 private struct HRZonesWidget: View {
     let zone: Int
+    let source: HRSource
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetLabel("Zone")
-            HeroNumber(zone == 0 ? "—" : "Z\(zone)", unit: "").heroNumberSize(.medium)
+            if source == .none {
+                NoHRSourceLabel()
+            } else {
+                HeroNumber(zone == 0 ? "—" : "Z\(zone)", unit: "").heroNumberSize(.medium)
+            }
             Spacer()
         }
         .padding(Spacing.sm)
@@ -378,6 +397,7 @@ private struct WeatherWidget: View {
                 speedKPH: 28.4,
                 heartRateBPM: 155,
                 hrZone: 4,
+                isHRPaired: true,
                 cadence: CadenceFeature.State(cadenceRPM: 87),
                 distanceMeters: 12300,
                 speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
@@ -408,6 +428,7 @@ private struct WeatherWidget: View {
                 speedKPH: 28.4,
                 heartRateBPM: 155,
                 hrZone: 4,
+                isHRPaired: true,
                 cadence: CadenceFeature.State(cadenceRPM: 87),
                 distanceMeters: 12300,
                 speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
@@ -432,6 +453,7 @@ private struct WeatherWidget: View {
                 elapsedSeconds: 1230,
                 heartRateBPM: 130,
                 hrZone: 3,
+                isHRPaired: true,
                 cadence: CadenceFeature.State(),
                 distanceMeters: 7600,
                 speed: SpeedFeature.State(speedMPS: 0, activeSpeedSource: .gps),
