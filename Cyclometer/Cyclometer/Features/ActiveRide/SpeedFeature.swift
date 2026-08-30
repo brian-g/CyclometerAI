@@ -1,12 +1,6 @@
 import ComposableArchitecture
 import Foundation
 
-enum SensorSource: Equatable, Sendable {
-    case none
-    case gps
-    case bleWheel
-}
-
 /// A single timestamped speed reading (m/s) used for the watermark sparkline.
 struct SpeedSample: Equatable, Sendable {
     let time: Date

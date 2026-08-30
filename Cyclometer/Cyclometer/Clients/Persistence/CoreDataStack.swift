@@ -10,11 +10,26 @@ final class CoreDataStack {
     let container: NSPersistentContainer
 
     private init() {
-        // REQUIRES: CyclometerTimeSeries.xcdatamodeld must exist in the Xcode target
-        // before this stack is first accessed. Create it via File → New → Data Model,
-        // name it "CyclometerTimeSeries", and add the TrackPoint entity.
-        // Accessing CoreDataStack.shared without the model file will fatalError here.
         container = NSPersistentContainer(name: "CyclometerTimeSeries")
+        Self.load(container)
+    }
+
+    #if DEBUG
+    /// Test-only: an isolated, ephemeral store instead of `.shared`'s. Deliberately still
+    /// SQLite-backed (pointed at /dev/null) rather than NSInMemoryStoreType —
+    /// NSBatchInsertRequest runs as SQL under the hood and isn't supported on the true
+    /// in-memory store type. `#if DEBUG` keeps this unreachable from a Release build, so
+    /// `.shared` stays the only way to get a CoreDataStack outside of tests.
+    init(inMemory: Bool) {
+        container = NSPersistentContainer(name: "CyclometerTimeSeries")
+        if inMemory {
+            container.persistentStoreDescriptions.first?.url = URL(fileURLWithPath: "/dev/null")
+        }
+        Self.load(container)
+    }
+    #endif
+
+    private static func load(_ container: NSPersistentContainer) {
         container.loadPersistentStores { _, error in
             if let error { fatalError("CoreData load failed: \(error)") }
         }

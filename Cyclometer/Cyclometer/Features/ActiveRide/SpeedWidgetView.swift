@@ -159,7 +159,8 @@ struct SpeedWidget: View {
         let (label, fg, bg): (String, Color, Color) = switch activeSpeedSource {
         case .gps:      ("GPS", .cyTextOnPrimary, .cyPrimary)
         case .bleWheel: ("BLE", .cyTextOnPrimary, .cyPrimary)
-        case .none:     ("--",  .cyTextTertiary,  .cyBgTertiary)
+        case .bleHR, .bleCadence, .blePower, .appleWatch, .none:
+                        ("--",  .cyTextTertiary,  .cyBgTertiary)
         }
         return Text(label)
             .font(.caption2.weight(.bold))
