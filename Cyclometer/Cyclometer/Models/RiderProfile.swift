@@ -133,6 +133,23 @@ extension RiderProfile {
         maxOverrideBPM ?? healthMax ?? Self.defaultMaxBPM
     }
 
+    /// PRD §9.4's 220 − age estimate, computed from the HealthKit `dateOfBirth`
+    /// characteristic. `nil` when the rider has none on file — the same "nothing to
+    /// offer" case `HealthKitClient.fetchDateOfBirth` already collapses denial and
+    /// absence into.
+    ///
+    /// `.gregorian` explicitly rather than `.current` — `dateOfBirthComponents()` is
+    /// a Gregorian characteristic, and the estimate must not vary with the device's
+    /// calendar locale. `referenceDate` is required rather than defaulted to `Date()`
+    /// so callers supply it from `@Dependency(\.date)`, keeping this testable.
+    static func estimatedMaxBPM(fromDateOfBirth dateOfBirth: DateComponents?, on referenceDate: Date) -> Int? {
+        guard let dateOfBirth,
+              let birthDate = Calendar(identifier: .gregorian).date(from: dateOfBirth),
+              let age = Calendar(identifier: .gregorian).dateComponents([.year], from: birthDate, to: referenceDate).year
+        else { return nil }
+        return 220 - age
+    }
+
     /// The rider's heart-rate reserve — the denominator of the Karvonen formula
     /// (DataModel.md §8).
     func hrReserve(healthResting: Int? = nil, healthMax: Int? = nil) -> Int {

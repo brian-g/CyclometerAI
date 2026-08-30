@@ -692,6 +692,7 @@ struct ActiveRideFeatureStateMachineTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -1183,6 +1184,7 @@ struct ActiveRideFeatureHeartRateTests {
     /// state is constructed.
     private func makeStore(
         profile: RiderProfile = RiderProfile(),
+        healthKitClient: HealthKitClient = .testValue,
         _ state: @autoclosure () -> ActiveRideFeature.State
             = ActiveRideFeature.State(recordingState: .active)
     ) -> TestStoreOf<ActiveRideFeature> {
@@ -1200,6 +1202,8 @@ struct ActiveRideFeatureHeartRateTests {
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
                 $0.locationClient = .testValue
+                $0.healthKitClient = healthKitClient
+                $0.date = .constant(Date(timeIntervalSince1970: 1_800_000_000))
                 $0.defaultFileStorage = storage
             }
         }
@@ -1256,6 +1260,67 @@ struct ActiveRideFeatureHeartRateTests {
         await store.send(.hrPairingChanged(true)) {
             $0.isHRPaired = true
         }
+    }
+
+    // MARK: - HealthKit-sourced resting/max (#160)
+
+    @Test("A HealthKit-scripted resting HR and date of birth resolve the zone, not the 60/190 defaults")
+    func healthKitTermsResolveZone() async {
+        let store = makeStore(healthKitClient: .mock(
+            restingHeartRate: 48,
+            dateOfBirth: DateComponents(year: 1990, month: 1, day: 1)
+        ))
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.healthProfileFetched) {
+            $0.healthRestingBPM = 48
+            // Fixed test clock is 2027-01-15; already 37 by 1990-01-01 → 220 − 37 = 183.
+            $0.healthMaxBPM = 183
+        }
+        // HRR 135 → (150 − 48) / 135 = 0.756 → zone 3, not the zone 2 the 60/190
+        // defaults would give the same reading.
+        await store.send(.heartRateUpdated(150)) {
+            $0.heartRateBPM = 150
+            $0.hrZone = 3
+        }
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("A manual override still wins over a HealthKit-scripted value")
+    func overrideBeatsHealthKitTerm() async {
+        let store = makeStore(
+            profile: RiderProfile(restingOverrideBPM: 45, maxOverrideBPM: 200),
+            healthKitClient: .mock(restingHeartRate: 48, dateOfBirth: DateComponents(year: 1990, month: 1, day: 1))
+        )
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.healthProfileFetched) {
+            $0.healthRestingBPM = 48
+            $0.healthMaxBPM = 183
+        }
+        // Same case as `overrideChangesDerivedZone`: HRR 155 → (165 − 45) / 155 =
+        // 0.774 → zone 3, using the override pair rather than the fetched 48/183.
+        await store.send(.heartRateUpdated(165)) {
+            $0.heartRateBPM = 165
+            $0.hrZone = 3
+        }
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("No date of birth on file falls back to the 190 default, not a crash or placeholder")
+    func noDateOfBirthFallsBackToDefaultMax() async {
+        let store = makeStore(healthKitClient: .mock(restingHeartRate: 48))
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.healthProfileFetched) {
+            $0.healthRestingBPM = 48
+            $0.healthMaxBPM = nil
+        }
+        #expect(store.state.riderProfile.resolvedMaxBPM(healthMax: store.state.healthMaxBPM) == 190)
+        await store.skipInFlightEffects(strict: false)
     }
 }
 

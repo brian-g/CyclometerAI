@@ -53,6 +53,29 @@ struct RiderProfileTests {
         #expect(RiderProfile(restingOverrideBPM: 50, maxOverrideBPM: 200).hrReserve() == 150)
     }
 
+    // MARK: - Age-based max HR estimate
+
+    @Test("220 minus age, for a birthday already reached this year")
+    func estimatedMaxBPMForBirthdayAlreadyReached() {
+        let dob = DateComponents(year: 1990, month: 1, day: 1)
+        let reference = DateComponents(calendar: .init(identifier: .gregorian), year: 2026, month: 8, day: 30).date!
+        // Turned 36 back in January; 220 − 36 = 184.
+        #expect(RiderProfile.estimatedMaxBPM(fromDateOfBirth: dob, on: reference) == 184)
+    }
+
+    @Test("Age rounds down when this year's birthday has not happened yet")
+    func estimatedMaxBPMForBirthdayNotYetReached() {
+        let dob = DateComponents(year: 1990, month: 12, day: 25)
+        let reference = DateComponents(calendar: .init(identifier: .gregorian), year: 2026, month: 8, day: 30).date!
+        // Still 35 until December; 220 − 35 = 185, not 184.
+        #expect(RiderProfile.estimatedMaxBPM(fromDateOfBirth: dob, on: reference) == 185)
+    }
+
+    @Test("No date of birth on file yields no estimate")
+    func estimatedMaxBPMWithNoDateOfBirth() {
+        #expect(RiderProfile.estimatedMaxBPM(fromDateOfBirth: nil, on: Date()) == nil)
+    }
+
     // MARK: - Validation
 
     @Test("A resting override inside the bounds is applied")

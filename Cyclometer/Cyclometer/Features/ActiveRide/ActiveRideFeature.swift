@@ -24,6 +24,8 @@ struct ActiveRideFeature {
     @Dependency(\.variaRadarClient) var variaRadarClient
     @Dependency(\.locationClient) var locationClient
     @Dependency(\.permissionsClient) var permissionsClient
+    @Dependency(\.healthKitClient) var healthKitClient
+    @Dependency(\.date) var date
 
     @ObservableState
     struct State: Equatable {
@@ -33,6 +35,10 @@ struct ActiveRideFeature {
         var heartRateBPM: Int = 0
         var hrZone: Int = 0
         var isHRPaired: Bool = false
+        /// HealthKit-resolved terms fetched once at ride start (#160), threaded into
+        /// every `riderProfile` resolver call below instead of the defaulted `nil`.
+        var healthRestingBPM: Int? = nil
+        var healthMaxBPM: Int? = nil
         var cadence = CadenceFeature.State()
         var distanceMeters: Double = 0
         var distanceKM: Double { distanceMeters / 1000.0 }
@@ -119,6 +125,7 @@ struct ActiveRideFeature {
         case autoPauseTriggered
         case heartRateUpdated(Int)
         case hrPairingChanged(Bool)
+        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?)
         case cadence(CadenceFeature.Action)
         case elapsedTick
         case radarTargetsUpdated([RadarTarget])
@@ -174,6 +181,12 @@ struct ActiveRideFeature {
                         for await paired in bleHRClient.pairingStatus() {
                             await send(.hrPairingChanged(paired))
                         }
+                    },
+                    .run { [healthKitClient, date] send in
+                        async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
+                        async let dob = try? healthKitClient.fetchDateOfBirth()
+                        let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
+                        await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM))
                     },
                     .run { [variaRadarClient] send in
                         await variaRadarClient.startScanning()
@@ -243,7 +256,11 @@ struct ActiveRideFeature {
                 // Through the profile's own facade rather than unpacking it into
                 // maxHR/restingHR here — M5's HealthKit terms then thread through one
                 // place instead of every call site that re-assembles the pair.
-                state.hrZone = state.riderProfile.zone(forBPM: bpm).rawValue
+                state.hrZone = state.riderProfile.zone(
+                    forBPM: bpm,
+                    healthResting: state.healthRestingBPM,
+                    healthMax: state.healthMaxBPM
+                ).rawValue
                 return .none
             case .hrPairingChanged(let paired):
                 state.isHRPaired = paired
@@ -251,6 +268,10 @@ struct ActiveRideFeature {
                     state.heartRateBPM = 0
                     state.hrZone = 0
                 }
+                return .none
+            case .healthProfileFetched(let restingBPM, let maxBPM):
+                state.healthRestingBPM = restingBPM
+                state.healthMaxBPM = maxBPM
                 return .none
             case .cadence:
                 return .none

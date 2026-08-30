@@ -102,6 +102,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .task { await store.send(.task).finish() }
         .onChange(of: isCircumferenceFocused) { _, isFocused in
             if !isFocused { store.send(.customCircumferenceCommitted) }
         }

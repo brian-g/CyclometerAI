@@ -10,6 +10,8 @@ enum WheelSelection: Hashable, Sendable {
 @Reducer
 struct SettingsFeature {
     @Dependency(\.bleCSCClient) var bleCSCClient
+    @Dependency(\.healthKitClient) var healthKitClient
+    @Dependency(\.date) var date
 
     /// One row of the S12 HR Zones table — what `SettingsView` reads to build the
     /// section. Rows 1-4 carry a working `Stepper` on that row's upper boundary;
@@ -36,6 +38,10 @@ struct SettingsFeature {
         /// Only matters when the stored circumference happens to equal a preset —
         /// it keeps the custom field on screen while the rider is typing.
         var userChoseCustom: Bool = false
+        /// HealthKit-resolved terms fetched once on screen appearance (#160), threaded
+        /// into `hrZoneRows` and the boundary stepper instead of the defaulted `nil`.
+        var healthRestingBPM: Int? = nil
+        var healthMaxBPM: Int? = nil
 
         /// Read through to storage rather than mirrored in feature state: both have
         /// to survive a relaunch, and `preferredUnit` also has to agree with whatever
@@ -55,7 +61,7 @@ struct SettingsFeature {
                 HRZoneRow(
                     zone: zone,
                     displayName: zone.s12DisplayName,
-                    range: riderProfile.bounds(for: zone),
+                    range: riderProfile.bounds(for: zone, healthResting: healthRestingBPM, healthMax: healthMaxBPM),
                     isSteppable: zone != .zone5
                 )
             }
@@ -83,6 +89,8 @@ struct SettingsFeature {
         }
     }
     enum Action: Equatable {
+        case task
+        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?)
         case unitSelected(UnitSystem)
         case wheelSelectionChanged(WheelSelection)
         case customCircumferenceChanged(String)
@@ -100,6 +108,17 @@ struct SettingsFeature {
 
         Reduce { state, action in
             switch action {
+            case .task:
+                return .run { [healthKitClient, date] send in
+                    async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
+                    async let dob = try? healthKitClient.fetchDateOfBirth()
+                    let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
+                    await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM))
+                }
+            case .healthProfileFetched(let restingBPM, let maxBPM):
+                state.healthRestingBPM = restingBPM
+                state.healthMaxBPM = maxBPM
+                return .none
             case .unitSelected(let unit):
                 state.$preferences.withLock { $0.preferredUnit = unit }
                 return .none
@@ -137,8 +156,16 @@ struct SettingsFeature {
             case .hrZoneBoundaryStepped(let zone, let delta):
                 // An out-of-range step is a silent no-op — what makes the Stepper
                 // stop naturally at a clamp, with no separate disabled-state to track.
-                guard let current = state.riderProfile.resolvedBoundaryBPM(afterZone: zone),
-                      let updated = try? state.riderProfile.settingBoundaryOverride(current + delta, afterZone: zone)
+                guard let current = state.riderProfile.resolvedBoundaryBPM(
+                    afterZone: zone,
+                    healthResting: state.healthRestingBPM,
+                    healthMax: state.healthMaxBPM
+                ), let updated = try? state.riderProfile.settingBoundaryOverride(
+                    current + delta,
+                    afterZone: zone,
+                    healthResting: state.healthRestingBPM,
+                    healthMax: state.healthMaxBPM
+                )
                 else { return .none }
                 state.$riderProfile.withLock { $0 = updated }
                 return .none
