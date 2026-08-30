@@ -104,14 +104,17 @@ extension PermissionsClient {
 
     // MARK: HealthKit types
 
+    /// Named once so `HealthKitClient`'s queries reference the exact identifiers this
+    /// authorization set declares, rather than reconstructing them ad hoc and risking
+    /// silent drift between what's requested and what's queried.
+    static let heartRateType = HKQuantityType(.heartRate)
+    static let restingHeartRateType = HKQuantityType(.restingHeartRate)
+    static let dateOfBirthType = HKCharacteristicType(.dateOfBirth)
+
     /// PRD.md §9.4 — resting HR and max HR feed the Karvonen zones, date of birth backs
     /// the age-based max-HR estimate when no measured maximum exists.
     static var healthReadTypes: Set<HKObjectType> {
-        [
-            HKQuantityType(.heartRate),
-            HKQuantityType(.restingHeartRate),
-            HKCharacteristicType(.dateOfBirth),
-        ]
+        [heartRateType, restingHeartRateType, dateOfBirthType]
     }
 
     /// UX.md §S10 — an `HKWorkout` is written at ride end so the ride lands in the
