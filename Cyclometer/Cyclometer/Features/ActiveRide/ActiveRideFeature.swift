@@ -5,6 +5,21 @@ enum RideRecordingState: Equatable, Sendable {
     case idle, active, paused, ended
 }
 
+/// The dashboard's active HR source (#161). BLE always wins when both are present;
+/// see `ActiveRideFeature.State.hrSource`.
+enum HRSource: Equatable, Sendable {
+    case none, bleStrap, healthKit
+}
+
+/// A HealthKit HR reading plus when it arrived, so a reading that's gone stale can be
+/// told apart from a fresh one (#161). Bundled into one Optional rather than two
+/// separately-nullable fields — a bpm and a timestamp that must always be set or
+/// cleared together are one invariant as a struct instead of two to keep in sync.
+struct HealthKitHRSample: Equatable, Sendable {
+    let bpm: Int
+    let receivedAt: Date
+}
+
 @Reducer
 struct ActiveRideFeature {
 
@@ -18,6 +33,14 @@ struct ActiveRideFeature {
     /// `zeroSpeedSeconds`, so auto-end cannot trigger from a stop auto-pause already
     /// caught. No PRD-specified threshold exists; chosen to match a brief stop.
     static let autoPauseZeroSpeedSeconds = 10
+
+    /// How old a HealthKit HR sample can be and still count as "live" (#161).
+    /// `HealthKitClient.heartRateStream()`'s own doc comment: outside an active workout
+    /// the Watch's HR writes land minutes apart, so this can't be tight enough to
+    /// require near-continuous samples without defeating the fallback's entire point —
+    /// but it still has to reject a reading old enough that showing it as current would
+    /// mislead the rider. Five minutes is the balance chosen between those two.
+    static let healthKitHRStalenessWindow: TimeInterval = 5 * 60
 
     @Dependency(\.continuousClock) var clock
     @Dependency(\.bleHRClient) var bleHRClient
@@ -39,6 +62,22 @@ struct ActiveRideFeature {
         /// every `riderProfile` resolver call below instead of the defaulted `nil`.
         var healthRestingBPM: Int? = nil
         var healthMaxBPM: Int? = nil
+        /// Live HR shadow value from HealthKit (#161), kept fresh even while BLE is
+        /// the displayed source — mirrors `SpeedFeature.State.latestGPSSpeedMPS` — so a
+        /// BLE disconnect has something to promote to immediately. `nil` both when
+        /// nothing has arrived yet and once a sample ages out (see
+        /// `healthKitHRStalenessWindow`) — the two are indistinguishable from here on
+        /// out, which is correct: neither is safe to show as a live reading.
+        var healthKitHRSample: HealthKitHRSample? = nil
+        /// Computed, not stored: every existing `State(...)` literal that sets
+        /// `heartRateBPM`/`isHRPaired` without knowing about this field keeps deriving
+        /// the right answer, and the value can never drift out of sync with the two
+        /// fields it reads.
+        var hrSource: HRSource {
+            if isHRPaired { return .bleStrap }
+            if healthKitHRSample != nil { return .healthKit }
+            return .none
+        }
         var cadence = CadenceFeature.State()
         var distanceMeters: Double = 0
         var distanceKM: Double { distanceMeters / 1000.0 }
@@ -126,6 +165,7 @@ struct ActiveRideFeature {
         case heartRateUpdated(Int)
         case hrPairingChanged(Bool)
         case healthProfileFetched(restingBPM: Int?, maxBPM: Int?)
+        case healthKitHeartRateUpdated(Int)
         case cadence(CadenceFeature.Action)
         case elapsedTick
         case radarTargetsUpdated([RadarTarget])
@@ -187,6 +227,11 @@ struct ActiveRideFeature {
                         async let dob = try? healthKitClient.fetchDateOfBirth()
                         let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
                         await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM))
+                    },
+                    .run { [healthKitClient] send in
+                        for await bpm in healthKitClient.heartRateStream() {
+                            await send(.healthKitHeartRateUpdated(bpm))
+                        }
                     },
                     .run { [variaRadarClient] send in
                         await variaRadarClient.startScanning()
@@ -252,19 +297,20 @@ struct ActiveRideFeature {
                 state.isAutoPaused = true
                 return .none
             case .heartRateUpdated(let bpm):
-                state.heartRateBPM = bpm
-                // Through the profile's own facade rather than unpacking it into
-                // maxHR/restingHR here — M5's HealthKit terms then thread through one
-                // place instead of every call site that re-assembles the pair.
-                state.hrZone = state.riderProfile.zone(
-                    forBPM: bpm,
-                    healthResting: state.healthRestingBPM,
-                    healthMax: state.healthMaxBPM
-                ).rawValue
+                applyHeartRateReading(bpm, to: &state)
                 return .none
             case .hrPairingChanged(let paired):
                 state.isHRPaired = paired
-                if !paired {
+                guard !paired else { return .none }
+                // BLE is gone — promote whatever HealthKit shadow value is already on
+                // hand immediately (#161). There is no grace window to wait out here:
+                // unlike `BLECSCClient.connectionState()`, `bleHRClient.pairingStatus()`
+                // has no `.reconnecting` substate — `false` is already the fully
+                // committed "strap is gone now" signal.
+                expireStaleHealthKitSample(in: &state)
+                if let sample = state.healthKitHRSample {
+                    applyHeartRateReading(sample.bpm, to: &state)
+                } else {
                     state.heartRateBPM = 0
                     state.hrZone = 0
                 }
@@ -273,10 +319,31 @@ struct ActiveRideFeature {
                 state.healthRestingBPM = restingBPM
                 state.healthMaxBPM = maxBPM
                 return .none
+            case .healthKitHeartRateUpdated(let bpm):
+                // A HealthKit sample can never legitimately be ≤0 bpm; guarding at
+                // ingestion (rather than wherever `healthKitHRSample` is later read)
+                // keeps every downstream reader — the disconnect fallback above included
+                // — from having to re-derive "0 isn't a real reading" on its own.
+                guard bpm > 0 else { return .none }
+                state.healthKitHRSample = HealthKitHRSample(bpm: bpm, receivedAt: date.now)
+                // BLE has priority (PRD §8.4); while paired, this is a silent shadow
+                // update that doesn't touch the displayed reading — mirrors
+                // SpeedFeature.gpsSpeedReceived's identical BLE-vs-GPS guard.
+                guard !state.isHRPaired else { return .none }
+                applyHeartRateReading(bpm, to: &state)
+                return .none
             case .cadence:
                 return .none
             case .elapsedTick:
                 guard state.recordingState == .active else { return .none }
+                // A HealthKit-derived reading can go stale while it's the one on
+                // screen, with no disconnect event to catch it — piggyback the check
+                // on this once-a-second tick rather than adding a second timer (#161).
+                expireStaleHealthKitSample(in: &state)
+                if !state.isHRPaired, state.healthKitHRSample == nil {
+                    state.heartRateBPM = 0
+                    state.hrZone = 0
+                }
                 state.elapsedSeconds += 1
                 state.distanceMeters += max(state.speed.speedMPS ?? 0, 0)
                 if (state.speed.speedMPS ?? 0) == 0 {
@@ -386,5 +453,30 @@ struct ActiveRideFeature {
             }
         }
         .ifLet(\.$finishAlert, action: \.finishAlert)
+    }
+
+    /// Applies a resolved bpm reading — from either source — to the displayed state.
+    /// Through the profile's own facade rather than unpacking it into maxHR/restingHR
+    /// here — M5's HealthKit terms then thread through one place instead of every call
+    /// site that re-assembles the pair. Factored out (#161) so BLE, HealthKit, and the
+    /// disconnect fallback can never derive the zone differently by accident.
+    private func applyHeartRateReading(_ bpm: Int, to state: inout State) {
+        state.heartRateBPM = bpm
+        state.hrZone = state.riderProfile.zone(
+            forBPM: bpm,
+            healthResting: state.healthRestingBPM,
+            healthMax: state.healthMaxBPM
+        ).rawValue
+    }
+
+    /// Drops a HealthKit shadow sample once it's aged past `healthKitHRStalenessWindow`
+    /// (#161), so `hrSource` never keeps reporting `.healthKit` for a reading no longer
+    /// safe to call live. Called both continuously (`.elapsedTick`) and at the moment
+    /// of promotion (`.hrPairingChanged` disconnect) so the two paths can't disagree.
+    private func expireStaleHealthKitSample(in state: inout State) {
+        guard let sample = state.healthKitHRSample,
+              date.now.timeIntervalSince(sample.receivedAt) >= Self.healthKitHRStalenessWindow
+        else { return }
+        state.healthKitHRSample = nil
     }
 }

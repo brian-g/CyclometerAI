@@ -1177,6 +1177,9 @@ struct ActiveRideFeatureAutoPauseTests {
 @Suite("ActiveRideFeature — heart rate")
 struct ActiveRideFeatureHeartRateTests {
 
+    /// The fixed `@Dependency(\.date)` every store in this suite is built with.
+    private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
+
     /// Storage is quarantined per store because the zone now derives from the shared
     /// `RiderProfile` (#96) — without this the assertions would depend on whatever
     /// `rider-profile.json` happens to exist on the machine. The state is built
@@ -1203,7 +1206,7 @@ struct ActiveRideFeatureHeartRateTests {
                 $0.bleHRClient = .testValue
                 $0.locationClient = .testValue
                 $0.healthKitClient = healthKitClient
-                $0.date = .constant(Date(timeIntervalSince1970: 1_800_000_000))
+                $0.date = .constant(Self.fixedNow)
                 $0.defaultFileStorage = storage
             }
         }
@@ -1321,6 +1324,131 @@ struct ActiveRideFeatureHeartRateTests {
         }
         #expect(store.state.riderProfile.resolvedMaxBPM(healthMax: store.state.healthMaxBPM) == 190)
         await store.skipInFlightEffects(strict: false)
+    }
+
+    // MARK: - BLE → HealthKit fallback (#161)
+
+    @Test("A live HealthKit BPM reaches the dashboard when nothing is paired")
+    func healthKitStreamFeedsDashboardWhenUnpaired() async {
+        let store = makeStore(healthKitClient: .mock(heartRateSamples: [72]))
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        // An empty profile resolves to maxHR 190 / restingHR 60 → HRR 130.
+        // (72 − 60) / 130 = 0.092 → zone 1.
+        await store.receive(\.healthKitHeartRateUpdated) {
+            $0.healthKitHRSample = HealthKitHRSample(bpm: 72, receivedAt: Self.fixedNow)
+            $0.heartRateBPM = 72
+            $0.hrZone = 1
+        }
+        #expect(store.state.hrSource == .healthKit)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("BLE takes precedence over a concurrent HealthKit reading")
+    func bleTakesPrecedenceOverConcurrentHealthKit() async {
+        let store = makeStore(
+            ActiveRideFeature.State(recordingState: .active, heartRateBPM: 150, hrZone: 2, isHRPaired: true)
+        )
+        // Recorded only as the shadow value — the displayed bpm/zone don't move.
+        await store.send(.healthKitHeartRateUpdated(72)) {
+            $0.healthKitHRSample = HealthKitHRSample(bpm: 72, receivedAt: Self.fixedNow)
+        }
+        #expect(store.state.heartRateBPM == 150)
+        #expect(store.state.hrZone == 2)
+        #expect(store.state.hrSource == .bleStrap)
+    }
+
+    @Test("Disconnecting the BLE strap falls back to the last known HealthKit reading")
+    func disconnectFallsBackToHealthKitShadowValue() async {
+        let store = makeStore(
+            ActiveRideFeature.State(recordingState: .active, heartRateBPM: 150, hrZone: 2, isHRPaired: true)
+        )
+        await store.send(.healthKitHeartRateUpdated(72)) {
+            $0.healthKitHRSample = HealthKitHRSample(bpm: 72, receivedAt: Self.fixedNow)
+        }
+        // Same zone math as `healthKitStreamFeedsDashboardWhenUnpaired`: 72 → zone 1.
+        await store.send(.hrPairingChanged(false)) {
+            $0.isHRPaired = false
+            $0.heartRateBPM = 72
+            $0.hrZone = 1
+        }
+        #expect(store.state.hrSource == .healthKit)
+    }
+
+    @Test("A HealthKit reading older than the staleness window is not promoted on disconnect")
+    func staleHealthKitSampleIsNotPromotedOnDisconnect() async {
+        let store = makeStore(
+            ActiveRideFeature.State(
+                recordingState: .active,
+                heartRateBPM: 150,
+                hrZone: 2,
+                isHRPaired: true,
+                healthKitHRSample: HealthKitHRSample(
+                    bpm: 72,
+                    receivedAt: Self.fixedNow.addingTimeInterval(-ActiveRideFeature.healthKitHRStalenessWindow)
+                )
+            )
+        )
+        await store.send(.hrPairingChanged(false)) {
+            $0.isHRPaired = false
+            $0.healthKitHRSample = nil
+            $0.heartRateBPM = 0
+            $0.hrZone = 0
+        }
+        #expect(store.state.hrSource == .none)
+    }
+
+    @Test("A HealthKit reading expires on its own once it goes stale as the active source")
+    func staleHealthKitSampleExpiresOnElapsedTick() async {
+        let store = makeStore(
+            ActiveRideFeature.State(
+                recordingState: .active,
+                heartRateBPM: 72,
+                hrZone: 1,
+                isHRPaired: false,
+                healthKitHRSample: HealthKitHRSample(
+                    bpm: 72,
+                    receivedAt: Self.fixedNow.addingTimeInterval(-ActiveRideFeature.healthKitHRStalenessWindow)
+                )
+            )
+        )
+        await store.send(.elapsedTick) {
+            $0.healthKitHRSample = nil
+            $0.heartRateBPM = 0
+            $0.hrZone = 0
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = 1
+        }
+        #expect(store.state.hrSource == .none)
+    }
+
+    @Test("Reconnecting the BLE strap switches back over HealthKit immediately")
+    func reconnectingSwitchesBackToBLE() async {
+        let store = makeStore(
+            ActiveRideFeature.State(
+                recordingState: .active,
+                heartRateBPM: 72,
+                hrZone: 1,
+                isHRPaired: false,
+                healthKitHRSample: HealthKitHRSample(bpm: 72, receivedAt: Self.fixedNow)
+            )
+        )
+        #expect(store.state.hrSource == .healthKit)
+        // `hrSource` is computed, so this flips the instant pairing does — no new
+        // BLE sample has to arrive first.
+        await store.send(.hrPairingChanged(true)) {
+            $0.isHRPaired = true
+        }
+        #expect(store.state.hrSource == .bleStrap)
+    }
+
+    @Test("With neither source available, the dashboard reports no HR source")
+    func noSourceShowsNoHRSource() async {
+        let store = makeStore()
+        #expect(store.state.hrSource == .none)
+        #expect(store.state.heartRateBPM == 0)
+        #expect(store.state.hrZone == 0)
     }
 }
 

@@ -125,6 +125,15 @@ extension HealthKitClient {
     /// an error ever replays a rider's historical archive as if it just happened. On
     /// any error the query is re-established after `heartRateStreamRetryDelay` rather
     /// than ending the stream for good.
+    ///
+    /// **Not a 1Hz feed.** This only yields whatever HR samples the Watch has already
+    /// written to HealthKit, and the Watch does not write at 1Hz — outside an active
+    /// workout session those writes land minutes apart, and even during one they come
+    /// in multi-second batches. `ActiveRideFeature`'s fallback tile updates in sparse,
+    /// irregular bursts on this source, by design — a true live per-second HR feed
+    /// needs a Watch companion app streaming directly (`HKLiveWorkoutBuilder`/
+    /// `HKWorkoutSession` on-device, pushed over Watch Connectivity), which is PRD
+    /// §S17's Apple Watch companion, currently Phase 2/deferred.
     private static func makeHeartRateStream(_ store: HKHealthStore) -> AsyncStream<Int> {
         AsyncStream { continuation in
             let task = Task {
