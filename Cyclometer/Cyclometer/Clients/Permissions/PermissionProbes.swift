@@ -50,7 +50,7 @@ struct PermissionProbes: Sendable {
 /// `HKHealthStore` nor `CMMotionActivityManager` is `Sendable`, and access to both is
 /// confined to the closures below.
 private final class LiveFrameworkHandles: @unchecked Sendable {
-    let healthStore = HKHealthStore()
+    let healthStore = HealthKitStore.shared
     /// Retained deliberately: `queryActivityStarting` calls its handler asynchronously,
     /// and a manager released in the meantime never delivers.
     let motionManager = CMMotionActivityManager()
