@@ -59,6 +59,8 @@ final class SettingsSnapshotTests: XCTestCase {
                 $0.bleCSCClient = .testValue
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
+                $0.healthKitClient = .testValue
+                $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
                 $0.continuousClock = TestClock()
                 $0.defaultFileStorage = storage
             }

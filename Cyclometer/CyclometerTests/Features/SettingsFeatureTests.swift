@@ -24,7 +24,8 @@ struct SettingsFeatureTests {
     private func makeStore(
         circumferenceMM: Int = WheelPreset.default.circumferenceMM,
         riderProfile: RiderProfile = RiderProfile(),
-        bleCSCClient: BLECSCClient = .testValue
+        bleCSCClient: BLECSCClient = .testValue,
+        healthKitClient: HealthKitClient = .testValue
     ) -> TestStoreOf<SettingsFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -38,6 +39,8 @@ struct SettingsFeatureTests {
                 SettingsFeature()
             } withDependencies: {
                 $0.bleCSCClient = bleCSCClient
+                $0.healthKitClient = healthKitClient
+                $0.date = .constant(Date(timeIntervalSince1970: 1_800_000_000))
                 $0.defaultFileStorage = storage
             }
         }
@@ -246,6 +249,24 @@ struct SettingsFeatureTests {
         await store.send(.hrZoneBoundaryStepped(zone: .zone1, delta: 1))
 
         #expect(store.state.riderProfile.zone1CeilingOverrideBPM == 149)
+    }
+
+    @Test("`.task` fetches HealthKit terms and hrZoneRows reflect them, not the 60/190 defaults (#160)")
+    func taskPopulatesHRZoneRowsFromHealthKit() async {
+        let store = makeStore(healthKitClient: .mock(
+            restingHeartRate: 48,
+            dateOfBirth: DateComponents(year: 1990, month: 1, day: 1)
+        ))
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.healthProfileFetched) {
+            $0.healthRestingBPM = 48
+            // Fixed test clock is 2027-01-15; already 37 by 1990-01-01 → 220 − 37 = 183.
+            $0.healthMaxBPM = 183
+        }
+
+        #expect(store.state.hrZoneRows.map(\.range) == [48...128, 129...142, 143...155, 156...169, 170...183])
     }
 
     @Test(".hrZoneResetTapped clears every manual boundary override")
