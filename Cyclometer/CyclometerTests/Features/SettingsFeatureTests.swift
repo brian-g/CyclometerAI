@@ -282,4 +282,160 @@ struct SettingsFeatureTests {
 
         #expect(store.state.hrZoneRows.map(\.range) == [60...137, 138...150, 151...163, 164...176, 177...190])
     }
+
+    // MARK: - Resting/max HR overrides (#162)
+
+    @Test("A valid resting HR override is applied and immediately reflected in the zone table")
+    func restingOverrideWithinRangeIsAppliedAndPersists() async {
+        let store = makeStore()
+
+        await store.send(.restingOverrideChanged("52")) {
+            $0.restingOverrideDraft = "52"
+        }
+        #expect(store.state.restingOverrideValidationError == nil)
+
+        await store.send(.restingOverrideCommitted) {
+            $0.$riderProfile.withLock { $0.restingOverrideBPM = 52 }
+            $0.restingOverrideDraft = nil
+        }
+
+        #expect(store.state.hrZoneRows[0].range.lowerBound == 52)
+    }
+
+    @Test("A valid max HR override is applied and immediately reflected in the zone table")
+    func maxOverrideWithinRangeIsAppliedAndPersists() async {
+        let store = makeStore()
+
+        await store.send(.maxOverrideChanged("200")) {
+            $0.maxOverrideDraft = "200"
+        }
+        #expect(store.state.maxOverrideValidationError == nil)
+
+        await store.send(.maxOverrideCommitted) {
+            $0.$riderProfile.withLock { $0.maxOverrideBPM = 200 }
+            $0.maxOverrideDraft = nil
+        }
+
+        #expect(store.state.hrZoneRows[4].range.upperBound == 200)
+    }
+
+    @Test("An out-of-range resting entry is rejected with a specific error, and the draft is not dropped")
+    func restingOverrideOutOfRangeShowsSpecificError() async {
+        let store = makeStore()
+
+        await store.send(.restingOverrideChanged("20")) {
+            $0.restingOverrideDraft = "20"
+        }
+        #expect(store.state.restingOverrideValidationError == .restingOutOfRange)
+
+        await store.send(.restingOverrideCommitted)   // rejected — no state mutation at all
+
+        #expect(store.state.restingOverrideDraft == "20")
+        #expect(store.state.riderProfile.restingOverrideBPM == nil)
+        #expect(store.state.restingOverrideValidationError == .restingOutOfRange)
+    }
+
+    @Test("An out-of-range max entry is rejected with a specific error, and the draft is not dropped")
+    func maxOverrideOutOfRangeShowsSpecificError() async {
+        let store = makeStore()
+
+        await store.send(.maxOverrideChanged("50")) {
+            $0.maxOverrideDraft = "50"
+        }
+        #expect(store.state.maxOverrideValidationError == .maxOutOfRange)
+
+        await store.send(.maxOverrideCommitted)
+
+        #expect(store.state.maxOverrideDraft == "50")
+        #expect(store.state.riderProfile.maxOverrideBPM == nil)
+    }
+
+    @Test("A resting entry that leaves too small a reserve against max is rejected with the reserve-specific error")
+    func restingOverrideTooCloseToMaxShowsReserveError() async {
+        // 95 is within restingValidRange (30-100) on its own; only incoherent
+        // against this profile's overridden max of 100 (reserve of 5 < 8).
+        let store = makeStore(riderProfile: RiderProfile(maxOverrideBPM: 100))
+
+        await store.send(.restingOverrideChanged("95")) {
+            $0.restingOverrideDraft = "95"
+        }
+        #expect(store.state.restingOverrideValidationError == .reserveTooSmall)
+
+        await store.send(.restingOverrideCommitted)
+
+        #expect(store.state.riderProfile.restingOverrideBPM == nil)
+    }
+
+    @Test("A max entry that leaves too small a reserve against resting is rejected with the reserve-specific error")
+    func maxOverrideTooCloseToRestingShowsReserveError() async {
+        // 100 is within maxValidRange (100-230) on its own; only incoherent
+        // against this profile's overridden resting of 95 (reserve of 5 < 8).
+        let store = makeStore(riderProfile: RiderProfile(restingOverrideBPM: 95))
+
+        await store.send(.maxOverrideChanged("100")) {
+            $0.maxOverrideDraft = "100"
+        }
+        #expect(store.state.maxOverrideValidationError == .reserveTooSmall)
+
+        await store.send(.maxOverrideCommitted)
+
+        #expect(store.state.riderProfile.maxOverrideBPM == nil)
+    }
+
+    @Test("Clearing a resting override reverts the field and zone table to the resolved default")
+    func clearingRestingOverrideReverts() async {
+        let store = makeStore(riderProfile: RiderProfile(restingOverrideBPM: 52))
+        #expect(store.state.restingOverrideText == "52")
+
+        await store.send(.restingOverrideChanged("")) {
+            $0.restingOverrideDraft = ""
+        }
+        await store.send(.restingOverrideCommitted) {
+            $0.$riderProfile.withLock { $0.restingOverrideBPM = nil }
+            $0.restingOverrideDraft = nil
+        }
+
+        #expect(store.state.restingOverrideText == "")
+        #expect(store.state.restingOverridePlaceholder == "60")
+        #expect(store.state.hrZoneRows.map(\.range) == [60...137, 138...150, 151...163, 164...176, 177...190])
+    }
+
+    @Test("Clearing a max override reverts the field and zone table to the resolved default")
+    func clearingMaxOverrideReverts() async {
+        let store = makeStore(riderProfile: RiderProfile(maxOverrideBPM: 200))
+        #expect(store.state.maxOverrideText == "200")
+
+        await store.send(.maxOverrideChanged("")) {
+            $0.maxOverrideDraft = ""
+        }
+        await store.send(.maxOverrideCommitted) {
+            $0.$riderProfile.withLock { $0.maxOverrideBPM = nil }
+            $0.maxOverrideDraft = nil
+        }
+
+        #expect(store.state.maxOverrideText == "")
+        #expect(store.state.maxOverridePlaceholder == "190")
+        #expect(store.state.hrZoneRows.map(\.range) == [60...137, 138...150, 151...163, 164...176, 177...190])
+    }
+
+    @Test("Placeholders reflect HealthKit-fetched resting HR and the age-based max estimate when no override is set")
+    func placeholdersReflectHealthKitValues() async {
+        let store = makeStore(healthKitClient: .mock(
+            restingHeartRate: 48,
+            dateOfBirth: DateComponents(year: 1990, month: 1, day: 1)
+        ))
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.healthProfileFetched) {
+            $0.healthRestingBPM = 48
+            // Fixed test clock is 2027-01-15; already 37 by 1990-01-01 → 220 − 37 = 183.
+            $0.healthMaxBPM = 183
+        }
+
+        #expect(store.state.restingOverridePlaceholder == "48")
+        #expect(store.state.maxOverridePlaceholder == "183")
+        #expect(store.state.restingOverrideText == "")
+        #expect(store.state.maxOverrideText == "")
+    }
 }
