@@ -279,6 +279,58 @@ struct PersistenceClientTests {
         }
     }
 
+    // MARK: - Ride.RecordingState query behavior (#171 follow-up)
+
+    // SwiftData's #Predicate macro compiles a comparison against a captured
+    // RawRepresentable-enum value fine, but faults at runtime — confirmed live via
+    // a device log archive ("Unsupported Predicate: Captured/constant values of
+    // type 'RecordingState' are not supported") after AppView's Rides list silently
+    // never showed a completed ride. This documents the failure so a future revert
+    // to a #Predicate-based filter breaks a test instead of shipping silently broken.
+    @Test("a #Predicate comparing recordingState against a captured enum value throws at fetch time")
+    func recordingStatePredicateThrowsAtRuntime() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        try await client.createRide(UUID(), Date())
+
+        let context = ModelContext(swiftDataStack.container)
+        let ended = Ride.RecordingState.ended
+        let descriptor = FetchDescriptor<Ride>(predicate: #Predicate<Ride> { $0.recordingState == ended })
+
+        #expect(throws: (any Error).self) {
+            try context.fetch(descriptor)
+        }
+    }
+
+    @Test("filtering fetched Rides in Swift (AppView's approach) returns only .ended rides, newest first")
+    func endedRidesFilteredInSwift() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let base = Date()
+        let activeId = UUID()
+        let pausedId = UUID()
+        let endedId = UUID()
+
+        try await client.createRide(activeId, base)
+        try await client.createRide(pausedId, base.addingTimeInterval(60))
+        try await client.createRide(endedId, base.addingTimeInterval(120))
+
+        let pauseUpdate = RideSummaryUpdate(
+            rideId: pausedId, recordingState: .paused,
+            durationSeconds: 30, distanceMeters: 100, averageSpeedMPS: 3, maxSpeedMPS: 4
+        )
+        try await client.updateRideSummary(pauseUpdate)
+        let finishUpdate = RideSummaryUpdate(
+            rideId: endedId, recordingState: .ended,
+            durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
+        )
+        try await client.finalizeRide(endedId, base.addingTimeInterval(180), finishUpdate)
+
+        let context = ModelContext(swiftDataStack.container)
+        let descriptor = FetchDescriptor<Ride>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
+        let items = try context.fetch(descriptor).filter { $0.recordingState == .ended }
+
+        #expect(items.map(\.id) == [endedId])
+    }
+
     private static func fetchRide(_ id: UUID, from swiftDataStack: SwiftDataStack) throws -> Ride {
         let context = ModelContext(swiftDataStack.container)
         var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == id })
