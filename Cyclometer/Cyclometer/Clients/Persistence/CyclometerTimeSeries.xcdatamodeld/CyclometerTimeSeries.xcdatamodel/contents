@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="24A335" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="TrackPoint" representedClassName="TrackPointMO" syncable="YES">
+        <attribute name="id" attributeType="UUID"/>
+        <attribute name="rideId" attributeType="UUID"/>
+        <attribute name="timestamp" attributeType="Date"/>
+        <attribute name="latitude" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="longitude" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="altitudeMeters" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="horizontalAccuracyMeters" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="speedMPS" attributeType="Double" defaultValueString="-1.0" usesScalarValueType="YES"/>
+        <attribute name="speedSourceRaw" attributeType="String"/>
+        <attribute name="heartRateBPM" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="heartRateSourceRaw" attributeType="String"/>
+        <attribute name="cadenceRPM" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="powerWatts" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <fetchIndex name="byRideIdIndex">
+            <fetchIndexElement property="rideId" type="Binary" order="ascending"/>
+        </fetchIndex>
+    </entity>
+</model>
