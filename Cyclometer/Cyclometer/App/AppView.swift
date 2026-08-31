@@ -4,8 +4,24 @@ import ComposableArchitecture
 
 struct AppView: View {
     @Bindable var store: StoreOf<AppFeature>
-    @Query(sort: \Item.timestamp, order: .reverse) private var items: [Item]
+    // Only finished rides belong in the Rides list — an in-progress ride is
+    // reflected live via the ActiveRideFeature accessory strip instead, not as a
+    // history entry (#171 review).
+    @Query(
+        filter: AppView.endedRidesFilter,
+        sort: \Ride.startedAt,
+        order: .reverse
+    ) private var items: [Ride]
     @Environment(\.scenePhase) private var scenePhase
+
+    // #Predicate's macro can't resolve a nested-type member-access chain like
+    // `Ride.RecordingState.ended` written directly inside the predicate closure
+    // ("key path cannot refer to enum case") — capturing the case in a local first
+    // sidesteps that.
+    private static let endedRidesFilter: Predicate<Ride> = {
+        let ended = Ride.RecordingState.ended
+        return #Predicate<Ride> { $0.recordingState == ended }
+    }()
 
     /// The accessory strip shows only while a ride is active or paused (S05.3).
     private var hasVisibleRide: Bool {
@@ -149,7 +165,7 @@ struct AppView: View {
                 AppFeature()
             }
         )
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: Ride.self, inMemory: true)
     }
 }
 
@@ -181,6 +197,6 @@ struct AppView: View {
                 AppFeature()
             }
         )
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: Ride.self, inMemory: true)
     }
 }

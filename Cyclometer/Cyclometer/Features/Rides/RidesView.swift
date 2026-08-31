@@ -6,7 +6,7 @@ import ComposableArchitecture
 
 struct RidesView: View {
     let store: StoreOf<RidesFeature>
-    let recordedItems: [Item]
+    let recordedItems: [Ride]
     let onStartRide: () -> Void
     @Environment(\.modelContext) private var modelContext
 
@@ -60,8 +60,8 @@ struct RidesView: View {
         switch ride.source {
         case .demo(let id):
             store.send(.deleteDemoRide(id))
-        case .recorded(let item):
-            modelContext.delete(item)
+        case .recorded(let ride):
+            modelContext.delete(ride)
         }
     }
 }
@@ -238,7 +238,7 @@ struct ElevationPoint: Identifiable {
             onStartRide: {}
         )
     }
-    .modelContainer(for: Item.self, inMemory: true)
+    .modelContainer(for: Ride.self, inMemory: true)
 }
 
 #Preview("Rides — empty") {
@@ -249,11 +249,11 @@ struct ElevationPoint: Identifiable {
             onStartRide: {}
         )
     }
-    .modelContainer(for: Item.self, inMemory: true)
+    .modelContainer(for: Ride.self, inMemory: true)
 }
 
 struct RideSummary: Identifiable {
-    enum Source { case demo(UUID); case recorded(Item) }
+    enum Source { case demo(UUID); case recorded(Ride) }
     let id: String; let title: String; let date: Date
     let elapsedTime: String; let distance: String
     let detail: RideDetail; let source: Source
@@ -263,11 +263,11 @@ struct RideSummary: Identifiable {
                     elapsedTime: ride.elapsedTime, distance: ride.distance,
                     detail: ride.detail, source: .demo(ride.id))
     }
-    static func recorded(_ item: Item) -> RideSummary {
-        let detail = RideDetail.recordedRide(timestamp: item.timestamp)
-        return RideSummary(id: item.persistentModelID.hashValue.description,
-                           title: detail.title, date: item.timestamp,
+    static func recorded(_ ride: Ride) -> RideSummary {
+        let detail = RideDetail.recordedRide(timestamp: ride.startedAt)
+        return RideSummary(id: ride.id.uuidString,
+                           title: detail.title, date: ride.startedAt,
                            elapsedTime: detail.elapsedTime, distance: detail.distance,
-                           detail: detail, source: .recorded(item))
+                           detail: detail, source: .recorded(ride))
     }
 }
