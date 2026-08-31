@@ -424,6 +424,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -542,6 +543,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -612,6 +614,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -637,6 +640,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -663,12 +667,16 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
         await store.send(.elapsedTick)
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+        }
+        await store.receive(\.trackRecorder.resumeRecording) {
+            $0.trackRecorder.isRecording = true
         }
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = false
@@ -700,6 +708,7 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 30
             $0.distanceMeters = 300.0
         }
+        await store.receive(\.trackRecorder.checkpointFired)
         #expect(checkpointCount.value == 1)
 
         for tick in 31...59 {
@@ -714,6 +723,7 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 60
             $0.distanceMeters = 600.0
         }
+        await store.receive(\.trackRecorder.checkpointFired)
         #expect(checkpointCount.value == 2)
     }
 
@@ -726,6 +736,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -857,6 +868,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -881,6 +893,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -907,6 +920,9 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.resumeTapped) {
             $0.recordingState = .active
         }
+        await store.receive(\.trackRecorder.resumeRecording) {
+            $0.trackRecorder.isRecording = true
+        }
         // A store built directly at .paused never ran the .idle → .active transition,
         // so the child is still on its unsuspended default and this lands as a no-op.
         await store.receive(\.calibration.suspensionChanged)
@@ -930,6 +946,9 @@ struct ActiveRideFeatureStateMachineTests {
         }
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+        }
+        await store.receive(\.trackRecorder.resumeRecording) {
+            $0.trackRecorder.isRecording = true
         }
         await store.receive(\.calibration.suspensionChanged)
         #expect(updatedSummary.value?.rideId == rideId)
@@ -1154,6 +1173,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.distanceMeters = 8.0
             $0.zeroSpeedSeconds = 0
         }
+        await store.receive(\.trackRecorder.timerTick)
     }
 
     @Test("Auto-end disabled skips trigger")
