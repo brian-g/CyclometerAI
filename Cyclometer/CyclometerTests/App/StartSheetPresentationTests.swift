@@ -50,6 +50,7 @@ struct StartSheetPresentationTests {
                 // not fail on an unimplemented dependency while the scan is released.
                 $0.continuousClock = TestClock()
                 $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+                $0.uuid = .incrementing
                 $0.hapticsClient = .testValue
                 $0.locationClient = .testValue
                 $0.permissionsClient = .testValue

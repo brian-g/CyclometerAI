@@ -78,6 +78,7 @@ struct AppFeatureTests {
         } withDependencies: {
             $0.continuousClock = TestClock()   // timer suspends; cancelled on finish
             $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.uuid = .incrementing
             $0.bleHRClient = .testValue
             $0.variaRadarClient = .testValue
             $0.locationClient = .testValue

@@ -49,14 +49,25 @@ struct ActiveRideFeature {
     @Dependency(\.permissionsClient) var permissionsClient
     @Dependency(\.healthKitClient) var healthKitClient
     @Dependency(\.date) var date
+    @Dependency(\.uuid) var uuid
+    @Dependency(\.persistenceClient) var persistenceClient
 
     @ObservableState
     struct State: Equatable {
+        /// Placeholder until `.task` overwrites it with a fresh, deterministic id
+        /// (`@Dependency(\.uuid)`) — mirrors how `recordingState` defaults to `.idle`
+        /// pre-start. The persisted Ride record is created with this same id (#171).
+        var rideId: UUID = UUID()
         var recordingState: RideRecordingState = .idle
         var elapsedSeconds: Int = 0
         var speedKPH: Double = 0
         var heartRateBPM: Int = 0
         var hrZone: Int = 0
+        /// Count of non-zero bpm readings applied to `heartRateBPM`, paired with
+        /// `hrSampleSum` — mirrors `speedSampleCount`/`speedSampleSum` (#171).
+        var hrSampleCount: Int = 0
+        var hrSampleSum: Double = 0
+        var maxHeartRateBPM: Int = 0
         var isHRPaired: Bool = false
         /// HealthKit-resolved terms fetched once at ride start (#160), threaded into
         /// every `riderProfile` resolver call below instead of the defaulted `nil`.
@@ -183,7 +194,7 @@ struct ActiveRideFeature {
         }
     }
 
-    private enum CancelID { case radarLossTimer }
+    private enum CancelID { case radarLossTimer, rideCheckpoint }
 
     var body: some ReducerOf<Self> {
         Scope(state: \.speed, action: \.speed) {
@@ -202,10 +213,16 @@ struct ActiveRideFeature {
             switch action {
             case .task:
                 state.recordingState = .active
+                state.rideId = uuid()
+                let rideId = state.rideId
+                let startedAt = date.now
                 return .merge(
                     .send(.speed(.startListening)),
                     .send(.cadence(.startListening)),
                     .send(.calibration(.startListening)),
+                    .run { [persistenceClient] _ in
+                        try? await persistenceClient.createRide(rideId, startedAt)
+                    },
                     .run { send in
                         for await _ in clock.timer(interval: .seconds(1)) {
                             await send(.elapsedTick)
@@ -257,13 +274,19 @@ struct ActiveRideFeature {
             case .pauseTapped:
                 guard state.recordingState == .active else { return .none }
                 state.recordingState = .paused
-                return .none
+                let update = makeRideSummaryUpdate(from: state)
+                return .run { [persistenceClient] _ in
+                    try? await persistenceClient.updateRideSummary(update)
+                }
             case .resumeTapped:
                 guard state.recordingState == .paused else { return .none }
                 state.recordingState = .active
                 state.zeroSpeedSeconds = 0
                 state.isAutoPaused = false
-                return .none
+                let update = makeRideSummaryUpdate(from: state)
+                return .run { [persistenceClient] _ in
+                    try? await persistenceClient.updateRideSummary(update)
+                }
             case .finishTapped:
                 guard state.recordingState == .paused else { return .none }
                 state.finishAlert = AlertState {
@@ -279,12 +302,24 @@ struct ActiveRideFeature {
                 return .none
             case .finishAlert(.presented(.confirmFinish)):
                 state.recordingState = .ended
-                return .run { [bleHRClient, variaRadarClient, locationClient] _ in
-                    async let hr: Void = bleHRClient.disconnect()
-                    async let radar: Void = variaRadarClient.disconnect()
-                    async let loc: Void = locationClient.stopUpdates()
-                    _ = await (hr, radar, loc)
-                }
+                let rideId = state.rideId
+                let endedAt = date.now
+                let finalSummary = makeRideSummaryUpdate(from: state)
+                return .merge(
+                    // A checkpoint queued or in flight from the same tick that just
+                    // finished the ride must not land after this write and stomp the
+                    // final aggregates with a stale, smaller snapshot.
+                    .cancel(id: CancelID.rideCheckpoint),
+                    .run { [bleHRClient, variaRadarClient, locationClient] _ in
+                        async let hr: Void = bleHRClient.disconnect()
+                        async let radar: Void = variaRadarClient.disconnect()
+                        async let loc: Void = locationClient.stopUpdates()
+                        _ = await (hr, radar, loc)
+                    },
+                    .run { [persistenceClient] _ in
+                        try? await persistenceClient.finalizeRide(rideId, endedAt, finalSummary)
+                    }
+                )
             case .finishAlert:
                 return .none
             case .autoEndTriggered:
@@ -335,6 +370,10 @@ struct ActiveRideFeature {
             case .cadence:
                 return .none
             case .elapsedTick:
+                // The SwiftData checkpoint below piggybacks on this guard for its own
+                // "only while active" gating — a guard added here for an unrelated
+                // reason (e.g. a new sensor check) changes how often, or whether,
+                // rides get checkpointed. See the comment at the checkpoint site.
                 guard state.recordingState == .active else { return .none }
                 // A HealthKit-derived reading can go stale while it's the one on
                 // screen, with no disconnect event to catch it — piggyback the check
@@ -351,13 +390,34 @@ struct ActiveRideFeature {
                 } else {
                     state.zeroSpeedSeconds = 0
                 }
+
+                var effects: [Effect<Action>] = []
+
+                // DataModel.md §1 Checkpoint Policy: SwiftData Ride summary update
+                // every 30s of active recording — a parallel, independent cadence
+                // from the CoreData TrackPoint flush timer (#170). Piggybacked on
+                // this 1Hz tick rather than a second Clock timer; the guard above
+                // already gives "excludes paused intervals" for free. Cancellable so
+                // ride-end can cancel a checkpoint that's queued or still in flight
+                // (`.cancel(id: CancelID.rideCheckpoint)` in `.finishAlert`) rather
+                // than let a stale write land after the final one.
+                if state.elapsedSeconds % 30 == 0 {
+                    let update = makeRideSummaryUpdate(from: state)
+                    effects.append(
+                        .run { [persistenceClient] _ in
+                            try? await persistenceClient.updateRideSummary(update)
+                        }
+                        .cancellable(id: CancelID.rideCheckpoint, cancelInFlight: true)
+                    )
+                }
+
                 if state.preferences.isAutoPauseEnabled, state.zeroSpeedSeconds >= Self.autoPauseZeroSpeedSeconds {
-                    return .send(.autoPauseTriggered)
+                    effects.append(.send(.autoPauseTriggered))
+                } else if state.isAutoEndEnabled, state.zeroSpeedSeconds >= Self.autoEndZeroSpeedSeconds {
+                    effects.append(.send(.autoEndTriggered))
                 }
-                if state.isAutoEndEnabled, state.zeroSpeedSeconds >= Self.autoEndZeroSpeedSeconds {
-                    return .send(.autoEndTriggered)
-                }
-                return .none
+
+                return effects.isEmpty ? .none : .merge(effects)
             case .radarTargetsUpdated(let targets):
                 state.radarTargets = targets
                 let newLevel = AlertLevel.level(for: targets)
@@ -467,6 +527,41 @@ struct ActiveRideFeature {
             healthResting: state.healthRestingBPM,
             healthMax: state.healthMaxBPM
         ).rawValue
+        if bpm > 0 {
+            state.hrSampleCount += 1
+            state.hrSampleSum += Double(bpm)
+        }
+        if bpm > state.maxHeartRateBPM {
+            state.maxHeartRateBPM = bpm
+        }
+    }
+
+    /// Snapshot of the current running aggregates, written to the persisted Ride
+    /// both at the 30s checkpoint and at ride end (#171). Gated on sample *count*,
+    /// not "value > 0" — a genuine 0 bpm/rpm max would otherwise be misreported as
+    /// "no data."
+    private func makeRideSummaryUpdate(from state: State) -> RideSummaryUpdate {
+        let recordingState: Ride.RecordingState = switch state.recordingState {
+        case .paused: .paused
+        case .ended: .ended
+        case .active, .idle: .active
+        }
+        return RideSummaryUpdate(
+            rideId: state.rideId,
+            recordingState: recordingState,
+            durationSeconds: TimeInterval(state.elapsedSeconds),
+            distanceMeters: state.distanceMeters,
+            averageSpeedMPS: state.averageSpeedMPS,
+            maxSpeedMPS: state.maxSpeedMPS,
+            averageHeartRateBPM: state.hrSampleCount > 0
+                ? Int((state.hrSampleSum / Double(state.hrSampleCount)).rounded()) : nil,
+            maxHeartRateBPM: state.hrSampleCount > 0 ? state.maxHeartRateBPM : nil,
+            averageCadenceRPM: state.cadence.pedalingSampleCount > 0
+                ? state.cadence.averageCadenceRPM : nil,
+            maxCadenceRPM: state.cadence.pedalingSampleCount > 0
+                ? state.cadence.maxCadenceRPM : nil,
+            vehiclePassCount: nil
+        )
     }
 
     /// Drops a HealthKit shadow sample once it's aged past `healthKitHRStalenessWindow`

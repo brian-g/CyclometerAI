@@ -529,6 +529,7 @@ struct ActiveRideFeatureLocationTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -571,7 +572,8 @@ struct ActiveRideFeatureLocationTests {
 struct ActiveRideFeatureTimerTests {
 
     private func makeStore(
-        speedMPS: Double = 0
+        speedMPS: Double = 0,
+        persistenceClient: PersistenceClient = .testValue
     ) -> TestStoreOf<ActiveRideFeature> {
         TestStore(
             initialState: ActiveRideFeature.State(
@@ -589,6 +591,7 @@ struct ActiveRideFeatureTimerTests {
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
             $0.locationClient = .testValue
+            $0.persistenceClient = persistenceClient
         }
     }
 
@@ -675,6 +678,65 @@ struct ActiveRideFeatureTimerTests {
             $0.distanceMeters = 20.0
         }
     }
+
+    @Test("Checkpoint fires exactly once per 30 ticks while active")
+    func checkpointFiresEvery30Ticks() async {
+        // Non-zero speed throughout, so zeroSpeedSeconds never accumulates far
+        // enough to trip auto-pause (10s) or auto-end (300s) — this test is only
+        // about the 30s checkpoint cadence.
+        let checkpointCount = LockIsolated(0)
+        let store = makeStore(speedMPS: 10.0, persistenceClient: .mock(
+            onUpdateRideSummary: { _ in checkpointCount.withValue { $0 += 1 } }
+        ))
+        for tick in 1...29 {
+            await store.send(.elapsedTick) {
+                $0.elapsedSeconds = tick
+                $0.distanceMeters = Double(tick) * 10.0
+            }
+        }
+        #expect(checkpointCount.value == 0)
+
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 30
+            $0.distanceMeters = 300.0
+        }
+        #expect(checkpointCount.value == 1)
+
+        for tick in 31...59 {
+            await store.send(.elapsedTick) {
+                $0.elapsedSeconds = tick
+                $0.distanceMeters = Double(tick) * 10.0
+            }
+        }
+        #expect(checkpointCount.value == 1)
+
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 60
+            $0.distanceMeters = 600.0
+        }
+        #expect(checkpointCount.value == 2)
+    }
+
+    @Test("No checkpoint fires while paused")
+    func noCheckpointWhilePaused() async {
+        let checkpointCount = LockIsolated(0)
+        let store = makeStore(persistenceClient: .mock(
+            onUpdateRideSummary: { _ in checkpointCount.withValue { $0 += 1 } }
+        ))
+        await store.send(.pauseTapped) {
+            $0.recordingState = .paused
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+        // pauseTapped itself persists the .paused transition (#171 review) — that's
+        // the one write expected here; the 30 no-op ticks below must not add more.
+        #expect(checkpointCount.value == 1)
+        for _ in 0..<30 {
+            await store.send(.elapsedTick)
+        }
+        #expect(checkpointCount.value == 1)
+    }
 }
 
 // MARK: - State machine
@@ -693,6 +755,7 @@ struct ActiveRideFeatureStateMachineTests {
         } withDependencies: {
             $0.continuousClock = TestClock()
             $0.date = .constant(testDate)
+            $0.uuid = .incrementing
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -759,6 +822,35 @@ struct ActiveRideFeatureStateMachineTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    @Test("task creates a Ride with a deterministic id via persistenceClient")
+    func taskCreatesRide() async {
+        let created = LockIsolated<(UUID, Date)?>(nil)
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(recordingState: .idle)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(onCreateRide: { created.setValue(($0, $1)) })
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task) {
+            $0.recordingState = .active
+            $0.rideId = UUID(0)
+        }
+        #expect(created.value?.0 == UUID(0))
+        #expect(created.value?.1 == testDate)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
     @Test("pauseTapped only transitions from active")
     func pauseOnlyFromActive() async {
         let store = makeStore(recordingState: .active)
@@ -768,6 +860,33 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
+    }
+
+    @Test("pauseTapped persists the paused recordingState")
+    func pauseTappedPersistsPausedState() async {
+        let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
+        let rideId = UUID()
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(rideId: rideId, recordingState: .active, distanceMeters: 250)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(onUpdateRideSummary: { updatedSummary.setValue($0) })
+        }
+        await store.send(.pauseTapped) {
+            $0.recordingState = .paused
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+        #expect(updatedSummary.value?.rideId == rideId)
+        #expect(updatedSummary.value?.recordingState == .paused)
+        #expect(updatedSummary.value?.distanceMeters == 250)
     }
 
     @Test("pauseTapped ignored when idle")
@@ -791,6 +910,30 @@ struct ActiveRideFeatureStateMachineTests {
         // A store built directly at .paused never ran the .idle → .active transition,
         // so the child is still on its unsuspended default and this lands as a no-op.
         await store.receive(\.calibration.suspensionChanged)
+    }
+
+    @Test("resumeTapped persists the active recordingState")
+    func resumeTappedPersistsActiveState() async {
+        let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
+        let rideId = UUID()
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(rideId: rideId, recordingState: .paused)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(onUpdateRideSummary: { updatedSummary.setValue($0) })
+        }
+        await store.send(.resumeTapped) {
+            $0.recordingState = .active
+        }
+        await store.receive(\.calibration.suspensionChanged)
+        #expect(updatedSummary.value?.rideId == rideId)
+        #expect(updatedSummary.value?.recordingState == .active)
     }
 
     @Test("resumeTapped ignored when active")
@@ -825,12 +968,15 @@ struct ActiveRideFeatureStateMachineTests {
     @Test("finishConfirmed transitions to ended and disconnects sensors")
     func finishConfirmedEndsRide() async {
         let disconnectCalled = LockIsolated(false)
+        let finalizedRide = LockIsolated<(UUID, Date, RideSummaryUpdate)?>(nil)
+        let rideId = UUID()
         let store = TestStore(
-            initialState: ActiveRideFeature.State(recordingState: .paused)
+            initialState: ActiveRideFeature.State(rideId: rideId, recordingState: .paused, distanceMeters: 500)
         ) {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -838,6 +984,9 @@ struct ActiveRideFeatureStateMachineTests {
             $0.locationClient = LocationClient(
                 startUpdates: { AsyncStream { $0.finish() } },
                 stopUpdates: { disconnectCalled.setValue(true) }
+            )
+            $0.persistenceClient = .mock(
+                onFinalizeRide: { finalizedRide.setValue(($0, $1, $2)) }
             )
         }
         await store.send(.finishTapped) {
@@ -857,6 +1006,11 @@ struct ActiveRideFeatureStateMachineTests {
             $0.finishAlert = nil
         }
         #expect(disconnectCalled.value == true)
+        #expect(finalizedRide.value?.0 == rideId)
+        #expect(finalizedRide.value?.1 == testDate)
+        #expect(finalizedRide.value?.2.rideId == rideId)
+        #expect(finalizedRide.value?.2.distanceMeters == 500)
+        #expect(finalizedRide.value?.2.recordingState == .ended)
     }
 
     @Test("Alert cancel does not change recording state")
@@ -1207,6 +1361,7 @@ struct ActiveRideFeatureHeartRateTests {
                 $0.locationClient = .testValue
                 $0.healthKitClient = healthKitClient
                 $0.date = .constant(Self.fixedNow)
+                $0.uuid = .incrementing
                 $0.defaultFileStorage = storage
             }
         }
@@ -1220,6 +1375,9 @@ struct ActiveRideFeatureHeartRateTests {
         await store.send(.heartRateUpdated(150)) {
             $0.heartRateBPM = 150
             $0.hrZone = 2
+            $0.hrSampleCount = 1
+            $0.hrSampleSum = 150
+            $0.maxHeartRateBPM = 150
         }
     }
 
@@ -1235,6 +1393,9 @@ struct ActiveRideFeatureHeartRateTests {
         await store.send(.heartRateUpdated(165)) {
             $0.heartRateBPM = 165
             $0.hrZone = 3
+            $0.hrSampleCount = 1
+            $0.hrSampleSum = 165
+            $0.maxHeartRateBPM = 165
         }
         #expect(store.state.riderProfile.resolvedMaxBPM() == 200)
         #expect(store.state.riderProfile.resolvedRestingBPM() == 45)
@@ -1372,6 +1533,9 @@ struct ActiveRideFeatureHeartRateTests {
             $0.isHRPaired = false
             $0.heartRateBPM = 72
             $0.hrZone = 1
+            $0.hrSampleCount = 1
+            $0.hrSampleSum = 72
+            $0.maxHeartRateBPM = 72
         }
         #expect(store.state.hrSource == .healthKit)
     }
@@ -1449,6 +1613,49 @@ struct ActiveRideFeatureHeartRateTests {
         #expect(store.state.hrSource == .none)
         #expect(store.state.heartRateBPM == 0)
         #expect(store.state.hrZone == 0)
+    }
+
+    // MARK: - Ride aggregate tracking (#171)
+
+    @Test("heartRateUpdated accumulates into HR sample sum/count/max")
+    func heartRateAccumulatesAggregates() async {
+        let store = makeStore()
+        await store.send(.heartRateUpdated(140)) {
+            $0.heartRateBPM = 140
+            $0.hrZone = 2
+            $0.hrSampleCount = 1
+            $0.hrSampleSum = 140
+            $0.maxHeartRateBPM = 140
+        }
+        await store.send(.heartRateUpdated(160)) {
+            $0.heartRateBPM = 160
+            $0.hrZone = 3
+            $0.hrSampleCount = 2
+            $0.hrSampleSum = 300
+            $0.maxHeartRateBPM = 160
+        }
+        // A drop below the running max doesn't move maxHeartRateBPM.
+        await store.send(.heartRateUpdated(120)) {
+            $0.heartRateBPM = 120
+            $0.hrZone = 1
+            $0.hrSampleCount = 3
+            $0.hrSampleSum = 420
+            $0.maxHeartRateBPM = 160
+        }
+    }
+
+    @Test("Zero bpm does not count toward the HR average")
+    func zeroBPMDoesNotAccumulate() async {
+        let store = makeStore()
+        await store.send(.heartRateUpdated(0)) {
+            $0.heartRateBPM = 0
+            // Karvonen classifies a 0 bpm reading as zone 1 (intensity < 60% HRR) —
+            // this test only cares that it doesn't move the aggregate fields.
+            $0.hrZone = 1
+        }
+        #expect(store.state.hrSampleCount == 0)
+        #expect(store.state.hrSampleSum == 0)
+        #expect(store.state.maxHeartRateBPM == 0)
     }
 }
 

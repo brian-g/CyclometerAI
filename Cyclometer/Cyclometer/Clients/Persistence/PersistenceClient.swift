@@ -1,41 +1,63 @@
 import ComposableArchitecture
 import CoreData
 import Foundation
+import SwiftData
 
 // MARK: - PersistenceClient
 
-/// TCA dependency for CoreData's high-frequency TrackPoint time series. SwiftData-backed
-/// Ride/VehiclePassEvent/UserProfile operations are added to this struct by later M7/M9
-/// issues once those schemas exist (#171, #172) — this is the CoreData half only.
+/// TCA dependency for the app's two persistence stacks: CoreData's high-frequency
+/// TrackPoint time series, and SwiftData's low-frequency Ride summary record (the
+/// latter delegated to `RidePersistenceActor`). VehiclePassEvent/UserProfile
+/// operations are added to this struct by a later M7/M9 issue (#172) once those
+/// schemas exist.
 struct PersistenceClient: Sendable {
     /// Batch-insert via NSBatchInsertRequest on a background context (DataModel.md §4.2).
     var flushTrackPoints: @Sendable ([TrackPointDTO]) async throws -> Void
     /// Ascending by timestamp, for GPXExporter and Ride Detail (DataModel.md §7).
     var fetchTrackPoints: @Sendable (UUID) async throws -> [TrackPointDTO]
+    /// Inserts a new Ride record at ride start.
+    var createRide: @Sendable (UUID, Date) async throws -> Void
+    /// Writes running aggregates onto an existing Ride — the 30s checkpoint
+    /// (DataModel.md §1 Checkpoint Policy). Ride-end goes through `finalizeRide`
+    /// instead, which writes the same aggregates in the same atomic call.
+    var updateRideSummary: @Sendable (RideSummaryUpdate) async throws -> Void
+    /// Writes final aggregates, endedAt, and recordingState .ended in one call.
+    var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate) async throws -> Void
 }
 
-enum PersistenceError: Error {
+enum PersistenceError: Error, Equatable {
     case batchInsertFailed
+    case rideNotFound
 }
 
 // MARK: - DependencyKey
 
 extension PersistenceClient: DependencyKey {
     /// Factory with injectable storage, matching BLEHRClient.live(bleClient:), so tests
-    /// can drive real NSBatchInsertRequest/NSFetchRequest behavior against an in-memory
-    /// container instead of the shared singleton.
-    static func live(container: NSPersistentContainer) -> PersistenceClient {
-        PersistenceClient(
-            flushTrackPoints: { try await batchInsertTrackPoints($0, container: container) },
-            fetchTrackPoints: { try await fetchTrackPointsLive(rideId: $0, container: container) }
+    /// can drive real NSBatchInsertRequest/NSFetchRequest and SwiftData behavior against
+    /// in-memory containers instead of the shared singletons.
+    static func live(coreDataContainer: NSPersistentContainer, modelContainer: ModelContainer) -> PersistenceClient {
+        let rideActor = RidePersistenceActor(modelContainer: modelContainer)
+        return PersistenceClient(
+            flushTrackPoints: { try await batchInsertTrackPoints($0, container: coreDataContainer) },
+            fetchTrackPoints: { try await fetchTrackPointsLive(rideId: $0, container: coreDataContainer) },
+            createRide: { try await rideActor.createRide(id: $0, startedAt: $1) },
+            updateRideSummary: { try await rideActor.updateRideSummary($0) },
+            finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2) }
         )
     }
 
-    static let liveValue = PersistenceClient.live(container: CoreDataStack.shared.container)
+    static let liveValue = PersistenceClient.live(
+        coreDataContainer: CoreDataStack.shared.container,
+        modelContainer: SwiftDataStack.shared.container
+    )
 
     static let testValue = PersistenceClient(
         flushTrackPoints: { _ in },
-        fetchTrackPoints: { _ in [] }
+        fetchTrackPoints: { _ in [] },
+        createRide: { _, _ in },
+        updateRideSummary: { _ in },
+        finalizeRide: { _, _, _ in }
     )
 }
 
