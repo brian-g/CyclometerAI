@@ -51,6 +51,7 @@ struct ActiveRideFeature {
     @Dependency(\.date) var date
     @Dependency(\.uuid) var uuid
     @Dependency(\.persistenceClient) var persistenceClient
+    @Dependency(\.rideDataBuffer) var rideDataBuffer
 
     @ObservableState
     struct State: Equatable {
@@ -139,6 +140,7 @@ struct ActiveRideFeature {
         var isRadarSidebarVisible: Bool { wasRadarEverPaired }
         var isRadarOffline: Bool { wasRadarEverPaired && radarConnectionState != .active }
         var alertOrchestrator = AlertOrchestratorFeature.State()
+        var trackRecorder = TrackPointRecorderFeature.State()
         var coordinate: Coordinate? = nil
         var trackCoordinates: [Coordinate] = []
         var altitude: Double = 0
@@ -185,6 +187,7 @@ struct ActiveRideFeature {
         case alertOrchestrator(AlertOrchestratorFeature.Action)
         case speed(SpeedFeature.Action)
         case calibration(WheelCalibrationFeature.Action)
+        case trackRecorder(TrackPointRecorderFeature.Action)
         case locationUpdated(LocationUpdate)
         case locationAuthorizationResult(PermissionState)
 
@@ -209,6 +212,9 @@ struct ActiveRideFeature {
         Scope(state: \.alertOrchestrator, action: \.alertOrchestrator) {
             AlertOrchestratorFeature()
         }
+        Scope(state: \.trackRecorder, action: \.trackRecorder) {
+            TrackPointRecorderFeature()
+        }
         Reduce { state, action in
             switch action {
             case .task:
@@ -220,6 +226,7 @@ struct ActiveRideFeature {
                     .send(.speed(.startListening)),
                     .send(.cadence(.startListening)),
                     .send(.calibration(.startListening)),
+                    .send(.trackRecorder(.startRecording)),
                     .run { [persistenceClient] _ in
                         try? await persistenceClient.createRide(rideId, startedAt)
                     },
@@ -275,18 +282,24 @@ struct ActiveRideFeature {
                 guard state.recordingState == .active else { return .none }
                 state.recordingState = .paused
                 let update = makeRideSummaryUpdate(from: state)
-                return .run { [persistenceClient] _ in
-                    try? await persistenceClient.updateRideSummary(update)
-                }
+                return .merge(
+                    .send(.trackRecorder(.pauseRecording)),
+                    .run { [persistenceClient] _ in
+                        try? await persistenceClient.updateRideSummary(update)
+                    }
+                )
             case .resumeTapped:
                 guard state.recordingState == .paused else { return .none }
                 state.recordingState = .active
                 state.zeroSpeedSeconds = 0
                 state.isAutoPaused = false
                 let update = makeRideSummaryUpdate(from: state)
-                return .run { [persistenceClient] _ in
-                    try? await persistenceClient.updateRideSummary(update)
-                }
+                return .merge(
+                    .send(.trackRecorder(.resumeRecording)),
+                    .run { [persistenceClient] _ in
+                        try? await persistenceClient.updateRideSummary(update)
+                    }
+                )
             case .finishTapped:
                 guard state.recordingState == .paused else { return .none }
                 state.finishAlert = AlertState {
@@ -305,11 +318,25 @@ struct ActiveRideFeature {
                 let rideId = state.rideId
                 let endedAt = date.now
                 let finalSummary = makeRideSummaryUpdate(from: state)
+                // Not routed through `.send(.trackRecorder(.stopRecording))`: AppFeature
+                // nils `activeRide` on this exact same action (AppFeature.swift:195), and
+                // a `.send`-effect resolves in a later action-processing cycle — by then
+                // `activeRide` is already nil and the `ifLet` errors on a child action with
+                // no child state. State is mutated directly (safe — applied synchronously,
+                // before AppFeature's own case runs) and the flush is inline, mirroring how
+                // `persistenceClient` is already called directly elsewhere in this reducer
+                // rather than through a child action.
+                state.trackRecorder.isRecording = false
                 return .merge(
                     // A checkpoint queued or in flight from the same tick that just
                     // finished the ride must not land after this write and stomp the
                     // final aggregates with a stale, smaller snapshot.
                     .cancel(id: CancelID.rideCheckpoint),
+                    .run { [rideDataBuffer, persistenceClient] _ in
+                        let points = await rideDataBuffer.drainForFlush()
+                        guard !points.isEmpty else { return }
+                        try? await persistenceClient.flushTrackPoints(points)
+                    },
                     .run { [bleHRClient, variaRadarClient, locationClient] _ in
                         async let hr: Void = bleHRClient.disconnect()
                         async let radar: Void = variaRadarClient.disconnect()
@@ -393,6 +420,13 @@ struct ActiveRideFeature {
 
                 var effects: [Effect<Action>] = []
 
+                // #170: one TrackPointDTO recorded per elapsed second, skipped
+                // silently if GPS hasn't locked yet (rare — ride start already
+                // requires a GPS lock, PRD §8.8).
+                if let point = makeTrackPoint(from: state) {
+                    effects.append(.send(.trackRecorder(.timerTick(point))))
+                }
+
                 // DataModel.md §1 Checkpoint Policy: SwiftData Ride summary update
                 // every 30s of active recording — a parallel, independent cadence
                 // from the CoreData TrackPoint flush timer (#170). Piggybacked on
@@ -409,6 +443,11 @@ struct ActiveRideFeature {
                         }
                         .cancellable(id: CancelID.rideCheckpoint, cancelInFlight: true)
                     )
+                    // TrackPoint flush shares the same 30s cadence, but is a
+                    // separate persistence target (CoreData, not SwiftData) with
+                    // no overwrite hazard, so it doesn't need CancelID.rideCheckpoint's
+                    // cancellation — see TrackPointRecorderFeature.flushEffect().
+                    effects.append(.send(.trackRecorder(.checkpointFired)))
                 }
 
                 if state.preferences.isAutoPauseEnabled, state.zeroSpeedSeconds >= Self.autoPauseZeroSpeedSeconds {
@@ -502,6 +541,8 @@ struct ActiveRideFeature {
                 return .none
             case .alertOrchestrator:
                 return .none
+            case .trackRecorder:
+                return .none
             }
         }
         // Radar targets arrive continuously and recording state changes from five
@@ -562,6 +603,38 @@ struct ActiveRideFeature {
                 ? state.cadence.maxCadenceRPM : nil,
             vehiclePassCount: nil
         )
+    }
+
+    /// Builds the per-second track point for `TrackPointRecorderFeature` (#170). Nil
+    /// while there's no GPS fix yet, since `TrackPointDTO.latitude`/`longitude` are
+    /// non-optional — ride start already requires a GPS lock (PRD §8.8), so this is rare.
+    private func makeTrackPoint(from state: State) -> TrackPointDTO? {
+        guard let coordinate = state.coordinate else { return nil }
+        return TrackPointDTO(
+            rideId: state.rideId,
+            timestamp: date.now,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
+            altitudeMeters: state.altitude,
+            horizontalAccuracyMeters: state.horizontalAccuracy,
+            speedMPS: state.speed.speedMPS,
+            speedSource: state.speed.activeSpeedSource,
+            heartRateBPM: state.hrSource == .none ? nil : state.heartRateBPM,
+            heartRateSource: Self.sensorSource(for: state.hrSource),
+            cadenceRPM: state.cadence.cadenceRPM,
+            powerWatts: nil
+        )
+    }
+
+    /// `HRSource` and `SensorSource` are separate enums — the former is HR-display-
+    /// specific (#161), the latter is the shared per-field provenance tag TrackPointDTO
+    /// (and every other sensor field) uses.
+    private static func sensorSource(for hrSource: HRSource) -> SensorSource {
+        switch hrSource {
+        case .none: .none
+        case .bleStrap: .bleHR
+        case .healthKit: .appleWatch
+        }
     }
 
     /// Drops a HealthKit shadow sample once it's aged past `healthKitHRStalenessWindow`
