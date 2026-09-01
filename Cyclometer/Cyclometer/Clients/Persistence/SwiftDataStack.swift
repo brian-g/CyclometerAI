@@ -1,8 +1,8 @@
 import SwiftData
 import Foundation
 
-/// SwiftData stack — low-frequency Ride summary records (and, later, RadarEvent /
-/// VehiclePassEvent / UserProfile). High-frequency time-series data lives in
+/// SwiftData stack — low-frequency Ride summary and VehiclePassEvent records (and,
+/// later, RadarEvent / UserProfile). High-frequency time-series data lives in
 /// CoreDataStack (NSBatchInsertRequest).
 final class SwiftDataStack {
     static let shared = SwiftDataStack()
@@ -25,7 +25,7 @@ final class SwiftDataStack {
     #endif
 
     private static func makeContainer(inMemory: Bool) -> ModelContainer {
-        let schema = Schema([Ride.self])
+        let schema = Schema([Ride.self, VehiclePassEvent.self])
         let config = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: inMemory,

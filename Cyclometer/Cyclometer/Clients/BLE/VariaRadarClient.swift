@@ -763,24 +763,34 @@ private final class RadarClientState: @unchecked Sendable {
     /// per-vehicle `UUID`, keyed off `wireThreatID` rather than array position —
     /// see `VariaRadarClient.parseAlert`'s doc comment for why position was wrong.
     /// A wire ID keeps the slot it was already given; a wire ID no longer present
-    /// frees its slot back to the pool; a new wire ID is handed the first slot not
-    /// currently in use. `count <= vehicleSlotIDs.count` is already enforced by
+    /// frees its slot back to the pool **starting the packet after** this one (see
+    /// `reservedSlots` below); a new wire ID is handed the first slot not currently
+    /// in use or just-freed. `count <= vehicleSlotIDs.count` is already enforced by
     /// `parseAlert`, so a free slot always exists for a wire ID seeing it for the
     /// first time.
     private func resolveTargets(_ raw: [VariaRadarClient.RawThreat]) -> [RadarTarget] {
         lock.withLock {
             let liveWireIDs = Set(raw.map(\.wireThreatID))
+            let slotsBeforeThisPacket = Set(slotByWireID.values)
             slotByWireID = slotByWireID.filter { liveWireIDs.contains($0.key) }
 
-            var usedSlots = Set(slotByWireID.values)
+            // A slot a wire id vacates in *this* packet is held back from reuse for
+            // one more packet, rather than handed to a brand-new wire id in the same
+            // packet — otherwise a departing vehicle's slot could pass straight to
+            // an arriving one with zero tick where `RadarTarget.id` was ever absent,
+            // silently merging two different vehicles' history in
+            // `VehiclePassDetector` (code review, #172).
+            var reservedSlots = slotsBeforeThisPacket
+            reservedSlots.formUnion(slotByWireID.values)
+
             return raw.map { threat in
                 let slot: UUID
                 if let existing = slotByWireID[threat.wireThreatID] {
                     slot = existing
                 } else {
-                    slot = VariaRadarClient.vehicleSlotIDs.first { !usedSlots.contains($0) }!
+                    slot = VariaRadarClient.vehicleSlotIDs.first { !reservedSlots.contains($0) }!
                     slotByWireID[threat.wireThreatID] = slot
-                    usedSlots.insert(slot)
+                    reservedSlots.insert(slot)
                 }
                 return RadarTarget(
                     id: slot,
