@@ -70,10 +70,9 @@ final class Ride {
     var recordingState: RecordingState
 
     // MARK: - Relationships
-    // TrackPoints stored in CoreData, linked by rideId.
-    // radarEvents / vehiclePassEvents relationships deferred: RadarEvent and
-    // VehiclePassEvent don't exist as Swift types yet (#172 and a future RadarEvent
-    // issue add them, along with these relationship arrays).
+    // TrackPoints and VehiclePassEvents are linked by rideId only (TrackPoint's
+    // CoreData FK pattern, #172) — no SwiftData `@Relationship` array here.
+    // radarEvents deferred until RadarEvent exists (a future issue).
 
     init(id: UUID = UUID(), startedAt: Date = .now) {
         self.id = id

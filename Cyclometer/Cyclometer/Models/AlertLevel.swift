@@ -6,7 +6,7 @@ import Foundation
 /// L1/L2 into one color band. The Varia payload's own byte 0 nominally carries a
 /// 0–3 alert level too, but `VariaRadarClient.parseAlert` collapses it into
 /// `ThreatLevel` and discards it — there is no shortcut available here.
-enum AlertLevel: Int, CaseIterable, Comparable, Hashable, Sendable {
+enum AlertLevel: Int, CaseIterable, Comparable, Hashable, Sendable, Codable {
     case clear = 0, advisory = 1, caution = 2, danger = 3
 
     static func < (lhs: AlertLevel, rhs: AlertLevel) -> Bool { lhs.rawValue < rhs.rawValue }

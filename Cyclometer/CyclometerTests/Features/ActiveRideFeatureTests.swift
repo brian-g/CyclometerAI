@@ -6,6 +6,18 @@ import CoreLocation
 /// Fixed clock for SpeedFeature's timestamped samples in TestStores.
 private let testDate = Date(timeIntervalSince1970: 1_000_000)
 
+/// The `VehicleTrackingRecord` `VehiclePassDetector` produces for a single radar
+/// sighting at `testDate` — the fixture every suite in this file uses, since none
+/// of them send a `.locationUpdated` before their radar assertions (no GPS fix,
+/// zero rider speed).
+private func singleSighting(mps: Double, alertLevel: AlertLevel) -> VehicleTrackingRecord {
+    VehicleTrackingRecord(
+        firstSeenAt: testDate, lastSeenAt: testDate,
+        sampleCount: 1, positiveSampleCount: mps > 0 ? 1 : 0, positiveSampleSum: max(mps, 0),
+        lastKnownCoordinate: nil, lastRiderSpeedMPS: 0, lastAlertLevel: alertLevel
+    )
+}
+
 @MainActor
 @Suite("ActiveRideFeature — radar wiring")
 struct ActiveRideFeatureRadarTests {
@@ -43,6 +55,7 @@ struct ActiveRideFeatureRadarTests {
         ]
         await store.send(.radarTargetsUpdated(targets)) {
             $0.radarTargets = targets
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -8, alertLevel: .clear)]
         }
     }
 
@@ -85,6 +98,7 @@ struct ActiveRideFeatureRadarTests {
                     threatLevel: .warning
                 )
             ]
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -5, alertLevel: .clear)]
         }
 
         // Badge stays paired during the 10s grace window.
@@ -96,6 +110,7 @@ struct ActiveRideFeatureRadarTests {
             $0.isRadarPaired = false
             $0.radarTargets = []
             $0.radarConnectionState = .disconnected
+            $0.vehiclePassTracking = [:]
         }
         await store.receive(\.alertOrchestrator.alertLevelChanged) {
             $0.alertOrchestrator.activeAlertLevel = .advisory
@@ -176,6 +191,7 @@ struct ActiveRideFeatureRadarTests {
         ]
         await store.send(.radarTargetsUpdated(targets)) {
             $0.radarTargets = targets
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -5, alertLevel: .clear)]
         }
 
         await store.send(.radarConnectionChanged(.reconnecting)) {
@@ -194,6 +210,7 @@ struct ActiveRideFeatureRadarTests {
             $0.isRadarPaired = false
             $0.radarTargets = []
             $0.radarConnectionState = .disconnected
+            $0.vehiclePassTracking = [:]
         }
         await store.receive(\.alertOrchestrator.alertLevelChanged) {
             $0.alertOrchestrator.activeAlertLevel = .advisory
@@ -272,6 +289,7 @@ struct ActiveRideFeatureAlertEscalationTests {
 
         await store.send(.radarTargetsUpdated(targets)) {
             $0.radarTargets = targets
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: 2, alertLevel: .advisory)]
         }
         await store.receive(\.alertOrchestrator.alertLevelChanged) {
             $0.alertOrchestrator.activeAlertLevel = .advisory
@@ -288,6 +306,7 @@ struct ActiveRideFeatureAlertEscalationTests {
 
         await store.send(.radarTargetsUpdated(targets)) {
             $0.radarTargets = targets
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -8, alertLevel: .clear)]
         }
     }
 
@@ -297,6 +316,7 @@ struct ActiveRideFeatureAlertEscalationTests {
 
         await store.send(.radarTargetsUpdated([Self.vehicle(mps: 20 / 3.6)])) {
             $0.radarTargets = [Self.vehicle(mps: 20 / 3.6)]
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: 20 / 3.6, alertLevel: .caution)]
         }
         await store.receive(\.alertOrchestrator.alertLevelChanged) {
             $0.alertOrchestrator.activeAlertLevel = .caution
@@ -307,6 +327,7 @@ struct ActiveRideFeatureAlertEscalationTests {
             $0.isRadarPaired = false
             $0.radarTargets = []
             $0.radarConnectionState = .disconnected
+            $0.vehiclePassTracking = [:]
         }
         await store.receive(\.alertOrchestrator.hardDisconnected) {
             $0.alertOrchestrator.activeAlertLevel = .clear
@@ -1742,6 +1763,7 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
 
         await store.send(.radarTargetsUpdated(targets)) {
             $0.radarTargets = targets
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -8, alertLevel: .clear)]
         }
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
@@ -1755,11 +1777,16 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
 
         await store.send(.radarTargetsUpdated(approaching)) {
             $0.radarTargets = approaching
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -8, alertLevel: .clear)]
         }
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
 
+        // The vehicle going missing this tick doesn't change vehiclePassTracking —
+        // fixed `.constant(testDate)` clock, so VehiclePassDetector's disappearance
+        // grace period never elapses; the record is left tracked untouched pending
+        // a reappearance or an explicit radar reset.
         await store.send(.radarTargetsUpdated([])) {
             $0.radarTargets = []
         }
@@ -1775,6 +1802,7 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
 
         await store.send(.radarTargetsUpdated(approaching)) {
             $0.radarTargets = approaching
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -8, alertLevel: .clear)]
         }
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
@@ -1786,6 +1814,15 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
         let closing = [Self.target(.danger)]
         await store.send(.radarTargetsUpdated(closing)) {
             $0.radarTargets = closing
+            // Same tracked vehicle (same slot id), not a new or disappeared one — a
+            // second closing-velocity sample is folded into its existing record.
+            $0.vehiclePassTracking = [
+                VariaRadarClient.vehicleSlotIDs[0]: VehicleTrackingRecord(
+                    firstSeenAt: testDate, lastSeenAt: testDate,
+                    sampleCount: 2, positiveSampleCount: 0, positiveSampleSum: 0,
+                    lastKnownCoordinate: nil, lastRiderSpeedMPS: 0, lastAlertLevel: .clear
+                )
+            ]
         }
         // No second .calibration(.suspensionChanged) fires — an unasserted receive
         // fails the test.
@@ -1817,6 +1854,7 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
         let targets = [Self.target(.danger)]
         await store.send(.radarTargetsUpdated(targets)) {
             $0.radarTargets = targets
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -8, alertLevel: .clear)]
         }
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
@@ -1831,6 +1869,8 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
         }
         await store.send(.calibration(.wheelRevolutionsReceived(5)))
 
+        // Fixed clock — the disappearance grace period never elapses, so this
+        // doesn't touch vehiclePassTracking; the record stays as tracked above.
         await store.send(.radarTargetsUpdated([])) {
             $0.radarTargets = []
         }
@@ -2051,5 +2091,93 @@ struct ActiveRideFeatureUnitsTests {
             $preferences.withLock { $0.preferredUnit = .imperial }
             #expect(store.state.unitSystem == .imperial)
         }
+    }
+}
+
+// MARK: - Vehicle pass persistence
+
+/// #172 code review: `vehiclePassCount` must advance only once a pass event is
+/// actually confirmed persisted, not the moment `VehiclePassDetector` detects one —
+/// otherwise a save failure leaves the in-memory count permanently ahead of what's
+/// really in the SwiftData store, with no later checkpoint able to correct it (unlike
+/// distanceMeters/durationSeconds, which get fully resent every checkpoint).
+@MainActor
+@Suite("ActiveRideFeature — vehicle pass persistence")
+struct ActiveRideFeatureVehiclePassPersistenceTests {
+    private static let coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+
+    private static func vehicle(mps: Double) -> RadarTarget {
+        RadarTarget(id: VariaRadarClient.vehicleSlotIDs[0], relativeVelocityMPS: mps, rangeMetres: 40, threatLevel: .allClear)
+    }
+
+    private func makeStore(persistenceClient: PersistenceClient) -> TestStoreOf<ActiveRideFeature> {
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(recordingState: .active, coordinate: Self.coordinate)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.audioClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = persistenceClient
+        }
+        // This suite is about vehiclePassCount specifically — the alert-escalation
+        // haptic/audio wiring these ticks also trigger has its own coverage above.
+        store.exhaustivity = .off
+        return store
+    }
+
+    /// Drives one full overtake through the real reducer: two sightings 2s apart
+    /// (satisfying the tracked-duration minimum), then a confirmation tick 2s past
+    /// the last sighting (satisfying the disappearance grace period).
+    private func sendOvertake(on store: TestStoreOf<ActiveRideFeature>) async {
+        await store.send(.radarTargetsUpdated([Self.vehicle(mps: 8)]))
+        store.dependencies.date.now = testDate.addingTimeInterval(2)
+        await store.send(.radarTargetsUpdated([Self.vehicle(mps: 8)]))
+        store.dependencies.date.now = testDate.addingTimeInterval(4)
+        await store.send(.radarTargetsUpdated([]))
+    }
+
+    @Test("vehiclePassCount increments once appendVehiclePassEvents succeeds")
+    func vehiclePassCountIncrementsOnConfirmedPersistence() async {
+        let appended = LockIsolated<[VehiclePassEventDTO]>([])
+        let store = makeStore(persistenceClient: .mock(onAppendVehiclePassEvents: { appended.setValue($0) }))
+
+        await sendOvertake(on: store)
+        await store.receive(\.vehiclePassEventsPersisted)
+
+        #expect(appended.value.count == 1)
+        #expect(store.state.vehiclePassCount == 1)
+    }
+
+    @Test("A failed appendVehiclePassEvents write does not increment vehiclePassCount")
+    func failedPersistenceDoesNotIncrementCount() async {
+        struct WriteFailed: Error {}
+        var persistenceClient = PersistenceClient.testValue
+        persistenceClient.appendVehiclePassEvents = { _ in throw WriteFailed() }
+        let store = makeStore(persistenceClient: persistenceClient)
+
+        await sendOvertake(on: store)
+
+        #expect(store.state.vehiclePassCount == 0)
+    }
+
+    @Test("vehiclePassCount flows into the checkpoint's RideSummaryUpdate")
+    func vehiclePassCountReachesRideSummaryUpdate() async {
+        let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
+        let store = makeStore(persistenceClient: .mock(
+            onUpdateRideSummary: { updatedSummary.setValue($0) }
+        ))
+
+        await sendOvertake(on: store)
+        await store.receive(\.vehiclePassEventsPersisted)
+        #expect(store.state.vehiclePassCount == 1)
+
+        await store.send(.pauseTapped)
+        #expect(updatedSummary.value?.vehiclePassCount == 1)
     }
 }

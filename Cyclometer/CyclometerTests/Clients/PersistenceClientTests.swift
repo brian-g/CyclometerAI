@@ -114,6 +114,10 @@ struct PersistenceClientTests {
         let update = RideSummaryUpdate(rideId: UUID(), durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0)
         try await client.updateRideSummary(update)
         try await client.finalizeRide(UUID(), Date(), update)
+        try await client.appendVehiclePassEvents([VehiclePassEventDTO(
+            rideId: UUID(), timestamp: Date(), latitude: 0, longitude: 0,
+            alertLevelAtPass: .clear, riderSpeedKph: 0, estimatedPassSpeedKph: nil
+        )])
     }
 
     @Test("mock returns exactly what it is scripted with, and reports flushed points")
@@ -124,12 +128,14 @@ struct PersistenceClientTests {
         let createdRide = LockIsolated<(UUID, Date)?>(nil)
         let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
         let finalizedRide = LockIsolated<(UUID, Date, RideSummaryUpdate)?>(nil)
+        let appendedPassEvents = LockIsolated<[VehiclePassEventDTO]>([])
         let client = PersistenceClient.mock(
             trackPoints: [rideId: scripted],
             onFlush: { flushed.setValue($0) },
             onCreateRide: { createdRide.setValue(($0, $1)) },
             onUpdateRideSummary: { updatedSummary.setValue($0) },
-            onFinalizeRide: { finalizedRide.setValue(($0, $1, $2)) }
+            onFinalizeRide: { finalizedRide.setValue(($0, $1, $2)) },
+            onAppendVehiclePassEvents: { appendedPassEvents.setValue($0) }
         )
 
         #expect(try await client.fetchTrackPoints(rideId) == scripted)
@@ -152,6 +158,13 @@ struct PersistenceClientTests {
         #expect(finalizedRide.value?.0 == rideId)
         #expect(finalizedRide.value?.1 == endedAt)
         #expect(finalizedRide.value?.2 == summary)
+
+        let passEvent = VehiclePassEventDTO(
+            rideId: rideId, timestamp: Date(), latitude: 1, longitude: 2,
+            alertLevelAtPass: .caution, riderSpeedKph: 25, estimatedPassSpeedKph: 55
+        )
+        try await client.appendVehiclePassEvents([passEvent])
+        #expect(appendedPassEvents.value == [passEvent])
     }
 
     // MARK: - Ride
@@ -329,6 +342,86 @@ struct PersistenceClientTests {
         let items = try context.fetch(descriptor).filter { $0.recordingState == .ended }
 
         #expect(items.map(\.id) == [endedId])
+    }
+
+    // MARK: - VehiclePassEvent (#172)
+
+    @Test("appendVehiclePassEvents persists a queryable VehiclePassEvent linked by rideId")
+    func appendVehiclePassEventsPersists() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date())
+
+        let dto = VehiclePassEventDTO(
+            rideId: rideId,
+            timestamp: Date(timeIntervalSince1970: 1_000_000),
+            latitude: 36.0726,
+            longitude: -79.7920,
+            alertLevelAtPass: .caution,
+            riderSpeedKph: 28.4,
+            estimatedPassSpeedKph: 62.1
+        )
+        try await client.appendVehiclePassEvents([dto])
+
+        let context = ModelContext(swiftDataStack.container)
+        let events = try context.fetch(FetchDescriptor<VehiclePassEvent>())
+        #expect(events.count == 1)
+        let event = try #require(events.first)
+        #expect(event.rideId == rideId)
+        #expect(event.timestamp == dto.timestamp)
+        #expect(event.latitude == dto.latitude)
+        #expect(event.longitude == dto.longitude)
+        #expect(event.alertLevelAtPass == .caution)
+        #expect(event.riderSpeedKph == 28.4)
+        #expect(event.estimatedPassSpeedKph == 62.1)
+    }
+
+    @Test("appendVehiclePassEvents inserts every event in the batch with a single call")
+    func appendVehiclePassEventsBatchInsertsAll() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date())
+
+        let dtos = (0..<3).map { offset in
+            VehiclePassEventDTO(
+                rideId: rideId, timestamp: Date(timeIntervalSince1970: TimeInterval(offset)),
+                latitude: 1, longitude: 2, alertLevelAtPass: .advisory,
+                riderSpeedKph: 20, estimatedPassSpeedKph: 40
+            )
+        }
+        try await client.appendVehiclePassEvents(dtos)
+
+        let context = ModelContext(swiftDataStack.container)
+        let events = try context.fetch(FetchDescriptor<VehiclePassEvent>())
+        #expect(events.count == 3)
+        #expect(Set(events.map(\.timestamp)) == Set(dtos.map(\.timestamp)))
+    }
+
+    @Test("appendVehiclePassEvents with a nil estimatedPassSpeedKph round-trips as nil")
+    func appendVehiclePassEventNilEstimatedSpeedRoundTrips() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date())
+
+        try await client.appendVehiclePassEvents([VehiclePassEventDTO(
+            rideId: rideId, timestamp: Date(), latitude: 1, longitude: 2,
+            alertLevelAtPass: .danger, riderSpeedKph: 30, estimatedPassSpeedKph: nil
+        )])
+
+        let context = ModelContext(swiftDataStack.container)
+        let events = try context.fetch(FetchDescriptor<VehiclePassEvent>())
+        #expect(events.count == 1)
+        #expect(events.first?.estimatedPassSpeedKph == nil)
+    }
+
+    @Test("appendVehiclePassEvents with an empty array is a no-op")
+    func appendVehiclePassEventsEmptyArrayIsNoOp() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        try await client.appendVehiclePassEvents([])
+
+        let context = ModelContext(swiftDataStack.container)
+        let events = try context.fetch(FetchDescriptor<VehiclePassEvent>())
+        #expect(events.isEmpty)
     }
 
     private static func fetchRide(_ id: UUID, from swiftDataStack: SwiftDataStack) throws -> Ride {
