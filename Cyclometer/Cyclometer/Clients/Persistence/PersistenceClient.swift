@@ -6,9 +6,10 @@ import SwiftData
 // MARK: - PersistenceClient
 
 /// TCA dependency for the app's two persistence stacks: CoreData's high-frequency
-/// TrackPoint time series, and SwiftData's low-frequency Ride/VehiclePassEvent
-/// records (the latter delegated to `RidePersistenceActor`). UserProfile operations
-/// are added to this struct by a later M9 issue once that schema exists.
+/// TrackPoint time series, and SwiftData's low-frequency Ride summary record (the
+/// latter delegated to `RidePersistenceActor`). VehiclePassEvent/UserProfile
+/// operations are added to this struct by a later M7/M9 issue (#172) once those
+/// schemas exist.
 struct PersistenceClient: Sendable {
     /// Batch-insert via NSBatchInsertRequest on a background context (DataModel.md §4.2).
     var flushTrackPoints: @Sendable ([TrackPointDTO]) async throws -> Void
@@ -22,9 +23,6 @@ struct PersistenceClient: Sendable {
     var updateRideSummary: @Sendable (RideSummaryUpdate) async throws -> Void
     /// Writes final aggregates, endedAt, and recordingState .ended in one call.
     var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate) async throws -> Void
-    /// Inserts confirmed vehicle-pass events in one batch — `VehiclePassDetector`
-    /// can legitimately confirm more than one on the same tick (#172, DataModel.md §3.4).
-    var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
 }
 
 enum PersistenceError: Error, Equatable {
@@ -45,8 +43,7 @@ extension PersistenceClient: DependencyKey {
             fetchTrackPoints: { try await fetchTrackPointsLive(rideId: $0, container: coreDataContainer) },
             createRide: { try await rideActor.createRide(id: $0, startedAt: $1) },
             updateRideSummary: { try await rideActor.updateRideSummary($0) },
-            finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2) },
-            appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) }
+            finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2) }
         )
     }
 
@@ -60,8 +57,7 @@ extension PersistenceClient: DependencyKey {
         fetchTrackPoints: { _ in [] },
         createRide: { _, _ in },
         updateRideSummary: { _ in },
-        finalizeRide: { _, _, _ in },
-        appendVehiclePassEvents: { _ in }
+        finalizeRide: { _, _, _ in }
     )
 }
 

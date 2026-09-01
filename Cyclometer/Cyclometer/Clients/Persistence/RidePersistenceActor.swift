@@ -12,16 +12,24 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persi
 @ModelActor
 actor RidePersistenceActor {
     func createRide(id: UUID, startedAt: Date) throws {
-        try savingChanges("createRide", id: id) {
-            modelContext.insert(Ride(id: id, startedAt: startedAt))
+        modelContext.insert(Ride(id: id, startedAt: startedAt))
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("createRide(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            throw error
         }
     }
 
     /// The 30s checkpoint path — running aggregates only, no endedAt/finalization.
     func updateRideSummary(_ update: RideSummaryUpdate) throws {
-        try savingChanges("updateRideSummary", id: update.rideId) {
+        do {
             let ride = try fetchRide(id: update.rideId)
             apply(update, to: ride)
+            try modelContext.save()
+        } catch {
+            logger.error("updateRideSummary(\(update.rideId, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            throw error
         }
     }
 
@@ -29,32 +37,15 @@ actor RidePersistenceActor {
     /// is logically one atomic write, not the two independent round trips an earlier
     /// version of this actor required to avoid two contexts racing on the same row.
     func finalizeRide(id: UUID, endedAt: Date, summary: RideSummaryUpdate) throws {
-        try savingChanges("finalizeRide", id: id) {
+        do {
             let ride = try fetchRide(id: id)
             apply(summary, to: ride)
             ride.endedAt = endedAt
             ride.recordingState = .ended
-        }
-    }
-
-    /// Inserts confirmed vehicle-pass events in one batch and one save (#172) —
-    /// `VehiclePassDetector` can confirm more than one on the same radar tick.
-    /// Plain inserts against the same long-lived context as the Ride writes above;
-    /// unlike the checkpoint, this never overwrites an existing row.
-    func appendVehiclePassEvents(_ dtos: [VehiclePassEventDTO]) throws {
-        guard let firstRideId = dtos.first?.rideId else { return }
-        try savingChanges("appendVehiclePassEvents", id: firstRideId) {
-            for dto in dtos {
-                modelContext.insert(VehiclePassEvent(
-                    rideId: dto.rideId,
-                    timestamp: dto.timestamp,
-                    latitude: dto.latitude,
-                    longitude: dto.longitude,
-                    alertLevelAtPass: dto.alertLevelAtPass,
-                    riderSpeedKph: dto.riderSpeedKph,
-                    estimatedPassSpeedKph: dto.estimatedPassSpeedKph
-                ))
-            }
+            try modelContext.save()
+        } catch {
+            logger.error("finalizeRide(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            throw error
         }
     }
 
@@ -68,9 +59,9 @@ actor RidePersistenceActor {
     }
 
     /// Only overwrites `vehiclePassCount` when the caller actually has a value —
-    /// `ActiveRideFeature` passes its running count on every checkpoint/finalize
-    /// (#172), but unconditionally overwriting would silently stomp a real count
-    /// back to nil for any caller that doesn't track one.
+    /// every current caller passes `nil` (vehicle-pass counting is #172's job), and
+    /// unconditionally overwriting would silently stomp a real count back to nil the
+    /// next time this ride is touched once that lands.
     private func apply(_ update: RideSummaryUpdate, to ride: Ride) {
         ride.recordingState = update.recordingState
         ride.durationSeconds = update.durationSeconds
@@ -83,20 +74,6 @@ actor RidePersistenceActor {
         ride.maxCadenceRPM = update.maxCadenceRPM
         if let vehiclePassCount = update.vehiclePassCount {
             ride.vehiclePassCount = vehiclePassCount
-        }
-    }
-
-    /// Shared body for every write above: run `changes` (insert/fetch/mutate, no
-    /// save), save the context, and log-then-rethrow under one label on failure.
-    /// Replaces four near-identical do/save/catch blocks that differed only in the
-    /// log label (code review, #172).
-    private func savingChanges(_ label: String, id: UUID, _ changes: () throws -> Void) throws {
-        do {
-            try changes()
-            try modelContext.save()
-        } catch {
-            logger.error("\(label, privacy: .public)(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
-            throw error
         }
     }
 }

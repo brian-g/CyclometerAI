@@ -141,12 +141,6 @@ struct ActiveRideFeature {
         var isRadarOffline: Bool { wasRadarEverPaired && radarConnectionState != .active }
         var alertOrchestrator = AlertOrchestratorFeature.State()
         var trackRecorder = TrackPointRecorderFeature.State()
-        /// Per-vehicle radar history keyed by `RadarTarget.id`, feeding
-        /// `VehiclePassDetector.processTick` each radar update (#172).
-        var vehiclePassTracking: [UUID: VehicleTrackingRecord] = [:]
-        /// Running count of confirmed passes this ride, folded into
-        /// `RideSummaryUpdate.vehiclePassCount` at each checkpoint/finalize.
-        var vehiclePassCount: Int = 0
         var coordinate: Coordinate? = nil
         var trackCoordinates: [Coordinate] = []
         var altitude: Double = 0
@@ -190,11 +184,6 @@ struct ActiveRideFeature {
         case radarTargetsUpdated([RadarTarget])
         case radarConnectionChanged(VariaRadarClient.ConnectionState)
         case radarReconnectTimedOut
-        /// Sent only once `appendVehiclePassEvents` has actually succeeded, carrying
-        /// how many of this tick's confirmed passes were persisted — `vehiclePassCount`
-        /// increments from here, not from detection, so it can never overcount past
-        /// what's really in the SwiftData store on a save failure (#172 review).
-        case vehiclePassEventsPersisted(Int)
         case alertOrchestrator(AlertOrchestratorFeature.Action)
         case speed(SpeedFeature.Action)
         case calibration(WheelCalibrationFeature.Action)
@@ -471,48 +460,8 @@ struct ActiveRideFeature {
             case .radarTargetsUpdated(let targets):
                 state.radarTargets = targets
                 let newLevel = AlertLevel.level(for: targets)
-
-                // #172: runs every tick regardless of the guard below — a vehicle's
-                // tracking history must accumulate even on ticks that don't change
-                // the ride-level alert level.
-                let passEvents = VehiclePassDetector.processTick(
-                    targets: targets,
-                    trackedVehicles: &state.vehiclePassTracking,
-                    now: date.now,
-                    rideId: state.rideId,
-                    alertLevel: newLevel,
-                    riderCoordinate: state.coordinate,
-                    riderSpeedMPS: state.speed.speedMPS ?? 0
-                )
-
-                var effects: [Effect<Action>] = []
-                if !passEvents.isEmpty {
-                    effects.append(.run { [persistenceClient] send in
-                        // vehiclePassCount only advances once this succeeds (see
-                        // .vehiclePassEventsPersisted) — a failed write here must not
-                        // leave the ride-level count permanently ahead of what's
-                        // actually in the SwiftData store, unlike the other summary
-                        // fields, which get fully resent (and so self-correct) on
-                        // every subsequent checkpoint.
-                        do {
-                            try await persistenceClient.appendVehiclePassEvents(passEvents)
-                            await send(.vehiclePassEventsPersisted(passEvents.count))
-                        } catch {
-                            // Logged inside RidePersistenceActor. No retry queue exists
-                            // anywhere in this persistence layer today (matches
-                            // updateRideSummary/finalizeRide's identical `try?` elsewhere
-                            // in this reducer) — a lost event stays lost, but the count
-                            // stays accurate to what's persisted.
-                        }
-                    })
-                }
-                if newLevel != state.alertOrchestrator.activeAlertLevel {
-                    effects.append(.send(.alertOrchestrator(.alertLevelChanged(newLevel))))
-                }
-                return effects.isEmpty ? .none : .merge(effects)
-            case .vehiclePassEventsPersisted(let count):
-                state.vehiclePassCount += count
-                return .none
+                guard newLevel != state.alertOrchestrator.activeAlertLevel else { return .none }
+                return .send(.alertOrchestrator(.alertLevelChanged(newLevel)))
             case .radarConnectionChanged(let connectionState):
                 state.radarConnectionState = connectionState
                 switch connectionState {
@@ -532,7 +481,6 @@ struct ActiveRideFeature {
                 case .disconnected:
                     state.isRadarPaired = false
                     state.radarTargets = []
-                    resetVehiclePassTracking(&state)
                     return .merge(
                         .cancel(id: CancelID.radarLossTimer),
                         .send(.alertOrchestrator(.hardDisconnected))
@@ -544,7 +492,6 @@ struct ActiveRideFeature {
                 state.isRadarPaired = false
                 state.radarConnectionState = .disconnected
                 state.radarTargets = []
-                resetVehiclePassTracking(&state)
                 // Routed through the same guarded dispatch path as vehicle-based
                 // escalation (#135) rather than firing unconditionally — no `!=`
                 // guard here, since disconnect is a distinct real-world trigger
@@ -654,16 +601,8 @@ struct ActiveRideFeature {
                 ? state.cadence.averageCadenceRPM : nil,
             maxCadenceRPM: state.cadence.pedalingSampleCount > 0
                 ? state.cadence.maxCadenceRPM : nil,
-            vehiclePassCount: state.vehiclePassCount
+            vehiclePassCount: nil
         )
-    }
-
-    /// A hard radar unpair or reconnect timeout is data loss, not a
-    /// resolved-then-vanished vehicle — wipe tracking without evaluating pass
-    /// criteria, or every vehicle mid-track at the moment of a BLE drop would be
-    /// misreported as having passed. Shared by both call sites (#172 review).
-    private func resetVehiclePassTracking(_ state: inout State) {
-        state.vehiclePassTracking = [:]
     }
 
     /// Builds the per-second track point for `TrackPointRecorderFeature` (#170). Nil
