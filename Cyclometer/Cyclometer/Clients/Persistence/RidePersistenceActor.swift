@@ -58,6 +58,33 @@ actor RidePersistenceActor {
         }
     }
 
+    /// Read path for `GPXExporter` (#173) — the rest of this actor is write-only by
+    /// design (#171), but GPX export needs the ride's title/startedAt for
+    /// `<metadata>`/`<trk><name>`.
+    func fetchRideExportMetadata(id: UUID) throws -> RideExportMetadata {
+        let ride = try fetchRide(id: id)
+        return RideExportMetadata(title: ride.title, startedAt: ride.startedAt)
+    }
+
+    /// Read path for `GPXExporter` (#173) — one `<wpt>` per event, oldest first.
+    func fetchVehiclePassEvents(rideId: UUID) throws -> [VehiclePassEventDTO] {
+        let descriptor = FetchDescriptor<VehiclePassEvent>(
+            predicate: #Predicate { $0.rideId == rideId },
+            sortBy: [SortDescriptor(\.timestamp)]
+        )
+        return try modelContext.fetch(descriptor).map {
+            VehiclePassEventDTO(
+                rideId: $0.rideId,
+                timestamp: $0.timestamp,
+                latitude: $0.latitude,
+                longitude: $0.longitude,
+                alertLevelAtPass: $0.alertLevelAtPass,
+                riderSpeedKph: $0.riderSpeedKph,
+                estimatedPassSpeedKph: $0.estimatedPassSpeedKph
+            )
+        }
+    }
+
     private func fetchRide(id: UUID) throws -> Ride {
         var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1

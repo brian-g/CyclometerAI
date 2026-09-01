@@ -8,9 +8,9 @@ import Testing
 struct PersistenceClientTests {
 
     /// Fresh in-memory CoreData + SwiftData stacks per test — no shared state, no disk I/O.
-    /// The SwiftData stack is returned alongside the client so Ride tests can fetch
-    /// directly against it — there's no `fetchRide` on the client, by design (#171's
-    /// scope is write-only).
+    /// The SwiftData stack is returned alongside the client so Ride tests can also
+    /// fetch directly against it when asserting on state the client doesn't expose
+    /// as a DTO (e.g. `recordingState`).
     static func makeLiveClient() -> (client: PersistenceClient, swiftDataStack: SwiftDataStack) {
         let coreDataStack = CoreDataStack(inMemory: true)
         let swiftDataStack = SwiftDataStack(inMemory: true)
@@ -110,6 +110,8 @@ struct PersistenceClientTests {
             TrackPointDTO(rideId: UUID(), timestamp: Date(), latitude: 0, longitude: 0, altitudeMeters: 0, horizontalAccuracyMeters: 0, speedSource: .none, heartRateSource: .none)
         ])
         #expect(try await client.fetchTrackPoints(UUID()).isEmpty)
+        #expect(try await client.fetchRide(UUID()) == RideExportMetadata(title: "", startedAt: .init(timeIntervalSince1970: 0)))
+        #expect(try await client.fetchVehiclePassEvents(UUID()).isEmpty)
         try await client.createRide(UUID(), Date())
         let update = RideSummaryUpdate(rideId: UUID(), durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0)
         try await client.updateRideSummary(update)
@@ -124,6 +126,11 @@ struct PersistenceClientTests {
     func mockReturnsScriptedValues() async throws {
         let rideId = UUID()
         let scripted = [TrackPointDTO(rideId: rideId, timestamp: Date(), latitude: 1, longitude: 1, altitudeMeters: 0, horizontalAccuracyMeters: 0, speedSource: .gps, heartRateSource: .bleHR)]
+        let scriptedRideMetadata = RideExportMetadata(title: "Evening Ride", startedAt: Date())
+        let scriptedPassEvents = [VehiclePassEventDTO(
+            rideId: rideId, timestamp: Date(), latitude: 3, longitude: 4,
+            alertLevelAtPass: .advisory, riderSpeedKph: 22, estimatedPassSpeedKph: nil
+        )]
         let flushed = LockIsolated<[TrackPointDTO]>([])
         let createdRide = LockIsolated<(UUID, Date)?>(nil)
         let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
@@ -131,6 +138,8 @@ struct PersistenceClientTests {
         let appendedPassEvents = LockIsolated<[VehiclePassEventDTO]>([])
         let client = PersistenceClient.mock(
             trackPoints: [rideId: scripted],
+            rideExportMetadata: [rideId: scriptedRideMetadata],
+            vehiclePassEvents: [rideId: scriptedPassEvents],
             onFlush: { flushed.setValue($0) },
             onCreateRide: { createdRide.setValue(($0, $1)) },
             onUpdateRideSummary: { updatedSummary.setValue($0) },
@@ -140,6 +149,9 @@ struct PersistenceClientTests {
 
         #expect(try await client.fetchTrackPoints(rideId) == scripted)
         #expect(try await client.fetchTrackPoints(UUID()).isEmpty)
+        #expect(try await client.fetchRide(rideId) == scriptedRideMetadata)
+        #expect(try await client.fetchVehiclePassEvents(rideId) == scriptedPassEvents)
+        #expect(try await client.fetchVehiclePassEvents(UUID()).isEmpty)
 
         try await client.flushTrackPoints(scripted)
         #expect(flushed.value == scripted)
@@ -165,6 +177,14 @@ struct PersistenceClientTests {
         )
         try await client.appendVehiclePassEvents([passEvent])
         #expect(appendedPassEvents.value == [passEvent])
+    }
+
+    @Test("mock's fetchRide throws rideNotFound for an unscripted rideId, matching live")
+    func mockFetchRideThrowsForUnscriptedRideId() async throws {
+        let client = PersistenceClient.mock(rideExportMetadata: [UUID(): RideExportMetadata(title: "Other Ride", startedAt: Date())])
+        await #expect(throws: PersistenceError.rideNotFound) {
+            try await client.fetchRide(UUID())
+        }
     }
 
     // MARK: - Ride
@@ -289,6 +309,35 @@ struct PersistenceClientTests {
         let update = RideSummaryUpdate(rideId: UUID(), durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0)
         await #expect(throws: PersistenceError.rideNotFound) {
             try await client.finalizeRide(UUID(), Date(), update)
+        }
+    }
+
+    // MARK: - Ride read path (#173, for GPXExporter)
+
+    @Test("fetchRide returns the ride's title and startedAt")
+    func fetchRideReturnsMetadata() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let rideId = UUID()
+        let startedAt = Date()
+        try await client.createRide(rideId, startedAt)
+
+        let context = ModelContext(swiftDataStack.container)
+        var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == rideId })
+        descriptor.fetchLimit = 1
+        let ride = try #require(try context.fetch(descriptor).first)
+        ride.title = "Morning Ride"
+        try context.save()
+
+        let metadata = try await client.fetchRide(rideId)
+        #expect(metadata.title == "Morning Ride")
+        #expect(metadata.startedAt == startedAt)
+    }
+
+    @Test("fetchRide on an unknown rideId throws rideNotFound")
+    func fetchRideUnknownRideThrows() async throws {
+        let (client, _) = Self.makeLiveClient()
+        await #expect(throws: PersistenceError.rideNotFound) {
+            try await client.fetchRide(UUID())
         }
     }
 
@@ -422,6 +471,38 @@ struct PersistenceClientTests {
         let context = ModelContext(swiftDataStack.container)
         let events = try context.fetch(FetchDescriptor<VehiclePassEvent>())
         #expect(events.isEmpty)
+    }
+
+    @Test("fetchVehiclePassEvents returns only the given ride's events, ascending by timestamp")
+    func fetchVehiclePassEventsReturnsOwnEventsInOrder() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        let otherRideId = UUID()
+        let base = Date()
+
+        let dtos = (0..<3).reversed().map { offset in
+            VehiclePassEventDTO(
+                rideId: rideId, timestamp: base.addingTimeInterval(TimeInterval(offset)),
+                latitude: 1, longitude: 2, alertLevelAtPass: .caution,
+                riderSpeedKph: 25, estimatedPassSpeedKph: 50
+            )
+        }
+        let otherRideDto = VehiclePassEventDTO(
+            rideId: otherRideId, timestamp: base, latitude: 0, longitude: 0,
+            alertLevelAtPass: .danger, riderSpeedKph: 30, estimatedPassSpeedKph: nil
+        )
+        try await client.appendVehiclePassEvents(dtos + [otherRideDto])
+
+        let fetched = try await client.fetchVehiclePassEvents(rideId)
+        #expect(fetched.map(\.rideId) == Array(repeating: rideId, count: 3))
+        #expect(fetched.map(\.timestamp) == dtos.map(\.timestamp).sorted())
+    }
+
+    @Test("fetchVehiclePassEvents for an unknown rideId returns empty, not an error")
+    func fetchVehiclePassEventsUnknownRideIdIsEmpty() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let fetched = try await client.fetchVehiclePassEvents(UUID())
+        #expect(fetched.isEmpty)
     }
 
     private static func fetchRide(_ id: UUID, from swiftDataStack: SwiftDataStack) throws -> Ride {
