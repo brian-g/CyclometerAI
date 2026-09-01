@@ -14,5 +14,5 @@ struct RideSummaryUpdate: Sendable, Equatable {
     var maxHeartRateBPM: Int?
     var averageCadenceRPM: Int?
     var maxCadenceRPM: Int?
-    var vehiclePassCount: Int?   // always nil until #172 wires real counting
+    var vehiclePassCount: Int?   // ActiveRideFeature's running count of confirmed passes (#172)
 }
