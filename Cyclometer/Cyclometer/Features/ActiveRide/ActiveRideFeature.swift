@@ -1,5 +1,9 @@
 import ComposableArchitecture
 import Foundation
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "recording")
 
 enum RideRecordingState: Equatable, Sendable {
     case idle, active, paused, ended
@@ -343,19 +347,32 @@ struct ActiveRideFeature {
                     // finished the ride must not land after this write and stomp the
                     // final aggregates with a stale, smaller snapshot.
                     .cancel(id: CancelID.rideCheckpoint),
+                    // Sequential, not merged: GPXExporter reads track points back from
+                    // persistence, so the flush must land first; the final SwiftData
+                    // write includes whatever URL export produced, so it must come
+                    // last. A failed export degrades to a nil gpxFileURL rather than
+                    // leaving the ride stuck out of `.ended`.
                     .run { [rideDataBuffer, persistenceClient] _ in
                         let points = await rideDataBuffer.drainForFlush()
-                        guard !points.isEmpty else { return }
-                        try? await persistenceClient.flushTrackPoints(points)
+                        if !points.isEmpty {
+                            do {
+                                try await persistenceClient.flushTrackPoints(points)
+                            } catch {
+                                // Not retried — GPX export still runs below and will
+                                // simply be missing these points (it re-reads from
+                                // persistence). Logged so a truncated export is at
+                                // least diagnosable after the fact.
+                                logger.error("flushTrackPoints failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — GPX export will be missing \(points.count, privacy: .public) point(s)")
+                            }
+                        }
+                        let gpxURL = try? await GPXExporter.generate(rideId: rideId)
+                        try? await persistenceClient.finalizeRide(rideId, endedAt, finalSummary, gpxURL)
                     },
                     .run { [bleHRClient, variaRadarClient, locationClient] _ in
                         async let hr: Void = bleHRClient.disconnect()
                         async let radar: Void = variaRadarClient.disconnect()
                         async let loc: Void = locationClient.stopUpdates()
                         _ = await (hr, radar, loc)
-                    },
-                    .run { [persistenceClient] _ in
-                        try? await persistenceClient.finalizeRide(rideId, endedAt, finalSummary)
                     }
                 )
             case .finishAlert:

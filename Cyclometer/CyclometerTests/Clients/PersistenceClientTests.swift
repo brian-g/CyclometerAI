@@ -115,7 +115,7 @@ struct PersistenceClientTests {
         try await client.createRide(UUID(), Date())
         let update = RideSummaryUpdate(rideId: UUID(), durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0)
         try await client.updateRideSummary(update)
-        try await client.finalizeRide(UUID(), Date(), update)
+        try await client.finalizeRide(UUID(), Date(), update, nil)
         try await client.appendVehiclePassEvents([VehiclePassEventDTO(
             rideId: UUID(), timestamp: Date(), latitude: 0, longitude: 0,
             alertLevelAtPass: .clear, riderSpeedKph: 0, estimatedPassSpeedKph: nil
@@ -134,7 +134,7 @@ struct PersistenceClientTests {
         let flushed = LockIsolated<[TrackPointDTO]>([])
         let createdRide = LockIsolated<(UUID, Date)?>(nil)
         let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
-        let finalizedRide = LockIsolated<(UUID, Date, RideSummaryUpdate)?>(nil)
+        let finalizedRide = LockIsolated<(UUID, Date, RideSummaryUpdate, URL?)?>(nil)
         let appendedPassEvents = LockIsolated<[VehiclePassEventDTO]>([])
         let client = PersistenceClient.mock(
             trackPoints: [rideId: scripted],
@@ -143,7 +143,7 @@ struct PersistenceClientTests {
             onFlush: { flushed.setValue($0) },
             onCreateRide: { createdRide.setValue(($0, $1)) },
             onUpdateRideSummary: { updatedSummary.setValue($0) },
-            onFinalizeRide: { finalizedRide.setValue(($0, $1, $2)) },
+            onFinalizeRide: { finalizedRide.setValue(($0, $1, $2, $3)) },
             onAppendVehiclePassEvents: { appendedPassEvents.setValue($0) }
         )
 
@@ -166,10 +166,12 @@ struct PersistenceClientTests {
         #expect(updatedSummary.value == summary)
 
         let endedAt = Date()
-        try await client.finalizeRide(rideId, endedAt, summary)
+        let gpxURL = URL(string: "file:///tmp/scripted.gpx")!
+        try await client.finalizeRide(rideId, endedAt, summary, gpxURL)
         #expect(finalizedRide.value?.0 == rideId)
         #expect(finalizedRide.value?.1 == endedAt)
         #expect(finalizedRide.value?.2 == summary)
+        #expect(finalizedRide.value?.3 == gpxURL)
 
         let passEvent = VehiclePassEventDTO(
             rideId: rideId, timestamp: Date(), latitude: 1, longitude: 2,
@@ -266,7 +268,7 @@ struct PersistenceClientTests {
         }
     }
 
-    @Test("finalizeRide writes final aggregates, endedAt, and recordingState .ended in one call")
+    @Test("finalizeRide writes final aggregates, endedAt, recordingState .ended, and gpxFileURL in one call")
     func finalizeRideSetsEndedState() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
         let rideId = UUID()
@@ -277,12 +279,14 @@ struct PersistenceClientTests {
         )
 
         let endedAt = Date()
-        try await client.finalizeRide(rideId, endedAt, update)
+        let gpxURL = URL(string: "file:///tmp/ride.gpx")!
+        try await client.finalizeRide(rideId, endedAt, update, gpxURL)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(ride.endedAt == endedAt)
         #expect(ride.recordingState == .ended)
         #expect(ride.distanceMeters == update.distanceMeters)
+        #expect(ride.gpxFileURL == gpxURL)
     }
 
     @Test("finalizeRide always sets recordingState .ended regardless of the summary's recordingState")
@@ -297,7 +301,7 @@ struct PersistenceClientTests {
             durationSeconds: 900, distanceMeters: 5_000, averageSpeedMPS: 5, maxSpeedMPS: 10
         )
 
-        try await client.finalizeRide(rideId, Date(), update)
+        try await client.finalizeRide(rideId, Date(), update, nil)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(ride.recordingState == .ended)
@@ -308,7 +312,7 @@ struct PersistenceClientTests {
         let (client, _) = Self.makeLiveClient()
         let update = RideSummaryUpdate(rideId: UUID(), durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0)
         await #expect(throws: PersistenceError.rideNotFound) {
-            try await client.finalizeRide(UUID(), Date(), update)
+            try await client.finalizeRide(UUID(), Date(), update, nil)
         }
     }
 
@@ -384,7 +388,7 @@ struct PersistenceClientTests {
             rideId: endedId, recordingState: .ended,
             durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
         )
-        try await client.finalizeRide(endedId, base.addingTimeInterval(180), finishUpdate)
+        try await client.finalizeRide(endedId, base.addingTimeInterval(180), finishUpdate, nil)
 
         let context = ModelContext(swiftDataStack.container)
         let descriptor = FetchDescriptor<Ride>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])

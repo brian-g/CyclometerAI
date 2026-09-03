@@ -8,7 +8,7 @@ extension PersistenceClient {
         onFlush: @escaping @Sendable ([TrackPointDTO]) -> Void = { _ in },
         onCreateRide: @escaping @Sendable (UUID, Date) -> Void = { _, _ in },
         onUpdateRideSummary: @escaping @Sendable (RideSummaryUpdate) -> Void = { _ in },
-        onFinalizeRide: @escaping @Sendable (UUID, Date, RideSummaryUpdate) -> Void = { _, _, _ in },
+        onFinalizeRide: @escaping @Sendable (UUID, Date, RideSummaryUpdate, URL?) -> Void = { _, _, _, _ in },
         onAppendVehiclePassEvents: @escaping @Sendable ([VehiclePassEventDTO]) -> Void = { _ in }
     ) -> PersistenceClient {
         PersistenceClient(
@@ -23,7 +23,7 @@ extension PersistenceClient {
             },
             createRide: { onCreateRide($0, $1) },
             updateRideSummary: { onUpdateRideSummary($0) },
-            finalizeRide: { onFinalizeRide($0, $1, $2) },
+            finalizeRide: { onFinalizeRide($0, $1, $2, $3) },
             appendVehiclePassEvents: { onAppendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { vehiclePassEvents[$0] ?? [] }
         )

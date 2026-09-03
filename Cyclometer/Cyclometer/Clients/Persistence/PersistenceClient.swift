@@ -23,8 +23,9 @@ struct PersistenceClient: Sendable {
     /// (DataModel.md §1 Checkpoint Policy). Ride-end goes through `finalizeRide`
     /// instead, which writes the same aggregates in the same atomic call.
     var updateRideSummary: @Sendable (RideSummaryUpdate) async throws -> Void
-    /// Writes final aggregates, endedAt, and recordingState .ended in one call.
-    var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate) async throws -> Void
+    /// Writes final aggregates, endedAt, recordingState .ended, and the exported
+    /// GPX file's URL (nil if export failed) in one call.
+    var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate, URL?) async throws -> Void
     /// Inserts confirmed vehicle-pass events in one batch — `VehiclePassDetector`
     /// can legitimately confirm more than one on the same tick (#172, DataModel.md §3.4).
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
@@ -51,7 +52,7 @@ extension PersistenceClient: DependencyKey {
             fetchRide: { try await rideActor.fetchRideExportMetadata(id: $0) },
             createRide: { try await rideActor.createRide(id: $0, startedAt: $1) },
             updateRideSummary: { try await rideActor.updateRideSummary($0) },
-            finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2) },
+            finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) }
         )
@@ -68,7 +69,7 @@ extension PersistenceClient: DependencyKey {
         fetchRide: { _ in RideExportMetadata(title: "", startedAt: .init(timeIntervalSince1970: 0)) },
         createRide: { _, _ in },
         updateRideSummary: { _ in },
-        finalizeRide: { _, _, _ in },
+        finalizeRide: { _, _, _, _ in },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] }
     )

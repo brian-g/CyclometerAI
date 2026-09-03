@@ -28,12 +28,13 @@ actor RidePersistenceActor {
     /// Ride-end: aggregates + endedAt + .ended in one fetch/save. Closing out a ride
     /// is logically one atomic write, not the two independent round trips an earlier
     /// version of this actor required to avoid two contexts racing on the same row.
-    func finalizeRide(id: UUID, endedAt: Date, summary: RideSummaryUpdate) throws {
+    func finalizeRide(id: UUID, endedAt: Date, summary: RideSummaryUpdate, gpxFileURL: URL?) throws {
         try savingChanges("finalizeRide", id: id) {
             let ride = try fetchRide(id: id)
             apply(summary, to: ride)
             ride.endedAt = endedAt
             ride.recordingState = .ended
+            ride.gpxFileURL = gpxFileURL
         }
     }
 

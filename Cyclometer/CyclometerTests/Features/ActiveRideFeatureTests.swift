@@ -1008,7 +1008,7 @@ struct ActiveRideFeatureStateMachineTests {
     @Test("finishConfirmed transitions to ended and disconnects sensors")
     func finishConfirmedEndsRide() async {
         let disconnectCalled = LockIsolated(false)
-        let finalizedRide = LockIsolated<(UUID, Date, RideSummaryUpdate)?>(nil)
+        let finalizedRide = LockIsolated<(UUID, Date, RideSummaryUpdate, URL?)?>(nil)
         let rideId = UUID()
         let store = TestStore(
             initialState: ActiveRideFeature.State(rideId: rideId, recordingState: .paused, distanceMeters: 500)
@@ -1026,7 +1026,7 @@ struct ActiveRideFeatureStateMachineTests {
                 stopUpdates: { disconnectCalled.setValue(true) }
             )
             $0.persistenceClient = .mock(
-                onFinalizeRide: { finalizedRide.setValue(($0, $1, $2)) }
+                onFinalizeRide: { finalizedRide.setValue(($0, $1, $2, $3)) }
             )
         }
         await store.send(.finishTapped) {
@@ -1051,6 +1051,7 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(finalizedRide.value?.2.rideId == rideId)
         #expect(finalizedRide.value?.2.distanceMeters == 500)
         #expect(finalizedRide.value?.2.recordingState == .ended)
+        #expect(finalizedRide.value?.3 == nil)
     }
 
     @Test("Alert cancel does not change recording state")
