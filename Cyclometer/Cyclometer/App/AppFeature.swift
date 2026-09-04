@@ -21,6 +21,8 @@ struct AppFeature {
     @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.screenClient) var screenClient
     @Dependency(\.continuousClock) var clock
+    @Dependency(\.persistenceClient) var persistenceClient
+    @Dependency(\.date) var date
 
     @ObservableState
     struct State: Equatable {
@@ -68,6 +70,9 @@ struct AppFeature {
         case routes(RoutesFeature.Action)
         case settings(SettingsFeature.Action)
         case activeRide(ActiveRideFeature.Action)
+        /// Sent from `.task` when a kill mid-ride left a non-`.ended` Ride behind
+        /// (#175).
+        case resumableRideFetched(RideSummaryUpdate)
 
         // ── Screen power management (#110) ───────────────────────────────────────
         case scenePhaseChanged(isActive: Bool)
@@ -110,16 +115,29 @@ struct AppFeature {
                 //
                 // Sequential rather than merged — a deterministic order is what makes
                 // the launch push assertable as one interleaved call log (BLE.md §5.0).
-                return .run { [
-                    bleCSCClient, variaRadarClient, bleHRClient,
-                    assignments = state.preferences.cscAssignments,
-                    radarID = state.preferences.pairedSensor(for: .radar)?.peripheralID,
-                    hrID = state.preferences.pairedSensor(for: .heartRate)?.peripheralID
-                ] _ in
-                    await bleCSCClient.setPairedSensors(assignments)
-                    await variaRadarClient.setPairedSensor(radarID)
-                    await bleHRClient.setPairedSensor(hrID)
-                }
+                //
+                // Merged with the resume-fetch below: the two are independent
+                // concerns (unlike the three sequential calls inside the first
+                // effect, which must run in a fixed order relative to each other).
+                return .merge(
+                    .run { [
+                        bleCSCClient, variaRadarClient, bleHRClient,
+                        assignments = state.preferences.cscAssignments,
+                        radarID = state.preferences.pairedSensor(for: .radar)?.peripheralID,
+                        hrID = state.preferences.pairedSensor(for: .heartRate)?.peripheralID
+                    ] _ in
+                        await bleCSCClient.setPairedSensors(assignments)
+                        await variaRadarClient.setPairedSensor(radarID)
+                        await bleHRClient.setPairedSensor(hrID)
+                    },
+                    // #175: at most one non-ended Ride can exist; if a kill left one
+                    // behind, resume it instead of leaving it permanently orphaned.
+                    .run { [persistenceClient] send in
+                        if let summary = try? await persistenceClient.fetchResumableRide() {
+                            await send(.resumableRideFetched(summary))
+                        }
+                    }
+                )
 
             case .tabSelected(let tab):
                 state.selectedTab = tab
@@ -156,10 +174,8 @@ struct AppFeature {
                 return Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
 
             case .startSheet(.presented(.delegate(.startRide))):
-                state.activeRide = ActiveRideFeature.State()
+                Self.presentActiveRide(ActiveRideFeature.State(), in: &state)
                 state.startSheet = nil
-                state.isDashboardPresented = true
-                state.selectedTab = .rides
                 // Start the ride's long-running effects (1 Hz timer, HR, radar,
                 // location) here so they live for the whole ride — bound to
                 // `activeRide` via `.ifLet` and torn down only when the ride
@@ -189,6 +205,20 @@ struct AppFeature {
                 state.activeRide = nil
                 state.isDashboardPresented = false
                 return .none
+
+            case .resumableRideFetched(let summary):
+                // `.task`'s two effects race: the rider can start a brand-new ride
+                // through the normal start-sheet flow before this async fetch
+                // resolves. Don't clobber that ride — but the orphaned one still
+                // needs to be closed out, or it stays a phantom non-`.ended` row
+                // forever (invisible in RidesView, never exported) (#175 review).
+                guard state.activeRide == nil else {
+                    return .run { [persistenceClient, date] _ in
+                        try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
+                    }
+                }
+                Self.presentActiveRide(ActiveRideFeature.State(resuming: summary), in: &state)
+                return .send(.activeRide(.task))
 
             case .scenePhaseChanged(let isActive):
                 state.isForeground = isActive
@@ -269,6 +299,15 @@ struct AppFeature {
                 .send(.screenVisibilityChanged(isVisible))
             }
         }
+    }
+
+    /// Puts a ride's dashboard on screen — shared by starting a brand-new ride
+    /// and resuming one found on relaunch (#175), so a future addition to
+    /// "present the ride dashboard" only has to be made once.
+    private static func presentActiveRide(_ activeRide: ActiveRideFeature.State, in state: inout State) {
+        state.activeRide = activeRide
+        state.isDashboardPresented = true
+        state.selectedTab = .rides
     }
 
     /// Balance the scan `startRideButtonTapped` took. Shared by the two paths the sheet

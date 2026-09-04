@@ -103,4 +103,78 @@ struct AppFeatureTests {
         await store.finish()
         #expect(store.state.activeRide == nil)
     }
+
+    /// #175: `.task` discovers a Ride a kill left behind and resumes it — the
+    /// `AppFeature`-level wiring companion to `ActiveRideFeatureTests`'
+    /// `State(resuming:)` tests and `RideRecordingTests.killAndRelaunchResumesRide`,
+    /// neither of which exercises this reducer.
+    @Test("task discovers a resumable ride and presents the dashboard")
+    func taskDiscoversResumableRide() async {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .active,
+            durationSeconds: 120, distanceMeters: 800, averageSpeedMPS: 5, maxSpeedMPS: 9
+        )
+        let store = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.uuid = .incrementing
+            $0.bleCSCClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.screenClient = .testValue
+            $0.hapticsClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(resumableRide: summary)
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.resumableRideFetched)
+        #expect(store.state.activeRide?.rideId == summary.rideId)
+        #expect(store.state.activeRide?.recordingState == .active)
+        #expect(store.state.isDashboardPresented == true)
+        #expect(store.state.selectedTab == .rides)
+        await store.receive(\.activeRide.task)
+    }
+
+    /// #175 review: `.task`'s BLE-pairing push and resumable-ride fetch race —
+    /// the rider can start a brand-new ride through the normal start-sheet flow
+    /// before the async fetch resolves. The already-started ride must not be
+    /// clobbered, and the orphaned resumed ride must still get closed out
+    /// rather than staying a phantom non-`.ended` row forever.
+    @Test("resumableRideFetched finalizes an orphaned ride instead of clobbering one already started")
+    func resumableRideFetchedDoesNotClobberANewlyStartedRide() async {
+        let orphanedRideId = UUID()
+        let newRideId = UUID()
+        let orphanedSummary = RideSummaryUpdate(
+            rideId: orphanedRideId, recordingState: .active,
+            durationSeconds: 300, distanceMeters: 2_000, averageSpeedMPS: 5, maxSpeedMPS: 9
+        )
+        let finalized = LockIsolated<(UUID, Date, RideSummaryUpdate, URL?)?>(nil)
+        let fixedDate = Date(timeIntervalSince1970: 2_000_000)
+        let store = TestStore(
+            initialState: AppFeature.State(
+                activeRide: ActiveRideFeature.State(rideId: newRideId, recordingState: .active),
+                isDashboardPresented: true
+            )
+        ) {
+            AppFeature()
+        } withDependencies: {
+            $0.date = .constant(fixedDate)
+            $0.persistenceClient = .mock(onFinalizeRide: { finalized.setValue(($0, $1, $2, $3)) })
+        }
+
+        await store.send(.resumableRideFetched(orphanedSummary))
+
+        // The new ride is left untouched — not overwritten by the stale resumed one.
+        #expect(store.state.activeRide?.rideId == newRideId)
+        #expect(store.state.isDashboardPresented == true)
+
+        #expect(finalized.value?.0 == orphanedRideId)
+        #expect(finalized.value?.1 == fixedDate)
+        #expect(finalized.value?.2 == orphanedSummary)
+        #expect(finalized.value?.3 == nil)
+    }
 }

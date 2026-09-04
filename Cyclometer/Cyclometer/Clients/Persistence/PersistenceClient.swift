@@ -31,6 +31,9 @@ struct PersistenceClient: Sendable {
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
     /// Ascending by timestamp, for GPXExporter (#173).
     var fetchVehiclePassEvents: @Sendable (UUID) async throws -> [VehiclePassEventDTO]
+    /// Read path for app-relaunch resume (#175) — the in-progress Ride left behind
+    /// by a kill mid-ride, if one exists.
+    var fetchResumableRide: @Sendable () async throws -> RideSummaryUpdate?
 }
 
 enum PersistenceError: Error, Equatable {
@@ -54,7 +57,8 @@ extension PersistenceClient: DependencyKey {
             updateRideSummary: { try await rideActor.updateRideSummary($0) },
             finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
-            fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) }
+            fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
+            fetchResumableRide: { try await rideActor.fetchResumableRide() }
         )
     }
 
@@ -71,7 +75,8 @@ extension PersistenceClient: DependencyKey {
         updateRideSummary: { _ in },
         finalizeRide: { _, _, _, _ in },
         appendVehiclePassEvents: { _ in },
-        fetchVehiclePassEvents: { _ in [] }
+        fetchVehiclePassEvents: { _ in [] },
+        fetchResumableRide: { nil }
     )
 }
 

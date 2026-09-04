@@ -112,6 +112,7 @@ struct PersistenceClientTests {
         #expect(try await client.fetchTrackPoints(UUID()).isEmpty)
         #expect(try await client.fetchRide(UUID()) == RideExportMetadata(title: "", startedAt: .init(timeIntervalSince1970: 0)))
         #expect(try await client.fetchVehiclePassEvents(UUID()).isEmpty)
+        #expect(try await client.fetchResumableRide() == nil)
         try await client.createRide(UUID(), Date())
         let update = RideSummaryUpdate(rideId: UUID(), durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0)
         try await client.updateRideSummary(update)
@@ -131,6 +132,10 @@ struct PersistenceClientTests {
             rideId: rideId, timestamp: Date(), latitude: 3, longitude: 4,
             alertLevelAtPass: .advisory, riderSpeedKph: 22, estimatedPassSpeedKph: nil
         )]
+        let scriptedResumableRide = RideSummaryUpdate(
+            rideId: rideId, recordingState: .paused,
+            durationSeconds: 300, distanceMeters: 1_500, averageSpeedMPS: 5, maxSpeedMPS: 9
+        )
         let flushed = LockIsolated<[TrackPointDTO]>([])
         let createdRide = LockIsolated<(UUID, Date)?>(nil)
         let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
@@ -140,6 +145,7 @@ struct PersistenceClientTests {
             trackPoints: [rideId: scripted],
             rideExportMetadata: [rideId: scriptedRideMetadata],
             vehiclePassEvents: [rideId: scriptedPassEvents],
+            resumableRide: scriptedResumableRide,
             onFlush: { flushed.setValue($0) },
             onCreateRide: { createdRide.setValue(($0, $1)) },
             onUpdateRideSummary: { updatedSummary.setValue($0) },
@@ -152,6 +158,7 @@ struct PersistenceClientTests {
         #expect(try await client.fetchRide(rideId) == scriptedRideMetadata)
         #expect(try await client.fetchVehiclePassEvents(rideId) == scriptedPassEvents)
         #expect(try await client.fetchVehiclePassEvents(UUID()).isEmpty)
+        #expect(try await client.fetchResumableRide() == scriptedResumableRide)
 
         try await client.flushTrackPoints(scripted)
         #expect(flushed.value == scripted)
@@ -223,7 +230,12 @@ struct PersistenceClientTests {
             maxHeartRateBPM: 178,
             averageCadenceRPM: 82,
             maxCadenceRPM: 110,
-            vehiclePassCount: nil
+            vehiclePassCount: nil,
+            isAutoPaused: true,
+            zeroSpeedSeconds: 7,
+            speedSampleCount: 900,
+            hrSampleCount: 850,
+            cadenceSampleCount: 700
         )
         try await client.updateRideSummary(update)
 
@@ -237,6 +249,11 @@ struct PersistenceClientTests {
         #expect(ride.maxHeartRateBPM == update.maxHeartRateBPM)
         #expect(ride.averageCadenceRPM == update.averageCadenceRPM)
         #expect(ride.maxCadenceRPM == update.maxCadenceRPM)
+        #expect(ride.isAutoPaused == true)
+        #expect(ride.zeroSpeedSeconds == 7)
+        #expect(ride.speedSampleCount == 900)
+        #expect(ride.hrSampleCount == 850)
+        #expect(ride.cadenceSampleCount == 700)
     }
 
     @Test("updateRideSummary preserves an existing vehiclePassCount when the incoming update is nil")
@@ -395,6 +412,62 @@ struct PersistenceClientTests {
         let items = try context.fetch(descriptor).filter { $0.recordingState == .ended }
 
         #expect(items.map(\.id) == [endedId])
+    }
+
+    // MARK: - fetchResumableRide (#175)
+
+    @Test("fetchResumableRide returns nil when no rides exist")
+    func fetchResumableRideNilWhenEmpty() async throws {
+        let (client, _) = Self.makeLiveClient()
+        #expect(try await client.fetchResumableRide() == nil)
+    }
+
+    @Test("fetchResumableRide returns nil when the only ride is .ended")
+    func fetchResumableRideNilWhenOnlyEndedRideExists() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date())
+        let finishUpdate = RideSummaryUpdate(
+            rideId: rideId, recordingState: .ended,
+            durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
+        )
+        try await client.finalizeRide(rideId, Date(), finishUpdate, nil)
+
+        #expect(try await client.fetchResumableRide() == nil)
+    }
+
+    @Test("fetchResumableRide returns the non-ended ride's snapshot, ignoring an ended one")
+    func fetchResumableRideReturnsNonEndedRide() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let base = Date()
+        let endedId = UUID()
+        let activeId = UUID()
+
+        try await client.createRide(endedId, base)
+        let finishUpdate = RideSummaryUpdate(
+            rideId: endedId, recordingState: .ended,
+            durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
+        )
+        try await client.finalizeRide(endedId, base.addingTimeInterval(60), finishUpdate, nil)
+
+        try await client.createRide(activeId, base.addingTimeInterval(120))
+        let checkpoint = RideSummaryUpdate(
+            rideId: activeId, recordingState: .paused,
+            durationSeconds: 145, distanceMeters: 980,
+            averageSpeedMPS: 5.5, maxSpeedMPS: 11,
+            averageHeartRateBPM: 140, maxHeartRateBPM: 172,
+            averageCadenceRPM: 78, maxCadenceRPM: 105,
+            vehiclePassCount: 2,
+            isAutoPaused: true,
+            zeroSpeedSeconds: 9,
+            speedSampleCount: 120,
+            hrSampleCount: 90,
+            cadenceSampleCount: 60
+        )
+        try await client.updateRideSummary(checkpoint)
+
+        let resumable = try await client.fetchResumableRide()
+        #expect(resumable == checkpoint)
     }
 
     // MARK: - VehiclePassEvent (#172)

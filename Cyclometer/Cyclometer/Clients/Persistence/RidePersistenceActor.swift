@@ -67,6 +67,34 @@ actor RidePersistenceActor {
         return RideExportMetadata(title: ride.title, startedAt: ride.startedAt)
     }
 
+    /// Read path for app-relaunch resume (#175). Ordinarily at most one non-ended
+    /// Ride exists at a time, so `fetchLimit = 1` alone would suffice — the
+    /// `startedAt` descending sort is a deliberate second line of defense against
+    /// the one known way that invariant can transiently break: `AppFeature`
+    /// starting a brand-new ride while this fetch is still in flight leaves two
+    /// non-ended rows until the orphaned one is closed out (`AppFeature.swift`'s
+    /// `resumableRideFetched` handler). Picking the most recent by `startedAt`
+    /// is what makes this method itself still return the *newer* ride rather
+    /// than an arbitrary one for the brief window that can occur in.
+    /// Filters on `endedAt == nil` rather than `recordingState != .ended`: SwiftData's
+    /// #Predicate can't compare a RawRepresentable-backed enum property (same fault
+    /// AppView.swift works around) — but every write path here only ever sets
+    /// `.ended` in the same call that sets `endedAt` (finalizeRide), so the two
+    /// fields are always in lockstep and `endedAt == nil` is an exact, enum-free proxy.
+    func fetchResumableRide() throws -> RideSummaryUpdate? {
+        do {
+            var descriptor = FetchDescriptor<Ride>(
+                predicate: #Predicate { $0.endedAt == nil },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+            )
+            descriptor.fetchLimit = 1
+            return try modelContext.fetch(descriptor).first?.summarySnapshot
+        } catch {
+            logger.error("fetchResumableRide failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// Read path for `GPXExporter` (#173) — one `<wpt>` per event, oldest first.
     func fetchVehiclePassEvents(rideId: UUID) throws -> [VehiclePassEventDTO] {
         let descriptor = FetchDescriptor<VehiclePassEvent>(
@@ -112,6 +140,11 @@ actor RidePersistenceActor {
         if let vehiclePassCount = update.vehiclePassCount {
             ride.vehiclePassCount = vehiclePassCount
         }
+        ride.isAutoPaused = update.isAutoPaused
+        ride.zeroSpeedSeconds = update.zeroSpeedSeconds
+        ride.speedSampleCount = update.speedSampleCount
+        ride.hrSampleCount = update.hrSampleCount
+        ride.cadenceSampleCount = update.cadenceSampleCount
     }
 
     /// Shared body for every write above: run `changes` (insert/fetch/mutate, no

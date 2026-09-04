@@ -62,6 +62,9 @@ struct ActiveRideFeature {
         /// Placeholder until `.task` overwrites it with a fresh, deterministic id
         /// (`@Dependency(\.uuid)`) — mirrors how `recordingState` defaults to `.idle`
         /// pre-start. The persisted Ride record is created with this same id (#171).
+        /// Exception: `State(resuming:)` (#175) sets this to an *existing* Ride's
+        /// id — `.task` knows not to overwrite it because `recordingState` is
+        /// never left `.idle` by that initializer (see `.task`'s `isResuming` check).
         var rideId: UUID = UUID()
         var recordingState: RideRecordingState = .idle
         var elapsedSeconds: Int = 0
@@ -233,16 +236,27 @@ struct ActiveRideFeature {
         Reduce { state, action in
             switch action {
             case .task:
-                state.recordingState = .active
-                state.rideId = uuid()
+                // A fresh ride's `State()` always starts `.idle`; `State(resuming:)`
+                // always sets `.active` or `.paused` (never `.idle` — a persisted
+                // Ride can't be) — so this distinguishes the two paths without a
+                // dedicated flag (#175 review: simpler than a redundant bool).
+                let isResuming = state.recordingState != .idle
+                if !isResuming {
+                    state.recordingState = .active
+                    state.rideId = uuid()
+                }
                 let rideId = state.rideId
                 let startedAt = date.now
                 return .merge(
                     .send(.speed(.startListening)),
                     .send(.cadence(.startListening)),
                     .send(.calibration(.startListening)),
-                    .send(.trackRecorder(.startRecording)),
-                    .run { [persistenceClient] _ in
+                    // A resumed ride can come back `.paused` (#175) — starting the
+                    // recorder unconditionally here would desync
+                    // `trackRecorder.isRecording` from `recordingState`, an
+                    // invariant `.elapsedTick`'s guard relies on elsewhere in this file.
+                    state.recordingState == .active ? .send(.trackRecorder(.startRecording)) : .none,
+                    isResuming ? .none : .run { [persistenceClient] _ in
                         try? await persistenceClient.createRide(rideId, startedAt)
                     },
                     .run { send in
@@ -385,7 +399,15 @@ struct ActiveRideFeature {
                 guard state.recordingState == .active else { return .none }
                 state.recordingState = .paused
                 state.isAutoPaused = true
-                return .none
+                // Unlike a manual pause, nothing else ever checkpoints a
+                // `.paused` state to persistence — the 30s periodic checkpoint
+                // only fires while `.active` (`.elapsedTick`'s own guard), so
+                // without this write an auto-paused ride killed before the next
+                // manual action would resume as stale `.active` data (#175 review).
+                let update = makeRideSummaryUpdate(from: state)
+                return .run { [persistenceClient] _ in
+                    try? await persistenceClient.updateRideSummary(update)
+                }
             case .heartRateUpdated(let bpm):
                 applyHeartRateReading(bpm, to: &state)
                 return .none
@@ -671,7 +693,12 @@ struct ActiveRideFeature {
                 ? state.cadence.averageCadenceRPM : nil,
             maxCadenceRPM: state.cadence.pedalingSampleCount > 0
                 ? state.cadence.maxCadenceRPM : nil,
-            vehiclePassCount: state.vehiclePassCount
+            vehiclePassCount: state.vehiclePassCount,
+            isAutoPaused: state.isAutoPaused,
+            zeroSpeedSeconds: state.zeroSpeedSeconds,
+            speedSampleCount: state.speedSampleCount,
+            hrSampleCount: state.hrSampleCount,
+            cadenceSampleCount: state.cadence.pedalingSampleCount
         )
     }
 
@@ -724,5 +751,68 @@ struct ActiveRideFeature {
               date.now.timeIntervalSince(sample.receivedAt) >= Self.healthKitHRStalenessWindow
         else { return }
         state.healthKitHRSample = nil
+    }
+}
+
+extension ActiveRideFeature.State {
+    /// Seeds a resumed ride's cumulative aggregates from its last-persisted
+    /// checkpoint (#175, `PersistenceClient.fetchResumableRide`). Transient
+    /// UI/sensor fields (coordinate, trackCoordinates, radar/BLE connection state,
+    /// etc.) are left at `State()`'s defaults — `.task`'s existing scan/reconnect
+    /// effects repopulate those naturally, same as a fresh ride; rebuilding them is
+    /// explicitly out of scope for #175.
+    ///
+    /// An extension initializer rather than one declared inside `State` itself —
+    /// the latter would suppress the synthesized memberwise initializer that every
+    /// existing test and preview already constructs `State(...)` literals through.
+    init(resuming summary: RideSummaryUpdate) {
+        // `fetchResumableRide` filters on `endedAt == nil`, which every write
+        // path keeps in lockstep with `recordingState != .ended` — if that ever
+        // stopped being true, resuming a dead ride as live would be a worse
+        // failure than crashing here (#175 review).
+        assert(summary.recordingState != .ended, "State(resuming:) received an already-ended Ride")
+
+        self.init()
+        rideId = summary.rideId
+        // Faithfully restores active vs. manually paused — "resume recording from
+        // it" (#175), not silently un-pausing a ride the rider had stopped.
+        recordingState = summary.recordingState == .paused ? .paused : .active
+        // Only meaningful alongside `.paused` (`.pauseTapped`/`.resumeTapped`
+        // always clear it) — restoring it lets the `case .speed` auto-resume
+        // guard keep working after a resume exactly as it did before the kill,
+        // instead of silently requiring a manual Resume tap every time.
+        isAutoPaused = summary.isAutoPaused
+        // Bounded to the same one-checkpoint-window staleness as every other
+        // field here — worst case, the auto-pause/auto-end grace period runs a
+        // little longer than it would have, never a little shorter.
+        zeroSpeedSeconds = summary.zeroSpeedSeconds
+        elapsedSeconds = Int(summary.durationSeconds)
+        distanceMeters = summary.distanceMeters
+        maxSpeedKPH = Measurement(value: summary.maxSpeedMPS, unit: UnitSpeed.metersPerSecond)
+            .converted(to: .kilometersPerHour).value
+        // The running averages are seeded from their *real* persisted sample
+        // counts, not a fabricated weight — `average * count` reconstructs the
+        // true prior sum, so a post-resume sample is weighted correctly against
+        // however many samples actually preceded it, rather than always as if
+        // exactly one had. A zero count also tells "no real sample yet" apart
+        // from "genuinely averaged zero", which `averageSpeedMPS` alone (a
+        // non-optional Double) can't.
+        if summary.speedSampleCount > 0 {
+            speedSampleCount = summary.speedSampleCount
+            let averageSpeedKPH = Measurement(value: summary.averageSpeedMPS, unit: UnitSpeed.metersPerSecond)
+                .converted(to: .kilometersPerHour).value
+            speedSampleSum = averageSpeedKPH * Double(summary.speedSampleCount)
+        }
+        if let avgHR = summary.averageHeartRateBPM, summary.hrSampleCount > 0 {
+            hrSampleCount = summary.hrSampleCount
+            hrSampleSum = Double(avgHR) * Double(summary.hrSampleCount)
+        }
+        maxHeartRateBPM = summary.maxHeartRateBPM ?? 0
+        if let avgCadence = summary.averageCadenceRPM, summary.cadenceSampleCount > 0 {
+            cadence.pedalingSampleCount = summary.cadenceSampleCount
+            cadence.cadenceSum = Double(avgCadence) * Double(summary.cadenceSampleCount)
+        }
+        cadence.maxCadenceRPM = summary.maxCadenceRPM ?? 0
+        vehiclePassCount = summary.vehiclePassCount ?? 0
     }
 }
