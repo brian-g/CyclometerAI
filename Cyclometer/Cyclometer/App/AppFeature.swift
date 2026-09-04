@@ -21,6 +21,7 @@ struct AppFeature {
     @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.screenClient) var screenClient
     @Dependency(\.continuousClock) var clock
+    @Dependency(\.persistenceClient) var persistenceClient
 
     @ObservableState
     struct State: Equatable {
@@ -68,6 +69,9 @@ struct AppFeature {
         case routes(RoutesFeature.Action)
         case settings(SettingsFeature.Action)
         case activeRide(ActiveRideFeature.Action)
+        /// Sent from `.task` when a kill mid-ride left a non-`.ended` Ride behind
+        /// (#175).
+        case resumableRideFetched(RideSummaryUpdate)
 
         // ── Screen power management (#110) ───────────────────────────────────────
         case scenePhaseChanged(isActive: Bool)
@@ -110,16 +114,29 @@ struct AppFeature {
                 //
                 // Sequential rather than merged — a deterministic order is what makes
                 // the launch push assertable as one interleaved call log (BLE.md §5.0).
-                return .run { [
-                    bleCSCClient, variaRadarClient, bleHRClient,
-                    assignments = state.preferences.cscAssignments,
-                    radarID = state.preferences.pairedSensor(for: .radar)?.peripheralID,
-                    hrID = state.preferences.pairedSensor(for: .heartRate)?.peripheralID
-                ] _ in
-                    await bleCSCClient.setPairedSensors(assignments)
-                    await variaRadarClient.setPairedSensor(radarID)
-                    await bleHRClient.setPairedSensor(hrID)
-                }
+                //
+                // Merged with the resume-fetch below: the two are independent
+                // concerns (unlike the three sequential calls inside the first
+                // effect, which must run in a fixed order relative to each other).
+                return .merge(
+                    .run { [
+                        bleCSCClient, variaRadarClient, bleHRClient,
+                        assignments = state.preferences.cscAssignments,
+                        radarID = state.preferences.pairedSensor(for: .radar)?.peripheralID,
+                        hrID = state.preferences.pairedSensor(for: .heartRate)?.peripheralID
+                    ] _ in
+                        await bleCSCClient.setPairedSensors(assignments)
+                        await variaRadarClient.setPairedSensor(radarID)
+                        await bleHRClient.setPairedSensor(hrID)
+                    },
+                    // #175: at most one non-ended Ride can exist; if a kill left one
+                    // behind, resume it instead of leaving it permanently orphaned.
+                    .run { [persistenceClient] send in
+                        if let summary = try? await persistenceClient.fetchResumableRide() {
+                            await send(.resumableRideFetched(summary))
+                        }
+                    }
+                )
 
             case .tabSelected(let tab):
                 state.selectedTab = tab
@@ -189,6 +206,16 @@ struct AppFeature {
                 state.activeRide = nil
                 state.isDashboardPresented = false
                 return .none
+
+            case .resumableRideFetched(let summary):
+                // `.task` fires exactly once per process launch (AppView.swift),
+                // before a ride could have started through the normal start-sheet
+                // flow — this guard costs nothing and documents that intent.
+                guard state.activeRide == nil else { return .none }
+                state.activeRide = ActiveRideFeature.State(resuming: summary)
+                state.isDashboardPresented = true
+                state.selectedTab = .rides
+                return .send(.activeRide(.task))
 
             case .scenePhaseChanged(let isActive):
                 state.isForeground = isActive

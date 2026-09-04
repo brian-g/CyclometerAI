@@ -103,4 +103,39 @@ struct AppFeatureTests {
         await store.finish()
         #expect(store.state.activeRide == nil)
     }
+
+    /// #175: `.task` discovers a Ride a kill left behind and resumes it — the
+    /// `AppFeature`-level wiring companion to `ActiveRideFeatureTests`'
+    /// `State(resuming:)` tests and `RideRecordingTests.killAndRelaunchResumesRide`,
+    /// neither of which exercises this reducer.
+    @Test("task discovers a resumable ride and presents the dashboard")
+    func taskDiscoversResumableRide() async {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .active,
+            durationSeconds: 120, distanceMeters: 800, averageSpeedMPS: 5, maxSpeedMPS: 9
+        )
+        let store = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.uuid = .incrementing
+            $0.bleCSCClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.screenClient = .testValue
+            $0.hapticsClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(resumableRide: summary)
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.resumableRideFetched)
+        #expect(store.state.activeRide?.rideId == summary.rideId)
+        #expect(store.state.activeRide?.recordingState == .active)
+        #expect(store.state.isDashboardPresented == true)
+        #expect(store.state.selectedTab == .rides)
+        await store.receive(\.activeRide.task)
+    }
 }

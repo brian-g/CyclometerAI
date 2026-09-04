@@ -67,6 +67,35 @@ actor RidePersistenceActor {
         return RideExportMetadata(title: ride.title, startedAt: ride.startedAt)
     }
 
+    /// Read path for app-relaunch resume (#175). At most one non-ended Ride can
+    /// exist at a time; returns its last-persisted snapshot, or nil if none.
+    /// Filters on `endedAt == nil` rather than `recordingState != .ended`: SwiftData's
+    /// #Predicate can't compare a RawRepresentable-backed enum property (same fault
+    /// AppView.swift works around) — but every write path here only ever sets
+    /// `.ended` in the same call that sets `endedAt` (finalizeRide), so the two
+    /// fields are always in lockstep and `endedAt == nil` is an exact, enum-free proxy.
+    func fetchResumableRide() throws -> RideSummaryUpdate? {
+        var descriptor = FetchDescriptor<Ride>(
+            predicate: #Predicate { $0.endedAt == nil },
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        guard let ride = try modelContext.fetch(descriptor).first else { return nil }
+        return RideSummaryUpdate(
+            rideId: ride.id,
+            recordingState: ride.recordingState,
+            durationSeconds: ride.durationSeconds,
+            distanceMeters: ride.distanceMeters,
+            averageSpeedMPS: ride.averageSpeedMPS,
+            maxSpeedMPS: ride.maxSpeedMPS,
+            averageHeartRateBPM: ride.averageHeartRateBPM,
+            maxHeartRateBPM: ride.maxHeartRateBPM,
+            averageCadenceRPM: ride.averageCadenceRPM,
+            maxCadenceRPM: ride.maxCadenceRPM,
+            vehiclePassCount: ride.vehiclePassCount
+        )
+    }
+
     /// Read path for `GPXExporter` (#173) — one `<wpt>` per event, oldest first.
     func fetchVehiclePassEvents(rideId: UUID) throws -> [VehiclePassEventDTO] {
         let descriptor = FetchDescriptor<VehiclePassEvent>(

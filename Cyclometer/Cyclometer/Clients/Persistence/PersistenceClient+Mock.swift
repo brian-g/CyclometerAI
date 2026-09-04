@@ -5,6 +5,7 @@ extension PersistenceClient {
         trackPoints: [UUID: [TrackPointDTO]] = [:],
         rideExportMetadata: [UUID: RideExportMetadata] = [:],
         vehiclePassEvents: [UUID: [VehiclePassEventDTO]] = [:],
+        resumableRide: RideSummaryUpdate? = nil,
         onFlush: @escaping @Sendable ([TrackPointDTO]) -> Void = { _ in },
         onCreateRide: @escaping @Sendable (UUID, Date) -> Void = { _, _ in },
         onUpdateRideSummary: @escaping @Sendable (RideSummaryUpdate) -> Void = { _ in },
@@ -25,7 +26,8 @@ extension PersistenceClient {
             updateRideSummary: { onUpdateRideSummary($0) },
             finalizeRide: { onFinalizeRide($0, $1, $2, $3) },
             appendVehiclePassEvents: { onAppendVehiclePassEvents($0) },
-            fetchVehiclePassEvents: { vehiclePassEvents[$0] ?? [] }
+            fetchVehiclePassEvents: { vehiclePassEvents[$0] ?? [] },
+            fetchResumableRide: { resumableRide }
         )
     }
 }

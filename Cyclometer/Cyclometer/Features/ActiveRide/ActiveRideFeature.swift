@@ -62,8 +62,16 @@ struct ActiveRideFeature {
         /// Placeholder until `.task` overwrites it with a fresh, deterministic id
         /// (`@Dependency(\.uuid)`) — mirrors how `recordingState` defaults to `.idle`
         /// pre-start. The persisted Ride record is created with this same id (#171).
+        /// Exception: `State(resuming:)` (#175) sets this to an *existing* Ride's id,
+        /// which `isResumedFromPersistence` tells `.task` not to overwrite.
         var rideId: UUID = UUID()
         var recordingState: RideRecordingState = .idle
+        /// Set only by `State(resuming:)` (#175) — tells `.task` this state was
+        /// reconstructed from a persisted Ride left non-`.ended` by a kill, so it
+        /// must not regenerate `rideId` or call `createRide` again (which would
+        /// insert a second Ride row with a duplicate id — SwiftData enforces no
+        /// uniqueness constraint here).
+        var isResumedFromPersistence: Bool = false
         var elapsedSeconds: Int = 0
         var speedKPH: Double = 0
         var heartRateBPM: Int = 0
@@ -233,8 +241,11 @@ struct ActiveRideFeature {
         Reduce { state, action in
             switch action {
             case .task:
-                state.recordingState = .active
-                state.rideId = uuid()
+                let isResuming = state.isResumedFromPersistence
+                if !isResuming {
+                    state.recordingState = .active
+                    state.rideId = uuid()
+                }
                 let rideId = state.rideId
                 let startedAt = date.now
                 return .merge(
@@ -242,7 +253,7 @@ struct ActiveRideFeature {
                     .send(.cadence(.startListening)),
                     .send(.calibration(.startListening)),
                     .send(.trackRecorder(.startRecording)),
-                    .run { [persistenceClient] _ in
+                    isResuming ? .none : .run { [persistenceClient] _ in
                         try? await persistenceClient.createRide(rideId, startedAt)
                     },
                     .run { send in
@@ -724,5 +735,49 @@ struct ActiveRideFeature {
               date.now.timeIntervalSince(sample.receivedAt) >= Self.healthKitHRStalenessWindow
         else { return }
         state.healthKitHRSample = nil
+    }
+}
+
+extension ActiveRideFeature.State {
+    /// Seeds a resumed ride's cumulative aggregates from its last-persisted
+    /// checkpoint (#175, `PersistenceClient.fetchResumableRide`). Transient
+    /// UI/sensor fields (coordinate, trackCoordinates, radar/BLE connection state,
+    /// etc.) are left at `State()`'s defaults — `.task`'s existing scan/reconnect
+    /// effects repopulate those naturally, same as a fresh ride; rebuilding them is
+    /// explicitly out of scope for #175.
+    ///
+    /// An extension initializer rather than one declared inside `State` itself —
+    /// the latter would suppress the synthesized memberwise initializer that every
+    /// existing test and preview already constructs `State(...)` literals through.
+    init(resuming summary: RideSummaryUpdate) {
+        self.init()
+        rideId = summary.rideId
+        // Faithfully restores active vs. manually paused — "resume recording from
+        // it" (#175), not silently un-pausing a ride the rider had stopped.
+        // (.ended can't reach here: fetchResumableRide excludes it.)
+        recordingState = summary.recordingState == .paused ? .paused : .active
+        isResumedFromPersistence = true
+        elapsedSeconds = Int(summary.durationSeconds)
+        distanceMeters = summary.distanceMeters
+        maxSpeedKPH = Measurement(value: summary.maxSpeedMPS, unit: UnitSpeed.metersPerSecond)
+            .converted(to: .kilometersPerHour).value
+        // The sample-averaged fields (average speed/HR/cadence) have no
+        // precision-preserving inverse from a single persisted average — seed a
+        // synthetic 1-sample average so they don't reset to zero and stomp the DB
+        // on the next checkpoint; this smooths out as real samples accumulate.
+        speedSampleCount = 1
+        speedSampleSum = Measurement(value: summary.averageSpeedMPS, unit: UnitSpeed.metersPerSecond)
+            .converted(to: .kilometersPerHour).value
+        if let avgHR = summary.averageHeartRateBPM {
+            hrSampleCount = 1
+            hrSampleSum = Double(avgHR)
+        }
+        maxHeartRateBPM = summary.maxHeartRateBPM ?? 0
+        if let avgCadence = summary.averageCadenceRPM {
+            cadence.pedalingSampleCount = 1
+            cadence.cadenceSum = Double(avgCadence)
+        }
+        cadence.maxCadenceRPM = summary.maxCadenceRPM ?? 0
+        vehiclePassCount = summary.vehiclePassCount ?? 0
     }
 }

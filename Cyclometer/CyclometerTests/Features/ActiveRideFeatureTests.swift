@@ -883,6 +883,114 @@ struct ActiveRideFeatureStateMachineTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    // MARK: - State(resuming:) (#175)
+
+    @Test("State(resuming:) seeds cumulative aggregates from a persisted snapshot")
+    func stateResumingSeedsAggregates() {
+        let rideId = UUID()
+        let summary = RideSummaryUpdate(
+            rideId: rideId,
+            recordingState: .active,
+            durationSeconds: 145,
+            distanceMeters: 980,
+            averageSpeedMPS: 6.0,
+            maxSpeedMPS: 12.0,
+            averageHeartRateBPM: 140,
+            maxHeartRateBPM: 172,
+            averageCadenceRPM: 78,
+            maxCadenceRPM: 105,
+            vehiclePassCount: 2
+        )
+
+        let state = ActiveRideFeature.State(resuming: summary)
+
+        #expect(state.rideId == rideId)
+        #expect(state.isResumedFromPersistence == true)
+        #expect(state.recordingState == .active)
+        #expect(state.elapsedSeconds == 145)
+        #expect(state.distanceMeters == 980)
+        #expect(abs(state.maxSpeedKPH - 12.0 * 3.6) < 0.001)
+        #expect(abs(state.averageSpeedKPH - 6.0 * 3.6) < 0.001)
+        #expect(state.maxHeartRateBPM == 172)
+        #expect(state.hrSampleCount == 1)
+        #expect(state.hrSampleSum == 140)
+        #expect(state.cadence.maxCadenceRPM == 105)
+        #expect(state.cadence.pedalingSampleCount == 1)
+        #expect(state.cadence.averageCadenceRPM == 78)
+        #expect(state.vehiclePassCount == 2)
+    }
+
+    @Test("State(resuming:) leaves HR/cadence averages at zero when the persisted ride never had a sample")
+    func stateResumingLeavesUnsampledAveragesAtZero() {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(),
+            recordingState: .active,
+            durationSeconds: 10,
+            distanceMeters: 20,
+            averageSpeedMPS: 2,
+            maxSpeedMPS: 3,
+            averageHeartRateBPM: nil,
+            maxHeartRateBPM: nil,
+            averageCadenceRPM: nil,
+            maxCadenceRPM: nil,
+            vehiclePassCount: nil
+        )
+
+        let state = ActiveRideFeature.State(resuming: summary)
+
+        #expect(state.hrSampleCount == 0)
+        #expect(state.hrSampleSum == 0)
+        #expect(state.maxHeartRateBPM == 0)
+        #expect(state.cadence.pedalingSampleCount == 0)
+        #expect(state.cadence.cadenceSum == 0)
+        #expect(state.cadence.maxCadenceRPM == 0)
+        #expect(state.vehiclePassCount == 0)
+    }
+
+    @Test("State(resuming:) preserves .paused, doesn't force .active")
+    func stateResumingPreservesPaused() {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .paused,
+            durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 3, maxSpeedMPS: 5
+        )
+
+        let state = ActiveRideFeature.State(resuming: summary)
+
+        #expect(state.recordingState == .paused)
+    }
+
+    @Test("task on a resumed state does not call createRide and preserves rideId")
+    func taskOnResumedStateSkipsCreateRide() async {
+        let rideId = UUID()
+        let created = LockIsolated<(UUID, Date)?>(nil)
+        let summary = RideSummaryUpdate(
+            rideId: rideId, recordingState: .active,
+            durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 3, maxSpeedMPS: 5
+        )
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(resuming: summary)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(onCreateRide: { created.setValue(($0, $1)) })
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        #expect(store.state.rideId == rideId)
+        #expect(store.state.recordingState == .active)
+        #expect(created.value == nil)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
     @Test("pauseTapped only transitions from active")
     func pauseOnlyFromActive() async {
         let store = makeStore(recordingState: .active)
