@@ -1,12 +1,35 @@
 import ComposableArchitecture
 import Foundation
 
+/// Where `GPXExporter.generate` writes files — live resolves to the real
+/// `Documents/` directory; test resolves to a fresh temp directory per access
+/// (a computed `var`, not `static let` — same reasoning as `RideDataBuffer.testValue`)
+/// so a caller that never configured `PersistenceClient.fetchRide` to throw
+/// (e.g. `.testValue`, which always succeeds) still can't write into the real
+/// on-device Documents folder.
+private enum GPXDocumentsDirectoryKey: DependencyKey {
+    static let liveValue: URL = .documentsDirectory
+    static var testValue: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(
+            "GPXExporterTests-\(UUID().uuidString)", isDirectory: true
+        )
+    }
+}
+
+extension DependencyValues {
+    var gpxDocumentsDirectory: URL {
+        get { self[GPXDocumentsDirectoryKey.self] }
+        set { self[GPXDocumentsDirectoryKey.self] = newValue }
+    }
+}
+
 /// Builds and writes a ride's GPX 1.1 export file (PRD §8.7, Appendix B;
 /// DataModel.md §6). `buildXML` is a pure function over already-persisted data — no
 /// dependencies, no I/O — so `GPXExporterTests` can exercise the schema/omission
 /// rules directly against fixtures, the same shape as `VehiclePassDetector`.
 enum GPXExporter {
     @Dependency(\.persistenceClient) static var persistenceClient
+    @Dependency(\.gpxDocumentsDirectory) static var documentsDirectory
 
     /// Fetches persisted Ride/TrackPoint/VehiclePassEvent data by rideId, builds the
     /// GPX document, and atomically writes it to `Documents/Rides/`.
@@ -19,7 +42,7 @@ enum GPXExporter {
         async let trackPoints = persistenceClient.fetchTrackPoints(rideId)
         async let vehiclePassEvents = persistenceClient.fetchVehiclePassEvents(rideId)
         let xml = try await buildXML(ride: ride, trackPoints: trackPoints, vehiclePassEvents: vehiclePassEvents)
-        return try await write(xml: xml, rideStartedAt: ride.startedAt)
+        return try await write(xml: xml, rideStartedAt: ride.startedAt, documentsDirectory: documentsDirectory)
     }
 
     /// Pure — no I/O, no dependencies. Document order is `metadata` → `wpt`* → `trk`,
@@ -77,7 +100,7 @@ enum GPXExporter {
     static func write(
         xml: String,
         rideStartedAt: Date,
-        documentsDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        documentsDirectory: URL = .documentsDirectory
     ) throws -> URL {
         let ridesDirectory = documentsDirectory.appendingPathComponent("Rides", isDirectory: true)
         try FileManager.default.createDirectory(at: ridesDirectory, withIntermediateDirectories: true)
