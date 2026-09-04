@@ -15,4 +15,11 @@ struct RideSummaryUpdate: Sendable, Equatable {
     var averageCadenceRPM: Int?
     var maxCadenceRPM: Int?
     var vehiclePassCount: Int?   // ActiveRideFeature's running count of confirmed passes (#172)
+    /// See `Ride.isAutoPaused`/`Ride.zeroSpeedSeconds`/the three sample-count
+    /// fields (#175) — defaulted so every pre-#175 call site keeps compiling.
+    var isAutoPaused: Bool = false
+    var zeroSpeedSeconds: Int = 0
+    var speedSampleCount: Int = 0
+    var hrSampleCount: Int = 0
+    var cadenceSampleCount: Int = 0
 }

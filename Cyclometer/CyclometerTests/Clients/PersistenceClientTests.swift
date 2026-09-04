@@ -230,7 +230,12 @@ struct PersistenceClientTests {
             maxHeartRateBPM: 178,
             averageCadenceRPM: 82,
             maxCadenceRPM: 110,
-            vehiclePassCount: nil
+            vehiclePassCount: nil,
+            isAutoPaused: true,
+            zeroSpeedSeconds: 7,
+            speedSampleCount: 900,
+            hrSampleCount: 850,
+            cadenceSampleCount: 700
         )
         try await client.updateRideSummary(update)
 
@@ -244,6 +249,11 @@ struct PersistenceClientTests {
         #expect(ride.maxHeartRateBPM == update.maxHeartRateBPM)
         #expect(ride.averageCadenceRPM == update.averageCadenceRPM)
         #expect(ride.maxCadenceRPM == update.maxCadenceRPM)
+        #expect(ride.isAutoPaused == true)
+        #expect(ride.zeroSpeedSeconds == 7)
+        #expect(ride.speedSampleCount == 900)
+        #expect(ride.hrSampleCount == 850)
+        #expect(ride.cadenceSampleCount == 700)
     }
 
     @Test("updateRideSummary preserves an existing vehiclePassCount when the incoming update is nil")
@@ -447,7 +457,12 @@ struct PersistenceClientTests {
             averageSpeedMPS: 5.5, maxSpeedMPS: 11,
             averageHeartRateBPM: 140, maxHeartRateBPM: 172,
             averageCadenceRPM: 78, maxCadenceRPM: 105,
-            vehiclePassCount: 2
+            vehiclePassCount: 2,
+            isAutoPaused: true,
+            zeroSpeedSeconds: 9,
+            speedSampleCount: 120,
+            hrSampleCount: 90,
+            cadenceSampleCount: 60
         )
         try await client.updateRideSummary(checkpoint)
 

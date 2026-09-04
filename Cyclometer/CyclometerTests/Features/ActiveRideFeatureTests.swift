@@ -885,9 +885,13 @@ struct ActiveRideFeatureStateMachineTests {
 
     // MARK: - State(resuming:) (#175)
 
-    @Test("State(resuming:) seeds cumulative aggregates from a persisted snapshot")
+    @Test("State(resuming:) seeds cumulative aggregates from a persisted snapshot, weighted by the real sample counts")
     func stateResumingSeedsAggregates() {
         let rideId = UUID()
+        // Realistic, unequal sample counts (#175 review) — proves the seeded
+        // sum/count pair reconstructs the true prior weight, not a fabricated
+        // single-sample average that would let one post-resume reading collapse
+        // a long ride's running average toward itself.
         let summary = RideSummaryUpdate(
             rideId: rideId,
             recordingState: .active,
@@ -899,45 +903,53 @@ struct ActiveRideFeatureStateMachineTests {
             maxHeartRateBPM: 172,
             averageCadenceRPM: 78,
             maxCadenceRPM: 105,
-            vehiclePassCount: 2
+            vehiclePassCount: 2,
+            speedSampleCount: 120,
+            hrSampleCount: 90,
+            cadenceSampleCount: 60
         )
 
         let state = ActiveRideFeature.State(resuming: summary)
 
         #expect(state.rideId == rideId)
-        #expect(state.isResumedFromPersistence == true)
         #expect(state.recordingState == .active)
         #expect(state.elapsedSeconds == 145)
         #expect(state.distanceMeters == 980)
         #expect(abs(state.maxSpeedKPH - 12.0 * 3.6) < 0.001)
+        #expect(state.speedSampleCount == 120)
         #expect(abs(state.averageSpeedKPH - 6.0 * 3.6) < 0.001)
+        #expect(abs(state.speedSampleSum - 6.0 * 3.6 * 120) < 0.01)
         #expect(state.maxHeartRateBPM == 172)
-        #expect(state.hrSampleCount == 1)
-        #expect(state.hrSampleSum == 140)
+        #expect(state.hrSampleCount == 90)
+        #expect(state.hrSampleSum == 140 * 90)
         #expect(state.cadence.maxCadenceRPM == 105)
-        #expect(state.cadence.pedalingSampleCount == 1)
+        #expect(state.cadence.pedalingSampleCount == 60)
+        #expect(state.cadence.cadenceSum == 78 * 60)
         #expect(state.cadence.averageCadenceRPM == 78)
         #expect(state.vehiclePassCount == 2)
     }
 
-    @Test("State(resuming:) leaves HR/cadence averages at zero when the persisted ride never had a sample")
+    @Test("State(resuming:) leaves every sample-averaged field at zero when the persisted ride never had a sample")
     func stateResumingLeavesUnsampledAveragesAtZero() {
         let summary = RideSummaryUpdate(
             rideId: UUID(),
             recordingState: .active,
             durationSeconds: 10,
             distanceMeters: 20,
-            averageSpeedMPS: 2,
-            maxSpeedMPS: 3,
+            averageSpeedMPS: 0,
+            maxSpeedMPS: 0,
             averageHeartRateBPM: nil,
             maxHeartRateBPM: nil,
             averageCadenceRPM: nil,
             maxCadenceRPM: nil,
             vehiclePassCount: nil
+            // speedSampleCount/hrSampleCount/cadenceSampleCount default to 0.
         )
 
         let state = ActiveRideFeature.State(resuming: summary)
 
+        #expect(state.speedSampleCount == 0)
+        #expect(state.speedSampleSum == 0)
         #expect(state.hrSampleCount == 0)
         #expect(state.hrSampleSum == 0)
         #expect(state.maxHeartRateBPM == 0)
@@ -957,6 +969,21 @@ struct ActiveRideFeatureStateMachineTests {
         let state = ActiveRideFeature.State(resuming: summary)
 
         #expect(state.recordingState == .paused)
+    }
+
+    @Test("State(resuming:) restores isAutoPaused and zeroSpeedSeconds from the persisted snapshot")
+    func stateResumingRestoresAutoPauseState() {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .paused,
+            durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 0, maxSpeedMPS: 5,
+            isAutoPaused: true, zeroSpeedSeconds: 8
+        )
+
+        let state = ActiveRideFeature.State(resuming: summary)
+
+        #expect(state.recordingState == .paused)
+        #expect(state.isAutoPaused == true)
+        #expect(state.zeroSpeedSeconds == 8)
     }
 
     @Test("task on a resumed state does not call createRide and preserves rideId")
@@ -987,6 +1014,36 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(store.state.rideId == rideId)
         #expect(store.state.recordingState == .active)
         #expect(created.value == nil)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("task on a resumed .paused state does not start the track recorder")
+    func taskOnResumedPausedStateSkipsStartRecording() async {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .paused,
+            durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 0, maxSpeedMPS: 5
+        )
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(resuming: summary)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .testValue
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        // Sending .trackRecorder(.startRecording) here would desync
+        // trackRecorder.isRecording from recordingState == .paused (#175 review).
+        #expect(store.state.trackRecorder.isRecording == false)
 
         await store.skipInFlightEffects(strict: false)
     }
@@ -1391,6 +1448,57 @@ struct ActiveRideFeatureAutoPauseTests {
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
+    }
+
+    @Test("Auto-pause checkpoints isAutoPaused and zeroSpeedSeconds immediately (#175)")
+    func autoPauseTriggeredPersistsImmediately() async {
+        // Unlike the periodic 30s checkpoint (which only fires while .active),
+        // nothing else ever persists a .paused state reached via auto-pause —
+        // without this immediate write, a kill before the next manual action
+        // would resume from a stale .active snapshot (#175 review).
+        let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
+        let threshold = ActiveRideFeature.autoPauseZeroSpeedSeconds
+        let rideId = UUID()
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.isAutoPauseEnabled = true }
+            return TestStore(
+                initialState: ActiveRideFeature.State(
+                    rideId: rideId, recordingState: .active, zeroSpeedSeconds: threshold - 1
+                )
+            ) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.continuousClock = TestClock()
+                $0.date = .constant(testDate)
+                $0.hapticsClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.defaultFileStorage = storage
+                $0.persistenceClient = .mock(onUpdateRideSummary: { updatedSummary.setValue($0) })
+            }
+        }
+
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = threshold
+        }
+        await store.receive(.autoPauseTriggered) {
+            $0.recordingState = .paused
+            $0.isAutoPaused = true
+        }
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+
+        #expect(updatedSummary.value?.rideId == rideId)
+        #expect(updatedSummary.value?.recordingState == .paused)
+        #expect(updatedSummary.value?.isAutoPaused == true)
+        #expect(updatedSummary.value?.zeroSpeedSeconds == threshold)
     }
 
     @Test("Auto-pause does not trigger one tick below the threshold")

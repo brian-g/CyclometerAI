@@ -22,6 +22,7 @@ struct AppFeature {
     @Dependency(\.screenClient) var screenClient
     @Dependency(\.continuousClock) var clock
     @Dependency(\.persistenceClient) var persistenceClient
+    @Dependency(\.date) var date
 
     @ObservableState
     struct State: Equatable {
@@ -173,10 +174,8 @@ struct AppFeature {
                 return Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
 
             case .startSheet(.presented(.delegate(.startRide))):
-                state.activeRide = ActiveRideFeature.State()
+                Self.presentActiveRide(ActiveRideFeature.State(), in: &state)
                 state.startSheet = nil
-                state.isDashboardPresented = true
-                state.selectedTab = .rides
                 // Start the ride's long-running effects (1 Hz timer, HR, radar,
                 // location) here so they live for the whole ride — bound to
                 // `activeRide` via `.ifLet` and torn down only when the ride
@@ -208,13 +207,17 @@ struct AppFeature {
                 return .none
 
             case .resumableRideFetched(let summary):
-                // `.task` fires exactly once per process launch (AppView.swift),
-                // before a ride could have started through the normal start-sheet
-                // flow — this guard costs nothing and documents that intent.
-                guard state.activeRide == nil else { return .none }
-                state.activeRide = ActiveRideFeature.State(resuming: summary)
-                state.isDashboardPresented = true
-                state.selectedTab = .rides
+                // `.task`'s two effects race: the rider can start a brand-new ride
+                // through the normal start-sheet flow before this async fetch
+                // resolves. Don't clobber that ride — but the orphaned one still
+                // needs to be closed out, or it stays a phantom non-`.ended` row
+                // forever (invisible in RidesView, never exported) (#175 review).
+                guard state.activeRide == nil else {
+                    return .run { [persistenceClient, date] _ in
+                        try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
+                    }
+                }
+                Self.presentActiveRide(ActiveRideFeature.State(resuming: summary), in: &state)
                 return .send(.activeRide(.task))
 
             case .scenePhaseChanged(let isActive):
@@ -296,6 +299,15 @@ struct AppFeature {
                 .send(.screenVisibilityChanged(isVisible))
             }
         }
+    }
+
+    /// Puts a ride's dashboard on screen — shared by starting a brand-new ride
+    /// and resuming one found on relaunch (#175), so a future addition to
+    /// "present the ride dashboard" only has to be made once.
+    private static func presentActiveRide(_ activeRide: ActiveRideFeature.State, in state: inout State) {
+        state.activeRide = activeRide
+        state.isDashboardPresented = true
+        state.selectedTab = .rides
     }
 
     /// Balance the scan `startRideButtonTapped` took. Shared by the two paths the sheet

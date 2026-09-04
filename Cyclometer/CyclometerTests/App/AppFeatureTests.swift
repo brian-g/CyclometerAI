@@ -138,4 +138,43 @@ struct AppFeatureTests {
         #expect(store.state.selectedTab == .rides)
         await store.receive(\.activeRide.task)
     }
+
+    /// #175 review: `.task`'s BLE-pairing push and resumable-ride fetch race —
+    /// the rider can start a brand-new ride through the normal start-sheet flow
+    /// before the async fetch resolves. The already-started ride must not be
+    /// clobbered, and the orphaned resumed ride must still get closed out
+    /// rather than staying a phantom non-`.ended` row forever.
+    @Test("resumableRideFetched finalizes an orphaned ride instead of clobbering one already started")
+    func resumableRideFetchedDoesNotClobberANewlyStartedRide() async {
+        let orphanedRideId = UUID()
+        let newRideId = UUID()
+        let orphanedSummary = RideSummaryUpdate(
+            rideId: orphanedRideId, recordingState: .active,
+            durationSeconds: 300, distanceMeters: 2_000, averageSpeedMPS: 5, maxSpeedMPS: 9
+        )
+        let finalized = LockIsolated<(UUID, Date, RideSummaryUpdate, URL?)?>(nil)
+        let fixedDate = Date(timeIntervalSince1970: 2_000_000)
+        let store = TestStore(
+            initialState: AppFeature.State(
+                activeRide: ActiveRideFeature.State(rideId: newRideId, recordingState: .active),
+                isDashboardPresented: true
+            )
+        ) {
+            AppFeature()
+        } withDependencies: {
+            $0.date = .constant(fixedDate)
+            $0.persistenceClient = .mock(onFinalizeRide: { finalized.setValue(($0, $1, $2, $3)) })
+        }
+
+        await store.send(.resumableRideFetched(orphanedSummary))
+
+        // The new ride is left untouched — not overwritten by the stale resumed one.
+        #expect(store.state.activeRide?.rideId == newRideId)
+        #expect(store.state.isDashboardPresented == true)
+
+        #expect(finalized.value?.0 == orphanedRideId)
+        #expect(finalized.value?.1 == fixedDate)
+        #expect(finalized.value?.2 == orphanedSummary)
+        #expect(finalized.value?.3 == nil)
+    }
 }

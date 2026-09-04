@@ -68,6 +68,23 @@ final class Ride {
 
     // MARK: - State
     var recordingState: RecordingState
+    /// Whether the current `.paused` state was auto-triggered (stoplight, #102)
+    /// rather than a manual Pause tap. Persisted (#175) so a resumed ride can
+    /// tell the two apart — auto-resume-on-motion only applies to the former.
+    var isAutoPaused: Bool
+    /// Consecutive zero-speed seconds while active, mirroring
+    /// `ActiveRideFeature.State.zeroSpeedSeconds` (#175) — persisted so a kill
+    /// near the auto-pause/auto-end threshold doesn't hand a resumed ride a
+    /// fresh grace window. Bounded to the same one-checkpoint-window staleness
+    /// as every other resumed aggregate.
+    var zeroSpeedSeconds: Int
+    /// Sample counts backing the running averages above, persisted (#175) so a
+    /// resumed ride can seed its true prior weight instead of fabricating one —
+    /// `averageSpeedMPS`/`averageHeartRateBPM`/`averageCadenceRPM` alone can't
+    /// be un-averaged back into a (sum, count) pair without this.
+    var speedSampleCount: Int
+    var hrSampleCount: Int
+    var cadenceSampleCount: Int
 
     // MARK: - Relationships
     // TrackPoints and VehiclePassEvents are linked by rideId only (TrackPoint's
@@ -87,6 +104,11 @@ final class Ride {
         self.elevationDropMeters = 0
         self.recordingState = .active
         self.hrZoneDurations = [:]
+        self.isAutoPaused = false
+        self.zeroSpeedSeconds = 0
+        self.speedSampleCount = 0
+        self.hrSampleCount = 0
+        self.cadenceSampleCount = 0
     }
 
     /// Nested rather than top-level to avoid colliding with the TCA-side
@@ -95,6 +117,35 @@ final class Ride {
     /// a ride actually starts.
     enum RecordingState: String, Codable {
         case active, paused, ended
+    }
+}
+
+extension Ride {
+    /// Snapshot of this ride's current aggregates, in the same shape a
+    /// checkpoint write applies (`RidePersistenceActor.apply`) — the read-side
+    /// counterpart used by `fetchResumableRide` (#175), kept as a single named
+    /// accessor rather than a second hand-duplicated field list (#172 review
+    /// precedent: this same duplication, one level down, was already
+    /// consolidated once in `RidePersistenceActor.savingChanges`).
+    var summarySnapshot: RideSummaryUpdate {
+        RideSummaryUpdate(
+            rideId: id,
+            recordingState: recordingState,
+            durationSeconds: durationSeconds,
+            distanceMeters: distanceMeters,
+            averageSpeedMPS: averageSpeedMPS,
+            maxSpeedMPS: maxSpeedMPS,
+            averageHeartRateBPM: averageHeartRateBPM,
+            maxHeartRateBPM: maxHeartRateBPM,
+            averageCadenceRPM: averageCadenceRPM,
+            maxCadenceRPM: maxCadenceRPM,
+            vehiclePassCount: vehiclePassCount,
+            isAutoPaused: isAutoPaused,
+            zeroSpeedSeconds: zeroSpeedSeconds,
+            speedSampleCount: speedSampleCount,
+            hrSampleCount: hrSampleCount,
+            cadenceSampleCount: cadenceSampleCount
+        )
     }
 }
 
