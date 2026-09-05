@@ -22,6 +22,7 @@ struct AppFeature {
     @Dependency(\.screenClient) var screenClient
     @Dependency(\.continuousClock) var clock
     @Dependency(\.persistenceClient) var persistenceClient
+    @Dependency(\.rideEndIntentClient) var rideEndIntentClient
     @Dependency(\.date) var date
 
     @ObservableState
@@ -217,6 +218,25 @@ struct AppFeature {
                         try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
                     }
                 }
+
+                // The rider already ended this ride and only its finalize write failed,
+                // so it is resumable purely because `endedAt` never got set. Close it
+                // out instead of resuming a ride that is over (#188) — otherwise the
+                // recorder restarts and sensors reconnect on a finished ride.
+                if let pending = rideEndIntentClient.load(), pending.rideId == summary.rideId {
+                    return .run { [persistenceClient, rideEndIntentClient] _ in
+                        do {
+                            try await persistenceClient.finalizeRide(
+                                pending.rideId, pending.endedAt, summary, pending.gpxFileURL
+                            )
+                            rideEndIntentClient.clear()
+                        } catch {
+                            // Logged in RidePersistenceActor. The marker stays so the
+                            // next launch tries again rather than resuming the ride.
+                        }
+                    }
+                }
+
                 Self.presentActiveRide(ActiveRideFeature.State(resuming: summary), in: &state)
                 return .send(.activeRide(.task))
 
