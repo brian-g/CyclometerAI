@@ -56,6 +56,7 @@ struct ActiveRideFeature {
     @Dependency(\.uuid) var uuid
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.rideDataBuffer) var rideDataBuffer
+    @Dependency(\.rideEndIntentClient) var rideEndIntentClient
 
     @ObservableState
     struct State: Equatable {
@@ -366,7 +367,14 @@ struct ActiveRideFeature {
                     // write includes whatever URL export produced, so it must come
                     // last. A failed export degrades to a nil gpxFileURL rather than
                     // leaving the ride stuck out of `.ended`.
-                    .run { [rideDataBuffer, persistenceClient] _ in
+                    .run { [rideDataBuffer, persistenceClient, rideEndIntentClient] _ in
+                        // Recorded before any of the writes below, in storage a SwiftData
+                        // failure cannot reach: if `finalizeRide` fails, this is the only
+                        // durable trace that the rider ended this ride (#188).
+                        rideEndIntentClient.save(
+                            PendingRideEnd(rideId: rideId, endedAt: endedAt, gpxFileURL: nil)
+                        )
+
                         let points = await rideDataBuffer.drainForFlush()
                         if !points.isEmpty {
                             do {
@@ -379,8 +387,33 @@ struct ActiveRideFeature {
                                 logger.error("flushTrackPoints failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — GPX export will be missing \(points.count, privacy: .public) point(s)")
                             }
                         }
-                        let gpxURL = try? await GPXExporter.generate(rideId: rideId)
-                        try? await persistenceClient.finalizeRide(rideId, endedAt, finalSummary, gpxURL)
+
+                        var gpxURL: URL?
+                        do {
+                            gpxURL = try await GPXExporter.generate(rideId: rideId)
+                            // Recorded before the finalize below, so a file that was
+                            // written successfully isn't orphaned on disk if only the
+                            // row pointing at it fails to save.
+                            rideEndIntentClient.save(
+                                PendingRideEnd(rideId: rideId, endedAt: endedAt, gpxFileURL: gpxURL)
+                            )
+                        } catch {
+                            // Degrades to a nil gpxFileURL rather than leaving the ride
+                            // stuck out of `.ended`. Logged rather than swallowed — a
+                            // ride with no exportable file is otherwise invisible.
+                            logger.error("GPX export failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — ride will end with no gpxFileURL")
+                        }
+
+                        do {
+                            try await persistenceClient.finalizeRide(rideId, endedAt, finalSummary, gpxURL)
+                            // Only now is the ride durably over. Clearing earlier would
+                            // discard the one record that survives this write failing.
+                            rideEndIntentClient.clear()
+                        } catch {
+                            // Logged inside RidePersistenceActor. The marker deliberately
+                            // stays: AppFeature closes the ride out at next launch rather
+                            // than resuming a ride the rider already ended (#188).
+                        }
                     },
                     .run { [bleHRClient, variaRadarClient, locationClient] _ in
                         async let hr: Void = bleHRClient.disconnect()
