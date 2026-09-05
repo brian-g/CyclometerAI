@@ -171,9 +171,11 @@ struct GPXExporterTests {
 
         let url = try GPXExporter.write(xml: "<gpx/>", rideStartedAt: Self.start, documentsDirectory: tempDir)
 
-        let expectedFormatter = DateFormatter()
-        expectedFormatter.dateFormat = "yyyy-MM-dd_HH-mm"
-        let expectedName = "Cyclometer_\(expectedFormatter.string(from: Self.start)).gpx"
+        // Self.filenameStem pins en_US_POSIX + Gregorian, as GPXExporter's own
+        // formatter does. An unpinned DateFormatter here would adopt the device's
+        // calendar exactly as the code under test does, so the two would drift
+        // together and this assertion could never fail for the reason it exists.
+        let expectedName = "\(Self.filenameStem(for: Self.start)).gpx"
 
         #expect(url.lastPathComponent == expectedName)
         #expect(url.deletingLastPathComponent().lastPathComponent == "Rides")
@@ -197,5 +199,117 @@ struct GPXExporterTests {
         #expect(try String(contentsOf: firstURL, encoding: .utf8) == "<gpx>first</gpx>")
         #expect(try String(contentsOf: secondURL, encoding: .utf8) == "<gpx>second</gpx>")
         #expect(try String(contentsOf: thirdURL, encoding: .utf8) == "<gpx>third</gpx>")
+    }
+
+    // MARK: - Round-trip (parse the emitted document back)
+
+    /// ISO-8601 as `GPXExporter` emits it, rebuilt independently here so the test
+    /// pins the wire format rather than echoing whatever the exporter produced.
+    private static func iso(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: date)
+    }
+
+    /// Pinned to `en_US_POSIX` + Gregorian, matching `GPXExporter.filenameStem`'s own
+    /// pinning. An unpinned formatter here would drift in lockstep with the code under
+    /// a Buddhist/Japanese device calendar, so the assertion could never fail.
+    private static func filenameStem(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm"
+        return "Cyclometer_\(formatter.string(from: date))"
+    }
+
+    @Test("round-trip: a synthetic multi-sensor ride parses back with matching point and waypoint counts and per-point field presence")
+    func roundTripPreservesCountsAndPerPointFields() throws {
+        // Deliberately mixed sensor coverage: every combination of present/absent that
+        // the omission rule has to get right, on three points that must stay distinct
+        // through the round trip. Values are chosen to survive the exporter's %.1f /
+        // %.7f formatting exactly, so equality is exact rather than tolerance-based.
+        let points = [
+            Self.point(lat: 36.0726, lon: -79.7920, ele: 220.1, time: Self.start,
+                       speedMPS: 7.2, speedSource: .gps, hr: 142, hrSource: .bleHR, cad: 85),
+            Self.point(lat: 36.0727, lon: -79.7921, ele: 220.5, time: Self.start.addingTimeInterval(1),
+                       speedMPS: 7.4, speedSource: .gps, hr: nil, hrSource: .none, cad: 88),
+            Self.point(lat: 36.0728, lon: -79.7922, ele: 221.0, time: Self.start.addingTimeInterval(2),
+                       speedMPS: nil, speedSource: .none, hr: 150, hrSource: .bleHR, cad: nil),
+        ]
+        let events = [
+            Self.passEvent(lat: 36.0727, lon: -79.7921, time: Self.start.addingTimeInterval(1),
+                           alertLevel: .caution, riderSpeedKph: 28.4, estimatedPassSpeedKph: 62.1),
+            Self.passEvent(lat: 36.0728, lon: -79.7922, time: Self.start.addingTimeInterval(2),
+                           alertLevel: .danger, riderSpeedKph: 30.0, estimatedPassSpeedKph: nil),
+        ]
+
+        let parsed = try GPXParsing.parse(
+            GPXExporter.buildXML(ride: Self.ride, trackPoints: points, vehiclePassEvents: events)
+        )
+
+        // Counts: the assertion substring matching structurally cannot make.
+        #expect(parsed.trackPoints.count == 3)
+        #expect(parsed.waypoints.count == 2)
+
+        // Every track point round-trips in order, with its own coordinates and time.
+        for (index, expected) in points.enumerated() {
+            let actual = parsed.trackPoints[index]
+            #expect(actual.latitude == expected.latitude)
+            #expect(actual.longitude == expected.longitude)
+            #expect(actual.elevation == expected.altitudeMeters)
+            #expect(actual.time == Self.iso(expected.timestamp))
+        }
+
+        // Per-point sensor presence — absent means nil, never 0, and a present field
+        // must land on the point that actually has it.
+        #expect(parsed.trackPoints[0].heartRate == 142)
+        #expect(parsed.trackPoints[0].cadence == 85)
+        #expect(parsed.trackPoints[0].speed == 7.2)
+
+        #expect(parsed.trackPoints[1].heartRate == nil)
+        #expect(parsed.trackPoints[1].cadence == 88)
+        #expect(parsed.trackPoints[1].speed == 7.4)
+
+        #expect(parsed.trackPoints[2].heartRate == 150)
+        #expect(parsed.trackPoints[2].cadence == nil)
+        #expect(parsed.trackPoints[2].speed == nil)
+
+        // Waypoints, in order, with the estimated speed present on one and absent on
+        // the other.
+        for (index, expected) in events.enumerated() {
+            let actual = parsed.waypoints[index]
+            #expect(actual.latitude == expected.latitude)
+            #expect(actual.longitude == expected.longitude)
+            #expect(actual.time == Self.iso(expected.timestamp))
+            #expect(actual.name == "Vehicle Pass")
+            #expect(actual.type == "vehiclePass")
+            #expect(actual.riderSpeedKph == expected.riderSpeedKph)
+            #expect(actual.estimatedPassSpeedKph == expected.estimatedPassSpeedKph)
+        }
+        #expect(parsed.waypoints[0].alertLevel == "caution")
+        #expect(parsed.waypoints[1].alertLevel == "danger")
+
+        #expect(parsed.trackName == "Morning Ride")
+    }
+
+    @Test("metadata carries the filename stem as <name> and the ride start as an ISO-8601 <time>")
+    func metadataNameAndTime() throws {
+        let parsed = try GPXParsing.parse(
+            GPXExporter.buildXML(ride: Self.ride, trackPoints: [Self.point()], vehiclePassEvents: [])
+        )
+
+        #expect(parsed.metadataName == Self.filenameStem(for: Self.start))
+        #expect(parsed.metadataTime == Self.iso(Self.start))
+    }
+
+    @Test("an empty ride still emits a well-formed document with no track points and no waypoints")
+    func emptyRideIsStillWellFormed() throws {
+        let parsed = try GPXParsing.parse(
+            GPXExporter.buildXML(ride: Self.ride, trackPoints: [], vehiclePassEvents: [])
+        )
+
+        #expect(parsed.trackPoints.isEmpty)
+        #expect(parsed.waypoints.isEmpty)
+        #expect(parsed.metadataName == Self.filenameStem(for: Self.start))
     }
 }
