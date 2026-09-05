@@ -222,4 +222,152 @@ struct RideRecordingTests {
 
         #expect(try await persistenceClient.fetchResumableRide() == nil)
     }
+
+    // MARK: - Vehicle passes through the whole pipeline
+
+    private static let approachingVehicle = RadarTarget(
+        id: VariaRadarClient.vehicleSlotIDs[0], relativeVelocityMPS: 8, rangeMetres: 40, threatLevel: .warning
+    )
+    /// Receding: majority non-positive closing speed, so the detector must reject it
+    /// as a turn-off/slowdown even though it is tracked and disappears exactly like
+    /// the approaching one.
+    private static let recedingVehicle = RadarTarget(
+        id: VariaRadarClient.vehicleSlotIDs[1], relativeVelocityMPS: -5, rangeMetres: 60, threatLevel: .allClear
+    )
+
+    /// The exporter's AlertLevel spelling. That this is the mapping GPXExporter
+    /// actually emits is pinned by `GPXExporterTests.alertLevelStrings`; here it only
+    /// needs to name the level the persisted event carries, so the two can be compared.
+    private static func gpxAlertLevel(_ level: AlertLevel) -> String {
+        switch level {
+        case .clear: "clear"
+        case .advisory: "advisory"
+        case .caution: "caution"
+        case .danger: "danger"
+        }
+    }
+
+    private static func location(_ coordinate: Coordinate, altitude: Double, at time: Date) -> LocationUpdate {
+        LocationUpdate(
+            coordinate: coordinate, altitude: altitude, speed: 5,
+            horizontalAccuracy: 5, heading: 90, timestamp: time
+        )
+    }
+
+    /// The seam #176 is actually about: the detector is covered as a pure function,
+    /// persistence via mocks, and the exporter with hand-built DTOs — but nothing
+    /// joined them, so a break anywhere along
+    /// `radarTargetsUpdated → VehiclePassDetector → appendVehiclePassEvents →
+    /// GPXExporter → <wpt>` was invisible. This drives that whole chain once and
+    /// checks all three records of the ride agree.
+    ///
+    /// Note `date` is mutated between sends rather than pinned with `.constant`, as
+    /// the other tests in this suite do: `VehiclePassDetector` needs the vehicle
+    /// tracked >= 2s *and* absent >= 2s, both measured off `date.now`, so under a
+    /// frozen clock a pass can never fire at all. Same idiom as
+    /// `ActiveRideFeatureVehiclePassPersistenceTests.sendOvertake`.
+    @Test("a ride with vehicle passes agrees across TrackPoints, VehiclePassEvents and the written GPX")
+    func vehiclePassesAgreeAcrossPersistenceAndGPX() async throws {
+        let (persistenceClient, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let coordinateA = Coordinate(latitude: 43.0731, longitude: -89.4012)
+        let coordinateB = Coordinate(latitude: 43.0745, longitude: -89.4030)
+
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(recordingState: .idle)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(Self.testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.audioClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = persistenceClient
+            $0.gpxDocumentsDirectory = tempDir
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        let rideId = store.state.rideId
+
+        // A rider position must exist before the pass is confirmed — the detector
+        // drops an event whose last sighting had no GPS fix.
+        await store.send(.locationUpdated(Self.location(coordinateA, altitude: 12, at: Self.testDate)))
+        await store.send(.elapsedTick)
+
+        // Both vehicles are tracked together and disappear together, so the only
+        // thing separating them is closing-speed sign.
+        await store.send(.radarTargetsUpdated([Self.approachingVehicle, Self.recedingVehicle]))
+
+        store.dependencies.date.now = Self.testDate.addingTimeInterval(2)
+        await store.send(.radarTargetsUpdated([Self.approachingVehicle, Self.recedingVehicle]))
+        await store.send(.elapsedTick)
+
+        store.dependencies.date.now = Self.testDate.addingTimeInterval(4)
+        await store.send(.radarTargetsUpdated([]))
+        await store.receive(\.vehiclePassEventsPersisted)
+        await store.send(.elapsedTick)
+
+        store.dependencies.date.now = Self.testDate.addingTimeInterval(6)
+        await store.send(.locationUpdated(Self.location(coordinateB, altitude: 15, at: Self.testDate.addingTimeInterval(6))))
+        await store.send(.elapsedTick)
+
+        #expect(store.state.vehiclePassCount == 1)
+
+        await store.send(.pauseTapped)
+        await store.send(.finishTapped)
+        await store.send(.finishAlert(.presented(.confirmFinish)))
+        await store.skipInFlightEffects(strict: false)
+        await store.finish(timeout: .seconds(5))
+
+        // --- The three records of this ride, read back independently ---
+        let persistedPoints = try await persistenceClient.fetchTrackPoints(rideId)
+        let persistedEvents = try await persistenceClient.fetchVehiclePassEvents(rideId)
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        let gpxURL = try #require(ride.gpxFileURL)
+        let parsed = try GPXParsing.parse(try String(contentsOf: gpxURL, encoding: .utf8))
+
+        // Exactly one pass survived detection, and it is the approaching vehicle's.
+        #expect(persistedEvents.count == 1)
+        #expect(ride.vehiclePassCount == 1)
+        #expect(parsed.waypoints.count == 1)
+
+        // Counts agree: every recorded track point reached the file, and no extras.
+        #expect(persistedPoints.count == 4)
+        #expect(parsed.trackPoints.count == persistedPoints.count)
+
+        // Field-level agreement between what was persisted and what was written.
+        // Compared by value, not identity — VehiclePassEventDTO carries no id, so
+        // nothing survives the persistence round trip to match on.
+        let event = try #require(persistedEvents.first)
+        let waypoint = try #require(parsed.waypoints.first)
+        #expect(waypoint.latitude == event.latitude)
+        #expect(waypoint.longitude == event.longitude)
+        #expect(waypoint.riderSpeedKph == event.riderSpeedKph)
+        #expect(waypoint.type == "vehiclePass")
+        // The exact level is AlertLevelTests' business; what matters here is that the
+        // file reports the same one that was persisted.
+        #expect(waypoint.alertLevel == Self.gpxAlertLevel(event.alertLevelAtPass))
+
+        // The pass is positioned at the rider's location as of the last sighting
+        // (coordinate A), not wherever the rider had moved to by confirmation time.
+        #expect(event.latitude == coordinateA.latitude)
+        #expect(event.longitude == coordinateA.longitude)
+
+        for (index, point) in persistedPoints.enumerated() {
+            #expect(parsed.trackPoints[index].latitude == point.latitude)
+            #expect(parsed.trackPoints[index].longitude == point.longitude)
+            #expect(parsed.trackPoints[index].elevation == point.altitudeMeters)
+        }
+
+        // The rider moved partway through, and the file records both positions.
+        #expect(parsed.trackPoints.contains { $0.latitude == coordinateA.latitude })
+        #expect(parsed.trackPoints.contains { $0.latitude == coordinateB.latitude })
+    }
 }
