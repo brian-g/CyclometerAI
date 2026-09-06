@@ -1,6 +1,8 @@
 # Cyclometer — UX Specification
-**Version:** 0.7  
-**Date:** 2026-03-31  
+**Version:** 0.8  
+**Date:** 2026-09-06
+
+**Updated:** 2026-09-06 — M8 scope pass: Add Routes View and Route Detail to M8 work.  
 **Updated:** 2026-08-14 — M10 scope pass: S11 rewritten as the flat device list the Sketch frame shows; S12 loses Set Do Not Disturb, defers Accounts to Phase 2, and moves wheel size to a detail screen; S01 drops the Files permission and asks for Location When In Use  
 **Previously updated:** 2026-05-21 — Dashboard vision rewritten; S05.4 reframed as factory default; S05.5 removed  
 **Status:** In Progress  
@@ -68,8 +70,8 @@ All design artifacts are in `assets/design/`. These files are the source of trut
 | [S16](#s16-training-zones-graph) | Training Zones Graph | Cut | Stub |
 | [S17](#s17-apple-watch) | Apple Watch | Phase 2 | Stub |
 | [S18](#s18-ar-hud-configuration) | AR HUD Configuration | Phase 3 | Stub |
-| [S19](#s19-route-management) | Route Management | Phase 2 | Stub |
-| [S20](#s20-route-detail) | Route Detail | Phase 2 | Stub |
+| [S19](#s19-route-management) | Route Management | M8 | Stub |
+| [S20](#s20-route-detail) | Route Detail | M8 | Stub |
 
 ---
 
@@ -1046,19 +1048,20 @@ ContentUnavailableView {
 
 ## S19 — Route Management
 
-**Phase:** Phase 2  
-**Purpose:** Browsable list of saved routes with list and map views.
+**Phase:** MVP  
+**Purpose:** Browsable list of saved routes with list and map views. Allows the user to import new routes from  services such as Ride with GPS, Strava, iCloud Files, Tribos Studio. Although all of those but iCloud Files (the Files app) are deferred until later. 
 
 ### Layout
-> *Refer to `assets/design/Design.sketch` — S19.*
+> *Refer to `RoutesView` as prototyped in the source..*
 
 ### Key Components
 - Toolbar toggle: list view / map view (`list.bullet` / `map` SF Symbol)
-- List view: route rows with name, distance, terrain description
-- Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls
+- List view: route rows map thumbnail, name, distance, terrain description
+- Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls. The map can act as a filter. When switching back to the list will show only those routes displayed on the map. Map will initially zoom to a 50 mile radius around the user's current location. 
 - Tap a route → navigates to S20
 - Empty state: `ContentUnavailableView` with "No Routes" label and import action
-- Route import action
+- Route import action — Opens the Files browser sheet that browses the File system of the iPhone and iCloud.
+- Route filter action — Opens a sheet that contains basic filter options: distance slider (min, max), elevation gain slider (max). 
 
 ### Open UX Questions
 - [x] How does the user import a route here (vs. at ride start)? There will be a route import action. Routes can be imported from Files, from Strava, other from other connected services that have routes.
@@ -1069,14 +1072,14 @@ ContentUnavailableView {
 
 ## S20 — Route Detail
 
-**Phase:** Phase 2  
+**Phase:** MVP  
 **Purpose:** Full detail view of a route with map, elevation, weather, Strava segments, and previous rides.
 
 ### Layout
-> *Refer to `assets/design/Design.sketch` — S20.*
+> *Refer to RouteDetailView` — Protyped In source code.*
 
 ### Key Components
-- Full-width `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag)
+- `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag). Route should show the direction of travel. Forcasted wind direction and vectors should be overlayed (deferred to weather integration)
 - Distance and elevation gain/loss summary (`LabeledContent`)
 - Elevation profile: Swift Charts `AreaMark` + `LineMark` in `brPrimary`, catmullRom interpolation
 - Current weather section: temperature, wind direction (`WindDirectionView` — rotated arrow SF Symbol + compass label + degrees), wind speed

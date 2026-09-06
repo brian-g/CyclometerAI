@@ -43,7 +43,11 @@ nearest existing pattern to follow. Real example: "UX.md §S05.4, §S07, §S08 �
 
 ## Batch-create flow
 
-1. Resolve the milestone: `gh api repos/:owner/:repo/milestones | jq '.[] | {number,title}'` (or `gh api repos/:owner/:repo/milestones -q '.[] | select(.title | contains("M10.7")) | .number'` for a specific one). Milestones are referenced by number in `gh issue create --milestone`.
+1. Resolve the milestone's **exact title**: `gh api repos/:owner/:repo/milestones -q '.[] | "\(.number)  \(.title)"'`.
+
+   **`gh issue create --milestone` takes the milestone *title*, not its number** — passing a number fails with `could not add to milestone '8': '8' not found`, and it fails *before* creating the issue, so a bad batch aborts cleanly rather than leaving half-milestoned issues. Copy the title exactly, em dashes and all (`M8 — Navigation, Live Map & Routes`); the number is only useful for `gh api` calls that edit the milestone itself.
+
+   **Run `gh` from inside the working copy**, or pass `--repo brian-g/CyclometerAI`. `gh issue create` shells out to git to infer the repo and dies with `failed to run git: fatal: not a git repository` if the working directory is elsewhere (a scratchpad, say) — even though `--body-file` happily takes an absolute path out of that scratchpad.
 
 2. Draft every title + body against the template above **before creating anything**. Break the spec section or wave of work into one issue per independently-shippable unit — look at how M10.5's issues split (#139 data model, #140 three widgets together since they share a shape, #141 edit mode, #142 add-widget sheet, #143 the shared detail-sheet pattern before the four screens that use it) as a sizing reference: group only when pieces are trivial together, split when a "done" checkbox line would otherwise span unrelated files.
 
@@ -59,7 +63,7 @@ nearest existing pattern to follow. Real example: "UX.md §S05.4, §S07, §S08 �
    EOF
    )" \
      --label feat \
-     --milestone <number>
+     --milestone "<exact milestone title>"
    ```
    Capture the issue number `gh issue create` prints (last line of a URL) for each.
 
