@@ -13,7 +13,7 @@ import Foundation
 /// Each frame is the wire's own three fields: milliseconds since the track's first
 /// sighting, range in whole metres, and closing speed in whole km/h. The Varia reports
 /// closing speed as an *unsigned* byte, so no frame here is negative — that is precisely
-/// why the pre-#207 `positiveSampleCount` majority check could never reject anything.
+/// why the pre-#207 majority-positive closing-speed check could never reject anything.
 enum RadarPassFixtures {
 
     struct Track {

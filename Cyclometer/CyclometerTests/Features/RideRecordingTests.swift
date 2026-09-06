@@ -356,6 +356,16 @@ struct RideRecordingTests {
         #expect(waypoint.latitude == event.latitude)
         #expect(waypoint.longitude == event.longitude)
         #expect(waypoint.riderSpeedKph == event.riderSpeedKph)
+        // Both speeds, not just the rider's — #208 changed what the estimate means,
+        // and this is the only test that walks it detector -> SwiftData -> GPX.
+        //
+        // Compared at the file's own precision rather than bit-for-bit: the exporter
+        // writes `%.1f`, and unlike the rider's speed this one does not land on an
+        // exact decimal (it persists as 46.800000000000004). Rounding here states what
+        // the format actually guarantees instead of relying on the arithmetic
+        // happening to come out clean.
+        let atExportPrecision = event.estimatedPassSpeedKph.map { ($0 * 10).rounded() / 10 }
+        #expect(waypoint.estimatedPassSpeedKph == atExportPrecision)
         #expect(waypoint.type == "vehiclePass")
         // The exact level is AlertLevelTests' business; what matters here is that the
         // file reports the same one that was persisted.
