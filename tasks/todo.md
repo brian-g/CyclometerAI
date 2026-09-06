@@ -1,85 +1,68 @@
-# #207 — Vehicle pass detector never checks approach distance
+# #208 — estimatedPassSpeedKph exported a whole-track mean of *closing* speed
 
-Branch: `fix/207-vehicle-pass-approach-distance`
+Branch: `fix/208-pass-speed-ground-speed-peak`
 
 ## Diagnosis (done)
-Found by analysing a real ride (`system_logs.logarchive` + `Cyclometer_2026-09-06_11-55.gpx`).
+Two defects in one field, both visible in `Cyclometer_2026-09-06_11-55.gpx`.
 
-`VehiclePassDetector` confirmed a pass on two criteria — tracked >= 2s, and
-majority-positive closing speed — neither of which involves range. A vehicle
-acquired at 93 m and tracked to **52 m at a constant 46–48 kph closing speed**
-before vanishing was recorded as a completed `danger` pass at the rider's
-position 52 m early. The other four encounters that ride all closed to 0 m.
+**A relative speed presented as an absolute one.** The Varia wire byte is closing
+speed. Three of that ride's five events exported a "pass speed" at or below the
+rider's own (`riderSpeedKph 33.6 / estimatedPassSpeedKph 26.9`).
 
-The guard meant to catch this could never fire. `parseAlert` decodes closing
-speed from an **unsigned** wire byte (`VariaRadarClient.swift:145`), so
-`relativeVelocityMPS` is never negative; across 565 target-bearing frames not
-one carried even a zero. `positiveSampleCount == sampleCount` always held.
+**Averaging the whole track biases it low.** Radar measures only the radial
+component, which decays by cos(theta) as a vehicle draws alongside, so the tail
+near the rider drags the mean down — by 13–27 kph on the four genuine overtakes.
 
-Both specs already required the missing check — PRD §8.7 ("distance decreasing",
-"distance reached minimum threshold") and TCA.md §4.12 (`minimumDistance`) — and
-both were dropped when #172 shipped.
+PRD §8.7 never said which speed the field carried, so the semantics had to be
+settled first. **Decided: the vehicle's ground speed.** Appendix B's own worked
+example (62.1 against a rider at 28.4) is only coherent that way, and the issue's
+"must exceed riderSpeedKph" criterion is unsatisfiable by a closing speed.
 
 ## Plan
-- [x] Add `minimumRangeMetres` to `VehicleTrackingRecord`, folded per tick
-- [x] Add `passProximityMetres = 10`, calibrated against the capture
-- [x] Replace the majority-positive guard with the proximity check
-- [x] Keep `positiveSampleCount`/`Sum` — the pass-speed estimator still uses them (#208)
-- [x] Replace the two tests feeding wire-impossible inputs (`mps: -3`, `mps: 0`)
-- [x] Add `RadarPassFixtures` + `VehiclePassDetectorReplayTests` over the real capture
-- [x] Rework `RideRecordingTests`' end-to-end pair to discriminate by range
-- [x] Full suite, then revert-the-fix verification
+- [x] `VehicleTrackingRecord`: replace `positiveSampleCount`/`positiveSampleSum`
+      with one `maxPositiveClosingMPS`, clamped at 0 on both the seed and the fold
+- [x] Emit `(lastRiderSpeedMPS + maxPositiveClosingMPS) * kphPerMPS` — one multiply,
+      so a whole-m/s test input lands on an exact decimal
+- [x] PRD §8.7 field table + new prose; PRD §10 and Appendix B comments;
+      DataModel.md §3.4 annotation
+- [x] Replace `estimatedPassSpeedIsAverageOfPositiveSamples` with peak, decaying-tail
+      and constant-speed tests; add three replay tests against the real capture
+- [x] Full suite green — 789 cases, every new test confirmed present by name
 
-## Review
+## Why the peak, not a smarter estimator
+Across all five captures, `max` equals the far-field plateau **exactly** (59/54/54/
+47/48), and the peak is held for 4–12 consecutive frames with the next distinct
+value always 1 kph below — no isolated spikes to reject. A range-gated far-field
+mean is *worse* (42.2 vs a 54 plateau on pass1200_09, which decelerated from 135 m).
+`max` is also a single Double, preserving the O(1) fold the record exists to defend.
 
-**Changed**
-- `Features/ActiveRide/VehiclePassDetector.swift` — `minimumRangeMetres` on the
-  tracking record, `passProximityMetres = 10`, and the guard swap. Comments
-  record why the old guard was inert, why TCA.md's `lastDistance` is deliberately
-  omitted, and that the pass-speed estimator's whole-track average is #208's
-  problem, not this change's.
-- `CyclometerTests/Features/VehiclePassDetectorTests.swift` — `target()` gains a
-  `range:` defaulting to 4 m, so existing tracks still read as genuine passes.
-  Dropped `turnOffOrSlowdownProducesNoEvent` and `zeroClosingSpeedIsNotApproaching`
-  (both fed velocities the wire cannot emit); added five: lost-beyond-threshold,
-  exactly-at-threshold, one-metre-short, minimum-retained-after-moving-away, and
-  a nil pass-speed estimate for an all-zero track.
-- `CyclometerTests/Features/RadarPassFixtures.swift` — **new**. The five real
-  radar tracks from 2026-09-06 as `(ms, range, kph)` triples, in source rather
-  than a binary capture so they stay diffable in review.
-- `CyclometerTests/Features/VehiclePassDetectorReplayTests.swift` — **new**.
-  Replays those tracks at their own frame spacing. Also pins that nothing in the
-  capture sits between 0 m and 52 m, so the threshold is demonstrably not
-  finely tuned — if a future capture narrows that gap, this fails loudly.
-- `CyclometerTests/Features/ActiveRideFeatureTests.swift` — `singleSighting`
-  gains `range:`; the persistence suite's `vehicle()` moves to 4 m so its
-  overtakes still confirm.
-- `CyclometerTests/Features/RideRecordingTests.swift` — the end-to-end pair now
-  differs by range (4 m vs 60 m) instead of closing-speed sign. `recedingVehicle`
-  renamed `lostVehicle`, since a receding vehicle is not something the hardware
-  can report.
+## Verified by reverting, not by reasoning
+The change has two independent halves, so each was reverted separately:
 
-**Verification**
-- Full `CyclometerTests` (snapshot suites skipped, as CI does): **739 passed, 0
-  failed**. Baseline on `main` was 732; net +7 (five new unit tests, four replay
-  tests, two removed).
-- Reverted the guard to `positiveSampleCount * 2 > sampleCount` and re-ran the
-  three affected suites: 40 cases ran (count checked, not just the exit code),
-  **7 failed** — including `vehicleLostBeyondThresholdProducesNoEvent`,
-  `capturedTracksAreClassifiedCorrectly`, and the end-to-end
-  `vehiclePassesAgreeAcrossPersistenceAndGPX`. Restored and re-confirmed green,
-  with every new test verified present by name.
+| revert | constant-speed test | the other four |
+|---|---|---|
+| whole-track mean, rider term kept | **passes** | fail |
+| peak kept, rider term dropped | fails | fail |
 
-**Guard against recurrence**
-The replay suite pins real hardware output, so the criteria can no longer be
-"verified" by inputs the wire cannot produce — which is exactly how #172 shipped
-with an inert guard and a ticked acceptance criterion.
+Both halves are load-bearing, and the constant-speed test is genuinely invariant
+under the mean→peak switch — which is what this issue's stale AC #4 was asking for.
+
+## AC #4 was stale and is ticked with a correction
+It asked that the 16:01:03 capture "stays at constant range and closing speed" and
+be "unchanged by the estimator switch". Three things wrong: #207 (9fa2dfd) now
+rejects that vehicle at 52 m so it produces **no event at all**; its range is not
+constant (93 m → 52 m); and "unchanged" was never literally true even before (max
+48 vs mean 47.1). The intent — the switch is a no-op without a decaying tail — is
+pinned by `constantClosingSpeedIsUnchangedByTheEstimatorSwitch` instead. Recorded
+rather than silently ticked, which is how #172 shipped an inert guard.
 
 **Not done (tracked separately)**
-- #208 — `estimatedPassSpeedKph` still exports a whole-track mean of *closing*
-  speed, understating genuine passes by 13–27 kph on four of the five captures.
-- #209 — `alertLevelAtPass` still snapshots the least severe instant of the
-  encounter.
-- Making `relativeVelocityMPS` non-negative by construction would make the
-  impossible test inputs unrepresentable. It is the deeper fix and touches every
-  radar consumer, so it stayed out of scope here.
+- #209 — `alertLevelAtPass` still snapshots the least severe instant of the encounter.
+- `sampleCount` is now write-only: nothing reads it since #207 deleted the majority
+  check. Removing it is a clean follow-up, but it churns three test files for a
+  reason unrelated to this issue.
+- PRD §8.7's "Pass detection logic" block and TCA.md §4.12 still describe the
+  majority-positive criterion #207 deleted, and OQ15 is still Open though #207
+  settled it at 10 m. #207's debt, left alone here.
+- Making `relativeVelocityMPS` non-negative by construction is now *more* attractive:
+  after this change, two `max(_, 0)` clamps are the only thing defending the invariant.

@@ -539,7 +539,19 @@ Vehicle pass events are recorded as GPX `<wpt>` (waypoint) elements rather than 
 | Event type | `<type>vehiclePass</type>` | Standard GPX type element for filtering |
 | Alert level | `<cyc:alertLevel>` | danger / caution / advisory at time of pass |
 | Rider speed | `<cyc:riderSpeedKph>` | Rider speed at moment of pass (km/h) |
-| Estimated pass speed | `<cyc:estimatedPassSpeedKph>` | Inferred from closing speed data (km/h); omitted if insufficient data |
+| Estimated pass speed | `<cyc:estimatedPassSpeedKph>` | The **vehicle's ground speed** (km/h) — an absolute speed, not a closing speed. Always greater than `<cyc:riderSpeedKph>`. Omitted if the vehicle was never observed approaching |
+
+**What `estimatedPassSpeedKph` carries.** The radar reports *closing* speed — how fast the vehicle is gaining on the rider, not how fast it is travelling — so a ground speed has to be derived:
+
+```
+estimatedPassSpeedKph = riderSpeedKph (at the pass) + peak closing speed (over the vehicle's track)
+```
+
+The **peak** rather than an average over the track. Radar measures only the radial component of the closing speed, which decays by cos(θ) as a vehicle draws alongside, so a whole-track mean is dragged down by the tail near the rider — by 13–27 km/h across the four overtakes captured on 2026-09-06. The peak occurs while the vehicle is still lined up behind the rider (87–135 m out in every one of those captures), where θ is near zero and the radial component is the true speed difference.
+
+Because both speeds are exported, a consumer recovers the raw radar closing speed as `estimatedPassSpeedKph − riderSpeedKph`, to the one-decimal precision of the file.
+
+> **This is the vehicle's speed on approach**, not necessarily its speed at the instant it drew level: the two terms are measured up to 22 seconds apart. A vehicle that slows behind the rider before committing to the pass is described by how fast it came up, not how fast it went by.
 
 **Recording Rate:** Track points recorded at 1Hz. Vehicle pass events recorded discretely on occurrence.
 
@@ -1003,7 +1015,7 @@ enum VehicleSize: String, Codable {
     
     var alertLevelAtPass: AlertLevel   // threat level when vehicle cleared the rider
     var riderSpeedKph: Double          // rider speed at moment of pass
-    var estimatedPassSpeedKph: Double? // inferred from closing speed history; nil if insufficient data
+    var estimatedPassSpeedKph: Double? // vehicle ground speed = riderSpeedKph + peak closing speed; nil if never observed approaching
 }
 ```
 
@@ -1321,7 +1333,7 @@ Every ride exports a GPX 1.1 file with biometric track point extensions and vehi
         <cyc:alertLevel>caution</cyc:alertLevel>
         <cyc:riderSpeedKph>28.4</cyc:riderSpeedKph>
         <cyc:estimatedPassSpeedKph>62.1</cyc:estimatedPassSpeedKph>
-        <!-- estimatedPassSpeedKph omitted if insufficient closing speed data -->
+        <!-- vehicle ground speed, not closing speed; omitted if the vehicle was never observed approaching -->
       </cyc:VehiclePassEvent>
     </extensions>
   </wpt>

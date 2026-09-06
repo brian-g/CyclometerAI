@@ -17,7 +17,7 @@ private let testDate = Date(timeIntervalSince1970: 1_000_000)
 private func singleSighting(mps: Double, alertLevel: AlertLevel, range: Double = 40) -> VehicleTrackingRecord {
     VehicleTrackingRecord(
         firstSeenAt: testDate, lastSeenAt: testDate,
-        sampleCount: 1, positiveSampleCount: mps > 0 ? 1 : 0, positiveSampleSum: max(mps, 0),
+        sampleCount: 1, maxPositiveClosingMPS: max(mps, 0),
         minimumRangeMetres: range,
         lastKnownCoordinate: nil, lastRiderSpeedMPS: 0, lastAlertLevel: alertLevel
     )
@@ -2041,7 +2041,7 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
             $0.vehiclePassTracking = [
                 VariaRadarClient.vehicleSlotIDs[0]: VehicleTrackingRecord(
                     firstSeenAt: testDate, lastSeenAt: testDate,
-                    sampleCount: 2, positiveSampleCount: 0, positiveSampleSum: 0,
+                    sampleCount: 2, maxPositiveClosingMPS: 0,
                     minimumRangeMetres: 40,
                     lastKnownCoordinate: nil, lastRiderSpeedMPS: 0, lastAlertLevel: .clear
                 )

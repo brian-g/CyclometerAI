@@ -48,7 +48,7 @@ struct VehiclePassDetectorTests {
         #expect(event.longitude == Self.coordinate.longitude)
         #expect(event.alertLevelAtPass == .clear)
         #expect(event.riderSpeedKph == 6 * AlertLevel.kphPerMPS)
-        #expect(event.estimatedPassSpeedKph == 8 * AlertLevel.kphPerMPS)
+        #expect(event.estimatedPassSpeedKph == (6 + 8) * AlertLevel.kphPerMPS)
         #expect(tracking[id] == nil)
     }
 
@@ -110,7 +110,7 @@ struct VehiclePassDetectorTests {
         let event = try #require(events.first)
         #expect(events.count == 1)
         #expect(event.timestamp == Self.start.addingTimeInterval(2))
-        #expect(event.estimatedPassSpeedKph == 8 * AlertLevel.kphPerMPS)
+        #expect(event.estimatedPassSpeedKph == (6 + 8) * AlertLevel.kphPerMPS)
     }
 
     @Test("A vehicle lost while still beyond the proximity threshold produces no event")
@@ -221,8 +221,9 @@ struct VehiclePassDetectorTests {
 
         // Not reachable from live hardware — the wire's closing speed is an unsigned
         // byte and not one frame of the 2026-09-06 capture carried even a zero. This
-        // pins PRD §8.7's "omitted if insufficient data" branch, which the pass-speed
-        // arithmetic would otherwise divide by zero on.
+        // pins PRD §8.7's "omitted if insufficient data" branch: a peak of 0 means the
+        // vehicle was never once observed approaching, so there is nothing to add the
+        // rider's speed to.
         for offset in [0.0, 2.0] {
             _ = VehiclePassDetector.processTick(
                 targets: [Self.target(mps: 0, id: id)],
@@ -290,27 +291,78 @@ struct VehiclePassDetectorTests {
         #expect(tracking[id] == nil)
     }
 
-    @Test("estimatedPassSpeedKph is the average of only the positive closing-speed samples, in km/h")
-    func estimatedPassSpeedIsAverageOfPositiveSamples() throws {
+    /// Feeds `(mps, range)` samples one second apart, then confirms the disappearance,
+    /// and returns the single event. The pass-speed tests below differ only in the
+    /// track they feed, so the ceremony is hoisted here.
+    private static func passSpeed(
+        forTrack track: [(mps: Double, range: Double)],
+        riderSpeedMPS: Double
+    ) throws -> Double? {
         let id = UUID()
         var tracking: [UUID: VehicleTrackingRecord] = [:]
 
-        for (offset, mps) in [4.0, 8.0, 6.0].enumerated() {
+        for (offset, sample) in track.enumerated() {
             _ = VehiclePassDetector.processTick(
-                targets: [Self.target(mps: mps, id: id)],
+                targets: [Self.target(mps: sample.mps, id: id, range: sample.range)],
                 trackedVehicles: &tracking, now: Self.start.addingTimeInterval(TimeInterval(offset)),
                 rideId: Self.rideId, alertLevel: .caution,
-                riderCoordinate: Self.coordinate, riderSpeedMPS: 0
+                riderCoordinate: Self.coordinate, riderSpeedMPS: riderSpeedMPS
             )
         }
         let events = VehiclePassDetector.processTick(
             targets: [],
-            trackedVehicles: &tracking, now: Self.start.addingTimeInterval(4), rideId: Self.rideId,
-            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 0
+            trackedVehicles: &tracking,
+            now: Self.start.addingTimeInterval(TimeInterval(track.count) + 2),
+            rideId: Self.rideId, alertLevel: .clear,
+            riderCoordinate: Self.coordinate, riderSpeedMPS: riderSpeedMPS
+        )
+        return try #require(events.first).estimatedPassSpeedKph
+    }
+
+    @Test("estimatedPassSpeedKph is the rider's speed plus the peak closing sample, in km/h")
+    func estimatedPassSpeedIsPeakClosingSamplePlusRiderSpeed() throws {
+        // The peak is neither the mean (6 m/s) nor the last sample (6 m/s), so this
+        // fails against the whole-track average this replaced (#208).
+        let estimate = try Self.passSpeed(
+            forTrack: [(4, 4), (8, 4), (6, 4)],
+            riderSpeedMPS: 6
         )
 
-        let event = try #require(events.first)
-        #expect(event.estimatedPassSpeedKph == 6.0 * AlertLevel.kphPerMPS)
+        #expect(estimate == (6 + 8) * AlertLevel.kphPerMPS)
+        #expect(estimate != (6 + 6) * AlertLevel.kphPerMPS)
+    }
+
+    @Test("The cos(theta) tail as a vehicle draws alongside does not drag the estimate down")
+    func estimatedPassSpeedIgnoresTheDecayingTail() throws {
+        // The shape every genuine overtake in the 2026-09-06 capture has: closing hard
+        // while lined up behind, then a decaying radial component as the vehicle moves
+        // laterally into the passing lane. The peak at acquisition is the physically
+        // meaningful figure; the whole-track mean here would be 9 m/s.
+        let estimate = try Self.passSpeed(
+            forTrack: [(16, 80), (12, 40), (6, 12), (2, 4)],
+            riderSpeedMPS: 6
+        )
+
+        #expect(estimate == (6 + 16) * AlertLevel.kphPerMPS)
+        #expect(estimate != (6 + 9) * AlertLevel.kphPerMPS)
+    }
+
+    @Test("A track with no decaying tail is unmoved by the switch from whole-track mean to peak")
+    func constantClosingSpeedIsUnchangedByTheEstimatorSwitch() throws {
+        // #208's fourth acceptance criterion, restated so it can actually be tested.
+        // It named the 16:01:03 capture, but #207 rejects that vehicle at 52 m and it
+        // now produces no event at all (`VehiclePassDetectorReplayTests`), so the
+        // criterion's intent is pinned here instead: where closing speed is constant,
+        // peak == mean, and that half of the change is a no-op. Verified by reverting —
+        // with the whole-track mean restored and the rider term kept, this test still
+        // passes while the two above fail. It is not invariant under the other half:
+        // adding the rider's speed necessarily moves every event.
+        let estimate = try Self.passSpeed(
+            forTrack: [(13, 80), (13, 40), (13, 4)],
+            riderSpeedMPS: 6
+        )
+
+        #expect(estimate == (6 + 13) * AlertLevel.kphPerMPS)
     }
 
     @Test("Tracking accumulates independently per vehicle id and only finalizes the one that disappeared")
@@ -338,7 +390,7 @@ struct VehiclePassDetectorTests {
         #expect(tracking[staying] == VehicleTrackingRecord(
             firstSeenAt: Self.start,
             lastSeenAt: Self.start.addingTimeInterval(4),
-            sampleCount: 3, positiveSampleCount: 3, positiveSampleSum: 15,
+            sampleCount: 3, maxPositiveClosingMPS: 5,
             minimumRangeMetres: 4,
             lastKnownCoordinate: Self.coordinate, lastRiderSpeedMPS: 6, lastAlertLevel: .clear
         ))

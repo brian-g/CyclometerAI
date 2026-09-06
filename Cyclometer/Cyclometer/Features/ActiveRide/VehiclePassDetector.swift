@@ -5,11 +5,11 @@ import Foundation
 /// the wire's own threat id), so it doubles as the join key here with no separate
 /// identity scheme needed. TCA.md §4.12.
 ///
-/// Closing-speed samples are folded into running counters rather than kept as an
-/// array: the pass-speed estimate only ever needs the count and sum of positive
-/// samples, and a vehicle that lingers under the same wire id for a long time (a
-/// stuck/phantom radar target) would otherwise grow that array for the rest of the
-/// ride. `minimumRangeMetres` is folded the same way and for the same reason.
+/// Closing-speed samples are folded into a running maximum rather than kept as an
+/// array: the pass-speed estimate only ever needs the peak positive sample, and a
+/// vehicle that lingers under the same wire id for a long time (a stuck/phantom radar
+/// target) would otherwise grow that array for the rest of the ride.
+/// `minimumRangeMetres` is folded the same way and for the same reason.
 struct VehicleTrackingRecord: Equatable {
     var firstSeenAt: Date
     /// Updated on every tick the vehicle is present — the basis for both the
@@ -17,8 +17,25 @@ struct VehicleTrackingRecord: Equatable {
     /// the last moment this vehicle was actually confirmed present.
     var lastSeenAt: Date
     var sampleCount: Int
-    var positiveSampleCount: Int
-    var positiveSampleSum: Double
+    /// Fastest this vehicle was ever seen closing, in m/s — the basis of the
+    /// pass-speed estimate (#208). Never negative: both the seed and the fold clamp
+    /// at 0, so `0` means "never once observed approaching", which is exactly the
+    /// condition under which `estimatedPassSpeedKph` is omitted.
+    ///
+    /// The peak rather than an average over the track. Radar measures the *radial*
+    /// component of the closing speed, which decays by cos(theta) as a vehicle draws
+    /// alongside, so a whole-track mean is dragged down by the tail near the rider —
+    /// by 13–27 km/h across the four overtakes captured on 2026-09-06. The peak lands
+    /// while the vehicle is still lined up behind the rider (frame 0 of all five of
+    /// those tracks, at 87–135 m), where theta is near zero and the radial component
+    /// is the true speed difference.
+    ///
+    /// A running max is in principle more exposed than a mean to one spurious sample
+    /// from a stuck/phantom target, since a mean dilutes toward recent values and a
+    /// max does not. #207's proximity guard bounds that: a phantom that never comes
+    /// within `VehiclePassDetector.passProximityMetres` is dropped before it ever
+    /// reaches the estimator.
+    var maxPositiveClosingMPS: Double
     /// Closest this vehicle has ever come, in metres — the overtake criterion (#207).
     /// A vehicle that disappears without having come within
     /// `VehiclePassDetector.passProximityMetres` never reached the rider, so its
@@ -86,14 +103,10 @@ enum VehiclePassDetector {
         riderSpeedMPS: Double
     ) -> [VehiclePassEventDTO] {
         for target in targets {
-            let isApproaching = target.relativeVelocityMPS > 0
             if var record = trackedVehicles[target.id] {
                 record.lastSeenAt = now
                 record.sampleCount += 1
-                if isApproaching {
-                    record.positiveSampleCount += 1
-                    record.positiveSampleSum += target.relativeVelocityMPS
-                }
+                record.maxPositiveClosingMPS = max(record.maxPositiveClosingMPS, target.relativeVelocityMPS)
                 record.minimumRangeMetres = min(record.minimumRangeMetres, target.rangeMetres)
                 record.lastKnownCoordinate = riderCoordinate
                 record.lastRiderSpeedMPS = riderSpeedMPS
@@ -104,8 +117,10 @@ enum VehiclePassDetector {
                     firstSeenAt: now,
                     lastSeenAt: now,
                     sampleCount: 1,
-                    positiveSampleCount: isApproaching ? 1 : 0,
-                    positiveSampleSum: isApproaching ? target.relativeVelocityMPS : 0,
+                    // Clamped, like the fold above: hardware cannot report a negative
+                    // closing speed, but `RadarTarget` can be constructed with one, and
+                    // an unclamped seed would leave the "peak" negative for the track.
+                    maxPositiveClosingMPS: max(target.relativeVelocityMPS, 0),
                     minimumRangeMetres: target.rangeMetres,
                     lastKnownCoordinate: riderCoordinate,
                     lastRiderSpeedMPS: riderSpeedMPS,
@@ -136,11 +151,11 @@ enum VehiclePassDetector {
             // The overtake criterion (#207). This replaced a majority-positive
             // closing-speed test, which could never reject anything: `parseAlert`
             // decodes closing speed from an *unsigned* wire byte, so
-            // `relativeVelocityMPS` is never negative and `positiveSampleCount`
-            // always equalled `sampleCount`. Across the 565 target-bearing frames of
-            // the 2026-09-06 capture, not one carried even a zero speed byte. Range
-            // is what actually separates an overtake from a vehicle that turned off
-            // or was lost while still behind.
+            // `relativeVelocityMPS` is never negative and every sample counted as
+            // approaching. Across the 565 target-bearing frames of the 2026-09-06
+            // capture, not one carried even a zero speed byte. Range is what actually
+            // separates an overtake from a vehicle that turned off or was lost while
+            // still behind.
             guard record.minimumRangeMetres <= Self.passProximityMetres else { continue }
 
             // No GPS fix yet — rare (ride start already requires a lock, PRD §8.8),
@@ -149,19 +164,33 @@ enum VehiclePassDetector {
             // to persist.
             guard let coordinate = record.lastKnownCoordinate else { continue }
 
+            // PRD §8.7: this field carries the *vehicle's* ground speed, not the
+            // closing speed the radar reports. The Varia measures speed relative to
+            // the rider, so the rider's own speed has to be added back to get an
+            // absolute figure — exported beside `riderSpeedKph`, a relative one would
+            // read as the car being slower than the bike it just overtook (#208).
+            //
+            // The two terms are not simultaneous, and the PRD says so: the peak lands
+            // at acquisition (87–135 m out in every 2026-09-06 capture) while the
+            // rider term is the speed at the pass, up to 22 s later. That is the
+            // vehicle's speed *on approach* — a car that slows behind the rider before
+            // committing is described by how fast it came up, not how fast it went by.
+            // Rider drift over that window is a few km/h against the 13–27 km/h
+            // geometric bias this replaced, and pairing the two exported fields from
+            // the same instant is what lets a consumer recover the raw closing speed
+            // by subtracting them.
+            //
+            // Converted to km/h in a single multiply so a whole-m/s test input lands
+            // on an exact decimal: (6 + 8) * 3.6 == 50.4, where two separate
+            // conversions would not.
+            //
             // The nil branch is PRD §8.7's "omitted if insufficient data" and is not
             // reachable from live hardware — every wire frame carries a positive
-            // closing speed, so `positiveSampleCount` is never 0 for a vehicle that
-            // was tracked at all. Kept rather than force-unwrapped: nil is a
-            // documented, persisted output of this field, and the arithmetic below
-            // would divide by zero without it.
-            //
-            // What this averages is closing speed across the whole track, which
-            // understates a genuine pass — the estimator is #208's problem, not this
-            // change's.
-            let estimatedPassSpeedKph = record.positiveSampleCount == 0
-                ? nil
-                : (record.positiveSampleSum / Double(record.positiveSampleCount)) * AlertLevel.kphPerMPS
+            // closing speed, so a vehicle tracked at all has a positive peak. Kept
+            // rather than force-unwrapped: nil is a documented, persisted output.
+            let estimatedPassSpeedKph = record.maxPositiveClosingMPS > 0
+                ? (record.lastRiderSpeedMPS + record.maxPositiveClosingMPS) * AlertLevel.kphPerMPS
+                : nil
 
             events.append(VehiclePassEventDTO(
                 rideId: rideId,

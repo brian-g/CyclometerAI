@@ -309,7 +309,7 @@ final class VehiclePassEvent {
     var longitude: Double
     var alertLevelAtPass: AlertLevel
     var riderSpeedKph: Double
-    var estimatedPassSpeedKph: Double?
+    var estimatedPassSpeedKph: Double?         // Vehicle ground speed = riderSpeedKph + peak closing speed; nil if never approaching
 
     init(
         rideId: UUID, timestamp: Date,
