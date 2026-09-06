@@ -4,6 +4,13 @@ import SwiftData
 /// Top-level ride summary, persisted in SwiftData (DataModel.md §3.1).
 /// High-frequency samples (speed, HR, GPS) are stored separately in CoreData,
 /// linked to a Ride only by `rideId` — see `TrackPointDTO`.
+///
+/// Any non-optional attribute added here needs a *declaration-site* default
+/// (`= 0`, not just an `init` assignment). SwiftData takes the attribute's
+/// store-level default from the declaration, and lightweight migration can't
+/// backfill a mandatory attribute that has none — it fails the entire store
+/// load, crashing at launch for anyone with an older store (#186).
+/// `RideSchemaMigrationTests` is the guard against a regression.
 @Model
 final class Ride {
     // MARK: - Identity
@@ -71,20 +78,20 @@ final class Ride {
     /// Whether the current `.paused` state was auto-triggered (stoplight, #102)
     /// rather than a manual Pause tap. Persisted (#175) so a resumed ride can
     /// tell the two apart — auto-resume-on-motion only applies to the former.
-    var isAutoPaused: Bool
+    var isAutoPaused: Bool = false
     /// Consecutive zero-speed seconds while active, mirroring
     /// `ActiveRideFeature.State.zeroSpeedSeconds` (#175) — persisted so a kill
     /// near the auto-pause/auto-end threshold doesn't hand a resumed ride a
     /// fresh grace window. Bounded to the same one-checkpoint-window staleness
     /// as every other resumed aggregate.
-    var zeroSpeedSeconds: Int
+    var zeroSpeedSeconds: Int = 0
     /// Sample counts backing the running averages above, persisted (#175) so a
     /// resumed ride can seed its true prior weight instead of fabricating one —
     /// `averageSpeedMPS`/`averageHeartRateBPM`/`averageCadenceRPM` alone can't
     /// be un-averaged back into a (sum, count) pair without this.
-    var speedSampleCount: Int
-    var hrSampleCount: Int
-    var cadenceSampleCount: Int
+    var speedSampleCount: Int = 0
+    var hrSampleCount: Int = 0
+    var cadenceSampleCount: Int = 0
 
     // MARK: - Relationships
     // TrackPoints and VehiclePassEvents are linked by rideId only (TrackPoint's

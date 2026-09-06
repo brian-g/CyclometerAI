@@ -24,8 +24,13 @@ final class SwiftDataStack {
     }
     #endif
 
+    /// The one schema production loads. Exposed so migration tests open a store
+    /// against exactly this, rather than a hand-copied model list that silently
+    /// drifts the moment a model is added here.
+    static let schema = Schema([Ride.self, VehiclePassEvent.self])
+
     private static func makeContainer(inMemory: Bool) -> ModelContainer {
-        let schema = Schema([Ride.self, VehiclePassEvent.self])
+        let schema = Self.schema
         let config = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: inMemory,

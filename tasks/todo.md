@@ -1,42 +1,52 @@
-# #188 — Ride-end failure paths
+# SwiftData migration crash (#186 regression) — fix + regression test
 
-Branch: `fix/188-ride-end-failure-paths`
+Branch: `fix/swiftdata-migration-defaults`
 
-## Tasks
+## Diagnosis (done)
+Launch crash on device: `SwiftDataStack.swift:37` fatalError.
+CoreData 134110 — `entity=Ride, attribute=cadenceSampleCount, reason=Validation
+error missing attribute values on mandatory destination attribute`.
+The five attributes added in #175 (`isAutoPaused`, `zeroSpeedSeconds`,
+`speedSampleCount`, `hrSampleCount`, `cadenceSampleCount`) are non-optional and
+initialized only in `init`, so SwiftData emits them as mandatory-with-no-default
+and lightweight migration refuses any store written before #186.
 
-- [x] 1. `PendingRideEnd` model + `RideEndIntentClient` (file-backed, outside SwiftData)
-- [x] 2. `ActiveRideFeature`: record intent before the writes; clear only on finalize success; log export failure
-- [x] 3. `AppFeature`: at launch, close the ride out instead of resuming when intent matches
-- [x] 4. `RideEndFailureTests` — all three paths + stale-marker guard
-- [x] 5. Full suite green; fix proven load-bearing
+## Plan
+- [x] Add declaration-site defaults to the five #175 attributes on `Ride`
+- [x] Hoist `Schema([Ride.self, VehiclePassEvent.self])` to `SwiftDataStack.schema`
+      so the test asserts against the same schema production loads
+- [x] Regression test: write a store with the pre-#175 `Ride` shape, reopen it
+      with the current schema, assert it loads and backfills the new attributes
+- [x] Build + run the full CyclometerTests suite
 
 ## Review
 
-**The defect.** `finalizeRide` is the only writer of `Ride.endedAt`, and `fetchResumableRide`
-reads a nil `endedAt` as "still in progress". A swallowed failure therefore left a finished
-ride matching the resumable predicate, so #175's crash recovery resumed a ride the rider had
-already ended — restarting the recorder and reconnecting sensors, silently.
+**Changed**
+- `Models/Ride.swift` — declaration-site defaults on the five #175 attributes
+  (`= false` / `= 0`), plus a type-level note explaining why they can't be left
+  to `init` alone.
+- `Clients/Persistence/SwiftDataStack.swift` — `Schema([Ride.self,
+  VehiclePassEvent.self])` hoisted to `static let schema`, so the test opens a
+  store against the same schema production loads instead of a copy that drifts.
+- `CyclometerTests/Models/RideSchemaMigrationTests.swift` — new. Holds the
+  pre-#175 `Ride` as a test-only `@Model` (readable/diffable, unlike a
+  checked-in binary `.store`), writes a store with it, then cold-opens that
+  store with the current schema and asserts old data survives and the new
+  attributes are backfilled. A second test proves the migrated store is
+  writable, not just readable.
 
-**The fix.** The durable fact "the rider ended this ride" cannot live in the store that just
-failed, so it goes to a small JSON file behind `RideEndIntentClient`: written before the
-ride-end writes, cleared only once `finalizeRide` actually succeeds. A marker still present
-at launch means the previous finalize never landed, so `AppFeature` finalizes the ride
-instead of resuming it. The marker carries the GPX URL too, so an export that succeeded
-isn't orphaned on disk by a failed row write.
+**Verification**
+- Both new tests fail without the fix, with `SwiftDataError.loadIssueModelContainer` —
+  the same error the device crash logged. Confirmed by reverting the defaults,
+  re-running, and restoring.
+- Full `CyclometerTests`: 777 passed, 0 failed, 0 skipped (iPhone 17 Pro, iOS 26.5).
 
-**Design note worth keeping.** The marker started as `@Shared(.pendingRideEnd)` in
-`ActiveRideFeature.State`. That broke two exhaustive `TestStore` tests, because shared-state
-mutations are state changes that every such test must assert — a permanent tax for a
-persistence detail nothing renders. Moving the `@Shared` *into* the effect then failed
-differently: writes made after an `await` never propagated, so the marker was recorded but
-never updated or cleared. A dependency client solved both — it matches how
-`persistenceClient` is already called directly from this reducer, keeps the marker out of
-every exhaustive test's state contract, and is trivially controllable in tests. The two
-previously-failing tests then passed **unchanged**, with no neighbouring edits.
+**Guard against recurrence**
+The migration test pins the oldest supported on-disk shape, so *any* future
+non-optional attribute added to `Ride` without a declaration-site default fails
+CI — not just the original five.
 
-Deliberately not folded into `PersistenceClient`: the whole point is to survive a
-PersistenceClient failure.
-
-**Verification.** Full `CyclometerTests`: **775 cases, 0 failures**. Removing the launch-time
-recovery branch turns `finalizeFailureIsRecoveredAtLaunchRatherThanResumed` red while the
-other three stay green.
+**Not done (flagged, needs its own issue)**
+`SwiftDataStack.swift:37` and `CoreDataStack.swift:34` still `fatalError` on
+store-load failure. Fine pre-release; post-ship a bad migration bricks the app
+with no recovery path and no way to salvage ride data.
