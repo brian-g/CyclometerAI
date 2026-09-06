@@ -8,8 +8,11 @@ struct VehiclePassDetectorTests {
     private static let rideId = UUID()
     private static let coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
 
-    private static func target(mps: Double, id: UUID) -> RadarTarget {
-        RadarTarget(id: id, relativeVelocityMPS: mps, rangeMetres: 40, threatLevel: .allClear)
+    /// `range` defaults to 4 m — well inside `passProximityMetres`, so a track built
+    /// from the default reads as a vehicle that genuinely reached the rider. Tests
+    /// about the proximity criterion itself pass it explicitly.
+    private static func target(mps: Double, id: UUID, range: Double = 4) -> RadarTarget {
+        RadarTarget(id: id, relativeVelocityMPS: mps, rangeMetres: range, threatLevel: .allClear)
     }
 
     @Test("A vehicle tracked >= 2s with majority-positive closing speed that then disappears past the grace period produces exactly one pass event, using the last-seen snapshot")
@@ -110,29 +113,23 @@ struct VehiclePassDetectorTests {
         #expect(event.estimatedPassSpeedKph == 8 * AlertLevel.kphPerMPS)
     }
 
-    @Test("A vehicle that turns off or slows (majority non-positive) before disappearing produces no event")
-    func turnOffOrSlowdownProducesNoEvent() {
+    @Test("A vehicle lost while still beyond the proximity threshold produces no event")
+    func lostBeyondProximityThresholdProducesNoEvent() {
         let id = UUID()
         var tracking: [UUID: VehicleTrackingRecord] = [:]
 
-        _ = VehiclePassDetector.processTick(
-            targets: [Self.target(mps: 8, id: id)],
-            trackedVehicles: &tracking, now: Self.start, rideId: Self.rideId,
-            alertLevel: .caution, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
-        )
-        _ = VehiclePassDetector.processTick(
-            targets: [Self.target(mps: -3, id: id)],
-            trackedVehicles: &tracking, now: Self.start.addingTimeInterval(1), rideId: Self.rideId,
-            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
-        )
-        _ = VehiclePassDetector.processTick(
-            targets: [Self.target(mps: -3, id: id)],
-            trackedVehicles: &tracking, now: Self.start.addingTimeInterval(2), rideId: Self.rideId,
-            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
-        )
-
-        // Tracked 2 continuous seconds (well past the minimum) but two of the three
-        // samples are non-positive, so this is a turn-off/slowdown, not a pass.
+        // Closing hard the whole time — 50 km/h of closing speed, never once
+        // receding — but never nearer than 52 m. This is the shape of the
+        // 2026-09-06 12:01:03 capture #207 was filed for, which the majority-positive
+        // closing-speed guard this replaces recorded as a `danger` pass.
+        for (offset, range) in [(0.0, 93.0), (1.0, 72.0), (2.0, 52.0)] {
+            _ = VehiclePassDetector.processTick(
+                targets: [Self.target(mps: 50 / AlertLevel.kphPerMPS, id: id, range: range)],
+                trackedVehicles: &tracking, now: Self.start.addingTimeInterval(offset),
+                rideId: Self.rideId, alertLevel: .danger,
+                riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+            )
+        }
         let events = VehiclePassDetector.processTick(
             targets: [],
             trackedVehicles: &tracking, now: Self.start.addingTimeInterval(4), rideId: Self.rideId,
@@ -141,6 +138,107 @@ struct VehiclePassDetectorTests {
 
         #expect(events.isEmpty)
         #expect(tracking[id] == nil)
+    }
+
+    @Test("A vehicle that closes to exactly the proximity threshold produces an event")
+    func closingToExactlyTheThresholdProducesEvent() throws {
+        let id = UUID()
+        var tracking: [UUID: VehicleTrackingRecord] = [:]
+
+        for (offset, range) in [(0.0, 40.0), (2.0, VehiclePassDetector.passProximityMetres)] {
+            _ = VehiclePassDetector.processTick(
+                targets: [Self.target(mps: 8, id: id, range: range)],
+                trackedVehicles: &tracking, now: Self.start.addingTimeInterval(offset),
+                rideId: Self.rideId, alertLevel: .caution,
+                riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+            )
+        }
+        let events = VehiclePassDetector.processTick(
+            targets: [],
+            trackedVehicles: &tracking, now: Self.start.addingTimeInterval(4), rideId: Self.rideId,
+            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+        )
+
+        // The threshold is inclusive — a vehicle that reached exactly it did pass.
+        #expect(events.count == 1)
+        _ = try #require(events.first)
+    }
+
+    @Test("A vehicle that stops one metre short of the proximity threshold produces no event")
+    func closingToJustBeyondTheThresholdProducesNoEvent() {
+        let id = UUID()
+        var tracking: [UUID: VehicleTrackingRecord] = [:]
+
+        // One metre is the wire's own resolution — the range byte is whole metres —
+        // so this is the tightest rejection the hardware can express.
+        for (offset, range) in [(0.0, 40.0), (2.0, VehiclePassDetector.passProximityMetres + 1)] {
+            _ = VehiclePassDetector.processTick(
+                targets: [Self.target(mps: 8, id: id, range: range)],
+                trackedVehicles: &tracking, now: Self.start.addingTimeInterval(offset),
+                rideId: Self.rideId, alertLevel: .caution,
+                riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+            )
+        }
+        let events = VehiclePassDetector.processTick(
+            targets: [],
+            trackedVehicles: &tracking, now: Self.start.addingTimeInterval(4), rideId: Self.rideId,
+            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+        )
+
+        #expect(events.isEmpty)
+    }
+
+    @Test("The closest range ever seen decides the pass, not the range at the last sighting")
+    func minimumRangeIsRetainedAfterMovingAway() throws {
+        let id = UUID()
+        var tracking: [UUID: VehicleTrackingRecord] = [:]
+
+        // Reaches 3 m, then the last frames report it further out again. The Varia's
+        // range byte does drift back up as a vehicle clears the beam, so the criterion
+        // has to hold the minimum rather than read whatever the final frame said.
+        for (offset, range) in [(0.0, 60.0), (1.0, 3.0), (2.0, 30.0)] {
+            _ = VehiclePassDetector.processTick(
+                targets: [Self.target(mps: 8, id: id, range: range)],
+                trackedVehicles: &tracking, now: Self.start.addingTimeInterval(offset),
+                rideId: Self.rideId, alertLevel: .caution,
+                riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+            )
+        }
+        let events = VehiclePassDetector.processTick(
+            targets: [],
+            trackedVehicles: &tracking, now: Self.start.addingTimeInterval(4), rideId: Self.rideId,
+            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+        )
+
+        #expect(events.count == 1)
+        _ = try #require(events.first)
+    }
+
+    @Test("A track with no positive closing-speed samples reports a nil pass-speed estimate")
+    func allZeroClosingSpeedYieldsNilEstimate() throws {
+        let id = UUID()
+        var tracking: [UUID: VehicleTrackingRecord] = [:]
+
+        // Not reachable from live hardware — the wire's closing speed is an unsigned
+        // byte and not one frame of the 2026-09-06 capture carried even a zero. This
+        // pins PRD §8.7's "omitted if insufficient data" branch, which the pass-speed
+        // arithmetic would otherwise divide by zero on.
+        for offset in [0.0, 2.0] {
+            _ = VehiclePassDetector.processTick(
+                targets: [Self.target(mps: 0, id: id)],
+                trackedVehicles: &tracking, now: Self.start.addingTimeInterval(offset),
+                rideId: Self.rideId, alertLevel: .clear,
+                riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+            )
+        }
+        let events = VehiclePassDetector.processTick(
+            targets: [],
+            trackedVehicles: &tracking, now: Self.start.addingTimeInterval(4), rideId: Self.rideId,
+            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+        )
+
+        let event = try #require(events.first)
+        #expect(event.estimatedPassSpeedKph == nil)
     }
 
     @Test("A vehicle tracked less than the 2s minimum produces no event even if approaching and confirmed gone")
@@ -163,30 +261,6 @@ struct VehiclePassDetectorTests {
 
         #expect(events.isEmpty)
         #expect(tracking[id] == nil)
-    }
-
-    @Test("A zero closing-speed sample does not count as approaching")
-    func zeroClosingSpeedIsNotApproaching() {
-        let id = UUID()
-        var tracking: [UUID: VehicleTrackingRecord] = [:]
-
-        _ = VehiclePassDetector.processTick(
-            targets: [Self.target(mps: 0, id: id)],
-            trackedVehicles: &tracking, now: Self.start, rideId: Self.rideId,
-            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
-        )
-        _ = VehiclePassDetector.processTick(
-            targets: [Self.target(mps: 0, id: id)],
-            trackedVehicles: &tracking, now: Self.start.addingTimeInterval(2), rideId: Self.rideId,
-            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
-        )
-        let events = VehiclePassDetector.processTick(
-            targets: [],
-            trackedVehicles: &tracking, now: Self.start.addingTimeInterval(4), rideId: Self.rideId,
-            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
-        )
-
-        #expect(events.isEmpty)
     }
 
     @Test("No GPS fix at the last sighting before a pass drops the event, still clearing the tracked vehicle")
@@ -265,6 +339,7 @@ struct VehiclePassDetectorTests {
             firstSeenAt: Self.start,
             lastSeenAt: Self.start.addingTimeInterval(4),
             sampleCount: 3, positiveSampleCount: 3, positiveSampleSum: 15,
+            minimumRangeMetres: 4,
             lastKnownCoordinate: Self.coordinate, lastRiderSpeedMPS: 6, lastAlertLevel: .clear
         ))
     }

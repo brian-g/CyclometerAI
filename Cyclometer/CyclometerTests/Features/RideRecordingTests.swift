@@ -225,14 +225,20 @@ struct RideRecordingTests {
 
     // MARK: - Vehicle passes through the whole pipeline
 
+    /// Reaches 4 m — inside `VehiclePassDetector.passProximityMetres` — so this vehicle
+    /// genuinely overtook the rider and must produce an event.
     private static let approachingVehicle = RadarTarget(
-        id: VariaRadarClient.vehicleSlotIDs[0], relativeVelocityMPS: 8, rangeMetres: 40, threatLevel: .warning
+        id: VariaRadarClient.vehicleSlotIDs[0], relativeVelocityMPS: 8, rangeMetres: 4, threatLevel: .warning
     )
-    /// Receding: majority non-positive closing speed, so the detector must reject it
-    /// as a turn-off/slowdown even though it is tracked and disappears exactly like
-    /// the approaching one.
-    private static let recedingVehicle = RadarTarget(
-        id: VariaRadarClient.vehicleSlotIDs[1], relativeVelocityMPS: -5, rangeMetres: 60, threatLevel: .allClear
+    /// Closing just as hard, tracked just as long, disappearing on the very same tick —
+    /// but never nearer than 60 m, so the detector must reject it as a vehicle that
+    /// never reached the rider. Range is the only thing separating the two.
+    ///
+    /// It used to be separated by a *negative* closing speed instead, which the Varia's
+    /// unsigned wire byte cannot produce — so this pair only ever exercised a
+    /// discriminator no real ride could reach (#207).
+    private static let lostVehicle = RadarTarget(
+        id: VariaRadarClient.vehicleSlotIDs[1], relativeVelocityMPS: 8, rangeMetres: 60, threatLevel: .warning
     )
 
     /// The exporter's AlertLevel spelling. That this is the mapping GPXExporter
@@ -302,11 +308,11 @@ struct RideRecordingTests {
         await store.send(.elapsedTick)
 
         // Both vehicles are tracked together and disappear together, so the only
-        // thing separating them is closing-speed sign.
-        await store.send(.radarTargetsUpdated([Self.approachingVehicle, Self.recedingVehicle]))
+        // thing separating them is how close each came to the rider.
+        await store.send(.radarTargetsUpdated([Self.approachingVehicle, Self.lostVehicle]))
 
         store.dependencies.date.now = Self.testDate.addingTimeInterval(2)
-        await store.send(.radarTargetsUpdated([Self.approachingVehicle, Self.recedingVehicle]))
+        await store.send(.radarTargetsUpdated([Self.approachingVehicle, Self.lostVehicle]))
         await store.send(.elapsedTick)
 
         store.dependencies.date.now = Self.testDate.addingTimeInterval(4)

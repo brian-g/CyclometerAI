@@ -10,10 +10,15 @@ private let testDate = Date(timeIntervalSince1970: 1_000_000)
 /// sighting at `testDate` — the fixture every suite in this file uses, since none
 /// of them send a `.locationUpdated` before their radar assertions (no GPS fix,
 /// zero rider speed).
-private func singleSighting(mps: Double, alertLevel: AlertLevel) -> VehicleTrackingRecord {
+/// `range` mirrors the `rangeMetres` of whatever target the test sent — the detector
+/// seeds `minimumRangeMetres` from it (#207). Most fixtures here use 40 m; the few at
+/// 60 m pass it explicitly. None of these suites assert a *pass*, only the tracking
+/// bookkeeping, so the value only has to match what was sent.
+private func singleSighting(mps: Double, alertLevel: AlertLevel, range: Double = 40) -> VehicleTrackingRecord {
     VehicleTrackingRecord(
         firstSeenAt: testDate, lastSeenAt: testDate,
         sampleCount: 1, positiveSampleCount: mps > 0 ? 1 : 0, positiveSampleSum: max(mps, 0),
+        minimumRangeMetres: range,
         lastKnownCoordinate: nil, lastRiderSpeedMPS: 0, lastAlertLevel: alertLevel
     )
 }
@@ -98,7 +103,7 @@ struct ActiveRideFeatureRadarTests {
                     threatLevel: .warning
                 )
             ]
-            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -5, alertLevel: .clear)]
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -5, alertLevel: .clear, range: 60)]
         }
 
         // Badge stays paired during the 10s grace window.
@@ -191,7 +196,7 @@ struct ActiveRideFeatureRadarTests {
         ]
         await store.send(.radarTargetsUpdated(targets)) {
             $0.radarTargets = targets
-            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -5, alertLevel: .clear)]
+            $0.vehiclePassTracking = [VariaRadarClient.vehicleSlotIDs[0]: singleSighting(mps: -5, alertLevel: .clear, range: 60)]
         }
 
         await store.send(.radarConnectionChanged(.reconnecting)) {
@@ -2037,6 +2042,7 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
                 VariaRadarClient.vehicleSlotIDs[0]: VehicleTrackingRecord(
                     firstSeenAt: testDate, lastSeenAt: testDate,
                     sampleCount: 2, positiveSampleCount: 0, positiveSampleSum: 0,
+                    minimumRangeMetres: 40,
                     lastKnownCoordinate: nil, lastRiderSpeedMPS: 0, lastAlertLevel: .clear
                 )
             ]
@@ -2323,8 +2329,11 @@ struct ActiveRideFeatureUnitsTests {
 struct ActiveRideFeatureVehiclePassPersistenceTests {
     private static let coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
 
+    /// 4 m — inside `VehiclePassDetector.passProximityMetres`, so `sendOvertake` below
+    /// describes a vehicle that actually reached the rider. At the 40 m this used to
+    /// sit at, no overtake in this suite would confirm at all (#207).
     private static func vehicle(mps: Double) -> RadarTarget {
-        RadarTarget(id: VariaRadarClient.vehicleSlotIDs[0], relativeVelocityMPS: mps, rangeMetres: 40, threatLevel: .allClear)
+        RadarTarget(id: VariaRadarClient.vehicleSlotIDs[0], relativeVelocityMPS: mps, rangeMetres: 4, threatLevel: .allClear)
     }
 
     private func makeStore(persistenceClient: PersistenceClient) -> TestStoreOf<ActiveRideFeature> {
