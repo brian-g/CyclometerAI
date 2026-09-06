@@ -18,9 +18,9 @@ struct VehicleTrackingRecord: Equatable {
     var lastSeenAt: Date
     var sampleCount: Int
     /// Fastest this vehicle was ever seen closing, in m/s — the basis of the
-    /// pass-speed estimate (#208). Never negative: both the seed and the fold clamp
-    /// at 0, so `0` means "never once observed approaching", which is exactly the
-    /// condition under which `estimatedPassSpeedKph` is omitted.
+    /// pass-speed estimate (#208). Never negative: the seed clamps at 0 and the fold
+    /// only ever raises it, so `0` means "never once observed approaching", which is
+    /// exactly the condition under which `estimatedPassSpeedKph` is omitted.
     ///
     /// The peak rather than an average over the track. Radar measures the *radial*
     /// component of the closing speed, which decays by cos(theta) as a vehicle draws
@@ -46,12 +46,39 @@ struct VehicleTrackingRecord: Equatable {
     /// describe is already implied by a vehicle reaching the proximity threshold.
     var minimumRangeMetres: Double
     /// Snapshotted from the tick that last saw this vehicle, not the tick that
-    /// eventually confirms its disappearance — the rider may have moved, and the
-    /// alert level may have changed for an unrelated vehicle, in the time it takes
-    /// `disappearanceGracePeriod` to elapse.
+    /// eventually confirms its disappearance — the rider may have moved in the time it
+    /// takes `disappearanceGracePeriod` to elapse. Both are at-pass values, unlike
+    /// `alertLevelAtPeakClosing` below; the asymmetry is deliberate and documented at
+    /// the emission site.
     var lastKnownCoordinate: Coordinate?
     var lastRiderSpeedMPS: Double
-    var lastAlertLevel: AlertLevel
+    /// The ride-level `AlertLevel` at the tick that set `maxPositiveClosingMPS` — the
+    /// most threatening moment of the encounter, not its last (#209).
+    ///
+    /// The last tick a vehicle is seen is the moment it is alongside the rider, where
+    /// the radial component of its closing speed, and so the derived level, bottoms
+    /// out. Snapshotting there recorded the *least* severe instant of every encounter:
+    /// the 2026-09-06 pass that closed at 59 km/h, nearly twice
+    /// `AlertLevel.dangerClosingSpeedKPH`, was filed as `caution` on a last-seen 25.
+    ///
+    /// Moved with the peak rather than folded as a running max over the whole track,
+    /// because the value is *ride-level* — `AlertLevel.level(for:)` over every current
+    /// target, not just this one. A running max would let a concurrent faster vehicle
+    /// raise this vehicle's level and, since a max only ever rises, hold it raised for
+    /// the rest of the track; `level(for:)`'s `approaching.count >= 3` clause alone
+    /// would then stamp `caution` on every pass in traffic regardless of speed. Pinning
+    /// it to a single tick bounds the cross-vehicle influence to what was genuinely
+    /// happening at this vehicle's peak — which is worth keeping rather than
+    /// engineering away, since the ride-level alert is what the rider was warned by.
+    ///
+    /// Strictly `>`, so the first frame of a plateau wins. Peaks in that capture are
+    /// held for 4–12 consecutive frames and the first is the acquisition frame at
+    /// 87–135 m, where theta is near zero — the same geometry that makes the peak the
+    /// right sample at all (see `maxPositiveClosingMPS`).
+    ///
+    /// A vehicle never observed approaching keeps its seed tick's level, on the same
+    /// condition that sends `estimatedPassSpeedKph` nil.
+    var alertLevelAtPeakClosing: AlertLevel
 }
 
 /// Detects a genuine vehicle overtake from radar history, distinguishing it from a
@@ -106,11 +133,17 @@ enum VehiclePassDetector {
             if var record = trackedVehicles[target.id] {
                 record.lastSeenAt = now
                 record.sampleCount += 1
-                record.maxPositiveClosingMPS = max(record.maxPositiveClosingMPS, target.relativeVelocityMPS)
+                // Both peak-derived fields move together or not at all. The
+                // comparison also subsumes the clamp the plain `max` used to carry:
+                // the stored value is never negative, so a negative sample can never
+                // win it.
+                if target.relativeVelocityMPS > record.maxPositiveClosingMPS {
+                    record.maxPositiveClosingMPS = target.relativeVelocityMPS
+                    record.alertLevelAtPeakClosing = alertLevel
+                }
                 record.minimumRangeMetres = min(record.minimumRangeMetres, target.rangeMetres)
                 record.lastKnownCoordinate = riderCoordinate
                 record.lastRiderSpeedMPS = riderSpeedMPS
-                record.lastAlertLevel = alertLevel
                 trackedVehicles[target.id] = record
             } else {
                 trackedVehicles[target.id] = VehicleTrackingRecord(
@@ -124,7 +157,7 @@ enum VehiclePassDetector {
                     minimumRangeMetres: target.rangeMetres,
                     lastKnownCoordinate: riderCoordinate,
                     lastRiderSpeedMPS: riderSpeedMPS,
-                    lastAlertLevel: alertLevel
+                    alertLevelAtPeakClosing: alertLevel
                 )
             }
         }
@@ -192,12 +225,21 @@ enum VehiclePassDetector {
                 ? (record.lastRiderSpeedMPS + record.maxPositiveClosingMPS) * AlertLevel.kphPerMPS
                 : nil
 
+            // The three exported fields are deliberately not all from one instant, and
+            // should not be reconciled into agreement later. `riderSpeedKph` is the
+            // rider's speed *at the pass*, which is what PRD §8.7's field table asks
+            // for; `alertLevelAtPass` and `estimatedPassSpeedKph` are both anchored to
+            // the peak-closing sample. Pairing the at-pass rider speed with the peak
+            // closing speed is precisely what makes `estimatedPassSpeedKph` the
+            // vehicle's speed on approach (#208), and #209 put the severity on that
+            // same sample so the exported level describes the same moment as the
+            // exported speed.
             events.append(VehiclePassEventDTO(
                 rideId: rideId,
                 timestamp: record.lastSeenAt,
                 latitude: coordinate.latitude,
                 longitude: coordinate.longitude,
-                alertLevelAtPass: record.lastAlertLevel,
+                alertLevelAtPass: record.alertLevelAtPeakClosing,
                 riderSpeedKph: record.lastRiderSpeedMPS * AlertLevel.kphPerMPS,
                 estimatedPassSpeedKph: estimatedPassSpeedKph
             ))

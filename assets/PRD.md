@@ -537,7 +537,7 @@ Vehicle pass events are recorded as GPX `<wpt>` (waypoint) elements rather than 
 | Location at pass | `<wpt lat="..." lon="...">` | Rider position when vehicle cleared |
 | Timestamp | `<time>` | UTC timestamp of pass |
 | Event type | `<type>vehiclePass</type>` | Standard GPX type element for filtering |
-| Alert level | `<cyc:alertLevel>` | danger / caution / advisory at time of pass |
+| Alert level | `<cyc:alertLevel>` | danger / caution / advisory — the ride-level alert at the vehicle's **peak closing speed**, not at the instant it drew level |
 | Rider speed | `<cyc:riderSpeedKph>` | Rider speed at moment of pass (km/h) |
 | Estimated pass speed | `<cyc:estimatedPassSpeedKph>` | The **vehicle's ground speed** (km/h) — an absolute speed, not a closing speed. Always greater than `<cyc:riderSpeedKph>`. Omitted if the vehicle was never observed approaching |
 
@@ -552,6 +552,14 @@ The **peak** rather than an average over the track. Radar measures only the radi
 Because both speeds are exported, a consumer recovers the raw radar closing speed as `estimatedPassSpeedKph − riderSpeedKph`, to the one-decimal precision of the file.
 
 > **This is the vehicle's speed on approach**, not necessarily its speed at the instant it drew level: the two terms are measured up to 22 seconds apart. A vehicle that slows behind the rider before committing to the pass is described by how fast it came up, not how fast it went by.
+
+**What `alertLevel` carries.** The ride-level alert sampled at the same instant as the peak closing speed above — the most threatening moment of the encounter, not its last.
+
+Because radar measures only the radial component, a vehicle's closing speed is at its *minimum* as it draws level with the rider. Recording the alert level there recorded the least severe instant of every encounter, and inverted the severity ordering outright: on 2026-09-06 the pass that closed at 59 km/h was filed a band *below* the pass that closed at 47, because the first was last seen at 25 km/h and the second at 32.
+
+The value remains **ride-level** — derived from every vehicle the radar can see, not this one alone — so a faster vehicle alongside at the peak is reflected in it. That is the level the rider was genuinely alerted at. Anchoring it to one tick rather than taking the worst level over the whole encounter is what bounds the effect: a running maximum would let any later vehicle raise a pass's severity and, because it only ever rises, hold it there for the rest of the track.
+
+> `riderSpeedKph` deliberately stays the value **at the pass**, per the field table above. Two of the three fields are peak-anchored and one is not — that asymmetry is exactly what makes `estimatedPassSpeedKph` the vehicle's speed on approach, and it should not be reconciled away.
 
 **Recording Rate:** Track points recorded at 1Hz. Vehicle pass events recorded discretely on occurrence.
 
@@ -1013,7 +1021,7 @@ enum VehicleSize: String, Codable {
     var latitude: Double               // rider position at time of pass
     var longitude: Double
     
-    var alertLevelAtPass: AlertLevel   // threat level when vehicle cleared the rider
+    var alertLevelAtPass: AlertLevel   // ride-level alert at the vehicle's peak closing speed, not at the pass
     var riderSpeedKph: Double          // rider speed at moment of pass
     var estimatedPassSpeedKph: Double? // vehicle ground speed = riderSpeedKph + peak closing speed; nil if never observed approaching
 }
@@ -1330,7 +1338,8 @@ Every ride exports a GPX 1.1 file with biometric track point extensions and vehi
     <type>vehiclePass</type>
     <extensions>
       <cyc:VehiclePassEvent>
-        <cyc:alertLevel>caution</cyc:alertLevel>
+        <cyc:alertLevel>danger</cyc:alertLevel>
+        <!-- at the peak closing sample, not at the pass: 62.1 - 28.4 = 33.7 km/h closing, past the 30 km/h danger threshold -->
         <cyc:riderSpeedKph>28.4</cyc:riderSpeedKph>
         <cyc:estimatedPassSpeedKph>62.1</cyc:estimatedPassSpeedKph>
         <!-- vehicle ground speed, not closing speed; omitted if the vehicle was never observed approaching -->

@@ -94,7 +94,73 @@ struct VehiclePassDetectorReplayTests {
             #expect(event.latitude == Self.coordinate.latitude)
             #expect(event.longitude == Self.coordinate.longitude)
             #expect(event.riderSpeedKph == 6 * AlertLevel.kphPerMPS)
+
+            // The display name has always claimed the alert level; until #209 nothing
+            // here checked it. Derived from the track's own peak rather than written
+            // as a literal, so editing a fixture cannot quietly invalidate it.
+            let peakKph = try #require(track.frames.map(\.kph).max())
+            #expect(event.alertLevelAtPass == Self.level(atClosingKph: peakKph), "\(track.name)")
         }
+    }
+
+    /// The ride-level alert a lone vehicle closing at `kph` produces, built exactly the
+    /// way `replay` builds its targets so the km/h -> m/s round trip matches.
+    private static func level(atClosingKph kph: Int) -> AlertLevel {
+        AlertLevel.level(for: [
+            RadarTarget(
+                id: UUID(),
+                relativeVelocityMPS: Double(kph) / AlertLevel.kphPerMPS,
+                rangeMetres: 0,
+                threatLevel: .warning
+            )
+        ])
+    }
+
+    @Test("Every captured overtake records the peak of its encounter, not its least severe instant")
+    func overtakesRecordThePeakAlertLevel() throws {
+        // #209's first two acceptance criteria. `Cyclometer_2026-09-06_11-55.gpx`
+        // shipped caution / caution / caution / danger — the level at each vehicle's
+        // *last* frame, by which point the radial closing component has decayed to
+        // 23-32 kph. Every track peaks at 47-59 kph, all past `dangerClosingSpeedKPH`,
+        // so all four are `danger` now.
+        let shipped: [String: (peak: Int, lastSeen: Int, wasRecordedAs: AlertLevel)] = [
+            "pass1158": (59, 25, .caution), "pass1200_09": (54, 24, .caution),
+            "pass1200_30": (54, 23, .caution), "pass1200_50": (47, 32, .danger),
+        ]
+
+        for track in RadarPassFixtures.all where track.isGenuinePass {
+            let expected = try #require(shipped[track.name])
+            #expect(track.frames.map(\.kph).max() == expected.peak, "\(track.name)")
+            #expect(track.frames.last?.kph == expected.lastSeen, "\(track.name)")
+            // The `wasRecordedAs` column is the shipped GPX's own `<cyc:alertLevel>`,
+            // reproduced here from the last-seen closing speed — proof that the column
+            // is what the old snapshot computed and not a number copied by hand.
+            #expect(Self.level(atClosingKph: expected.lastSeen) == expected.wasRecordedAs,
+                    "\(track.name)")
+
+            let event = try #require(Self.replay(track).first, "\(track.name)")
+            #expect(event.alertLevelAtPass == .danger,
+                    "\(track.name): peak \(expected.peak) kph, last seen \(expected.lastSeen)")
+        }
+    }
+
+    @Test("The 11:58:48 pass, filed as caution on a 59 kph peak, no longer sits below the 47 kph one")
+    func theSeverityInversionIsGone() throws {
+        // The inversion #209 leads with, and the sharpest regression test here: two
+        // real events whose recorded severities were ordered opposite to the closing
+        // speeds that produced them.
+        let harder = RadarPassFixtures.pass1158      // peak 59, last seen 25 -> shipped caution
+        let milder = RadarPassFixtures.pass1200_50   // peak 47, last seen 32 -> shipped danger
+
+        let harderPeak = try #require(harder.frames.map(\.kph).max())
+        let milderPeak = try #require(milder.frames.map(\.kph).max())
+        #expect(harderPeak > milderPeak)
+        // The shipped file had these the other way round.
+        #expect(Self.level(atClosingKph: 25) == .caution)
+        #expect(Self.level(atClosingKph: 32) == .danger)
+
+        #expect(try #require(Self.replay(harder).first).alertLevelAtPass == .danger)
+        #expect(try #require(Self.replay(milder).first).alertLevelAtPass == .danger)
     }
 
     @Test("The capture's separation is wide enough that the 10 m threshold is not finely tuned")

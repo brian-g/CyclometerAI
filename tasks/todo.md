@@ -1,68 +1,80 @@
-# #208 — estimatedPassSpeedKph exported a whole-track mean of *closing* speed
+# #209 — `alertLevelAtPass` recorded the least severe instant of the encounter
 
-Branch: `fix/208-pass-speed-ground-speed-peak`
+Branch: `fix/209-alert-level-at-peak`
 
 ## Diagnosis (done)
-Two defects in one field, both visible in `Cyclometer_2026-09-06_11-55.gpx`.
+`VehicleTrackingRecord.lastAlertLevel` was overwritten on every tick a vehicle was
+present and read when the pass was confirmed. Radar measures the *radial* component
+of closing speed, so the last tick a vehicle is seen — alongside the rider — is where
+that speed, and therefore the derived `AlertLevel`, bottoms out. Every persisted event
+carried the least severe instant of its encounter.
 
-**A relative speed presented as an absolute one.** The Varia wire byte is closing
-speed. Three of that ride's five events exported a "pass speed" at or below the
-rider's own (`riderSpeedKph 33.6 / estimatedPassSpeedKph 26.9`).
+`Cyclometer_2026-09-06_11-55.gpx` shows the ordering inverted: the 11:58:48 pass peaked
+at **59 kph** closing, nearly 2× `dangerClosingSpeedKPH`, and shipped as `caution` on a
+last-seen 25; the 12:00:50 pass peaked at only **47** and shipped as `danger` on a
+last-seen 32. Live L1–L3 escalation was correct throughout — `AlertOrchestratorFeature`
+reacts to the current tick, as it should. Only the recorded history was wrong.
 
-**Averaging the whole track biases it low.** Radar measures only the radial
-component, which decays by cos(theta) as a vehicle draws alongside, so the tail
-near the rider drags the mean down — by 13–27 kph on the four genuine overtakes.
+## Which instant, and whose severity
+`processTick` is handed a **ride-level** alert — `AlertLevel.level(for: targets)` over
+every current target (`ActiveRideFeature:545`) — and stamps it on every tracked vehicle.
+The issue's Scope wording (a running max over the encounter) would have fixed the
+wrong-instant bug and added a new one: another vehicle's severity leaks in, and since a
+max only rises it is sticky for the rest of the track. `level(for:)`'s
+`approaching.count >= 3` clause alone would then stamp `caution` on every pass in
+traffic regardless of speed.
 
-PRD §8.7 never said which speed the field carried, so the semantics had to be
-settled first. **Decided: the vehicle's ground speed.** Appendix B's own worked
-example (62.1 against a rider at 28.4) is only coherent that way, and the issue's
-"must exceed riderSpeedKph" criterion is unsatisfiable by a closing speed.
+**Decided: the ride-level alert at the tick where *this vehicle's* closing speed peaked.**
+Not sticky, and it lands on the same sample `estimatedPassSpeedKph` already uses (#208),
+so the two exported fields finally describe one moment. Cross-vehicle influence at that
+single tick is kept deliberately — it is the level the rider was actually alerted at —
+and is pinned by a test rather than left accidental.
 
 ## Plan
-- [x] `VehicleTrackingRecord`: replace `positiveSampleCount`/`positiveSampleSum`
-      with one `maxPositiveClosingMPS`, clamped at 0 on both the seed and the fold
-- [x] Emit `(lastRiderSpeedMPS + maxPositiveClosingMPS) * kphPerMPS` — one multiply,
-      so a whole-m/s test input lands on an exact decimal
-- [x] PRD §8.7 field table + new prose; PRD §10 and Appendix B comments;
-      DataModel.md §3.4 annotation
-- [x] Replace `estimatedPassSpeedIsAverageOfPositiveSamples` with peak, decaying-tail
-      and constant-speed tests; add three replay tests against the real capture
-- [x] Full suite green — 789 cases, every new test confirmed present by name
+- [x] `VehicleTrackingRecord`: `lastAlertLevel` → `alertLevelAtPeakClosing`, moved out of
+      the at-pass doc block that still covers `lastKnownCoordinate`/`lastRiderSpeedMPS`
+- [x] Fold the two peak-derived fields together under one strict `>`, which also subsumes
+      the clamp the plain `max` carried — a negative sample cannot beat a non-negative store
+- [x] Document the deliberate three-field asymmetry at the emission site (AC3), so
+      `riderSpeedKph` is not later "fixed" into agreement with the other two
+- [x] PRD §8.7 field table + new prose; PRD §10 comment; Appendix B worked example;
+      DataModel.md §3.4 annotations
+- [x] Five new tests; two existing expectations flip and become regression pins
+- [x] Full suite green — 794 cases (789 + 5), exit 0
 
-## Why the peak, not a smarter estimator
-Across all five captures, `max` equals the far-field plateau **exactly** (59/54/54/
-47/48), and the peak is held for 4–12 consecutive frames with the next distinct
-value always 1 kph below — no isolated spikes to reject. A range-gated far-field
-mean is *worse* (42.2 vs a 54 plateau on pass1200_09, which decelerated from 135 m).
-`max` is also a single Double, preserving the O(1) fold the record exists to defend.
+## Why `>` and not `>=`
+Peaks in the capture are held for 4–12 consecutive frames, so a tie has to resolve
+somewhere. `>` keeps the *first* frame of the plateau — the acquisition frame at
+87–135 m, where theta is near zero and the radial component is the true speed
+difference. `>=` would walk the level forward across the plateau and settle on the frame
+nearest the rider, which is the geometry this issue exists to get away from.
+`plateauKeepsTheFirstFrameAtThePeak` pins it.
 
 ## Verified by reverting, not by reasoning
-The change has two independent halves, so each was reverted separately:
+Moving `alertLevelAtPeakClosing = alertLevel` back out of the `if` (restoring
+last-sighting semantics) fails exactly eight tests and no others:
 
-| revert | constant-speed test | the other four |
-|---|---|---|
-| whole-track mean, rider term kept | **passes** | fail |
-| peak kept, rider term dropped | fails | fail |
+| suite | failing under revert |
+|---|---|
+| `VehiclePassDetectorTests` | `alertLevelIsTakenFromThePeakNotTheDecayingTail`, `plateauKeepsTheFirstFrameAtThePeak`, `recordedLevelIsTheRideLevelAlertAtThePeakTick`, `overtakeProducesOnePassEvent`, `trackingIsIndependentPerVehicle` |
+| `VehiclePassDetectorReplayTests` | `overtakesRecordThePeakAlertLevel`, `theSeverityInversionIsGone`, `genuineOvertakesProduceAWellFormedEvent` |
 
-Both halves are load-bearing, and the constant-speed test is genuinely invariant
-under the mean→peak switch — which is what this issue's stale AC #4 was asking for.
+Every #208 pass-speed test stays green across that revert, so the two changes are
+independently load-bearing.
 
-## AC #4 was stale and is ticked with a correction
-It asked that the 16:01:03 capture "stays at constant range and closing speed" and
-be "unchanged by the estimator switch". Three things wrong: #207 (9fa2dfd) now
-rejects that vehicle at 52 m so it produces **no event at all**; its range is not
-constant (93 m → 52 m); and "unchanged" was never literally true even before (max
-48 vs mean 47.1). The intent — the switch is a no-op without a decaying tail — is
-pinned by `constantClosingSpeedIsUnchangedByTheEstimatorSwitch` instead. Recorded
-rather than silently ticked, which is how #172 shipped an inert guard.
+## All four captured passes now read `danger`
+Peaks are 59 / 54 / 54 / 47 kph, every one past the 30 kph threshold, against last-seen
+values of 25 / 24 / 23 / 32. The shipped GPX's `caution, caution, caution, danger`
+becomes uniformly `danger`. That is correct — all four cars overtook at well over the
+danger threshold — but it means this ride is **not** evidence that the field
+discriminates well between passes in general.
 
 **Not done (tracked separately)**
-- #209 — `alertLevelAtPass` still snapshots the least severe instant of the encounter.
-- `sampleCount` is now write-only: nothing reads it since #207 deleted the majority
-  check. Removing it is a clean follow-up, but it churns three test files for a
-  reason unrelated to this issue.
+- `sampleCount` is still write-only: nothing has read it since #207 deleted the majority
+  check. Removing it is a clean follow-up that churns three test files for an unrelated
+  reason.
 - PRD §8.7's "Pass detection logic" block and TCA.md §4.12 still describe the
-  majority-positive criterion #207 deleted, and OQ15 is still Open though #207
-  settled it at 10 m. #207's debt, left alone here.
-- Making `relativeVelocityMPS` non-negative by construction is now *more* attractive:
-  after this change, two `max(_, 0)` clamps are the only thing defending the invariant.
+  majority-positive criterion #207 deleted, and OQ15 is still Open though #207 settled it
+  at 10 m. #207's debt, left alone here.
+- Making `relativeVelocityMPS` non-negative by construction: after #208 and this change,
+  one seed clamp and one strict comparison are all that defend the invariant.
