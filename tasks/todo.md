@@ -1,52 +1,85 @@
-# SwiftData migration crash (#186 regression) — fix + regression test
+# #207 — Vehicle pass detector never checks approach distance
 
-Branch: `fix/swiftdata-migration-defaults`
+Branch: `fix/207-vehicle-pass-approach-distance`
 
 ## Diagnosis (done)
-Launch crash on device: `SwiftDataStack.swift:37` fatalError.
-CoreData 134110 — `entity=Ride, attribute=cadenceSampleCount, reason=Validation
-error missing attribute values on mandatory destination attribute`.
-The five attributes added in #175 (`isAutoPaused`, `zeroSpeedSeconds`,
-`speedSampleCount`, `hrSampleCount`, `cadenceSampleCount`) are non-optional and
-initialized only in `init`, so SwiftData emits them as mandatory-with-no-default
-and lightweight migration refuses any store written before #186.
+Found by analysing a real ride (`system_logs.logarchive` + `Cyclometer_2026-09-06_11-55.gpx`).
+
+`VehiclePassDetector` confirmed a pass on two criteria — tracked >= 2s, and
+majority-positive closing speed — neither of which involves range. A vehicle
+acquired at 93 m and tracked to **52 m at a constant 46–48 kph closing speed**
+before vanishing was recorded as a completed `danger` pass at the rider's
+position 52 m early. The other four encounters that ride all closed to 0 m.
+
+The guard meant to catch this could never fire. `parseAlert` decodes closing
+speed from an **unsigned** wire byte (`VariaRadarClient.swift:145`), so
+`relativeVelocityMPS` is never negative; across 565 target-bearing frames not
+one carried even a zero. `positiveSampleCount == sampleCount` always held.
+
+Both specs already required the missing check — PRD §8.7 ("distance decreasing",
+"distance reached minimum threshold") and TCA.md §4.12 (`minimumDistance`) — and
+both were dropped when #172 shipped.
 
 ## Plan
-- [x] Add declaration-site defaults to the five #175 attributes on `Ride`
-- [x] Hoist `Schema([Ride.self, VehiclePassEvent.self])` to `SwiftDataStack.schema`
-      so the test asserts against the same schema production loads
-- [x] Regression test: write a store with the pre-#175 `Ride` shape, reopen it
-      with the current schema, assert it loads and backfills the new attributes
-- [x] Build + run the full CyclometerTests suite
+- [x] Add `minimumRangeMetres` to `VehicleTrackingRecord`, folded per tick
+- [x] Add `passProximityMetres = 10`, calibrated against the capture
+- [x] Replace the majority-positive guard with the proximity check
+- [x] Keep `positiveSampleCount`/`Sum` — the pass-speed estimator still uses them (#208)
+- [x] Replace the two tests feeding wire-impossible inputs (`mps: -3`, `mps: 0`)
+- [x] Add `RadarPassFixtures` + `VehiclePassDetectorReplayTests` over the real capture
+- [x] Rework `RideRecordingTests`' end-to-end pair to discriminate by range
+- [x] Full suite, then revert-the-fix verification
 
 ## Review
 
 **Changed**
-- `Models/Ride.swift` — declaration-site defaults on the five #175 attributes
-  (`= false` / `= 0`), plus a type-level note explaining why they can't be left
-  to `init` alone.
-- `Clients/Persistence/SwiftDataStack.swift` — `Schema([Ride.self,
-  VehiclePassEvent.self])` hoisted to `static let schema`, so the test opens a
-  store against the same schema production loads instead of a copy that drifts.
-- `CyclometerTests/Models/RideSchemaMigrationTests.swift` — new. Holds the
-  pre-#175 `Ride` as a test-only `@Model` (readable/diffable, unlike a
-  checked-in binary `.store`), writes a store with it, then cold-opens that
-  store with the current schema and asserts old data survives and the new
-  attributes are backfilled. A second test proves the migrated store is
-  writable, not just readable.
+- `Features/ActiveRide/VehiclePassDetector.swift` — `minimumRangeMetres` on the
+  tracking record, `passProximityMetres = 10`, and the guard swap. Comments
+  record why the old guard was inert, why TCA.md's `lastDistance` is deliberately
+  omitted, and that the pass-speed estimator's whole-track average is #208's
+  problem, not this change's.
+- `CyclometerTests/Features/VehiclePassDetectorTests.swift` — `target()` gains a
+  `range:` defaulting to 4 m, so existing tracks still read as genuine passes.
+  Dropped `turnOffOrSlowdownProducesNoEvent` and `zeroClosingSpeedIsNotApproaching`
+  (both fed velocities the wire cannot emit); added five: lost-beyond-threshold,
+  exactly-at-threshold, one-metre-short, minimum-retained-after-moving-away, and
+  a nil pass-speed estimate for an all-zero track.
+- `CyclometerTests/Features/RadarPassFixtures.swift` — **new**. The five real
+  radar tracks from 2026-09-06 as `(ms, range, kph)` triples, in source rather
+  than a binary capture so they stay diffable in review.
+- `CyclometerTests/Features/VehiclePassDetectorReplayTests.swift` — **new**.
+  Replays those tracks at their own frame spacing. Also pins that nothing in the
+  capture sits between 0 m and 52 m, so the threshold is demonstrably not
+  finely tuned — if a future capture narrows that gap, this fails loudly.
+- `CyclometerTests/Features/ActiveRideFeatureTests.swift` — `singleSighting`
+  gains `range:`; the persistence suite's `vehicle()` moves to 4 m so its
+  overtakes still confirm.
+- `CyclometerTests/Features/RideRecordingTests.swift` — the end-to-end pair now
+  differs by range (4 m vs 60 m) instead of closing-speed sign. `recedingVehicle`
+  renamed `lostVehicle`, since a receding vehicle is not something the hardware
+  can report.
 
 **Verification**
-- Both new tests fail without the fix, with `SwiftDataError.loadIssueModelContainer` —
-  the same error the device crash logged. Confirmed by reverting the defaults,
-  re-running, and restoring.
-- Full `CyclometerTests`: 777 passed, 0 failed, 0 skipped (iPhone 17 Pro, iOS 26.5).
+- Full `CyclometerTests` (snapshot suites skipped, as CI does): **739 passed, 0
+  failed**. Baseline on `main` was 732; net +7 (five new unit tests, four replay
+  tests, two removed).
+- Reverted the guard to `positiveSampleCount * 2 > sampleCount` and re-ran the
+  three affected suites: 40 cases ran (count checked, not just the exit code),
+  **7 failed** — including `vehicleLostBeyondThresholdProducesNoEvent`,
+  `capturedTracksAreClassifiedCorrectly`, and the end-to-end
+  `vehiclePassesAgreeAcrossPersistenceAndGPX`. Restored and re-confirmed green,
+  with every new test verified present by name.
 
 **Guard against recurrence**
-The migration test pins the oldest supported on-disk shape, so *any* future
-non-optional attribute added to `Ride` without a declaration-site default fails
-CI — not just the original five.
+The replay suite pins real hardware output, so the criteria can no longer be
+"verified" by inputs the wire cannot produce — which is exactly how #172 shipped
+with an inert guard and a ticked acceptance criterion.
 
-**Not done (flagged, needs its own issue)**
-`SwiftDataStack.swift:37` and `CoreDataStack.swift:34` still `fatalError` on
-store-load failure. Fine pre-release; post-ship a bad migration bricks the app
-with no recovery path and no way to salvage ride data.
+**Not done (tracked separately)**
+- #208 — `estimatedPassSpeedKph` still exports a whole-track mean of *closing*
+  speed, understating genuine passes by 13–27 kph on four of the five captures.
+- #209 — `alertLevelAtPass` still snapshots the least severe instant of the
+  encounter.
+- Making `relativeVelocityMPS` non-negative by construction would make the
+  impossible test inputs unrepresentable. It is the deeper fix and touches every
+  radar consumer, so it stayed out of scope here.
