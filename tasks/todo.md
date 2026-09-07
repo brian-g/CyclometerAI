@@ -78,3 +78,117 @@ discriminates well between passes in general.
   at 10 m. #207's debt, left alone here.
 - Making `relativeVelocityMPS` non-negative by construction: after #208 and this change,
   one seed clamp and one strict comparison are all that defend the invariant.
+
+---
+
+# CI test reliability — `CyclometerTests` failing intermittently on GitHub
+
+**Branch:** `fix/ci-test-reliability`
+
+## The premise was wrong
+
+These were not flaky tests to be quarantined. They are correct tests catching real
+async races, and they surface only under contention. Two facts settle it:
+
+- The whole suite is **~8 seconds** of execution (712 tests, 69 suites). Every minute
+  of the 16-minute CI run is build and simulator boot, not tests.
+- **Six consecutive local runs on an idle machine: all green**, on a commit CI failed.
+  "It passes locally" was never evidence of anything for these tests.
+
+## Root causes
+
+1. **False sync points in the BLE suites.** A test awaits the client's *state* stream,
+   then reads a value the client writes on the line *after* publishing that state.
+   `BLECSCClient.swift:807` sets `connectionState = .connected` — waking the test — and
+   only at `:813` calls `discoverServices`. Nothing orders the two. Five sites; one
+   carried the comment `// sync point: discoverServices has run`, which was false.
+
+2. **`reconnectRescanCountsAsAmbient` waited for the wrong call.** It waited for the
+   last transport call to be *a* `startScanning`, which `beginPairingScan`'s own opening
+   call already satisfies before the disconnect is handled at all. The wait returned
+   instantly, `endPairingScan` released a radio the reconnect still needed, and the
+   assertion failed. Fixing (1) made this deterministic — it had been passing by luck.
+
+3. **Simulator-clone launch flake.** The 2026-09-04 and 2026-09-07 failures both carry
+   `FBSOpenApplicationServiceErrorDomain Code=1 "Simulator device failed to launch"`.
+   xcodebuild was cloning simulators to parallelize 8 seconds of work.
+
+4. **CI failures were undiagnosable — the worst of the four.** Cloned-destination runs
+   switch xcodebuild to the terse legacy reporter: `Test case 'X' failed` and nothing
+   else. The 2026-09-07 log had **zero** expectation text or line numbers for its three
+   failures, so a real bug and an infra flake looked identical. That is why this kept
+   recurring. Same setting as (3): disabling parallel testing fixes both.
+
+5. **Wall-clock drain deadlines.** `TestStore.finish(timeout:)` counts real nanoseconds,
+   not `TestClock` time, so it couples to machine load — the same coupling that got
+   `.timeLimit` traits reverted twice. `RideRecordingTests` and `RideEndFailureTests`
+   were the only two files using it, at 5 seconds, and were exactly the two that failed
+   on CI. Correlation, not proof; see "Not verified" below.
+
+## Changes
+
+- [x] `tests.yml` — `-parallel-testing-enabled NO`, `-resultBundlePath`
+- [x] `.github/scripts/summarize-xcresult.py` — assertion text + source location into the
+      job summary; verified against a real failing bundle and end-to-end on a probe
+- [x] `.xcresult` uploaded as an artifact on failure (14-day retention)
+- [x] `CyclometerTests/TestSupport.swift` — `expectEventually` (bounded wait for values
+      the harness records out of band) and `effectDrainTimeout`
+- [x] five BLE race sites rewritten to wait rather than read
+- [x] seven `finish(timeout: .seconds(5))` / one `.seconds(1)` → `effectDrainTimeout`
+- [x] `scripts/stress-tests.sh` — run the suite N times under CPU load
+
+## Verified
+
+- Serial suite green: 712 tests, ~8s.
+- 8/8 runs green under load (serial), 6/6 under load in clone mode.
+- `expectEventually`'s timeout path reports at the **call site**, carries its comment,
+  and honours its deadline (300 ms budget → 0.310 s).
+
+## 6 — `skipInFlightEffects` cancels; it does not drain
+
+Found only because the diagnostics landed first. The Ride suites did:
+
+    await store.skipInFlightEffects(strict: false)
+    await store.finish(timeout: ...)
+
+with the comment "draining in-flight effects is the only way to know it's actually
+done". But `skipInFlightEffects` **cancels** in-flight effects rather than awaiting
+them. The flush → GPX → finalizeRide pipeline is an unreceived `.run` effect, so on an
+idle machine it finishes before the cancel lands and the test passes; on a loaded one
+the cancel kills it mid-flight. CI's first readable run said exactly that:
+
+    RideRecordingTests/killAndRelaunchResumesRide()
+        RideRecordingTests.swift:182: Expectation failed: (ride.recordingState → .paused) == .ended
+        RideRecordingTests.swift:183: Expectation failed: (ride.endedAt → nil) != nil
+        RideRecordingTests.swift:188: Expectation failed: (ride).gpxFileURL → nil → nil
+
+Fixed by observing the pipeline's own end state before tearing the store down.
+`runRideToEnd` now takes an `until:` predicate, because each failure-injection test
+has a different end state (`.ended` for the two whose finalize succeeds; a recorded
+intent carrying the GPX for the one whose finalize fails).
+
+Note this supersedes (5) as the explanation for those two suites. Raising the drain
+deadline was treating a symptom that was not the cause — a longer timeout cannot help
+when the work is being cancelled rather than waited for. The wider deadline is kept
+because it is correct on its own terms, not because it fixed this.
+
+## 7 — Hardcoded simulator name
+
+`-destination 'platform=iOS Simulator,name=iPhone 17 Pro'` requires that device to
+already exist. Twice it didn't (2026-08-30, and this PR's own first run), the second on
+a runner reimaged to Xcode 26.6 listing no concrete simulators at all. Now resolved at
+runtime, preferring `iPhone 17 Pro` so local snapshot references stay valid.
+
+## Still not reproduced
+
+`AlertOrchestratorFeatureTests` — seen failing once locally as a whole suite, never
+since, and never on CI with diagnostics available. Left alone.
+
+## Left alone
+
+- Snapshot suites stay skipped in CI (locally-recorded references — separate problem).
+- Bare `await Task.yield()` sync points remain at `BLECSCClientTests` 659/769/841 and
+  `VariaRadarClientTests` 515/536/717. Same family as (1), but none of them has failed;
+  changing tests that pass, on a theory, is what causes churn.
+- Test count 715 → 712 is not a regression: the three cadence-zero tests belong to the
+  unmerged `fix/211` branch, and this branch is off `main`.

@@ -203,3 +203,54 @@ when the snap appeared and nothing else.
   archive) over a derived heuristic with a threshold tuned to one ride.
 - Stop and re-ask when the finding invalidates an approved plan, even mid-implementation. The earlier answer
   was given under the wrong model of the defect.
+
+---
+
+# "It passes locally" is not evidence for an async test
+
+**The correction.** CI failures in `CyclometerTests` were framed as flaky tests that
+might need turning off. They were real tests catching real races. The tell was in the
+numbers, not the code: the suite executes in **8 seconds**, but CI runs took 16 minutes.
+All of that gap is build and simulator boot. A suite that cheap has no business being
+parallelised across simulator clones, and the clones were causing two of the four bugs.
+
+**What made the diagnosis hard, and what fixed it.** `xcodebuild`'s console output for a
+failing cloned-destination run is the test's *name* and nothing else — no assertion text,
+no line number. The failing run's log had 14,279 lines and not one word about why three
+tests failed. That is not a logging inconvenience; it is the reason the problem recurred,
+because a genuine bug and a simulator flake were indistinguishable. The `.xcresult` bundle
+had the full message the whole time.
+
+**Rules.**
+- Before theorising about a flaky test, get the actual assertion message. If the harness
+  is not printing one, fixing *that* comes first — everything after it is guesswork.
+- Green on an idle machine proves nothing about a test that awaits async state. Run it
+  under CPU contention, repeatedly, or do not claim it passes. Six consecutive green runs
+  preceded a reproduction on the seventh, under load.
+- A state stream is a sync point for the **state**, not for whatever the producer does on
+  its next line. Awaiting `connectionState == .connected` does not order the
+  `discoverServices` call the handler makes immediately afterwards.
+- A wait predicate must be unsatisfiable by earlier history. "The last call is a
+  `startScanning`" was already true from the *opening* scan, so the wait returned
+  instantly and the test asserted against a state that had not happened yet. Prefer
+  counting occurrences over inspecting `.last`.
+- Fixing a race can convert a sibling flake into a hard failure. That is progress —
+  it means a second bug was hiding behind the first, not that the fix broke something.
+- Real deadlines (`TestStore.finish(timeout:)`, `.timeLimit`) count wall-clock time and
+  so couple to machine load. Wait for an observable condition where one exists; where a
+  deadline is unavoidable, make it generous, since a long deadline can only delay
+  reporting a hang, never mask one.
+- Do not rewrite tests you could not reproduce failing. Say plainly which ones those are
+  and what would diagnose them next time.
+
+**Also.** Repeated `xcodebuild test` leaves a booted simulator and its whole daemon set
+behind. Eight iterations reached 221 simulator processes and the OS killed the run for
+memory pressure. `xcrun simctl shutdown all` between iterations.
+
+**`skipInFlightEffects` cancels, it does not drain.** The Ride suites used it as "wait
+for the fire-and-forget pipeline", with a comment saying so. It cancels. On an idle
+machine the pipeline won the race and the tests passed for months; on a loaded CI runner
+the cancel landed first and the ride was left half-ended. Wait for the work's own
+observable end state, then tear the store down — never the other way round. Corollary:
+when a test's teardown can cancel the thing it is asserting about, a longer timeout is
+treating a symptom.

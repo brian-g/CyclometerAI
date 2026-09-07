@@ -902,11 +902,14 @@ struct BLECSCIntegrationTests {
         #expect(await states.next() == .connecting)
 
         harness.events.yield(.connected(id: id))
-        #expect(await states.next() == .connected)   // sync point: discoverServices has run
+        #expect(await states.next() == .connected)
 
-        #expect(harness.servicesDiscovered.value.count == 1)
-        #expect(harness.servicesDiscovered.value[0]?.contains(cscServiceUUID) == true)
-        #expect(harness.servicesDiscovered.value[0]?.contains(batteryServiceUUID) == true)
+        // Not a sync point for the discover call: the handler publishes `.connected`
+        // and only then calls `discoverServices` (BLECSCClient.swift's `.connected`
+        // case), so the state stream can wake us first.
+        await expectEventually { harness.servicesDiscovered.value.count == 1 }
+        #expect(harness.servicesDiscovered.value.first??.contains(cscServiceUUID) == true)
+        #expect(harness.servicesDiscovered.value.first??.contains(batteryServiceUUID) == true)
     }
 
     @Test("Battery level is read on connect, published per role, and cleared on disconnect")
