@@ -71,7 +71,7 @@ struct RideRecordingTests {
         // draining in-flight effects is the only way to know it's actually done
         // before asserting against SwiftData/disk below.
         await store.skipInFlightEffects(strict: false)
-        await store.finish(timeout: .seconds(5))
+        await store.finish(timeout: effectDrainTimeout)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(ride.recordingState == .ended)
@@ -176,7 +176,7 @@ struct RideRecordingTests {
         await secondStore.send(.finishTapped)
         await secondStore.send(.finishAlert(.presented(.confirmFinish)))
         await secondStore.skipInFlightEffects(strict: false)
-        await secondStore.finish(timeout: .seconds(5))
+        await secondStore.finish(timeout: effectDrainTimeout)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(ride.recordingState == .ended)
@@ -218,7 +218,7 @@ struct RideRecordingTests {
         await store.send(.finishTapped)
         await store.send(.finishAlert(.presented(.confirmFinish)))
         await store.skipInFlightEffects(strict: false)
-        await store.finish(timeout: .seconds(5))
+        await store.finish(timeout: effectDrainTimeout)
 
         #expect(try await persistenceClient.fetchResumableRide() == nil)
     }
@@ -330,7 +330,7 @@ struct RideRecordingTests {
         await store.send(.finishTapped)
         await store.send(.finishAlert(.presented(.confirmFinish)))
         await store.skipInFlightEffects(strict: false)
-        await store.finish(timeout: .seconds(5))
+        await store.finish(timeout: effectDrainTimeout)
 
         // --- The three records of this ride, read back independently ---
         let persistedPoints = try await persistenceClient.fetchTrackPoints(rideId)

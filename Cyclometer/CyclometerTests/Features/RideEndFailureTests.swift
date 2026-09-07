@@ -76,7 +76,7 @@ struct RideEndFailureTests {
         await store.send(.finishTapped)
         await store.send(.finishAlert(.presented(.confirmFinish)))
         await store.skipInFlightEffects(strict: false)
-        await store.finish(timeout: .seconds(5))
+        await store.finish(timeout: effectDrainTimeout)
         return rideId
     }
 
@@ -185,7 +185,7 @@ struct RideEndFailureTests {
         appStore.exhaustivity = .off
 
         await appStore.send(.resumableRideFetched(summary))
-        await appStore.finish(timeout: .seconds(5))
+        await appStore.finish(timeout: effectDrainTimeout)
 
         // The ride the rider already ended is not resumed.
         #expect(appStore.state.activeRide == nil)
@@ -246,6 +246,6 @@ struct RideEndFailureTests {
         await appStore.send(.activeRide(.finishTapped))
         await appStore.send(.activeRide(.finishAlert(.presented(.confirmFinish))))
         await appStore.skipInFlightEffects(strict: false)
-        await appStore.finish(timeout: .seconds(5))
+        await appStore.finish(timeout: effectDrainTimeout)
     }
 }

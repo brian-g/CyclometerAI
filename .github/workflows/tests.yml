@@ -41,6 +41,20 @@ jobs:
       # is no headless equivalent, so a fresh runner fails the build outright. The
       # macros here are the pointfreeco TCA stack, version-pinned in Package.resolved.
       #
+      # -parallel-testing-enabled NO: xcodebuild otherwise clones the simulator to
+      # split the suite across destinations, and that bought us two recurring problems
+      # for no speedup. First, clone launch is itself flaky — the failures on
+      # 2026-09-04 and 2026-09-07 both carry `FBSOpenApplicationServiceErrorDomain
+      # Code=1 "Simulator device failed to launch com.xavier.cyclometer"`. Second, the
+      # cloned-destination run switches xcodebuild to the terse legacy reporter, which
+      # prints `Test case 'X' failed` and nothing else: the 2026-09-07 log contains
+      # zero expectation text or line numbers for its three failures, so a failure
+      # could not be told apart from an infra flake without this. Serial keeps the
+      # Swift Testing reporter and its `recorded an issue at File.swift:LINE` output.
+      #
+      # The speedup was never real: the whole suite is ~8 seconds of execution
+      # (715 tests, 69 suites). CI wall-clock is build and simulator boot, not tests.
+      #
       # Snapshot suites are excluded deliberately, not by oversight. Their reference
       # images were recorded against a local simulator and SwiftUI pixel output
       # varies across runner images, so gating merges on them would be flaky from
@@ -54,6 +68,8 @@ jobs:
             -scheme Cyclometer \
             -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
             -skipMacroValidation \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/TestResults.xcresult" \
             -only-testing:CyclometerTests \
             -skip-testing:CyclometerTests/HeroNumberSnapshotTests \
             -skip-testing:CyclometerTests/SpeedWidgetSnapshotTests \
@@ -64,3 +80,30 @@ jobs:
             -skip-testing:CyclometerTests/SensorPairingSnapshotTests \
             -skip-testing:CyclometerTests/WelcomeSnapshotTests \
             -skip-testing:CyclometerTests/SettingsSnapshotTests
+
+      # Every failure before this existed as three bare test names in 14k lines of
+      # xcodebuild noise. The bundle carries the assertion text and source location;
+      # the summary puts it on the job page so the common case needs no download.
+      - name: Summarize test failures
+        if: failure()
+        run: |
+          BUNDLE="$RUNNER_TEMP/TestResults.xcresult"
+          if [ ! -d "$BUNDLE" ]; then
+            echo "No result bundle — the run failed before tests started." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo '## Test failures'
+            echo '```'
+            "$GITHUB_WORKSPACE/.github/scripts/summarize-xcresult.py" "$BUNDLE"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test result bundle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults
+          path: ${{ runner.temp }}/TestResults.xcresult
+          retention-days: 14
