@@ -651,8 +651,15 @@ struct BLEHRIntegrationTests {
         _ = await harness.devices { $0.contains { $0.id == id } }
 
         harness.events.yield(.disconnected(id: id, error: nil))
-        // Sync point: the rescan is the last transport call the handler makes.
-        while harness.calls.value.last != .startScanning([hrServiceUUID]) { await Task.yield() }
+        // The reconnect *is* a rescan (`BLEHRClient.swift`'s `.disconnected` case), so
+        // the **second** `startScanning` is the sync point. Waiting for the last call to
+        // merely be a `startScanning` — what this did before — is satisfied by the
+        // pairing scan's own opening call, which is already in the log before the
+        // disconnect is handled at all: the wait then returned instantly, `endPairingScan`
+        // released a radio the reconnect still needed, and the assertion below failed.
+        await expectEventually {
+            harness.calls.value.filter { $0 == .startScanning([hrServiceUUID]) }.count == 2
+        }
 
         await harness.client.endPairingScan()
         #expect(!harness.calls.value.contains(.stopScanning([hrServiceUUID])))

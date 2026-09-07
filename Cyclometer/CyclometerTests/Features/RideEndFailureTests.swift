@@ -60,7 +60,16 @@ struct RideEndFailureTests {
     /// Start → record a few seconds → pause → finish → confirm, then drain the
     /// fire-and-forget ride-end pipeline. Three ticks is deliberately short of the 30-tick
     /// checkpoint, so nothing reaches persistence until the final flush.
-    private static func runRideToEnd(_ store: TestStoreOf<ActiveRideFeature>) async -> UUID {
+    ///
+    /// `until` is the caller's evidence that the fire-and-forget pipeline has finished.
+    /// It is required because `skipInFlightEffects` **cancels** in-flight effects rather
+    /// than awaiting them: without observing the pipeline first, a loaded machine kills
+    /// it mid-flight and the assertions below see a half-ended ride. CI on 2026-09-07
+    /// caught exactly that here (`pending.gpxFileURL → nil`).
+    private static func runRideToEnd(
+        _ store: TestStoreOf<ActiveRideFeature>,
+        until pipelineFinished: @escaping @Sendable (UUID) -> Bool
+    ) async -> UUID {
         await store.send(.task)
         let rideId = store.state.rideId
 
@@ -75,8 +84,9 @@ struct RideEndFailureTests {
         await store.send(.pauseTapped)
         await store.send(.finishTapped)
         await store.send(.finishAlert(.presented(.confirmFinish)))
+        await expectEventually { pipelineFinished(rideId) }
         await store.skipInFlightEffects(strict: false)
-        await store.finish(timeout: .seconds(5))
+        await store.finish(timeout: effectDrainTimeout)
         return rideId
     }
 
@@ -97,7 +107,10 @@ struct RideEndFailureTests {
         let rideEndIntent = RideEndIntentClient.inMemory()
 
         let store = Self.makeRideStore(persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent)
-        let rideId = await Self.runRideToEnd(store)
+        // finalizeRide still succeeds here, so the ride reaching `.ended` is the signal.
+        let rideId = await Self.runRideToEnd(store) {
+            fetchRideIfPresent($0, from: swiftDataStack)?.recordingState == .ended
+        }
 
         // The ride still closes out — a lost flush must not strand it out of `.ended`.
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
@@ -127,7 +140,10 @@ struct RideEndFailureTests {
         let rideEndIntent = RideEndIntentClient.inMemory()
 
         let store = Self.makeRideStore(persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent)
-        let rideId = await Self.runRideToEnd(store)
+        // Only the export fails, so finalizeRide still lands the ride in `.ended`.
+        let rideId = await Self.runRideToEnd(store) {
+            fetchRideIfPresent($0, from: swiftDataStack)?.recordingState == .ended
+        }
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(ride.recordingState == .ended)
@@ -149,7 +165,10 @@ struct RideEndFailureTests {
         let rideEndIntent = RideEndIntentClient.inMemory()
 
         let store = Self.makeRideStore(persistenceClient: failingClient, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent)
-        let rideId = await Self.runRideToEnd(store)
+        // finalizeRide is the thing failing here, so the ride never reaches `.ended`.
+        // The recorded intent, carrying the GPX written before the failure, is the
+        // pipeline's observable end state instead.
+        let rideId = await Self.runRideToEnd(store) { _ in rideEndIntent.load()?.gpxFileURL != nil }
 
         // The write failed, so the row still looks like a ride in progress — this is the
         // state that used to be resumed.
@@ -185,7 +204,7 @@ struct RideEndFailureTests {
         appStore.exhaustivity = .off
 
         await appStore.send(.resumableRideFetched(summary))
-        await appStore.finish(timeout: .seconds(5))
+        await appStore.finish(timeout: effectDrainTimeout)
 
         // The ride the rider already ended is not resumed.
         #expect(appStore.state.activeRide == nil)
@@ -246,6 +265,6 @@ struct RideEndFailureTests {
         await appStore.send(.activeRide(.finishTapped))
         await appStore.send(.activeRide(.finishAlert(.presented(.confirmFinish))))
         await appStore.skipInFlightEffects(strict: false)
-        await appStore.finish(timeout: .seconds(5))
+        await appStore.finish(timeout: effectDrainTimeout)
     }
 }

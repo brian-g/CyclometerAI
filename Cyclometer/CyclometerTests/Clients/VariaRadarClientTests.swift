@@ -269,9 +269,11 @@ struct VariaRadarIntegrationTests {
 
         // One call carrying both. A second call for 0x180F would re-emit the full
         // service list and re-fire the alert characteristic's discover → notify chain.
-        #expect(harness.servicesDiscovered.value.count == 1)
-        #expect(harness.servicesDiscovered.value[0]?.contains(radarServiceUUID) == true)
-        #expect(harness.servicesDiscovered.value[0]?.contains(batteryServiceUUID) == true)
+        // The `.connected` state lands before that call is made, so it has to be
+        // waited for rather than read on the next line.
+        await expectEventually { harness.servicesDiscovered.value.count == 1 }
+        #expect(harness.servicesDiscovered.value.first??.contains(radarServiceUUID) == true)
+        #expect(harness.servicesDiscovered.value.first??.contains(batteryServiceUUID) == true)
     }
 
     @Test("Battery level is read on connect and published, then cleared on disconnect")
@@ -663,7 +665,7 @@ struct VariaRadarIntegrationTests {
         ))
 
         #expect(await states.next() == .connecting)
-        #expect(harness.calls.value.contains(.connect(paired)))
+        await expectEventually { harness.calls.value.contains(.connect(paired)) }
         #expect(!harness.calls.value.contains(.connect(stranger)))
         #expect(harness.connectCount.value == 1)
 
@@ -801,7 +803,7 @@ struct VariaRadarIntegrationTests {
             id: peripheralID, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]
         ))
         #expect(await states.next() == .connecting)
-        #expect(harness.connectCount.value == 2)
+        await expectEventually { harness.connectCount.value == 2 }
     }
 
     /// The rider didn't unpair — the radio went off.

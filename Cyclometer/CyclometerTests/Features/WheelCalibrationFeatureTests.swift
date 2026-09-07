@@ -346,7 +346,7 @@ struct WheelCalibrationFeatureTests {
         }
         await store.receive(\.bannerDismissed) { $0.banner = nil }
 
-        await store.finish(timeout: .seconds(1))
+        await store.finish(timeout: effectDrainTimeout)
         #expect(pushed.value == [expected])
     }
 
