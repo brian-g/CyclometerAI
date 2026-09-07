@@ -246,3 +246,11 @@ had the full message the whole time.
 **Also.** Repeated `xcodebuild test` leaves a booted simulator and its whole daemon set
 behind. Eight iterations reached 221 simulator processes and the OS killed the run for
 memory pressure. `xcrun simctl shutdown all` between iterations.
+
+**`skipInFlightEffects` cancels, it does not drain.** The Ride suites used it as "wait
+for the fire-and-forget pipeline", with a comment saying so. It cancels. On an idle
+machine the pipeline won the race and the tests passed for months; on a loaded CI runner
+the cancel landed first and the ride was left half-ended. Wait for the work's own
+observable end state, then tear the store down — never the other way round. Corollary:
+when a test's teardown can cancel the thing it is asserting about, a longer timeout is
+treating a symptom.

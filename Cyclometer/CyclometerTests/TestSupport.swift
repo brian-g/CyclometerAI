@@ -1,4 +1,7 @@
+import Foundation
+import SwiftData
 import Testing
+@testable import Cyclometer
 
 /// Waits until `condition` holds, and records an issue if it never does.
 ///
@@ -67,3 +70,15 @@ func expectEventually(
 /// reporting a genuine hang, and this is still a small fraction of the 30-minute job
 /// timeout that exists to catch exactly that.
 let effectDrainTimeout: Duration = .seconds(30)
+
+/// Fetch a `Ride` row without asserting on its absence.
+///
+/// `expectEventually` predicates run while the ride-end pipeline is still in flight, so
+/// "no row yet" is the expected intermediate state there, not a failure. The suites'
+/// own `fetchRide` helpers use `#require` and would record an issue on every poll.
+func fetchRideIfPresent(_ id: UUID, from swiftDataStack: SwiftDataStack) -> Ride? {
+    let context = ModelContext(swiftDataStack.container)
+    var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == id })
+    descriptor.fetchLimit = 1
+    return try? context.fetch(descriptor).first
+}

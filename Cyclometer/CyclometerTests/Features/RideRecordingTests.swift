@@ -67,9 +67,16 @@ struct RideRecordingTests {
         #expect(store.state.recordingState == .ended)
 
         // The flush → GPXExporter.generate → finalizeRide pipeline runs as an
-        // unreceived `.run` effect (no delegate action to `store.receive`), so
-        // draining in-flight effects is the only way to know it's actually done
-        // before asserting against SwiftData/disk below.
+        // unreceived `.run` effect (no delegate action to `store.receive`), so its
+        // completion has to be observed directly.
+        //
+        // `skipInFlightEffects` **cancels** what is still running rather than awaiting
+        // it, so it cannot be that observation: on an idle machine the pipeline wins
+        // the race and the test passes, and on a loaded one the cancel lands first and
+        // kills the very effect these assertions are about. That is what CI reported
+        // on 2026-09-07 — `recordingState → .paused`, `endedAt → nil`, `gpxFileURL → nil`.
+        // Wait for the pipeline's own end state first; only then tear the store down.
+        await expectEventually { fetchRideIfPresent(rideId, from: swiftDataStack)?.gpxFileURL != nil }
         await store.skipInFlightEffects(strict: false)
         await store.finish(timeout: effectDrainTimeout)
 
@@ -175,6 +182,8 @@ struct RideRecordingTests {
         await secondStore.send(.pauseTapped)
         await secondStore.send(.finishTapped)
         await secondStore.send(.finishAlert(.presented(.confirmFinish)))
+        // See `fullLifecycleProducesValidGPXFile`: observe the pipeline, then cancel.
+        await expectEventually { fetchRideIfPresent(rideId, from: swiftDataStack)?.gpxFileURL != nil }
         await secondStore.skipInFlightEffects(strict: false)
         await secondStore.finish(timeout: effectDrainTimeout)
 
@@ -329,6 +338,8 @@ struct RideRecordingTests {
         await store.send(.pauseTapped)
         await store.send(.finishTapped)
         await store.send(.finishAlert(.presented(.confirmFinish)))
+        // See `fullLifecycleProducesValidGPXFile`: observe the pipeline, then cancel.
+        await expectEventually { fetchRideIfPresent(rideId, from: swiftDataStack)?.gpxFileURL != nil }
         await store.skipInFlightEffects(strict: false)
         await store.finish(timeout: effectDrainTimeout)
 

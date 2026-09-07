@@ -144,13 +144,45 @@ async races, and they surface only under contention. Two facts settle it:
 - `expectEventually`'s timeout path reports at the **call site**, carries its comment,
   and honours its deadline (300 ms budget → 0.310 s).
 
-## Not verified
+## 6 — `skipInFlightEffects` cancels; it does not drain
 
-The `AlertOrchestratorFeatureTests` and `RideRecordingTests`/`RideEndFailureTests`
-failures were **not reproduced locally** — 14 loaded runs, both modes, all green. An
-18-core laptop is not a GitHub macOS runner. Cause (5) is a reasoned mitigation for
-them, not a demonstrated fix. If they recur, the workflow change now puts the assertion
-text and source location straight on the job summary.
+Found only because the diagnostics landed first. The Ride suites did:
+
+    await store.skipInFlightEffects(strict: false)
+    await store.finish(timeout: ...)
+
+with the comment "draining in-flight effects is the only way to know it's actually
+done". But `skipInFlightEffects` **cancels** in-flight effects rather than awaiting
+them. The flush → GPX → finalizeRide pipeline is an unreceived `.run` effect, so on an
+idle machine it finishes before the cancel lands and the test passes; on a loaded one
+the cancel kills it mid-flight. CI's first readable run said exactly that:
+
+    RideRecordingTests/killAndRelaunchResumesRide()
+        RideRecordingTests.swift:182: Expectation failed: (ride.recordingState → .paused) == .ended
+        RideRecordingTests.swift:183: Expectation failed: (ride.endedAt → nil) != nil
+        RideRecordingTests.swift:188: Expectation failed: (ride).gpxFileURL → nil → nil
+
+Fixed by observing the pipeline's own end state before tearing the store down.
+`runRideToEnd` now takes an `until:` predicate, because each failure-injection test
+has a different end state (`.ended` for the two whose finalize succeeds; a recorded
+intent carrying the GPX for the one whose finalize fails).
+
+Note this supersedes (5) as the explanation for those two suites. Raising the drain
+deadline was treating a symptom that was not the cause — a longer timeout cannot help
+when the work is being cancelled rather than waited for. The wider deadline is kept
+because it is correct on its own terms, not because it fixed this.
+
+## 7 — Hardcoded simulator name
+
+`-destination 'platform=iOS Simulator,name=iPhone 17 Pro'` requires that device to
+already exist. Twice it didn't (2026-08-30, and this PR's own first run), the second on
+a runner reimaged to Xcode 26.6 listing no concrete simulators at all. Now resolved at
+runtime, preferring `iPhone 17 Pro` so local snapshot references stay valid.
+
+## Still not reproduced
+
+`AlertOrchestratorFeatureTests` — seen failing once locally as a whole suite, never
+since, and never on CI with diagnostics available. Left alone.
 
 ## Left alone
 
