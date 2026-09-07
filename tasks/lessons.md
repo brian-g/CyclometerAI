@@ -173,3 +173,33 @@ only thing that sees both ends of the lifetime.
   has to drive the parent.
 - Weigh a fix against the test harness's constraints, not just correctness. An effect that never finishes is
   a fine runtime pattern and a bad `TestStore` citizen.
+
+
+## Verify the bug report's *mechanism* against the raw data before designing the filter (2026-09-07, #210)
+
+**What happened.** #210 described four "GPS spikes" — 12–20 m one-second position jumps against a sane speed
+channel — and the approved plan filtered them by implied speed: reject a fix whose jump contradicts the active
+speed source. Replaying the ride's own 566 points killed the design. The jumps are not bad positions. Each is
+the *end* of a stretch where the reported position crawled (0.3–0.8 m/s against a reported 3.1 m/s for six
+seconds) and then caught up. Over a window either side, haversine and the speed integral agree to a few metres,
+and the bearings through the snap are constant — the rider genuinely covered that ground.
+
+The jump filter therefore rejected the one honest fix in each window, held the stale position three more
+seconds, then re-seeded and drew the same line anyway: 3259.2 m filtered vs 3259.9 m unfiltered. It changed
+when the snap appeared and nothing else.
+
+**What the data was asked, and answered.** Three cheap checks, all before writing tests:
+- Sum haversine *and* the speed integral over a window spanning the artefact. Equal ⇒ no position error, only
+  latency.
+- Look at bearings through the jump. Constant ⇒ a straight line, not an excursion.
+- Look at the seconds *before* the jump, not just the jump. The stall is the defect; the jump is its shadow.
+
+**Rules.**
+- A bug report's numbers can be right and its mechanism wrong. Reproduce the mechanism from raw data before
+  committing to a filter shape — an issue's "Scope" bullets are a hypothesis, not a spec.
+- When a filter's job is to remove bad data, measure what it removes *and* what the output looks like after.
+  "Rejects all four listed timestamps" was true of a design that improved nothing.
+- Prefer filtering on a measurement the app already makes (`horizontalAccuracy`, cross-checked against a log
+  archive) over a derived heuristic with a threshold tuned to one ride.
+- Stop and re-ask when the finding invalidates an approved plan, even mid-implementation. The earlier answer
+  was given under the wrong model of the defect.

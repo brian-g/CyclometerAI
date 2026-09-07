@@ -33,11 +33,12 @@ struct GPXExporterTests {
         time: Date = start,
         speedMPS: Double? = 7.2, speedSource: SensorSource = .gps,
         hr: Int? = 142, hrSource: SensorSource = .bleHR,
-        cad: Int? = 85
+        cad: Int? = 85,
+        accuracy: Double = 5
     ) -> TrackPointDTO {
         TrackPointDTO(
             rideId: rideId, timestamp: time, latitude: lat, longitude: lon,
-            altitudeMeters: ele, horizontalAccuracyMeters: 5,
+            altitudeMeters: ele, horizontalAccuracyMeters: accuracy,
             speedMPS: speedMPS, speedSource: speedSource,
             heartRateBPM: hr, heartRateSource: hrSource,
             cadenceRPM: cad, powerWatts: nil
@@ -95,13 +96,51 @@ struct GPXExporterTests {
     func trkptOmitsAllSensorFieldsAndExtensions() {
         let xml = GPXExporter.buildXML(
             ride: Self.ride,
-            trackPoints: [Self.point(speedMPS: nil, speedSource: .none, hr: nil, hrSource: .none, cad: nil)],
+            trackPoints: [Self.point(speedMPS: nil, speedSource: .none, hr: nil, hrSource: .none, cad: nil, accuracy: 0)],
             vehiclePassEvents: []
         )
         #expect(!xml.contains("gpxtpx:hr"))
         #expect(!xml.contains("gpxtpx:cad"))
         #expect(!xml.contains("gpxtpx:speed"))
         #expect(!xml.contains("<extensions>"))
+    }
+
+    // MARK: - Horizontal accuracy (#210)
+
+    @Test("trkpt carries horizontal accuracy as a cyc: element in metres, not as hdop")
+    func trkptIncludesHorizontalAccuracy() {
+        let xml = GPXExporter.buildXML(
+            ride: Self.ride, trackPoints: [Self.point(accuracy: 4.7)], vehiclePassEvents: []
+        )
+        #expect(xml.contains("<cyc:horizontalAccuracyMeters>4.7</cyc:horizontalAccuracyMeters>"))
+        // <hdop> is dilution of precision — a unitless geometry factor. Metres written
+        // there would parse as a plausible number and mean something else entirely.
+        #expect(!xml.contains("hdop"))
+    }
+
+    @Test("trkpt omits horizontal accuracy when it was never measured")
+    func trkptOmitsUnmeasuredAccuracy() {
+        for accuracy in [0.0, -1.0] {
+            let xml = GPXExporter.buildXML(
+                ride: Self.ride, trackPoints: [Self.point(accuracy: accuracy)], vehiclePassEvents: []
+            )
+            #expect(!xml.contains("cyc:horizontalAccuracyMeters"))
+        }
+    }
+
+    @Test("accuracy alone opens the extensions block")
+    func accuracyAloneOpensExtensions() {
+        let xml = GPXExporter.buildXML(
+            ride: Self.ride,
+            trackPoints: [Self.point(
+                speedMPS: nil, speedSource: .none, hr: nil, hrSource: .none, cad: nil, accuracy: 8.4
+            )],
+            vehiclePassEvents: []
+        )
+        #expect(xml.contains("<extensions>"))
+        #expect(xml.contains("<cyc:horizontalAccuracyMeters>8.4</cyc:horizontalAccuracyMeters>"))
+        #expect(xml.contains("</extensions>"))
+        #expect(!xml.contains("gpxtpx:TrackPointExtension"))
     }
 
     @Test("trkpt includes only the sensor fields that are present, omitting the rest")

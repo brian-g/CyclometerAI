@@ -520,6 +520,15 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 | Cadence | BLE cadence sensor (RPM) | `<gpxtpx:cad>` |
 | Speed | Active speed source (m/s) | `<gpxtpx:speed>` |
 | Power | BLE power meter (Watts, Phase 3) | `<gpxtpx:power>` |
+| Horizontal accuracy | CoreLocation `horizontalAccuracy` (m) | `<cyc:horizontalAccuracyMeters>` |
+
+**Which fixes become track points.** A fix whose `horizontalAccuracy` is worse than **10 m** — the same threshold wheel auto-calibration pauses its window on (§8.9) — produces no track point and no map polyline vertex. The track takes a gap, which a consumer straight-lines across; the app does not substitute a held or smoothed position for one it knows is untrustworthy. The live map marker still follows the freshest fix, since there is nothing better to show.
+
+A backstop bounds this: if nothing has been recorded for **10 s**, the next valid fix is recorded whatever its accuracy. A ride under heavy tree cover records a coarse track rather than none.
+
+> **What this does and does not remove.** On the ride of 2026-09-06 the reported position repeatedly crawled behind the speed channel for several seconds and then snapped forward — 20.1 m in one second against a reported 3.1 m/s, inside a window whose accuracy the app had already measured at 10.3 m. The gate removes those seconds. It is *not* a jump filter: over a window either side of each snap, the track's own distance and the speed integral agree to a few metres and the bearings through it are constant, so the snap is the fix catching up with ground the rider genuinely covered. Rejecting it would hold a stale position and then draw the same line three seconds later. Smoothing or map-matching the recorded track remains out of scope.
+
+**Why not `<hdop>`.** GPX 1.1 has no element for positional accuracy in metres. `<hdop>` is *horizontal dilution of precision* — a unitless factor describing satellite geometry, not a distance — so metres written there would parse as a plausible number and mean something else entirely. Accuracy is exported in the Cyclometer-specific `cyc:` namespace instead, alongside `cyc:VehiclePassEvent`; consumers that don't know the namespace ignore it.
 
 **Vehicle Pass Events:**
 

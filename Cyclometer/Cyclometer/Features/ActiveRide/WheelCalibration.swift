@@ -34,8 +34,9 @@ enum WheelCalibration {
     /// Ceiling on a single correction, so one bad window cannot move the rider's
     /// wheel size far. A genuinely large error converges across several windows.
     static let maxAdjustmentFraction = 0.10
-    /// Fixes worse than this are unreliable enough that the window is paused.
-    static let maxHorizontalAccuracy = 10.0
+    /// Fixes worse than this are unreliable enough that the window is paused. Shared with
+    /// the recording-side gate (#210) so the two cannot drift apart.
+    static let maxHorizontalAccuracy = GPSFixFilter.maxHorizontalAccuracy
     /// Below this the rider is stopped or crawling, where both estimators are noise
     /// and GPS scatter accumulates distance the wheel never travelled.
     static let minMovingSpeedMPS = 2.0

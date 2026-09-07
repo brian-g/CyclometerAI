@@ -404,6 +404,8 @@ struct ActiveRideFeatureLocationTests {
             $0.trackCoordinates = [Coordinate(latitude: 43.0731, longitude: -89.4012)]
             $0.altitude = 280.0
             $0.horizontalAccuracy = 5.0
+            $0.isFixRecordable = true
+            $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
             $0.speedSampleCount = 1
@@ -423,6 +425,43 @@ struct ActiveRideFeatureLocationTests {
         }
     }
 
+    @Test("A poor-accuracy fix moves the marker but is kept out of the recorded track")
+    func poorAccuracyFixIsNotRecorded() async {
+        let store = makeStore()
+        let poor = LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
+            altitude: 280.0,
+            speed: 8.5,
+            // The accuracy the log archive recorded at 11:56:51 on 2026-09-06 (#210).
+            horizontalAccuracy: 13.2,
+            heading: 192.0,
+            timestamp: testDate
+        )
+        await store.send(.locationUpdated(poor)) {
+            // Live position still follows the freshest fix — but no polyline vertex, and
+            // `isFixRecordable` false means `.elapsedTick` writes no track point either.
+            $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.horizontalAccuracy = 13.2
+            $0.altitude = 280.0
+            $0.heading = 192.0
+            $0.speedKPH = 8.5 * 3.6
+            $0.speedSampleCount = 1
+            $0.speedSampleSum = 8.5 * 3.6
+            $0.maxSpeedKPH = 8.5 * 3.6
+        }
+        #expect(store.state.trackCoordinates.isEmpty)
+        #expect(!store.state.isFixRecordable)
+        // The Doppler speed on that same fix is position-independent, and calibration runs
+        // its own gate on the same data — both still see it.
+        await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.speed.speedMPS = 8.5
+            $0.speed.activeSpeedSource = .gps
+            $0.speed.latestGPSSpeedMPS = 8.5
+            $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
+        }
+        await store.receive(\.calibration.locationUpdated)
+    }
+
     @Test("Location updates continue while paused")
     func locationContinuesWhilePaused() async {
         let store = makeStore()
@@ -431,6 +470,8 @@ struct ActiveRideFeatureLocationTests {
             $0.trackCoordinates = [Coordinate(latitude: 43.0731, longitude: -89.4012)]
             $0.altitude = 280.0
             $0.horizontalAccuracy = 5.0
+            $0.isFixRecordable = true
+            $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
             $0.speedSampleCount = 1
@@ -513,6 +554,8 @@ struct ActiveRideFeatureLocationTests {
             $0.trackCoordinates = [Coordinate(latitude: 43.0731, longitude: -89.4012)]
             $0.altitude = 280.0
             $0.horizontalAccuracy = 5.0
+            $0.isFixRecordable = true
+            $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
             $0.speedKPH = 0
         }
@@ -1343,6 +1386,8 @@ struct ActiveRideFeatureStateMachineTests {
             $0.trackCoordinates = [Coordinate(latitude: 43.0, longitude: -89.0)]
             $0.altitude = 280.0
             $0.horizontalAccuracy = 5.0
+            $0.isFixRecordable = true
+            $0.lastRecordablePositionAt = testDate
             $0.heading = 0
             $0.speedKPH = 8.0 * 3.6
             $0.speedSampleCount = 1

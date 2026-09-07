@@ -146,8 +146,24 @@ enum GPXExporter {
         xml += "        <ele>\(decimal1(point.altitudeMeters))</ele>\n"
         xml += "        <time>\(isoString(point.timestamp))</time>\n"
 
-        if point.heartRateBPM != nil || point.cadenceRPM != nil || point.speedMPS != nil {
+        let hasBiometrics =
+            point.heartRateBPM != nil || point.cadenceRPM != nil || point.speedMPS != nil
+        // 0 is `TrackPointDTO`'s "never set" default, and CoreLocation reports a negative
+        // accuracy for an invalid fix — neither is a measurement worth exporting.
+        let hasAccuracy = point.horizontalAccuracyMeters > 0
+
+        if hasBiometrics || hasAccuracy {
             xml += "        <extensions>\n"
+        }
+        // Metres, so *not* <hdop>: that element is dilution of precision, a unitless
+        // geometry factor, and writing metres into it would be quietly wrong. A `cyc:`
+        // element instead, in the namespace already declared for VehiclePassEvent (#210).
+        if hasAccuracy {
+            xml += "          <cyc:horizontalAccuracyMeters>"
+            xml += "\(decimal1(point.horizontalAccuracyMeters))"
+            xml += "</cyc:horizontalAccuracyMeters>\n"
+        }
+        if hasBiometrics {
             xml += "          <gpxtpx:TrackPointExtension>\n"
             if let hr = point.heartRateBPM {
                 xml += "            <gpxtpx:hr>\(hr)</gpxtpx:hr>\n"
@@ -159,6 +175,8 @@ enum GPXExporter {
                 xml += "            <gpxtpx:speed>\(decimal1(speed))</gpxtpx:speed>\n"
             }
             xml += "          </gpxtpx:TrackPointExtension>\n"
+        }
+        if hasBiometrics || hasAccuracy {
             xml += "        </extensions>\n"
         }
 
