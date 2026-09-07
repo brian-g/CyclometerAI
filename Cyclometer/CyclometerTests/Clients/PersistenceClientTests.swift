@@ -96,6 +96,39 @@ struct PersistenceClientTests {
         #expect(fetched[0].powerWatts == nil)
     }
 
+    @Test("a zero sensor reading round-trips as 0, not as nil")
+    func zeroSensorReadingsRoundTripAsZero() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        // The coasting/stopped rider: every sensor is connected and reporting, and every
+        // one of them legitimately reads 0. Storing 0 as the "no reading" sentinel used
+        // to erase these on the way back out, so the GPX dropped the elements entirely
+        // and misreported an active sensor as absent (#211).
+        let point = TrackPointDTO(
+            rideId: rideId,
+            timestamp: Date(),
+            latitude: 1,
+            longitude: 2,
+            altitudeMeters: 3,
+            horizontalAccuracyMeters: 4,
+            speedMPS: 0,
+            speedSource: .gps,
+            heartRateBPM: 0,
+            heartRateSource: .bleHR,
+            cadenceRPM: 0,
+            powerWatts: 0
+        )
+
+        try await client.flushTrackPoints([point])
+
+        let fetched = try await client.fetchTrackPoints(rideId)
+        #expect(fetched.count == 1)
+        #expect(fetched[0].speedMPS == 0)
+        #expect(fetched[0].heartRateBPM == 0)
+        #expect(fetched[0].cadenceRPM == 0)
+        #expect(fetched[0].powerWatts == 0)
+    }
+
     @Test("fetchTrackPoints for an unknown rideId returns empty, not an error")
     func fetchUnknownRideIdIsEmpty() async throws {
         let (client, _) = Self.makeLiveClient()

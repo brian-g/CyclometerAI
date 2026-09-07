@@ -92,6 +92,20 @@ struct GPXExporterTests {
         #expect(xml.contains("<gpxtpx:speed>7.2</gpxtpx:speed>"))
     }
 
+    @Test("a coasting rider's 0 rpm is exported as <gpxtpx:cad>0</gpxtpx:cad>, not dropped")
+    func trkptExportsZeroCadenceRatherThanOmittingIt() {
+        // Absence has to keep meaning "no active sensor" (PRD §8.7). A connected sensor
+        // reporting a genuine 0 must serialize the 0 (#211).
+        let xml = GPXExporter.buildXML(
+            ride: Self.ride,
+            trackPoints: [Self.point(speedMPS: 0, hr: 0, cad: 0)],
+            vehiclePassEvents: []
+        )
+        #expect(xml.contains("<gpxtpx:cad>0</gpxtpx:cad>"))
+        #expect(xml.contains("<gpxtpx:hr>0</gpxtpx:hr>"))
+        #expect(xml.contains("<gpxtpx:speed>0.0</gpxtpx:speed>"))
+    }
+
     @Test("trkpt omits gpxtpx:hr/cad/speed and the whole extensions block when all three are nil")
     func trkptOmitsAllSensorFieldsAndExtensions() {
         let xml = GPXExporter.buildXML(
