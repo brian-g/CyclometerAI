@@ -307,8 +307,8 @@ final class VehiclePassEvent {
     var timestamp: Date
     var latitude: Double
     var longitude: Double
-    var alertLevelAtPass: AlertLevel
-    var riderSpeedKph: Double
+    var alertLevelAtPass: AlertLevel           // Ride-level alert at the peak closing sample, not at the pass
+    var riderSpeedKph: Double                  // At the pass — deliberately not peak-anchored like the two fields around it
     var estimatedPassSpeedKph: Double?         // Vehicle ground speed = riderSpeedKph + peak closing speed; nil if never approaching
 
     init(

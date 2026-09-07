@@ -19,7 +19,7 @@ private func singleSighting(mps: Double, alertLevel: AlertLevel, range: Double =
         firstSeenAt: testDate, lastSeenAt: testDate,
         sampleCount: 1, maxPositiveClosingMPS: max(mps, 0),
         minimumRangeMetres: range,
-        lastKnownCoordinate: nil, lastRiderSpeedMPS: 0, lastAlertLevel: alertLevel
+        lastKnownCoordinate: nil, lastRiderSpeedMPS: 0, alertLevelAtPeakClosing: alertLevel
     )
 }
 
@@ -2043,7 +2043,7 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
                     firstSeenAt: testDate, lastSeenAt: testDate,
                     sampleCount: 2, maxPositiveClosingMPS: 0,
                     minimumRangeMetres: 40,
-                    lastKnownCoordinate: nil, lastRiderSpeedMPS: 0, lastAlertLevel: .clear
+                    lastKnownCoordinate: nil, lastRiderSpeedMPS: 0, alertLevelAtPeakClosing: .clear
                 )
             ]
         }

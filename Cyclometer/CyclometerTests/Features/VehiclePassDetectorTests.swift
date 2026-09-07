@@ -15,7 +15,7 @@ struct VehiclePassDetectorTests {
         RadarTarget(id: id, relativeVelocityMPS: mps, rangeMetres: range, threatLevel: .allClear)
     }
 
-    @Test("A vehicle tracked >= 2s with majority-positive closing speed that then disappears past the grace period produces exactly one pass event, using the last-seen snapshot")
+    @Test("A vehicle tracked >= 2s with majority-positive closing speed that then disappears past the grace period produces exactly one pass event, positioned at the last sighting")
     func overtakeProducesOnePassEvent() throws {
         let id = UUID()
         var tracking: [UUID: VehicleTrackingRecord] = [:]
@@ -28,8 +28,8 @@ struct VehiclePassDetectorTests {
         _ = VehiclePassDetector.processTick(
             targets: [Self.target(mps: 8, id: id)],
             trackedVehicles: &tracking, now: Self.start.addingTimeInterval(2), rideId: Self.rideId,
-            // Cached from this, the last sighting — not from the disappearance-
-            // confirmation tick below, which deliberately uses a different level.
+            // Neither this level nor the confirmation tick's below reaches the event:
+            // both differ from the first tick's, which is the one that set the peak.
             alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
         )
 
@@ -46,7 +46,10 @@ struct VehiclePassDetectorTests {
         #expect(event.timestamp == Self.start.addingTimeInterval(2))
         #expect(event.latitude == Self.coordinate.latitude)
         #expect(event.longitude == Self.coordinate.longitude)
-        #expect(event.alertLevelAtPass == .clear)
+        // The peak-closing tick (#209) — here the first, since tick two ties at 8 m/s
+        // and a tie does not displace the incumbent. Not the last sighting (.clear),
+        // and not the confirmation tick (.danger).
+        #expect(event.alertLevelAtPass == .caution)
         #expect(event.riderSpeedKph == 6 * AlertLevel.kphPerMPS)
         #expect(event.estimatedPassSpeedKph == (6 + 8) * AlertLevel.kphPerMPS)
         #expect(tracking[id] == nil)
@@ -392,7 +395,118 @@ struct VehiclePassDetectorTests {
             lastSeenAt: Self.start.addingTimeInterval(4),
             sampleCount: 3, maxPositiveClosingMPS: 5,
             minimumRangeMetres: 4,
-            lastKnownCoordinate: Self.coordinate, lastRiderSpeedMPS: 6, lastAlertLevel: .clear
+            // .caution, from the offset-0 tick that set the 5 m/s peak — the two later
+            // ties leave it alone, including the .clear tick that last touched the
+            // record (#209).
+            lastKnownCoordinate: Self.coordinate, lastRiderSpeedMPS: 6, alertLevelAtPeakClosing: .caution
         ))
+    }
+
+    // MARK: - Alert level at the peak (#209)
+
+    @Test("A track whose alert level peaks mid-encounter and decays before disappearance records the peak")
+    func alertLevelIsTakenFromThePeakNotTheDecayingTail() throws {
+        // The shape every genuine overtake in the 2026-09-06 capture has: closing hard
+        // while lined up behind, then a decaying radial component as the vehicle moves
+        // laterally into the passing lane. Under the last-sighting snapshot this
+        // replaced, the event took `.caution` off the 2 m/s tail — the least severe
+        // instant of the encounter, and the inversion #209 was filed for.
+        let id = UUID()
+        var tracking: [UUID: VehicleTrackingRecord] = [:]
+        let track: [(mps: Double, level: AlertLevel)] = [(4, .advisory), (10, .danger), (2, .caution)]
+
+        for (offset, sample) in track.enumerated() {
+            _ = VehiclePassDetector.processTick(
+                targets: [Self.target(mps: sample.mps, id: id)],
+                trackedVehicles: &tracking, now: Self.start.addingTimeInterval(TimeInterval(offset)),
+                rideId: Self.rideId, alertLevel: sample.level,
+                riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+            )
+        }
+        let events = VehiclePassDetector.processTick(
+            targets: [], trackedVehicles: &tracking,
+            now: Self.start.addingTimeInterval(5), rideId: Self.rideId,
+            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+        )
+
+        let event = try #require(events.first)
+        #expect(event.alertLevelAtPass == .danger)
+        #expect(event.alertLevelAtPass != .caution)
+        // The same sample the pass-speed estimate is taken from: after #209 the two
+        // exported fields agree on which instant they describe.
+        #expect(event.estimatedPassSpeedKph == (6 + 10) * AlertLevel.kphPerMPS)
+    }
+
+    @Test("Across a plateau at the peak, the first frame's alert level is the one kept")
+    func plateauKeepsTheFirstFrameAtThePeak() throws {
+        // Peaks in the capture are held for 4–12 consecutive frames, and the first is
+        // the acquisition frame at 87–135 m where theta is near zero. This pins the
+        // fold's strict `>`: under `>=` the level would walk forward across the
+        // plateau and settle on the frame nearest the rider, which is the geometry
+        // #209 exists to get away from.
+        let id = UUID()
+        var tracking: [UUID: VehicleTrackingRecord] = [:]
+
+        for (offset, level) in [AlertLevel.danger, .caution, .advisory].enumerated() {
+            _ = VehiclePassDetector.processTick(
+                targets: [Self.target(mps: 9, id: id)],
+                trackedVehicles: &tracking, now: Self.start.addingTimeInterval(TimeInterval(offset)),
+                rideId: Self.rideId, alertLevel: level,
+                riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+            )
+        }
+        let events = VehiclePassDetector.processTick(
+            targets: [], trackedVehicles: &tracking,
+            now: Self.start.addingTimeInterval(5), rideId: Self.rideId,
+            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+        )
+
+        #expect(try #require(events.first).alertLevelAtPass == .danger)
+    }
+
+    @Test("The level recorded is the ride-level alert at the peak tick, so a faster concurrent vehicle sets it")
+    func recordedLevelIsTheRideLevelAlertAtThePeakTick() throws {
+        // Deliberate, not incidental. `processTick` is handed `AlertLevel.level(for:)`
+        // over *every* current target, so a second, faster vehicle present at this
+        // one's peak is what this one records. #209 bounds that to the single peak
+        // tick rather than removing it: a running max over the encounter would let any
+        // later spike in and, since a max only rises, keep it for the rest of the
+        // track — and `level(for:)`'s `approaching.count >= 3` clause alone would then
+        // stamp `caution` on every pass in traffic regardless of speed.
+        let slow = UUID()
+        let fast = UUID()
+        var tracking: [UUID: VehicleTrackingRecord] = [:]
+
+        // 20 m/s is 72 km/h closing, well past `dangerClosingSpeedKPH`.
+        let together = [Self.target(mps: 4, id: slow), Self.target(mps: 20, id: fast)]
+        _ = VehiclePassDetector.processTick(
+            targets: together, trackedVehicles: &tracking, now: Self.start,
+            rideId: Self.rideId, alertLevel: AlertLevel.level(for: together),
+            riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+        )
+        let alone = [Self.target(mps: 4, id: slow)]
+        for offset in [1.0, 2.0] {
+            _ = VehiclePassDetector.processTick(
+                targets: alone, trackedVehicles: &tracking,
+                now: Self.start.addingTimeInterval(offset), rideId: Self.rideId,
+                alertLevel: AlertLevel.level(for: alone),
+                riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+            )
+        }
+        let events = VehiclePassDetector.processTick(
+            targets: [], trackedVehicles: &tracking,
+            now: Self.start.addingTimeInterval(5), rideId: Self.rideId,
+            alertLevel: .clear, riderCoordinate: Self.coordinate, riderSpeedMPS: 6
+        )
+
+        // Only the slow vehicle produces one: the fast one was seen on a single tick,
+        // so it fails `minimumTrackedDuration`.
+        #expect(events.count == 1)
+        let event = try #require(events.first)
+        // 4 m/s is 14.4 km/h closing — on its own that is `advisory`, below
+        // `moderateClosingSpeedKPH`. What lands is the level the *rider* was under.
+        #expect(AlertLevel.level(for: alone) == .advisory)
+        #expect(event.alertLevelAtPass == .danger)
+        #expect(event.estimatedPassSpeedKph == (6 + 4) * AlertLevel.kphPerMPS)
     }
 }
