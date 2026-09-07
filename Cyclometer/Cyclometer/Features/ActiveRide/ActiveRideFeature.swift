@@ -160,6 +160,13 @@ struct ActiveRideFeature {
         var altitude: Double = 0
         var heading: Double = -1
         var horizontalAccuracy: Double = 0
+        /// Whether the fix behind `coordinate` is good enough to record (#210). Sticky
+        /// between fixes, so the once-a-second track point inherits the verdict of the fix
+        /// it is actually made of. False until the first fix arrives.
+        var isFixRecordable: Bool = false
+        /// When a track point was last recorded, or ride start while none has been —
+        /// what `GPSFixFilter.maxSuppressedInterval` is measured against.
+        var lastRecordablePositionAt: Date? = nil
         var isLocationAvailable: Bool = false
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
@@ -248,6 +255,10 @@ struct ActiveRideFeature {
                 }
                 let rideId = state.rideId
                 let startedAt = date.now
+                // Seeds the backstop `GPSFixFilter.maxSuppressedInterval` is measured
+                // against, so a ride that never sees a good fix still starts recording one
+                // 10 s in rather than never (#210).
+                state.lastRecordablePositionAt = startedAt
                 return .merge(
                     .send(.speed(.startListening)),
                     .send(.cadence(.startListening)),
@@ -629,16 +640,41 @@ struct ActiveRideFeature {
                 // §8.3's general Alert Rules apply the same guard everywhere else.
                 return .send(.alertOrchestrator(.alertLevelChanged(.advisory)))
             case .locationUpdated(let update):
+                // `coordinate` always takes the freshest fix — the live map marker is
+                // best-effort, and there is nothing better to show. What a poor fix does
+                // not do is enter the recorded track: no polyline vertex here, and no
+                // track point at the next tick (#210).
                 state.coordinate = update.coordinate
-                // Only record track points while actively riding, so paused/stopped
-                // GPS jitter doesn't pollute the polyline — mirrors distanceMeters,
-                // which also only accumulates while active (.elapsedTick).
-                if state.recordingState == .active {
-                    state.trackCoordinates.append(update.coordinate)
+                state.horizontalAccuracy = update.horizontalAccuracy
+                let sinceRecorded = date.now.timeIntervalSince(
+                    state.lastRecordablePositionAt ?? date.now
+                )
+                let wasRecordable = state.isFixRecordable
+                state.isFixRecordable = GPSFixFilter.isRecordable(
+                    horizontalAccuracyMeters: update.horizontalAccuracy,
+                    sinceLastRecorded: sinceRecorded
+                )
+                if state.isFixRecordable {
+                    state.lastRecordablePositionAt = date.now
+                    // Only record track points while actively riding, so paused/stopped
+                    // GPS jitter doesn't pollute the polyline — mirrors distanceMeters,
+                    // which also only accumulates while active (.elapsedTick).
+                    if state.recordingState == .active {
+                        state.trackCoordinates.append(update.coordinate)
+                    }
+                }
+                if wasRecordable != state.isFixRecordable {
+                    let gate = state.isFixRecordable ? "open" : "shut"
+                    logger.notice(
+                        """
+                        recording gps gate \
+                        \(gate, privacy: .public) — accuracy \
+                        \(update.horizontalAccuracy, format: .fixed(precision: 1), privacy: .public) m
+                        """
+                    )
                 }
                 state.altitude = update.altitude
                 state.heading = update.heading
-                state.horizontalAccuracy = update.horizontalAccuracy
                 let kph = max(update.speed, 0) * 3.6
                 state.speedKPH = kph
                 if kph > 0 {
@@ -746,8 +782,12 @@ struct ActiveRideFeature {
     /// Builds the per-second track point for `TrackPointRecorderFeature` (#170). Nil
     /// while there's no GPS fix yet, since `TrackPointDTO.latitude`/`longitude` are
     /// non-optional — ride start already requires a GPS lock (PRD §8.8), so this is rare.
+    ///
+    /// Also nil while the fix behind `coordinate` is too poor to record (#210): the track
+    /// takes a gap rather than a position the app already knows is untrustworthy.
+    /// `GPSFixFilter.maxSuppressedInterval` bounds how long such a gap can run.
     private func makeTrackPoint(from state: State) -> TrackPointDTO? {
-        guard let coordinate = state.coordinate else { return nil }
+        guard let coordinate = state.coordinate, state.isFixRecordable else { return nil }
         return TrackPointDTO(
             rideId: state.rideId,
             timestamp: date.now,

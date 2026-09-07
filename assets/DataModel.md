@@ -803,6 +803,8 @@ final class TrackPointMO: NSManagedObject {
 }
 ```
 
+> **A row exists only for a fix worth trusting.** Points are written once a second, but a second whose GPS fix was worse than `GPSFixFilter.maxHorizontalAccuracy` (10 m) produces no row at all, so a ride's rows are not necessarily contiguous in time — see PRD §8.7. `horizontalAccuracyMeters` therefore sits at or under that threshold on every row except the ones the 10 s backstop admitted, and is exported per point as `<cyc:horizontalAccuracyMeters>`.
+
 ### 4.2 NSBatchInsertRequest Flow
 
 ```swift
