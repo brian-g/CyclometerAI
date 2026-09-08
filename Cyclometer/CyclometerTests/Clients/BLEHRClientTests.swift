@@ -318,6 +318,15 @@ struct BLEHRIntegrationTests {
 
         var paired = harness.client.pairingStatus().makeAsyncIterator()
         _ = await paired.next()
+        // Subscribed before the events, so the 45 below is a sync point rather than a
+        // replay. `paired.next() == true` alone is not one: pairing is published by the
+        // HR `characteristicsDiscovered` handler, two events ahead of the battery frame,
+        // so it can resolve while that frame is still queued. `disconnect()` then clears
+        // the battery, the queued frame sets it back to 45, and the late subscriber
+        // replays 45 instead of nil. That is a real ordering, not a hypothetical: it
+        // failed this way twice in twelve runs under load.
+        var battery = harness.client.batteryLevel().makeAsyncIterator()
+        #expect(await battery.next() == Int?.none)   // replayed: nothing read yet
 
         await harness.pair(id)
         harness.events.yield(.discovered(id: id, name: "HRM-Dual", rssi: -55, services: [hrServiceUUID]))
@@ -334,7 +343,8 @@ struct BLEHRIntegrationTests {
         harness.events.yield(.characteristicValueUpdated(
             peripheralID: id, characteristicUUID: batteryLevelUUID, value: Data([0x2D])
         ))
-        #expect(await paired.next() == true)   // sync point: fully connected
+        #expect(await paired.next() == true)      // sync point: fully connected
+        #expect(await battery.next() == 45)       // sync point: the battery frame is handled
 
         await harness.client.disconnect()
         // The transport answers after the fact, as it does on hardware.
@@ -629,6 +639,12 @@ struct BLEHRIntegrationTests {
         await harness.client.startScanning()
         harness.bringToPaired(id)
         _ = await harness.devices { $0.contains { $0.id == id } }
+        // The device list is broadcast from the `.discovered` handler *before* it awaits
+        // `connect`, so the list appearing does not mean the connect has been issued. Left
+        // in flight it lands after `endPairingScan`, and the `calls.value.last` assertion
+        // below sees `.connect` rather than `.stopScanning`. Observed once in twelve runs
+        // under load.
+        await expectEventually { harness.calls.value.contains(.connect(id)) }
 
         await harness.client.beginPairingScan()
         await harness.client.disconnect()
