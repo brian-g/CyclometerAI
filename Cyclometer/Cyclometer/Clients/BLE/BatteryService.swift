@@ -62,8 +62,7 @@ enum BatteryService {
         case .characteristicValueUpdated(let id, let characteristic, let value):
             guard owns(id), characteristic == levelUUID else { return nil }
             guard let level = parseLevel(from: value) else {
-                let hex = value.map { String(format: "%02X", $0) }.joined(separator: " ")
-                logger.notice("battery value [\(hex, privacy: .public)] → out of range, ignored")
+                logger.notice("battery value [\(value.loggableHex, privacy: .public)] → out of range, ignored")
                 return nil
             }
             logger.notice("battery \(level)% on \(id, privacy: .public)")

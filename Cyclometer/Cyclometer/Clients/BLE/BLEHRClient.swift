@@ -3,6 +3,7 @@ import CoreBluetooth
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Retrieve after an untethered ride: `log collect --device --last 1h` (notice level persists).
 private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "hr")
 
 private let hrServiceUUID     = CBUUID(string: "180D")
@@ -160,6 +161,10 @@ private final class HRClientState: @unchecked Sendable {
     private var discoveredContinuations: [Int: AsyncStream<[DiscoveredDevice]>.Continuation] = [:]
     private var nextID = 0
     private let lock = NSLock()
+    /// Rate limit for the per-sample `bpm` line. Straps notify at about 1 Hz, so this is a
+    /// ceiling rather than a throttle in practice — but the level it guards is the one that
+    /// reaches a collected archive, and the ceiling is what makes that affordable (#212).
+    private var bpmLogGate = LogSampleGate()
 
     init(bleClient: BLEClient) {
         self.bleClient = bleClient
@@ -251,7 +256,7 @@ private final class HRClientState: @unchecked Sendable {
         // `BLEClient.requestedServices` is a plain set with no per-caller refcount, so
         // dropping the HR UUID here would cancel the Sensors screen's scan too.
         guard shouldStopHardware else {
-            logger.info("stopScanning kept alive — \(self.pairingScanCountSnapshot) pairing scan(s) open")
+            logger.notice("stopScanning kept alive — \(self.pairingScanCountSnapshot) pairing scan(s) open")
             return
         }
         logger.notice("stopping scan")
@@ -484,7 +489,12 @@ private final class HRClientState: @unchecked Sendable {
                   charUUID == hrMeasurementUUID,
                   let bpm = BLEHRClient.parseBPM(from: data) else { return }
             broadcastHeartRate(bpm)
-            logger.info("bpm \(bpm)")
+            // Was `.info`, which os_log keeps in memory and never writes to the store: not one
+            // `bpm` line survived into the archive collected after ride 2026-09-06, so whether
+            // the strap was delivering at all was unanswerable from it (#212).
+            if lock.withLock({ bpmLogGate.admit(uptime: ProcessInfo.processInfo.systemUptime) }) {
+                logger.notice("bpm \(bpm)")
+            }
 
         case .disconnected(let id, _):
             // Rescanning *is* this client's reconnect: `BLECentral.rescan` restarts the

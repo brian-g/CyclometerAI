@@ -341,10 +341,27 @@ private final class CSCClientState: @unchecked Sendable {
         /// Last Battery Service reading, or nil until one arrives. Cleared on
         /// disconnect so a reconnect re-reads rather than showing a stale level.
         var batteryPercent: Int?
+        /// Rate limit for this peripheral's per-sample telemetry line. Per-slot rather than
+        /// per-client: a combo sensor and a dedicated speed sensor are independent frame
+        /// sources, and one must not throttle the other.
+        var logGate = LogSampleGate()
         /// Connected solely to read 0x2A5C, holding no roles until the rider decides.
         /// An interrogating slot is exempt from the "no roles means gone" rule that
         /// otherwise reaps a peripheral the moment it holds nothing.
         var isInterrogating = false
+    }
+
+    /// What one CSC measurement frame produced. Replaces the tuple this used to return
+    /// once the log gate — which needs `roles`, and lives on the `Slot` — joined it.
+    private struct MeasurementOutcome {
+        var speed: Double?
+        var cadence: Double?
+        var wheelRevolutions: Double = 0
+        /// The roles this peripheral holds, so the log line names only the values this
+        /// sensor was ever going to produce. Empty on the paths that emit nothing.
+        var roles: Set<SensorRole> = []
+        var shouldLog = false
+        var emptiedSlot = false
     }
 
     private let bleClient: BLEClient
@@ -518,7 +535,7 @@ private final class CSCClientState: @unchecked Sendable {
             return true
         }
         guard shouldScan else {
-            logger.info("startScanning skipped — not in cold state")
+            logger.notice("startScanning skipped — not in cold state")
             return
         }
         await bleClient.startScanning([cscServiceUUID])
@@ -533,7 +550,7 @@ private final class CSCClientState: @unchecked Sendable {
         // `BLEClient.requestedServices` is a plain set with no per-caller refcount,
         // so dropping the CSC UUID here would cancel a pairing scan too.
         guard shouldStopHardware else {
-            logger.info("stopScanning kept alive — \(self.pairingScanCountSnapshot) pairing scan(s) open")
+            logger.notice("stopScanning kept alive — \(self.pairingScanCountSnapshot) pairing scan(s) open")
             return
         }
         await bleClient.stopScanning([cscServiceUUID])
@@ -849,8 +866,7 @@ private final class CSCClientState: @unchecked Sendable {
         case .characteristicValueUpdated(let id, let charUUID, let data):
             if charUUID == cscFeatureUUID {
                 guard let parsed = BLECSCClient.Capabilities(featureData: data) else {
-                    let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
-                    logger.notice("csc feature [\(hex, privacy: .public)] → parse FAILED")
+                    logger.notice("csc feature [\(data.loggableHex, privacy: .public)] → parse FAILED")
                     return
                 }
                 let emptied = lock.withLock { () -> Bool in
@@ -871,8 +887,7 @@ private final class CSCClientState: @unchecked Sendable {
             }
             guard charUUID == cscMeasurementUUID else { return }
             guard let measurement = BLECSCClient.Measurement(data: data) else {
-                let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
-                logger.notice("csc frame [\(hex, privacy: .public)] → parse FAILED")
+                logger.notice("csc frame [\(data.loggableHex, privacy: .public)] → parse FAILED")
                 return
             }
             // Role gating: feed wheel data to the calculator only if this peripheral
@@ -880,8 +895,8 @@ private final class CSCClientState: @unchecked Sendable {
             // lets a combo sensor be used for cadence only while a dedicated sensor
             // supplies speed. Compute under the lock to keep calculator state and the
             // circumference read consistent.
-            var emptiedSlot = false
-            let (speedVal, cadenceVal, wheelRevolutions): (Double?, Double?, Double) = lock.withLock {
+            let outcome: MeasurementOutcome = lock.withLock {
+                var outcome = MeasurementOutcome()
                 // Fallback for a sensor that never answered the 0x2A5C read: which
                 // fields the measurement actually carries reveals what it supports.
                 // Only runs while no authoritative capabilities have arrived, and
@@ -893,12 +908,15 @@ private final class CSCClientState: @unchecked Sendable {
                         supportsCrankRevolutions: measurement.cumulativeCrankRevolutions != nil
                     )
                     capabilities[id] = inferred
-                    emptiedSlot = narrowRolesLocked(id, to: inferred.supportedRoles)
+                    outcome.emptiedSlot = narrowRolesLocked(id, to: inferred.supportedRoles)
                     // A released role has to be republished, or its tile stays stuck
                     // on the state it held before the sensor gave it up.
                     recomputeRoleStatesLocked()
                 }
-                guard var slot = slots[id] else { return (nil, nil, 0) }
+                // `narrowRolesLocked` above can have removed the slot outright. Nothing to
+                // measure, nothing to log — `emptiedSlot` is already set and the caller is
+                // about to disconnect the peripheral.
+                guard var slot = slots[id] else { return outcome }
                 var s: Double?
                 var c: Double?
                 var revolutions: Double = 0
@@ -917,27 +935,55 @@ private final class CSCClientState: @unchecked Sendable {
                    let rps = slot.crank.update(revs: revs, eventTime: time) {
                     c = rps * 60.0
                 }
+                outcome.speed = s
+                outcome.cadence = c
+                outcome.wheelRevolutions = revolutions
+                outcome.roles = slot.roles
+                // These samples used to log at `.info`, which os_log keeps in memory and never
+                // writes to the store — not one survived into the archive collected minutes
+                // after ride 2026-09-06 (#212). `.notice` persists them; the gate is what keeps
+                // that affordable for a sensor notifying faster than once a second.
+                if !slot.roles.isEmpty {
+                    outcome.shouldLog = slot.logGate.admit(uptime: ProcessInfo.processInfo.systemUptime)
+                }
+
                 if slot.roles.isEmpty, !slot.isInterrogating {
                     slots.removeValue(forKey: id)
-                    emptiedSlot = true
+                    outcome.emptiedSlot = true
                     recomputeRoleStatesLocked()
                 } else {
-                    slots[id] = slot   // write back mutated calculator state
+                    slots[id] = slot   // write back mutated calculator state and log gate
                 }
-                return (s, c, revolutions)
+                return outcome
             }
-            if let speedVal {
+            // One line per frame rather than one per value: speed and cadence off the same
+            // frame belong together, and a role that produced nothing this frame is the
+            // interesting half. Built outside the lock — os_log allocates and this is the
+            // same lock every role-state broadcast takes.
+            if outcome.shouldLog {
+                var parts: [String] = []
+                if outcome.roles.contains(.speed) {
+                    parts.append(outcome.speed.map { String(format: "speed %.2f m/s", $0) }
+                        ?? "speed —")
+                }
+                if outcome.roles.contains(.cadence) {
+                    parts.append(outcome.cadence.map { String(format: "cadence %.0f rpm", $0) }
+                        ?? "cadence —")
+                }
+                logger.notice("""
+                    csc \(id, privacy: .public) — \(parts.joined(separator: ", "), privacy: .public)
+                    """)
+            }
+            if let speedVal = outcome.speed {
                 broadcastSpeed(speedVal)
-                logger.info("speed \(speedVal, format: .fixed(precision: 2)) m/s")
             }
-            if wheelRevolutions > 0 {
-                broadcastWheelRevolutions(wheelRevolutions)
+            if outcome.wheelRevolutions > 0 {
+                broadcastWheelRevolutions(outcome.wheelRevolutions)
             }
-            if let cadenceVal {
+            if let cadenceVal = outcome.cadence {
                 broadcastCadence(cadenceVal)
-                logger.info("cadence \(cadenceVal, format: .fixed(precision: 0)) rpm")
             }
-            if emptiedSlot { await bleClient.disconnect(id, cscOwnerID) }
+            if outcome.emptiedSlot { await bleClient.disconnect(id, cscOwnerID) }
 
         case .disconnected(let id, _):
             // Only unexpected disconnects match — user disconnect() removes the slot first.

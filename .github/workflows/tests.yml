@@ -29,6 +29,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # os_log writes .notice and above to the persisted store; .info and .debug live in a
+      # memory ring buffer and are gone before anyone runs `log collect`. Ride 2026-09-06
+      # collected 4,330 entries with not one speed, cadence or HR sample among them, because
+      # all three logged at .info (#212). Nothing else in the repo can catch this: there is no
+      # linter, and no test can observe an os.Logger.
+      - name: BLE clients must not log at .info
+        run: |
+          if grep -rn 'logger\.info' Cyclometer/Cyclometer/Clients/BLE/; then
+            echo "::error::.info never reaches the persisted log store — use .notice (assets/BLE.md §15)"
+            exit 1
+          fi
+
       - name: Show toolchain
         run: xcodebuild -version
 

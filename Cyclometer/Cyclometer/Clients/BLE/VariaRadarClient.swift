@@ -249,6 +249,23 @@ private final class RadarClientState: @unchecked Sendable {
     /// silently inherit a departed vehicle's identity. See `resolveTargets`.
     private var slotByWireID: [UInt8: UUID] = [:]
 
+    /// Once-a-minute liveness counters for the radar frame stream.
+    ///
+    /// Empty frames log at `.debug` and so never reach a collected archive (#212). Without a
+    /// periodic summary a quiet radar and one that stayed connected but silently stopped
+    /// sending would be indistinguishable there — a distinction the old 8 Hz `.notice` stream
+    /// gave away for free.
+    private var frameSummaryGate = LogSampleGate(bucketSeconds: 60)
+    /// Cleared with the rest of the per-connection frame state, so each connection
+    /// contributes exactly one raw frame to the persisted log.
+    private var loggedFirstFrameThisConnection = false
+    /// The gate admits its first call, which for a summary is one frame into a window that
+    /// has not elapsed yet. Flipped once so that call only establishes the bucket.
+    private var frameSummaryPrimed = false
+    private var framesThisMinute = 0
+    private var targetFramesThisMinute = 0
+    private var unparsedFramesThisMinute = 0
+
     /// An ambient (dashboard) scan is running. Tracked separately from
     /// `connectionState` because a pairing scan must not move that state — see
     /// `beginPairingScan`.
@@ -368,7 +385,7 @@ private final class RadarClientState: @unchecked Sendable {
             return true
         }
         guard shouldScan else {
-            logger.info("startScanning skipped — not in disconnected state")
+            logger.notice("startScanning skipped — not in disconnected state")
             return
         }
         setConnectionState(.scanning)
@@ -383,7 +400,7 @@ private final class RadarClientState: @unchecked Sendable {
         // `BLEClient.requestedServices` is a plain set with no per-caller refcount, so
         // dropping the radar UUID here would cancel the Sensors screen's scan too.
         guard shouldStopHardware else {
-            logger.info("stopScanning kept alive — \(self.pairingScanCountSnapshot) pairing scan(s) open")
+            logger.notice("stopScanning kept alive — \(self.pairingScanCountSnapshot) pairing scan(s) open")
             return
         }
         await bleClient.stopScanning([radarServiceUUID])
@@ -459,9 +476,7 @@ private final class RadarClientState: @unchecked Sendable {
         let id = lock.withLock { () -> UUID? in
             let current = targetPeripheralID
             targetPeripheralID = nil
-            // A wire ID recycled by the hardware on the next ride must not inherit
-            // this ride's stale slot — see `slotByWireID`'s doc comment.
-            slotByWireID.removeAll()
+            resetConnectionFrameStateLocked()
             return current
         }
         setConnectionState(.disconnected)
@@ -524,7 +539,7 @@ private final class RadarClientState: @unchecked Sendable {
         if let toDisconnect {
             setConnectionState(.disconnected)
             broadcastTargets([])   // clear stale vehicles from the sidebar
-            lock.withLock { slotByWireID.removeAll() }
+            lock.withLock { resetConnectionFrameStateLocked() }
             setBattery(nil)
             await bleClient.disconnect(toDisconnect, radarOwnerID)
         }
@@ -638,23 +653,61 @@ private final class RadarClientState: @unchecked Sendable {
                   charUUID == radarAlertUUID else { return }
             // Raw frame hex is the ground truth for validating the payload-layout
             // assumption in parseAlert — keep failed parses visible.
-            let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+            //
+            // And keep one good frame per connection visible too. `parseAlert` returns []
+            // rather than nil for a frame it reads as empty, so a layout that is wrong in a
+            // way that yields no threats logs no failures — and with empty frames at `.debug`
+            // it would now leave nothing behind at all. One line per connection is a cheap
+            // hedge on an alert characteristic whose numbering is still called out as
+            // unvalidated above.
+            if lock.withLock({ () -> Bool in
+                guard !loggedFirstFrameThisConnection else { return false }
+                loggedFirstFrameThisConnection = true
+                return true
+            }) {
+                logger.notice("first alert frame this connection [\(data.loggableHex, privacy: .public)]")
+            }
             guard let raw = VariaRadarClient.parseAlert(from: data) else {
-                logger.notice("alert frame [\(hex, privacy: .public)] → parse FAILED — layout assumption likely wrong")
+                logger.notice("alert frame [\(data.loggableHex, privacy: .public)] → parse FAILED — layout assumption likely wrong")
+                if let summary = noteFrame(hasTargets: false, parseFailed: true) {
+                    logger.notice("\(summary, privacy: .public)")
+                }
                 return
             }
             let targets = resolveTargets(raw)
-            let summary = targets
-                .map { "(\(Int($0.rangeMetres))m, \(Int($0.relativeVelocityMPS))m/s)" }
-                .joined(separator: " ")
-            logger.notice("alert frame [\(hex, privacy: .public)] → \(targets.count) target(s) \(summary, privacy: .public)")
+            if targets.isEmpty {
+                // A radar with nothing in range still streams ~8 frames a second, and at
+                // `.notice` those were 3,710 of the 4,330 entries a 9-minute ride persisted
+                // (#212). `.debug` keeps them on a tethered Console stream and out of a
+                // collected archive.
+                //
+                // What used to cost something here was the `let hex = …` hoisted above the
+                // branch, which ran at every level. Interpolated instead, it is an autoclosure
+                // os_log never invokes while debug is off. The explicit isEnabled check buys
+                // only the OSLogMessage construction around it — small, but this is 8 Hz on
+                // the CoreBluetooth callback path.
+                if logger.isEnabled(type: .debug) {
+                    logger.debug("alert frame [\(data.loggableHex, privacy: .public)] → 0 target(s)")
+                }
+            } else {
+                // Deliberately ungated. At 8 Hz a vehicle closing at 16 m/s is sampled every
+                // 2 m, and that resolution is what the vehicle-pass defects in #207-#209 were
+                // diagnosed from. The volume is set by traffic, not by the app.
+                let summary = targets
+                    .map { "(\(Int($0.rangeMetres))m, \(Int($0.relativeVelocityMPS))m/s)" }
+                    .joined(separator: " ")
+                logger.notice("alert frame [\(data.loggableHex, privacy: .public)] → \(targets.count) target(s) \(summary, privacy: .public)")
+            }
+            if let summary = noteFrame(hasTargets: !targets.isEmpty) {
+                logger.notice("\(summary, privacy: .public)")
+            }
             broadcastTargets(targets)
 
         case .disconnected(let id, _):
             // Only unexpected disconnects match — user disconnect() nils the target first.
             guard lock.withLock({ targetPeripheralID }) == id else { return }
             broadcastTargets([])   // clear stale vehicles from the sidebar
-            lock.withLock { slotByWireID.removeAll() }
+            lock.withLock { resetConnectionFrameStateLocked() }
             setBattery(nil)        // re-read on reconnect rather than show a stale level
             setConnectionState(.reconnecting)
             startReconnect()
@@ -668,7 +721,7 @@ private final class RadarClientState: @unchecked Sendable {
                 cancelReconnect()
                 lock.withLock {
                     targetPeripheralID = nil
-                    slotByWireID.removeAll()
+                    resetConnectionFrameStateLocked()
                 }
                 broadcastTargets([])
                 setBattery(nil)
@@ -768,6 +821,45 @@ private final class RadarClientState: @unchecked Sendable {
     /// in use or just-freed. `count <= vehicleSlotIDs.count` is already enforced by
     /// `parseAlert`, so a free slot always exists for a wire ID seeing it for the
     /// first time.
+    /// Frame bookkeeping scoped to one connection, cleared whenever that connection ends.
+    /// A wire ID recycled by the hardware on the next ride must not inherit this ride's stale
+    /// slot — see `slotByWireID`'s doc comment — and the next connection logs its own first
+    /// raw frame. Must hold the lock.
+    private func resetConnectionFrameStateLocked() {
+        slotByWireID.removeAll()
+        loggedFirstFrameThisConnection = false
+    }
+
+    /// Counts one frame toward the liveness summary, returning the line to log when the
+    /// minute rolls over. Takes the lock itself rather than folding into `resolveTargets`,
+    /// which never runs for a frame that failed to parse.
+    private func noteFrame(hasTargets: Bool, parseFailed: Bool = false) -> String? {
+        lock.withLock { () -> String? in
+            framesThisMinute += 1
+            if hasTargets { targetFramesThisMinute += 1 }
+            if parseFailed { unparsedFramesThisMinute += 1 }
+            guard frameSummaryGate.admit(uptime: ProcessInfo.processInfo.systemUptime) else {
+                return nil
+            }
+            defer {
+                framesThisMinute = 0
+                targetFramesThisMinute = 0
+                unparsedFramesThisMinute = 0
+            }
+            // "since last summary" rather than "in the last minute": every window but the
+            // first is a minute wide, and the first runs from the first frame to whenever
+            // the next minute boundary falls.
+            guard frameSummaryPrimed else {
+                frameSummaryPrimed = true
+                return nil
+            }
+            return """
+                radar \(framesThisMinute) frame(s), \(targetFramesThisMinute) with targets, \
+                \(unparsedFramesThisMinute) unparsed since last summary
+                """
+        }
+    }
+
     private func resolveTargets(_ raw: [VariaRadarClient.RawThreat]) -> [RadarTarget] {
         lock.withLock {
             let liveWireIDs = Set(raw.map(\.wireThreatID))
