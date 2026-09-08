@@ -103,9 +103,13 @@ struct RideDashboardView: View {
 
                     // W4 HR + W12 HR Zones
                     GridRow {
-                        HeartRateWidget(bpm: store.heartRateBPM, zone: store.hrZone, source: store.hrSource)
-                            .frame(height: unit)
-                        HRZonesWidget(zone: store.hrZone, source: store.hrSource)
+                        HeartRateWidget(
+                            bpm: store.displayHeartRateBPM,
+                            zone: store.displayHRZone,
+                            source: store.hrSource
+                        )
+                        .frame(height: unit)
+                        HRZonesWidget(zone: store.displayHRZone, source: store.hrSource)
                             .frame(height: unit)
                     }
 
@@ -301,6 +305,10 @@ private struct NoHRSourceLabel: View {
 
 /// W4 — Heart Rate 1×1
 private struct HeartRateWidget: View {
+    /// `ActiveRideFeature.State.displayHeartRateBPM`, not the raw reading — it resolves
+    /// a brief strap silence to the held value rather than to `0` (#221). `0` here means
+    /// "no reading", which a connected strap does report: `—` is the honest answer, and
+    /// distinct from `source == .none`'s "nothing is paired at all".
     let bpm: Int
     let zone: Int
     let source: HRSource
