@@ -892,6 +892,10 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | HR payload parses 8-bit BPM | Single byte BPM read correctly |
 | HR payload parses 16-bit BPM | Two-byte BPM read correctly per flags |
 | Reconnection backoff sequence | Delays follow 1s, 2s, 4s, 8s, 16s, 30s, 30s... pattern |
+| Log gate admits the first sample | `LogSampleGate.admit` is true on its first call, whatever the uptime |
+| Log gate holds one line per bucket | A 4 Hz stream over 10s admits exactly 10 lines |
+| Log gate does not halve a jittering 1 Hz stream | Samples drifting either side of a 1s spacing all admit — the reason for bucketing over an interval gate |
+| Log gate survives a backwards clock | A jump backwards admits rather than stalling the gate shut |
 | Speed disconnection during ride | GPS fallback activates; source badge updates; banner shown |
 | Cadence disconnection during ride | Cadence shows "--"; no fallback; banner shown |
 | Shared peripheral disconnection | Both speed fallback and cadence "--" fire; single combined banner |
@@ -967,8 +971,16 @@ background. That fragility is the reason §13.3 adopts `bluetooth-central` even 
 require it.
 
 > **To verify:** start a ride, lock the screen for 10+ minutes, then `log collect --device --last 1h`
-> and filter subsystem `com.xavier.cyclometer`. The sensor clients log every notification, so a
-> continuous stream of `speed`/`cadence`/`hr` lines across the locked window confirms it.
+> and filter subsystem `com.xavier.cyclometer`. The sensor clients log one `csc` line and one `hr`
+> line per sensor per second, so a continuous stream of them across the locked window confirms it.
+> See §15 for why the rate is one a second and not one per notification.
+
+> **Correction (#212, 2026-09-07).** Until #212 this paragraph read "the sensor clients log every
+> notification", and the procedure could not have worked as written. Those lines were `logger.info`,
+> which os_log holds in memory and never writes to the store — a `.logarchive` collected minutes
+> after ride 2026-09-06 held 4,276 radar frames and not one speed, cadence or HR sample. The
+> procedure is valid from #212 onward; any earlier attempt to run it was reading an absence that
+> meant nothing.
 
 **Q2 — Does scanning work while backgrounded without `bluetooth-central`?** *(unverified)*
 
@@ -1126,4 +1138,83 @@ SF Symbol by level and tints at or below 20% with `cyRatingBad`.
 
 ---
 
-*Cyclometer BLE Integration Spec v1.3 · 2026-08-14*
+## 15. Logging and Diagnostics
+
+Everything the app logs goes to one subsystem, `com.xavier.cyclometer`, under a per-area category.
+Stream it live with Console.app or the Xcode console; retrieve it after an untethered ride with
+`log collect --device --last 1h`.
+
+| Category | Written by |
+|---|---|
+| `ble` | `BLEClient`, `BatteryService` |
+| `radar` | `VariaRadarClient` |
+| `csc` | `BLECSCClient` |
+| `hr` | `BLEHRClient` |
+| `location`, `healthkit`, `permissions`, `persistence`, `audio`, `recording` | the non-BLE clients and `ActiveRideFeature` |
+
+### 15.1 Level policy — `.notice` persists, `.info` does not
+
+**`os_log` writes `.notice` and above to the persisted store. `.info` and `.debug` live in a memory
+ring buffer and are gone by the time anyone runs `log collect`.** That is the whole policy, and it
+decides every level in the BLE clients:
+
+- **Anything needed to reconstruct a ride afterwards is `.notice`.** Per-sample sensor telemetry,
+  connection lifecycle, parse failures, role changes. There is no `.info` anywhere under
+  `Clients/BLE/`, and CI fails the build if one appears — nothing else can catch it, since no test
+  can observe an `os.Logger`.
+- **`.debug` is for what only helps while tethered.** Currently one call site: radar frames
+  carrying no target.
+- **A `.notice` on a per-notification path must be rate-limited.** `LogSampleGate` admits at most
+  one line per whole second of `ProcessInfo.processInfo.systemUptime`. It buckets rather than
+  measuring the interval since the last line, so a nominally-1 Hz sensor whose packets jitter
+  either side of a second is not silently halved.
+- **Build a raw-frame hex string inside the log interpolation, never into a `let` above it.**
+  `OSLogMessage` takes its arguments as `@autoclosure`, so an interpolated `Data.loggableHex` costs
+  nothing at a disabled level. A hoisted `let` runs on every notification whatever the level.
+
+> **The gate has no bypass, deliberately (#212).** A draft admitted any frame whose emitted values
+> changed shape, so a rate dropping out could never be the sample the gate discarded.
+> `CSCCalculator.update` withholds a rate on five routine paths — priming, a stopped counter below
+> `zeroThreshold`, a zero time delta, re-priming after a stop, and an over-cap spike — so the shape
+> flips on every stop-and-go and the bound below would not hold. At one line a second a dropout is
+> visible within a second anyway.
+
+### 15.2 Persisted entry budget
+
+Per riding hour, subsystem `com.xavier.cyclometer`:
+
+| Source | Level | Gate | Entries per hour |
+|---|---|---|---|
+| Radar frame, no target | `.debug` | — | 0 persisted |
+| Radar frame, ≥1 target | `.notice` | none — 8 Hz while a vehicle is in range | 0 – 28,800; ~3,800 at the traffic measured on ride 2026-09-06 |
+| Radar frame, parse failed | `.notice` | none | 0 in normal operation |
+| Radar first frame of a connection | `.notice` | one per connection | a handful |
+| Radar liveness summary | `.notice` | 1 / 60 s | 60 |
+| CSC measurement | `.notice` | ≤1/s per peripheral | ≤3,600, or ≤7,200 with separate speed and cadence sensors |
+| HR measurement | `.notice` | ≤1/s | ≤3,600 |
+| Battery (0x180F) | `.notice` | sensor-driven, on change | typically <10 |
+| Scan, discovery, connection, reconnect | `.notice` | per event | ~200 |
+| **Typical ride** | | | **~11,000** |
+| **Worst case** | | | **~40,000** |
+
+Radar frames carrying a target are the one unbounded row, and deliberately so: at 8 Hz a vehicle
+closing at 16 m/s is sampled every 2 m, and that resolution is what the vehicle-pass defects in
+#207–#209 were diagnosed from. The volume is set by traffic, not by the app. Every other row is
+bounded by the app.
+
+> **Where these numbers come from (#212).** A `.logarchive` collected after ride 2026-09-06
+> (11:55–12:10 EDT) held **4,330** persisted entries. **4,275** of them were `VariaRadarClient`
+> alert frames at a sustained **8.01 Hz** — 98.7% of everything the app wrote — of which **3,710**
+> carried no target at all. Parse failures, the reason the frame log exists: **zero**. Speed,
+> cadence and HR samples: **zero**, all three logged at `.info`. A quiet hour therefore cost about
+> 29,000 entries, all of them `alert frame [..] → 0 target(s)`, and bought no telemetry.
+>
+> Dropping empty frames to `.debug` is what removes that floor. It costs the evidence that the
+> radar is alive at all, which is why two lines replace it: one raw frame per connection, and a
+> summary a minute. `parseAlert` returns `[]` rather than nil for a frame it reads as empty, so a
+> payload layout wrong in a way that yields no threats would otherwise log nothing at any level —
+> and §3.1's alert characteristic numbering is still marked unvalidated.
+
+---
+
+*Cyclometer BLE Integration Spec v1.4 · 2026-09-07*

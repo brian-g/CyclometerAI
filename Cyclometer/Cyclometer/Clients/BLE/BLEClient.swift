@@ -290,7 +290,7 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
     /// Must be called on bleQueue.
     private func rescan() {
         guard manager.state == .poweredOn else {
-            logger.info("rescan deferred — manager state \(self.manager.state.rawValue) (resumes on poweredOn)")
+            logger.notice("rescan deferred — manager state \(self.manager.state.rawValue) (resumes on poweredOn)")
             return
         }
         if requestedServices.isEmpty {
