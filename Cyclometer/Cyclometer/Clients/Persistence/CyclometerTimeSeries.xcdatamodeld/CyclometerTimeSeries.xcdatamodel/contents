@@ -10,10 +10,10 @@
         <attribute name="horizontalAccuracyMeters" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="speedMPS" attributeType="Double" defaultValueString="-1.0" usesScalarValueType="YES"/>
         <attribute name="speedSourceRaw" attributeType="String"/>
-        <attribute name="heartRateBPM" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="heartRateBPM" attributeType="Integer 16" defaultValueString="-1" usesScalarValueType="YES"/>
         <attribute name="heartRateSourceRaw" attributeType="String"/>
-        <attribute name="cadenceRPM" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
-        <attribute name="powerWatts" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="cadenceRPM" attributeType="Integer 16" defaultValueString="-1" usesScalarValueType="YES"/>
+        <attribute name="powerWatts" attributeType="Integer 16" defaultValueString="-1" usesScalarValueType="YES"/>
         <fetchIndex name="byRideIdIndex">
             <fetchIndexElement property="rideId" type="Binary" order="ascending"/>
         </fetchIndex>

@@ -574,6 +574,35 @@ struct BLECSCIntegrationTests {
         #expect(await cadences.next() == 60.0)
     }
 
+    @Test("Coasting to a stop broadcasts cadence 0, rather than withholding a value")
+    func coastToZeroBroadcastsZero() async {
+        // The stationary crank has to reach the recorder as a real 0, not as silence:
+        // silence leaves the last positive reading standing, and a nil reading exports
+        // as an absent element, which PRD §8.7 reserves for an inactive sensor (#211).
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.setRoles(id, [.cadence])
+
+        var cadences = harness.client.cadence().makeAsyncIterator()
+        func yieldCrank(revs: UInt16, time: UInt16) {
+            harness.events.yield(.characteristicValueUpdated(
+                peripheralID: id, characteristicUUID: cscMeasurementUUID,
+                value: cscPayload(crankRevs: revs, crankTime: time)
+            ))
+        }
+
+        yieldCrank(revs: 50, time: 0)         // primes
+        yieldCrank(revs: 52, time: 2048)      // 2 revs / 2 s = 60 rpm
+        #expect(await cadences.next() == 60.0)
+
+        // A stationary crank repeats its counter. Three duplicates clear
+        // `CSCCalculator.zeroThreshold`; the first two emit nothing.
+        yieldCrank(revs: 52, time: 2048)
+        yieldCrank(revs: 52, time: 2048)
+        yieldCrank(revs: 52, time: 2048)
+        #expect(await cadences.next() == 0.0)
+    }
+
     @Test("Multi-sensor: dedicated speed sensor + combo-as-cadence gate by assigned role")
     func multiSensorRoleGating() async {
         let harness = Harness()

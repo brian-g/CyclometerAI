@@ -103,12 +103,16 @@ private func batchInsertTrackPoints(_ points: [TrackPointDTO], container: NSPers
         mo.longitude = point.longitude
         mo.altitudeMeters = point.altitudeMeters
         mo.horizontalAccuracyMeters = point.horizontalAccuracyMeters
+        // Every optional sensor field stores "no reading" as a negative sentinel, because
+        // the attributes are non-optional scalars. It has to be negative, not 0: a
+        // coasting rider genuinely reads 0 rpm and a stopped rider 0 m/s, and 0 as the
+        // sentinel silently erased those readings on the way back out (#211).
         mo.speedMPS = point.speedMPS ?? -1.0
         mo.speedSourceRaw = point.speedSource.rawValue
-        mo.heartRateBPM = Int16(clamping: point.heartRateBPM ?? 0)
+        mo.heartRateBPM = Int16(clamping: point.heartRateBPM ?? -1)
         mo.heartRateSourceRaw = point.heartRateSource.rawValue
-        mo.cadenceRPM = Int16(clamping: point.cadenceRPM ?? 0)
-        mo.powerWatts = Int16(clamping: point.powerWatts ?? 0)
+        mo.cadenceRPM = Int16(clamping: point.cadenceRPM ?? -1)
+        mo.powerWatts = Int16(clamping: point.powerWatts ?? -1)
         index += 1
         return false
     })
@@ -135,12 +139,14 @@ private func fetchTrackPointsLive(rideId: UUID, container: NSPersistentContainer
                 longitude: mo.longitude,
                 altitudeMeters: mo.altitudeMeters,
                 horizontalAccuracyMeters: mo.horizontalAccuracyMeters,
+                // Negative is the "no reading" sentinel for every optional sensor
+                // field; 0 is a real measurement and round-trips as one (#211).
                 speedMPS: mo.speedMPS < 0 ? nil : mo.speedMPS,
                 speedSource: SensorSource(rawValue: mo.speedSourceRaw) ?? .none,
-                heartRateBPM: mo.heartRateBPM == 0 ? nil : Int(mo.heartRateBPM),
+                heartRateBPM: mo.heartRateBPM < 0 ? nil : Int(mo.heartRateBPM),
                 heartRateSource: SensorSource(rawValue: mo.heartRateSourceRaw) ?? .none,
-                cadenceRPM: mo.cadenceRPM == 0 ? nil : Int(mo.cadenceRPM),
-                powerWatts: mo.powerWatts == 0 ? nil : Int(mo.powerWatts)
+                cadenceRPM: mo.cadenceRPM < 0 ? nil : Int(mo.cadenceRPM),
+                powerWatts: mo.powerWatts < 0 ? nil : Int(mo.powerWatts)
             )
         }
     }
