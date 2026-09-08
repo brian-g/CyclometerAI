@@ -24,6 +24,21 @@ struct HealthKitHRSample: Equatable, Sendable {
     let receivedAt: Date
 }
 
+/// The last reading worth showing, kept alive for `hrHoldWindow` after the strap stops
+/// producing one (#221) so a one-second contact loss doesn't blank the hero number.
+///
+/// Carries its zone rather than re-deriving it on read: the zone came from the rider's
+/// profile at the instant the reading landed, and recomputing it later would let a
+/// profile edit retroactively re-colour a value already on screen.
+///
+/// Display-only. `makeTrackPoint` deliberately ignores this — a per-second time series
+/// that repeated a held value would be fabricating measurements the strap never took.
+struct HeldHeartRate: Equatable, Sendable {
+    let bpm: Int
+    let zone: Int
+    let heldSince: Date
+}
+
 @Reducer
 struct ActiveRideFeature {
 
@@ -45,6 +60,31 @@ struct ActiveRideFeature {
     /// but it still has to reject a reading old enough that showing it as current would
     /// mislead the rider. Five minutes is the balance chosen between those two.
     static let healthKitHRStalenessWindow: TimeInterval = 5 * 60
+
+    /// How long the last good BLE reading stays on screen after the strap stops
+    /// producing one (#221).
+    ///
+    /// Sized from ride 2026-09-08, where a healthy TICKR notifying at a steady 1 Hz
+    /// still sent `bpm 0` — its no-contact sentinel — on 27% of packets, in runs whose
+    /// lengths clustered at 1, 2 and 5 samples. Five seconds absorbs those without
+    /// hiding a strap that has genuinely stopped reading: past it the rider sees `—`
+    /// and knows to adjust the strap. Longer would start passing off a stale number as
+    /// current, which is the failure this must not trade into.
+    static let hrHoldWindow: TimeInterval = 5
+
+    /// How long after a strap connects its readings are discarded (#221).
+    ///
+    /// A TICKR's first packets after a connection are its internal averaging window
+    /// refilling, not the rider: the 2026-09-08 reconnect produced `41, 70, 67, 77, 85,
+    /// 85, 98, 113, 135` over nine seconds while the rider held a steady climb. Ten
+    /// seconds covers that ramp. It costs nothing at a normal ride start — pairing
+    /// completes during the start sheet, seconds before `.task` begins recording, so
+    /// the window has already elapsed by the first `.elapsedTick`.
+    ///
+    /// Applied at the pairing transition rather than to zero-recovery generally, which
+    /// would be the wrong shape: every non-reconnect recovery in that ride resumed at a
+    /// plausible value on its very first sample.
+    static let hrWarmUpWindow: TimeInterval = 10
 
     @Dependency(\.continuousClock) var clock
     @Dependency(\.bleHRClient) var bleHRClient
@@ -89,14 +129,70 @@ struct ActiveRideFeature {
         /// `healthKitHRStalenessWindow`) — the two are indistinguishable from here on
         /// out, which is correct: neither is safe to show as a live reading.
         var healthKitHRSample: HealthKitHRSample? = nil
+        /// Which source produced the current `heartRateBPM` (#221).
+        ///
+        /// Deliberately *not* the same question as `hrSource`, which reports what is
+        /// connected. The two disagree exactly when a paired strap has gone silent and a
+        /// HealthKit sample is covering for it: `hrSource` still says `.bleStrap`,
+        /// because a strap is still connected and the rider should not be told to pair
+        /// one, while this says `.appleWatch`, because that is who measured the number.
+        /// `makeTrackPoint` needs the latter — a recorded provenance tag that named the
+        /// wrong sensor would be worse than no tag.
+        ///
+        /// Written only by `applyHeartRateReading`, which is the single path every
+        /// reading from either source takes; that is a stronger guarantee against drift
+        /// than deriving it would be, since there is nothing to derive it from.
+        var heartRateProvenance: SensorSource = .none
+        /// `receivedAt` of the HealthKit sample already written to a track point (#221).
+        ///
+        /// A strap measures once a second, so recording its reading on every tick is
+        /// recording measurements. A HealthKit sample does not: outside a workout the
+        /// Watch's writes land minutes apart (`healthKitHRStalenessWindow`), so a tick
+        /// that re-recorded the covering sample would invent a measurement per second
+        /// out of one real one. Ride 2026-09-08 is the evidence — its 37-second strap
+        /// outage exported a frozen `<gpxtpx:hr>103</gpxtpx:hr>` on 37 consecutive
+        /// track points, one HealthKit reading wearing 37 timestamps.
+        ///
+        /// The sample still drives the *display* for as long as it is fresh; only the
+        /// per-second time series is held to one row per measurement.
+        var recordedHealthKitSampleAt: Date? = nil
+        /// The reading being held on screen while the strap is silent (#221), or `nil`
+        /// when the display is live, nothing has been read yet, or the hold has expired.
+        var heldHR: HeldHeartRate? = nil
+        /// Deadline before which strap readings are discarded as unreliable (#221), set
+        /// at each pairing transition. `nil` once it has passed — see `isHRWarmingUp`.
+        var hrWarmUpEndsAt: Date? = nil
         /// Computed, not stored: every existing `State(...)` literal that sets
         /// `heartRateBPM`/`isHRPaired` without knowing about this field keeps deriving
         /// the right answer, and the value can never drift out of sync with the two
         /// fields it reads.
+        ///
+        /// Reports *connectivity*, not the provenance of the displayed number — a strap
+        /// that is connected but reading nothing is still the ride's HR source, and
+        /// answering `.none` there would tell the rider to go pair a strap they are
+        /// already wearing. `heartRateProvenance` answers the other question.
         var hrSource: HRSource {
             if isHRPaired { return .bleStrap }
             if healthKitHRSample != nil { return .healthKit }
             return .none
+        }
+        /// The bpm the dashboard should show: the live reading, or the held one while
+        /// the strap is briefly silent, or `0` for "no reading" (#221).
+        var displayHeartRateBPM: Int {
+            heartRateBPM > 0 ? heartRateBPM : (heldHR?.bpm ?? 0)
+        }
+        /// The zone matching `displayHeartRateBPM`, so W4 and W12 can never disagree.
+        var displayHRZone: Int {
+            heartRateBPM > 0 ? hrZone : (heldHR?.zone ?? 0)
+        }
+        /// Whether this second's reading is a measurement worth writing to the track,
+        /// as opposed to no reading at all or a HealthKit sample already recorded
+        /// (#221). Note it reads `heartRateBPM`, never `displayHeartRateBPM` — a held
+        /// value is a display affordance and belongs to no particular second.
+        var isHeartRateRecordable: Bool {
+            guard heartRateBPM > 0 else { return false }
+            guard heartRateProvenance == .appleWatch else { return true }
+            return healthKitHRSample?.receivedAt != recordedHealthKitSampleAt
         }
         var cadence = CadenceFeature.State()
         var distanceMeters: Double = 0
@@ -453,11 +549,30 @@ struct ActiveRideFeature {
                     try? await persistenceClient.updateRideSummary(update)
                 }
             case .heartRateUpdated(let bpm):
-                applyHeartRateReading(bpm, to: &state)
+                // Everything the strap says during its post-connect warm-up is its own
+                // averaging window refilling rather than the rider (#221) — dropped
+                // here, before it can reach either the display or the ride average.
+                if let warmUpEndsAt = state.hrWarmUpEndsAt {
+                    guard date.now >= warmUpEndsAt else { return .none }
+                    state.hrWarmUpEndsAt = nil
+                }
+                if bpm > 0 {
+                    applyHeartRateReading(bpm, from: .bleHR, to: &state)
+                } else {
+                    markStrapSilent(in: &state)
+                }
                 return .none
             case .hrPairingChanged(let paired):
                 state.isHRPaired = paired
-                guard !paired else { return .none }
+                guard !paired else {
+                    state.hrWarmUpEndsAt = date.now + Self.hrWarmUpWindow
+                    return .none
+                }
+                // A disconnect is unambiguous, so it blanks immediately rather than
+                // riding out `hrHoldWindow` — that hold exists for a strap that is still
+                // there and momentarily not reading, which this is not (#221).
+                state.heldHR = nil
+                state.hrWarmUpEndsAt = nil
                 // BLE is gone — promote whatever HealthKit shadow value is already on
                 // hand immediately (#161). There is no grace window to wait out here:
                 // unlike `BLECSCClient.connectionState()`, `bleHRClient.pairingStatus()`
@@ -465,10 +580,11 @@ struct ActiveRideFeature {
                 // committed "strap is gone now" signal.
                 expireStaleHealthKitSample(in: &state)
                 if let sample = state.healthKitHRSample {
-                    applyHeartRateReading(sample.bpm, to: &state)
+                    applyHeartRateReading(sample.bpm, from: .appleWatch, to: &state)
                 } else {
                     state.heartRateBPM = 0
                     state.hrZone = 0
+                    state.heartRateProvenance = .none
                 }
                 return .none
             case .healthProfileFetched(let restingBPM, let maxBPM):
@@ -486,7 +602,7 @@ struct ActiveRideFeature {
                 // update that doesn't touch the displayed reading — mirrors
                 // SpeedFeature.gpsSpeedReceived's identical BLE-vs-GPS guard.
                 guard !state.isHRPaired else { return .none }
-                applyHeartRateReading(bpm, to: &state)
+                applyHeartRateReading(bpm, from: .appleWatch, to: &state)
                 return .none
             case .cadence:
                 return .none
@@ -500,10 +616,21 @@ struct ActiveRideFeature {
                 // screen, with no disconnect event to catch it — piggyback the check
                 // on this once-a-second tick rather than adding a second timer (#161).
                 expireStaleHealthKitSample(in: &state)
-                if !state.isHRPaired, state.healthKitHRSample == nil {
+                if state.healthKitHRSample == nil,
+                   !state.isHRPaired || state.heartRateProvenance == .appleWatch {
+                    // Either nothing is paired and the shadow it was living on has aged
+                    // out (#161), or a paired-but-silent strap was being covered by a
+                    // HealthKit sample that has now aged out too (#221). Both leave the
+                    // displayed number with no source behind it.
                     state.heartRateBPM = 0
                     state.hrZone = 0
+                    state.heartRateProvenance = .none
                 }
+                // Ordered hold-then-cover: while the hold is alive the strap's own last
+                // reading is the freshest thing available, and only once it expires is a
+                // HealthKit sample the best on offer (#221).
+                expireHeldHR(in: &state)
+                coverSilentStrapWithHealthKit(in: &state)
                 state.elapsedSeconds += 1
                 state.distanceMeters += max(state.speed.speedMPS ?? 0, 0)
                 if (state.speed.speedMPS ?? 0) == 0 {
@@ -518,6 +645,11 @@ struct ActiveRideFeature {
                 // silently if GPS hasn't locked yet (rare — ride start already
                 // requires a GPS lock, PRD §8.8).
                 if let point = makeTrackPoint(from: state) {
+                    // Claim the HealthKit sample this point just carried, so the next
+                    // tick records absence rather than the same reading again (#221).
+                    if point.heartRateSource == .appleWatch {
+                        state.recordedHealthKitSampleAt = state.healthKitHRSample?.receivedAt
+                    }
                     effects.append(.send(.trackRecorder(.timerTick(point))))
                 }
 
@@ -722,20 +854,76 @@ struct ActiveRideFeature {
     /// here — M5's HealthKit terms then thread through one place instead of every call
     /// site that re-assembles the pair. Factored out (#161) so BLE, HealthKit, and the
     /// disconnect fallback can never derive the zone differently by accident.
-    private func applyHeartRateReading(_ bpm: Int, to state: inout State) {
+    private func applyHeartRateReading(
+        _ bpm: Int,
+        from provenance: SensorSource,
+        to state: inout State
+    ) {
         state.heartRateBPM = bpm
-        state.hrZone = state.riderProfile.zone(
-            forBPM: bpm,
-            healthResting: state.healthRestingBPM,
-            healthMax: state.healthMaxBPM
-        ).rawValue
+        state.heartRateProvenance = bpm > 0 ? provenance : .none
+        // A living rider is never at 0 bpm, so a zero is the sensor saying "no reading",
+        // not a measurement — but Karvonen classifies it as zone 1 (< 60% HRR), which
+        // left W4 showing "—" while W12 showed "Z1" and both widgets tinted themselves
+        // zone-1 green (#221). Zone 0 is the "no zone" sentinel both widgets already
+        // render as "—", and is what the unpair path has always set.
+        state.hrZone = bpm > 0
+            ? state.riderProfile.zone(
+                forBPM: bpm,
+                healthResting: state.healthRestingBPM,
+                healthMax: state.healthMaxBPM
+              ).rawValue
+            : 0
         if bpm > 0 {
             state.hrSampleCount += 1
             state.hrSampleSum += Double(bpm)
+            state.heldHR = HeldHeartRate(bpm: bpm, zone: state.hrZone, heldSince: date.now)
         }
         if bpm > state.maxHeartRateBPM {
             state.maxHeartRateBPM = bpm
         }
+    }
+
+    /// Drops the held reading once it has aged past `hrHoldWindow` (#221), so the
+    /// dashboard falls to "—" rather than showing a stale number indefinitely.
+    ///
+    /// Swept on `.elapsedTick` rather than answered in `displayHeartRateBPM`, for the
+    /// same reason `expireStaleHealthKitSample` is: state can't reach `@Dependency(\.date)`,
+    /// and a 1 Hz sweep is exactly the resolution a 5-second window needs.
+    private func expireHeldHR(in state: inout State) {
+        guard let held = state.heldHR,
+              date.now.timeIntervalSince(held.heldSince) >= Self.hrHoldWindow
+        else { return }
+        state.heldHR = nil
+    }
+
+    /// Records that the strap sent a contact-loss zero (#221).
+    ///
+    /// A zero is not a reading, so it does not go through `applyHeartRateReading` — it
+    /// clears the live value (leaving `heldHR` to carry the display, and leaving
+    /// `makeTrackPoint` nothing to record for this second) without touching a HealthKit
+    /// reading that has already been promoted to cover this same silence. Without that
+    /// last guard the strap's 1 Hz zeros would knock the cover down every second and
+    /// `coverSilentStrapWithHealthKit` would re-promote — re-counting one sample into
+    /// the ride average once per second.
+    private func markStrapSilent(in state: inout State) {
+        guard state.heartRateProvenance != .appleWatch else { return }
+        state.heartRateBPM = 0
+        state.hrZone = 0
+        state.heartRateProvenance = .none
+    }
+
+    /// Promotes the HealthKit shadow sample when nothing else has a reading to show
+    /// (#221) — including while a strap is still *paired* but sending contact-loss
+    /// zeros, which is the case #161's disconnect-only fallback could never reach.
+    ///
+    /// Ordered strictly after the BLE hold: a two-second-old strap reading beats a
+    /// HealthKit sample that may be minutes old (`healthKitHRStalenessWindow`), so this
+    /// only fires once the hold has expired. Idempotent by construction — it promotes
+    /// only into an empty display, and its own promotion fills that display.
+    private func coverSilentStrapWithHealthKit(in state: inout State) {
+        guard state.heartRateBPM == 0, state.heldHR == nil else { return }
+        guard let sample = state.healthKitHRSample else { return }
+        applyHeartRateReading(sample.bpm, from: .appleWatch, to: &state)
     }
 
     /// Snapshot of the current running aggregates, written to the persisted Ride
@@ -797,22 +985,21 @@ struct ActiveRideFeature {
             horizontalAccuracyMeters: state.horizontalAccuracy,
             speedMPS: state.speed.speedMPS,
             speedSource: state.speed.activeSpeedSource,
-            heartRateBPM: state.hrSource == .none ? nil : state.heartRateBPM,
-            heartRateSource: Self.sensorSource(for: state.hrSource),
+            // Absent, not zero, for a second with no live reading — `SensorSource.none`'s
+            // own contract, and PRD §8.7's. Gated on the reading rather than on
+            // `hrSource`, which reports a connected strap even while it is sending its
+            // no-contact zeros: that gate exported 162 `<gpxtpx:hr>0</gpxtpx:hr>` elements
+            // across the 572 track points of ride 2026-09-08, pulling a consumer's mean
+            // HR from the real 98 bpm down to 70 (#221). Unlike cadence, where 0 rpm is a
+            // real measurement (#211), no living rider is at 0 bpm.
+            //
+            // `heartRateBPM`, not `displayHeartRateBPM`: a held value is a display
+            // affordance, and repeating it once a second would fabricate measurements.
+            heartRateBPM: state.isHeartRateRecordable ? state.heartRateBPM : nil,
+            heartRateSource: state.isHeartRateRecordable ? state.heartRateProvenance : .none,
             cadenceRPM: state.cadence.cadenceRPM,
             powerWatts: nil
         )
-    }
-
-    /// `HRSource` and `SensorSource` are separate enums — the former is HR-display-
-    /// specific (#161), the latter is the shared per-field provenance tag TrackPointDTO
-    /// (and every other sensor field) uses.
-    private static func sensorSource(for hrSource: HRSource) -> SensorSource {
-        switch hrSource {
-        case .none: .none
-        case .bleStrap: .bleHR
-        case .healthKit: .appleWatch
-        }
     }
 
     /// Drops a HealthKit shadow sample once it's aged past `healthKitHRStalenessWindow`

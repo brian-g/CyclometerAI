@@ -1682,10 +1682,12 @@ struct ActiveRideFeatureHeartRateTests {
         // (150 − 60) / 130 = 0.692 → zone 2 (endurance, 60–70% HRR).
         await store.send(.heartRateUpdated(150)) {
             $0.heartRateBPM = 150
+            $0.heartRateProvenance = .bleHR
             $0.hrZone = 2
             $0.hrSampleCount = 1
             $0.hrSampleSum = 150
             $0.maxHeartRateBPM = 150
+            $0.heldHR = HeldHeartRate(bpm: 150, zone: 2, heldSince: Self.fixedNow)
         }
     }
 
@@ -1700,10 +1702,12 @@ struct ActiveRideFeatureHeartRateTests {
         // under the defaults ((165 − 60) / 130 = 0.808), which is the point.
         await store.send(.heartRateUpdated(165)) {
             $0.heartRateBPM = 165
+            $0.heartRateProvenance = .bleHR
             $0.hrZone = 3
             $0.hrSampleCount = 1
             $0.hrSampleSum = 165
             $0.maxHeartRateBPM = 165
+            $0.heldHR = HeldHeartRate(bpm: 165, zone: 3, heldSince: Self.fixedNow)
         }
         #expect(store.state.riderProfile.resolvedMaxBPM() == 200)
         #expect(store.state.riderProfile.resolvedRestingBPM() == 45)
@@ -1731,6 +1735,7 @@ struct ActiveRideFeatureHeartRateTests {
         let store = makeStore()
         await store.send(.hrPairingChanged(true)) {
             $0.isHRPaired = true
+            $0.hrWarmUpEndsAt = Self.fixedNow + ActiveRideFeature.hrWarmUpWindow
         }
     }
 
@@ -1840,10 +1845,12 @@ struct ActiveRideFeatureHeartRateTests {
         await store.send(.hrPairingChanged(false)) {
             $0.isHRPaired = false
             $0.heartRateBPM = 72
+            $0.heartRateProvenance = .appleWatch
             $0.hrZone = 1
             $0.hrSampleCount = 1
             $0.hrSampleSum = 72
             $0.maxHeartRateBPM = 72
+            $0.heldHR = HeldHeartRate(bpm: 72, zone: 1, heldSince: Self.fixedNow)
         }
         #expect(store.state.hrSource == .healthKit)
     }
@@ -1911,6 +1918,7 @@ struct ActiveRideFeatureHeartRateTests {
         // BLE sample has to arrive first.
         await store.send(.hrPairingChanged(true)) {
             $0.isHRPaired = true
+            $0.hrWarmUpEndsAt = Self.fixedNow + ActiveRideFeature.hrWarmUpWindow
         }
         #expect(store.state.hrSource == .bleStrap)
     }
@@ -1930,10 +1938,12 @@ struct ActiveRideFeatureHeartRateTests {
         let store = makeStore()
         await store.send(.heartRateUpdated(140)) {
             $0.heartRateBPM = 140
+            $0.heartRateProvenance = .bleHR
             $0.hrZone = 2
             $0.hrSampleCount = 1
             $0.hrSampleSum = 140
             $0.maxHeartRateBPM = 140
+            $0.heldHR = HeldHeartRate(bpm: 140, zone: 2, heldSince: Self.fixedNow)
         }
         await store.send(.heartRateUpdated(160)) {
             $0.heartRateBPM = 160
@@ -1941,6 +1951,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleCount = 2
             $0.hrSampleSum = 300
             $0.maxHeartRateBPM = 160
+            $0.heldHR = HeldHeartRate(bpm: 160, zone: 3, heldSince: Self.fixedNow)
         }
         // A drop below the running max doesn't move maxHeartRateBPM.
         await store.send(.heartRateUpdated(120)) {
@@ -1949,22 +1960,338 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleCount = 3
             $0.hrSampleSum = 420
             $0.maxHeartRateBPM = 160
+            $0.heldHR = HeldHeartRate(bpm: 120, zone: 1, heldSince: Self.fixedNow)
         }
     }
 
     @Test("Zero bpm does not count toward the HR average")
     func zeroBPMDoesNotAccumulate() async {
         let store = makeStore()
+        // A contact-loss zero is not a reading: it moves no aggregate, and — since
+        // nothing was on screen to begin with — no displayed field either (#221).
+        // Before #221 it also landed in Karvonen zone 1, tinting both HR widgets
+        // green while the hero number read "—".
+        await store.send(.heartRateUpdated(0))
+        #expect(store.state.hrSampleCount == 0)
+        #expect(store.state.hrSampleSum == 0)
+        #expect(store.state.maxHeartRateBPM == 0)
+        #expect(store.state.hrZone == 0)
+        #expect(store.state.displayHRZone == 0)
+    }
+}
+
+// MARK: - HR dropout handling (#221)
+
+/// Ride 2026-09-08 is the worked example behind every number in this suite. A healthy
+/// TICKR notifying at a steady 1 Hz sent `bpm 0` — its no-contact sentinel, not a
+/// measurement — on 134 of 491 packets, and the dashboard mirrored each one straight
+/// into a `—`. Six of the twenty zero-runs were a single sample long.
+@MainActor
+@Suite("ActiveRideFeature — HR dropout handling")
+struct ActiveRideFeatureHRDropoutTests {
+
+    private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
+
+    /// An empty profile resolves to maxHR 190 / restingHR 60 → HRR 130, so
+    /// (150 − 60) / 130 = 0.692 → zone 2. Every reading below is read against that.
+    private static let heldAt150 = HeldHeartRate(bpm: 150, zone: 2, heldSince: fixedNow)
+
+    /// Unlike the sibling HR suite's `.constant` generator, this one is advanceable:
+    /// both windows under test are expiries, and an expiry can only be observed by
+    /// moving the clock the reducer reads. Storage is quarantined per store for the
+    /// same reason it is there — the zone derives from the shared `RiderProfile`.
+    private func makeStore(
+        now: LockIsolated<Date>,
+        healthKitClient: HealthKitClient = .testValue,
+        _ state: @autoclosure () -> ActiveRideFeature.State
+            = ActiveRideFeature.State(recordingState: .active, isHRPaired: true)
+    ) -> TestStoreOf<ActiveRideFeature> {
+        let storage = FileStorage.inMemory
+        return withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.riderProfile) var stored
+            $stored.withLock { $0 = RiderProfile() }
+            return TestStore(initialState: state()) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.continuousClock = TestClock()
+                $0.hapticsClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.healthKitClient = healthKitClient
+                $0.date = DateGenerator { now.value }
+                $0.uuid = .incrementing
+                $0.defaultFileStorage = storage
+            }
+        }
+    }
+
+    // MARK: Hold window
+
+    @Test("A single contact-loss zero leaves the hero number unchanged")
+    func singleZeroDoesNotBlankTheDisplay() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+
+        await store.send(.heartRateUpdated(150)) {
+            $0.heartRateBPM = 150
+            $0.heartRateProvenance = .bleHR
+            $0.hrZone = 2
+            $0.hrSampleCount = 1
+            $0.hrSampleSum = 150
+            $0.maxHeartRateBPM = 150
+            $0.heldHR = Self.heldAt150
+        }
+        // The live reading is gone — nothing may be recorded for this second — but the
+        // held one carries the display, which is the whole point of the window.
         await store.send(.heartRateUpdated(0)) {
             $0.heartRateBPM = 0
-            // Karvonen classifies a 0 bpm reading as zone 1 (intensity < 60% HRR) —
-            // this test only cares that it doesn't move the aggregate fields.
-            $0.hrZone = 1
+            $0.heartRateProvenance = .none
+            $0.hrZone = 0
+        }
+        #expect(store.state.displayHeartRateBPM == 150)
+        #expect(store.state.displayHRZone == 2)
+    }
+
+    @Test("A zero-run inside the hold window survives an elapsed tick")
+    func holdSurvivesWithinTheWindow() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.heartRateUpdated(150))
+        await store.send(.heartRateUpdated(0))
+        now.setValue(Self.fixedNow + ActiveRideFeature.hrHoldWindow - 1)
+        await store.send(.elapsedTick)
+
+        #expect(store.state.heldHR == Self.heldAt150)
+        #expect(store.state.displayHeartRateBPM == 150)
+    }
+
+    @Test("A zero-run past the hold window falls to no reading")
+    func holdExpiresPastTheWindow() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.heartRateUpdated(150))
+        await store.send(.heartRateUpdated(0))
+        now.setValue(Self.fixedNow + ActiveRideFeature.hrHoldWindow)
+        await store.send(.elapsedTick)
+
+        #expect(store.state.heldHR == nil)
+        #expect(store.state.displayHeartRateBPM == 0)
+        #expect(store.state.displayHRZone == 0)
+        // Still a connected strap, so the widget shows "—" rather than "No HR Source".
+        #expect(store.state.hrSource == .bleStrap)
+    }
+
+    @Test("A disconnect blanks immediately rather than riding out the hold")
+    func disconnectClearsTheHold() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.heartRateUpdated(150))
+        #expect(store.state.heldHR == Self.heldAt150)
+        // The hold exists for a strap that is still there and momentarily not reading.
+        // A disconnect is not that, and holding through one would be a lie about a
+        // sensor that has left.
+        await store.send(.hrPairingChanged(false))
+
+        #expect(store.state.heldHR == nil)
+        #expect(store.state.displayHeartRateBPM == 0)
+        #expect(store.state.hrSource == .none)
+    }
+
+    // MARK: Post-connect warm-up
+
+    @Test("The reconnect ramp reaches neither the display nor the ride average")
+    func warmUpDiscardsTheReconnectRamp() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now, ActiveRideFeature.State(recordingState: .active))
+        store.exhaustivity = .off
+
+        await store.send(.hrPairingChanged(true))
+        #expect(store.state.hrWarmUpEndsAt == Self.fixedNow + ActiveRideFeature.hrWarmUpWindow)
+
+        // The strap's own words after the 2026-09-08 reconnect, one per second. `41`
+        // while climbing at 17 kph is its averaging window refilling, not the rider.
+        for (offset, bpm) in [41, 70, 67, 77, 85, 85, 98, 113].enumerated() {
+            now.setValue(Self.fixedNow + Double(offset + 1))
+            await store.send(.heartRateUpdated(bpm))
         }
         #expect(store.state.hrSampleCount == 0)
         #expect(store.state.hrSampleSum == 0)
         #expect(store.state.maxHeartRateBPM == 0)
+        #expect(store.state.displayHeartRateBPM == 0)
+
+        // Past the window the strap is trusted again, on the very next packet.
+        now.setValue(Self.fixedNow + ActiveRideFeature.hrWarmUpWindow)
+        await store.send(.heartRateUpdated(135))
+        #expect(store.state.hrWarmUpEndsAt == nil)
+        #expect(store.state.heartRateBPM == 135)
+        #expect(store.state.hrSampleCount == 1)
+        #expect(store.state.maxHeartRateBPM == 135)
     }
+
+    @Test("A ride whose strap paired before recording began is not warmed up mid-ride")
+    func warmUpDoesNotPenaliseANormalRideStart() async {
+        let now = LockIsolated(Self.fixedNow)
+        // Pairing completes during the start sheet — on 2026-09-08, 14 s before the
+        // first track point. `State(recordingState: .active, isHRPaired: true)` is that
+        // ride: already paired, no warm-up deadline outstanding.
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.heartRateUpdated(150))
+        #expect(store.state.heartRateBPM == 150)
+        #expect(store.state.hrSampleCount == 1)
+    }
+
+    // MARK: HealthKit covering a silent strap (#161 extended)
+
+    @Test("A paired but silent strap is covered by HealthKit once the hold expires")
+    func healthKitCoversASilentStrap() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.heartRateUpdated(150))
+        await store.send(.healthKitHeartRateUpdated(72))
+        await store.send(.heartRateUpdated(0))
+        // Inside the hold the strap's own 1-second-old reading still beats a HealthKit
+        // sample that may be minutes old, so nothing is promoted yet.
+        #expect(store.state.displayHeartRateBPM == 150)
+
+        now.setValue(Self.fixedNow + ActiveRideFeature.hrHoldWindow)
+        await store.send(.elapsedTick)
+
+        // (72 − 60) / 130 = 0.092 → zone 1.
+        #expect(store.state.displayHeartRateBPM == 72)
+        #expect(store.state.displayHRZone == 1)
+        #expect(store.state.heartRateProvenance == .appleWatch)
+        // The rider is still wearing a connected strap; telling them to pair one would
+        // be wrong, so `hrSource` — which reports connectivity — does not move.
+        #expect(store.state.hrSource == .bleStrap)
+    }
+
+    @Test("A HealthKit cover is not re-counted into the average once per second")
+    func healthKitCoverIsCountedOnce() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.healthKitHeartRateUpdated(72))
+        await store.send(.heartRateUpdated(0))
+        now.setValue(Self.fixedNow + ActiveRideFeature.hrHoldWindow)
+        await store.send(.elapsedTick)
+        #expect(store.state.hrSampleCount == 1)
+
+        // The strap keeps sending its zeros at 1 Hz while the cover stands. Each one
+        // must leave the cover alone: knocking it down and re-promoting would count the
+        // same single sample into the ride average once every second.
+        for offset in 1...5 {
+            now.setValue(Self.fixedNow + ActiveRideFeature.hrHoldWindow + Double(offset))
+            await store.send(.heartRateUpdated(0))
+            await store.send(.elapsedTick)
+        }
+        #expect(store.state.hrSampleCount == 1)
+        #expect(store.state.hrSampleSum == 72)
+        #expect(store.state.displayHeartRateBPM == 72)
+    }
+
+    @Test("A cover that goes stale clears, rather than sitting on screen as current")
+    func staleCoverClears() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.healthKitHeartRateUpdated(72))
+        await store.send(.heartRateUpdated(0))
+        now.setValue(Self.fixedNow + ActiveRideFeature.hrHoldWindow)
+        await store.send(.elapsedTick)
+        #expect(store.state.displayHeartRateBPM == 72)
+
+        now.setValue(Self.fixedNow + ActiveRideFeature.healthKitHRStalenessWindow)
+        await store.send(.elapsedTick)
+
+        #expect(store.state.healthKitHRSample == nil)
+        #expect(store.state.displayHeartRateBPM == 0)
+        #expect(store.state.heartRateProvenance == .none)
+    }
+
+    // MARK: Recorded track points
+
+    /// PRD §8.7: fields must be "correctly absent (not zero) for seconds with no active
+    /// sensor", which `SensorSource.none`'s own doc comment repeats. Ride 2026-09-08
+    /// exported 162 `<gpxtpx:hr>0</gpxtpx:hr>` elements across 572 track points, pulling
+    /// a consumer's mean HR from the real 98 bpm down to 70.
+    @Test("A second with no live reading records absent HR, not zero")
+    func noReadingRecordsAbsentHR() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.heartRateUpdated(150))
+        await store.send(.elapsedTick)
+        await store.send(.heartRateUpdated(0))
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.count == 2)
+        #expect(recorded[0].heartRateBPM == 150)
+        #expect(recorded[0].heartRateSource == .bleHR)
+        // Absent, not 0 — and specifically not the 150 still on screen: a held value is
+        // a display affordance, and repeating it here would fabricate a measurement the
+        // strap never took.
+        #expect(recorded[1].heartRateBPM == nil)
+        #expect(recorded[1].heartRateSource == .none)
+        #expect(store.state.displayHeartRateBPM == 150)
+    }
+
+    /// Ride 2026-09-08's 37-second strap outage exported a frozen
+    /// `<gpxtpx:hr>103</gpxtpx:hr>` on 37 consecutive track points — one HealthKit
+    /// reading wearing 37 timestamps, because #161's fallback promoted it to the
+    /// displayed value and every tick then recorded whatever was displayed.
+    @Test("A covering HealthKit sample is recorded once, not once per second")
+    func healthKitSampleIsRecordedOnce() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.healthKitHeartRateUpdated(72))
+        await store.send(.hrPairingChanged(false))
+        for offset in 1...5 {
+            now.setValue(Self.fixedNow + Double(offset))
+            await store.send(.elapsedTick)
+        }
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        let watchRows = recorded.filter { $0.heartRateSource == .appleWatch }
+        #expect(watchRows.count == 1)
+        #expect(watchRows.first?.heartRateBPM == 72)
+        #expect(recorded.dropFirst().allSatisfy { $0.heartRateBPM == nil })
+        // It is still the best reading available, so it stays on screen throughout.
+        #expect(store.state.displayHeartRateBPM == 72)
+    }
+
+    private static let goodFix = LocationUpdate(
+        coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
+        altitude: 280.0,
+        speed: 8.5,
+        horizontalAccuracy: 5.0,
+        heading: 192.0,
+        timestamp: fixedNow
+    )
 }
 
 // MARK: - Calibration suspension
