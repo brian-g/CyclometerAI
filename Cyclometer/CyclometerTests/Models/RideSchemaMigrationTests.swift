@@ -83,21 +83,6 @@ private enum RideSchemaBeforeSampleCounts {
 @Suite("Ride schema migration")
 struct RideSchemaMigrationTests {
 
-    /// Runs `body` against a unique on-disk store URL, then removes the store and
-    /// its SQLite sidecars. On disk rather than `isStoredInMemoryOnly` by
-    /// necessity: an in-memory store has nothing to migrate *from*.
-    private func withTemporaryStoreURL(_ body: (URL) throws -> Void) throws {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("RideMigration-\(UUID().uuidString)")
-            .appendingPathExtension("store")
-        defer {
-            for path in [url.path, url.path + "-wal", url.path + "-shm"] {
-                try? FileManager.default.removeItem(atPath: path)
-            }
-        }
-        try body(url)
-    }
-
     /// Writes one `Ride` in the pre-#175 shape and closes the store. Scoped so the
     /// container deallocates — the reopen below has to be a genuine cold open.
     private func writeLegacyStore(at url: URL, rideId: UUID, startedAt: Date) throws {
@@ -118,24 +103,17 @@ struct RideSchemaMigrationTests {
         try context.save()
     }
 
-    /// Cold-opens `url` with the schema production loads.
-    private func openWithCurrentSchema(at url: URL) throws -> ModelContainer {
-        try ModelContainer(
-            for: SwiftDataStack.schema,
-            configurations: [ModelConfiguration(schema: SwiftDataStack.schema, url: url)]
-        )
-    }
 
     @Test("a store written before #175 still opens against the current schema")
     func opensPreSampleCountStore() throws {
         let rideId = UUID()
         let startedAt = Date(timeIntervalSince1970: 1_757_155_800)
 
-        try withTemporaryStoreURL { url in
+        try withTemporaryStoreURL(prefix: "RideMigration") { url in
             try writeLegacyStore(at: url, rideId: rideId, startedAt: startedAt)
 
             // Threw NSCocoaErrorDomain 134110 before the declaration-site defaults.
-            let container = try openWithCurrentSchema(at: url)
+            let container = try openStore(at: url)
 
             let rides = try ModelContext(container).fetch(FetchDescriptor<Ride>())
             #expect(rides.count == 1)
@@ -160,12 +138,47 @@ struct RideSchemaMigrationTests {
         }
     }
 
-    @Test("a migrated store is writable, not just readable")
-    func migratedStoreAcceptsWrites() throws {
-        try withTemporaryStoreURL { url in
+    /// `Route` (#191) is the first entity added to the schema since the store shipped, as
+    /// opposed to an attribute added to an existing one. A store written before it existed
+    /// has no `Route` table at all, so this asserts the additive half of lightweight
+    /// migration — the half `opensPreSampleCountStore` above cannot see, since it only
+    /// checks that the *old* rows survive.
+    @Test("a store written before Route existed still opens, and then accepts a Route")
+    func aStoreWrittenBeforeRouteExistedAcceptsARoute() throws {
+        try withTemporaryStoreURL(prefix: "RideMigration") { url in
             try writeLegacyStore(at: url, rideId: UUID(), startedAt: .now)
 
-            let context = try ModelContext(openWithCurrentSchema(at: url))
+            let context = try ModelContext(openStore(at: url))
+            let legacyRide = try #require(context.fetch(FetchDescriptor<Ride>()).first)
+            // The legacy ride predates both route fields, so both backfill to nil rather
+            // than to a zero UUID or an empty string.
+            #expect(legacyRide.routeId == nil)
+            #expect(legacyRide.routeName == nil)
+
+            context.insert(Route(imported: ImportedRoute(
+                name: "Hanging Rock",
+                terrainDescription: "Gravel",
+                coordinates: [
+                    RouteCoordinate(latitude: 36.39, longitude: -80.26, elevationMeters: 380),
+                    RouteCoordinate(latitude: 36.40, longitude: -80.25, elevationMeters: 470),
+                ],
+                cuePoints: []
+            )))
+            try context.save()
+
+            let routes = try context.fetch(FetchDescriptor<Route>())
+            #expect(routes.count == 1)
+            #expect(routes.first?.name == "Hanging Rock")
+            #expect(routes.first?.coordinates.count == 2)
+        }
+    }
+
+    @Test("a migrated store is writable, not just readable")
+    func migratedStoreAcceptsWrites() throws {
+        try withTemporaryStoreURL(prefix: "RideMigration") { url in
+            try writeLegacyStore(at: url, rideId: UUID(), startedAt: .now)
+
+            let context = try ModelContext(openStore(at: url))
             let existing = try #require(context.fetch(FetchDescriptor<Ride>()).first)
             existing.cadenceSampleCount = 42
 

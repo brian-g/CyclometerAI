@@ -365,7 +365,7 @@ struct ActiveRideFeature {
                     // invariant `.elapsedTick`'s guard relies on elsewhere in this file.
                     state.recordingState == .active ? .send(.trackRecorder(.startRecording)) : .none,
                     isResuming ? .none : .run { [persistenceClient] _ in
-                        try? await persistenceClient.createRide(rideId, startedAt)
+                        try? await persistenceClient.createRide(rideId, startedAt, nil)
                     },
                     .run { send in
                         for await _ in clock.timer(interval: .seconds(1)) {

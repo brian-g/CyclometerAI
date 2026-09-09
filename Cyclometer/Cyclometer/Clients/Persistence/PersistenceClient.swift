@@ -17,8 +17,9 @@ struct PersistenceClient: Sendable {
     /// Ride metadata read path, for GPXExporter (#173) — the rest of this client is
     /// write-only for Ride by design (#171).
     var fetchRide: @Sendable (UUID) async throws -> RideExportMetadata
-    /// Inserts a new Ride record at ride start.
-    var createRide: @Sendable (UUID, Date) async throws -> Void
+    /// Inserts a new Ride record at ride start, denormalizing the route it is being
+    /// ridden on (nil for a free ride).
+    var createRide: @Sendable (UUID, Date, RouteReference?) async throws -> Void
     /// Writes running aggregates onto an existing Ride — the 30s checkpoint
     /// (DataModel.md §1 Checkpoint Policy). Ride-end goes through `finalizeRide`
     /// instead, which writes the same aggregates in the same atomic call.
@@ -34,6 +35,21 @@ struct PersistenceClient: Sendable {
     /// Read path for app-relaunch resume (#175) — the in-progress Ride left behind
     /// by a kill mid-ride, if one exists.
     var fetchResumableRide: @Sendable () async throws -> RideSummaryUpdate?
+    /// Persists a parsed `.gpx` (#191) and hands back the stored summary, whose id the
+    /// importing screen needs to select what it just imported.
+    var importRoute: @Sendable (ImportedRoute) async throws -> RouteSummary
+    /// Every saved route, newest first, without geometry — S19's list and filters.
+    var fetchRoutes: @Sendable () async throws -> [RouteSummary]
+    /// One route with its polyline and cues, for S20 and ride start. Nil when the id no
+    /// longer resolves, which a `Ride.routeId` legitimately may.
+    var fetchRoute: @Sendable (UUID) async throws -> RouteDetail?
+    /// Removes a route. Past rides keep their `routeId` and `routeName`.
+    var deleteRoute: @Sendable (UUID) async throws -> Void
+    /// Completed rides ridden on a route, newest first — S20's Previous Rides (#195).
+    /// Named for the route, not the rides: at a call site `fetchRides(someId)` would give
+    /// no hint that the id has to be a *route* id, and S15's own ride-history read will
+    /// want the plain name.
+    var fetchRouteRides: @Sendable (UUID) async throws -> [RouteRideSummary]
 }
 
 enum PersistenceError: Error, Equatable {
@@ -49,16 +65,22 @@ extension PersistenceClient: DependencyKey {
     /// in-memory containers instead of the shared singletons.
     static func live(coreDataContainer: NSPersistentContainer, modelContainer: ModelContainer) -> PersistenceClient {
         let rideActor = RidePersistenceActor(modelContainer: modelContainer)
+        let routeActor = RoutePersistenceActor(modelContainer: modelContainer)
         return PersistenceClient(
             flushTrackPoints: { try await batchInsertTrackPoints($0, container: coreDataContainer) },
             fetchTrackPoints: { try await fetchTrackPointsLive(rideId: $0, container: coreDataContainer) },
             fetchRide: { try await rideActor.fetchRideExportMetadata(id: $0) },
-            createRide: { try await rideActor.createRide(id: $0, startedAt: $1) },
+            createRide: { try await rideActor.createRide(id: $0, startedAt: $1, route: $2) },
             updateRideSummary: { try await rideActor.updateRideSummary($0) },
             finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
-            fetchResumableRide: { try await rideActor.fetchResumableRide() }
+            fetchResumableRide: { try await rideActor.fetchResumableRide() },
+            importRoute: { try await routeActor.importRoute($0) },
+            fetchRoutes: { try await routeActor.fetchRoutes() },
+            fetchRoute: { try await routeActor.fetchRoute(id: $0) },
+            deleteRoute: { try await routeActor.deleteRoute(id: $0) },
+            fetchRouteRides: { try await rideActor.fetchRides(routeId: $0) }
         )
     }
 
@@ -71,12 +93,17 @@ extension PersistenceClient: DependencyKey {
         flushTrackPoints: { _ in },
         fetchTrackPoints: { _ in [] },
         fetchRide: { _ in RideExportMetadata(title: "", startedAt: .init(timeIntervalSince1970: 0)) },
-        createRide: { _, _ in },
+        createRide: { _, _, _ in },
         updateRideSummary: { _ in },
         finalizeRide: { _, _, _, _ in },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
-        fetchResumableRide: { nil }
+        fetchResumableRide: { nil },
+        importRoute: { _ in RouteSummary.empty },
+        fetchRoutes: { [] },
+        fetchRoute: { _ in nil },
+        deleteRoute: { _ in },
+        fetchRouteRides: { _ in [] }
     )
 }
 

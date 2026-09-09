@@ -44,8 +44,13 @@ final class Ride {
     var vehiclePassCount: Int?
 
     // MARK: - Route
-    // MVP: plain string matching GPX or tribos.studio route name.
-    // Phase 2: replaced by relationship to Route @Model (OQDM1 deferred).
+    // FK by id, matching how TrackPoint and VehiclePassEvent link back here (#172) —
+    // no SwiftData `@Relationship`. Written at ride start (#191); nil for a free ride.
+    var routeId: UUID?
+    // The denormalized historical copy, written alongside routeId. It stays a plain
+    // String precisely so deleting a route cannot erase what a past ride *was*: the id
+    // is then left dangling and this is all S15 has to show. Optional, so #186's
+    // mandatory-attribute backfill trap doesn't apply to either field.
     var routeName: String?
     var gpxFileURL: URL?
 

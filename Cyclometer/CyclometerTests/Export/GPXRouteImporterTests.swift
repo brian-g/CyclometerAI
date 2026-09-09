@@ -124,6 +124,38 @@ struct GPXRouteImporterTests {
     </gpx>
     """
 
+    /// Every way a number in a GPX can be syntactically valid and geographically absurd.
+    /// `Double.init` accepts "nan" outright and overflows "1e999" to `.infinity`, so these
+    /// reach the importer as ordinary-looking `Double?`s that are anything but.
+    private static let hostileNumbers = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <gpx version="1.1" creator="Fuzzed" xmlns="http://www.topografix.com/GPX/1/1">
+      <trk>
+        <name>Hostile</name>
+        <trkseg>
+          <trkpt lat="36.3000000" lon="-80.4000000"><ele>300</ele></trkpt>
+          <trkpt lat="nan" lon="-80.4100000"><ele>310</ele></trkpt>
+          <trkpt lat="36.3200000" lon="1e999"><ele>320</ele></trkpt>
+          <trkpt lat="200.0000000" lon="-80.4300000"><ele>330</ele></trkpt>
+          <trkpt lat="36.3400000" lon="-400.0000000"><ele>340</ele></trkpt>
+          <trkpt lat="36.3500000" lon="-80.4500000"><ele>nan</ele></trkpt>
+        </trkseg>
+      </trk>
+      <wpt lat="nan" lon="-80.42"><name>Turn left</name></wpt>
+      <wpt lat="36.31" lon="-80.39"><name>Turn right</name></wpt>
+    </gpx>
+    """
+
+    private static let allCoordinatesHostile = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <gpx version="1.1" creator="Fuzzed" xmlns="http://www.topografix.com/GPX/1/1">
+      <trk><trkseg>
+        <trkpt lat="nan" lon="nan"></trkpt>
+        <trkpt lat="1e999" lon="-80.41"></trkpt>
+      </trkseg></trk>
+    </gpx>
+    """
+
     private static func route(_ xml: String, maximumCoordinateCount: Int = GPXRouteImporter.maximumCoordinateCount) throws -> ImportedRoute {
         try GPXRouteImporter.route(from: Data(xml.utf8), maximumCoordinateCount: maximumCoordinateCount)
     }
@@ -239,6 +271,34 @@ struct GPXRouteImporterTests {
         // Two cars passed. Neither is a turn — a re-imported ride must not announce a
         // maneuver at every overtake.
         #expect(route.cuePoints.isEmpty)
+    }
+
+    // MARK: - Hostile numbers
+
+    @Test("non-finite and out-of-range coordinates are dropped, not carried through")
+    func nonFiniteAndOutOfRangeCoordinatesAreDropped() throws {
+        let route = try Self.route(Self.hostileNumbers)
+
+        // Only the first and last trkpt are real coordinates; nan, inf, lat 200 and
+        // lon -400 all go.
+        #expect(route.coordinates.count == 2)
+        #expect(route.coordinates.allSatisfy { $0.latitude.isFinite && $0.longitude.isFinite })
+        #expect(route.coordinates.map(\.latitude) == [36.30, 36.35])
+
+        // A non-finite <ele> costs the elevation, not the point — the coordinate is fine.
+        #expect(route.coordinates.first?.elevationMeters == 300)
+        #expect(route.coordinates.last?.elevationMeters == nil)
+
+        // Cues are held to the same standard, or #192 derives a maneuver at nowhere.
+        #expect(route.cuePoints.count == 1)
+        #expect(route.cuePoints.first?.name == "Turn right")
+    }
+
+    @Test("a file whose every coordinate is non-finite throws .noCoordinates")
+    func allNonFiniteCoordinatesThrowsNoCoordinates() {
+        #expect(throws: GPXImportError.noCoordinates) {
+            _ = try Self.route(Self.allCoordinatesHostile)
+        }
     }
 
     // MARK: - Refusals

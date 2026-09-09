@@ -904,7 +904,7 @@ struct ActiveRideFeatureStateMachineTests {
 
     @Test("task creates a Ride with a deterministic id via persistenceClient")
     func taskCreatesRide() async {
-        let created = LockIsolated<(UUID, Date)?>(nil)
+        let created = LockIsolated<(UUID, Date, RouteReference?)?>(nil)
         let store = TestStore(
             initialState: ActiveRideFeature.State(recordingState: .idle)
         ) {
@@ -917,7 +917,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
             $0.locationClient = .testValue
-            $0.persistenceClient = .mock(onCreateRide: { created.setValue(($0, $1)) })
+            $0.persistenceClient = .mock(onCreateRide: { created.setValue(($0, $1, $2)) })
         }
         store.exhaustivity = .off
 
@@ -927,6 +927,9 @@ struct ActiveRideFeatureStateMachineTests {
         }
         #expect(created.value?.0 == UUID(0))
         #expect(created.value?.1 == testDate)
+        // No route yet: S19/S20 own selecting one and #196 owns carrying it here. #191
+        // only makes the argument expressible, so a ride started today is a free ride.
+        #expect(created.value?.2 == nil)
 
         await store.skipInFlightEffects(strict: false)
     }
@@ -1037,7 +1040,7 @@ struct ActiveRideFeatureStateMachineTests {
     @Test("task on a resumed state does not call createRide and preserves rideId")
     func taskOnResumedStateSkipsCreateRide() async {
         let rideId = UUID()
-        let created = LockIsolated<(UUID, Date)?>(nil)
+        let created = LockIsolated<(UUID, Date, RouteReference?)?>(nil)
         let summary = RideSummaryUpdate(
             rideId: rideId, recordingState: .active,
             durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 3, maxSpeedMPS: 5
@@ -1054,7 +1057,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
             $0.locationClient = .testValue
-            $0.persistenceClient = .mock(onCreateRide: { created.setValue(($0, $1)) })
+            $0.persistenceClient = .mock(onCreateRide: { created.setValue(($0, $1, $2)) })
         }
         store.exhaustivity = .off
 

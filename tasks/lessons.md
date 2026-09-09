@@ -254,3 +254,55 @@ the cancel landed first and the ride was left half-ended. Wait for the work's ow
 observable end state, then tear the store down — never the other way round. Corollary:
 when a test's teardown can cancel the thing it is asserting about, a longer timeout is
 treating a symptom.
+
+---
+
+## `try?` around an encode is a silent data-loss path (2026-09-08, #191 review)
+
+**What happened.** `Route.init` stored its polyline with
+`polylineData = try? JSONEncoder().encode(imported.coordinates)`, copied from the
+`Ride.weatherData` / `Ride.syncRecords` pattern. A code review pointed out that
+`JSONEncoder`'s default `nonConformingFloatEncodingStrategy` is `.throw` — so a single
+non-finite coordinate makes the encode throw, `try?` turns that into `nil`, and the route
+saves with `coordinateCount = 5000` beside an empty polyline. The import reports success.
+Verified: `Double("nan")` returns `.nan` and `Double("1e999")` returns `.infinity`, so a
+GPX only has to *contain* those strings — nothing was validating them.
+
+The same NaN also poisoned everything derived: `Swift.min(.nan, 5.0)` is `.nan`, so one bad
+point makes NaN of all four stored bounding-box columns, and a NaN column compares false
+against every `#Predicate` viewport test — the route simply stops existing on the map.
+
+**Rules.**
+- Copying a `try?` accessor pattern copies its failure mode too. Before reusing one, ask what
+  the encoder actually rejects. JSON rejects NaN and infinity by default.
+- Validate at the parse boundary, not at the store boundary. The fix was a `isFinite` +
+  range guard in `GPXRouteImporter`, which fixed every downstream consumer at once; guarding
+  in `Route.init` would have left the same trap for the next reader of the parsed value.
+- A getter that coalesces to `[]` and a setter that swallows an error will make corrupt data
+  look like absent data. Prefer get-only when nothing legitimately writes.
+
+---
+
+## A framework's reference implementation can still be the wrong choice (2026-09-08, #191)
+
+**What happened.** `RouteGeometry.distanceMeters` used `CLLocation.distance(from:)`, chosen
+because it is the ellipsoidal reference and "there is no formula to get wrong." A test
+asserting that two code paths agree on the same input then failed: the same polyline
+measured 5709.9076 m and 5709.8369 m in one test process. A 200-call loop in the simulator
+found only one value, and macOS was stable — so it is intermittent, ~1.2e-5 relative, the
+signature of a spherical model standing in until something in CoreLocation finishes loading.
+
+**Why that mattered more than accuracy.** The value is *stored*, shown to the rider, and
+filtered on. Two routes with identical geometry getting different distances depending on
+when they were imported is not a rounding difference, and no caller can defend against it.
+Replaced with the local-radius-of-curvature formula on the WGS84 ellipsoid: pure arithmetic,
+matching `CLLocation` to 0.04 m over a 100 km route and hitting the published 110,574.4 m
+meridian-degree figure exactly.
+
+**Rules.**
+- For a value you persist, reproducibility is a hard requirement, ranking above provenance.
+  Ask "will this give the same answer next month" before "is this the reference".
+- A test that asserts *two independent paths agree* catches what neither path's own tests
+  can — both were self-consistent and both matched their own expectations.
+- When a numeric test fails by a suspiciously small relative amount, get the two values
+  before theorising. 1.2e-5 named the cause (sphere vs ellipsoid); "flaky test" would not have.
