@@ -10,6 +10,13 @@ import UniformTypeIdentifiers
 /// UX.md §S20 points at as its layout spec, and #195 replaces it with a real one.
 struct RoutesView: View {
     @Bindable var store: StoreOf<RoutesFeature>
+    /// Start Ride is the global toolbar affordance every tab opts into, but items in
+    /// *separate* `.toolbar` modifiers sort by ancestry — the outermost lands leftmost, no
+    /// matter where in the chain it is applied — so `.startRideToolbarItem` would always put
+    /// it first. Declared inside this screen's own toolbar instead, where written order
+    /// holds, giving Import, Map/List, Start Ride.
+    var isStartRideHidden: Bool = false
+    var onStartRide: () -> Void = {}
 
     /// Resolved from the app's own `UTImportedTypeDeclarations` (`Info.plist`). iOS does
     /// **not** know GPX on its own — measured on iOS 26, `UTType("com.topografix.gpx")` is
@@ -43,7 +50,7 @@ struct RoutesView: View {
                 }
             } else {
                 List(store.routes) { route in
-                    RouteRow(route: route, unit: store.unitSystem)
+                    RouteRow(route: route, unitSystem: store.unitSystem)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
                                 store.send(.deleteButtonTapped(route.id))
@@ -77,6 +84,11 @@ struct RoutesView: View {
                 }
                 .accessibilityLabel(store.showsMap ? "Show as List" : "Show on Map")
             }
+            if !isStartRideHidden {
+                ToolbarItem(placement: .topBarTrailing) {
+                    StartRideButton(action: onStartRide)
+                }
+            }
         }
         .fileImporter(
             isPresented: $store.isImporterPresented.sending(\.importerPresentationChanged),
@@ -97,35 +109,36 @@ struct RoutesView: View {
 
 private struct RouteRow: View {
     let route: RouteSummary
-    let unit: UnitSystem
+    let unitSystem: UnitSystem
 
-    /// Distance and terrain in one secondary line — the shape the prototype's
-    /// `RouteStub.detail` already had ("22.4 • Rolling terrain"), now with real values and
-    /// the rider's units. A GPX without a `<desc>` or `<type>` leaves just the distance.
-    private var detail: String {
-        // `.formatted`, not `String(format:)`: every other number in the app renders through
-        // it, and a comma-decimal locale would otherwise read "22.4" beside "22,4" elsewhere.
-        let value = unit.distance(fromMeters: route.distanceMeters)
-            .formatted(.number.precision(.fractionLength(1)))
-        let distance = "\(value) \(unit.distanceLabel)"
-        guard let terrain = route.terrainDescription, !terrain.isEmpty else { return distance }
-        return "\(distance) • \(terrain)"
+    /// The terrain line, when the file gave one. Distance used to live here too; it now sits
+    /// on the trailing edge as a `HeroNumber`, matching `RideRow`.
+    private var terrain: String? {
+        guard let terrain = route.terrainDescription, !terrain.isEmpty else { return nil }
+        return terrain
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Spacing.md) {
             Image(systemName: "map")
                 .font(.headline)
                 .foregroundStyle(.cyPrimary)
-                .frame(width: 36, height: 36)
-                .background(Color.cyPrimary.opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            VStack(alignment: .leading, spacing: 4) {
+                .frame(width: Spacing.xxl, height: Spacing.xxl)
+                .background(Color.cyPrimary.opacity(Opacity.iconTile),
+                            in: RoundedRectangle(cornerRadius: Spacing.cornerMd, style: .continuous))
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(route.name).font(.headline)
-                Text(detail).font(.subheadline).foregroundStyle(.secondary)
+                if let terrain {
+                    Text(terrain).font(.subheadline).foregroundStyle(.secondary)
+                }
             }
+            Spacer(minLength: Spacing.sm)
+            HeroNumber(unitSystem.distance(fromMeters: route.distanceMeters),
+                       unit: unitSystem.distanceLabel)
+                .heroNumberSize(.small)
+                .layout(.horizontal)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, Spacing.xs)
     }
 }
 

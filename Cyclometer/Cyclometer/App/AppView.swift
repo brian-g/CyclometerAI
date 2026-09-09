@@ -47,10 +47,14 @@ struct AppView: View {
                 
                 // ── Routes ───────────────────────────────────────────────────────
                 NavigationStack {
-                    RoutesView(store: store.scope(state: \.routes, action: \.routes))
-                        .startRideToolbarItem(isHidden: store.activeRide != nil) {
-                            store.send(.startRideButtonTapped)
-                        }
+                    // Start Ride is passed in rather than layered on from here: this screen
+                    // has toolbar items of its own, and an ancestor's item would sort ahead
+                    // of them.
+                    RoutesView(
+                        store: store.scope(state: \.routes, action: \.routes),
+                        isStartRideHidden: store.activeRide != nil,
+                        onStartRide: { store.send(.startRideButtonTapped) }
+                    )
                 }
                 .tabItem { Label("Routes", systemImage: "point.topleft.down.curvedto.point.bottomright.up") }
                 .tag(AppFeature.Tab.routes)
