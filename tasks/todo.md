@@ -1,71 +1,107 @@
-# tasks/todo.md — #192 TurnDerivation (cue points with geometric fallback)
+# tasks/todo.md — #193 S19 Routes tab (real list, map and Files import)
 
-Branch: `feat/192-turn-derivation` · Milestone M8 · Plan:
-`~/.claude/plans/quirky-waddling-puzzle.md`
+Branch: `feat/193-routes-tab` · Milestone M8 · Plan:
+`~/.claude/plans/goofy-enchanting-quokka.md`
 
 ## Implementation
 
-- [x] `Models/RouteGeometry.swift` — extract `tangentPlaneOffset(from:to:)` out of `segmentMeters`
-      (the same north/east pair is a length and a bearing); add `bearingDegrees(from:to:)`
-      returning nil on a zero-length segment, `cumulativeDistances(_:)`,
-      `resampled(_:everyMeters:)` and `projection(of:onto:cumulative:)`
-- [x] `Models/TurnDerivation.swift` — `enum TurnDerivation` + `struct Maneuver`; six thresholds,
-      each with the reasoning for its value; geometric path, cue path, cue-text reading,
-      separation filter
-- [x] Geometry path: resample → per-sample heading change → runs with reversal hysteresis →
-      accumulated turn → magnitude gate + radius gate → place at the half-turn point
-- [x] Cue path: perpendicular projection, 50 m snap limit, `type`→`name`→`desc` reading,
-      negative word list, geometry fallback for unstated cues, sort by along-route distance
-      with an importer-order tie-break
+- [x] `Clients/Location/LocationClient.swift` — add `currentCoordinate: @Sendable () async -> Coordinate?`
+- [x] `Clients/Location/LocationManagerState.swift` — one-shot fix: cached `manager.location`
+      first, else `requestLocation()` + timeout, resumed by draining a continuation dict under
+      the lock. Never call `stopUpdates()` (it kills a recording ride's stream)
+- [x] `Models/RouteGeometry.swift` — `RouteBounds.union(_:)`
+- [x] `Features/Routes/RoutesMapCamera.swift` — rider fix → route bounds → fallbackCenter,
+      50-mile radius (100-mile span)
+- [x] `Features/Routes/RoutesFeature.swift` — real state, `RouteImportFailure`, persistence /
+      location / permissions dependencies, import + delete effects
+- [x] `Features/Routes/RoutesView.swift` — read the store, `fileImporter`, empty state,
+      swipe-to-delete, third `topBarTrailing` import item; leave `RouteDetailView` for #195
 
 ## Tests
 
-- [x] `CyclometerTests/Models/TurnDerivationTests.swift` — 31 tests / 52 cases, one or more per
-      acceptance criterion, plus the three properties the first design lacked: density
-      independence, drawn-radius independence, and recorded-track scatter tolerance
-- [x] Full suite green: **803 tests in 75 suites**, snapshot suites included (locally)
+- [x] `CyclometerTests/Features/RoutesFeatureTests.swift`
+- [x] `CyclometerTests/Features/RoutesMapCameraTests.swift`
+- [x] `CyclometerTests/Features/RoutesSnapshotTests.swift` (list + empty only; no map — see
+      the MapKit snapshot lesson) + CI skip-list entry
+- [x] `CyclometerTests/Clients/LocationClientTests.swift` — `testValue.currentCoordinate`
+- [x] Full local suite green
 
 ## Review
 
-**The approved plan was wrong and had to be replaced mid-flight.** The first design measured a
-*windowed bearing delta* — bearing 20 m before a point against 20 m after — and was validated
-against synthetic sharp-vertex fixtures. Those fixtures hid a defect that would have shipped: the
-windowed delta measures curvature over the window, not turn angle, so one 90° corner read 85° when
-drawn with a 5 m corner radius, 43° at 28 m, and **nothing at all at 30 m or wider**. Whether a real
-intersection became a maneuver depended on which planning tool wrote the file. A second defect:
-grouping candidates by *array index adjacency* treats index proximity as road proximity, so on a file
-decimated to 150–200 m spacing two corners 200 m apart merged into one maneuver.
+**Suite: 892 tests, 0 failures** over two consecutive full runs (26 of them Routes), snapshot suites included locally.
 
-Replaced with accumulated turn over a uniformly resampled polyline. Summing many small heading
-changes gives the true angle whatever the drawn radius, and splits the decision into the two
-questions that actually matter — how far the road turns (the sum) and over what distance (the span,
-via `maximumTurnRadiusMeters`). Resampling first is what makes index distance *be* road distance, so
-the index-adjacency class of bug cannot recur.
+**The issue's "no Info.plist change needed" was wrong, and the failure would have been
+silent.** Measured on iOS 26: `UTType("com.topografix.gpx")` is **nil** — iOS does not know
+GPX at all — and `UTType(filenameExtension: "gpx")` answers a *dynamic* type
+(`dyn.ah62d4rv4ge80s6d2`) that conforms to nothing, not even `public.xml`. A `fileImporter`
+filtering on it compiles, runs, opens the picker, and greys out every `.gpx`. The planned
+`?? .xml` fallback could never have fired either, because the call returns non-nil. Fixed by
+declaring the type in `UTImportedTypeDeclarations`; `RoutesGPXTypeTests` pins it, since
+deleting the declaration breaks the picker with no error anywhere. Verified in the running
+app: in the picker both `.gpx` files are selectable and both `.json` files are greyed out.
 
-**Found while implementing, not planned for.** A bare recorded track is the only thing the geometry
-path ever sees (a file with cues never reaches it), and at 1 Hz a bike lays a fix every 5–10 m with a
-couple of metres of scatter — 15–30° of heading noise on *every* sample. Ending a turn at the first
-sample pointing the other way shattered one corner into seven sub-threshold fragments and reported
-none of them. Fixed with reversal hysteresis (`reversalThresholdDegrees`): a counter-turn has to
-accumulate past 20° to end a turn, and resets the moment the road resumes its original direction.
-This is the same technique, for the same reason, that `RouteGeometry.elevationGainLoss` already uses
-against DEM jitter.
+**`isLoading` was a field that existed only to make the screen wrong.** It was in the plan to
+stop the empty state flashing before the first read. Two blank snapshot references exposed
+what it actually did: a snapshot captures after `.task` sends but before its effect lands, so
+`isLoading` was true and the empty branch never rendered — and the same is true of the first
+frame the rider sees. For a local SwiftData read there is nothing to spin about, so the field
+is gone and the empty state keys off `routes.isEmpty` alone.
 
-**Decisions, and what they cost.** Cue data is exclusive — any cue that *resolves* suppresses the
-geometry scan entirely — so a partially-cued file under-navigates rather than inventing turns the
-planner deliberately omitted. The test is deliberately "a cue resolved", not "a cue exists": Garmin
-Connect and Strava both export routes whose only `<wpt>` is named "Start", and keying off presence
-would drop that cue for having no direction and then ship the route with zero maneuvers.
-`.slightLeft`/`.slightRight` come only from cue text; a 40° gate has no standing to call anything
-slight. Cue text is English-only.
+**Two spec deviations, both deliberate.** UX.md §S19 asks for polylines on the map, but
+`RouteSummary` deliberately carries no geometry — so the map lazily fetches `RouteDetail` per
+route the first time it is opened and caches the result, and a rider who only uses the list
+never pays to decode a polyline. And the prototype's `spanMeters = 96_560` is a 60-mile
+*span*; the spec says a 50-mile *radius*, which is a 100-mile span, so the constant was
+replaced rather than kept.
 
-**Left for other issues:** nothing consumes this yet — `NavigationFeature` (#197) owns firing,
-distance-to-turn and off-route, #198 the tones, #200 the W9 widget. No spec-doc edits: #202 owns
-those, and two staleness items are its, not this issue's — `CLAUDE.md:155` still lists OQ12 as open
-where `PRD.md:1272` resolved it, and `DataModel.md:228` still calls `Route` a Phase 2 entity that
-#191 shipped.
+**One AC read literally rather than in spirit.** "No code path reads `RouteStub.sampleRoutes`"
+holds for the list and the map. The retained S20 prototype `RouteDetailView` still has one
+`#Preview` that feeds it a stub, because that view is what UX.md §S20 points at as its layout
+spec until #195 replaces it.
 
-**Known residual:** `maximumTurnRadiusMeters = 60` is the one constant with no external reference
-behind it — it is where a rider stops steering for a corner and starts following the road round, and
-that is a judgement, not a measurement. It is covered from both sides by `turnRadiusBoundary` and is
-a single edit if real GPX proves it wrong.
+**What the tests do not cover.** Driving the out-of-process Files picker from XCUITest did not
+work, so the three-line `fileImporter` callback is the one hop verified by eye rather than by
+assertion. Everything on either side of it is covered: `RoutesFeatureTests` runs the reducer
+against real `.gpx` files on disk, and `RoutesImportIntegrationTests` runs a picked URL through
+the real importer into a real SQLite store, reopens a second container over the same file, and
+asserts the route — polyline, cue and all — is still there, which is what surviving a relaunch
+actually means.
+
+
+## Post-review round (`/code-review`, xhigh)
+
+Fourteen of fifteen findings accepted; all fixed.
+
+**Two real bugs in the one-shot location fix, both in the part I claimed to have designed
+around.** `requestLocation()` and `startUpdatingLocation()` are mutually exclusive on one
+`CLLocationManager` — CoreLocation cancels one when the other starts — so opening the Routes
+tab mid-ride could have cancelled the recording ride's stream, and a ride ending could have
+stranded the browse waiter for its full timeout. It now returns whatever the live stream has
+already delivered instead of requesting, whenever a stream is active. Separately,
+`didFailWithError` drained every waiter on *any* error, including `kCLErrorLocationUnknown`,
+which is routine indoors and transient — CoreLocation keeps trying after it. Only a denial is
+treated as an answer now; everything else waits for the timeout.
+
+**`isLoading` should have been fixed, not deleted** — see `tasks/lessons.md`. Restored as
+`hasLoaded`, set only on a successful read, so a failed read no longer renders "No Routes"
+behind its own error alert.
+
+**Rest of the accepted findings.** The map now accepts a fix that arrives after it opened (the
+tab remembers `showsMap`, so `initialPosition` alone ignored it); a route imported while the
+map is showing loads its polyline; the polyline cache is keyed on ids rather than counts (a
+failed fetch made counts differ forever, and a delete-plus-import made them match while
+holding the wrong routes); `isImporting` now guards a second concurrent import and drives a
+`ProgressView` instead of being write-only; `deleteFailed` re-reads via `.reloadRoutes` rather
+than re-running the whole appear effect and its location request; row distance uses
+`.formatted` rather than `String(format:)`, which was not locale-aware; the region span is
+clamped to what `MKCoordinateSpan` accepts; the dead `?? .xml` fallback became `.item`; and
+bounding-box centre arithmetic moved to `RouteBounds.center`.
+
+**Declined, with reasoning.** The reviewer wanted `loadMissingPolylines` parallelised and the
+polylines decimated for display. `RoutePersistenceActor` is a serial `@ModelActor`, so a task
+group buys nothing, and decimation is #194's problem — it needs real geometry for viewport
+intersection anyway. Noted rather than built.
+
+**New tests: 11.** Four regression tests on the reducer, two on region clamping (globe-spanning
+routes, antimeridian), three on `LocationManagerState`'s one-shot — including that it leaves an
+active update stream running, which is the whole reason it exists — plus the import-guard pair.

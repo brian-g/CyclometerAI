@@ -606,7 +606,8 @@ struct ActiveRideFeatureLocationTests {
             $0.permissionsClient = .mock(initial: [.locationWhenInUse: .granted])
             $0.locationClient = LocationClient(
                 startUpdates: { AsyncStream { $0.finish() } },
-                stopUpdates: { stopCalled.setValue(true) }
+                stopUpdates: { stopCalled.setValue(true) },
+                currentCoordinate: { nil }
             )
         }
         await store.send(.pauseTapped) {
@@ -1239,7 +1240,8 @@ struct ActiveRideFeatureStateMachineTests {
             $0.permissionsClient = .mock(initial: [.locationWhenInUse: .granted])
             $0.locationClient = LocationClient(
                 startUpdates: { AsyncStream { $0.finish() } },
-                stopUpdates: { disconnectCalled.setValue(true) }
+                stopUpdates: { disconnectCalled.setValue(true) },
+                currentCoordinate: { nil }
             )
             $0.persistenceClient = .mock(
                 onFinalizeRide: { finalizedRide.setValue(($0, $1, $2, $3)) }

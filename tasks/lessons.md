@@ -340,3 +340,40 @@ m spacing real decimated GPX uses, two corners 200 m apart landed on consecutive
 - Sampling-density independence is a property worth asserting directly. Two of the defects here were
   really one bug — reasoning about array indices as if they were distances — and a test that runs the
   same corner at 0.5 m through 100 m spacing catches that whole class in one line.
+
+---
+
+## Deleting state because a snapshot was blank (2026-09-09, #193 review)
+
+**What happened.** Two snapshot references came out blank. The cause was that a snapshot
+captures after `.task` *sends* but before its effect lands, so `isLoading` was true and the
+`ContentUnavailableView` branch never rendered. I concluded the field was unnecessary for a
+local SwiftData read and deleted it, and reported that as a simplification.
+
+It was not. The flag was set at the wrong *time*, not for the wrong *reason*. Removing it
+collapsed three distinct screens into one: "not read yet", "read came back empty", and "the
+read failed" all became `routes.isEmpty`. The last is the damaging one — after a failed read
+the rider saw "No Routes / Import a route from the Files app" sitting behind a "Couldn't Load
+Routes" alert, telling them their saved routes were gone when the store was untouched. A code
+review caught it. The fix was `hasLoaded`, set only on success: one field, three screens.
+
+**Rules.**
+- A test symptom tells you *when* state is wrong, not *whether* it should exist. Before
+  deleting a field to make a test pass, enumerate the screens it distinguishes and check each
+  one still has a distinct rendering without it.
+- "Simplification" that removes a distinction is a behaviour change. Say which cases collapse
+  into which, and if one of them is an error path, that is the one to check first.
+- A loading flag around a *failed* read is not about latency. Even when the read is instant,
+  empty-because-nothing-is-saved and empty-because-the-read-failed must not render the same.
+
+**Also, from the same review.** Two more of the same shape: I trusted a `?? .xml` fallback
+that could never fire (`UTType(filenameExtension:)` returns non-nil even when it resolves to
+a useless dynamic type), and validated a cache with `polylines.count != routes.count` when
+the loader deliberately omits failures — so a count could match while holding entirely the
+wrong keys. **Compare identities, not cardinalities**, and check that a fallback's guard can
+actually be reached before writing the comment that says it recovers.
+
+**And.** `concurrentImportIsRefused` passed alone and failed under suite load: it raced two
+sends against a 200 ms sleep in a mock. Assert the *guard* (seed `isImporting = true`, send,
+expect nothing), not the race that motivates it — same class as the `skipInFlightEffects`
+entry above.

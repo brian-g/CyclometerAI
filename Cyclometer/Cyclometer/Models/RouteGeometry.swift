@@ -265,3 +265,26 @@ struct RouteBounds: Sendable, Equatable {
     var minLongitude: Double
     var maxLongitude: Double
 }
+
+extension RouteBounds {
+    /// The smallest box containing all of them, or nil for an empty collection — S19 frames
+    /// its map on every saved route when it has no rider fix, and #194 needs the same union
+    /// to decide what a viewport holds.
+    static func union(_ bounds: [RouteBounds]) -> RouteBounds? {
+        guard var combined = bounds.first else { return nil }
+        for box in bounds.dropFirst() {
+            combined.minLatitude = min(combined.minLatitude, box.minLatitude)
+            combined.maxLatitude = max(combined.maxLatitude, box.maxLatitude)
+            combined.minLongitude = min(combined.minLongitude, box.minLongitude)
+            combined.maxLongitude = max(combined.maxLongitude, box.maxLongitude)
+        }
+        return combined
+    }
+
+    /// The middle of the box: where the map pins a route whose polyline it has not loaded,
+    /// and the centre of the region S19 frames when it has no rider fix. A plain pair rather
+    /// than a `CLLocationCoordinate2D`, keeping CoreLocation out of the model layer.
+    var center: (latitude: Double, longitude: Double) {
+        ((minLatitude + maxLatitude) / 2, (minLongitude + maxLongitude) / 2)
+    }
+}
