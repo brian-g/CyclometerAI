@@ -16,7 +16,7 @@ actor RidePersistenceActor {
     /// actor never has to read the `Route` table, which is what keeps it and
     /// `RoutePersistenceActor` on disjoint tables (#191).
     func createRide(id: UUID, startedAt: Date, route: RouteReference?) throws {
-        try savingChanges("createRide", id: id) {
+        try savingChanges("createRide", id: id, context: modelContext) {
             let ride = Ride(id: id, startedAt: startedAt)
             ride.routeId = route?.id
             ride.routeName = route?.name
@@ -26,7 +26,7 @@ actor RidePersistenceActor {
 
     /// The 30s checkpoint path — running aggregates only, no endedAt/finalization.
     func updateRideSummary(_ update: RideSummaryUpdate) throws {
-        try savingChanges("updateRideSummary", id: update.rideId) {
+        try savingChanges("updateRideSummary", id: update.rideId, context: modelContext) {
             let ride = try fetchRide(id: update.rideId)
             apply(update, to: ride)
         }
@@ -36,7 +36,7 @@ actor RidePersistenceActor {
     /// is logically one atomic write, not the two independent round trips an earlier
     /// version of this actor required to avoid two contexts racing on the same row.
     func finalizeRide(id: UUID, endedAt: Date, summary: RideSummaryUpdate, gpxFileURL: URL?) throws {
-        try savingChanges("finalizeRide", id: id) {
+        try savingChanges("finalizeRide", id: id, context: modelContext) {
             let ride = try fetchRide(id: id)
             apply(summary, to: ride)
             ride.endedAt = endedAt
@@ -51,7 +51,7 @@ actor RidePersistenceActor {
     /// unlike the checkpoint, this never overwrites an existing row.
     func appendVehiclePassEvents(_ dtos: [VehiclePassEventDTO]) throws {
         guard let firstRideId = dtos.first?.rideId else { return }
-        try savingChanges("appendVehiclePassEvents", id: firstRideId) {
+        try savingChanges("appendVehiclePassEvents", id: firstRideId, context: modelContext) {
             for dto in dtos {
                 modelContext.insert(VehiclePassEvent(
                     rideId: dto.rideId,
@@ -185,19 +185,5 @@ actor RidePersistenceActor {
         ride.speedSampleCount = update.speedSampleCount
         ride.hrSampleCount = update.hrSampleCount
         ride.cadenceSampleCount = update.cadenceSampleCount
-    }
-
-    /// Shared body for every write above: run `changes` (insert/fetch/mutate, no
-    /// save), save the context, and log-then-rethrow under one label on failure.
-    /// Replaces four near-identical do/save/catch blocks that differed only in the
-    /// log label (code review, #172).
-    private func savingChanges(_ label: String, id: UUID, _ changes: () throws -> Void) throws {
-        do {
-            try changes()
-            try modelContext.save()
-        } catch {
-            logger.error("\(label, privacy: .public)(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
-            throw error
-        }
     }
 }

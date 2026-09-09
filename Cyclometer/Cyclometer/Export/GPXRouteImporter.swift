@@ -94,18 +94,34 @@ enum GPXRouteImporter {
     /// exported rides as a route must not plant a turn cue at every car that passed you.
     private static let vehiclePassWaypointType = "vehiclePass"
 
-    /// A point missing either coordinate is dropped rather than failing the import: one
-    /// bad element in a thousand shouldn't cost the rider the route. Dropping *all* of
-    /// them still surfaces as `.noCoordinates`.
+    /// A point missing or malforming either coordinate is dropped rather than failing the
+    /// import: one bad element in a thousand shouldn't cost the rider the route. Dropping
+    /// *all* of them still surfaces as `.noCoordinates`.
+    ///
+    /// "Malformed" has to include non-finite, not just absent. `Double.init` accepts
+    /// `"nan"` and turns `"1e999"` into `.infinity`, and either one poisons everything
+    /// downstream: `Swift.min(.nan, x)` is `.nan`, so a single bad point makes NaN of a
+    /// whole route's stored bounding box and distance, and `JSONEncoder` *throws* on a
+    /// non-conforming float, which would leave the polyline blob nil while
+    /// `coordinateCount` still claimed thousands of points. A range check comes with it:
+    /// a latitude of 200 is not a coordinate either, and costs nothing to reject here.
     private static func coordinate(
         _ latitude: Double?, _ longitude: Double?, _ elevation: Double?
     ) -> RouteCoordinate? {
-        guard let latitude, let longitude else { return nil }
-        return RouteCoordinate(latitude: latitude, longitude: longitude, elevationMeters: elevation)
+        guard let latitude, let longitude, isValid(latitude, longitude) else { return nil }
+        // A non-finite `<ele>` drops the elevation, not the point — the coordinate is
+        // still good, and elevation is optional per point by design.
+        let elevationMeters = elevation.flatMap { $0.isFinite ? $0 : nil }
+        return RouteCoordinate(latitude: latitude, longitude: longitude, elevationMeters: elevationMeters)
+    }
+
+    private static func isValid(_ latitude: Double, _ longitude: Double) -> Bool {
+        (-90...90).contains(latitude) && (-180...180).contains(longitude)
     }
 
     private static func cue(fromWaypoint waypoint: ParsedGPX.Waypoint) -> RouteCuePoint? {
-        guard let latitude = waypoint.latitude, let longitude = waypoint.longitude else { return nil }
+        guard let latitude = waypoint.latitude, let longitude = waypoint.longitude,
+              isValid(latitude, longitude) else { return nil }
         guard waypoint.type != vehiclePassWaypointType else { return nil }
         return RouteCuePoint(
             latitude: latitude, longitude: longitude,
@@ -117,7 +133,8 @@ enum GPXRouteImporter {
     /// names the ones that are turns; treating all of them as cues would make a cue of
     /// every bend in the road.
     private static func cue(fromRoutePoint point: ParsedGPX.RoutePoint) -> RouteCuePoint? {
-        guard let latitude = point.latitude, let longitude = point.longitude else { return nil }
+        guard let latitude = point.latitude, let longitude = point.longitude,
+              isValid(latitude, longitude) else { return nil }
         guard point.name?.isEmpty == false || point.desc?.isEmpty == false else { return nil }
         return RouteCuePoint(
             latitude: latitude, longitude: longitude,

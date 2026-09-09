@@ -88,3 +88,58 @@ no import de-duplication, no retained `.gpx`, no persisted maneuvers (#192), no 
 `[]` rather than surfacing an error — the `Ride.syncRecords` precedent this follows. A stored route
 can never legitimately have an empty polyline, so that is arguably corruption worth throwing on; it
 is not a case #191 creates and #197 will need to guard the navigation path regardless.
+
+
+---
+
+## Code review follow-up (`/code-review`, xhigh)
+
+15 findings. Nine adopted, six rejected with reasons.
+
+### Adopted
+
+- **Non-finite coordinates (the serious one).** `Double("nan")` parses, `Double("1e999")`
+  overflows to `.infinity`, and nothing checked. One such point made NaN of all four stored
+  bounding-box columns (`Swift.min(.nan, x)` is `.nan`) *and* made `JSONEncoder` throw, which
+  `try?` turned into a nil polyline stored beside a `coordinateCount` still claiming every
+  point — a route that looks fine in the list and opens empty. Fixed at the parse boundary
+  with an `isFinite` + range guard in `GPXRouteImporter`, so every downstream consumer is
+  covered at once. A non-finite `<ele>` drops the elevation, not the point.
+- **`CLLocation.distance(from:)` replaced with deterministic ellipsoidal arithmetic.** Not a
+  review finding — the new "mock and live must agree" test caught it: the same polyline
+  measured 5709.9076 m and 5709.8369 m in one process. Reproducibility is not optional for a
+  number that is stored, displayed and filtered on. The replacement matches `CLLocation` to
+  0.04 m over 100 km and hits the WGS84 meridian-degree reference exactly.
+- `coordinates` / `cuePoints` are get-only; nothing mutates a stored route, and the setters
+  baked in the same silent-nil failure.
+- Derivation moved to `RouteSummary.init(imported:id:importedAt:)`, so the mock no longer
+  allocates an uninserted `@Model` to reuse `Route.init`'s arithmetic.
+- `PersistenceClient.fetchRides` → `fetchRouteRides` (and `mock(ridesByRoute:)`): the old name
+  gave no signal the id had to be a *route* id, and S15's own ride-history read wants it.
+- `mock(importResult:)`, so a #193 TestStore test can get a known id back — the live path mints
+  one below the dependency boundary where `$0.uuid` cannot reach.
+- `savingChanges` hoisted to one shared free function; the two copies were byte-identical.
+- Test store helpers hoisted into `TestSupport.swift`, and the temp-store cleanup now removes
+  the `_SUPPORT` directory — the version this was copied from had leaked 68 orphaned
+  directories into the simulator container.
+- `rideRouteLinkSurvivesAColdReopen` no longer holds two `ModelContainer`s open on one store
+  file, which is unsupported and the exact flake shape 31edca0 was landed to remove.
+- The no-de-duplication decision is now recorded next to `importRoute`, not only in the PR.
+
+### Rejected
+
+- **Fusing the three geometry passes into one.** Import is one-shot and user-initiated;
+  three O(n) passes over even the 100k-point ceiling is milliseconds. Three separately
+  testable pure functions are worth more than the cycles.
+- **`propertiesToFetch` on `fetchRoutes`.** The finding's premise is wrong: SwiftData's
+  identity map means re-fetching the same rows reuses the same registered objects, so the
+  registry is bounded by row count, not by refresh count. The doc comment's claim that no
+  polyline is decoded is accurate — the accessor is never called.
+- **Lazy `RoutePersistenceActor`.** A `ModelContext` on an already-open container is cheap,
+  and `RidePersistenceActor` is constructed the same way; deferring one and not the other
+  buys nothing and breaks the symmetry.
+- **`@Attribute(.unique)` on `Route.id`.** `Ride.id` does not have it either.
+- **Import de-duplication.** Still out of scope; recorded as a decision instead.
+- **Collapsing the two elevation optionals into one value.** They are written together from a
+  single optional tuple at the one write site, and flat columns are what `#Predicate` can
+  filter on for #194.

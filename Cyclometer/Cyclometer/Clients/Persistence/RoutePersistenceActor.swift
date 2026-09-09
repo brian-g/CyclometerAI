@@ -20,9 +20,15 @@ actor RoutePersistenceActor {
 
     /// Persists a parsed file. Returns the stored summary because the importing screen
     /// needs the new id to select or navigate to what it just imported.
+    ///
+    /// No de-duplication, deliberately: importing the same `.gpx` twice yields two rows.
+    /// A rider may well import a deliberate variant of a route they already have, and
+    /// there is no identity in a GPX file to key on that would tell the two apart. If
+    /// duplicates turn out to be a nuisance in practice, the decision belongs in S19's
+    /// import flow (#193), which is the only place that knows the file it came from.
     func importRoute(_ imported: ImportedRoute) throws -> RouteSummary {
         let route = Route(imported: imported)
-        try savingChanges("importRoute", id: route.id) {
+        try savingChanges("importRoute", id: route.id, context: modelContext) {
             modelContext.insert(route)
         }
         return route.summary
@@ -59,7 +65,7 @@ actor RoutePersistenceActor {
     /// ride was, and clearing either would rewrite history to tidy up a foreign key.
     func deleteRoute(id: UUID) throws {
         guard let route = try routeRow(id: id) else { return }
-        try savingChanges("deleteRoute", id: id) {
+        try savingChanges("deleteRoute", id: id, context: modelContext) {
             modelContext.delete(route)
         }
     }
@@ -71,18 +77,5 @@ actor RoutePersistenceActor {
         var descriptor = FetchDescriptor<Route>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1
         return try modelContext.fetch(descriptor).first
-    }
-
-    /// Shared body for every write: run `changes` (insert/delete/mutate, no save), save
-    /// the context, and log-then-rethrow under one label on failure. Mirrors
-    /// `RidePersistenceActor.savingChanges`.
-    private func savingChanges(_ label: String, id: UUID, _ changes: () throws -> Void) throws {
-        do {
-            try changes()
-            try modelContext.save()
-        } catch {
-            logger.error("\(label, privacy: .public)(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
-            throw error
-        }
     }
 }

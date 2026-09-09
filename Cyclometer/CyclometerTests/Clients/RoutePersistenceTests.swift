@@ -197,8 +197,8 @@ struct RoutePersistenceTests {
 
     // MARK: - fetchRides(routeId:)
 
-    @Test("fetchRides returns only that route's finished rides, newest first")
-    func fetchRidesForARouteReturnsOnlyEndedRidesNewestFirst() async throws {
+    @Test("fetchRouteRides returns only that route's finished rides, newest first")
+    func fetchRouteRidesForARouteReturnsOnlyEndedRidesNewestFirst() async throws {
         let (client, _) = Self.makeLiveClient()
         let route = try await client.importRoute(Self.climbingRoute())
         let otherRoute = try await client.importRoute(Self.climbingRoute(name: "Elsewhere"))
@@ -232,7 +232,7 @@ struct RoutePersistenceTests {
         // against a captured value, the same shape that compiled and then faulted at fetch
         // time for `recordingState` (#171). A fault surfaces here as a thrown error rather
         // than as a silently empty Previous Rides list on S20.
-        let rides = try await client.fetchRides(route.id)
+        let rides = try await client.fetchRouteRides(route.id)
 
         #expect(rides.map(\.rideId) == [newer, older])
         #expect(rides.first?.durationSeconds == 3_600)
@@ -240,14 +240,54 @@ struct RoutePersistenceTests {
         #expect(rides.allSatisfy { $0.endedAt != nil })
     }
 
-    @Test("fetchRides for a route with no rides returns empty")
-    func fetchRidesForARouteWithNoRidesReturnsEmpty() async throws {
+    @Test("fetchRouteRides for a route with no rides returns empty")
+    func fetchRouteRidesForARouteWithNoRidesReturnsEmpty() async throws {
         let (client, _) = Self.makeLiveClient()
         let route = try await client.importRoute(Self.climbingRoute())
-        #expect(try await client.fetchRides(route.id).isEmpty)
+        #expect(try await client.fetchRouteRides(route.id).isEmpty)
+    }
+
+    @Test("the guard at import is what keeps a stored row coherent")
+    func aStoredRouteAlwaysHasAPolylineMatchingItsCount() async throws {
+        let (client, _) = Self.makeLiveClient()
+        // Before the importer rejected non-finite coordinates, one NaN was enough to make
+        // NaN of all four bounds columns (`Swift.min(.nan, x)` is `.nan`) *and* to make
+        // JSONEncoder throw — which `try?` turned into a nil polyline stored beside a
+        // coordinateCount still claiming every point. The row looked fine and opened empty.
+        let imported = try GPXRouteImporter.route(from: Data("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <gpx version="1.1" creator="Fuzzed" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><name>Fuzzed</name><trkseg>
+            <trkpt lat="36.30" lon="-80.40"><ele>300</ele></trkpt>
+            <trkpt lat="nan" lon="-80.41"><ele>310</ele></trkpt>
+            <trkpt lat="36.32" lon="-80.42"><ele>1e999</ele></trkpt>
+          </trkseg></trk>
+        </gpx>
+        """.utf8))
+
+        let summary = try await client.importRoute(imported)
+        let detail = try #require(await client.fetchRoute(summary.id))
+
+        #expect(summary.coordinateCount == 2)
+        #expect(detail.coordinates.count == summary.coordinateCount)
+        #expect(summary.distanceMeters.isFinite)
+        #expect(summary.bounds.minLatitude.isFinite)
+        #expect(summary.bounds.maxLongitude.isFinite)
+        // The overflowing <ele> was dropped, so only one point has an elevation and the
+        // route reports nil gain rather than a confident zero.
+        #expect(summary.elevationGainMeters == nil)
     }
 
     // MARK: - Mock
+
+    @Test("the mock returns a scripted summary when one is given")
+    func mockImportRouteReturnsAScriptedSummary() async throws {
+        // The live path mints the id below the dependency boundary, so a feature test that
+        // needs a known id back scripts it here rather than reaching for $0.uuid.
+        let scripted = RouteSummary(imported: Self.climbingRoute(), id: UUID(0))
+        let client = PersistenceClient.mock(importResult: scripted)
+        #expect(try await client.importRoute(Self.climbingRoute()) == scripted)
+    }
 
     @Test("the mock derives the same summary the live path stores")
     func mockImportRouteDerivesTheSameSummaryAsLive() async throws {
@@ -293,15 +333,15 @@ struct RoutePersistenceTests {
         let client = PersistenceClient.mock(
             routes: [summary],
             routeDetails: [summary.id: detail],
-            rides: [summary.id: [ride]]
+            ridesByRoute: [summary.id: [ride]]
         )
 
         #expect(try await client.fetchRoutes() == [summary])
         #expect(try await client.fetchRoute(summary.id) == detail)
         // Nil for an unscripted id, matching live — unlike fetchRide, which throws.
         #expect(try await client.fetchRoute(UUID()) == nil)
-        #expect(try await client.fetchRides(summary.id) == [ride])
-        #expect(try await client.fetchRides(UUID()).isEmpty)
+        #expect(try await client.fetchRouteRides(summary.id) == [ride])
+        #expect(try await client.fetchRouteRides(UUID()).isEmpty)
     }
 
     // MARK: - On-disk behaviour
@@ -310,26 +350,10 @@ struct RoutePersistenceTests {
     // spills an `.externalStorage` attribute to its own file, and it has no relaunch to
     // survive. Both use a real store URL, following `RideSchemaMigrationTests`.
 
-    private func withTemporaryStoreURL(_ body: (URL) async throws -> Void) async throws {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("RoutePersistence-\(UUID().uuidString)")
-            .appendingPathExtension("store")
-        defer {
-            for path in [url.path, url.path + "-wal", url.path + "-shm"] {
-                try? FileManager.default.removeItem(atPath: path)
-            }
-        }
-        try await body(url)
-    }
-
     private func makeOnDiskClient(at url: URL) throws -> PersistenceClient {
-        let container = try ModelContainer(
-            for: SwiftDataStack.schema,
-            configurations: [ModelConfiguration(schema: SwiftDataStack.schema, url: url)]
-        )
-        return PersistenceClient.live(
+        PersistenceClient.live(
             coreDataContainer: CoreDataStack(inMemory: true).container,
-            modelContainer: container
+            modelContainer: try openStore(at: url)
         )
     }
 
@@ -356,7 +380,7 @@ struct RoutePersistenceTests {
             }
         )
 
-        try await withTemporaryStoreURL { url in
+        try await withTemporaryStoreURL(prefix: "RoutePersistence") { url in
             // Scoped so the container and its actors are released before the reopen —
             // otherwise this reads back through the same live context and proves nothing.
             let routeId: UUID
@@ -378,7 +402,7 @@ struct RoutePersistenceTests {
 
     @Test("a ride's routeId and routeName survive an app relaunch")
     func rideRouteLinkSurvivesAColdReopen() async throws {
-        try await withTemporaryStoreURL { url in
+        try await withTemporaryStoreURL(prefix: "RoutePersistence") { url in
             let rideId = UUID()
             let routeId: UUID
             do {
@@ -388,17 +412,18 @@ struct RoutePersistenceTests {
                 routeId = summary.id
             }
 
-            let reopened = try makeOnDiskClient(at: url)
-            #expect(try await reopened.fetchRoute(routeId) != nil)
-            #expect(try await reopened.fetchRoutes().count == 1)
+            // Scoped, so only one ModelContainer is ever open on this store file at a
+            // time — two at once is not a supported configuration and is exactly the
+            // lock-contention flake 31edca0 was landed to get rid of.
+            do {
+                let reopened = try makeOnDiskClient(at: url)
+                #expect(try await reopened.fetchRoute(routeId) != nil)
+                #expect(try await reopened.fetchRoutes().count == 1)
+            }
 
             // The link itself, read off the row rather than through the client, because
             // this is the claim: routeId was persisted, not merely held in feature state.
-            let container = try ModelContainer(
-                for: SwiftDataStack.schema,
-                configurations: [ModelConfiguration(schema: SwiftDataStack.schema, url: url)]
-            )
-            let context = ModelContext(container)
+            let context = ModelContext(try openStore(at: url))
             var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == rideId })
             descriptor.fetchLimit = 1
             let ride = try #require(try context.fetch(descriptor).first)

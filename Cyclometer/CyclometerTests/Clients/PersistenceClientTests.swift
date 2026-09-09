@@ -149,7 +149,7 @@ struct PersistenceClientTests {
         #expect(try await client.importRoute(ImportedRoute(coordinates: [], cuePoints: [])) == .empty)
         #expect(try await client.fetchRoutes().isEmpty)
         #expect(try await client.fetchRoute(UUID()) == nil)
-        #expect(try await client.fetchRides(UUID()).isEmpty)
+        #expect(try await client.fetchRouteRides(UUID()).isEmpty)
         try await client.deleteRoute(UUID())
         try await client.createRide(UUID(), Date(), nil)
         let update = RideSummaryUpdate(rideId: UUID(), durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0)

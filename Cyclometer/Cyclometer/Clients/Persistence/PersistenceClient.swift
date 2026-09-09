@@ -46,7 +46,10 @@ struct PersistenceClient: Sendable {
     /// Removes a route. Past rides keep their `routeId` and `routeName`.
     var deleteRoute: @Sendable (UUID) async throws -> Void
     /// Completed rides ridden on a route, newest first — S20's Previous Rides (#195).
-    var fetchRides: @Sendable (UUID) async throws -> [RouteRideSummary]
+    /// Named for the route, not the rides: at a call site `fetchRides(someId)` would give
+    /// no hint that the id has to be a *route* id, and S15's own ride-history read will
+    /// want the plain name.
+    var fetchRouteRides: @Sendable (UUID) async throws -> [RouteRideSummary]
 }
 
 enum PersistenceError: Error, Equatable {
@@ -77,7 +80,7 @@ extension PersistenceClient: DependencyKey {
             fetchRoutes: { try await routeActor.fetchRoutes() },
             fetchRoute: { try await routeActor.fetchRoute(id: $0) },
             deleteRoute: { try await routeActor.deleteRoute(id: $0) },
-            fetchRides: { try await rideActor.fetchRides(routeId: $0) }
+            fetchRouteRides: { try await rideActor.fetchRides(routeId: $0) }
         )
     }
 
@@ -100,7 +103,7 @@ extension PersistenceClient: DependencyKey {
         fetchRoutes: { [] },
         fetchRoute: { _ in nil },
         deleteRoute: { _ in },
-        fetchRides: { _ in [] }
+        fetchRouteRides: { _ in [] }
     )
 }
 

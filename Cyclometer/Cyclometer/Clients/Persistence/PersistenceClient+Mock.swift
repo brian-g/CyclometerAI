@@ -8,7 +8,8 @@ extension PersistenceClient {
         resumableRide: RideSummaryUpdate? = nil,
         routes: [RouteSummary] = [],
         routeDetails: [UUID: RouteDetail] = [:],
-        rides: [UUID: [RouteRideSummary]] = [:],
+        importResult: RouteSummary? = nil,
+        ridesByRoute: [UUID: [RouteRideSummary]] = [:],
         onFlush: @escaping @Sendable ([TrackPointDTO]) -> Void = { _ in },
         onCreateRide: @escaping @Sendable (UUID, Date, RouteReference?) -> Void = { _, _, _ in },
         onUpdateRideSummary: @escaping @Sendable (RideSummaryUpdate) -> Void = { _ in },
@@ -35,17 +36,17 @@ extension PersistenceClient {
             fetchResumableRide: { resumableRide },
             importRoute: {
                 onImportRoute($0)
-                // Runs the caller's route through the same derivation the live path uses,
-                // so a feature test can assert on real distance and elevation without
-                // standing up a store. A `@Model` that is never inserted into a context is
-                // an ordinary object — this allocates one purely to reuse `Route.init`'s
-                // arithmetic rather than keep a second copy of it in sync here.
-                return Route(imported: $0).summary
+                // Unscripted, this runs the caller's route through the same derivation the
+                // live path uses, so a feature test sees real distance and elevation
+                // without standing up a store. `importResult` is for the tests that need a
+                // known id back: the live path mints a fresh UUID below the dependency
+                // boundary, so `$0.uuid = .incrementing` cannot reach it.
+                return importResult ?? RouteSummary(imported: $0)
             },
             fetchRoutes: { routes },
             fetchRoute: { routeDetails[$0] },
             deleteRoute: { onDeleteRoute($0) },
-            fetchRides: { rides[$0] ?? [] }
+            fetchRouteRides: { ridesByRoute[$0] ?? [] }
         )
     }
 }

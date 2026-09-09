@@ -52,40 +52,43 @@ final class Route {
     @Attribute(.externalStorage)
     var polylineData: Data?
 
+    /// Get-only: a route is written once at import and never edited, so there is no
+    /// setter to misuse — and no `try?` on the encode side to swallow a failure into a
+    /// silently empty polyline. `init` writes the blob directly.
     var coordinates: [RouteCoordinate] {
-        get { polylineData.flatMap { try? JSONDecoder().decode([RouteCoordinate].self, from: $0) } ?? [] }
-        set { polylineData = try? JSONEncoder().encode(newValue) }
+        polylineData.flatMap { try? JSONDecoder().decode([RouteCoordinate].self, from: $0) } ?? []
     }
 
     @Attribute(.externalStorage)
     var cuePointsData: Data?
 
     var cuePoints: [RouteCuePoint] {
-        get { cuePointsData.flatMap { try? JSONDecoder().decode([RouteCuePoint].self, from: $0) } ?? [] }
-        set { cuePointsData = try? JSONEncoder().encode(newValue) }
+        cuePointsData.flatMap { try? JSONDecoder().decode([RouteCuePoint].self, from: $0) } ?? []
     }
 
     /// The only way a `Route` is made: from a parsed file, deriving distance, elevation
     /// and bounds once. Everything derived is stored rather than recomputed on read,
     /// because S19 sorts and filters on it.
     init(imported: ImportedRoute, id: UUID = UUID(), importedAt: Date = .now) {
-        let bounds = RouteGeometry.boundingBox(imported.coordinates)
-        let elevation = RouteGeometry.elevationGainLoss(imported.coordinates)
+        // The derivation itself lives on RouteSummary, so the one place that computes
+        // these numbers is a plain value type — callers that want them without a store
+        // (PersistenceClient.mock) don't have to allocate a @Model to get at it.
+        let summary = RouteSummary(imported: imported, id: id, importedAt: importedAt)
 
-        self.id = id
-        self.name = imported.name ?? Self.defaultName
-        self.terrainDescription = imported.terrainDescription
-        self.importedAt = importedAt
+        self.id = summary.id
+        self.name = summary.name
+        self.terrainDescription = summary.terrainDescription
+        self.importedAt = summary.importedAt
 
-        self.distanceMeters = RouteGeometry.distanceMeters(imported.coordinates)
-        self.coordinateCount = imported.coordinates.count
-        self.elevationGainMeters = elevation?.gain
-        self.elevationLossMeters = elevation?.loss
+        self.distanceMeters = summary.distanceMeters
+        self.coordinateCount = summary.coordinateCount
+        self.elevationGainMeters = summary.elevationGainMeters
+        self.elevationLossMeters = summary.elevationLossMeters
 
-        self.minLatitude = bounds.minLatitude
-        self.maxLatitude = bounds.maxLatitude
-        self.minLongitude = bounds.minLongitude
-        self.maxLongitude = bounds.maxLongitude
+        self.minLatitude = summary.bounds.minLatitude
+        self.maxLatitude = summary.bounds.maxLatitude
+        self.minLongitude = summary.bounds.minLongitude
+        self.maxLongitude = summary.bounds.maxLongitude
 
         // The stored blobs directly, not the computed accessors above: those are
         // unavailable until every stored property is initialised.
@@ -148,6 +151,24 @@ struct RouteSummary: Sendable, Equatable, Identifiable {
 }
 
 extension RouteSummary {
+    /// Everything a parsed file implies about itself, derived once. `Route.init` stores
+    /// the result; `PersistenceClient.mock` returns it directly, so a feature test sees
+    /// the same arithmetic the live path would have written.
+    init(imported: ImportedRoute, id: UUID = UUID(), importedAt: Date = .now) {
+        let elevation = RouteGeometry.elevationGainLoss(imported.coordinates)
+        self.init(
+            id: id,
+            name: imported.name ?? Route.defaultName,
+            terrainDescription: imported.terrainDescription,
+            importedAt: importedAt,
+            distanceMeters: RouteGeometry.distanceMeters(imported.coordinates),
+            coordinateCount: imported.coordinates.count,
+            elevationGainMeters: elevation?.gain,
+            elevationLossMeters: elevation?.loss,
+            bounds: RouteGeometry.boundingBox(imported.coordinates)
+        )
+    }
+
     /// The inert value `PersistenceClient.testValue` hands back, matching how its
     /// `fetchRide` returns a blank `RideExportMetadata`: a test that has not overridden
     /// the dependency should get something obviously empty and deterministic, never a

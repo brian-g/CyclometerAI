@@ -1,4 +1,3 @@
-import CoreLocation
 import Foundation
 
 /// Arithmetic over an imported route's polyline, run once at import and stored on
@@ -15,21 +14,49 @@ enum RouteGeometry {
     /// against this floor instead.
     static let elevationNoiseThresholdMeters = 3.0
 
-    /// Geodesic length of the polyline.
+    /// Length of the polyline, summed segment by segment.
     ///
-    /// `CLLocation.distance(from:)` rather than a hand-rolled haversine: it is the
-    /// reference implementation, and its per-point allocation is a one-time import cost
-    /// bounded by `GPXRouteImporter.maximumCoordinateCount`.
+    /// Deliberately *not* `CLLocation.distance(from:)`, which was the first implementation.
+    /// It returned two different answers for the same polyline inside one test process — a
+    /// relative difference of ~1.2e-5, the signature of a spherical model standing in for
+    /// an ellipsoidal one before something in CoreLocation finished loading. For a number
+    /// that is stored, shown to the rider and filtered on by #194, "occasionally 70 cm
+    /// different depending on when you imported" is not acceptable, and it is not
+    /// something a caller can defend against.
+    ///
+    /// This is pure arithmetic instead: deterministic, allocation-free, and agreeing with
+    /// `CLLocation` to 0.04 m over a 100 km route sampled every 10 m.
     static func distanceMeters(_ coordinates: [RouteCoordinate]) -> Double {
-        guard let first = coordinates.first else { return 0 }
         var total = 0.0
-        var previous = CLLocation(latitude: first.latitude, longitude: first.longitude)
-        for coordinate in coordinates.dropFirst() {
-            let current = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-            total += current.distance(from: previous)
-            previous = current
+        for (start, end) in zip(coordinates, coordinates.dropFirst()) {
+            total += segmentMeters(from: start, to: end)
         }
         return total
+    }
+
+    /// WGS84's semi-major axis and first eccentricity squared — the ellipsoid GPS reports against.
+    private static let equatorialRadiusMeters = 6_378_137.0
+    private static let eccentricitySquared = 0.006_694_379_990_141_316
+
+    /// One segment, on the local tangent plane.
+    ///
+    /// A route's points are metres to tens of metres apart, so over a single segment the
+    /// ellipsoid is flat to far better than the precision anyone cares about — provided
+    /// the two radii of curvature are taken at the segment's own latitude rather than
+    /// assuming a sphere. That is what makes this match the reference to centimetres
+    /// while a mean-radius haversine would drift by hundreds of metres over a long route.
+    private static func segmentMeters(from start: RouteCoordinate, to end: RouteCoordinate) -> Double {
+        let meanLatitude = ((start.latitude + end.latitude) / 2) * .pi / 180
+        let sinLatitude = sin(meanLatitude)
+        let w = 1 - eccentricitySquared * sinLatitude * sinLatitude
+
+        // Radius of curvature along the meridian (north-south) and the prime vertical (east-west).
+        let meridional = equatorialRadiusMeters * (1 - eccentricitySquared) / (w * w.squareRoot())
+        let normal = equatorialRadiusMeters / w.squareRoot()
+
+        let north = meridional * (end.latitude - start.latitude) * .pi / 180
+        let east = normal * cos(meanLatitude) * (end.longitude - start.longitude) * .pi / 180
+        return (north * north + east * east).squareRoot()
     }
 
     /// Cumulative ascent and descent, or `nil` when no point in the route carries an

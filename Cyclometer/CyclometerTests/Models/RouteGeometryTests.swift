@@ -26,14 +26,22 @@ struct RouteGeometryTests {
         #expect(RouteGeometry.distanceMeters([]) == 0)
     }
 
-    @Test("one degree of latitude measures about 110 km")
+    @Test("one degree of meridian matches the WGS84 reference figure")
     func distanceOverAKnownMeridianSegment() {
         let distance = RouteGeometry.distanceMeters([coordinate(0, 0), coordinate(1, 0)])
-        // A WGS84 meridian degree is 110,574 m; a spherical approximation gives 111,195 m.
-        // The band admits either rather than pinning CoreLocation's internal model, while
-        // still failing loudly on a wrong unit or a transposed lat/lon.
-        #expect(distance > 110_000)
-        #expect(distance < 111_500)
+        // 110,574.4 m is the published WGS84 value, not something read off this code.
+        // A spherical approximation would give 111,195 m and fail here by 600 m.
+        #expect(abs(distance - 110_574.4) < 1)
+    }
+
+    @Test("the same polyline always measures the same")
+    func distanceIsDeterministic() {
+        // `CLLocation.distance(from:)` was the first implementation and did not hold this:
+        // it returned two answers for one polyline inside a single test process. A stored,
+        // displayed, filtered-on number has to be reproducible.
+        let route = (0..<200).map { coordinate(36.0 + Double($0) * 0.0001, -80.0 + Double($0) * 0.0001) }
+        let measurements = Set((0..<50).map { _ in RouteGeometry.distanceMeters(route) })
+        #expect(measurements.count == 1)
     }
 
     @Test("distance accumulates every segment, not just the endpoints")
