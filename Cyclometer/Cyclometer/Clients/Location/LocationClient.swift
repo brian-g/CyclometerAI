@@ -33,6 +33,13 @@ struct LocationUpdate: Sendable, Equatable {
 struct LocationClient: Sendable {
     var startUpdates: @Sendable () -> AsyncStream<LocationUpdate>
     var stopUpdates: @Sendable () async -> Void
+    /// One position, for a screen that wants a map centre rather than a track (S19, #193).
+    /// Nil when location is denied, unavailable, or too slow to answer.
+    ///
+    /// Separate from the pair above because `stopUpdates` is not per-subscriber — it stops
+    /// the manager for everyone — so a browse screen must never open and close the stream
+    /// while a ride is recording.
+    var currentCoordinate: @Sendable () async -> Coordinate?
 }
 
 // MARK: - DependencyKey
@@ -40,12 +47,14 @@ struct LocationClient: Sendable {
 extension LocationClient: DependencyKey {
     static let liveValue = LocationClient(
         startUpdates: { LocationManagerState.shared.makeUpdateStream() },
-        stopUpdates:  { await LocationManagerState.shared.stopUpdates() }
+        stopUpdates:  { await LocationManagerState.shared.stopUpdates() },
+        currentCoordinate: { await LocationManagerState.shared.currentCoordinate() }
     )
 
     static let testValue = LocationClient(
         startUpdates: { AsyncStream { $0.finish() } },
-        stopUpdates:  { }
+        stopUpdates:  { },
+        currentCoordinate: { nil }
     )
 }
 

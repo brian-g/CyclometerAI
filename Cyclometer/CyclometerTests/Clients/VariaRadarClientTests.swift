@@ -741,7 +741,12 @@ struct VariaRadarIntegrationTests {
 
         await harness.pair(peripheralID)
         #expect(await states.next() == .connecting)
-        #expect(harness.calls.value.last == .connect(peripheralID))
+        // Waited for, not sampled: `.connecting` is a sync point for the *state*, not for
+        // the `connect` the client issues alongside it, so the tail of `calls` may not hold
+        // it yet. `contains` rather than `.last` for the same reason as the pairing-scan
+        // tests below — `connectCount == 0` above is what makes its arrival a real
+        // transition, and nothing here cares what the client does after it.
+        await expectEventually { harness.calls.value.contains(.connect(peripheralID)) }
     }
 
     @Test("Switching the gate tears the old radar down before connecting the new one")
@@ -905,7 +910,10 @@ struct VariaRadarIntegrationTests {
         #expect(!harness.calls.value.contains(.stopScanning([radarServiceUUID])))
 
         await harness.client.endPairingScan()
-        #expect(harness.calls.value.last == .stopScanning([radarServiceUUID]))
+        // `contains`, not `.last`: the assertion above proves the stop had not happened yet,
+        // so its arrival is a real transition — while `.last` also asserts that nothing else
+        // the client does asynchronously lands afterwards, which is not what this is about.
+        #expect(harness.calls.value.contains(.stopScanning([radarServiceUUID])))
     }
 
     /// The one that bites. `BLEClient.requestedServices` is a plain set with no
@@ -919,13 +927,23 @@ struct VariaRadarIntegrationTests {
         await harness.client.startScanning()
         harness.events.yield(.discovered(id: id, name: "Varia", rssi: -60, services: [radarServiceUUID]))
         _ = await harness.devices { $0.contains { $0.id == id } }
+        // The device list is broadcast from the `.discovered` handler *before* it awaits
+        // `connect`, so the list appearing does not mean the connect has been issued. Left
+        // in flight it lands after `endPairingScan`. `BLEHRClientTests` drains it here for
+        // exactly this reason (#219); the radar twin never got the same treatment, and that
+        // is what failed CI on #225.
+        await expectEventually { harness.calls.value.contains(.connect(id)) }
 
         await harness.client.beginPairingScan()
         await harness.client.disconnect()
         #expect(!harness.calls.value.contains(.stopScanning([radarServiceUUID])))
 
         await harness.client.endPairingScan()
-        #expect(harness.calls.value.last == .stopScanning([radarServiceUUID]))
+        // Same reason as above, and here it is not hypothetical: `pair` + `.discovered` sets
+        // a fire-and-forget auto-connect going, and `devices { ... }` syncs on the device
+        // reaching state, not on the connect that follows it. Under load that `.connect`
+        // lands after this stop and `.last` reads it instead (CI on #225, twice).
+        #expect(harness.calls.value.contains(.stopScanning([radarServiceUUID])))
     }
 
     @Test("A pairing scan re-issues the hardware scan, which is what refresh restarts")
