@@ -905,7 +905,10 @@ struct VariaRadarIntegrationTests {
         #expect(!harness.calls.value.contains(.stopScanning([radarServiceUUID])))
 
         await harness.client.endPairingScan()
-        #expect(harness.calls.value.last == .stopScanning([radarServiceUUID]))
+        // `contains`, not `.last`: the assertion above proves the stop had not happened yet,
+        // so its arrival is a real transition — while `.last` also asserts that nothing else
+        // the client does asynchronously lands afterwards, which is not what this is about.
+        #expect(harness.calls.value.contains(.stopScanning([radarServiceUUID])))
     }
 
     /// The one that bites. `BLEClient.requestedServices` is a plain set with no
@@ -925,7 +928,11 @@ struct VariaRadarIntegrationTests {
         #expect(!harness.calls.value.contains(.stopScanning([radarServiceUUID])))
 
         await harness.client.endPairingScan()
-        #expect(harness.calls.value.last == .stopScanning([radarServiceUUID]))
+        // Same reason as above, and here it is not hypothetical: `pair` + `.discovered` sets
+        // a fire-and-forget auto-connect going, and `devices { ... }` syncs on the device
+        // reaching state, not on the connect that follows it. Under load that `.connect`
+        // lands after this stop and `.last` reads it instead (CI on #225, twice).
+        #expect(harness.calls.value.contains(.stopScanning([radarServiceUUID])))
     }
 
     @Test("A pairing scan re-issues the hardware scan, which is what refresh restarts")
