@@ -472,7 +472,9 @@ struct BLEHRIntegrationTests {
         #expect(!harness.calls.value.contains(.connect(id)))
 
         await harness.pair(id)
-        #expect(harness.calls.value.last == .connect(id))
+        // Waited for, not sampled: `pair` returning is not the connect being recorded. The
+        // `!contains` above is what makes this a real transition rather than earlier history.
+        await expectEventually { harness.calls.value.contains(.connect(id)) }
     }
 
     @Test("Switching the gate tears the old strap down before connecting the new one")
@@ -625,7 +627,11 @@ struct BLEHRIntegrationTests {
         #expect(!harness.calls.value.contains(.stopScanning([hrServiceUUID])))
 
         await harness.client.endPairingScan()
-        #expect(harness.calls.value.last == .stopScanning([hrServiceUUID]))
+        // `contains`, not `.last`: the assertion above proves the stop had not happened yet,
+        // so its arrival is the transition under test — while `.last` also demands nothing
+        // else the client does asynchronously lands afterwards, which is not what this is
+        // about, and is what broke the radar twin on CI (#225).
+        #expect(harness.calls.value.contains(.stopScanning([hrServiceUUID])))
     }
 
     /// The one that bites. `BLEClient.requestedServices` is a plain set with no
@@ -641,9 +647,8 @@ struct BLEHRIntegrationTests {
         _ = await harness.devices { $0.contains { $0.id == id } }
         // The device list is broadcast from the `.discovered` handler *before* it awaits
         // `connect`, so the list appearing does not mean the connect has been issued. Left
-        // in flight it lands after `endPairingScan`, and the `calls.value.last` assertion
-        // below sees `.connect` rather than `.stopScanning`. Observed once in twelve runs
-        // under load.
+        // in flight it lands after `endPairingScan`, which is what made the `.last`
+        // assertion below flaky. Observed once in twelve runs under load.
         await expectEventually { harness.calls.value.contains(.connect(id)) }
 
         await harness.client.beginPairingScan()
@@ -651,7 +656,9 @@ struct BLEHRIntegrationTests {
         #expect(!harness.calls.value.contains(.stopScanning([hrServiceUUID])))
 
         await harness.client.endPairingScan()
-        #expect(harness.calls.value.last == .stopScanning([hrServiceUUID]))
+        // The drain above removes the known racer; `contains` means a new one would not
+        // silently break this again.
+        #expect(harness.calls.value.contains(.stopScanning([hrServiceUUID])))
     }
 
     /// A strap that drops mid-ride reconnects by rescanning, and that rescan bypasses

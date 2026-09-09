@@ -741,7 +741,12 @@ struct VariaRadarIntegrationTests {
 
         await harness.pair(peripheralID)
         #expect(await states.next() == .connecting)
-        #expect(harness.calls.value.last == .connect(peripheralID))
+        // Waited for, not sampled: `.connecting` is a sync point for the *state*, not for
+        // the `connect` the client issues alongside it, so the tail of `calls` may not hold
+        // it yet. `contains` rather than `.last` for the same reason as the pairing-scan
+        // tests below — `connectCount == 0` above is what makes its arrival a real
+        // transition, and nothing here cares what the client does after it.
+        await expectEventually { harness.calls.value.contains(.connect(peripheralID)) }
     }
 
     @Test("Switching the gate tears the old radar down before connecting the new one")
@@ -922,6 +927,12 @@ struct VariaRadarIntegrationTests {
         await harness.client.startScanning()
         harness.events.yield(.discovered(id: id, name: "Varia", rssi: -60, services: [radarServiceUUID]))
         _ = await harness.devices { $0.contains { $0.id == id } }
+        // The device list is broadcast from the `.discovered` handler *before* it awaits
+        // `connect`, so the list appearing does not mean the connect has been issued. Left
+        // in flight it lands after `endPairingScan`. `BLEHRClientTests` drains it here for
+        // exactly this reason (#219); the radar twin never got the same treatment, and that
+        // is what failed CI on #225.
+        await expectEventually { harness.calls.value.contains(.connect(id)) }
 
         await harness.client.beginPairingScan()
         await harness.client.disconnect()
