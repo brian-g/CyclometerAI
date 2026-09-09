@@ -11,9 +11,16 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persi
 /// `ModelContext` isn't safe to share across concurrent callers without one.
 @ModelActor
 actor RidePersistenceActor {
-    func createRide(id: UUID, startedAt: Date) throws {
+    /// Takes the whole `RouteReference` rather than a bare id so `routeId` and the
+    /// denormalized `routeName` are written together and can never disagree — and so this
+    /// actor never has to read the `Route` table, which is what keeps it and
+    /// `RoutePersistenceActor` on disjoint tables (#191).
+    func createRide(id: UUID, startedAt: Date, route: RouteReference?) throws {
         try savingChanges("createRide", id: id) {
-            modelContext.insert(Ride(id: id, startedAt: startedAt))
+            let ride = Ride(id: id, startedAt: startedAt)
+            ride.routeId = route?.id
+            ride.routeName = route?.name
+            modelContext.insert(ride)
         }
     }
 
@@ -91,6 +98,39 @@ actor RidePersistenceActor {
             return try modelContext.fetch(descriptor).first?.summarySnapshot
         } catch {
             logger.error("fetchResumableRide failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
+    /// Read path for S20's Previous Rides (#195) — completed rides that were ridden on
+    /// this route, newest first.
+    ///
+    /// Filters on `endedAt != nil` rather than `recordingState == .ended` for the reason
+    /// spelled out on `fetchResumableRide` above: a `#Predicate` comparing a
+    /// RawRepresentable-backed enum property against a captured value compiles and then
+    /// faults at fetch time. The two fields move in lockstep, so this is an exact,
+    /// enum-free proxy for "finished".
+    ///
+    /// A route that has since been deleted still matches its past rides here — the id is
+    /// left dangling deliberately (#191) — but nothing asks for a deleted route's id, so
+    /// that costs nothing.
+    func fetchRides(routeId: UUID) throws -> [RouteRideSummary] {
+        do {
+            let descriptor = FetchDescriptor<Ride>(
+                predicate: #Predicate { $0.routeId == routeId && $0.endedAt != nil },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+            )
+            return try modelContext.fetch(descriptor).map {
+                RouteRideSummary(
+                    rideId: $0.id,
+                    startedAt: $0.startedAt,
+                    endedAt: $0.endedAt,
+                    durationSeconds: $0.durationSeconds,
+                    distanceMeters: $0.distanceMeters
+                )
+            }
+        } catch {
+            logger.error("fetchRides(route) failed: \(error.localizedDescription, privacy: .public)")
             throw error
         }
     }

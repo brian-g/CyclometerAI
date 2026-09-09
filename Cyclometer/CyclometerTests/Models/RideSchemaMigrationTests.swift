@@ -160,6 +160,41 @@ struct RideSchemaMigrationTests {
         }
     }
 
+    /// `Route` (#191) is the first entity added to the schema since the store shipped, as
+    /// opposed to an attribute added to an existing one. A store written before it existed
+    /// has no `Route` table at all, so this asserts the additive half of lightweight
+    /// migration — the half `opensPreSampleCountStore` above cannot see, since it only
+    /// checks that the *old* rows survive.
+    @Test("a store written before Route existed still opens, and then accepts a Route")
+    func aStoreWrittenBeforeRouteExistedAcceptsARoute() throws {
+        try withTemporaryStoreURL { url in
+            try writeLegacyStore(at: url, rideId: UUID(), startedAt: .now)
+
+            let context = try ModelContext(openWithCurrentSchema(at: url))
+            let legacyRide = try #require(context.fetch(FetchDescriptor<Ride>()).first)
+            // The legacy ride predates both route fields, so both backfill to nil rather
+            // than to a zero UUID or an empty string.
+            #expect(legacyRide.routeId == nil)
+            #expect(legacyRide.routeName == nil)
+
+            context.insert(Route(imported: ImportedRoute(
+                name: "Hanging Rock",
+                terrainDescription: "Gravel",
+                coordinates: [
+                    RouteCoordinate(latitude: 36.39, longitude: -80.26, elevationMeters: 380),
+                    RouteCoordinate(latitude: 36.40, longitude: -80.25, elevationMeters: 470),
+                ],
+                cuePoints: []
+            )))
+            try context.save()
+
+            let routes = try context.fetch(FetchDescriptor<Route>())
+            #expect(routes.count == 1)
+            #expect(routes.first?.name == "Hanging Rock")
+            #expect(routes.first?.coordinates.count == 2)
+        }
+    }
+
     @Test("a migrated store is writable, not just readable")
     func migratedStoreAcceptsWrites() throws {
         try withTemporaryStoreURL { url in

@@ -6,11 +6,16 @@ extension PersistenceClient {
         rideExportMetadata: [UUID: RideExportMetadata] = [:],
         vehiclePassEvents: [UUID: [VehiclePassEventDTO]] = [:],
         resumableRide: RideSummaryUpdate? = nil,
+        routes: [RouteSummary] = [],
+        routeDetails: [UUID: RouteDetail] = [:],
+        rides: [UUID: [RouteRideSummary]] = [:],
         onFlush: @escaping @Sendable ([TrackPointDTO]) -> Void = { _ in },
-        onCreateRide: @escaping @Sendable (UUID, Date) -> Void = { _, _ in },
+        onCreateRide: @escaping @Sendable (UUID, Date, RouteReference?) -> Void = { _, _, _ in },
         onUpdateRideSummary: @escaping @Sendable (RideSummaryUpdate) -> Void = { _ in },
         onFinalizeRide: @escaping @Sendable (UUID, Date, RideSummaryUpdate, URL?) -> Void = { _, _, _, _ in },
-        onAppendVehiclePassEvents: @escaping @Sendable ([VehiclePassEventDTO]) -> Void = { _ in }
+        onAppendVehiclePassEvents: @escaping @Sendable ([VehiclePassEventDTO]) -> Void = { _ in },
+        onImportRoute: @escaping @Sendable (ImportedRoute) -> Void = { _ in },
+        onDeleteRoute: @escaping @Sendable (UUID) -> Void = { _ in }
     ) -> PersistenceClient {
         PersistenceClient(
             flushTrackPoints: { onFlush($0) },
@@ -22,12 +27,25 @@ extension PersistenceClient {
                 guard let metadata = rideExportMetadata[$0] else { throw PersistenceError.rideNotFound }
                 return metadata
             },
-            createRide: { onCreateRide($0, $1) },
+            createRide: { onCreateRide($0, $1, $2) },
             updateRideSummary: { onUpdateRideSummary($0) },
             finalizeRide: { onFinalizeRide($0, $1, $2, $3) },
             appendVehiclePassEvents: { onAppendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { vehiclePassEvents[$0] ?? [] },
-            fetchResumableRide: { resumableRide }
+            fetchResumableRide: { resumableRide },
+            importRoute: {
+                onImportRoute($0)
+                // Runs the caller's route through the same derivation the live path uses,
+                // so a feature test can assert on real distance and elevation without
+                // standing up a store. A `@Model` that is never inserted into a context is
+                // an ordinary object — this allocates one purely to reuse `Route.init`'s
+                // arithmetic rather than keep a second copy of it in sync here.
+                return Route(imported: $0).summary
+            },
+            fetchRoutes: { routes },
+            fetchRoute: { routeDetails[$0] },
+            deleteRoute: { onDeleteRoute($0) },
+            fetchRides: { rides[$0] ?? [] }
         )
     }
 }

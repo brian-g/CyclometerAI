@@ -146,7 +146,12 @@ struct PersistenceClientTests {
         #expect(try await client.fetchRide(UUID()) == RideExportMetadata(title: "", startedAt: .init(timeIntervalSince1970: 0)))
         #expect(try await client.fetchVehiclePassEvents(UUID()).isEmpty)
         #expect(try await client.fetchResumableRide() == nil)
-        try await client.createRide(UUID(), Date())
+        #expect(try await client.importRoute(ImportedRoute(coordinates: [], cuePoints: [])) == .empty)
+        #expect(try await client.fetchRoutes().isEmpty)
+        #expect(try await client.fetchRoute(UUID()) == nil)
+        #expect(try await client.fetchRides(UUID()).isEmpty)
+        try await client.deleteRoute(UUID())
+        try await client.createRide(UUID(), Date(), nil)
         let update = RideSummaryUpdate(rideId: UUID(), durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0)
         try await client.updateRideSummary(update)
         try await client.finalizeRide(UUID(), Date(), update, nil)
@@ -170,7 +175,7 @@ struct PersistenceClientTests {
             durationSeconds: 300, distanceMeters: 1_500, averageSpeedMPS: 5, maxSpeedMPS: 9
         )
         let flushed = LockIsolated<[TrackPointDTO]>([])
-        let createdRide = LockIsolated<(UUID, Date)?>(nil)
+        let createdRide = LockIsolated<(UUID, Date, RouteReference?)?>(nil)
         let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
         let finalizedRide = LockIsolated<(UUID, Date, RideSummaryUpdate, URL?)?>(nil)
         let appendedPassEvents = LockIsolated<[VehiclePassEventDTO]>([])
@@ -180,7 +185,7 @@ struct PersistenceClientTests {
             vehiclePassEvents: [rideId: scriptedPassEvents],
             resumableRide: scriptedResumableRide,
             onFlush: { flushed.setValue($0) },
-            onCreateRide: { createdRide.setValue(($0, $1)) },
+            onCreateRide: { createdRide.setValue(($0, $1, $2)) },
             onUpdateRideSummary: { updatedSummary.setValue($0) },
             onFinalizeRide: { finalizedRide.setValue(($0, $1, $2, $3)) },
             onAppendVehiclePassEvents: { appendedPassEvents.setValue($0) }
@@ -197,9 +202,11 @@ struct PersistenceClientTests {
         #expect(flushed.value == scripted)
 
         let startedAt = Date()
-        try await client.createRide(rideId, startedAt)
+        let route = RouteReference(id: UUID(), name: "Sauratown Loop")
+        try await client.createRide(rideId, startedAt, route)
         #expect(createdRide.value?.0 == rideId)
         #expect(createdRide.value?.1 == startedAt)
+        #expect(createdRide.value?.2 == route)
 
         let summary = RideSummaryUpdate(rideId: rideId, durationSeconds: 120, distanceMeters: 500, averageSpeedMPS: 4, maxSpeedMPS: 9)
         try await client.updateRideSummary(summary)
@@ -237,7 +244,7 @@ struct PersistenceClientTests {
         let rideId = UUID()
         let startedAt = Date()
 
-        try await client.createRide(rideId, startedAt)
+        try await client.createRide(rideId, startedAt, nil)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(ride.id == rideId)
@@ -250,7 +257,7 @@ struct PersistenceClientTests {
     func updateRideSummaryWritesAggregates() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
         let rideId = UUID()
-        try await client.createRide(rideId, Date())
+        try await client.createRide(rideId, Date(), nil)
 
         let update = RideSummaryUpdate(
             rideId: rideId,
@@ -293,7 +300,7 @@ struct PersistenceClientTests {
     func updateRideSummaryPreservesVehiclePassCountWhenNil() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
         let rideId = UUID()
-        try await client.createRide(rideId, Date())
+        try await client.createRide(rideId, Date(), nil)
         try await client.updateRideSummary(RideSummaryUpdate(
             rideId: rideId, durationSeconds: 60, distanceMeters: 200,
             averageSpeedMPS: 3, maxSpeedMPS: 5, vehiclePassCount: 4
@@ -322,7 +329,7 @@ struct PersistenceClientTests {
     func finalizeRideSetsEndedState() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
         let rideId = UUID()
-        try await client.createRide(rideId, Date())
+        try await client.createRide(rideId, Date(), nil)
         let update = RideSummaryUpdate(
             rideId: rideId, recordingState: .ended,
             durationSeconds: 900, distanceMeters: 5_000, averageSpeedMPS: 5, maxSpeedMPS: 10
@@ -343,7 +350,7 @@ struct PersistenceClientTests {
     func finalizeRideForcesEndedRegardlessOfSummary() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
         let rideId = UUID()
-        try await client.createRide(rideId, Date())
+        try await client.createRide(rideId, Date(), nil)
         // A caller passing a stale/mismatched recordingState (e.g. .active) still
         // ends up .ended — finalizeRide is the one place that owns this transition.
         let update = RideSummaryUpdate(
@@ -373,7 +380,7 @@ struct PersistenceClientTests {
         let (client, swiftDataStack) = Self.makeLiveClient()
         let rideId = UUID()
         let startedAt = Date()
-        try await client.createRide(rideId, startedAt)
+        try await client.createRide(rideId, startedAt, nil)
 
         let context = ModelContext(swiftDataStack.container)
         var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == rideId })
@@ -406,7 +413,7 @@ struct PersistenceClientTests {
     @Test("a #Predicate comparing recordingState against a captured enum value throws at fetch time")
     func recordingStatePredicateThrowsAtRuntime() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
-        try await client.createRide(UUID(), Date())
+        try await client.createRide(UUID(), Date(), nil)
 
         let context = ModelContext(swiftDataStack.container)
         let ended = Ride.RecordingState.ended
@@ -425,9 +432,9 @@ struct PersistenceClientTests {
         let pausedId = UUID()
         let endedId = UUID()
 
-        try await client.createRide(activeId, base)
-        try await client.createRide(pausedId, base.addingTimeInterval(60))
-        try await client.createRide(endedId, base.addingTimeInterval(120))
+        try await client.createRide(activeId, base, nil)
+        try await client.createRide(pausedId, base.addingTimeInterval(60), nil)
+        try await client.createRide(endedId, base.addingTimeInterval(120), nil)
 
         let pauseUpdate = RideSummaryUpdate(
             rideId: pausedId, recordingState: .paused,
@@ -459,7 +466,7 @@ struct PersistenceClientTests {
     func fetchResumableRideNilWhenOnlyEndedRideExists() async throws {
         let (client, _) = Self.makeLiveClient()
         let rideId = UUID()
-        try await client.createRide(rideId, Date())
+        try await client.createRide(rideId, Date(), nil)
         let finishUpdate = RideSummaryUpdate(
             rideId: rideId, recordingState: .ended,
             durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
@@ -476,14 +483,14 @@ struct PersistenceClientTests {
         let endedId = UUID()
         let activeId = UUID()
 
-        try await client.createRide(endedId, base)
+        try await client.createRide(endedId, base, nil)
         let finishUpdate = RideSummaryUpdate(
             rideId: endedId, recordingState: .ended,
             durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
         )
         try await client.finalizeRide(endedId, base.addingTimeInterval(60), finishUpdate, nil)
 
-        try await client.createRide(activeId, base.addingTimeInterval(120))
+        try await client.createRide(activeId, base.addingTimeInterval(120), nil)
         let checkpoint = RideSummaryUpdate(
             rideId: activeId, recordingState: .paused,
             durationSeconds: 145, distanceMeters: 980,
@@ -509,7 +516,7 @@ struct PersistenceClientTests {
     func appendVehiclePassEventsPersists() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
         let rideId = UUID()
-        try await client.createRide(rideId, Date())
+        try await client.createRide(rideId, Date(), nil)
 
         let dto = VehiclePassEventDTO(
             rideId: rideId,
@@ -539,7 +546,7 @@ struct PersistenceClientTests {
     func appendVehiclePassEventsBatchInsertsAll() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
         let rideId = UUID()
-        try await client.createRide(rideId, Date())
+        try await client.createRide(rideId, Date(), nil)
 
         let dtos = (0..<3).map { offset in
             VehiclePassEventDTO(
@@ -560,7 +567,7 @@ struct PersistenceClientTests {
     func appendVehiclePassEventNilEstimatedSpeedRoundTrips() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
         let rideId = UUID()
-        try await client.createRide(rideId, Date())
+        try await client.createRide(rideId, Date(), nil)
 
         try await client.appendVehiclePassEvents([VehiclePassEventDTO(
             rideId: rideId, timestamp: Date(), latitude: 1, longitude: 2,
