@@ -306,3 +306,37 @@ meridian-degree figure exactly.
   can — both were self-consistent and both matched their own expectations.
 - When a numeric test fails by a suspiciously small relative amount, get the two values
   before theorising. 1.2e-5 named the cause (sphere vs ellipsoid); "flaky test" would not have.
+
+---
+
+## A fixture that cannot express the failure is not evidence (2026-09-08, #192)
+
+**What happened.** The geometry half of `TurnDerivation` was planned as a windowed bearing delta —
+compare the heading 20 m before a point with the heading 20 m after, call the difference the turn
+angle — and I validated it by simulating every acceptance criterion before writing the plan. All
+seven passed, with measured numbers. The plan was approved on that evidence.
+
+Every one of those fixtures used a **sharp vertex**: two straight legs meeting at a point. A sharp
+vertex is precisely the one case where "curvature over a window" and "turn angle" give the same
+answer. Real exporters round their corners. On an arc the two diverge completely: the same 90° corner
+measured 85° at a 5 m drawn radius, 43° at 28 m, and **nothing at 30 m or wider**, where it fell
+under the 40° threshold and vanished. The suite would have stayed green while the feature missed most
+real corners, with the answer depending on which planning tool wrote the file.
+
+A second defect the fixtures could not see: candidates were grouped by *array index adjacency*, which
+is only road adjacency if the file is densely sampled. Every fixture used 5 m spacing. At the 150–200
+m spacing real decimated GPX uses, two corners 200 m apart landed on consecutive indices and merged.
+
+**Rules.**
+- Simulating the ACs is not the same as testing the design. Ask what the fixture *cannot* express,
+  and build one that can, before treating a green run as evidence. Here the missing fixture was
+  one parameter wide: a constant-radius arc.
+- When a measurement is a proxy for the quantity you actually want, name the difference out loud and
+  test across the axis that separates them. "Curvature over a window" is not "turn angle", and the
+  axis that separates them is drawn corner radius.
+- A quantity worth reporting should not also be the gate. Splitting "how far does the road turn"
+  (accumulated sum) from "sharply enough to matter" (span/radius) made both testable and removed the
+  exporter-dependence entirely.
+- Sampling-density independence is a property worth asserting directly. Two of the defects here were
+  really one bug — reasoning about array indices as if they were distances — and a test that runs the
+  same corner at 0.5 m through 100 m spacing catches that whole class in one line.

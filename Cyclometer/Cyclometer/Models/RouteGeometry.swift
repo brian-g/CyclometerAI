@@ -38,14 +38,21 @@ enum RouteGeometry {
     private static let equatorialRadiusMeters = 6_378_137.0
     private static let eccentricitySquared = 0.006_694_379_990_141_316
 
-    /// One segment, on the local tangent plane.
+    /// One segment as metres north and east on the tangent plane at its mean latitude.
     ///
     /// A route's points are metres to tens of metres apart, so over a single segment the
     /// ellipsoid is flat to far better than the precision anyone cares about — provided
     /// the two radii of curvature are taken at the segment's own latitude rather than
     /// assuming a sphere. That is what makes this match the reference to centimetres
     /// while a mean-radius haversine would drift by hundreds of metres over a long route.
-    private static func segmentMeters(from start: RouteCoordinate, to end: RouteCoordinate) -> Double {
+    ///
+    /// Split out from `segmentMeters` because the same two components are a bearing:
+    /// length is their hypotenuse, direction is `atan2(east, north)`. Deriving the bearing
+    /// separately would mean a second, subtly different flattening of the same ellipsoid.
+    static func tangentPlaneOffset(
+        from start: RouteCoordinate,
+        to end: RouteCoordinate
+    ) -> (north: Double, east: Double) {
         let meanLatitude = ((start.latitude + end.latitude) / 2) * .pi / 180
         let sinLatitude = sin(meanLatitude)
         let w = 1 - eccentricitySquared * sinLatitude * sinLatitude
@@ -54,9 +61,136 @@ enum RouteGeometry {
         let meridional = equatorialRadiusMeters * (1 - eccentricitySquared) / (w * w.squareRoot())
         let normal = equatorialRadiusMeters / w.squareRoot()
 
-        let north = meridional * (end.latitude - start.latitude) * .pi / 180
-        let east = normal * cos(meanLatitude) * (end.longitude - start.longitude) * .pi / 180
-        return (north * north + east * east).squareRoot()
+        return (
+            north: meridional * (end.latitude - start.latitude) * .pi / 180,
+            east: normal * cos(meanLatitude) * (end.longitude - start.longitude) * .pi / 180
+        )
+    }
+
+    private static func segmentMeters(from start: RouteCoordinate, to end: RouteCoordinate) -> Double {
+        let offset = tangentPlaneOffset(from: start, to: end)
+        return (offset.north * offset.north + offset.east * offset.east).squareRoot()
+    }
+
+    /// Compass bearing of a segment, degrees clockwise from true north in `0..<360`.
+    ///
+    /// Undefined for a zero-length segment, which is why this returns nil there rather than
+    /// `atan2(0, 0)`'s silent `0` — due north is a wrong answer that looks like a right one,
+    /// and `GPXRouteImporter` does not dedupe consecutive identical points (it drops only
+    /// non-finite and out-of-range ones), so zero-length segments do reach this.
+    static func bearingDegrees(from start: RouteCoordinate, to end: RouteCoordinate) -> Double? {
+        let offset = tangentPlaneOffset(from: start, to: end)
+        guard offset.north != 0 || offset.east != 0 else { return nil }
+        let degrees = atan2(offset.east, offset.north) * 180 / .pi
+        return degrees < 0 ? degrees + 360 : degrees
+    }
+
+    /// Distance from the route start to each coordinate, one entry per coordinate.
+    ///
+    /// The prefix sums behind `distanceMeters`, kept rather than discarded: #192 places a
+    /// maneuver by along-route distance and #197 snaps the rider to the polyline, and both
+    /// would otherwise re-walk the route to answer "how far in is this point".
+    static func cumulativeDistances(_ coordinates: [RouteCoordinate]) -> [Double] {
+        guard !coordinates.isEmpty else { return [] }
+        var distances = [0.0]
+        distances.reserveCapacity(coordinates.count)
+        for (start, end) in zip(coordinates, coordinates.dropFirst()) {
+            distances.append(distances[distances.count - 1] + segmentMeters(from: start, to: end))
+        }
+        return distances
+    }
+
+    /// The polyline re-sampled at a fixed spacing along its length.
+    ///
+    /// The point of it is that everything computed downstream stops depending on how the
+    /// source file happened to be sampled. A GPX may carry a point every 1 m or every 200 m,
+    /// and #192's first design compared *array indices* to decide whether two turns were near
+    /// each other — which silently merged two corners 200 m apart on a decimated file. After
+    /// resampling, index distance is road distance and that class of bug cannot recur.
+    ///
+    /// Interpolation is linear in latitude/longitude: over one sub-`step` interval the
+    /// difference from interpolating along the geodesic is far below the metre.
+    static func resampled(
+        _ coordinates: [RouteCoordinate],
+        everyMeters step: Double
+    ) -> [(coordinate: RouteCoordinate, distanceAlongRouteMeters: Double)] {
+        guard step > 0, coordinates.count > 1 else { return [] }
+        let cumulative = cumulativeDistances(coordinates)
+        guard let total = cumulative.last, total > 0 else { return [] }
+
+        var samples: [(coordinate: RouteCoordinate, distanceAlongRouteMeters: Double)] = []
+        samples.reserveCapacity(Int(total / step) + 2)
+        var segment = 0
+        var distance = 0.0
+        while distance <= total {
+            while segment + 2 < coordinates.count, cumulative[segment + 1] < distance { segment += 1 }
+            let spanned = cumulative[segment + 1] - cumulative[segment]
+            let t = spanned <= 0 ? 0 : (distance - cumulative[segment]) / spanned
+            let start = coordinates[segment]
+            let end = coordinates[segment + 1]
+            samples.append((
+                coordinate: RouteCoordinate(
+                    latitude: start.latitude + (end.latitude - start.latitude) * t,
+                    longitude: start.longitude + (end.longitude - start.longitude) * t,
+                    elevationMeters: nil
+                ),
+                distanceAlongRouteMeters: distance
+            ))
+            distance += step
+        }
+        return samples
+    }
+
+    /// Where `point` falls on the polyline: the nearest point on the nearest segment, how far
+    /// along the route that is, and how far off the route `point` itself lies.
+    ///
+    /// Perpendicular projection rather than nearest vertex. A cue snapped to the closest
+    /// *vertex* is off by up to half the point spacing — ~5 m on a 10 m-sampled route, which
+    /// is half of the ±10 m budget PRD §8.6 gives #197 for firing a turn, spent before #197
+    /// has done anything.
+    static func projection(
+        of point: RouteCoordinate,
+        onto coordinates: [RouteCoordinate],
+        cumulative: [Double]
+    ) -> (coordinate: RouteCoordinate, distanceAlongRouteMeters: Double, offsetMeters: Double)? {
+        guard coordinates.count > 1, cumulative.count == coordinates.count else { return nil }
+
+        var best: (coordinate: RouteCoordinate, distanceAlongRouteMeters: Double, offsetMeters: Double)?
+        for index in 0..<(coordinates.count - 1) {
+            let start = coordinates[index]
+            let end = coordinates[index + 1]
+
+            // One frame for both vectors, anchored at the segment start. Taking the segment
+            // from `tangentPlaneOffset(start, end)` and the cue from `(start, point)` would
+            // flatten the ellipsoid at two different mean latitudes and quietly leave the dot
+            // product non-orthogonal.
+            let segment = tangentPlaneOffset(from: start, to: end)
+            let toPoint = tangentPlaneOffset(from: start, to: point)
+
+            let lengthSquared = segment.north * segment.north + segment.east * segment.east
+            // A zero-length segment gives 0/0. NaN loses every comparison, so left unguarded
+            // it would neither win nor lose the argmin — and as segment 0 it would seed `best`
+            // and then never be displaced.
+            let t = lengthSquared <= 0
+                ? 0
+                : min(max((toPoint.north * segment.north + toPoint.east * segment.east) / lengthSquared, 0), 1)
+
+            let offsetNorth = toPoint.north - segment.north * t
+            let offsetEast = toPoint.east - segment.east * t
+            let offset = (offsetNorth * offsetNorth + offsetEast * offsetEast).squareRoot()
+            guard best == nil || offset < best!.offsetMeters else { continue }
+
+            best = (
+                coordinate: RouteCoordinate(
+                    latitude: start.latitude + (end.latitude - start.latitude) * t,
+                    longitude: start.longitude + (end.longitude - start.longitude) * t,
+                    elevationMeters: nil
+                ),
+                distanceAlongRouteMeters: cumulative[index] + lengthSquared.squareRoot() * t,
+                offsetMeters: offset
+            )
+        }
+        return best
     }
 
     /// Cumulative ascent and descent, or `nil` when no point in the route carries an
