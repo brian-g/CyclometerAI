@@ -7,7 +7,7 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "route
 /// S19 — the Routes tab: saved routes as a list or a map, plus GPX import from the Files app.
 ///
 /// Everything the screen shows comes from `PersistenceClient`; nothing reads the demo data
-/// the prototype was built on. Tapping a row does nothing until S20 lands (#195).
+/// the prototype was built on. Tapping a row pushes S20 onto `path` (#195).
 ///
 /// Three filters narrow the list and compose: a distance range and an elevation-gain maximum
 /// from the sheet (`RouteFilter`), and the map's own viewport, captured when the rider switches
@@ -73,6 +73,11 @@ struct RoutesFeature {
 
         @Presents var alert: AlertState<Action.Alert>?
 
+        /// The tab's navigation stack: S20, pushed from a row (#195). A stack rather than a
+        /// `Scope`d child because S20 is one screen per route, and `NavigationLink(state:)` is
+        /// what tells the reducer which one was tapped.
+        var path = StackState<Path.State>()
+
         var unitSystem: UnitSystem { preferences.preferredUnit }
 
         /// The travel of the sheet's sliders, derived from what is actually saved. Nil for an
@@ -127,8 +132,22 @@ struct RoutesFeature {
         case deleteFailed
 
         case alert(PresentationAction<Alert>)
+        case path(StackActionOf<Path>)
+        case delegate(Delegate)
 
         enum Alert: Equatable {}
+
+        @CasePathable
+        enum Delegate: Equatable {
+            /// S20's "Use This Route", on its way to `AppFeature`, which owns the Start sheet.
+            case useRoute(RouteReference)
+        }
+    }
+
+    /// What the Routes tab can push (#195).
+    @Reducer(state: .equatable, action: .equatable)
+    enum Path {
+        case detail(RouteDetailFeature)
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
@@ -342,11 +361,15 @@ struct RoutesFeature {
                 // reducer, is the authority on what survived the failed write.
                 return .send(.reloadRoutes)
 
-            case .alert:
+            case .path(.element(id: _, action: .detail(.delegate(.useRoute(let route))))):
+                return .send(.delegate(.useRoute(route)))
+
+            case .alert, .path, .delegate:
                 return .none
             }
         }
         .ifLet(\.$alert, action: \.alert)
+        .forEach(\.path, action: \.path)
     }
 
     /// Fetches only the polylines state does not already hold, gathered into one action

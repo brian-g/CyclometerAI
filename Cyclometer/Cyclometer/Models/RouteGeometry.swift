@@ -230,6 +230,57 @@ enum RouteGeometry {
         return (gain, loss)
     }
 
+    /// The route's elevation at `sampleCount` evenly spaced distances from start to finish — S20's
+    /// elevation profile (#195) — or nil under exactly the rule `elevationGainLoss` uses, so the
+    /// chart and the gain/loss rows beside it can never disagree about whether a route has
+    /// elevation at all.
+    ///
+    /// Spaced by *distance*, not by point. `ElevationProfileView` plots its samples against their
+    /// index, and even spacing is what lets that index read as distance along the road. Charting
+    /// the file's own points instead would stretch a stretch sampled every metre across most of the
+    /// chart and squeeze one sampled every 200 m into a sliver.
+    ///
+    /// The samples always span the whole route. A point without an elevation is interpolated
+    /// across from the nearest points either side that have one, and the stretches before the
+    /// first and after the last such point hold its value — so a file missing `<ele>` at one end
+    /// still charts against the route's full length rather than against the part that was measured.
+    ///
+    /// Its own walk rather than `resampled(_:everyMeters:)`, which drops elevation by design.
+    static func elevationProfile(_ coordinates: [RouteCoordinate], sampleCount: Int) -> [Double]? {
+        let cumulative = cumulativeDistances(coordinates)
+        let measured = zip(cumulative, coordinates).compactMap { distance, coordinate in
+            coordinate.elevationMeters.map { (distance: distance, elevation: $0) }
+        }
+        guard measured.count > 1, let first = measured.first, let last = measured.last,
+              let total = cumulative.last
+        else { return nil }
+
+        // One sample is not a profile, and the spacing below divides by `count - 1`.
+        let count = max(sampleCount, 2)
+        var samples: [Double] = []
+        samples.reserveCapacity(count)
+        var lower = 0
+        for step in 0..<count {
+            let distance = total * Double(step) / Double(count - 1)
+            if distance <= first.distance {
+                samples.append(first.elevation)
+            } else if distance >= last.distance {
+                samples.append(last.elevation)
+            } else {
+                // The two branches above leave `measured[lower].distance < distance`, and the loop
+                // stops at the first point at or beyond it — so `span` is positive by construction.
+                // Guarded anyway: a NaN here would surface in Swift Charts, not in a test.
+                while measured[lower + 1].distance < distance { lower += 1 }
+                let start = measured[lower]
+                let end = measured[lower + 1]
+                let span = end.distance - start.distance
+                let t = span > 0 ? (distance - start.distance) / span : 1
+                samples.append(start.elevation + (end.elevation - start.elevation) * t)
+            }
+        }
+        return samples
+    }
+
     /// The polyline's extent, stored on `Route` so S19 can frame a map and #194 can test
     /// viewport intersection without decoding every route's polyline.
     ///

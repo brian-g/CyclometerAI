@@ -37,6 +37,14 @@ struct AppFeature {
         var routes: RoutesFeature.State = RoutesFeature.State()
         var settings: SettingsFeature.State = SettingsFeature.State()
 
+        /// The route S20's "Use This Route" picked for the Start sheet it opens (#195), which
+        /// #196's S05.1 row shows and hands to the ride.
+        ///
+        /// One-shot: cleared when that sheet is dismissed and when the ride starts. S05.1's route
+        /// row is read-only, so a route that stayed selected could never be un-chosen — every
+        /// later Start Ride, from any tab, would quietly carry it.
+        var activeRoute: RouteReference? = nil
+
         // ── Screen power management (#110) ───────────────────────────────────────
         var isForeground: Bool = true
         var isDimmed: Bool = false
@@ -145,38 +153,20 @@ struct AppFeature {
                 return .none
 
             case .startRideButtonTapped:
-                state.startSheet = StartSheetFeature.State()
-                // Hold a pairing scan open for as long as the sheet is up, so its sensor
-                // rows report something the rider can act on. `startScanning` belongs to
-                // the active ride and ride finish disconnects, so without this every row
-                // would sit at its last known state — in practice disconnected — until
-                // the rider had already pressed Start. The scan is refcounted and
-                // independent of the ride's (BLE.md §8), the clients connect only what
-                // the rider has paired (#97), and a connection made here survives the
-                // scan ending, so the ride begins with its sensors already up.
-                //
-                // Here rather than inside the sheet, for the same reason the launch push
-                // lives here: the sheet is a `@Presents` child, and every dismissal path
-                // clears `startSheet` *before* SwiftUI runs `onDisappear` — so a release
-                // sent from the sheet arrives at an absent destination and TCA drops it,
-                // leaking a reference on all three clients per open. Only the owner of
-                // the presentation sees both ends of the lifetime.
-                //
-                // Sequential, and in the same order as the launch push, so the whole
-                // lifecycle is assertable as one interleaved call log.
-                return .run { _ in
-                    await bleCSCClient.beginPairingScan()
-                    await variaRadarClient.beginPairingScan()
-                    await bleHRClient.beginPairingScan()
-                }
+                return presentStartSheet(&state)
 
             case .startSheet(.dismiss):
-                // Cancel and swipe-to-dismiss both arrive here.
+                // Cancel and swipe-to-dismiss both arrive here. A route chosen on S20 goes with
+                // the sheet it opened — see `activeRoute`.
+                state.activeRoute = nil
                 return Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
 
             case .startSheet(.presented(.delegate(.startRide))):
                 Self.presentActiveRide(ActiveRideFeature.State(), in: &state)
                 state.startSheet = nil
+                // Nothing reads the route at ride start until #196 hands it to the ride; it is
+                // cleared here either way, so the next sheet opens without it.
+                state.activeRoute = nil
                 // Start the ride's long-running effects (1 Hz timer, HR, radar,
                 // location) here so they live for the whole ride — bound to
                 // `activeRide` via `.ifLet` and torn down only when the ride
@@ -295,6 +285,14 @@ struct AppFeature {
                 state.onboarding = nil
                 return .none
 
+            case .routes(.delegate(.useRoute(let route))):
+                // S20 hides the button while a ride records, as every tab hides Start Ride — but
+                // the rule lives here too, because presenting the sheet mid-ride would offer to
+                // start a second ride over the first.
+                guard state.activeRide == nil else { return .none }
+                state.activeRoute = route
+                return presentStartSheet(&state)
+
             case .rides, .routes, .settings, .activeRide, .onboarding:
                 return .none
             }
@@ -330,7 +328,35 @@ struct AppFeature {
         state.selectedTab = .rides
     }
 
-    /// Balance the scan `startRideButtonTapped` took. Shared by the two paths the sheet
+    /// Presents S05.1. Shared by the toolbar's Start Ride and S20's "Use This Route" (#195), so
+    /// the two ways in cannot drift apart.
+    ///
+    /// Holds a pairing scan open for as long as the sheet is up, so its sensor rows report
+    /// something the rider can act on. `startScanning` belongs to the active ride and ride finish
+    /// disconnects, so without this every row would sit at its last known state — in practice
+    /// disconnected — until the rider had already pressed Start. The scan is refcounted and
+    /// independent of the ride's (BLE.md §8), the clients connect only what the rider has paired
+    /// (#97), and a connection made here survives the scan ending, so the ride begins with its
+    /// sensors already up.
+    ///
+    /// Here rather than inside the sheet, for the same reason the launch push lives here: the
+    /// sheet is a `@Presents` child, and every dismissal path clears `startSheet` *before* SwiftUI
+    /// runs `onDisappear` — so a release sent from the sheet arrives at an absent destination and
+    /// TCA drops it, leaking a reference on all three clients per open. Only the owner of the
+    /// presentation sees both ends of the lifetime.
+    ///
+    /// Sequential, and in the same order as the launch push, so the whole lifecycle is assertable
+    /// as one interleaved call log.
+    private func presentStartSheet(_ state: inout State) -> Effect<Action> {
+        state.startSheet = StartSheetFeature.State()
+        return .run { [bleCSCClient, variaRadarClient, bleHRClient] _ in
+            await bleCSCClient.beginPairingScan()
+            await variaRadarClient.beginPairingScan()
+            await bleHRClient.beginPairingScan()
+        }
+    }
+
+    /// Balance the scan `presentStartSheet` took. Shared by the two paths the sheet
     /// can leave by, so neither can drift from the other.
     private static func endStartSheetScan(
         _ bleCSCClient: BLECSCClient,

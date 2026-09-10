@@ -169,6 +169,12 @@ extension RouteSummary {
         )
     }
 
+    /// What a `Ride` denormalizes at start, for a caller holding only the summary — S20's "Use
+    /// This Route" (#195). Mirrors `Route.reference`.
+    var reference: RouteReference {
+        RouteReference(id: id, name: name)
+    }
+
     /// The inert value `PersistenceClient.testValue` hands back, matching how its
     /// `fetchRide` returns a blank `RideExportMetadata`: a test that has not overridden
     /// the dependency should get something obviously empty and deterministic, never a

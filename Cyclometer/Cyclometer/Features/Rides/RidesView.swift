@@ -106,7 +106,7 @@ struct RideDetailView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
             }
             Section("Elevation Profile") {
-                ElevationProfileView(samples: ride.elevationSamples)
+                ElevationProfileView(samples: ride.elevationSamples, unitLabel: "ft")
                     .frame(height: 140).padding(.vertical, 8)
             }
             Section("Stats") {
@@ -204,6 +204,9 @@ struct HeartRateProfileView: View {
 
 struct ElevationProfileView: View {
     let samples: [Double]
+    /// The unit `samples` are already in. This view plots and labels; it does not convert. S20
+    /// follows the S12 units picker (#195), while ride history's demo data is in feet.
+    let unitLabel: String
     private var points: [ElevationPoint] {
         samples.enumerated().map { ElevationPoint(distance: $0.offset, elevation: $0.element) }
     }
@@ -219,7 +222,7 @@ struct ElevationProfileView: View {
         .chartXAxis(.hidden)
         .chartYAxis {
             AxisMarks(position: .leading, values: [samples.min() ?? 0, samples.max() ?? 1]) { value in
-                AxisValueLabel { if let e = value.as(Double.self) { Text("\(Int(e)) ft") } }
+                AxisValueLabel { if let e = value.as(Double.self) { Text("\(Int(e)) \(unitLabel)") } }
             }
         }
     }

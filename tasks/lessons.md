@@ -377,3 +377,33 @@ actually be reached before writing the comment that says it recovers.
 sends against a 200 ms sleep in a mock. Assert the *guard* (seed `isImporting = true`, send,
 expect nothing), not the race that motivates it — same class as the `skipInFlightEffects`
 entry above.
+
+---
+
+## Use the framework's navigation, not a workaround for the issue's wording (2026-09-10, #195)
+
+**What happened.** #195 said to follow the S11 pattern: "a plain `Scope` behind a `NavigationLink`". S11 works
+because Sensors is a single screen. S20 is a different screen for each route, and a plain link can't tell a
+reducer which route was tapped. I didn't say that and reach for TCA's stack navigation. Instead I offered three
+ways to bend the design around the issue's wording:
+- `Button` rows with a hand-drawn chevron, driving `navigationDestination(isPresented:)`
+- `@Presents`
+- the literal link, with a stale first frame
+
+I followed those with a view-owned `@State` Store modelled on the Rides tab. Brian: "Those options seemed to be
+horrible", then "Let's use correct TCA patterns to do the navigation, and not try to work around it. This means
+that the scope will probably have to increase for this issue."
+
+**Why I was wrong.**
+- The prescription existed to protect one thing: state that outlives the view (the `@Presents`/`onDisappear`
+  entry above). I treated its *mechanism* as the constraint instead.
+- The Rides tab I cited as precedent is prototype code. It has no reducer, calls `@Query` and
+  `modelContext.delete` in the view, and shows fabricated detail data. Its shape was not evidence of a pattern.
+
+**Rules.**
+- When an issue's prescribed pattern doesn't fit, say so and use the framework's idiomatic tool. For a TCA
+  drill-down that is `StackState` + `NavigationLink(state:)` + delegate actions. State the scope it adds rather
+  than offering a menu of contortions.
+- Before following a prescription to the letter, check what it is *for*, and satisfy that.
+- Code that bypasses the architecture is not precedent. Before citing a sibling as "how we do it here", check
+  that it is built the way the codebase's own rules say.
