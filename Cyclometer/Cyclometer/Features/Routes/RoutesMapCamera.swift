@@ -60,3 +60,83 @@ enum RoutesMapCamera {
         )
     }
 }
+
+// MARK: - Viewport capture (#194)
+
+extension RoutesMapCamera {
+
+    /// The exact camera region, restored rather than re-framed — no padding and no minimum
+    /// span, because this is the viewport the rider left the map on, not a box being fitted
+    /// around content.
+    static func region(for bounds: RouteBounds) -> MKCoordinateRegion {
+        let center = bounds.center
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: center.latitude, longitude: center.longitude),
+            span: MKCoordinateSpan(
+                latitudeDelta: min(max(bounds.maxLatitude - bounds.minLatitude, .leastNormalMagnitude), 180),
+                longitudeDelta: min(max(bounds.maxLongitude - bounds.minLongitude, .leastNormalMagnitude), 360)
+            )
+        )
+    }
+
+    /// The box a camera region covers. Nil only for a region MapKit reports as non-finite,
+    /// which it does for a camera that has not settled.
+    ///
+    /// **Clamped, never wrapped.** `center ± span/2` runs past ±90 and ±180 on a zoomed-out
+    /// camera, and wrapping the two longitudes back into range independently *inverts* the box
+    /// — `minLongitude` ends up greater than `maxLongitude`, and `intersects` then rejects
+    /// every route, emptying the list at world zoom. Same stance as `span(_:limit:)` above,
+    /// which clamps rather than trusting what MapKit hands back.
+    static func bounds(for region: MKCoordinateRegion) -> RouteBounds? {
+        let center = region.center
+        let latitudeDelta = region.span.latitudeDelta
+        let longitudeDelta = region.span.longitudeDelta
+        // A zero span is a camera mid-transition, not a viewport. Restoring one hands MapKit an
+        // effectively zero `MKCoordinateSpan` — street level on an arbitrary point — and as a
+        // filter it is a zero-area box that intersects almost nothing, emptying the list behind
+        // a chip that explains none of it.
+        guard center.latitude.isFinite, center.longitude.isFinite,
+              latitudeDelta.isFinite, longitudeDelta.isFinite,
+              latitudeDelta > 0, longitudeDelta > 0
+        else { return nil }
+
+        // A camera showing a full turn of longitude has no west or east edge to speak of;
+        // `center ± 180` would describe a box that excludes the antimeridian instead.
+        let longitudes: (min: Double, max: Double) = longitudeDelta >= 360
+            ? (-180, 180)
+            : (max(center.longitude - longitudeDelta / 2, -180),
+               min(center.longitude + longitudeDelta / 2, 180))
+
+        let bounds = RouteBounds(
+            minLatitude: max(center.latitude - latitudeDelta / 2, -90),
+            maxLatitude: min(center.latitude + latitudeDelta / 2, 90),
+            minLongitude: longitudes.min,
+            maxLongitude: longitudes.max
+        )
+        // The clamps above hold the box the right way round for a centre that is itself in
+        // range. A centre that is not — which MapKit can report after panning across the
+        // antimeridian — clamps to an *inverted* box, and `intersects` would then reject every
+        // route. Refusing the region keeps the invariant this function documents.
+        guard bounds.minLatitude <= bounds.maxLatitude,
+              bounds.minLongitude <= bounds.maxLongitude
+        else { return nil }
+        return bounds
+    }
+
+    /// The same box, but nil when it already holds every saved route — a viewport that excludes
+    /// nothing is not a filter.
+    ///
+    /// Separate from `bounds(for:)` because the two answers are wanted in different places: the
+    /// *filter* should be absent at a zoom that shows everything, while the direction chevrons
+    /// still need to know what is on screen in order to space themselves. Collapsing the two
+    /// would leave a library spread across two continents with a chip on screen from the moment
+    /// the map opened, explaining an exclusion that was not happening.
+    static func filterBounds(
+        for region: MKCoordinateRegion,
+        routes: [RouteSummary]
+    ) -> RouteBounds? {
+        guard let bounds = bounds(for: region) else { return nil }
+        if let all = RouteBounds.union(routes.map(\.bounds)), bounds.contains(all) { return nil }
+        return bounds
+    }
+}

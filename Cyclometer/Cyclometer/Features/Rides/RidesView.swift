@@ -49,6 +49,10 @@ struct RidesView: View {
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
+                        // `role: .destructive` alone is not enough: the app-wide `.tint` wins
+                        // over the role inside a swipe action, so Delete rendered in the brand
+                        // green — the same colour as "Make Route" beside it.
+                        .tint(Color.cyDestructive)
                     }
                 }
             }

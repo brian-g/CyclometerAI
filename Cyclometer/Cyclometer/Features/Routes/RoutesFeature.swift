@@ -7,8 +7,12 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "route
 /// S19 — the Routes tab: saved routes as a list or a map, plus GPX import from the Files app.
 ///
 /// Everything the screen shows comes from `PersistenceClient`; nothing reads the demo data
-/// the prototype was built on. Map-as-filter and the filter sheet are #194, and tapping a
-/// row does nothing until S20 lands (#195).
+/// the prototype was built on. Tapping a row does nothing until S20 lands (#195).
+///
+/// Three filters narrow the list and compose: a distance range and an elevation-gain maximum
+/// from the sheet (`RouteFilter`), and the map's own viewport, captured when the rider switches
+/// back to the list. `routes` always holds everything the store returned — the filters are
+/// applied on the way out, never by editing it.
 @Reducer
 struct RoutesFeature {
 
@@ -34,6 +38,34 @@ struct RoutesFeature {
         var showsMap = false
         var isImporterPresented = false
         var isImporting = false
+        var isFilterSheetPresented = false
+
+        /// The sheet's two filters. `RouteFilter` keeps the rule itself testable without a
+        /// `TestStore`; this is only where the rider's current answer lives.
+        var filter = RouteFilter()
+
+        /// The viewport the map last settled on, updated as the rider pans. Not itself a
+        /// filter — it becomes one only when they switch back to the list.
+        var visibleMapBounds: RouteBounds?
+
+        /// The viewport that *is* filtering the list, captured from `visibleMapBounds` on the
+        /// way back to the list. Nil when the rider has not narrowed by map.
+        var mapFilterBounds: RouteBounds?
+
+        /// The viewport the rider dismissed from the chip, remembered so that returning to the
+        /// map and back does not silently re-apply it. Without it the map re-opens on the same
+        /// region, reports it, and the next switch to the list captures exactly the filter that
+        /// was just cleared — the chip would look like it had done nothing.
+        var dismissedMapBounds: RouteBounds?
+
+        /// Which routes survive `mapFilterBounds`, or nil when there is no map filter.
+        ///
+        /// **Stored rather than computed on read.** The test walks every coordinate of every
+        /// route, and a computed property would re-run it on every body pass — twice in the
+        /// list branch alone, once for the empty-state check and once for the `List` itself —
+        /// and would make the list body observe `polylines`, invalidating it every time a
+        /// batch of geometry lands. Stored, the sweep runs once per thing that can change it.
+        var mapFilteredRouteIDs: Set<UUID>?
 
         /// Nil until a fix arrives, and permanently nil when location is denied — which is
         /// an ordinary state for this screen, not a failure. `RoutesMapCamera` falls back.
@@ -42,6 +74,27 @@ struct RoutesFeature {
         @Presents var alert: AlertState<Action.Alert>?
 
         var unitSystem: UnitSystem { preferences.preferredUnit }
+
+        /// The travel of the sheet's sliders, derived from what is actually saved. Nil for an
+        /// empty library, which is also when the filter button is hidden.
+        var filterDomain: RouteFilterDomain? { RouteFilterDomain.from(routes) }
+
+        /// What the *map* draws: the sheet filters only. Leaving the map's own viewport out is
+        /// what stops it ratcheting itself ever narrower — a route panned off-screen has to
+        /// still be there to pan back to.
+        var sheetFilteredRoutes: [RouteSummary] { routes.filter(filter.matches) }
+
+        /// What the *list* shows: the sheet filters and the map viewport, composed.
+        var filteredRoutes: [RouteSummary] {
+            guard let mapFilteredRouteIDs else { return sheetFilteredRoutes }
+            return sheetFilteredRoutes.filter { mapFilteredRouteIDs.contains($0.id) }
+        }
+
+        /// The toolbar badge. Sheet filters only — the map narrowing has its own chip, because
+        /// a number in the toolbar cannot explain an exclusion the rider made by panning.
+        var activeFilterCount: Int { filter.activeCount }
+
+        var isFiltered: Bool { !filter.isEmpty || mapFilterBounds != nil }
     }
 
     enum Action: Equatable {
@@ -52,6 +105,18 @@ struct RoutesFeature {
         case riderCoordinateResponse(Coordinate?)
 
         case mapToggled
+        case mapRegionChanged(RouteBounds?)
+        case mapFilterCleared
+
+        case filterButtonTapped
+        case filterSheetPresentationChanged(Bool)
+        case distanceFilterChanged(ClosedRange<Double>?)
+        case elevationGainFilterChanged(Double?)
+        case filtersCleared
+        case allFiltersCleared
+        case distanceFilterCleared
+        case elevationGainFilterCleared
+
         case importButtonTapped
         case importerPresentationChanged(Bool)
         case fileSelected(URL)
@@ -102,6 +167,7 @@ struct RoutesFeature {
             case .routesResponse(.success(let routes)):
                 state.hasLoaded = true
                 state.routes = routes
+                Self.refreshFilters(&state)
                 return state.showsMap ? loadMissingPolylines(state) : .none
 
             case .polylinesResponse(let polylines):
@@ -110,6 +176,9 @@ struct RoutesFeature {
                 // has no business keeping its geometry alive.
                 let live = Set(state.routes.map(\.id))
                 state.polylines = state.polylines.filter { live.contains($0.key) }
+                // Geometry that has just landed upgrades those routes from the bounding-box
+                // approximation to the exact test, so the map filter is re-evaluated here.
+                Self.refreshMapFilter(&state)
                 return .none
 
             case .routesResponse(.failure):
@@ -123,10 +192,75 @@ struct RoutesFeature {
 
             case .mapToggled:
                 state.showsMap.toggle()
+                guard state.showsMap else {
+                    // UX.md §S19: "When switching back to the list will show only those routes
+                    // displayed on the map." This is that moment — the viewport the rider left
+                    // the map on becomes the filter, unless it is the very one they dismissed
+                    // from the chip and have not moved since.
+                    guard state.visibleMapBounds != state.dismissedMapBounds else { return .none }
+                    state.dismissedMapBounds = nil
+                    state.mapFilterBounds = state.visibleMapBounds
+                    Self.refreshMapFilter(&state)
+                    return .none
+                }
                 // Deferred to the first time the map is actually opened, so a rider who
                 // only ever uses the list never pays to decode a polyline.
-                guard state.showsMap else { return .none }
                 return loadMissingPolylines(state)
+
+            case .mapRegionChanged(let bounds):
+                // Recorded, not applied. Panning the map must not reorder the list underneath
+                // it; only the switch back to the list captures.
+                state.visibleMapBounds = bounds
+                return .none
+
+            case .mapFilterCleared:
+                state.dismissedMapBounds = state.mapFilterBounds
+                state.mapFilterBounds = nil
+                state.mapFilteredRouteIDs = nil
+                return .none
+
+            case .filterButtonTapped:
+                state.isFilterSheetPresented = true
+                return .none
+
+            case .filterSheetPresentationChanged(let isPresented):
+                state.isFilterSheetPresented = isPresented
+                return .none
+
+            case .distanceFilterChanged(let range):
+                state.filter.distanceMeters = range
+                Self.normalizeFilter(&state)
+                return .none
+
+            case .elevationGainFilterChanged(let maximum):
+                state.filter.maxElevationGainMeters = maximum
+                Self.normalizeFilter(&state)
+                return .none
+
+            case .filtersCleared:
+                // The sheet's own Reset. Each chip above the list clears just itself; this
+                // clears both of the sheet's without touching the map narrowing.
+                state.filter = RouteFilter()
+                return .none
+
+            case .distanceFilterCleared:
+                state.filter.distanceMeters = nil
+                return .none
+
+            case .elevationGainFilterCleared:
+                state.filter.maxElevationGainMeters = nil
+                return .none
+
+            case .allFiltersCleared:
+                // The single "start again" affordance — the sheet's button and the
+                // no-matches empty state. A rider who has filtered themselves down to nothing
+                // wants everything back, and leaving the map narrowing in place would clear
+                // the screen's explanation while still hiding their routes.
+                state.filter = RouteFilter()
+                state.dismissedMapBounds = state.mapFilterBounds
+                state.mapFilterBounds = nil
+                state.mapFilteredRouteIDs = nil
+                return .none
 
             case .importButtonTapped:
                 state.isImporterPresented = true
@@ -176,6 +310,7 @@ struct RoutesFeature {
                 // `fetchRoutes` sorts newest first and this route was just imported, so one
                 // insert preserves that order without a second round trip to the store.
                 state.routes.insert(summary, at: 0)
+                Self.refreshFilters(&state)
                 // Nothing else loads this one's geometry: the two other loaders run on the
                 // map toggle and on a re-read, and importing from the map does neither.
                 return state.showsMap ? loadMissingPolylines(state) : .none
@@ -190,6 +325,7 @@ struct RoutesFeature {
                 // gesture that didn't take. `.deleteFailed` puts the list back.
                 state.routes.removeAll { $0.id == id }
                 state.polylines[id] = nil
+                Self.refreshFilters(&state)
                 return .run { send in
                     do {
                         try await persistenceClient.deleteRoute(id)
@@ -238,6 +374,62 @@ struct RoutesFeature {
             }
             await send(.polylinesResponse(polylines))
         }
+    }
+
+    // MARK: - Filters
+
+    /// The route set changed: bring any active filter back into the domain it now implies, and
+    /// re-decide what the map viewport holds.
+    private static func refreshFilters(_ state: inout State) {
+        normalizeFilter(&state)
+        refreshMapFilter(&state)
+    }
+
+    /// Clamp the filter into the current domain and drop anything that now covers all of it.
+    ///
+    /// Run on every change to `routes`, not only when a thumb moves. Import a 200 km route while
+    /// the upper thumb sits at what *was* the longest route — which the rider read as "no upper
+    /// limit" — and without this the new route is filtered out the instant it arrives, badge
+    /// reading 1, with nothing on screen to explain it.
+    private static func normalizeFilter(_ state: inout State) {
+        guard let domain = RouteFilterDomain.from(state.routes) else {
+            // Nothing saved. The filter button is hidden in this state, so a filter left set
+            // would be unreachable.
+            state.filter = RouteFilter()
+            return
+        }
+        state.filter = domain.normalizing(state.filter)
+    }
+
+    /// Which routes the captured viewport holds.
+    ///
+    /// The stored bounding box rejects in O(1), and only the survivors pay for the exact
+    /// segment-by-segment test — which is what makes "any part of the line is on screen" cheap
+    /// enough to be the rule rather than "the start marker is on screen".
+    ///
+    /// **A route whose polyline has not loaded is kept on its bounding box, not dropped.**
+    /// Dropping it looks defensible — it is not drawn on the map either — but `polylines` is
+    /// populated only when the map is open (`loadMissingPolylines` runs on the map toggle, on a
+    /// re-read and on an import *while the map shows*), so a route imported from the list, or
+    /// restored by `deleteFailed`, or whose geometry failed to load at all, would silently
+    /// vanish from the list with no way back. The map still draws such a route as a pin at its
+    /// bounds centre, so the box is also the honest answer to "displayed on the map"; and
+    /// erring toward showing a route the rider owns is the safe direction to be wrong in.
+    private static func refreshMapFilter(_ state: inout State) {
+        guard let bounds = state.mapFilterBounds else {
+            state.mapFilteredRouteIDs = nil
+            return
+        }
+        let polylines = state.polylines
+        state.mapFilteredRouteIDs = Set(
+            state.routes.lazy
+                .filter { route in
+                    guard route.bounds.intersects(bounds) else { return false }
+                    guard let polyline = polylines[route.id] else { return true }
+                    return RouteGeometry.polyline(polyline, intersects: bounds)
+                }
+                .map(\.id)
+        )
     }
 
     private static func alert(_ title: String, _ message: String) -> AlertState<Action.Alert> {

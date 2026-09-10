@@ -69,3 +69,60 @@ extension RouteSummary {
         )
     ]
 }
+
+/// Geometry for `RouteSummary.previewRoutes`.
+///
+/// `RouteSummary` deliberately carries none (`Route.swift:139-140`), so previews and the
+/// reducer tests that exercise the map filter read these through
+/// `PersistenceClient.mock(routes:routeDetails:)` — the same `fetchRoute` seam
+/// `RoutesFeature.loadMissingPolylines` uses live, rather than hand-seeding `state.polylines`
+/// with geometry no production path would have produced.
+extension RouteDetail {
+
+    /// Straight legs between the corners named, each one inside its summary's stored bounds so
+    /// the bounding-box pre-reject and the exact segment test agree about these routes.
+    static func preview(_ summary: RouteSummary, _ coordinates: [RouteCoordinate]) -> RouteDetail {
+        RouteDetail(summary: summary, coordinates: coordinates, cuePoints: [])
+    }
+
+    static let previewRouteDetails: [UUID: RouteDetail] = {
+        let routes = RouteSummary.previewRoutes
+
+        // River Loop — closed: the last point returns to the first, which is the case
+        // `RouteMapContent` collapses to a single flag rather than stacking a checkered one on
+        // top of the start.
+        let riverLoop = Self.preview(routes[0], [
+            .init(latitude: 37.3200, longitude: -122.0500, elevationMeters: 30),
+            .init(latitude: 37.3500, longitude: -122.0500, elevationMeters: 96),
+            .init(latitude: 37.3500, longitude: -122.0000, elevationMeters: 150),
+            .init(latitude: 37.3200, longitude: -122.0000, elevationMeters: 74),
+            .init(latitude: 37.3200, longitude: -122.0500, elevationMeters: 30)
+        ])
+
+        // Summit Climb — a diagonal, so its bounding box holds two large corners the line
+        // never enters. That is the shape a box-only viewport test gets wrong.
+        let summitClimb = Self.preview(routes[1], [
+            .init(latitude: 37.2900, longitude: -122.1400, elevationMeters: 60),
+            .init(latitude: 37.3100, longitude: -122.1100, elevationMeters: 340),
+            .init(latitude: 37.3400, longitude: -122.0800, elevationMeters: 807)
+        ])
+
+        let tempoFlats = Self.preview(routes[2], [
+            .init(latitude: 37.3600, longitude: -122.0300, elevationMeters: 12),
+            .init(latitude: 37.3700, longitude: -122.0050, elevationMeters: 40),
+            .init(latitude: 37.3800, longitude: -121.9800, elevationMeters: 20)
+        ])
+
+        // Coffee Spin — the nil-`<ele>` case, so its points carry no elevation at all rather
+        // than a confident zero.
+        let coffeeSpin = Self.preview(routes[3], [
+            .init(latitude: 37.3300, longitude: -122.0200, elevationMeters: nil),
+            .init(latitude: 37.3450, longitude: -122.0050, elevationMeters: nil)
+        ])
+
+        return Dictionary(
+            uniqueKeysWithValues: [riverLoop, summitClimb, tempoFlats, coffeeSpin]
+                .map { ($0.summary.id, $0) }
+        )
+    }()
+}
