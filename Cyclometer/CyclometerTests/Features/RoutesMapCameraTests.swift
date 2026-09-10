@@ -249,4 +249,22 @@ struct RoutesMapCameraViewportTests {
         #expect(abs(restored.minLongitude - original.minLongitude) < 1e-9)
         #expect(abs(restored.maxLongitude - original.maxLongitude) < 1e-9)
     }
+
+    @Test("a camera mid-transition, reporting no span at all, is not a viewport")
+    func zeroSpanIsRejected() {
+        // Restoring a zero-area box zooms MapKit to street level on an arbitrary point, and as
+        // a filter it intersects almost nothing — the list empties behind a chip explaining none
+        // of it.
+        #expect(RoutesMapCamera.bounds(for: Self.region(37.4, -122.0, 0, 0.2)) == nil)
+        #expect(RoutesMapCamera.bounds(for: Self.region(37.4, -122.0, 0.2, 0)) == nil)
+    }
+
+    @Test("a centre longitude outside ±180 is refused rather than inverted")
+    func unnormalisedCentreIsRefused() {
+        // MapKit can report this after panning across the antimeridian. Clamping alone would
+        // give minLongitude 184 and maxLongitude 180 — a box the wrong way round, which
+        // `intersects` rejects for every route.
+        #expect(RoutesMapCamera.bounds(for: Self.region(0, 185, 2, 2)) == nil)
+        #expect(RoutesMapCamera.bounds(for: Self.region(95, 0, 2, 2)) == nil)
+    }
 }

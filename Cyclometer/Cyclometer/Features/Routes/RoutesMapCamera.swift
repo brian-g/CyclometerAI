@@ -91,8 +91,13 @@ extension RoutesMapCamera {
         let center = region.center
         let latitudeDelta = region.span.latitudeDelta
         let longitudeDelta = region.span.longitudeDelta
+        // A zero span is a camera mid-transition, not a viewport. Restoring one hands MapKit an
+        // effectively zero `MKCoordinateSpan` — street level on an arbitrary point — and as a
+        // filter it is a zero-area box that intersects almost nothing, emptying the list behind
+        // a chip that explains none of it.
         guard center.latitude.isFinite, center.longitude.isFinite,
-              latitudeDelta.isFinite, longitudeDelta.isFinite
+              latitudeDelta.isFinite, longitudeDelta.isFinite,
+              latitudeDelta > 0, longitudeDelta > 0
         else { return nil }
 
         // A camera showing a full turn of longitude has no west or east edge to speak of;
@@ -102,12 +107,20 @@ extension RoutesMapCamera {
             : (max(center.longitude - longitudeDelta / 2, -180),
                min(center.longitude + longitudeDelta / 2, 180))
 
-        return RouteBounds(
+        let bounds = RouteBounds(
             minLatitude: max(center.latitude - latitudeDelta / 2, -90),
             maxLatitude: min(center.latitude + latitudeDelta / 2, 90),
             minLongitude: longitudes.min,
             maxLongitude: longitudes.max
         )
+        // The clamps above hold the box the right way round for a centre that is itself in
+        // range. A centre that is not — which MapKit can report after panning across the
+        // antimeridian — clamps to an *inverted* box, and `intersects` would then reject every
+        // route. Refusing the region keeps the invariant this function documents.
+        guard bounds.minLatitude <= bounds.maxLatitude,
+              bounds.minLongitude <= bounds.maxLongitude
+        else { return nil }
+        return bounds
     }
 
     /// The same box, but nil when it already holds every saved route — a viewport that excludes

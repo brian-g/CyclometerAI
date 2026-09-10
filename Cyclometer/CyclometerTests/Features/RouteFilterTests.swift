@@ -219,3 +219,56 @@ struct RouteFilterTests {
         #expect(domain.normalizing(filter).maxElevationGainMeters == nil)
     }
 }
+
+/// #194 review follow-ups — rules that were reachable in production but pinned by nothing.
+@Suite("RangeSlider — thumb selection")
+struct RangeSliderThumbTests {
+
+    @Test("the nearer thumb wins")
+    func nearestThumbWins() {
+        #expect(RangeSlider.thumbForDrag(target: 12, lowerValue: 10, upperValue: 90,
+                                         translation: 0, isRightToLeft: false,
+                                         hasLowerThumb: true) == .lower)
+        #expect(RangeSlider.thumbForDrag(target: 88, lowerValue: 10, upperValue: 90,
+                                         translation: 0, isRightToLeft: false,
+                                         hasLowerThumb: true) == .upper)
+    }
+
+    @Test("with the thumbs stacked, a zero translation picks neither")
+    func coincidentThumbsWaitForADirection() {
+        // A `DragGesture(minimumDistance: 0)` delivers its first `onChanged` with no
+        // translation. Latching on it would always pick `.lower`, and since the caller pins the
+        // choice for the rest of the drag, a fully closed range could only ever be dragged
+        // further closed — never reopened.
+        #expect(RangeSlider.thumbForDrag(target: 50, lowerValue: 50, upperValue: 50,
+                                         translation: 0, isRightToLeft: false,
+                                         hasLowerThumb: true) == nil)
+    }
+
+    @Test("with the thumbs stacked, the drag direction decides")
+    func coincidentThumbsBreakTheTieByDirection() {
+        #expect(RangeSlider.thumbForDrag(target: 50, lowerValue: 50, upperValue: 50,
+                                         translation: 12, isRightToLeft: false,
+                                         hasLowerThumb: true) == .upper)
+        #expect(RangeSlider.thumbForDrag(target: 50, lowerValue: 50, upperValue: 50,
+                                         translation: -12, isRightToLeft: false,
+                                         hasLowerThumb: true) == .lower)
+    }
+
+    @Test("right-to-left reverses which direction opens the range")
+    func directionIsMirroredForRightToLeft() {
+        #expect(RangeSlider.thumbForDrag(target: 50, lowerValue: 50, upperValue: 50,
+                                         translation: 12, isRightToLeft: true,
+                                         hasLowerThumb: true) == .lower)
+        #expect(RangeSlider.thumbForDrag(target: 50, lowerValue: 50, upperValue: 50,
+                                         translation: -12, isRightToLeft: true,
+                                         hasLowerThumb: true) == .upper)
+    }
+
+    @Test("a one-thumb slider always moves its upper bound")
+    func singleThumbAlwaysWins() {
+        #expect(RangeSlider.thumbForDrag(target: 0, lowerValue: 0, upperValue: 90,
+                                         translation: 0, isRightToLeft: false,
+                                         hasLowerThumb: false) == .upper)
+    }
+}

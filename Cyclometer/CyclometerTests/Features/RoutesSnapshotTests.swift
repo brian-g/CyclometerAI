@@ -135,13 +135,19 @@ final class RoutesSnapshotTests: XCTestCase {
 
     /// Filters that exclude everything. Kept distinct from the "No Routes" state above: a
     /// rider who filtered too hard must not be told their library is empty.
+    ///
+    /// The emptiness has to come from a filter the reducer could actually produce. An earlier
+    /// version of this pinned `mapFilteredRouteIDs: []` alongside `mapFilterBounds: nil`, which
+    /// `refreshMapFilter` never emits — and leaned on `maxElevationGainMeters: 0`, which cannot
+    /// empty this list at all, because "Coffee Spin" carries no elevation and `RouteFilter`
+    /// always keeps those. The reference would have stayed green through a regression in either
+    /// rule. 30–32 km falls between every preview route's distance and is inside the derived
+    /// domain, so it is reachable from the sliders.
     func testNoMatchingRoutes() {
         assertBothSchemes(
             screen(
                 routes: RouteSummary.previewRoutes,
-                filter: RouteFilter(distanceMeters: nil, maxElevationGainMeters: 0),
-                mapFilterBounds: nil,
-                mapFilteredRouteIDs: []
+                filter: RouteFilter(distanceMeters: 30_000...32_000, maxElevationGainMeters: nil)
             ),
             named: "no-matches"
         )

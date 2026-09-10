@@ -40,10 +40,14 @@ struct RoutesView: View {
             } else if store.hasLoaded && store.routes.isEmpty {
                 emptyLibrary
             } else {
+                // Read once. `filteredRoutes` walks every route and then a `Set`, and this
+                // branch would otherwise ask for it three times per body pass — which is the
+                // very cost `mapFilteredRouteIDs` is stored to avoid.
+                let shown = store.filteredRoutes
                 VStack(spacing: 0) {
                     if store.isFiltered {
                         FilterStatusBar(
-                            shownCount: store.filteredRoutes.count,
+                            shownCount: shown.count,
                             totalCount: store.routes.count,
                             showsMapChip: store.mapFilterBounds != nil,
                             onClearMapFilter: { store.send(.mapFilterCleared) }
@@ -53,10 +57,10 @@ struct RoutesView: View {
                     // blank list, nothing saved is `emptyLibrary` above, and nothing *matching*
                     // is this. Collapsing the last two would tell a rider who filtered too hard
                     // that their routes are gone.
-                    if store.hasLoaded && store.filteredRoutes.isEmpty {
+                    if store.hasLoaded && shown.isEmpty {
                         noMatches
                     } else {
-                        routeList
+                        routeList(shown)
                     }
                 }
             }
@@ -76,9 +80,10 @@ struct RoutesView: View {
                 .disabled(store.isImporting)
                 .accessibilityLabel("Import Route")
             }
-            // Hidden with nothing saved: the sliders derive their travel from the routes, so
-            // an empty library would open a sheet of dead controls beside "No Routes".
-            if !store.routes.isEmpty {
+            // Gated on the domain, not merely on `routes.isEmpty`: `RouteFilterDomain.from`
+            // also answers nil when no route has a finite distance, and the button must not
+            // open a sheet whose sliders have no travel to offer.
+            if store.filterDomain != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     filterButton
                 }
@@ -120,8 +125,8 @@ struct RoutesView: View {
 
     // MARK: - Branches
 
-    private var routeList: some View {
-        List(store.filteredRoutes) { route in
+    private func routeList(_ routes: [RouteSummary]) -> some View {
+        List(routes) { route in
             RouteRow(route: route, unitSystem: store.unitSystem)
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
@@ -436,6 +441,10 @@ private struct RoutesMapView: View {
     @State private var visibleBounds: RouteBounds?
     @State private var restoredStoredViewport = false
     @State private var hasCenteredOnRider = false
+    /// What `onAppear` framed. A late rider fix re-centres only while the camera is still
+    /// sitting on it — otherwise a fix that resolves a second after the map opens throws away
+    /// a pan the rider has already made and captures a viewport they never chose.
+    @State private var seededBounds: RouteBounds?
 
     private var seedRegion: MKCoordinateRegion {
         if let storedViewport { return RoutesMapCamera.region(for: storedViewport) }
@@ -476,6 +485,7 @@ private struct RoutesMapView: View {
             restoredStoredViewport = storedViewport != nil
             let region = seedRegion
             position = .region(region)
+            seededBounds = RoutesMapCamera.bounds(for: region)
             // Reported explicitly rather than waiting on `.onMapCameraChange`: if that does not
             // fire on the first settle, the captured viewport would be nil and the map filter
             // would silently never apply.
@@ -487,7 +497,9 @@ private struct RoutesMapView: View {
         .onChange(of: riderCoordinate) { _, fix in
             // Only on a first-ever open, and only once: after this the camera belongs to the
             // rider's gestures, and a restored viewport outranks a late-arriving fix.
-            guard let fix, !restoredStoredViewport, !hasCenteredOnRider else { return }
+            guard let fix, !restoredStoredViewport, !hasCenteredOnRider,
+                  visibleBounds == seededBounds
+            else { return }
             hasCenteredOnRider = true
             let region = RoutesMapCamera.region(riderCoordinate: fix, routes: allRoutes)
             position = .region(region)

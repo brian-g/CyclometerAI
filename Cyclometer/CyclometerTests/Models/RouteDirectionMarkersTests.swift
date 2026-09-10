@@ -148,4 +148,40 @@ struct RouteDirectionMarkersTests {
             #expect(abs(a.bearingDegrees - b.bearingDegrees) < 0.5)
         }
     }
+
+    @Test("capping spreads the chevrons over the whole line rather than truncating it")
+    func limitIsSpreadNotTruncated() {
+        // Spacing is measured along the *route*, not across the screen, so a line that doubles
+        // back inside one viewport yields far more in-view samples than the cap. Taking the
+        // first N would leave the back half of a visible route with no direction at all.
+        let longRoute = [coordinate(37.0, -122.0), coordinate(37.0, -121.0)]
+        let viewport = RouteBounds(minLatitude: 36.9, maxLatitude: 37.1,
+                                   minLongitude: -122.0, maxLongitude: -121.0)
+        let uncapped = RouteDirectionMarkers.placements(coordinates: longRoute,
+                                                        visibleBounds: viewport, limit: 1_000)
+        let capped = RouteDirectionMarkers.placements(coordinates: longRoute,
+                                                      visibleBounds: viewport, limit: 6)
+        #expect(uncapped.count > 6)
+        #expect(capped.count == 6)
+        // The last capped chevron must sit near the end of the line, not a sixth of the way in.
+        let lastCapped = try! #require(capped.last).coordinate.longitude
+        let lastUncapped = try! #require(uncapped.last).coordinate.longitude
+        #expect(abs(lastCapped - lastUncapped) < 0.01)
+    }
+
+    @Test("a cap of one puts its chevron in the middle of the line")
+    func limitOfOneDoesNotDivideByZero() {
+        let longRoute = [coordinate(37.0, -122.0), coordinate(37.0, -121.0)]
+        let viewport = RouteBounds(minLatitude: 36.9, maxLatitude: 37.1,
+                                   minLongitude: -122.0, maxLongitude: -121.0)
+        let capped = RouteDirectionMarkers.placements(coordinates: longRoute,
+                                                      visibleBounds: viewport, limit: 1)
+        #expect(capped.count == 1)
+        // The middle third of the line: the point is that one chevron lands in the body of the
+        // route rather than on its opening stretch, not that it hits the exact halfway metre —
+        // placements are indexed from the first sample after the start flag, so the index
+        // midpoint sits slightly beyond the geographic one.
+        let longitude = try! #require(capped.first).coordinate.longitude
+        #expect(longitude < -121.25 && longitude > -121.75)
+    }
 }

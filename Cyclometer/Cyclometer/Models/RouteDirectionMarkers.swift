@@ -61,7 +61,7 @@ enum RouteDirectionMarkers {
         guard coordinates.count > 1, limit > 0, let visibleBounds else { return [] }
 
         let spacing = spacingMeters(for: visibleBounds)
-        var samples = RouteGeometry.resampled(coordinates, everyMeters: spacing).map(\.coordinate)
+        let samples = RouteGeometry.resampled(coordinates, everyMeters: spacing).map(\.coordinate)
 
         if samples.count < 2 {
             // The whole route is shorter than one chevron spacing. It still has a direction,
@@ -82,7 +82,6 @@ enum RouteDirectionMarkers {
         }
 
         var placements: [Placement] = []
-        placements.reserveCapacity(min(limit, samples.count))
         // Anchored on the *later* sample of each pair, so no chevron lands on the route's first
         // point where it would sit under the start flag.
         for (start, end) in zip(samples, samples.dropFirst()) {
@@ -91,8 +90,25 @@ enum RouteDirectionMarkers {
             }
             guard let bearing = RouteGeometry.bearingDegrees(from: start, to: end) else { continue }
             placements.append(Placement(coordinate: end, bearingDegrees: bearing))
-            if placements.count == limit { break }
         }
-        return placements
+        return thinned(placements, to: limit)
+    }
+
+    /// At most `limit` placements, spread across the whole line rather than taken from its
+    /// start.
+    ///
+    /// Spacing is measured *along the route*, not across the screen, so a switchback climb or a
+    /// criterium loop that doubles back inside one viewport produces far more in-view samples
+    /// than the cap allows. Truncating would leave the back half of a visible line with no
+    /// chevrons at all, which reads as "this part has no direction" rather than as a cap.
+    private static func thinned(_ placements: [Placement], to limit: Int) -> [Placement] {
+        guard placements.count > limit else { return placements }
+        // `limit - 1` is the denominator below, so one chevron is its own case — the middle of
+        // the line, not the start of it.
+        guard limit > 1 else { return [placements[placements.count / 2]] }
+        // Evenly spaced indices across the whole array, endpoints included.
+        return (0..<limit).map { step in
+            placements[Int((Double(step) * Double(placements.count - 1) / Double(limit - 1)).rounded())]
+        }
     }
 }

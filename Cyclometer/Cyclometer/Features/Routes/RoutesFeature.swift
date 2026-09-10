@@ -52,6 +52,12 @@ struct RoutesFeature {
         /// way back to the list. Nil when the rider has not narrowed by map.
         var mapFilterBounds: RouteBounds?
 
+        /// The viewport the rider dismissed from the chip, remembered so that returning to the
+        /// map and back does not silently re-apply it. Without it the map re-opens on the same
+        /// region, reports it, and the next switch to the list captures exactly the filter that
+        /// was just cleared — the chip would look like it had done nothing.
+        var dismissedMapBounds: RouteBounds?
+
         /// Which routes survive `mapFilterBounds`, or nil when there is no map filter.
         ///
         /// **Stored rather than computed on read.** The test walks every coordinate of every
@@ -186,7 +192,10 @@ struct RoutesFeature {
                 guard state.showsMap else {
                     // UX.md §S19: "When switching back to the list will show only those routes
                     // displayed on the map." This is that moment — the viewport the rider left
-                    // the map on becomes the filter.
+                    // the map on becomes the filter, unless it is the very one they dismissed
+                    // from the chip and have not moved since.
+                    guard state.visibleMapBounds != state.dismissedMapBounds else { return .none }
+                    state.dismissedMapBounds = nil
                     state.mapFilterBounds = state.visibleMapBounds
                     Self.refreshMapFilter(&state)
                     return .none
@@ -202,6 +211,7 @@ struct RoutesFeature {
                 return .none
 
             case .mapFilterCleared:
+                state.dismissedMapBounds = state.mapFilterBounds
                 state.mapFilterBounds = nil
                 state.mapFilteredRouteIDs = nil
                 return .none

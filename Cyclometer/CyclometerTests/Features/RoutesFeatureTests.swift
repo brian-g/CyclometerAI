@@ -756,6 +756,47 @@ struct RoutesFeatureFilterTests {
         await store.finish()
     }
 
+    @Test("a cleared map filter stays cleared across a trip back to the map")
+    func clearedMapFilterIsNotSilentlyReapplied() async {
+        // The map re-opens on the viewport the rider left it on, reports it, and the switch
+        // back to the list captures it — so without remembering what was dismissed, the chip's
+        // clear button would appear to do nothing the moment they visited the map again.
+        let store = await loadedMapStore()
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = Self.nearViewport
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+        await store.send(.mapFilterCleared) {
+            $0.dismissedMapBounds = Self.nearViewport
+            $0.mapFilterBounds = nil
+            $0.mapFilteredRouteIDs = nil
+        }
+
+        await store.send(.mapToggled) { $0.showsMap = true }
+        // The map re-opens where it was and re-reports the same region.
+        await store.send(.mapRegionChanged(Self.nearViewport))
+        await store.send(.mapToggled) { $0.showsMap = false }
+        #expect(store.state.mapFilterBounds == nil)
+        #expect(store.state.filteredRoutes.count == 2)
+
+        // Panning somewhere new is a fresh decision and does capture.
+        let wider = RouteBounds(minLatitude: 37.20, maxLatitude: 37.40,
+                                minLongitude: -122.20, maxLongitude: -122.00)
+        await store.send(.mapToggled) { $0.showsMap = true }
+        await store.send(.mapRegionChanged(wider)) { $0.visibleMapBounds = wider }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.dismissedMapBounds = nil
+            $0.mapFilterBounds = wider
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+        await store.finish()
+    }
+
     @Test("clearing the map filter restores the whole list")
     func mapFilterCleared() async {
         let store = await loadedMapStore()
@@ -768,6 +809,7 @@ struct RoutesFeatureFilterTests {
             $0.mapFilteredRouteIDs = [Self.nearID]
         }
         await store.send(.mapFilterCleared) {
+            $0.dismissedMapBounds = Self.nearViewport
             $0.mapFilterBounds = nil
             $0.mapFilteredRouteIDs = nil
         }
