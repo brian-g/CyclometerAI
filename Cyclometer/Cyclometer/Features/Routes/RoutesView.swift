@@ -44,24 +44,17 @@ struct RoutesView: View {
                 // branch would otherwise ask for it three times per body pass — which is the
                 // very cost `mapFilteredRouteIDs` is stored to avoid.
                 let shown = store.filteredRoutes
-                VStack(spacing: 0) {
-                    if store.isFiltered {
-                        FilterStatusBar(
-                            shownCount: shown.count,
-                            totalCount: store.routes.count,
-                            showsMapChip: store.mapFilterBounds != nil,
-                            onClearMapFilter: { store.send(.mapFilterCleared) }
-                        )
-                    }
-                    // Three empty states, kept distinct on purpose: not read yet renders a
-                    // blank list, nothing saved is `emptyLibrary` above, and nothing *matching*
-                    // is this. Collapsing the last two would tell a rider who filtered too hard
-                    // that their routes are gone.
-                    if store.hasLoaded && shown.isEmpty {
+                // Three empty states, kept distinct on purpose: not read yet renders a blank
+                // list, nothing saved is `emptyLibrary` above, and nothing *matching* is this.
+                // Collapsing the last two would tell a rider who filtered too hard that their
+                // routes are gone.
+                if store.hasLoaded && shown.isEmpty {
+                    VStack(spacing: 0) {
+                        filterChips(shown: shown.count)
                         noMatches
-                    } else {
-                        routeList(shown)
                     }
+                } else {
+                    routeList(shown)
                 }
             }
         }
@@ -125,16 +118,31 @@ struct RoutesView: View {
 
     // MARK: - Branches
 
+    /// The chips ride in the list's own section header rather than in a bar stacked above it.
+    /// Stacked, the bar sat outside the list's insets so it never lined up with the rows, and
+    /// showing or hiding it resized the list's frame — which is what made it jump. As a header
+    /// it takes the list's insets, sticks to the top while the rows scroll under it, and
+    /// appearing costs the list nothing.
     private func routeList(_ routes: [RouteSummary]) -> some View {
-        List(routes) { route in
-            RouteRow(route: route, unitSystem: store.unitSystem)
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        store.send(.deleteButtonTapped(route.id))
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
+        List {
+            Section {
+                ForEach(routes) { route in
+                    RouteRow(route: route, unitSystem: store.unitSystem)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                store.send(.deleteButtonTapped(route.id))
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            // `role: .destructive` alone is not enough: the app-wide `.tint`
+                            // wins over the role inside a swipe action, so Delete rendered in
+                            // the brand green.
+                            .tint(Color.cyDestructive)
+                        }
                 }
+            } header: {
+                filterChips(shown: routes.count)
+            }
         }
     }
 
@@ -149,6 +157,57 @@ struct RoutesView: View {
         }
     }
 
+    /// One chip per applied filter, each clearing just itself, plus how much of the library
+    /// survives them. The issue asks the list to say plainly that it is filtered — otherwise
+    /// "my route vanished" and "this is a bug" are the same experience.
+    @ViewBuilder
+    private func filterChips(shown: Int) -> some View {
+        if store.isFiltered {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Spacing.sm) {
+                    Text("\(shown) of \(store.routes.count)")
+                        .font(.footnote)
+                        .foregroundStyle(Color.cyTextSecondary)
+                        .fixedSize()
+                    if let range = store.filter.distanceMeters {
+                        FilterChip(label: distanceRangeLabel(range),
+                                   accessibilityLabel: "Clear distance filter") {
+                            store.send(.distanceFilterCleared)
+                        }
+                    }
+                    if let gain = store.filter.maxElevationGainMeters {
+                        FilterChip(label: "≤ " + elevationLabel(gain, store.unitSystem),
+                                   accessibilityLabel: "Clear elevation gain filter") {
+                            store.send(.elevationGainFilterCleared)
+                        }
+                    }
+                    if store.mapFilterBounds != nil {
+                        FilterChip(label: "In map area",
+                                   accessibilityLabel: "Clear map filter") {
+                            store.send(.mapFilterCleared)
+                        }
+                    }
+                }
+                .padding(.vertical, Spacing.xs)
+            }
+            // Ideal height, not every point offered: left to itself the scroll view claims the
+            // whole header and pushes the rows off. It still scrolls sideways once Dynamic Type
+            // makes the labels too wide to fit.
+            .fixedSize(horizontal: false, vertical: true)
+            // A section header is uppercased by default, which would shout the chip labels.
+            .textCase(nil)
+        }
+    }
+
+    private func distanceRangeLabel(_ range: ClosedRange<Double>) -> String {
+        let unit = store.unitSystem
+        let low = unit.distance(fromMeters: range.lowerBound)
+            .formatted(.number.precision(.fractionLength(1)))
+        let high = unit.distance(fromMeters: range.upperBound)
+            .formatted(.number.precision(.fractionLength(1)))
+        return "\(low)–\(high) \(unit.distanceLabel)"
+    }
+
     private var noMatches: some View {
         ContentUnavailableView {
             Label("No Matching Routes", systemImage: "line.3.horizontal.decrease.circle")
@@ -157,12 +216,10 @@ struct RoutesView: View {
                  ? "No saved route matches the current filters."
                  : "No saved route matches the current filters in this map area.")
         } actions: {
-            // Only the sheet's filters. The map narrowing is cleared from its own chip above,
-            // which stays on screen behind this view — one button clearing both would make the
-            // badge's promise about what it covers untrue.
-            if store.activeFilterCount > 0 {
-                Button("Clear Filters") { store.send(.filtersCleared) }
-            }
+            // Everything, the map narrowing included. A rider who has filtered down to nothing
+            // wants their library back; clearing only the sheet's two would leave the screen
+            // still empty and the reason for it still on.
+            Button("Clear Filters") { store.send(.allFiltersCleared) }
         }
     }
 
@@ -184,7 +241,7 @@ struct RoutesView: View {
                 } description: {
                     Text("No saved route matches the current filters.")
                 } actions: {
-                    Button("Clear Filters") { store.send(.filtersCleared) }
+                    Button("Clear Filters") { store.send(.allFiltersCleared) }
                 }
                 .background(.regularMaterial)
             }
@@ -195,19 +252,13 @@ struct RoutesView: View {
         Button {
             store.send(.filterButtonTapped)
         } label: {
+            // Filled when something is applied, and nothing more. A count badge belongs
+            // outside the glyph's bounds, and a toolbar clips its items — the badge was being
+            // cut off. The chips above the list carry the detail instead, and say *which*
+            // filters are on rather than only how many.
             Image(systemName: store.activeFilterCount > 0
                   ? "line.3.horizontal.decrease.circle.fill"
                   : "line.3.horizontal.decrease.circle")
-                .overlay(alignment: .topTrailing) {
-                    if store.activeFilterCount > 0 {
-                        Text("\(store.activeFilterCount)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color.cyTextOnPrimary)
-                            .frame(width: Spacing.lg, height: Spacing.lg)
-                            .background(Color.cyPrimary, in: Circle())
-                            .offset(x: Spacing.sm, y: -Spacing.sm)
-                    }
-                }
         }
         .accessibilityLabel("Filter Routes")
         // Without this the badge reads to VoiceOver as a stray number beside an icon.
@@ -220,42 +271,36 @@ struct RoutesView: View {
 
 // MARK: - Filter status
 
-/// Why the list is shorter than the library. The issue asks the list to say plainly that it is
-/// filtered — "my route vanished" and "this is a bug" are otherwise the same experience.
-private struct FilterStatusBar: View {
-    let shownCount: Int
-    let totalCount: Int
-    let showsMapChip: Bool
-    let onClearMapFilter: () -> Void
+/// One applied filter, with its own way out. Used for all three, so a filter set from the
+/// sheet and one set by panning the map are cleared the same way.
+private struct FilterChip: View {
+    let label: String
+    let accessibilityLabel: String
+    let onClear: () -> Void
 
     var body: some View {
-        HStack(spacing: Spacing.sm) {
-            Text("\(shownCount) of \(totalCount) routes")
-                .font(.footnote)
-                .foregroundStyle(Color.cyTextSecondary)
-            Spacer(minLength: Spacing.sm)
-            if showsMapChip {
-                Button(action: onClearMapFilter) {
-                    HStack(spacing: Spacing.xs) {
-                        Text("In map area").font(.footnote.weight(.medium))
-                        Image(systemName: "xmark.circle.fill").font(.footnote)
-                    }
-                    .padding(.horizontal, Spacing.sm)
-                    .padding(.vertical, Spacing.xs)
-                    .foregroundStyle(Color.cyPrimary)
-                    .background(Color.cyPrimary.opacity(Opacity.iconTile), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                // The chip is the only affordance that explains a map narrowing, so its clear
-                // must announce as more than "x".
-                .accessibilityLabel("Clear map filter")
+        Button(action: onClear) {
+            HStack(spacing: Spacing.xs) {
+                Text(label).font(.footnote.weight(.medium))
+                Image(systemName: "xmark.circle.fill").font(.footnote)
             }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xs)
+            .foregroundStyle(Color.cyPrimary)
+            .background(Color.cyPrimary.opacity(Opacity.iconTile), in: Capsule())
         }
-        .padding(.horizontal, Spacing.lg)
-        .padding(.vertical, Spacing.sm)
-        .frame(maxWidth: .infinity)
-        .background(Color.cyBgSecondary)
+        .buttonStyle(.plain)
+        .fixedSize()
+        // The chips are the only thing explaining why rows are missing, so each clear has to
+        // announce as more than "x".
+        .accessibilityLabel(accessibilityLabel)
     }
+}
+
+/// Shared by the chip row and the sheet, so the two never disagree about how a climb reads.
+private func elevationLabel(_ meters: Double, _ unit: UnitSystem) -> String {
+    let value = unit.elevation(fromMeters: meters)
+    return "\(value.formatted(.number.precision(.fractionLength(0)))) \(unit.elevationLabel)"
 }
 
 // MARK: - Filter sheet
@@ -300,8 +345,8 @@ struct RouteFilterSheetBody: View {
                 }
             }
             Section {
-                Button("Clear Filters") { store.send(.filtersCleared) }
-                    .disabled(store.activeFilterCount == 0)
+                Button("Clear All Filters") { store.send(.allFiltersCleared) }
+                    .disabled(!store.isFiltered)
             }
         }
     }
@@ -376,9 +421,7 @@ struct RouteFilterSheetBody: View {
     }
 
     private func elevationText(_ meters: Double) -> String {
-        let unit = store.unitSystem
-        let value = unit.elevation(fromMeters: meters)
-        return "\(value.formatted(.number.precision(.fractionLength(0)))) \(unit.elevationLabel)"
+        elevationLabel(meters, store.unitSystem)
     }
 }
 

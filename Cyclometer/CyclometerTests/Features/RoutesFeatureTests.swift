@@ -1075,6 +1075,50 @@ struct RoutesFeatureFilterTests {
         await store.finish()
     }
 
+    @Test("each chip clears only its own filter")
+    func chipsClearIndividually() async {
+        let store = await loadedMapStore()
+        await store.send(.distanceFilterChanged(20_000...30_000)) {
+            $0.filter.distanceMeters = 20_000...30_000
+        }
+        await store.send(.elevationGainFilterChanged(400)) {
+            $0.filter.maxElevationGainMeters = 400
+        }
+        await store.send(.distanceFilterCleared) { $0.filter.distanceMeters = nil }
+        #expect(store.state.filter.maxElevationGainMeters == 400)
+        await store.send(.elevationGainFilterCleared) { $0.filter.maxElevationGainMeters = nil }
+        #expect(store.state.activeFilterCount == 0)
+        await store.finish()
+    }
+
+    @Test("clearing everything takes the map narrowing with it")
+    func allFiltersClearedIncludesTheMap() async {
+        // The no-matches empty state's only action. Clearing the sheet's two alone would leave
+        // the screen still empty and the reason for it still applied.
+        let store = await loadedMapStore()
+        await store.send(.distanceFilterChanged(20_000...30_000)) {
+            $0.filter.distanceMeters = 20_000...30_000
+        }
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = Self.nearViewport
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+
+        await store.send(.allFiltersCleared) {
+            $0.filter = RouteFilter()
+            $0.dismissedMapBounds = Self.nearViewport
+            $0.mapFilterBounds = nil
+            $0.mapFilteredRouteIDs = nil
+        }
+        #expect(!store.state.isFiltered)
+        #expect(store.state.filteredRoutes.count == 2)
+        await store.finish()
+    }
+
     // MARK: Sheet presentation
 
     @Test("the filter button opens the sheet and Done closes it")

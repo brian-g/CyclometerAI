@@ -24,4 +24,12 @@ extension Font {
     static let cyLabel   = Font.ddin(size: 12)
     /// 10 pt — captions, secondary metadata
     static let cyCaption = Font.ddin(size: 10)
+
+    // ── Map ─────────────────────────────────────────────────────────────────
+    /// 20 pt — direction-of-travel chevrons drawn along a route polyline (S19, S20).
+    ///
+    /// A system symbol weight rather than D-DIN: it sets an SF Symbol, not a number. Fixed
+    /// rather than Dynamic Type-scaled, because a map annotation is anchored to a point on
+    /// the ground — growing it only makes neighbouring chevrons collide.
+    static let cyMapAnnotation = Font.system(size: 20, weight: .bold)
 }

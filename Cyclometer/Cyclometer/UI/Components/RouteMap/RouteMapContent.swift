@@ -42,7 +42,7 @@ struct RouteMapContent: MapContent {
         ForEach(Array(chevrons.enumerated()), id: \.offset) { _, placement in
             Annotation("", coordinate: placement.coordinate.coordinate2D, anchor: .center) {
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.cyMapAnnotation)
                     .foregroundStyle(Color.cyPrimary)
                     .rotationEffect(.degrees(placement.bearingDegrees))
                     // Decorative: the flags carry start and finish for VoiceOver, and dozens

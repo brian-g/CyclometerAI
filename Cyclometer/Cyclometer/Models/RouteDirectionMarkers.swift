@@ -19,13 +19,17 @@ enum RouteDirectionMarkers {
 
     /// Chevrons no closer together than this on the ground, however far the rider zooms in.
     /// Without a floor, a viewport a few hundred metres wide would ask for a chevron every
-    /// couple of metres and bury the line it is annotating.
-    static let minimumSpacingMeters = 150.0
+    /// couple of metres and bury the line it is annotating. Raised from 150 m after review:
+    /// at tight zooms the floor is what sets the density, and 150 m was still crowding.
+    static let minimumSpacingMeters = 300.0
 
     /// Roughly this many chevrons across the viewport, whatever it is showing. This is what
     /// makes the spacing zoom-adaptive: it is a fraction of what is on screen, not of the
     /// route, so a 5 km route and a 100 km route read the same at the zoom you view them at.
-    static let chevronsAcrossViewport = 8.0
+    ///
+    /// Halved from 8 after review: the chevrons annotate a line the rider can already see, and
+    /// at that density they were reading as the line rather than as its direction.
+    static let chevronsAcrossViewport = 4.0
 
     /// Ground distance between chevrons for a given viewport.
     static func spacingMeters(for visibleBounds: RouteBounds) -> Double {
@@ -56,7 +60,7 @@ enum RouteDirectionMarkers {
     static func placements(
         coordinates: [RouteCoordinate],
         visibleBounds: RouteBounds?,
-        limit: Int = 24
+        limit: Int = 12
     ) -> [Placement] {
         guard coordinates.count > 1, limit > 0, let visibleBounds else { return [] }
 

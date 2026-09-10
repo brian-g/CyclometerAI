@@ -113,6 +113,9 @@ struct RoutesFeature {
         case distanceFilterChanged(ClosedRange<Double>?)
         case elevationGainFilterChanged(Double?)
         case filtersCleared
+        case allFiltersCleared
+        case distanceFilterCleared
+        case elevationGainFilterCleared
 
         case importButtonTapped
         case importerPresentationChanged(Bool)
@@ -235,9 +238,28 @@ struct RoutesFeature {
                 return .none
 
             case .filtersCleared:
-                // The sheet's filters only. The map narrowing has its own chip and its own
-                // clear, which is what keeps the badge count honest about what it covers.
+                // The sheet's own Reset. Each chip above the list clears just itself; this
+                // clears both of the sheet's without touching the map narrowing.
                 state.filter = RouteFilter()
+                return .none
+
+            case .distanceFilterCleared:
+                state.filter.distanceMeters = nil
+                return .none
+
+            case .elevationGainFilterCleared:
+                state.filter.maxElevationGainMeters = nil
+                return .none
+
+            case .allFiltersCleared:
+                // The single "start again" affordance — the sheet's button and the
+                // no-matches empty state. A rider who has filtered themselves down to nothing
+                // wants everything back, and leaving the map narrowing in place would clear
+                // the screen's explanation while still hiding their routes.
+                state.filter = RouteFilter()
+                state.dismissedMapBounds = state.mapFilterBounds
+                state.mapFilterBounds = nil
+                state.mapFilteredRouteIDs = nil
                 return .none
 
             case .importButtonTapped:

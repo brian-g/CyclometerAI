@@ -19,6 +19,21 @@ struct RouteDirectionMarkersTests {
         [coordinate(37.0, -122.0), coordinate(37.0, -121.9)]
     }
 
+    /// A route that doubles back on itself inside one viewport — a switchback climb or a
+    /// criterium lap. Spacing is measured along the *route*, so this is what produces far more
+    /// in-view samples than the cap allows, and it is the only shape that exercises thinning.
+    private var zigzagRoute: [RouteCoordinate] {
+        (0...80).map { step in
+            coordinate(step.isMultiple(of: 2) ? 36.99 : 37.01,
+                       -122.0 + 0.02 * Double(step) / 80)
+        }
+    }
+
+    private let zigzagViewport = RouteBounds(
+        minLatitude: 36.98, maxLatitude: 37.02,
+        minLongitude: -122.005, maxLongitude: -121.975
+    )
+
     private let wideViewport = RouteBounds(
         minLatitude: 36.9, maxLatitude: 37.1,
         minLongitude: -122.05, maxLongitude: -121.85
@@ -40,8 +55,10 @@ struct RouteDirectionMarkersTests {
                              minLongitude: -122.01, maxLongitude: -121.99)
         )
         #expect(zoomedIn < zoomedOut)
-        // ~17.8 km of longitude at this latitude, over the eight chevrons asked for.
-        #expect(abs(zoomedOut - 17_800 / 8) < 200)
+        // ~17.8 km of longitude at this latitude, shared out over however many chevrons the
+        // constant asks for — read from the constant so tuning the density does not silently
+        // invalidate this.
+        #expect(abs(zoomedOut - 17_800 / RouteDirectionMarkers.chevronsAcrossViewport) < 200)
     }
 
     @Test("spacing never falls below the floor, however far the rider zooms in")
@@ -92,14 +109,8 @@ struct RouteDirectionMarkersTests {
 
     @Test("the limit caps how many a single route can draw")
     func limitCapsTheCount() {
-        // Zoomed right in on a long route: the spacing floor still yields far more samples than
-        // anyone wants as map annotations.
-        let longRoute = [coordinate(37.0, -122.0), coordinate(37.0, -120.0)]
         let placements = RouteDirectionMarkers.placements(
-            coordinates: longRoute,
-            visibleBounds: RouteBounds(minLatitude: 36.9, maxLatitude: 37.1,
-                                       minLongitude: -122.0, maxLongitude: -120.0),
-            limit: 5
+            coordinates: zigzagRoute, visibleBounds: zigzagViewport, limit: 5
         )
         #expect(placements.count == 5)
     }
@@ -154,13 +165,11 @@ struct RouteDirectionMarkersTests {
         // Spacing is measured along the *route*, not across the screen, so a line that doubles
         // back inside one viewport yields far more in-view samples than the cap. Taking the
         // first N would leave the back half of a visible route with no direction at all.
-        let longRoute = [coordinate(37.0, -122.0), coordinate(37.0, -121.0)]
-        let viewport = RouteBounds(minLatitude: 36.9, maxLatitude: 37.1,
-                                   minLongitude: -122.0, maxLongitude: -121.0)
-        let uncapped = RouteDirectionMarkers.placements(coordinates: longRoute,
-                                                        visibleBounds: viewport, limit: 1_000)
-        let capped = RouteDirectionMarkers.placements(coordinates: longRoute,
-                                                      visibleBounds: viewport, limit: 6)
+        let uncapped = RouteDirectionMarkers.placements(coordinates: zigzagRoute,
+                                                        visibleBounds: zigzagViewport,
+                                                        limit: 1_000)
+        let capped = RouteDirectionMarkers.placements(coordinates: zigzagRoute,
+                                                      visibleBounds: zigzagViewport, limit: 6)
         #expect(uncapped.count > 6)
         #expect(capped.count == 6)
         // The last capped chevron must sit near the end of the line, not a sixth of the way in.
@@ -171,17 +180,14 @@ struct RouteDirectionMarkersTests {
 
     @Test("a cap of one puts its chevron in the middle of the line")
     func limitOfOneDoesNotDivideByZero() {
-        let longRoute = [coordinate(37.0, -122.0), coordinate(37.0, -121.0)]
-        let viewport = RouteBounds(minLatitude: 36.9, maxLatitude: 37.1,
-                                   minLongitude: -122.0, maxLongitude: -121.0)
-        let capped = RouteDirectionMarkers.placements(coordinates: longRoute,
-                                                      visibleBounds: viewport, limit: 1)
+        let capped = RouteDirectionMarkers.placements(coordinates: zigzagRoute,
+                                                      visibleBounds: zigzagViewport, limit: 1)
         #expect(capped.count == 1)
         // The middle third of the line: the point is that one chevron lands in the body of the
         // route rather than on its opening stretch, not that it hits the exact halfway metre —
         // placements are indexed from the first sample after the start flag, so the index
         // midpoint sits slightly beyond the geographic one.
         let longitude = try! #require(capped.first).coordinate.longitude
-        #expect(longitude < -121.25 && longitude > -121.75)
+        #expect(longitude < -121.9833 && longitude > -121.9967)
     }
 }
