@@ -12,4 +12,7 @@ enum Opacity {
     static let lineWatermark: Double = 0.35
     /// Tinted square behind a sensor row's SF Symbol (`SensorListRowView`).
     static let iconTile: Double = 0.14
+    /// Drop shadow under a `RangeSlider` thumb, matching the lift a system `Slider` gives its
+    /// own so the two read as the same control.
+    static let thumbShadow: Double = 0.25
 }

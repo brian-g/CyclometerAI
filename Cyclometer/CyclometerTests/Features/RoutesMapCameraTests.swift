@@ -141,3 +141,112 @@ struct RoutesMapCameraSpanTests {
         #expect(region.span.latitudeDelta <= 180)
     }
 }
+
+/// #194 — turning what the camera shows into the box the list filters on.
+@Suite("RoutesMapCamera — viewport capture")
+struct RoutesMapCameraViewportTests {
+
+    private static func bounds(
+        _ minLat: Double, _ maxLat: Double, _ minLon: Double, _ maxLon: Double
+    ) -> RouteBounds {
+        RouteBounds(minLatitude: minLat, maxLatitude: maxLat,
+                    minLongitude: minLon, maxLongitude: maxLon)
+    }
+
+    private static func route(_ bounds: RouteBounds) -> RouteSummary {
+        var summary = RouteSummary.empty
+        summary.id = UUID()
+        summary.bounds = bounds
+        return summary
+    }
+
+    private static func region(
+        _ latitude: Double, _ longitude: Double, _ latitudeDelta: Double, _ longitudeDelta: Double
+    ) -> MKCoordinateRegion {
+        MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+            span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
+        )
+    }
+
+    @Test("an ordinary region becomes the box around it")
+    func ordinaryRegion() {
+        let captured = try! #require(RoutesMapCamera.bounds(for: Self.region(37.4, -122.0, 0.2, 0.4)))
+        #expect(abs(captured.minLatitude - 37.3) < 1e-9)
+        #expect(abs(captured.maxLatitude - 37.5) < 1e-9)
+        #expect(abs(captured.minLongitude - -122.2) < 1e-9)
+        #expect(abs(captured.maxLongitude - -121.8) < 1e-9)
+    }
+
+    @Test("a region running past the poles is clamped rather than wrapped")
+    func poleOverflowIsClamped() {
+        let captured = try! #require(RoutesMapCamera.bounds(for: Self.region(85, 0, 40, 40)))
+        #expect(captured.maxLatitude == 90)
+        #expect(captured.minLatitude == 65)
+    }
+
+    @Test("a region running past the antimeridian is clamped, never wrapped")
+    func longitudeOverflowIsClamped() {
+        // Wrapping the two longitudes back into range independently would invert the box —
+        // minLongitude greater than maxLongitude — and `intersects` would then reject every
+        // route, emptying the list at world zoom.
+        let captured = try! #require(RoutesMapCamera.bounds(for: Self.region(0, 170, 10, 60)))
+        #expect(captured.minLongitude < captured.maxLongitude)
+        #expect(captured.maxLongitude == 180)
+        #expect(abs(captured.minLongitude - 140) < 1e-9)
+    }
+
+    @Test("a full turn of longitude becomes the whole range")
+    func fullTurnOfLongitude() {
+        let captured = try! #require(RoutesMapCamera.bounds(for: Self.region(0, 0, 10, 360)))
+        #expect(captured.minLongitude == -180)
+        #expect(captured.maxLongitude == 180)
+    }
+
+    @Test("a camera that has not settled reports nothing")
+    func nonFiniteRegionIsRejected() {
+        #expect(RoutesMapCamera.bounds(for: Self.region(.nan, 0, 1, 1)) == nil)
+        #expect(RoutesMapCamera.bounds(for: Self.region(0, 0, .infinity, 1)) == nil)
+    }
+
+    @Test("a viewport holding every saved route is not a filter")
+    func viewportThatExcludesNothingIsNotAFilter() {
+        // A library spread across two continents opens at a zoom that already shows all of it.
+        // Reporting that as a filter would put a chip on screen explaining an exclusion that is
+        // not happening.
+        let routes = [
+            Self.route(Self.bounds(37.30, 37.40, -122.10, -122.00)),
+            Self.route(Self.bounds(37.50, 37.60, -121.90, -121.80))
+        ]
+        #expect(RoutesMapCamera.filterBounds(for: Self.region(37.45, -121.95, 2, 2),
+                                             routes: routes) == nil)
+    }
+
+    @Test("a viewport that leaves a route out is a filter")
+    func narrowedViewportIsAFilter() {
+        let routes = [
+            Self.route(Self.bounds(37.30, 37.40, -122.10, -122.00)),
+            Self.route(Self.bounds(37.50, 37.60, -121.90, -121.80))
+        ]
+        #expect(RoutesMapCamera.filterBounds(for: Self.region(37.35, -122.05, 0.2, 0.2),
+                                             routes: routes) != nil)
+    }
+
+    @Test("with nothing saved, any viewport is still a filter rather than a crash")
+    func emptyLibraryStillCaptures() {
+        #expect(RoutesMapCamera.filterBounds(for: Self.region(37.4, -122.0, 1, 1),
+                                             routes: []) != nil)
+    }
+
+    @Test("a captured viewport round-trips back to the same box")
+    func regionForBoundsRoundTrips() {
+        // This is what restores the camera on the way back to the map, so it has to return the
+        // rider to where they left rather than to a padded approximation of it.
+        let original = Self.bounds(37.30, 37.50, -122.20, -121.80)
+        let restored = try! #require(RoutesMapCamera.bounds(for: RoutesMapCamera.region(for: original)))
+        #expect(abs(restored.minLatitude - original.minLatitude) < 1e-9)
+        #expect(abs(restored.maxLatitude - original.maxLatitude) < 1e-9)
+        #expect(abs(restored.minLongitude - original.minLongitude) < 1e-9)
+        #expect(abs(restored.maxLongitude - original.maxLongitude) < 1e-9)
+    }
+}

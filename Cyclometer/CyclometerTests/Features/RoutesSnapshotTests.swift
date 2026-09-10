@@ -34,7 +34,12 @@ final class RoutesSnapshotTests: XCTestCase {
     /// Imperial and a denied location: the units the row formats with have to be pinned to
     /// something, and denying location keeps the reference free of a simulator fix that
     /// would differ between machines.
-    private func screen(routes: [RouteSummary]) -> some View {
+    private func screen(
+        routes: [RouteSummary],
+        filter: RouteFilter = RouteFilter(),
+        mapFilterBounds: RouteBounds? = nil,
+        mapFilteredRouteIDs: Set<UUID>? = nil
+    ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
@@ -45,6 +50,9 @@ final class RoutesSnapshotTests: XCTestCase {
             // pass and never awaits an effect, so a fetched list would photograph as empty.
             var state = RoutesFeature.State()
             state.routes = routes
+            state.filter = filter
+            state.mapFilterBounds = mapFilterBounds
+            state.mapFilteredRouteIDs = mapFilteredRouteIDs
             // The screen after its first read, which is the state worth pinning — an
             // unseeded `hasLoaded` would photograph the pre-read blank instead.
             state.hasLoaded = true
@@ -99,5 +107,70 @@ final class RoutesSnapshotTests: XCTestCase {
     /// whole screen (UX.md §S19).
     func testEmptyState() {
         assertBothSchemes(screen(routes: []), named: "empty")
+    }
+
+    // MARK: Filters (#194)
+    //
+    // The toolbar is not covered by any of these: a `UIHostingController` renders the
+    // navigation bar's items as nothing at all here — the existing references above show a
+    // title and a list with no Import or Map/List button either — so the filter button and its
+    // badge are pinned by `RoutesFeatureTests` and by the running app, not by pixels.
+
+    /// Filtered by the map and by distance at once. The status bar has to say plainly that the
+    /// list is short, and the chip has to offer the way out — without them "my route vanished"
+    /// and "this is a bug" are the same experience.
+    func testFilteredListShowsStatusBarAndChip() {
+        let routes = RouteSummary.previewRoutes
+        assertBothSchemes(
+            screen(
+                routes: routes,
+                filter: RouteFilter(distanceMeters: 20_000...40_000, maxElevationGainMeters: nil),
+                mapFilterBounds: RouteBounds(minLatitude: 37.30, maxLatitude: 37.40,
+                                             minLongitude: -122.06, maxLongitude: -121.97),
+                mapFilteredRouteIDs: Set(routes.prefix(2).map(\.id))
+            ),
+            named: "filtered"
+        )
+    }
+
+    /// Filters that exclude everything. Kept distinct from the "No Routes" state above: a
+    /// rider who filtered too hard must not be told their library is empty.
+    func testNoMatchingRoutes() {
+        assertBothSchemes(
+            screen(
+                routes: RouteSummary.previewRoutes,
+                filter: RouteFilter(distanceMeters: nil, maxElevationGainMeters: 0),
+                mapFilterBounds: nil,
+                mapFilteredRouteIDs: []
+            ),
+            named: "no-matches"
+        )
+    }
+
+    /// The sheet's own body. Snapshotted without its `NavigationStack` wrapper, because a
+    /// sheet carrying `.topBarLeading`/`.topBarTrailing` items renders blank inside a
+    /// `UIHostingController` (`StartSheetSnapshotTests.swift:6-13`).
+    func testFilterSheet() {
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.preferredUnit = .imperial }
+            var state = RoutesFeature.State()
+            state.routes = RouteSummary.previewRoutes
+            state.hasLoaded = true
+            state.filter = RouteFilter(distanceMeters: 20_000...40_000, maxElevationGainMeters: 500)
+            return Store(initialState: state) { RoutesFeature() } withDependencies: {
+                $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+                $0.locationClient = .testValue
+                $0.permissionsClient = .mock(initial: [.locationWhenInUse: .denied])
+                $0.defaultFileStorage = storage
+            }
+        }
+        assertBothSchemes(
+            RouteFilterSheetBody(store: store).tint(Color.cyPrimary),
+            named: "sheet"
+        )
     }
 }

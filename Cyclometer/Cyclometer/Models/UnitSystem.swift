@@ -25,10 +25,15 @@ enum UnitSystem: String, Equatable, Sendable, Codable, CaseIterable {
 
     private var speedUnit: UnitSpeed { self == .metric ? .kilometersPerHour : .milesPerHour }
     private var lengthUnit: UnitLength { self == .metric ? .kilometers : .miles }
+    /// Elevation is metres or feet — never kilometres or miles. A climb is quoted in the
+    /// small unit in both systems, which is why this is separate from `lengthUnit`.
+    private var elevationUnit: UnitLength { self == .metric ? .meters : .feet }
 
     /// OS-localized unit symbols ("km/h"/"mph", "km"/"mi").
     var speedLabel: String { speedUnit.symbol }
     var distanceLabel: String { lengthUnit.symbol }
+    /// OS-localized elevation symbol ("m"/"ft").
+    var elevationLabel: String { elevationUnit.symbol }
 
     /// Title-case name for the S12 units picker.
     var displayName: String { self == .metric ? "Metric" : "Imperial" }
@@ -41,6 +46,13 @@ enum UnitSystem: String, Equatable, Sendable, Codable, CaseIterable {
     func distance(fromMeters meters: Double) -> Double {
         Measurement(value: meters, unit: UnitLength.meters)
             .converted(to: lengthUnit).value
+    }
+
+    /// Elevation gain or loss for display. S19's filter sheet labels its gain slider with it
+    /// and S20 (#195) quotes gain and loss with the same helper, so the two cannot disagree.
+    func elevation(fromMeters meters: Double) -> Double {
+        Measurement(value: meters, unit: UnitLength.meters)
+            .converted(to: elevationUnit).value
     }
 
     /// Seconds required to cover one distance unit (mile or kilometer) at the

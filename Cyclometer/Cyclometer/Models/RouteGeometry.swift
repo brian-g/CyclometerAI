@@ -288,3 +288,103 @@ extension RouteBounds {
         ((minLatitude + maxLatitude) / 2, (minLongitude + maxLongitude) / 2)
     }
 }
+
+// MARK: - Viewport intersection (#194)
+
+extension RouteBounds {
+    /// Whether two boxes overlap at all, edges included. Touching counts: a route whose
+    /// easternmost point sits exactly on the viewport's western edge is drawn on that edge,
+    /// so the list has to agree that it is visible.
+    func intersects(_ other: RouteBounds) -> Bool {
+        minLatitude <= other.maxLatitude && maxLatitude >= other.minLatitude
+            && minLongitude <= other.maxLongitude && maxLongitude >= other.minLongitude
+    }
+
+    func contains(latitude: Double, longitude: Double) -> Bool {
+        latitude >= minLatitude && latitude <= maxLatitude
+            && longitude >= minLongitude && longitude <= maxLongitude
+    }
+
+    /// Whether this box holds all of `other`. S19 uses it to recognise a viewport that
+    /// already shows every saved route, which is not a filter and must not raise the chip.
+    func contains(_ other: RouteBounds) -> Bool {
+        other.minLatitude >= minLatitude && other.maxLatitude <= maxLatitude
+            && other.minLongitude >= minLongitude && other.maxLongitude <= maxLongitude
+    }
+}
+
+extension RouteGeometry {
+
+    /// Whether one drawn segment touches `box` — Liang–Barsky, clipping the segment's
+    /// parameter against the four edges in turn and asking whether anything survives.
+    ///
+    /// **This is deliberately its own function rather than the body of `polyline`'s loop.**
+    /// Written inline, its early `return false` would abandon the whole *route* on the first
+    /// segment that falls outside, which is every zoomed-in case — and a fixture built from a
+    /// route lying wholly inside the viewport can never catch it, because such a route never
+    /// rejects a segment. `polylineWhoseFirstSegmentIsOutside` is the test that can.
+    ///
+    /// A zero-length segment leaves all four `p` at zero and reduces to point-in-box, which is
+    /// the right answer: `GPXRouteImporter` does not dedupe consecutive identical points, so
+    /// those do reach here.
+    static func segment(
+        from start: RouteCoordinate,
+        to end: RouteCoordinate,
+        intersects box: RouteBounds
+    ) -> Bool {
+        let dx = end.longitude - start.longitude
+        let dy = end.latitude - start.latitude
+
+        var t0 = 0.0
+        var t1 = 1.0
+
+        // `p` is how fast the segment crosses this edge, `q` how far inside it starts.
+        // `p == 0` is a segment parallel to the edge, which survives only if it starts inside.
+        func clip(_ p: Double, _ q: Double) -> Bool {
+            guard p != 0 else { return q >= 0 }
+            let r = q / p
+            if p < 0 {
+                if r > t1 { return false }
+                if r > t0 { t0 = r }
+            } else {
+                if r < t0 { return false }
+                if r < t1 { t1 = r }
+            }
+            return true
+        }
+
+        guard clip(-dx, start.longitude - box.minLongitude),
+              clip(dx, box.maxLongitude - start.longitude),
+              clip(-dy, start.latitude - box.minLatitude),
+              clip(dy, box.maxLatitude - start.latitude)
+        else { return false }
+
+        return t0 <= t1
+    }
+
+    /// Whether any part of the drawn polyline touches `box`.
+    ///
+    /// Segment by segment, not vertex by vertex: a route that crosses the viewport with both
+    /// of its endpoints — and every vertex — outside is still drawn across it, and UX.md §S19
+    /// promises the list shows "those routes displayed on the map".
+    ///
+    /// No bounding-box pre-reject here, because the caller has a better one: `RouteSummary`
+    /// already carries the route's stored bounds, so `RouteFilter` rejects in O(1) and only
+    /// reaches this for the survivors. Recomputing the box here would walk the coordinates a
+    /// second time for exactly those routes.
+    ///
+    /// Degrees rather than projected map points is right for this: the viewport and the stored
+    /// bounds are both lat/lon, and over one route segment the difference between a straight
+    /// line in degrees and the Mercator line MapKit actually draws is far below a metre.
+    static func polyline(_ coordinates: [RouteCoordinate], intersects box: RouteBounds) -> Bool {
+        guard let first = coordinates.first else { return false }
+        // A one-point GPX imports fine — `GPXRouteImporter` rejects only *no* coordinates —
+        // and has no segments to walk, so without this branch it could never match anything
+        // while its marker sat in the middle of the viewport.
+        guard coordinates.count > 1 else {
+            return box.contains(latitude: first.latitude, longitude: first.longitude)
+        }
+        return zip(coordinates, coordinates.dropFirst())
+            .contains { segment(from: $0, to: $1, intersects: box) }
+    }
+}

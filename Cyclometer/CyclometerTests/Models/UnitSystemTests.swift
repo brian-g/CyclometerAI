@@ -63,4 +63,24 @@ struct UnitSystemTests {
     func paceLabelMatchesDistanceLabel(unit: UnitSystem, expected: String) {
         #expect(unit.paceLabel == expected)
     }
+
+    // MARK: - Elevation (#194)
+
+    @Test("Elevation is metres or feet, never kilometres or miles", arguments: [
+        (UnitSystem.metric, 1_000.0, 1_000.0),
+        (UnitSystem.imperial, 1_000.0, 3_280.839_895)
+    ])
+    func elevationConverts(unit: UnitSystem, meters: Double, expected: Double) {
+        // A climb is quoted in the small unit in both systems, which is why this does not go
+        // through `lengthUnit`.
+        #expect(abs(unit.elevation(fromMeters: meters) - expected) < 0.01)
+    }
+
+    @Test("Elevation label is the OS symbol for that unit", arguments: [
+        (UnitSystem.metric, "m"),
+        (UnitSystem.imperial, "ft")
+    ])
+    func elevationLabelMatchesUnit(unit: UnitSystem, expected: String) {
+        #expect(unit.elevationLabel == expected)
+    }
 }

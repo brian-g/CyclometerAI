@@ -37,15 +37,24 @@ struct RoutesFeatureTests {
         }
     }
 
+    /// `RouteSummary.empty` puts every fixture at bounds (0, 0, 0, 0) — the Gulf of Guinea —
+    /// with no elevation gain, so both are parameters here rather than left to the default:
+    /// #194 filters on all three and a fixture that shares its box with every other one cannot
+    /// express a viewport that holds some routes and not others.
     private static func summary(
         id: UUID = UUID(), name: String = "River Loop",
-        terrain: String? = "Rolling terrain", distanceMeters: Double = 36_050
+        terrain: String? = "Rolling terrain", distanceMeters: Double = 36_050,
+        elevationGainMeters: Double? = nil,
+        bounds: RouteBounds = RouteBounds(minLatitude: 37.32, maxLatitude: 37.35,
+                                          minLongitude: -122.05, maxLongitude: -122.00)
     ) -> RouteSummary {
         var summary = RouteSummary.empty
         summary.id = id
         summary.name = name
         summary.terrainDescription = terrain
         summary.distanceMeters = distanceMeters
+        summary.elevationGainMeters = elevationGainMeters
+        summary.bounds = bounds
         return summary
     }
 
@@ -395,10 +404,15 @@ struct RoutesFeatureReviewTests {
         }
     }
 
+    /// Bounds that actually contain `coordinates()`. They used to be `RouteSummary.empty`'s
+    /// zeros while the geometry sat off Cupertino, which was harmless until #194 gave the
+    /// bounding box a job: a summary whose box disagrees with its own polyline cannot be
+    /// filtered correctly by any rule.
     nonisolated private static func summary(_ id: UUID, _ name: String) -> RouteSummary {
         var summary = RouteSummary.empty
         summary.id = id
         summary.name = name
+        summary.bounds = RouteGeometry.boundingBox(coordinates())
         return summary
     }
 
@@ -590,5 +604,442 @@ struct RoutesFeatureReviewTests {
 
         #expect(fixes.value == 1, "the recovery re-read also re-ran the location request")
         #expect(store.state.routes == [route])
+    }
+}
+
+/// #194 — the three filters, and what happens to them as the library changes underneath.
+@MainActor
+@Suite("RoutesFeature — filters")
+struct RoutesFeatureFilterTests {
+
+    // MARK: Fixtures
+
+    private static let nearID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
+    private static let farID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A2")!
+
+    /// Two routes far enough apart that a viewport can hold one and not the other.
+    private static let near = summary(
+        id: nearID, name: "Near", distanceMeters: 20_000, elevationGainMeters: 100,
+        bounds: RouteBounds(minLatitude: 37.30, maxLatitude: 37.35,
+                            minLongitude: -122.10, maxLongitude: -122.05)
+    )
+    private static let far = summary(
+        id: farID, name: "Far", distanceMeters: 60_000, elevationGainMeters: 800,
+        bounds: RouteBounds(minLatitude: 37.60, maxLatitude: 37.65,
+                            minLongitude: -121.90, maxLongitude: -121.85)
+    )
+
+    /// Holds `near` whole and none of `far`.
+    private static let nearViewport = RouteBounds(
+        minLatitude: 37.28, maxLatitude: 37.37,
+        minLongitude: -122.12, maxLongitude: -122.03
+    )
+
+    private static func summary(
+        id: UUID, name: String, distanceMeters: Double,
+        elevationGainMeters: Double?, bounds: RouteBounds
+    ) -> RouteSummary {
+        var summary = RouteSummary.empty
+        summary.id = id
+        summary.name = name
+        summary.distanceMeters = distanceMeters
+        summary.elevationGainMeters = elevationGainMeters
+        summary.bounds = bounds
+        return summary
+    }
+
+    private static func detail(_ summary: RouteSummary) -> RouteDetail {
+        // A short line inside the route's own bounds, so the stored box and the polyline agree.
+        RouteDetail(
+            summary: summary,
+            coordinates: [
+                RouteCoordinate(latitude: summary.bounds.minLatitude,
+                                longitude: summary.bounds.minLongitude, elevationMeters: nil),
+                RouteCoordinate(latitude: summary.bounds.maxLatitude,
+                                longitude: summary.bounds.maxLongitude, elevationMeters: nil)
+            ],
+            cuePoints: []
+        )
+    }
+
+    private func makeStore(
+        showsMap: Bool = false,
+        persistenceClient: PersistenceClient
+    ) -> TestStoreOf<RoutesFeature> {
+        let storage = FileStorage.inMemory
+        return withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.preferredUnit = .metric }
+            return TestStore(initialState: RoutesFeature.State(showsMap: showsMap)) {
+                RoutesFeature()
+            } withDependencies: {
+                $0.persistenceClient = persistenceClient
+                $0.locationClient = .testValue
+                $0.permissionsClient = .mock(initial: [.locationWhenInUse: .denied])
+                $0.defaultFileStorage = storage
+            }
+        }
+    }
+
+    /// A store already on the map with both routes and their geometry loaded.
+    private func loadedMapStore() async -> TestStoreOf<RoutesFeature> {
+        let routes = [Self.near, Self.far]
+        let details = [Self.nearID: Self.detail(Self.near), Self.farID: Self.detail(Self.far)]
+        let store = makeStore(showsMap: true,
+                              persistenceClient: .mock(routes: routes, routeDetails: details))
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = routes
+        }
+        await store.receive(\.polylinesResponse) {
+            $0.polylines = [Self.nearID: details[Self.nearID]!.coordinates,
+                            Self.farID: details[Self.farID]!.coordinates]
+        }
+        return store
+    }
+
+    // MARK: The map as a filter
+
+    @Test("panning the map records the viewport without reordering the list")
+    func mapRegionChangedRecordsOnly() async {
+        let store = await loadedMapStore()
+
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        // Recorded, not applied: the list must not shuffle under a map the rider is still panning.
+        #expect(store.state.mapFilterBounds == nil)
+        #expect(store.state.filteredRoutes.count == 2)
+        await store.finish()
+    }
+
+    @Test("switching back to the list captures the viewport and narrows to it")
+    func mapToListCapturesTheViewport() async {
+        let store = await loadedMapStore()
+
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = Self.nearViewport
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+
+        #expect(store.state.filteredRoutes.map(\.name) == ["Near"])
+        // The AC: filter state does not leak into the unfiltered store contents.
+        #expect(store.state.routes.map(\.name) == ["Near", "Far"])
+        await store.finish()
+    }
+
+    @Test("going back to the map does not capture, so the viewport can be widened again")
+    func listToMapDoesNotCapture() async {
+        let store = await loadedMapStore()
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = Self.nearViewport
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+
+        // Re-opening the map must show everything the sheet allows, or the rider can only ever
+        // narrow — there would be no gesture that brings a route back.
+        await store.send(.mapToggled) { $0.showsMap = true }
+        #expect(store.state.sheetFilteredRoutes.count == 2)
+        #expect(store.state.mapFilterBounds == Self.nearViewport)
+        await store.finish()
+    }
+
+    @Test("clearing the map filter restores the whole list")
+    func mapFilterCleared() async {
+        let store = await loadedMapStore()
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = Self.nearViewport
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+        await store.send(.mapFilterCleared) {
+            $0.mapFilterBounds = nil
+            $0.mapFilteredRouteIDs = nil
+        }
+        #expect(store.state.filteredRoutes.count == 2)
+        await store.finish()
+    }
+
+    // MARK: Routes whose geometry has not loaded
+
+    @Test("a route imported from the list survives an active map filter")
+    func importedRouteIsNotHiddenByTheMapFilter() async {
+        // `loadMissingPolylines` runs only while the map is showing, so a route imported from
+        // the list has no geometry. Failing it would mean the rider imports a GPX and the
+        // screen does nothing at all.
+        let store = await loadedMapStore()
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = Self.nearViewport
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+
+        let importedID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let imported = Self.summary(
+            id: importedID, name: "Imported", distanceMeters: 30_000, elevationGainMeters: 200,
+            bounds: RouteBounds(minLatitude: 37.31, maxLatitude: 37.33,
+                                minLongitude: -122.09, maxLongitude: -122.06)
+        )
+        await store.send(.importResponse(.success(imported))) {
+            $0.routes.insert(imported, at: 0)
+            $0.mapFilteredRouteIDs = [Self.nearID, importedID]
+        }
+        #expect(store.state.filteredRoutes.map(\.name) == ["Imported", "Near"])
+        await store.finish()
+    }
+
+    @Test("a route whose polyline never loads is still matched on its bounding box")
+    func unloadablePolylineFallsBackToBounds() async {
+        // `unloadablePolylineIsNotRefetchedForever` pins that a failed fetch is never retried,
+        // so this route has no geometry for the life of the screen. Dropping it would remove
+        // the row from the list permanently, with no way back.
+        let routes = [Self.near, Self.far]
+        let store = makeStore(showsMap: true,
+                              persistenceClient: .mock(routes: routes, routeDetails: [:]))
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = routes
+        }
+        await store.receive(\.polylinesResponse)
+
+        #expect(store.state.polylines.isEmpty)
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = Self.nearViewport
+            // `near`'s box is inside the viewport; `far`'s is not, so the fallback still
+            // discriminates — it is over-inclusive, not indiscriminate.
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+        #expect(store.state.filteredRoutes.map(\.name) == ["Near"])
+        await store.finish()
+    }
+
+    @Test("geometry arriving later upgrades the map filter from the box to the exact test")
+    func polylinesResponseRefreshesTheMapFilter() async {
+        // A viewport in the empty corner of a diagonal route: its box overlaps, its line does
+        // not. Before the geometry lands the box keeps it; once the polyline is in, it goes.
+        let diagonalID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let diagonal = Self.summary(
+            id: diagonalID, name: "Diagonal", distanceMeters: 50_000, elevationGainMeters: nil,
+            bounds: RouteBounds(minLatitude: 37.00, maxLatitude: 38.00,
+                                minLongitude: -123.00, maxLongitude: -121.00)
+        )
+        let corner = RouteBounds(minLatitude: 37.90, maxLatitude: 38.00,
+                                 minLongitude: -123.00, maxLongitude: -122.90)
+        let geometry = [
+            RouteCoordinate(latitude: 37.00, longitude: -123.00, elevationMeters: nil),
+            RouteCoordinate(latitude: 38.00, longitude: -121.00, elevationMeters: nil)
+        ]
+
+        let store = makeStore(persistenceClient: .mock(routes: [diagonal]))
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [diagonal]
+        }
+        await store.send(.mapRegionChanged(corner)) { $0.visibleMapBounds = corner }
+        await store.send(.mapToggled) { $0.showsMap = true }
+        await store.receive(\.polylinesResponse)
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = corner
+            $0.mapFilteredRouteIDs = [diagonalID]
+        }
+        #expect(store.state.filteredRoutes.count == 1, "kept on its box while geometry is absent")
+
+        await store.send(.polylinesResponse([diagonalID: geometry])) {
+            $0.polylines = [diagonalID: geometry]
+            $0.mapFilteredRouteIDs = []
+        }
+        #expect(store.state.filteredRoutes.isEmpty, "the line never enters that corner")
+        await store.finish()
+    }
+
+    // MARK: The sheet filters
+
+    @Test("the badge counts the sheet filters and ignores the map")
+    func badgeCountsSheetFiltersOnly() async {
+        let store = await loadedMapStore()
+        #expect(store.state.activeFilterCount == 0)
+
+        await store.send(.distanceFilterChanged(20_000...30_000)) {
+            $0.filter.distanceMeters = 20_000...30_000
+        }
+        #expect(store.state.activeFilterCount == 1)
+
+        await store.send(.elevationGainFilterChanged(400)) {
+            $0.filter.maxElevationGainMeters = 400
+        }
+        #expect(store.state.activeFilterCount == 2)
+
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = Self.nearViewport
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+        // The map narrowed the list, but it has its own chip — the badge must not claim it.
+        #expect(store.state.activeFilterCount == 2)
+        #expect(store.state.isFiltered)
+        await store.finish()
+    }
+
+    @Test("the map filter and the sheet filters compose")
+    func mapAndSheetFiltersCompose() async {
+        let store = await loadedMapStore()
+
+        // Admits `far` on distance and excludes `near`.
+        await store.send(.distanceFilterChanged(50_000...60_000)) {
+            $0.filter.distanceMeters = 50_000...60_000
+        }
+        #expect(store.state.sheetFilteredRoutes.map(\.name) == ["Far"])
+
+        // The viewport admits `near` and excludes `far`. Composed, nothing survives — which is
+        // the point: neither filter overrides the other.
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = Self.nearViewport
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+        #expect(store.state.filteredRoutes.isEmpty)
+        #expect(store.state.routes.count == 2)
+        await store.finish()
+    }
+
+    @Test("clearing the sheet filters leaves the map filter alone")
+    func filtersClearedLeavesTheMapFilter() async {
+        let store = await loadedMapStore()
+        await store.send(.distanceFilterChanged(20_000...30_000)) {
+            $0.filter.distanceMeters = 20_000...30_000
+        }
+        await store.send(.mapRegionChanged(Self.nearViewport)) {
+            $0.visibleMapBounds = Self.nearViewport
+        }
+        await store.send(.mapToggled) {
+            $0.showsMap = false
+            $0.mapFilterBounds = Self.nearViewport
+            $0.mapFilteredRouteIDs = [Self.nearID]
+        }
+
+        await store.send(.filtersCleared) { $0.filter = RouteFilter() }
+        #expect(store.state.mapFilterBounds == Self.nearViewport)
+        #expect(store.state.filteredRoutes.map(\.name) == ["Near"])
+        await store.finish()
+    }
+
+    @Test("a route with no elevation data is not dropped by the gain filter")
+    func nilGainRouteSurvivesTheGainFilter() async {
+        let flatID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
+        let noElevation = Self.summary(
+            id: flatID, name: "No Elevation", distanceMeters: 25_000, elevationGainMeters: nil,
+            bounds: Self.near.bounds
+        )
+        let routes = [Self.near, Self.far, noElevation]
+        let store = makeStore(persistenceClient: .mock(routes: routes))
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = routes
+        }
+
+        await store.send(.elevationGainFilterChanged(150)) {
+            $0.filter.maxElevationGainMeters = 150
+        }
+        #expect(store.state.filteredRoutes.map(\.name) == ["Near", "No Elevation"])
+        await store.finish()
+    }
+
+    @Test("an import that lengthens the library does not widen a cap the rider set")
+    func importDoesNotWidenAnActiveFilter() async {
+        let routes = [Self.near, Self.far]
+        let store = makeStore(persistenceClient: .mock(routes: routes))
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = routes
+        }
+
+        await store.send(.distanceFilterChanged(20_000...30_000)) {
+            $0.filter.distanceMeters = 20_000...30_000
+        }
+
+        let epicID = UUID(uuidString: "00000000-0000-0000-0000-0000000000E1")!
+        let epic = Self.summary(id: epicID, name: "Epic", distanceMeters: 200_000,
+                                elevationGainMeters: 4_000, bounds: Self.far.bounds)
+        await store.send(.importResponse(.success(epic))) {
+            $0.routes.insert(epic, at: 0)
+        }
+        // The cap survives the domain growing, and the new route is correctly outside it.
+        #expect(store.state.filter.distanceMeters == 20_000...30_000)
+        #expect(store.state.filteredRoutes.map(\.name) == ["Near"])
+        await store.finish()
+    }
+
+    @Test("deleting the last route with elevation drops a gain filter that could not be undone")
+    func deletingTheLastElevationRouteDropsTheGainFilter() async {
+        let flatID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D2")!
+        let flat = Self.summary(id: flatID, name: "Flat", distanceMeters: 25_000,
+                                elevationGainMeters: nil, bounds: Self.near.bounds)
+        let routes = [Self.near, flat]
+        let store = makeStore(persistenceClient: .mock(routes: routes))
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = routes
+        }
+        await store.send(.elevationGainFilterChanged(50)) {
+            $0.filter.maxElevationGainMeters = 50
+        }
+
+        // With `near` gone, nothing carries an elevation, so the sheet hides the gain row —
+        // and a filter left set behind a hidden control can never be undone.
+        await store.send(.deleteButtonTapped(Self.nearID)) {
+            $0.routes = [flat]
+            $0.filter.maxElevationGainMeters = nil
+        }
+        #expect(store.state.activeFilterCount == 0)
+        await store.finish()
+    }
+
+    // MARK: Sheet presentation
+
+    @Test("the filter button opens the sheet and Done closes it")
+    func sheetPresentation() async {
+        let store = makeStore(persistenceClient: .mock(routes: [Self.near]))
+        await store.send(.filterButtonTapped) { $0.isFilterSheetPresented = true }
+        await store.send(.filterSheetPresentationChanged(false)) { $0.isFilterSheetPresented = false }
+        await store.finish()
     }
 }
