@@ -73,5 +73,9 @@ drive's last assertion failed on my query, not the app: a `LabeledContent` link 
   `com.apple.runtime-issues`.
 - Previews were not rendered.
 
-**Follow-ups.** Spec gaps left out of the uncommitted PRD/UX edits (`UX.md:56`, `PRD.md:176`, §S05.2's key
-components) — Brian or #202. #197 restores the route on resume (`routeId` on `RideSummaryUpdate`).
+**Specs.** Brian's PRD v0.5.0/UX edits went in as their own commit. A second commit fixes what they left: the
+UX Screen Index row, the PRD §6 lists (plus the Phase 2 bike picker's "S05.1/S05.2"), UX §S05.2's key
+components, and `TCA.md`'s picker line.
+
+**Follow-ups.** The Routes tab itself is still Phase 2 in `PRD.md` §6 and `TCA.md:154` — #202. #197 restores
+the route on resume (`routeId` on `RideSummaryUpdate`).

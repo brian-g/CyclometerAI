@@ -158,6 +158,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Watch haptic alert system (3 escalation levels) with Silent Mode override for Danger
 - GPS track recording with live map view
 - Route loading from GPX file import (Files app) or tribos.studio integration
+- Route picker in the Start Sheet (S05.2)
 - GPX export with `gpxtpx:TrackPointExtension` (HR, cadence, speed per track point) and `cyc:VehiclePassEvent` waypoints
 - GPX files available in iOS Files app
 - Basic ride summary (post-ride)
@@ -172,8 +173,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Ride detail view (S15): HR graph, cadence graph, radar event + vehicle pass timeline
 - Heart rate zone training graphs
 - Customizable metric tiles on dashboard (S07, S08)
-- **Multi-bike management:** a rider owns several bikes; each bike owns its speed/cadence/radar sensors and maps to a Strava gear id for export. Wheel circumference lives on the speed sensor (§8.9.1). Heart rate stays rider-scoped. Includes the bike picker in the Start Sheet (S05.1/S05.2) and ride history that names the bike ridden. Data model in DataModel.md §3.9
-- Route picker in Start Sheet (S05.2)
+- **Multi-bike management:** a rider owns several bikes; each bike owns its speed/cadence/radar sensors and maps to a Strava gear id for export. Wheel circumference lives on the speed sensor (§8.9.1). Heart rate stays rider-scoped. Includes the bike picker in the Start Sheet (S05.1) and ride history that names the bike ridden. Data model in DataModel.md §3.9
 - Lock screen / Dynamic Island integration
 - Apple Watch standalone companion app and complication (S17)
 - Cadence + HR data visualization on ride detail screen
