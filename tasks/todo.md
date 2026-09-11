@@ -1,105 +1,85 @@
-# tasks/todo.md — #194 S19 map-as-filter, filter sheet, shared route-map component
+# tasks/todo.md — #195 S20 Route Detail
 
-Branch: `feat/194-routes-filters` · Milestone M8 · Plan:
-`~/.claude/plans/nested-discovering-toucan.md`
+Branch: `feat/195-route-detail` · Milestone M8 · Plan:
+`~/.claude/plans/zesty-forging-sifakis.md`
 
-## Geometry & pure values
+## Geometry
 
-- [x] `Models/RouteGeometry.swift` — `RouteBounds.intersects(_:)`, `.contains(latitude:longitude:)`,
-      `RouteGeometry.segment(from:to:intersects:)` (own function — Liang–Barsky),
-      `RouteGeometry.polyline(_:intersects:)` (bbox pre-reject, count==1 branch)
-- [x] `Features/Routes/RoutesMapCamera.swift` — `RouteBounds(region:)`, clamp not wrap,
-      `longitudeDelta >= 360` → full range, viewport-contains-everything → nil
-- [x] `Features/Routes/RouteFilter.swift` — `RouteFilter.matches`, `RouteFilterDomain.from`
-      (metres only, 1/2/5×10ᵏ step, `upper >= lower + step`, optional gain domain)
-- [x] `Models/RouteDirectionMarkers.swift` — viewport-derived spacing, cull, limit
-- [x] `Models/UnitSystem.swift` — `elevationUnit` / `elevationLabel` / `elevation(fromMeters:)`
-
-## UI components
-
-- [x] `UI/Components/RouteMap/RouteMapContent.swift` — polyline + chevrons + start/finish,
-      loop collapses to one flag, `coordinate2D` bridge moved here
-- [x] `UI/Components/RangeSlider/RangeSlider.swift` — two thumbs / one thumb, per-thumb a11y,
-      coincident-thumb rule, RTL, Dynamic Type, ≥44pt target
+- [x] `RouteGeometry.elevationProfile(_:sampleCount:)` + `RouteGeometryTests` (21/21)
 
 ## Feature
 
-- [x] `Features/Routes/RoutesFeature.swift` — filter state (declaration-site defaults),
-      stored `mapFilteredRouteIDs`, bbox fallback for missing geometry, unset normalization
-- [x] `Features/Routes/RoutesView.swift` — toolbar filter button + badge, status bar + chip,
-      third empty state, `interactionModes: [.pan, .zoom]`, camera survives toggle, sheet
-- [x] `PreviewContent/RoutePreviewData.swift` — `RouteDetail.previewRouteDetails` incl. a loop
+- [x] `Features/Routes/RouteDetailFeature.swift` + `RouteDetailFeatureTests`
+- [x] `RoutesFeature`: `Path` stack, `.forEach`, `Delegate.useRoute`, plus `RoutesNavigationTests`
+- [x] `RoutesNavigationStack`: one store-powered stack for AppView, the previews and the S19 snapshots
+- [x] `AppFeature`: `activeRoute`, `presentStartSheet`, one-shot clears, plus `AppRouteSelectionTests` (4/4)
+- [x] `RouteSummary.reference`
 
-## Tests
+## UI
 
-- [x] `Models/RouteGeometryTests.swift` — incl. loop-viewport and empty-corner fixtures,
-      and first-segment-outside (the P1 regression)
-- [x] `Models/RouteDirectionMarkersTests.swift`
-- [x] `Features/RouteFilterTests.swift`
-- [x] `Features/RoutesMapCameraTests.swift` — region → bounds edges
-- [x] `Features/RoutesFeatureTests.swift` — harness `bounds:`/`elevationGainMeters:` params
-- [x] `Models/UnitSystemTests.swift`
-- [x] `Features/RoutesSnapshotTests.swift` — re-record the four existing PNGs
-- [x] Full local suite green, twice
+- [x] `Features/Routes/RouteDetailView.swift`: map, sections, toolbar CTA, `RouteDetailList<MapRow>` seam
+- [x] `RoutesView`: `NavigationLink(state:)` rows, prototype removed, doc comments updated
+- [x] `ElevationProfileView` `unitLabel`
+- [x] Stub removal: `RouteSegmentStub` → `RideDetailData.swift`, delete `RouteDemoData.swift`
+- [x] `RoutePreviewData`: `RouteRideSummary` fixtures
+
+## Snapshots
+
+- [x] `RouteDetailSnapshotTests` (elevation ± × rides ±, light/dark) + CI skip-list; 8 references, none blank
+- [x] Re-record `RoutesSnapshotTests` populated/filtered, inspect PNGs (chevrons only)
+
+## Verify
+
+- [x] Delete `InlineTitleLadderTests` and its references (throwaway)
+- [x] Full suite ×2: 997/997 on runs B and C (run A recorded S20 and failed only on those 4)
+- [x] Simulator: the app installs, launches and stays up (S20 itself is reachable only via the preview
+      or a manual GPX import)
+- [ ] PR
 
 ## Review
 
-**Suite: 961 tests, 0 failures** over three full local runs, snapshot suites included.
-Baseline before this work was 892. The app builds, installs and launches clean on an
-iOS 26.5 simulator.
+**Suite: 997 tests, 0 failures** on two consecutive full local runs, snapshots included. Every new
+suite was confirmed by name in both runs' logs. The freshly built app installs and launches clean on
+the iPhone 17 Pro simulator (iOS 26) and stays up.
 
-**The plan was wrong about the snapshot references needing re-recording.** It predicted the
-new toolbar filter button would change `testPopulatedList` and `testEmptyState`; all four PNGs
-were untouched. The reason is worth knowing: a `UIHostingController` renders *no* navigation-bar
-items in this harness at all — the existing references show a title and a list with no Import
-and no Map/List button either. So the toolbar was never covered here, and the filter button and
-its badge are pinned by `RoutesFeatureTests` and by the running app instead. Three new
-references were added for what does render: the filtered list with its status bar and chip,
-"No Matching Routes", and the filter sheet body.
+**Navigation was corrected before any code was written.** The issue prescribed S11's plain `Scope`
+behind a `NavigationLink`. I first offered three workarounds, and then a view-owned store modelled on
+the Rides tab. Brian: use correct TCA patterns, and accept the scope. The Routes tab now owns a
+`StackState` path, rows are `NavigationLink(state:)`, and `RoutesNavigationStack` is the one place
+that stack is built. Recorded in `tasks/lessons.md`.
 
-**A test caught the chevron fallback placing two, not one.** A route shorter than one chevron
-spacing resampled to a single point, and the short-route fallback then fell through to the
-general loop, which emitted a chevron at the midpoint *and* one on the final coordinate —
-directly under the finish flag, which is what anchoring on the later sample of each pair exists
-to avoid. Fixed in `RouteDirectionMarkers` rather than by relaxing the expectation.
+**Two of the new reducer tests passed with nothing loaded.** A `TestStore`'s `state` does not advance
+past received actions at `finish()`: `TestReducer`'s `.receive` branch records the resulting state
+without adopting it (`TestStore.swift:2385-2387`). Asserting straight after `finish()` therefore read
+the state from before either load. Four tests failed on it, and two passed without anything having
+loaded. Fixed with `skipReceivedActions()`. The "never ridden" test now also asserts that the route
+loaded, so it can fail for the right reason.
 
-**Four reducer tests asserted filter values the sliders cannot produce.** They sent ranges
-outside the derived domain (10 km when the domain floor was 20 km) and expected them stored
-verbatim; `normalizing` correctly clamped them. The behaviour was right and the fixtures were
-wrong — `RouteFilterTests.normalizingClampsIntoTheDomain` already pinned it. Corrected the
-fixtures.
+**`NavigationLink(state:)` outside a store-powered stack is a test failure.** S19's snapshot harness
+and previews wrapped `RoutesView` in a bare `NavigationStack`. TCA reports an issue there, and XCTest
+records it as a failure. `RoutesNavigationStack` fixed that, and the "Routes — List" preview now
+pushes a fully loaded S20.
 
-**One-thumb sliders left a sliver of unfilled track.** The gain slider anchored its fill at the
-domain minimum's *position*, which sits half a thumb in from the edge, so ~13pt of grey showed
-to its left and read as a rendering fault rather than as "no minimum". The fill now anchors on
-the track's leading edge in one-thumb mode, mirrored for right-to-left.
+**The inline title renders white in offscreen snapshots: the harness, not S20.** My first theory, an
+unspecified light trait, was wrong; pinning `.light` changed nothing. A three-case ladder settled it:
+- a bare inline title rendered offscreen is white
+- the same view with a large title is black
+- the inline title drawn in the key window is black
 
-**The map itself could not be verified automatically, and no attempt is committed.** A
-throwaway harness rendering `RouteMapContent` through `drawHierarchy` produced a blank image —
-exactly the MapKit behaviour `tasks/lessons.md` and `RoutesSnapshotTests` already document — and
-the simulator cannot be driven to import a GPX and pan a map without UI automation. The
-placement arithmetic is fully unit-tested (`RouteDirectionMarkersTests`, 10 tests), but
-**chevrons, flags and the loop-collapse rule on a real map still want a human eye**; the
-`Routes — Map` preview now feeds real geometry so that check takes one Xcode preview.
+S20's references therefore render the list without a navigation bar. Added to the snapshot-toolbar
+memory.
 
-**Two decisions the critique changed before any code was written.** Failing a route whose
-polyline has not loaded would have silently removed rows from the *list* on three real paths —
-import-from-list, the `deleteFailed` re-read, and a permanently unreadable polyline — since
-`loadMissingPolylines` only runs while the map is open. It falls back to the stored bounding box
-instead, which is also the honest answer, because such a route still draws a pin on the map.
-And the slider domain is a function of the routes alone, never of `UnitSystem`: deriving round
-*mile* endpoints would have moved the domain when S12's units picker changed and flipped the
-badge 0 → 1 with no rider action.
+**Minor deviations from the plan.**
+- The stack tests live in a new `RoutesNavigationTests.swift` instead of being appended to the
+  1,100-line `RoutesFeatureTests`.
+- `StartSheetPresentationTests.makeStore` gained an `initialState` closure, so `@Shared` state is
+  built inside its storage scope.
+- `distanceLabel(_:_:)` moved up beside `elevationLabel` so S20 and the filter sheet share one format.
+- No M10.6 companion issue was filed, because #204 already exists.
 
-**Unrelated flakiness, confirmed not ours.** `LocationOneShotTests.timeoutResolvesNil` and
-`oneShotDoesNotDisturbAnActiveStream` failed on one run while Simulator.app was open. They fail
-identically on a clean baseline with these changes stashed, and pass in every run with the
-simulator UI closed. Left alone.
-
-**Deliberate deviations, both noted in the plan and both approved.** The Routes map drops pitch
-and rotation (`interactionModes: [.pan, .zoom]`) — a pitched camera's `region` reaches the
-horizon and would match nearly every route while showing a narrow wedge, and screen-space
-`Annotation` content does not counter-rotate, so chevrons would point wrong. And the polyline
-stroke went from 4pt to 5pt on S19, matching UX.md §S20 now that both screens share one
-component. `cyMapRoute` (purple) was deliberately *not* adopted: it belongs to the active-ride
-map, where #199 needs it distinct from `cyMapTravelPath`.
+**Not verified automatically.**
+- S20's live map (flags, chevrons without panning, the loop collapse) has no pixel coverage.
+- The "Use This Route" toolbar button has no pixel coverage either.
+- The simulator can't be driven through a Files-app GPX import without UI automation the repo doesn't
+  have. The "Routes — List" preview is the one-tap way to look.
+- Previous Rides can't populate on a device until #196/#197 write `Ride.routeId`.

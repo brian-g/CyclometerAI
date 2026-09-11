@@ -135,6 +135,98 @@ struct RouteGeometryTests {
         #expect(result.loss == 0)
     }
 
+    // MARK: - Elevation profile (#195)
+
+    /// A straight line due north with points 0.001° apart, so each sample of a profile taken at
+    /// `count` = points lands on a point.
+    private func northbound(_ elevations: [Double?]) -> [RouteCoordinate] {
+        elevations.enumerated().map { coordinate(36.0 + Double($0.offset) * 0.001, -80.0, $0.element) }
+    }
+
+    private func expectClose(_ profile: [Double], _ expected: [Double],
+                             sourceLocation: SourceLocation = #_sourceLocation) {
+        #expect(profile.count == expected.count, sourceLocation: sourceLocation)
+        for (sample, want) in zip(profile, expected) {
+            #expect(abs(sample - want) < 0.01, "\(profile) vs \(expected)", sourceLocation: sourceLocation)
+        }
+    }
+
+    @Test("the profile is nil exactly when gain and loss are nil")
+    func elevationProfileIsNilExactlyWhenGainLossIs() {
+        // S20 shows its elevation section from the stored gain and draws the chart from this, so
+        // the two must never disagree about whether a route has elevation at all.
+        let routes: [[RouteCoordinate]] = [
+            [],
+            [coordinate(36, -80, 100)],
+            northbound([nil, nil, nil]),
+            northbound([200, nil, nil]),
+            northbound([200, 200, 200]),
+            northbound([100, nil, 250]),
+        ]
+        for route in routes {
+            #expect((RouteGeometry.elevationProfile(route, sampleCount: 10) == nil)
+                    == (RouteGeometry.elevationGainLoss(route) == nil), "\(route)")
+        }
+    }
+
+    @Test("a flat route charts as a constant line, not as missing")
+    func elevationProfileOfAFlatRouteIsConstant() throws {
+        let profile = try #require(RouteGeometry.elevationProfile(northbound([200, 200, 200]), sampleCount: 5))
+        #expect(profile == [200, 200, 200, 200, 200])
+    }
+
+    @Test("samples are spaced by distance along the route, not by the file's points")
+    func elevationProfileIsSpacedByDistanceNotByPoint() throws {
+        // A steady 100 m climb over 0.01° of latitude, drawn with ten points crowded into its first
+        // tenth and one at the top. `ElevationProfileView` plots against index, so charting the
+        // file's own points would spend nine-tenths of the chart on the first 110 m. Spaced by
+        // distance, the same climb has to come out as a straight ramp.
+        var route = (0...9).map { coordinate(36.0 + Double($0) * 0.0001, -80.0, Double($0)) }
+        route.append(coordinate(36.01, -80.0, 100))
+        let profile = try #require(RouteGeometry.elevationProfile(route, sampleCount: 11))
+        expectClose(profile, (0...10).map { Double($0) * 10 })
+    }
+
+    @Test("points without an elevation are bridged, and the ends hold the nearest measured value")
+    func elevationProfileBridgesGapsAndHoldsTheEnds() throws {
+        // Measuring only the stretch that carries `<ele>` would chart a route missing it at one end
+        // against a compressed x axis. The profile spans the whole route instead.
+        let profile = try #require(RouteGeometry.elevationProfile(
+            northbound([nil, 100, nil, 300, nil]), sampleCount: 5))
+        expectClose(profile, [100, 100, 200, 300, 300])
+    }
+
+    @Test("duplicate consecutive points do not produce a NaN")
+    func elevationProfileSurvivesDuplicatePoints() throws {
+        // `GPXRouteImporter` does not dedupe consecutive identical points.
+        let route = [
+            coordinate(36.000, -80, 100), coordinate(36.000, -80, 100),
+            coordinate(36.001, -80, 150), coordinate(36.001, -80, 150),
+            coordinate(36.002, -80, 200),
+        ]
+        let profile = try #require(RouteGeometry.elevationProfile(route, sampleCount: 9))
+        // Outside `#expect`: the macro's expansion of a `rethrows` call given a key path does not
+        // compile ("call can throw, but it is not marked with 'try'").
+        let allFinite = profile.allSatisfy(\.isFinite)
+        #expect(allFinite)
+        expectClose([profile[0], profile[4], profile[8]], [100, 150, 200])
+    }
+
+    @Test("a route with no length charts a constant line")
+    func elevationProfileOfAZeroLengthRoute() throws {
+        let stationary = [coordinate(36.0, -80, 120), coordinate(36.0, -80, 140)]
+        let profile = try #require(RouteGeometry.elevationProfile(stationary, sampleCount: 4))
+        #expect(profile == [120, 120, 120, 120])
+    }
+
+    @Test("a sample count below two is raised to two")
+    func elevationProfileClampsTheSampleCount() throws {
+        for requested in [-1, 0, 1] {
+            let profile = try #require(RouteGeometry.elevationProfile(northbound([100, 200]), sampleCount: requested))
+            #expect(profile == [100, 200])
+        }
+    }
+
     // MARK: - Bounding box
 
     @Test("the bounding box spans the extremes of the polyline")

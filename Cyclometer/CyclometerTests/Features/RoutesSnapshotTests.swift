@@ -65,12 +65,12 @@ final class RoutesSnapshotTests: XCTestCase {
                 $0.defaultFileStorage = storage
             }
         }
-        return NavigationStack {
-            RoutesView(store: store)
-        }
-        // Explicit rather than ambient: a reference recorded against whatever the host
-        // bundle resolved would silently encode that instead of the token.
-        .tint(Color.cyPrimary)
+        // The app's own stack rather than a bare `NavigationStack`: a `NavigationLink(state:)` row
+        // outside a store-powered stack reports an issue, which XCTest records as a failure (#195).
+        return RoutesNavigationStack(store: store)
+            // Explicit rather than ambient: a reference recorded against whatever the host
+            // bundle resolved would silently encode that instead of the token.
+            .tint(Color.cyPrimary)
     }
 
     /// `testName` defaults to the *caller's* `#function` — Swift evaluates a magic literal

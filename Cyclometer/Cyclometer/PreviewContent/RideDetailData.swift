@@ -85,3 +85,17 @@ struct RideDetail: Equatable {
         )
     }
 }
+
+/// A Strava segment row in ride history's demo data (S15, Phase 2). Moved here from the Route
+/// Detail prototype's data when S20 went real (#195) — ride history is its only remaining reader.
+struct RouteSegmentStub: Identifiable, Equatable {
+    let id = UUID()
+    let name: String
+    let distance: String
+    let bestTime: String
+    let bestTimeDate: Date
+
+    static func date(year: Int, month: Int, day: Int) -> Date {
+        DateComponents(calendar: .current, year: year, month: month, day: day).date ?? .now
+    }
+}

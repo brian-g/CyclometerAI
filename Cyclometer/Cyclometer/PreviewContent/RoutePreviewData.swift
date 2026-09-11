@@ -2,7 +2,7 @@ import Foundation
 
 /// Saved-route fixtures for S19's previews and snapshot references.
 ///
-/// `RouteSummary` values rather than `RouteStub`s: these go through the same
+/// `RouteSummary` values, not view-only stubs: these go through the same
 /// `PersistenceClient.mock(routes:)` seam the real screen reads, so a preview exercises the
 /// production path instead of a parallel one.
 extension RouteSummary {
@@ -125,4 +125,27 @@ extension RouteDetail {
                 .map { ($0.summary.id, $0) }
         )
     }()
+}
+
+/// S20's Previous Rides (#195): three finished rides of "River Loop", newest first — the order
+/// `fetchRouteRides` returns. Fixed dates rather than `.now`, so a snapshot reference recorded
+/// today still matches next month; one ride runs past an hour so both elapsed formats render.
+extension RouteRideSummary {
+    private static func preview(_ suffix: String, daysAgo: Double, seconds: TimeInterval,
+                                meters: Double) -> RouteRideSummary {
+        let startedAt = Date(timeIntervalSince1970: 1_800_000_000 - daysAgo * 86_400)
+        return RouteRideSummary(
+            rideId: UUID(uuidString: "00000000-0000-0000-0000-0000000000\(suffix)")!,
+            startedAt: startedAt,
+            endedAt: startedAt.addingTimeInterval(seconds),
+            durationSeconds: seconds,
+            distanceMeters: meters
+        )
+    }
+
+    static let previewRides: [RouteRideSummary] = [
+        preview("A1", daysAgo: 2, seconds: 4_712, meters: 36_050),
+        preview("A2", daysAgo: 16, seconds: 4_868, meters: 36_050),
+        preview("A3", daysAgo: 37, seconds: 3_287, meters: 24_900)
+    ]
 }

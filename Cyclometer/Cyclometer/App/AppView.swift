@@ -46,16 +46,15 @@ struct AppView: View {
                 .tag(AppFeature.Tab.rides)
                 
                 // ── Routes ───────────────────────────────────────────────────────
-                NavigationStack {
-                    // Start Ride is passed in rather than layered on from here: this screen
-                    // has toolbar items of its own, and an ancestor's item would sort ahead
-                    // of them.
-                    RoutesView(
-                        store: store.scope(state: \.routes, action: \.routes),
-                        isStartRideHidden: store.activeRide != nil,
-                        onStartRide: { store.send(.startRideButtonTapped) }
-                    )
-                }
+                // Brings its own stack, driven by `RoutesFeature.path`, so a row pushes S20 as
+                // reducer state (#195). Start Ride is passed in rather than layered on from
+                // here: this screen has toolbar items of its own, and an ancestor's item would
+                // sort ahead of them.
+                RoutesNavigationStack(
+                    store: store.scope(state: \.routes, action: \.routes),
+                    isStartRideHidden: store.activeRide != nil,
+                    onStartRide: { store.send(.startRideButtonTapped) }
+                )
                 .tabItem { Label("Routes", systemImage: "point.topleft.down.curvedto.point.bottomright.up") }
                 .tag(AppFeature.Tab.routes)
                 

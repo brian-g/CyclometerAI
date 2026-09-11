@@ -4,10 +4,8 @@ import ComposableArchitecture
 import CoreLocation
 import UniformTypeIdentifiers
 
-/// S19 — Route Management.
-///
-/// Rows do not navigate yet: the detail screen below is still the fake-data prototype that
-/// UX.md §S20 points at as its layout spec, and #195 replaces it with a real one.
+/// S19 — Route Management. A row pushes S20, `RouteDetailView`, onto the tab's navigation stack
+/// as `RoutesFeature.Path` state (#195).
 struct RoutesView: View {
     @Bindable var store: StoreOf<RoutesFeature>
     /// Start Ride is the global toolbar affordance every tab opts into, but items in
@@ -127,18 +125,22 @@ struct RoutesView: View {
         List {
             Section {
                 ForEach(routes) { route in
-                    RouteRow(route: route, unitSystem: store.unitSystem)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                store.send(.deleteButtonTapped(route.id))
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            // `role: .destructive` alone is not enough: the app-wide `.tint`
-                            // wins over the role inside a swipe action, so Delete rendered in
-                            // the brand green.
-                            .tint(Color.cyDestructive)
+                    // Seeded with the summary the row already holds, so S20 has its name,
+                    // distance and climb from its first frame and reads only the geometry.
+                    NavigationLink(state: RoutesFeature.Path.State.detail(RouteDetailFeature.State(summary: route))) {
+                        RouteRow(route: route, unitSystem: store.unitSystem)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            store.send(.deleteButtonTapped(route.id))
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
+                        // `role: .destructive` alone is not enough: the app-wide `.tint`
+                        // wins over the role inside a swipe action, so Delete rendered in
+                        // the brand green.
+                        .tint(Color.cyDestructive)
+                    }
                 }
             } header: {
                 filterChips(shown: routes.count)
@@ -269,6 +271,31 @@ struct RoutesView: View {
     }
 }
 
+// MARK: - Navigation stack
+
+/// The Routes tab's navigation stack: S19 at the root, S20 pushed as `RoutesFeature.Path` state
+/// (#195). One definition for the app, the previews and the snapshot tests, because a
+/// `NavigationLink(state:)` row outside a store-powered stack reports an issue — a failure under
+/// XCTest — and cannot push.
+struct RoutesNavigationStack: View {
+    @Bindable var store: StoreOf<RoutesFeature>
+    /// Hides both ways into the Start sheet while a ride records: S19's Start Ride and S20's
+    /// Use This Route.
+    var isStartRideHidden: Bool = false
+    var onStartRide: () -> Void = {}
+
+    var body: some View {
+        NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
+            RoutesView(store: store, isStartRideHidden: isStartRideHidden, onStartRide: onStartRide)
+        } destination: { pathStore in
+            switch pathStore.case {
+            case .detail(let detailStore):
+                RouteDetailView(store: detailStore, isUseRouteHidden: isStartRideHidden)
+            }
+        }
+    }
+}
+
 // MARK: - Filter status
 
 /// One applied filter, with its own way out. Used for all three, so a filter set from the
@@ -297,10 +324,17 @@ private struct FilterChip: View {
     }
 }
 
-/// Shared by the chip row and the sheet, so the two never disagree about how a climb reads.
-private func elevationLabel(_ meters: Double, _ unit: UnitSystem) -> String {
+/// Shared by the chip row, the sheet and S20 (#195), so none of them disagree about how a climb
+/// reads.
+func elevationLabel(_ meters: Double, _ unit: UnitSystem) -> String {
     let value = unit.elevation(fromMeters: meters)
     return "\(value.formatted(.number.precision(.fractionLength(0)))) \(unit.elevationLabel)"
+}
+
+/// The filter sheet's distance format, shared with S20 (#195) for the same reason.
+func distanceLabel(_ meters: Double, _ unit: UnitSystem) -> String {
+    let value = unit.distance(fromMeters: meters)
+    return "\(value.formatted(.number.precision(.fractionLength(1)))) \(unit.distanceLabel)"
 }
 
 // MARK: - Filter sheet
@@ -415,9 +449,7 @@ struct RouteFilterSheetBody: View {
     }
 
     private func distanceText(_ meters: Double) -> String {
-        let unit = store.unitSystem
-        let value = unit.distance(fromMeters: meters)
-        return "\(value.formatted(.number.precision(.fractionLength(1)))) \(unit.distanceLabel)"
+        distanceLabel(meters, store.unitSystem)
     }
 
     private func elevationText(_ meters: Double) -> String {
@@ -566,154 +598,54 @@ private struct RoutesMapView: View {
     }
 }
 
+/// Every preview hosts S19 in `RoutesNavigationStack`, as the app does. In this one a tapped row
+/// pushes a fully loaded S20 — geometry for every route, and previous rides for "Summit Climb" —
+/// which is the quickest way to look at the route detail map, since no snapshot can pin it.
 #Preview("Routes — List") {
-    NavigationStack {
-        RoutesView(store: Store(initialState: RoutesFeature.State()) {
-            RoutesFeature()
-        } withDependencies: {
-            $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
-        })
-    }
+    RoutesNavigationStack(store: Store(initialState: RoutesFeature.State()) {
+        RoutesFeature()
+    } withDependencies: {
+        $0.persistenceClient = .mock(
+            routes: RouteSummary.previewRoutes,
+            routeDetails: RouteDetail.previewRouteDetails,
+            ridesByRoute: [RouteSummary.previewRoutes[1].id: RouteRideSummary.previewRides]
+        )
+    })
 }
 
 #Preview("Routes — Empty") {
-    NavigationStack {
-        RoutesView(store: Store(initialState: RoutesFeature.State()) { RoutesFeature() })
-    }
+    RoutesNavigationStack(store: Store(initialState: RoutesFeature.State()) { RoutesFeature() })
 }
 
 /// Geometry included, so the map draws real polylines with their direction chevrons and end
 /// flags rather than the bare pins a summary-only mock produces. "River Loop" is closed, which
 /// is the case `RouteMapContent` collapses to a single flag.
 #Preview("Routes — Map") {
-    NavigationStack {
-        RoutesView(store: Store(initialState: RoutesFeature.State(showsMap: true)) {
-            RoutesFeature()
-        } withDependencies: {
-            $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes,
-                                         routeDetails: RouteDetail.previewRouteDetails)
-        })
-    }
+    RoutesNavigationStack(store: Store(initialState: RoutesFeature.State(showsMap: true)) {
+        RoutesFeature()
+    } withDependencies: {
+        $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes,
+                                     routeDetails: RouteDetail.previewRouteDetails)
+    })
 }
 
 #Preview("Routes — Filtered list") {
-    NavigationStack {
-        RoutesView(store: Store(
-            initialState: {
-                var state = RoutesFeature.State()
-                state.routes = RouteSummary.previewRoutes
-                state.hasLoaded = true
-                state.filter = RouteFilter(distanceMeters: 20_000...40_000,
-                                           maxElevationGainMeters: nil)
-                state.mapFilterBounds = RouteBounds(minLatitude: 37.30, maxLatitude: 37.40,
-                                                    minLongitude: -122.06, maxLongitude: -121.97)
-                state.mapFilteredRouteIDs = Set(RouteSummary.previewRoutes.prefix(2).map(\.id))
-                return state
-            }()
-        ) {
-            RoutesFeature()
-        } withDependencies: {
-            $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
-        })
-    }
-}
-
-#Preview("Route Detail — S20 prototype") {
-    NavigationStack {
-        RouteDetailView(route: RouteStub.sampleRoutes[0])
-    }
-}
-
-struct RouteDetailView: View {
-    let route: RouteStub
-
-    var body: some View {
-        List {
-            Section {
-                RouteMapView(route: route)
-                    .frame(height: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                LabeledContent("Distance (mi)", value: route.distance)
-            }
-            Section("Elevation Profile") {
-                ElevationProfileView(samples: route.elevationSamples)
-                    .frame(height: 120)
-                    .padding(.vertical, 8)
-                LabeledContent("Elevation Gain (ft)", value: route.elevationGain)
-                LabeledContent("Elevation Loss (ft)", value: route.elevationLoss)
-            }
-            Section("Current Weather") {
-                LabeledContent("Temperature", value: route.currentTemperature)
-                LabeledContent("Wind") {
-                    WindDirectionView(route: route)
-                }
-                LabeledContent("Wind Speed (mph)", value: "\(route.windSpeed)")
-            }
-            Section("Strava Segments") {
-                ForEach(route.stravaSegments) { segment in
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(segment.name).font(.headline)
-                            HStack(spacing: 4) {
-                                Text(segment.distance); Text("mi"); Text("• \(segment.bestTime)")
-                            }
-                            .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 4)
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(segment.bestTime).font(.headline)
-                            Text(segment.bestTimeDate, format: .dateTime.month(.wide).day(.twoDigits))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            if !route.previousRides.isEmpty {
-                Section("Previous Rides") {
-                    ForEach(route.previousRides) { ride in
-                        LabeledContent {
-                            Text(ride.elapsedTime).font(.subheadline.weight(.semibold))
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(ride.date)
-                                Text(ride.condition).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-            }
-        }
-        .navigationTitle(route.name)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct RouteMapView: View {
-    let route: RouteStub
-
-    var body: some View {
-        Map(initialPosition: .region(route.mapRegion)) {
-            MapPolyline(coordinates: route.coordinates).stroke(Color.cyPrimary, lineWidth: 5)
-            Marker("Start", systemImage: "flag.fill", coordinate: route.startCoordinate).tint(.cyPrimary)
-            Marker("Finish", systemImage: "flag.checkered", coordinate: route.finishCoordinate).tint(.blue)
-        }
-        .mapStyle(.standard(elevation: .realistic))
-        .mapControls { MapCompass(); MapScaleView(); MapPitchToggle() }
-    }
-}
-
-private struct WindDirectionView: View {
-    let route: RouteStub
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "arrow.up")
-                .font(.caption.weight(.semibold))
-                .rotationEffect(.degrees(Double(route.windDirectionDegrees)))
-            Text("\(route.windCompassDirection) (\(route.windDirectionDegrees)°)")
-        }
-    }
+    RoutesNavigationStack(store: Store(
+        initialState: {
+            var state = RoutesFeature.State()
+            state.routes = RouteSummary.previewRoutes
+            state.hasLoaded = true
+            state.filter = RouteFilter(distanceMeters: 20_000...40_000,
+                                       maxElevationGainMeters: nil)
+            state.mapFilterBounds = RouteBounds(minLatitude: 37.30, maxLatitude: 37.40,
+                                                minLongitude: -122.06, maxLongitude: -121.97)
+            state.mapFilteredRouteIDs = Set(RouteSummary.previewRoutes.prefix(2).map(\.id))
+            return state
+        }()
+    ) {
+        RoutesFeature()
+    } withDependencies: {
+        $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+    })
 }
 

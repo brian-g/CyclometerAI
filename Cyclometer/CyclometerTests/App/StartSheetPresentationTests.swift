@@ -23,7 +23,13 @@ struct StartSheetPresentationTests {
         case end(SensorKind)
     }
 
-    static func makeStore(into log: LockIsolated<[ScanCall]>) -> TestStoreOf<AppFeature> {
+    /// `initialState` is a closure so the state — and the `@Shared` preferences inside it — is
+    /// built inside the in-memory storage scope below rather than at the call site.
+    /// `AppRouteSelectionTests` uses it to start from a ride already on screen.
+    static func makeStore(
+        into log: LockIsolated<[ScanCall]>,
+        initialState: () -> AppFeature.State = { AppFeature.State() }
+    ) -> TestStoreOf<AppFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
             $0.defaultFileStorage = storage
@@ -38,7 +44,7 @@ struct StartSheetPresentationTests {
             hr.beginPairingScan = { log.withValue { $0.append(.begin(.heartRate)) } }
             hr.endPairingScan = { log.withValue { $0.append(.end(.heartRate)) } }
 
-            return TestStore(initialState: AppFeature.State()) {
+            return TestStore(initialState: initialState()) {
                 AppFeature()
             } withDependencies: {
                 $0.bleCSCClient = csc
