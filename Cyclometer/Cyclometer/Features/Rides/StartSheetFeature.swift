@@ -34,6 +34,12 @@ struct StartSheetFeature {
         /// The sheet's own navigation stack: S05.2, pushed from the Route row (#196).
         var path = StackState<Path.State>()
 
+        /// What the Route row pushes: S05.2, opened on the sheet's current answer so that answer is the
+        /// one checked. Built here rather than in the view, so a test holds it to that.
+        var routePicker: Path.State {
+            .routePicker(RoutePickerFeature.State(selection: route))
+        }
+
         /// The rows the sheet shows: one per paired role, whatever its connection state.
         ///
         /// Keyed on the durable record rather than on live status, which is what makes a

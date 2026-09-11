@@ -55,7 +55,7 @@ struct AppView: View {
                     isStartRideHidden: store.activeRide != nil,
                     onStartRide: { store.send(.startRideButtonTapped) }
                 )
-                .tabItem { Label("Routes", systemImage: "point.topleft.down.curvedto.point.bottomright.up") }
+                .tabItem { Label("Routes", systemImage: RouteLibrary.symbolName) }
                 .tag(AppFeature.Tab.routes)
                 
                 // ── Settings ─────────────────────────────────────────────────────

@@ -175,12 +175,7 @@ struct RoutesFeature {
             // check and a second location request.
             case .reloadRoutes:
                 return .run { send in
-                    do {
-                        await send(.routesResponse(.success(try await persistenceClient.fetchRoutes())))
-                    } catch {
-                        logger.error("fetchRoutes failed: \(error.localizedDescription, privacy: .public)")
-                        await send(.routesResponse(.failure(PersistenceFailure())))
-                    }
+                    await send(.routesResponse(await persistenceClient.loadRoutes()))
                 }
 
             case .routesResponse(.success(let routes)):
@@ -201,8 +196,7 @@ struct RoutesFeature {
                 return .none
 
             case .routesResponse(.failure):
-                state.alert = Self.alert("Couldn't Load Routes",
-                                         "Your saved routes couldn't be read. Try again in a moment.")
+                state.alert = Self.alert(RouteLibrary.loadFailedTitle, RouteLibrary.loadFailedMessage)
                 return .none
 
             case .riderCoordinateResponse(let coordinate):

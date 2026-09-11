@@ -5,79 +5,81 @@ import SwiftUI
 ///
 /// `Design.sketch` draws the frame — the title "Routes" and a back button — and leaves the body
 /// blank. The body is S19's own rows, so a route looks the same wherever the rider meets it.
+///
+/// This view owns only what a snapshot must not run: the read. The screen itself is
+/// `RoutePickerList`, as S20's is `RouteDetailList`.
 struct RoutePickerView: View {
     let store: StoreOf<RoutePickerFeature>
 
     var body: some View {
-        RoutePickerList(
-            routes: store.routes,
-            selection: store.selection,
-            hasLoaded: store.hasLoaded,
-            loadFailed: store.loadFailed,
-            unitSystem: store.unitSystem,
-            onSelect: { store.send(.routeTapped($0)) }
-        )
-        .navigationTitle("Routes")
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await store.send(.task).finish() }
+        RoutePickerList(store: store)
+            .navigationTitle("Routes")
+            .navigationBarTitleDisplayMode(.inline)
+            .task { await store.send(.task).finish() }
     }
 }
 
-/// The picker's list, from plain values rather than a store, so `StartSheetSnapshotTests` can render
-/// it without navigation chrome — an inline title renders white in an offscreen capture — and without
-/// a read landing mid-capture.
+/// S05.2's content: everything except the read, so a snapshot renders it from seeded state without
+/// one landing mid-capture — and without navigation chrome, since an inline title renders white in
+/// an offscreen capture.
 struct RoutePickerList: View {
-    let routes: [RouteSummary]
-    let selection: RouteReference?
-    let hasLoaded: Bool
-    let loadFailed: Bool
-    let unitSystem: UnitSystem
-    /// Nil is None.
-    let onSelect: (RouteSummary?) -> Void
+    let store: StoreOf<RoutePickerFeature>
 
     var body: some View {
         List {
             // First, and there whatever the read did, so a route S20 seeded can still be cleared
             // when the library can't be read.
             Section {
-                ChoiceRow(isSelected: selection == nil) {
-                    onSelect(nil)
+                ChoiceRow(isSelected: store.selection == nil) {
+                    store.send(.routeTapped(nil))
                 } label: {
                     Text("None")
                 }
             }
-            // Three distinct screens below it: nothing before the first read; the routes, or an empty
+            // Below it, one of three screens: nothing before the first read; the routes, or an empty
             // library, after it; and a failure that never claims the library is empty.
-            if hasLoaded {
+            switch store.library {
+            case .loading:
+                EmptyView()
+            case .loaded(let routes):
                 if routes.isEmpty {
-                    message("No Routes", systemImage: "point.topleft.down.curvedto.point.bottomright.up",
-                            "Import a route from the Routes tab to ride it.")
+                    message("No Routes", systemImage: RouteLibrary.symbolName,
+                            "Import a route from the Routes tab to ride it.") { EmptyView() }
                 } else {
                     Section {
                         ForEach(routes) { route in
                             // By id, not by value: the reference is only ever a pointer to the route.
-                            ChoiceRow(isSelected: selection?.id == route.id) {
-                                onSelect(route)
+                            ChoiceRow(isSelected: store.selection?.id == route.id) {
+                                store.send(.routeTapped(route))
                             } label: {
-                                RouteRow(route: route, unitSystem: unitSystem)
+                                RouteRow(route: route, unitSystem: store.unitSystem)
                             }
                         }
                     }
                 }
-            } else if loadFailed {
-                message("Couldn't Load Routes", systemImage: "exclamationmark.triangle",
-                        "Your saved routes couldn't be read. Try again in a moment.")
+            case .failed:
+                message(RouteLibrary.loadFailedTitle, systemImage: "exclamationmark.triangle",
+                        RouteLibrary.loadFailedMessage) {
+                    Button("Try Again") { store.send(.retryButtonTapped) }
+                }
             }
         }
     }
 
     /// A message in place of the routes section, on the list's own background.
-    private func message(_ title: String, systemImage: String, _ description: String) -> some View {
+    private func message<Actions: View>(
+        _ title: String,
+        systemImage: String,
+        _ description: String,
+        @ViewBuilder actions: () -> Actions
+    ) -> some View {
         Section {
             ContentUnavailableView {
                 Label(title, systemImage: systemImage)
             } description: {
                 Text(description)
+            } actions: {
+                actions()
             }
             .listRowBackground(Color.clear)
         }

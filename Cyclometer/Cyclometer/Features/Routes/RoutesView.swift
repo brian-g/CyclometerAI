@@ -150,7 +150,7 @@ struct RoutesView: View {
 
     private var emptyLibrary: some View {
         ContentUnavailableView {
-            Label("No Routes", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+            Label("No Routes", systemImage: RouteLibrary.symbolName)
         } description: {
             Text("Import a route from the Files app to ride it.")
         } actions: {

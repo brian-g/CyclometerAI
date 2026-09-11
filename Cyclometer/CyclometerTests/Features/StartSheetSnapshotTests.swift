@@ -1,6 +1,7 @@
 import XCTest
 import SnapshotTesting
 import SwiftUI
+import ComposableArchitecture
 @testable import Cyclometer
 
 /// S05.1 — the Start sheet's rows — and S05.2, the Route picker it pushes (#196).
@@ -124,7 +125,8 @@ final class StartSheetSnapshotTests: XCTestCase {
         assertBothSchemes(routeRow(RouteSummary.previewRoutes[1].name), named: "chosen", layout: routeRowCanvas)
     }
 
-    /// A route's name is whatever its GPX author typed. One line, cut at the tail.
+    /// A route's name is whatever its GPX author typed. `LabeledContent` stacks the label over the
+    /// value and cuts the value at the tail.
     func testRouteRowLongName() {
         assertBothSchemes(
             routeRow("Saturday Coffee Loop via the Old Quarry Road and Back Again"),
@@ -134,23 +136,29 @@ final class StartSheetSnapshotTests: XCTestCase {
 
     // MARK: Route picker (#196)
 
-    /// S05.2's list from plain values: no navigation chrome — an inline title renders white in an
-    /// offscreen capture — and no read that could land mid-capture. Imperial, as S19's references.
+    /// S05.2's list, from a store seeded with the state `.task` would have produced. `RoutePickerList`
+    /// never starts the read, so none can land mid-capture, and it has no navigation chrome — an inline
+    /// title renders white offscreen. Imperial, as S19's references.
     private func picker(
-        routes: [RouteSummary] = RouteSummary.previewRoutes,
-        selection: RouteReference?,
-        hasLoaded: Bool = true,
-        loadFailed: Bool = false
+        _ library: RoutePickerFeature.Library = .loaded(RouteSummary.previewRoutes),
+        selection: RouteReference?
     ) -> some View {
-        RoutePickerList(
-            routes: routes,
-            selection: selection,
-            hasLoaded: hasLoaded,
-            loadFailed: loadFailed,
-            unitSystem: .imperial,
-            onSelect: { _ in }
-        )
-        .tint(Color.cyPrimary)
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.preferredUnit = .imperial }
+            var state = RoutePickerFeature.State(selection: selection)
+            state.library = library
+            return Store(initialState: state) {
+                RoutePickerFeature()
+            } withDependencies: {
+                $0.defaultFileStorage = storage
+            }
+        }
+        return RoutePickerList(store: store)
+            .tint(Color.cyPrimary)
     }
 
     func testPickerNoneChosen() {
@@ -166,14 +174,14 @@ final class StartSheetSnapshotTests: XCTestCase {
     }
 
     func testPickerEmptyLibrary() {
-        assertBothSchemes(picker(routes: [], selection: nil), named: "empty", layout: pickerCanvas)
+        assertBothSchemes(picker(.loaded([]), selection: nil), named: "empty", layout: pickerCanvas)
     }
 
-    /// A route seeded from S20 stays clearable: None is still offered when the read fails.
+    /// A route seeded from S20 stays clearable: None is still offered when the read fails, beside the
+    /// "Try Again" the failure's copy promises.
     func testPickerLoadFailed() {
         assertBothSchemes(
-            picker(routes: [], selection: RouteSummary.previewRoutes[1].reference,
-                   hasLoaded: false, loadFailed: true),
+            picker(.failed, selection: RouteSummary.previewRoutes[1].reference),
             named: "failed", layout: pickerCanvas
         )
     }

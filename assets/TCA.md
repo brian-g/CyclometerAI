@@ -149,7 +149,7 @@ AppFeature
 │   ├── RidesTabFeature                (Rides tab — ride list + start sheet)
 │   │   ├── RideListFeature            (S14 — Phase 2)
 │   │   ├── StartSheetFeature          (S05.1)
-│   │   ├── RoutePickerFeature         (S05.2)
+│   │   │   └── RoutePickerFeature     (S05.2 — pushed on the sheet's own stack)
 │   │   └── ActiveRideAccessoryFeature (S05.3 — accessory strip above TabBar)
 │   ├── RoutesTabFeature               (S19/S20 — Phase 2; "Coming Soon" in MVP)
 │   └── SettingsTabFeature

@@ -11,16 +11,20 @@ struct RoutePickerFeatureTests {
 
     private static let routes = RouteSummary.previewRoutes
 
-    /// Same in-memory `@Shared` idiom as `RoutesNavigationTests.makeStore`.
+    /// Same in-memory `@Shared` idiom as `RoutesNavigationTests.makeStore`; the state is built inside
+    /// the scope too, so its preferences land in the store's storage.
     private func makeStore(
         selection: RouteReference? = nil,
+        library: RoutePickerFeature.Library = .loading,
         persistenceClient: PersistenceClient = .mock(routes: RouteSummary.previewRoutes)
     ) -> TestStoreOf<RoutePickerFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
-            TestStore(initialState: RoutePickerFeature.State(selection: selection)) {
+            var state = RoutePickerFeature.State(selection: selection)
+            state.library = library
+            return TestStore(initialState: state) {
                 RoutePickerFeature()
             } withDependencies: {
                 $0.persistenceClient = persistenceClient
@@ -29,14 +33,19 @@ struct RoutePickerFeatureTests {
         }
     }
 
+    private static var failingClient: PersistenceClient {
+        var client = PersistenceClient.mock()
+        client.fetchRoutes = { throw PersistenceError.rideNotFound }
+        return client
+    }
+
     @Test("Appearing lists every saved route, in the order the store returns them")
     func appearingLoadsTheLibrary() async {
         let store = makeStore()
 
         await store.send(.task)
         await store.receive(.routesResponse(.success(Self.routes))) {
-            $0.routes = Self.routes
-            $0.hasLoaded = true
+            $0.library = .loaded(Self.routes)
         }
     }
 
@@ -46,23 +55,32 @@ struct RoutePickerFeatureTests {
 
         await store.send(.task)
         await store.receive(.routesResponse(.success([]))) {
-            $0.hasLoaded = true
+            $0.library = .loaded([])
         }
-        #expect(!store.state.loadFailed)
     }
 
     /// What #193 got wrong on S19: a read that failed must not look like a library with nothing in it.
     @Test("A failed read is its own state, never an empty library")
     func failedReadIsDistinctFromEmpty() async {
-        var client = PersistenceClient.mock()
-        client.fetchRoutes = { throw PersistenceError.rideNotFound }
-        let store = makeStore(persistenceClient: client)
+        let store = makeStore(persistenceClient: Self.failingClient)
 
         await store.send(.task)
         await store.receive(.routesResponse(.failure(PersistenceFailure()))) {
-            $0.loadFailed = true
+            $0.library = .failed
         }
-        #expect(!store.state.hasLoaded)
+    }
+
+    /// The failure screen's "Try Again": the retry its "Try again in a moment" copy promises.
+    @Test("Try Again after a failed read reads the library again")
+    func tryAgainReadsTheLibraryAgain() async {
+        let store = makeStore(library: .failed)
+
+        await store.send(.retryButtonTapped) {
+            $0.library = .loading
+        }
+        await store.receive(.routesResponse(.success(Self.routes))) {
+            $0.library = .loaded(Self.routes)
+        }
     }
 
     @Test("Tapping a route checks it and hands it back")

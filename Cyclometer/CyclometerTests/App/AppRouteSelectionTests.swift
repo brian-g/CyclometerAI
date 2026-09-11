@@ -91,14 +91,36 @@ struct AppRouteSelectionTests {
         #expect(store.state.startSheet == nil)
     }
 
+    /// The other way in while the sheet is already up — the toolbar's Start Ride after Use This Route —
+    /// must not replace the sheet and lose the route it was opened on, nor take a second scan.
+    @Test("Start Ride while the sheet is up keeps the route Use This Route set")
+    func startRideWhileTheSheetIsUpKeepsTheRoute() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let store = StartSheetPresentationTests.makeStore(into: log)
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await useRoute(on: store)
+        await store.send(.startRideButtonTapped)
+        await store.finish()
+
+        #expect(store.state.startSheet?.route == Self.route.reference)
+        #expect(log.value == Self.begun)
+    }
+
     @Test("A route picked on S05.2 reaches the ride")
-    func pickedRouteReachesTheRide() async {
+    func pickedRouteReachesTheRide() async throws {
         let log = LockIsolated<[ScanCall]>([])
         let store = StartSheetPresentationTests.makeStore(into: log)
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.startRideButtonTapped)
-        await store.send(.startSheet(.presented(.path(.push(id: 0, state: .routePicker(RoutePickerFeature.State()))))))
+        // What the Route row pushes, built in the store's own dependency scope so the picker's
+        // `@Shared` preferences live in `makeStore`'s in-memory storage, not the test context's.
+        let pushed = withDependencies { $0 = store.dependencies } operation: {
+            store.state.startSheet?.routePicker
+        }
+        let picker = try #require(pushed)
+        await store.send(.startSheet(.presented(.path(.push(id: 0, state: picker)))))
         await store.send(.startSheet(.presented(.path(.element(id: 0, action: .routePicker(.routeTapped(Self.route)))))))
         await store.receive(\.startSheet.presented.path[id: 0].routePicker.delegate.routeSelected, Self.route.reference)
 

@@ -13,10 +13,8 @@ struct StartSheetView: View {
             List {
                 Section("Ride Setup") {
                     LabeledContent("Bike") { Text(NewRideDemoData.bikeName) }
-                    // Seeded with the sheet's answer, so S05.2 opens with it checked.
-                    NavigationLink(state: StartSheetFeature.Path.State.routePicker(
-                        RoutePickerFeature.State(selection: store.route)
-                    )) {
+                    // `routePicker` opens S05.2 with the sheet's answer checked.
+                    NavigationLink(state: store.routePicker) {
                         ActiveRouteRow(routeName: store.route?.name)
                     }
                 }
@@ -80,7 +78,10 @@ struct ActiveRouteRow: View {
 
     var body: some View {
         LabeledContent("Route") {
+            // The token, not `LabeledContent`'s ambient secondary style, which a snapshot reference
+            // would record as whatever the host resolved.
             Text(routeName ?? "None")
+                .foregroundStyle(Color.cyTextSecondary)
                 .lineLimit(1)
         }
     }

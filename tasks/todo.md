@@ -79,3 +79,25 @@ components, and `TCA.md`'s picker line.
 
 **Follow-ups.** The Routes tab itself is still Phase 2 in `PRD.md` §6 and `TCA.md:154` — #202. #197 restores
 the route on resume (`routeId` on `RideSummaryUpdate`).
+
+## Review fixes (PR #229 code review)
+
+- [x] 1 — `presentStartSheet` ignores a present while the sheet is up; double-tap and Use-This-Route tests
+- [x] 2 — filed as #231 (Start Ride can replace a resumed ride without finalizing it)
+- [x] 3 — both `createRide` tests await the write instead of reading it straight after `send`
+- [x] 4 — "Try Again" on the picker's failure screen (`retryButtonTapped`)
+- [x] 5 — `RoutePickerFeature.Library` replaces `hasLoaded` + `loadFailed`
+- [x] 6 — `StartSheetFeature.State.routePicker` builds what the Route row pushes; tested
+- [x] 7 — the end-to-end test builds the pushed state in the store's dependency scope
+- [x] 8 — `ActiveRouteRow`'s value in `cyTextSecondary`
+- [x] 9 — stale `RouteDetailView` comment
+- [x] 10 — `TCA.md` nests `RoutePickerFeature` under `StartSheetFeature`
+- [x] 11 — noted on #202, with every remaining Phase 2 / "Coming Soon" spot
+- [x] 12 — `RouteLibrary`: symbol, failure copy and `loadRoutes()`, shared by S19, S05.2, the tab bar and RidesView
+- [x] 13 — `RoutePickerList(store:)`, as `RouteDetailList`
+- [x] Re-recorded the 8 changed references (route row ×3, picker failure) and opened each: 239–256 distinct
+      bytes. Run A failed only those 8 first records; run B: 1,018 tests (950 + 68), 0 failures
+- [x] Revert check on fix 1: without the guard, the two suites ran 10 tests and exactly the two new ones failed
+      (a second scan `begin`; the route lost to a replaced sheet). Guard restored
+- [x] Full run C on the code as committed: 1,018 tests (950 + 68), 0 failures. Runs B and C are both green
+- [ ] Push; PR body

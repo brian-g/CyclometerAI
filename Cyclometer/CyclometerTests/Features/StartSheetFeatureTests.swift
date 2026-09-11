@@ -237,6 +237,15 @@ struct StartSheetFeatureTests {
         await store.receive(.delegate(.startRide(Self.route.reference)))
     }
 
+    /// The state the Route row pushes. Held here so that dropping `selection: route` fails a test:
+    /// after Use This Route, S05.2 must open with that route checked, not None.
+    @Test("The Route row opens S05.2 with the sheet's route checked")
+    func routeRowOpensThePickerOnTheSheetsRoute() {
+        let chosen = StartSheetFeature.State(route: Self.route.reference)
+        #expect(chosen.routePicker == .routePicker(RoutePickerFeature.State(selection: Self.route.reference)))
+        #expect(StartSheetFeature.State().routePicker == .routePicker(RoutePickerFeature.State()))
+    }
+
     @Test("Picking a route on S05.2 fills the Route row and pops back to the sheet")
     func pickingARouteSetsItAndPops() async {
         let store = TestStore(initialState: StartSheetFeature.State()) {

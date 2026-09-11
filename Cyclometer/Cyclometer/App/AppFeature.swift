@@ -338,6 +338,9 @@ struct AppFeature {
     ///
     /// `route` is what S20's "Use This Route" chose; from here the sheet holds it (#196).
     private func presentStartSheet(_ state: inout State, route: RouteReference? = nil) -> Effect<Action> {
+        // A second tap before the sheet covers the button — or Use This Route with it already up — must
+        // not replace the sheet, losing its route, or take a scan the one dismissal cannot release.
+        guard state.startSheet == nil else { return .none }
         state.startSheet = StartSheetFeature.State(route: route)
         return .run { [bleCSCClient, variaRadarClient, bleHRClient] _ in
             await bleCSCClient.beginPairingScan()
