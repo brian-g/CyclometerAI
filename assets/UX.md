@@ -285,7 +285,7 @@ the screen differs only in its title, the **Next** button, and the helper text, 
 ### Key Components
 
 - Group: Ride Setup
-  - Route picker (Phase 2)
+  - Route picker
   - Bike picker (Phase 2) — selecting a bike selects its sensors, so the sensor list below follows this control, and the wheel circumference follows from whichever speed sensor that bike carries. See DataModel.md §3.9
 
 - Group: Sensors
@@ -329,7 +329,7 @@ pair *from*.
 
 ## S05.2 — Route Picker
 
-**Phase:** Phase 2  
+**Phase:** MVP 
 **Purpose:** Allow user to select a route for the ride.
 
 ### Layout
