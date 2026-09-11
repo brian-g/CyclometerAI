@@ -95,7 +95,7 @@ struct StartSheetPresentationTests {
         await store.send(.startSheet(.presented(.task)))
         #expect(log.value == Self.begun)
 
-        await store.send(.startSheet(.presented(.delegate(.startRide))))
+        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
         await store.finish()
 
         #expect(log.value == Self.begun + Self.ended)

@@ -3,14 +3,14 @@ import Foundation
 import ComposableArchitecture
 @testable import Cyclometer
 
-/// S20's "Use This Route" end to end (#195): from the button on a pushed route, out through
-/// `RoutesFeature`'s delegate, to the Start sheet `AppFeature` owns.
+/// The ride's route, from where it is chosen to the ride that follows it: S20's "Use This Route"
+/// (#195) and S05.2's picker (#196), through the Start sheet, into `ActiveRideFeature`.
 ///
 /// Built on `StartSheetPresentationTests.makeStore`, whose call log is what shows the sheet opened
 /// the way the toolbar's Start Ride opens it — pairing scan included. The toolbar button itself
 /// renders as nothing in a snapshot, so this is its coverage.
 @MainActor
-@Suite("AppFeature — Use This Route")
+@Suite("AppFeature — the ride's route")
 struct AppRouteSelectionTests {
     typealias ScanCall = StartSheetPresentationTests.ScanCall
 
@@ -25,7 +25,14 @@ struct AppRouteSelectionTests {
         await store.receive(\.routes.delegate.useRoute, Self.route.reference)
     }
 
-    @Test("Use This Route records the route and opens the Start sheet with its pairing scan")
+    /// Taps the sheet's own Start Ride. The delegate is *received*, not sent, so the route that
+    /// arrives is the one the sheet was holding.
+    private func startRide(on store: TestStoreOf<AppFeature>, expecting route: RouteReference?) async {
+        await store.send(.startSheet(.presented(.startRideButtonTapped)))
+        await store.receive(\.startSheet.presented.delegate.startRide, route)
+    }
+
+    @Test("Use This Route opens the Start sheet on that route, with its pairing scan")
     func useRouteOpensTheStartSheet() async {
         let log = LockIsolated<[ScanCall]>([])
         let store = StartSheetPresentationTests.makeStore(into: log)
@@ -34,8 +41,7 @@ struct AppRouteSelectionTests {
         await useRoute(on: store)
         await store.finish()
 
-        #expect(store.state.activeRoute == Self.route.reference)
-        #expect(store.state.startSheet != nil)
+        #expect(store.state.startSheet?.route == Self.route.reference)
         #expect(log.value == Self.begun)
     }
 
@@ -50,14 +56,13 @@ struct AppRouteSelectionTests {
         await useRoute(on: store)
         await store.finish()
 
-        #expect(store.state.activeRoute == nil)
         #expect(store.state.startSheet == nil)
         #expect(log.value.isEmpty)
     }
 
-    /// S05.1's route row is read-only (#196), so a route that outlived its sheet could never be
-    /// un-chosen: every later Start Ride would carry it.
-    @Test("Cancelling the sheet forgets the route, so the next Start Ride is a free ride")
+    /// Asserted on a *reopened* sheet. The dismissed one is nil, so an assertion about its route
+    /// would pass whatever the code did.
+    @Test("After Cancel, the next Start Ride opens on a free ride")
     func dismissingTheSheetForgetsTheRoute() async {
         let log = LockIsolated<[ScanCall]>([])
         let store = StartSheetPresentationTests.makeStore(into: log)
@@ -65,21 +70,44 @@ struct AppRouteSelectionTests {
 
         await useRoute(on: store)
         await store.send(.startSheet(.dismiss))
+        await store.send(.startRideButtonTapped)
         await store.finish()
 
-        #expect(store.state.activeRoute == nil)
+        #expect(store.state.startSheet != nil)
+        #expect(store.state.startSheet?.route == nil)
     }
 
-    @Test("Starting the ride clears the route, so the next sheet opens without it")
-    func startingTheRideClearsTheRoute() async {
+    @Test("Starting the ride hands S20's route to the ride")
+    func startingTheRideCarriesTheRoute() async {
         let log = LockIsolated<[ScanCall]>([])
         let store = StartSheetPresentationTests.makeStore(into: log)
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await useRoute(on: store)
-        await store.send(.startSheet(.presented(.delegate(.startRide))))
+        await startRide(on: store, expecting: Self.route.reference)
         await store.finish()
 
-        #expect(store.state.activeRoute == nil)
+        #expect(store.state.activeRide?.route == Self.route.reference)
+        #expect(store.state.startSheet == nil)
+    }
+
+    @Test("A route picked on S05.2 reaches the ride")
+    func pickedRouteReachesTheRide() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let store = StartSheetPresentationTests.makeStore(into: log)
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.startRideButtonTapped)
+        await store.send(.startSheet(.presented(.path(.push(id: 0, state: .routePicker(RoutePickerFeature.State()))))))
+        await store.send(.startSheet(.presented(.path(.element(id: 0, action: .routePicker(.routeTapped(Self.route)))))))
+        await store.receive(\.startSheet.presented.path[id: 0].routePicker.delegate.routeSelected, Self.route.reference)
+
+        #expect(store.state.startSheet?.route == Self.route.reference)
+        #expect(store.state.startSheet?.path.isEmpty == true)
+
+        await startRide(on: store, expecting: Self.route.reference)
+        await store.finish()
+
+        #expect(store.state.activeRide?.route == Self.route.reference)
     }
 }

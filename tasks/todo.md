@@ -1,85 +1,77 @@
-# tasks/todo.md — #195 S20 Route Detail
+# tasks/todo.md — #196 S05.1 active-route row + S05.2 Route picker
 
-Branch: `feat/195-route-detail` · Milestone M8 · Plan:
-`~/.claude/plans/zesty-forging-sifakis.md`
+Branch: `feat/196-active-route-row` · Milestone M8 · Plan:
+`~/.claude/plans/dapper-churning-acorn.md`
 
-## Geometry
+## Selection and ride hand-off
 
-- [x] `RouteGeometry.elevationProfile(_:sampleCount:)` + `RouteGeometryTests` (21/21)
+- [x] `StartSheetFeature`: `route`, `Delegate.startRide(RouteReference?)`, `path` + `Path.routePicker`, pop on pick
+- [x] `AppFeature`: delete `activeRoute`, `presentStartSheet(_:route:)`, hand the route to `ActiveRideFeature`
+- [x] `ActiveRideFeature`: `route`, passed to `createRide`
 
-## Feature
+## S05.2
 
-- [x] `Features/Routes/RouteDetailFeature.swift` + `RouteDetailFeatureTests`
-- [x] `RoutesFeature`: `Path` stack, `.forEach`, `Delegate.useRoute`, plus `RoutesNavigationTests`
-- [x] `RoutesNavigationStack`: one store-powered stack for AppView, the previews and the S19 snapshots
-- [x] `AppFeature`: `activeRoute`, `presentStartSheet`, one-shot clears, plus `AppRouteSelectionTests` (4/4)
-- [x] `RouteSummary.reference`
+- [x] `Features/Rides/RoutePickerFeature.swift`
+- [x] `Features/Rides/RoutePickerView.swift` + `RoutePickerList` seam; `RouteRow` made internal
 
-## UI
+## S05.1 view
 
-- [x] `Features/Routes/RouteDetailView.swift`: map, sections, toolbar CTA, `RouteDetailList<MapRow>` seam
-- [x] `RoutesView`: `NavigationLink(state:)` rows, prototype removed, doc comments updated
-- [x] `ElevationProfileView` `unitLabel`
-- [x] Stub removal: `RouteSegmentStub` → `RideDetailData.swift`, delete `RouteDemoData.swift`
-- [x] `RoutePreviewData`: `RouteRideSummary` fixtures
+- [x] `StartSheetView`: store-powered stack, `NavigationLink(state:)` route row, `ActiveRouteRow`, previews
 
-## Snapshots
+## Tests
 
-- [x] `RouteDetailSnapshotTests` (elevation ± × rides ±, light/dark) + CI skip-list; 8 references, none blank
-- [x] Re-record `RoutesSnapshotTests` populated/filtered, inspect PNGs (chevrons only)
+- [x] `.startRide` → `.startRide(nil)` at the four existing call sites
+- [x] `StartSheetFeatureTests`: carried on Start Ride, pick route pops + sets, pick None clears
+- [x] `RoutePickerFeatureTests`: success / empty / failure, tap → delegate
+- [x] `AppRouteSelectionTests` rewritten against `startSheet?.route` / `activeRide?.route`, plus end-to-end
+- [x] `ActiveRideFeatureTests`: seeded route reaches `createRide`; stale comment rewritten
+- [x] `StartSheetSnapshotTests`: 14 references recorded, every PNG opened, none blank (231–256 distinct bytes)
 
 ## Verify
 
-- [x] Delete `InlineTitleLadderTests` and its references (throwaway)
-- [x] Full suite ×2: 997/997 on runs B and C (run A recorded S20 and failed only on those 4)
-- [x] Simulator: the app installs, launches and stays up (S20 itself is reachable only via the preview
-      or a manual GPX import)
+- [x] Build (`build-for-testing`), no new warnings from this change
+- [x] Full suite ×2 (runs 2 and 3): 1,014 tests (946 Swift Testing + 68 XCTest), 0 failures, every new test named
+- [x] Revert-the-fix: with `createRide(…, nil)` back, `taskCreatesRideWithItsRoute` is the one failure of 28
+      (`ActiveRideFeatureStateMachineTests` — the file has no `ActiveRideFeatureTests` type; that filter ran 0)
+- [x] `grep onDisappear` over both views is empty
+- [x] Simulator: S05.1 → S05.2 → back → S05.2 → swipe-dismiss → reopen, driven by a throwaway XCUITest (deleted)
 - [ ] PR
 
 ## Review
 
-**Suite: 997 tests, 0 failures** on two consecutive full local runs, snapshots included. Every new
-suite was confirmed by name in both runs' logs. The freshly built app installs and launches clean on
-the iPhone 17 Pro simulator (iOS 26) and stays up.
+**Suite: 1,014 tests, 0 failures** on runs 2 and 3, snapshots included, each new test confirmed by name
+in both logs. Run 1 recorded the 14 new references (its 7 failures were exactly the "no reference on disk"
+first-record failures), then hung for ten minutes in `VariaRadarClientTests` "Unexpected disconnect … retries
+on backoff ladder". That test is untouched here and passed in runs 2 and 3. Its shape matches the lessons
+entry on state streams: `clock.advance` can land before the backoff task has started sleeping on the clock.
+Not rewritten — I could not reproduce it failing, only hanging once.
 
-**Navigation was corrected before any code was written.** The issue prescribed S11's plain `Scope`
-behind a `NavigationLink`. I first offered three workarounds, and then a view-owned store modelled on
-the Rides tab. Brian: use correct TCA patterns, and accept the scope. The Routes tab now owns a
-`StackState` path, rows are `NavigationLink(state:)`, and `RoutesNavigationStack` is the one place
-that stack is built. Recorded in `tasks/lessons.md`.
+**The route now lives in the sheet.** `AppFeature.activeRoute` was #195's one-shot placeholder, one-shot
+because the row was read-only. With a picker in the sheet, a parent copy would have needed syncing; the
+sheet's own state gives "forgotten on every way out" for free.
 
-**Two of the new reducer tests passed with nothing loaded.** A `TestStore`'s `state` does not advance
-past received actions at `finish()`: `TestReducer`'s `.receive` branch records the resulting state
-without adopting it (`TestStore.swift:2385-2387`). Asserting straight after `finish()` therefore read
-the state from before either load. Four tests failed on it, and two passed without anything having
-loaded. Fixed with `skipReceivedActions()`. The "never ridden" test now also asserts that the route
-loaded, so it can fail for the right reason.
+**Simulator, driven for the first time.** A throwaway XCUITest walked onboarding and permission alerts, then:
+S05.1 at the half-screen detent with a real `NavigationLink` chevron on "Route  None"; S05.2 pushed (title
+"Routes", back chevron, None checked, "No Routes"); back; pushed again; the whole sheet swiped away with S05.2
+still on its stack; reopened on "Route, None". A `log stream` on `com.apple.runtime-issues` and app faults
+logged no TCA warning across three drives — only an existing D-DIN "file already registered" font fault. The
+drive's last assertion failed on my query, not the app: a `LabeledContent` link row exposes one button,
+"Route, None", with no separate "None" text. The failure-time hierarchy shows the reopened sheet correct.
 
-**`NavigationLink(state:)` outside a store-powered stack is a test failure.** S19's snapshot harness
-and previews wrapped `RoutesView` in a bare `NavigationStack`. TCA reports an issue there, and XCTest
-records it as a failure. `RoutesNavigationStack` fixed that, and the "Routes — List" preview now
-pushes a fully loaded S20.
-
-**The inline title renders white in offscreen snapshots: the harness, not S20.** My first theory, an
-unspecified light trait, was wrong; pinning `.light` changed nothing. A three-case ladder settled it:
-- a bare inline title rendered offscreen is white
-- the same view with a large title is black
-- the inline title drawn in the key window is black
-
-S20's references therefore render the list without a navigation bar. Added to the snapshot-toolbar
-memory.
-
-**Minor deviations from the plan.**
-- The stack tests live in a new `RoutesNavigationTests.swift` instead of being appended to the
-  1,100-line `RoutesFeatureTests`.
-- `StartSheetPresentationTests.makeStore` gained an `initialState` closure, so `@Shared` state is
-  built inside its storage scope.
-- `distanceLabel(_:_:)` moved up beside `elevationLabel` so S20 and the filter sheet share one format.
-- No M10.6 companion issue was filed, because #204 already exists.
+**Deviations from the plan.**
+- A long route name does not stay on one line. `LabeledContent` stacks the label over the value and
+  truncates the value — the platform's fallback, now pinned by `testRouteRowLongName`.
+- The new `Path` uses `@Reducer` plus `Equatable` extensions: TCA 1.25.5 deprecates
+  `@Reducer(state: .equatable, action: .equatable)`. `RoutesFeature.swift:148` still uses the deprecated form
+  and warns; left alone.
+- No new "picker takes no scan" test: it could not fail, since `AppFeature` owns the scan.
 
 **Not verified automatically.**
-- S20's live map (flags, chevrons without panning, the loop collapse) has no pixel coverage.
-- The "Use This Route" toolbar button has no pixel coverage either.
-- The simulator can't be driven through a Files-app GPX import without UI automation the repo doesn't
-  have. The "Routes — List" preview is the one-tap way to look.
-- Previous Rides can't populate on a device until #196/#197 write `Ride.routeId`.
+- Picking a real route in the simulator: its library is empty and a Files import can't be driven. Covered by
+  `StartSheetFeatureTests`, `AppRouteSelectionTests` and the picker snapshots.
+- The runtime-issue capture had no positive control; it relies on TCA's Debug-build runtime warnings reaching
+  `com.apple.runtime-issues`.
+- Previews were not rendered.
+
+**Follow-ups.** Spec gaps left out of the uncommitted PRD/UX edits (`UX.md:56`, `PRD.md:176`, §S05.2's key
+components) — Brian or #202. #197 restores the route on resume (`routeId` on `RideSummaryUpdate`).

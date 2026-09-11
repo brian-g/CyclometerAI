@@ -928,9 +928,40 @@ struct ActiveRideFeatureStateMachineTests {
         }
         #expect(created.value?.0 == UUID(0))
         #expect(created.value?.1 == testDate)
-        // No route yet: S19/S20 own selecting one and #196 owns carrying it here. #191
-        // only makes the argument expressible, so a ride started today is a free ride.
+        // Started without a route (S05.1's "None"): a free ride.
         #expect(created.value?.2 == nil)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    /// #196: the route chosen on S05.1 is what the `Ride` is created with — the write S20's
+    /// Previous Rides reads back.
+    @Test("task creates the Ride with the route the ride was started on")
+    func taskCreatesRideWithItsRoute() async {
+        let route = RouteSummary.previewRoutes[1].reference
+        let created = LockIsolated<(UUID, Date, RouteReference?)?>(nil)
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(route: route)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(onCreateRide: { created.setValue(($0, $1, $2)) })
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task) {
+            $0.recordingState = .active
+            $0.rideId = UUID(0)
+        }
+        #expect(created.value?.0 == UUID(0))
+        #expect(created.value?.2 == route)
 
         await store.skipInFlightEffects(strict: false)
     }

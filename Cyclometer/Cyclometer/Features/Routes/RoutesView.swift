@@ -459,7 +459,8 @@ struct RouteFilterSheetBody: View {
 
 // MARK: - Rows and map
 
-private struct RouteRow: View {
+/// One saved route. Internal so S05.2's picker (#196) draws a route the way S19 does.
+struct RouteRow: View {
     let route: RouteSummary
     let unitSystem: UnitSystem
 

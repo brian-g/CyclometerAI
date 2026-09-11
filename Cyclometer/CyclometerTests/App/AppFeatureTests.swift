@@ -90,7 +90,7 @@ struct AppFeatureTests {
         // view is ever instantiated in this test — yet the ride still starts its
         // effects, because AppFeature emits `.task` itself.
         await store.send(.startRideButtonTapped)
-        await store.send(.startSheet(.presented(.delegate(.startRide))))
+        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
         await store.receive(\.activeRide.task)
         #expect(store.state.activeRide?.recordingState == .active)
 

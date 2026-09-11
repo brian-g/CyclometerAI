@@ -37,14 +37,6 @@ struct AppFeature {
         var routes: RoutesFeature.State = RoutesFeature.State()
         var settings: SettingsFeature.State = SettingsFeature.State()
 
-        /// The route S20's "Use This Route" picked for the Start sheet it opens (#195), which
-        /// #196's S05.1 row shows and hands to the ride.
-        ///
-        /// One-shot: cleared when that sheet is dismissed and when the ride starts. S05.1's route
-        /// row is read-only, so a route that stayed selected could never be un-chosen — every
-        /// later Start Ride, from any tab, would quietly carry it.
-        var activeRoute: RouteReference? = nil
-
         // ── Screen power management (#110) ───────────────────────────────────────
         var isForeground: Bool = true
         var isDimmed: Bool = false
@@ -156,17 +148,14 @@ struct AppFeature {
                 return presentStartSheet(&state)
 
             case .startSheet(.dismiss):
-                // Cancel and swipe-to-dismiss both arrive here. A route chosen on S20 goes with
-                // the sheet it opened — see `activeRoute`.
-                state.activeRoute = nil
+                // Cancel and swipe-to-dismiss both arrive here. The route goes with the sheet's own
+                // state, so the next Start Ride opens on a free ride (#196).
                 return Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
 
-            case .startSheet(.presented(.delegate(.startRide))):
-                Self.presentActiveRide(ActiveRideFeature.State(), in: &state)
+            case .startSheet(.presented(.delegate(.startRide(let route)))):
+                // The sheet's route is what the ride writes to its `Ride` (#196).
+                Self.presentActiveRide(ActiveRideFeature.State(route: route), in: &state)
                 state.startSheet = nil
-                // Nothing reads the route at ride start until #196 hands it to the ride; it is
-                // cleared here either way, so the next sheet opens without it.
-                state.activeRoute = nil
                 // Start the ride's long-running effects (1 Hz timer, HR, radar,
                 // location) here so they live for the whole ride — bound to
                 // `activeRide` via `.ifLet` and torn down only when the ride
@@ -290,8 +279,7 @@ struct AppFeature {
                 // the rule lives here too, because presenting the sheet mid-ride would offer to
                 // start a second ride over the first.
                 guard state.activeRide == nil else { return .none }
-                state.activeRoute = route
-                return presentStartSheet(&state)
+                return presentStartSheet(&state, route: route)
 
             case .rides, .routes, .settings, .activeRide, .onboarding:
                 return .none
@@ -347,8 +335,10 @@ struct AppFeature {
     ///
     /// Sequential, and in the same order as the launch push, so the whole lifecycle is assertable
     /// as one interleaved call log.
-    private func presentStartSheet(_ state: inout State) -> Effect<Action> {
-        state.startSheet = StartSheetFeature.State()
+    ///
+    /// `route` is what S20's "Use This Route" chose; from here the sheet holds it (#196).
+    private func presentStartSheet(_ state: inout State, route: RouteReference? = nil) -> Effect<Action> {
+        state.startSheet = StartSheetFeature.State(route: route)
         return .run { [bleCSCClient, variaRadarClient, bleHRClient] _ in
             await bleCSCClient.beginPairingScan()
             await variaRadarClient.beginPairingScan()

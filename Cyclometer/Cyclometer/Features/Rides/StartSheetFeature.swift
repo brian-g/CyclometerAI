@@ -2,9 +2,10 @@ import ComposableArchitecture
 import Foundation
 import SwiftUI
 
-/// S05.1 — Start Ride sheet. Global (app-level) setup screen: ride-setup stubs plus a live
-/// Sensors group. Presented by `AppFeature` via `@Presents`; the "Start Ride" CTA bubbles up
-/// as `.delegate(.startRide)` for the parent to begin the ride.
+/// S05.1 — Start Ride sheet. Global (app-level) setup screen: the ride's route — which S05.2,
+/// pushed on the sheet's own stack, changes — the Phase 2 bike placeholder, and a live Sensors
+/// group. Presented by `AppFeature` via `@Presents`; the "Start Ride" CTA bubbles up as
+/// `.delegate(.startRide)`, carrying the route, for the parent to begin the ride.
 @Reducer
 struct StartSheetFeature {
 
@@ -21,6 +22,17 @@ struct StartSheetFeature {
         /// Whether a category is paired at all — and what the sensor is called — comes
         /// from `preferences`, never from here.
         var sensors: [SensorRow] = SensorRow.Kind.allCases.map { SensorRow(kind: $0) }
+
+        /// The route the ride will follow, nil for a free ride (#196). Seeded by S20's "Use This
+        /// Route" when that is what opened the sheet; S05.2 changes it.
+        ///
+        /// Here rather than in `AppFeature`, so it lives exactly as long as the sheet: Cancel, a
+        /// swipe and starting the ride all discard it, and the next Start Ride from any tab opens on
+        /// a free ride.
+        var route: RouteReference? = nil
+
+        /// The sheet's own navigation stack: S05.2, pushed from the Route row (#196).
+        var path = StackState<Path.State>()
 
         /// The rows the sheet shows: one per paired role, whatever its connection state.
         ///
@@ -51,11 +63,20 @@ struct StartSheetFeature {
         case batteryUpdated(SensorRow.Kind, Int?)
         case cancelButtonTapped
         case startRideButtonTapped
+        case path(StackActionOf<Path>)
         case delegate(Delegate)
 
+        @CasePathable
         enum Delegate: Equatable {
-            case startRide
+            /// The sheet's route, nil for a free ride, for `AppFeature` to hand to the ride (#196).
+            case startRide(RouteReference?)
         }
+    }
+
+    /// What the sheet can push (#196). `Equatable` in extensions below, as TCA 1.25 asks.
+    @Reducer
+    enum Path {
+        case routePicker(RoutePickerFeature)
     }
 
     var body: some ReducerOf<Self> {
@@ -146,12 +167,20 @@ struct StartSheetFeature {
                 return .run { _ in await dismiss() }
 
             case .startRideButtonTapped:
-                return .send(.delegate(.startRide))
+                return .send(.delegate(.startRide(state.route)))
 
-            case .delegate:
+            case let .path(.element(id: id, action: .routePicker(.delegate(.routeSelected(route))))):
+                // The sheet pops rather than the picker dismissing itself, so the answer and the
+                // navigation land in the same pass — and a test can assert both.
+                state.route = route
+                state.path.pop(from: id)
+                return .none
+
+            case .path, .delegate:
                 return .none
             }
         }
+        .forEach(\.path, action: \.path)
     }
 
     // Map the shared client lifecycle onto the sheet's two-state badge (UX.md §S05.1).
@@ -169,6 +198,9 @@ struct StartSheetFeature {
         }
     }
 }
+
+extension StartSheetFeature.Path.State: Equatable {}
+extension StartSheetFeature.Path.Action: Equatable {}
 
 extension StartSheetFeature.State {
     mutating func setStatus(_ status: SensorRow.Status, for kind: SensorRow.Kind) {
