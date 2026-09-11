@@ -14,7 +14,7 @@ struct StartSheetFeatureTests {
         }
 
         await store.send(.startRideButtonTapped)
-        await store.receive(.delegate(.startRide))
+        await store.receive(.delegate(.startRide(nil)))
     }
 
     @Test("Cancel dismisses the sheet")
@@ -220,5 +220,67 @@ struct StartSheetFeatureTests {
         speedContinuation.finish()
         cadenceContinuation.finish()
         await store.finish()
+    }
+
+    // MARK: Route (#196)
+
+    /// "Summit Climb".
+    private static let route = RouteSummary.previewRoutes[1]
+
+    @Test("Start Ride carries the sheet's route")
+    func startRideCarriesTheRoute() async {
+        let store = TestStore(initialState: StartSheetFeature.State(route: Self.route.reference)) {
+            StartSheetFeature()
+        }
+
+        await store.send(.startRideButtonTapped)
+        await store.receive(.delegate(.startRide(Self.route.reference)))
+    }
+
+    /// The state the Route row pushes. Held here so that dropping `selection: route` fails a test:
+    /// after Use This Route, S05.2 must open with that route checked, not None.
+    @Test("The Route row opens S05.2 with the sheet's route checked")
+    func routeRowOpensThePickerOnTheSheetsRoute() {
+        let chosen = StartSheetFeature.State(route: Self.route.reference)
+        #expect(chosen.routePicker == .routePicker(RoutePickerFeature.State(selection: Self.route.reference)))
+        #expect(StartSheetFeature.State().routePicker == .routePicker(RoutePickerFeature.State()))
+    }
+
+    @Test("Picking a route on S05.2 fills the Route row and pops back to the sheet")
+    func pickingARouteSetsItAndPops() async {
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        }
+
+        await store.send(.path(.push(id: 0, state: .routePicker(RoutePickerFeature.State())))) {
+            $0.path[id: 0] = .routePicker(RoutePickerFeature.State())
+        }
+        await store.send(.path(.element(id: 0, action: .routePicker(.routeTapped(Self.route))))) {
+            $0.path[id: 0, case: \.routePicker]?.selection = Self.route.reference
+        }
+        await store.receive(\.path[id: 0].routePicker.delegate.routeSelected, Self.route.reference) {
+            $0.route = Self.route.reference
+            $0.path = StackState()
+        }
+    }
+
+    /// The way back to a free ride once S20 has seeded a route.
+    @Test("Picking None on S05.2 clears the route")
+    func pickingNoneClearsTheRoute() async {
+        let store = TestStore(initialState: StartSheetFeature.State(route: Self.route.reference)) {
+            StartSheetFeature()
+        }
+        let picker = RoutePickerFeature.State(selection: Self.route.reference)
+
+        await store.send(.path(.push(id: 0, state: .routePicker(picker)))) {
+            $0.path[id: 0] = .routePicker(picker)
+        }
+        await store.send(.path(.element(id: 0, action: .routePicker(.routeTapped(nil))))) {
+            $0.path[id: 0, case: \.routePicker]?.selection = nil
+        }
+        await store.receive(\.path[id: 0].routePicker.delegate.routeSelected, nil) {
+            $0.route = nil
+            $0.path = StackState()
+        }
     }
 }

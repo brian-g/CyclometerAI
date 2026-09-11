@@ -95,7 +95,7 @@ struct StartSheetPresentationTests {
         await store.send(.startSheet(.presented(.task)))
         #expect(log.value == Self.begun)
 
-        await store.send(.startSheet(.presented(.delegate(.startRide))))
+        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
         await store.finish()
 
         #expect(log.value == Self.begun + Self.ended)
@@ -119,5 +119,21 @@ struct StartSheetPresentationTests {
         let ends = log.value.filter { if case .end = $0 { return true } else { return false } }
         #expect(begins.count == 6)
         #expect(ends.count == 6)
+    }
+
+    /// A double tap on Start Ride before the sheet covers the button. The second must not take a scan
+    /// the one dismissal cannot release, nor replace the sheet the first opened.
+    @Test("A second Start Ride while the sheet is up takes no second scan")
+    func secondStartRideWhileTheSheetIsUpIsIgnored() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let store = Self.makeStore(into: log)
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.startRideButtonTapped)
+        await store.send(.startRideButtonTapped)
+        await store.send(.startSheet(.dismiss))
+        await store.finish()
+
+        #expect(log.value == Self.begun + Self.ended)
     }
 }

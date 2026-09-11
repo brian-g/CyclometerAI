@@ -39,7 +39,7 @@ struct RidesView: View {
                         }
                         .tint(.blue)
                         Button { } label: {
-                            Label("Make Route", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                            Label("Make Route", systemImage: RouteLibrary.symbolName)
                         }
                         .tint(.green)
                     }

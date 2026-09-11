@@ -53,7 +53,7 @@ All design artifacts are in `assets/design/`. These files are the source of trut
 | [S04](#s04-home) | Home | Deferred | Deferred |
 | [S05](#s05-active-ride-dashboard) | Active Ride Dashboard | MVP | **Priority — Detailed UX Needed** |
 | [S05.1](#s051-start-sheet) | Start Sheet | MVP | Priority |
-| S05.2 | Route Selector | Phase 2 | Stub |
+| [S05.2](#s052-route-picker) | Route Picker | MVP | Complete |
 | [S05.3](#s053-active-ride-accessory) | Active Ride Accessory | MVP | Complete — refer to prototype |
 | S05.4 | Widget Layout — Factory Default | MVP | Grid resolved — see S05 |
 | [S05.5](#s055) | Widget Layout 2 | Removed | — |
@@ -285,7 +285,7 @@ the screen differs only in its title, the **Next** button, and the helper text, 
 ### Key Components
 
 - Group: Ride Setup
-  - Route picker (Phase 2)
+  - Route picker
   - Bike picker (Phase 2) — selecting a bike selects its sensors, so the sensor list below follows this control, and the wheel circumference follows from whichever speed sensor that bike carries. See DataModel.md §3.9
 
 - Group: Sensors
@@ -329,18 +329,22 @@ pair *from*.
 
 ## S05.2 — Route Picker
 
-**Phase:** Phase 2  
+**Phase:** MVP  
 **Purpose:** Allow user to select a route for the ride.
 
 ### Layout
 
-> *Refer to `assets/design/Design.sketch` — S05.2.*
+> *Refer to `assets/design/Design.sketch` — S05.2.* The artboard draws the frame only — the title "Routes" and a
+> back button — so the body uses S19's route rows.
 
 ### Key Components
 
-- Route picker
-- Bike picker — drives which sensors the ride uses, and through the speed sensor, the wheel circumference (see S05.1)
-- List of sensors and status
+- Pushed from S05.1's Route row, on the Start sheet's own navigation stack
+- None — always first: a ride without a route, and the way to clear a route S20's "Use This Route" chose
+- Saved routes, one row each as on S19 (name, terrain line, distance); a checkmark marks the chosen route
+- Choosing pops back to S05.1, whose Route row shows the route's name, or "None"
+- Empty library: "No Routes", pointing to the Routes tab — the picker does not import; that is S19's
+- A failed read says so ("Couldn't Load Routes") rather than showing an empty library
 
 ### Open UX Questions
 

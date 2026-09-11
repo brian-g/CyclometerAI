@@ -107,6 +107,11 @@ struct ActiveRideFeature {
         /// id — `.task` knows not to overwrite it because `recordingState` is
         /// never left `.idle` by that initializer (see `.task`'s `isResuming` check).
         var rideId: UUID = UUID()
+        /// The route this ride follows, nil for a free ride (#196): chosen on S05.1 and written to
+        /// the `Ride` by `.task`'s `createRide`, which is what S20's Previous Rides reads back.
+        /// A resumed ride leaves it nil — its `Ride` keeps the route, but reading it back needs
+        /// `routeId` on `RideSummaryUpdate`, which is #197's.
+        var route: RouteReference? = nil
         var recordingState: RideRecordingState = .idle
         var elapsedSeconds: Int = 0
         var speedKPH: Double = 0
@@ -364,8 +369,8 @@ struct ActiveRideFeature {
                     // `trackRecorder.isRecording` from `recordingState`, an
                     // invariant `.elapsedTick`'s guard relies on elsewhere in this file.
                     state.recordingState == .active ? .send(.trackRecorder(.startRecording)) : .none,
-                    isResuming ? .none : .run { [persistenceClient] _ in
-                        try? await persistenceClient.createRide(rideId, startedAt, nil)
+                    isResuming ? .none : .run { [persistenceClient, route = state.route] _ in
+                        try? await persistenceClient.createRide(rideId, startedAt, route)
                     },
                     .run { send in
                         for await _ in clock.timer(interval: .seconds(1)) {

@@ -104,7 +104,7 @@ struct RouteDetailList<MapRow: View>: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    /// The repo's placeholder idiom — `StartSheetView`'s Route row.
+    /// The repo's placeholder idiom for a section whose data is not in MVP yet.
     private var comingSoon: some View {
         Text("Coming Soon").foregroundStyle(Color.cyTextSecondary)
     }
