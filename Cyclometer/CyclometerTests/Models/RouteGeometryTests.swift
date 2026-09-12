@@ -407,3 +407,152 @@ struct RouteGeometryViewportTests {
         #expect(!RouteGeometry.polyline(outside, intersects: viewport))
     }
 }
+
+/// #197 — placing a rider on a route.
+///
+/// The fixture these turn on is an out-and-back whose way back runs 2 m east of its way out, with
+/// the rider 3 m east of the outbound line: nearer the *return* leg, as a rider on the right of a
+/// two-way road is. Nearest-point snapping over the whole route picks the return leg there, which
+/// is exactly what the window and `firstPass` exist to prevent — so the whole-route answer is
+/// asserted too, proving the fixture can tell the two apart.
+@Suite("RouteGeometry — projection")
+struct RouteGeometryProjectionTests {
+
+    private let outAndBack: [RouteFixtures.Leg] = [(0, 400), (90, 2), (180, 400)]
+    private var route: [RouteCoordinate] { RouteFixtures.path(legs: outAndBack) }
+    /// 300 m up the way out and 3 m east of it — 1 m west of the way back, which passes the same
+    /// spot 502 m in.
+    private var rider: RouteCoordinate { RouteFixtures.point(along: outAndBack, at: 300, lateralMeters: 3) }
+
+    private func projection(
+        of point: RouteCoordinate? = nil,
+        alongRoute window: ClosedRange<Double>? = nil,
+        heading: Double? = nil
+    ) -> RouteGeometry.Projection? {
+        let coordinates = route
+        return RouteGeometry.projection(
+            of: point ?? rider,
+            onto: coordinates,
+            cumulative: RouteGeometry.cumulativeDistances(coordinates),
+            alongRoute: window,
+            heading: heading
+        )
+    }
+
+    private func firstPass(
+        of point: RouteCoordinate? = nil,
+        from floor: Double,
+        heading: Double? = nil
+    ) -> RouteGeometry.Projection? {
+        let coordinates = route
+        return RouteGeometry.firstPass(
+            of: point ?? rider,
+            onto: coordinates,
+            cumulative: RouteGeometry.cumulativeDistances(coordinates),
+            fromMeters: floor,
+            within: 50,
+            heading: heading
+        )
+    }
+
+    // MARK: - Direction
+
+    @Test("a course keeps even the whole-route search on the leg that runs its way")
+    func aCourseSelectsTheLegThatRunsItsWay() throws {
+        let out = try #require(projection(heading: 0))
+        #expect(abs(out.distanceAlongRouteMeters - 300) < 0.5)
+        let back = try #require(projection(heading: 180))
+        #expect(abs(back.distanceAlongRouteMeters - 502) < 0.5)
+    }
+
+    @Test("a leg within a right angle of the course is kept, and one beyond it is not")
+    func courseToleranceIsARightAngle() throws {
+        // At 89° the way out (0°) is inside the right angle and the way back (180°) is outside it;
+        // at 91° the reverse. Without the course the nearer way back wins, so 89° is the half that
+        // shows the filter is doing anything.
+        let at89 = try #require(projection(heading: 89))
+        #expect(abs(at89.distanceAlongRouteMeters - 300) < 0.5)
+        let at91 = try #require(projection(heading: 91))
+        #expect(abs(at91.distanceAlongRouteMeters - 502) < 0.5)
+    }
+
+    @Test("with a course, the first pass is the first one that runs that way")
+    func firstPassFollowsTheCourse() throws {
+        // The resume case: a rider relaunched on the way back is past the first pass of this
+        // spot, and their course says so.
+        let found = try #require(firstPass(from: 0, heading: 180))
+        #expect(abs(found.distanceAlongRouteMeters - 502) < 0.5)
+    }
+
+    // MARK: - projection
+
+    @Test("the whole-route search takes the nearest leg, even when it is the wrong one")
+    func wholeRouteSearchTakesTheNearestLeg() throws {
+        let found = try #require(projection())
+        #expect(abs(found.distanceAlongRouteMeters - 502) < 0.5)
+        #expect(abs(found.offsetMeters - 1) < 0.1)
+    }
+
+    @Test("a window ignores a nearer segment outside it")
+    func windowIgnoresANearerSegmentOutsideIt() throws {
+        let found = try #require(projection(alongRoute: 200...400))
+        #expect(abs(found.distanceAlongRouteMeters - 300) < 0.5)
+        #expect(abs(found.offsetMeters - 3) < 0.1)
+    }
+
+    @Test("the reported segment is the one the point landed on")
+    func segmentIndexNamesTheSegment() throws {
+        let cumulative = RouteGeometry.cumulativeDistances(route)
+        let found = try #require(projection(alongRoute: 200...400))
+        #expect(cumulative[found.segmentIndex] <= found.distanceAlongRouteMeters)
+        #expect(found.distanceAlongRouteMeters <= cumulative[found.segmentIndex + 1])
+    }
+
+    @Test("a window spanning the whole route agrees with no window, end to end")
+    func aWholeRouteWindowIsNoWindow() throws {
+        // Where the binary search can go wrong is at its edges: a window that dropped the first
+        // or last segment would disagree with the unwindowed search at the ends of the route.
+        let total = try #require(RouteGeometry.cumulativeDistances(route).last)
+        for meters in stride(from: 0.0, through: total + 20, by: 7) {
+            let point = RouteFixtures.point(along: outAndBack, at: meters, lateralMeters: 4)
+            #expect(projection(of: point, alongRoute: 0...total) == projection(of: point), "at \(meters) m")
+        }
+    }
+
+    @Test("a window wholly beyond either end of the route finds nothing")
+    func windowOffTheRouteFindsNothing() throws {
+        let total = try #require(RouteGeometry.cumulativeDistances(route).last)
+        #expect(projection(alongRoute: (total + 1)...(total + 500)) == nil)
+        #expect(projection(alongRoute: -500 ... -1) == nil)
+    }
+
+    // MARK: - firstPass
+
+    @Test("the first pass is the earliest stretch within tolerance, not the nearest")
+    func firstPassIsTheEarliestStretch() throws {
+        let found = try #require(firstPass(from: 0))
+        #expect(abs(found.distanceAlongRouteMeters - 300) < 0.5)
+    }
+
+    @Test("the first pass never looks behind its floor")
+    func firstPassRespectsItsFloor() throws {
+        let found = try #require(firstPass(from: 402))
+        #expect(abs(found.distanceAlongRouteMeters - 502) < 0.5)
+    }
+
+    @Test("the first pass reports the nearest point of its stretch, not where the stretch begins")
+    func firstPassTakesTheNearestPointOfItsStretch() throws {
+        // The route comes within 50 m of this point about 50 m before it. Stopping at the first
+        // segment inside tolerance would report ~250 m.
+        let onTheLine = RouteFixtures.point(along: outAndBack, at: 300)
+        let found = try #require(firstPass(of: onTheLine, from: 0))
+        #expect(abs(found.distanceAlongRouteMeters - 300) < 0.5)
+        #expect(found.offsetMeters < 0.1)
+    }
+
+    @Test("the first pass is nil when the route never comes within tolerance")
+    func firstPassIsNilOffTheRoute() {
+        let faraway = RouteFixtures.point(along: outAndBack, at: 300, lateralMeters: 200)
+        #expect(firstPass(of: faraway, from: 0) == nil)
+    }
+}

@@ -456,6 +456,38 @@ struct PersistenceClientTests {
 
     // MARK: - fetchResumableRide (#175)
 
+    @Test("fetchResumableRide carries back the route, and how far along it the ride had got (#197)")
+    func fetchResumableRideCarriesTheRouteAndProgress() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        let route = RouteReference(id: UUID(), name: "Lake Loop")
+        try await client.createRide(rideId, Date(), route)
+        // The checkpoint's own `route` is nil. Only `createRide` writes the route, so a checkpoint
+        // without one cannot erase it.
+        try await client.updateRideSummary(RideSummaryUpdate(
+            rideId: rideId,
+            durationSeconds: 60,
+            distanceMeters: 500,
+            averageSpeedMPS: 8,
+            maxSpeedMPS: 10,
+            routeProgressMeters: 1_234
+        ))
+
+        let resumable = try #require(try await client.fetchResumableRide())
+        #expect(resumable.route == route)
+        #expect(resumable.routeProgressMeters == 1_234)
+    }
+
+    @Test("a free ride resumes with no route and no progress")
+    func fetchResumableRideOfAFreeRideHasNoRoute() async throws {
+        let (client, _) = Self.makeLiveClient()
+        try await client.createRide(UUID(), Date(), nil)
+
+        let resumable = try #require(try await client.fetchResumableRide())
+        #expect(resumable.route == nil)
+        #expect(resumable.routeProgressMeters == nil)
+    }
+
     @Test("fetchResumableRide returns nil when no rides exist")
     func fetchResumableRideNilWhenEmpty() async throws {
         let (client, _) = Self.makeLiveClient()

@@ -1,103 +1,126 @@
-# tasks/todo.md — #196 S05.1 active-route row + S05.2 Route picker
+# tasks/todo.md — #197 NavigationFeature: route following, turn firing, off-route
 
-Branch: `feat/196-active-route-row` · Milestone M8 · Plan:
-`~/.claude/plans/dapper-churning-acorn.md`
+Branch: `feat/197-navigation-feature` · Milestone M8 · Plan:
+`~/.claude/plans/immutable-sauteeing-eich.md`
 
-## Selection and ride hand-off
+Decision: a resumed ride finds its place from `Ride.routeProgressMeters`, saved at each checkpoint.
 
-- [x] `StartSheetFeature`: `route`, `Delegate.startRide(RouteReference?)`, `path` + `Path.routePicker`, pop on pick
-- [x] `AppFeature`: delete `activeRoute`, `presentStartSheet(_:route:)`, hand the route to `ActiveRideFeature`
-- [x] `ActiveRideFeature`: `route`, passed to `createRide`
+## 1. RouteGeometry
 
-## S05.2
+- [x] Per-segment projection kernel extracted; result is a `Projection` with `segmentIndex`
+- [x] `projection(…, alongRoute:, heading:)` window (binary search over `cumulative`); `nil`/`nil` = today's behaviour
+- [x] `firstPass(of:onto:cumulative:fromMeters:within:heading:)`
+- [x] `RouteGeometryTests`: window, whole-route window = no window, off-route window, firstPass earliest/floor/nearest/nil, course picks the leg, 89°/91° boundary
 
-- [x] `Features/Rides/RoutePickerFeature.swift`
-- [x] `Features/Rides/RoutePickerView.swift` + `RoutePickerList` seam; `RouteRow` made internal
+## 2. NavigationFeature
 
-## S05.1 view
+- [x] `Features/ActiveRide/NavigationFeature.swift`: constants, `NavigationRoute`, State, actions, per-fix logic, banner timer, logging
+- [x] `CyclometerTests/Models/RouteFixtures.swift` (walker moved from `TurnDerivationTests.path(legs:)`) + `point`, `bearing`, `fix`
+- [x] `NavigationFeatureTests` (20 tests, sweep ×12): timing, lead preference, multi-turn, banner, out-and-back, early turnaround, off-route ×4, never-joined, detour, route end, no-route ×2, load ×2, resume ×2
 
-- [x] `StartSheetView`: store-powered stack, `NavigationLink(state:)` route row, `ActiveRouteRow`, previews
+## 3. Persistence for resume
 
-## Tests
+- [x] `RideSummaryUpdate.route` (read-back only) + `routeProgressMeters`
+- [x] `Ride.routeProgressMeters`, `summarySnapshot`, `apply`
+- [x] `PersistenceClientTests` round-trip; a checkpoint never erases the route; free ride has neither
+- [x] `RideSchemaMigrationTests`: legacy ride reads `routeProgressMeters == nil`
 
-- [x] `.startRide` → `.startRide(nil)` at the four existing call sites
-- [x] `StartSheetFeatureTests`: carried on Start Ride, pick route pops + sets, pick None clears
-- [x] `RoutePickerFeatureTests`: success / empty / failure, tap → delegate
-- [x] `AppRouteSelectionTests` rewritten against `startSheet?.route` / `activeRide?.route`, plus end-to-end
-- [x] `ActiveRideFeatureTests`: seeded route reaches `createRide`; stale comment rewritten
-- [x] `StartSheetSnapshotTests`: 14 references recorded, every PNG opened, none blank (231–256 distinct bytes)
+## 4. ActiveRideFeature wiring
 
-## Verify
+- [x] `navigation` state/action; navigation `Scope` gets its own `.onChange(of: \.isCalibrationSuspended)`
+- [x] `.task` loads the route; `.locationUpdated` forwards only with a route
+- [x] `isCalibrationSuspended` includes turn alerts (+ WheelCalibration doc/log text)
+- [x] `makeRideSummaryUpdate` + `State(resuming:)`; stale `route` doc rewritten
+- [x] Tests: calibration suspension on a turn, `.task` loads the route, checkpoint carries route + progress, resume restores both
 
-- [x] Build (`build-for-testing`), no new warnings from this change
-- [x] Full suite ×2 (runs 2 and 3): 1,014 tests (946 Swift Testing + 68 XCTest), 0 failures, every new test named
-- [x] Revert-the-fix: with `createRide(…, nil)` back, `taskCreatesRideWithItsRoute` is the one failure of 28
-      (`ActiveRideFeatureStateMachineTests` — the file has no `ActiveRideFeatureTests` type; that filter ran 0)
-- [x] `grep onDisappear` over both views is empty
-- [x] Simulator: S05.1 → S05.2 → back → S05.2 → swipe-dismiss → reopen, driven by a throwaway XCUITest (deleted)
-- [ ] PR
+## 5. AppPreferences
+
+- [x] `turnLeadDistanceMeters = defaultTurnLeadDistanceMeters` + decode; round-trip + legacy tests
+
+## 6. Dashboard
+
+- [x] `RideDashboardView.banner(turn:sourceSwitch:calibration:isOffRoute:)`: turn → source switch → calibration → off-route; icons
+- [x] `RideBannerPriorityTests`; `RideBanner` Turn / Off route previews
+
+## 7. Specs
+
+- [x] DataModel.md §3.6 `turnLeadDistanceMeters` + consumer list
+- [ ] Comment on #202: `Ride.routeProgressMeters` for §3.1, NavigationFeature shape for TCA.md §4/§10
+
+## 8. Verify
+
+- [x] Build clean — no warnings from changed code (the `fixedNow` isolation warnings in `ActiveRideFeatureTests` are pre-existing)
+- [x] Targeted: 25 suites, 272 distinct cases, 0 failures; every new test found by name
+- [x] Revert checks — each applied, run and restored by script, source diff hash identical after:
+      (a) whole-route snap → `outAndBackStaysOnTheLegBeingRidden`, `earlyTurnaroundIsFollowedHome`;
+      (b) Scope `.onChange` removed → `turnAlertSuspendsCalibration`;
+      (c) plain `≤ lead` → `turnIsAnnouncedWithinTenMetresAtFortyKPH`;
+      (d) floor ignores progress → `resumeLooksFromTheCheckpointedProgress`;
+      (d2) `State(resuming:)` drops progress → `stateResumingRestoresTheRoute`;
+      (e) no course filter → `outAndBackStaysOnTheLegBeingRidden`, `courseFindsTheLegWithoutACheckpoint`,
+      `earlyTurnaroundIsFollowedHome` — the last only after it was fixed: it first **passed** under (e), because its
+      rider rode out nearer the way back, the window-only match jumped there unasserted, and happened to be right by
+      the turnaround. Now it rides out on the way-out side and asserts every outbound fix
+- [x] Full `CyclometerTests` ×2 — baseline 1,018 (950 + 68) + added, every new test named in both logs
+      - Run 1: exit 0, **1,060 distinct cases passed, 0 failed** = 1,018 + the 42 new test functions
+        (992 Swift Testing + 68 XCTest)
+      - Run 2, after the throwaway drive tests were deleted: exit 0, **1,060 passed, 0 failed**. All 42 new tests
+        named in both logs; no warnings from changed files; working tree holds only the intended 21 files
+- [x] Simulator, **riding a real route in the app** (iPhone 17 Pro, iOS 26.5). `simctl openurl` could not work — the
+      app declares the GPX type but no `CFBundleDocumentTypes` — so a throwaway test seeded an 800 m N / 400 m E
+      route into the host app's live store, a throwaway XCUITest started a ride on it through S05.1 → S05.2, and
+      `simctl location start --speed=10` rode it. The app's own `navigation` log: route loaded (1 turn, 1,200 m) →
+      on route at 0 m → **turn announced 97.5 m out (lead 100)** → calibration gate shut, then open after the turn →
+      route complete; 200 m ridden past the finish raised no off-route. No runtime issues or app faults. The
+      dashboard screenshot at ride time 01:13 shows the **"Turn right" banner with its arrow**; 01:10 has none. First
+      attempt failed only because xcodebuild ran both tests on a *clone* — `-parallel-testing-enabled NO` (memory
+      updated). Both throwaway tests deleted
+- [ ] Commit + PR on Brian's go-ahead
+
+## Deviations from the approved plan
+
+- **Direction filter (Finding 6, added in step 2).** A window alone lets the way back of an out-and-back win within
+  250 m of the turnaround, and locks an early turnaround onto the way out. Both searches skip segments running
+  against the GPS course when it is meaningful (≥ 2 m/s). Plan file updated.
+- **`.onChange` on the navigation `Scope`, not `CombineReducers`.** Same TCA semantics — each base forwards what it
+  flips — without re-indenting the 500-line `Reduce`.
+- **Dropped "free-ride `.task` never calls `fetchRoute`".** `skipInFlightEffects` can cancel a load before it reaches
+  the mock, so the test could pass vacuously. Covered instead by the child no-route tests and the 8 unchanged
+  exhaustive location tests.
 
 ## Review
 
-**Suite: 1,014 tests, 0 failures** on runs 2 and 3, snapshots included, each new test confirmed by name
-in both logs. Run 1 recorded the 14 new references (its 7 failures were exactly the "no reference on disk"
-first-record failures), then hung for ten minutes in `VariaRadarClientTests` "Unexpected disconnect … retries
-on backoff ladder". That test is untouched here and passed in runs 2 and 3. Its shape matches the lessons
-entry on state streams: `clock.advance` can land before the backoff task has started sleeping on the clock.
-Not rewritten — I could not reproduce it failing, only hanging once.
+**Built.** `NavigationFeature` follows the ride's route:
+- Snapping keeps the rider on the leg they're riding: a 100 m back / 500 m ahead window, route segments that run
+  against the GPS course are ignored, and the first pass is used rather than the nearest.
+- Turns are announced within ±5.6 m of the lead distance at 40 km/h (PRD allows ±10).
+- Off-route is flagged on the 5th fix in a row beyond 50 m and cleared inside 30 m.
+- A ride that reaches the end goes quiet, including while it rides on past the finish.
+- A turn alert suspends wheel calibration.
+- A ride killed mid-route comes back on the right leg from `Ride.routeProgressMeters`.
 
-**The route now lives in the sheet.** `AppFeature.activeRoute` was #195's one-shot placeholder, one-shot
-because the row was read-only. With a picker in the sheet, a parent copy would have needed syncing; the
-sheet's own state gives "forgotten on every way out" for free.
+The banner priority is turn → source switch → calibration → off-route.
 
-**Simulator, driven for the first time.** A throwaway XCUITest walked onboarding and permission alerts, then:
-S05.1 at the half-screen detent with a real `NavigationLink` chevron on "Route  None"; S05.2 pushed (title
-"Routes", back chevron, None checked, "No Routes"); back; pushed again; the whole sheet swiped away with S05.2
-still on its stack; reopened on "Route, None". A `log stream` on `com.apple.runtime-issues` and app faults
-logged no TCA warning across three drives — only an existing D-DIN "file already registered" font fault. The
-drive's last assertion failed on my query, not the app: a `LabeledContent` link row exposes one button,
-"Route, None", with no separate "None" text. The failure-time hierarchy shows the reopened sheet correct.
+**Verified.**
+- 1,060 / 1,060 cases, twice, with all 42 new tests named in both logs.
+- Six revert checks, each turning its guard test red.
+- A real ride in the app on the simulator: the log shows the turn announced 97.5 m out, and the dashboard shows the "Turn right" banner.
 
-**Deviations from the plan.**
-- A long route name does not stay on one line. `LabeledContent` stacks the label over the value and
-  truncates the value — the platform's fallback, now pinned by `testRouteRowLongName`.
-- The new `Path` uses `@Reducer` plus `Equatable` extensions: TCA 1.25.5 deprecates
-  `@Reducer(state: .equatable, action: .equatable)`. `RoutesFeature.swift:148` still uses the deprecated form
-  and warns; left alone.
-- No new "picker takes no scan" test: it could not fail, since `AppFeature` owns the scan.
+**A test that proved nothing, caught by a revert check.** `earlyTurnaroundIsFollowedHome` passed with the direction
+filter removed. Its rider rode out nearer the way back, the window-only match jumped there unasserted, and by the
+turnaround it happened to be right. Fixed by riding out on the way-out side and asserting every outbound fix. Same
+shape as the #210 lesson: a green revert check proves the fixture, not just the code.
 
-**Not verified automatically.**
-- Picking a real route in the simulator: its library is empty and a Files import can't be driven. Covered by
-  `StartSheetFeatureTests`, `AppRouteSelectionTests` and the picker snapshots.
-- The runtime-issue capture had no positive control; it relies on TCA's Debug-build runtime warnings reaching
-  `com.apple.runtime-issues`.
-- Previews were not rendered.
+**Not changed, for you.**
+- The shared banner slot sits over the top of the hero speed digits (see the 01:13 drive screenshot). That's where the
+  source-switch and calibration banners already go. Moving UI needs your approval.
+- A rider standing still while being placed on a self-overlapping route can be put on the wrong leg. It corrects
+  itself once they move, at worst with a single off-route fix. Only a checkpointed relaunch can hit it.
 
-**Specs.** Brian's PRD v0.5.0/UX edits went in as their own commit. A second commit fixes what they left: the
-UX Screen Index row, the PRD §6 lists (plus the Phase 2 bike picker's "S05.1/S05.2"), UX §S05.2's key
-components, and `TCA.md`'s picker line.
+**Seams for the rest of M8.**
+- #198: attach the tone to the `announcedManeuverIndex` transition (no delegate added, as nothing would use it yet).
+- #199: draw `navigation.activeRoute.coordinates`.
+- #200: read `nextManeuver` and `distanceToNextTurnMeters`.
+- #201: GPX from disk through to an announced turn.
+- #202 has a comment asking for `Ride.routeProgressMeters` and the NavigationFeature §4/§10 entries.
 
-**Follow-ups.** The Routes tab itself is still Phase 2 in `PRD.md` §6 and `TCA.md:154` — #202. #197 restores
-the route on resume (`routeId` on `RideSummaryUpdate`).
-
-## Review fixes (PR #229 code review)
-
-- [x] 1 — `presentStartSheet` ignores a present while the sheet is up; double-tap and Use-This-Route tests
-- [x] 2 — filed as #231 (Start Ride can replace a resumed ride without finalizing it)
-- [x] 3 — both `createRide` tests await the write instead of reading it straight after `send`
-- [x] 4 — "Try Again" on the picker's failure screen (`retryButtonTapped`)
-- [x] 5 — `RoutePickerFeature.Library` replaces `hasLoaded` + `loadFailed`
-- [x] 6 — `StartSheetFeature.State.routePicker` builds what the Route row pushes; tested
-- [x] 7 — the end-to-end test builds the pushed state in the store's dependency scope
-- [x] 8 — `ActiveRouteRow`'s value in `cyTextSecondary`
-- [x] 9 — stale `RouteDetailView` comment
-- [x] 10 — `TCA.md` nests `RoutePickerFeature` under `StartSheetFeature`
-- [x] 11 — noted on #202, with every remaining Phase 2 / "Coming Soon" spot
-- [x] 12 — `RouteLibrary`: symbol, failure copy and `loadRoutes()`, shared by S19, S05.2, the tab bar and RidesView
-- [x] 13 — `RoutePickerList(store:)`, as `RouteDetailList`
-- [x] Re-recorded the 8 changed references (route row ×3, picker failure) and opened each: 239–256 distinct
-      bytes. Run A failed only those 8 first records; run B: 1,018 tests (950 + 68), 0 failures
-- [x] Revert check on fix 1: without the guard, the two suites ran 10 tests and exactly the two new ones failed
-      (a second scan `begin`; the route lost to a replaced sheet). Guard restored
-- [x] Full run C on the code as committed: 1,018 tests (950 + 68), 0 failures. Runs B and C are both green
-- [ ] Push; PR body

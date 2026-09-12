@@ -509,6 +509,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// #94. Not yet read: SettingsFeature still toggles its own copy, and the stop
     /// detection the ride state machine needs lands with #102.
     var isAutoPauseEnabled: Bool = true
+    /// #197. How far before a turn NavigationFeature announces it — PRD §8.6's
+    /// "configurable distance from turn". No S12 row sets it yet.
+    var turnLeadDistanceMeters: Double = defaultTurnLeadDistanceMeters   // 100 m
 
     func pairedSensor(for role: SensorRole) -> PairedSensor?
     /// CSC-role records only (#93). The collection also holds radar and HR records,
@@ -533,8 +536,9 @@ extension SharedReaderKey where Self == FileStorageKey<AppPreferences>.Default {
 Consumed by `SettingsFeature` (read/write, pushing each change to
 `BLECSCClient.setWheelCircumference`), `SpeedFeature` (`@SharedReader`, applied at ride start),
 `DeviceManagementFeature` (read/write, pushing each pairing change to
-`BLECSCClient.setPairedSensors`) and `AppFeature` (`@SharedReader`, pushing the assignments once at
-launch so paired sensors reconnect without the Sensors screen being open).
+`BLECSCClient.setPairedSensors`), `AppFeature` (`@SharedReader`, pushing the assignments once at
+launch so paired sensors reconnect without the Sensors screen being open) and `NavigationFeature`
+(`@SharedReader`, the turn lead distance on every fix — #197).
 
 **Still to land**, with the feature that consumes it:
 
