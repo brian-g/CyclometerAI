@@ -56,6 +56,13 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// stop detection the ride state machine needs lands with #102.
     var isAutoPauseEnabled: Bool = true
 
+    static let defaultTurnLeadDistanceMeters = 100.0
+
+    /// How far before a turn the rider is told about it, in metres (PRD §8.6: "at configurable
+    /// distance from turn"). `NavigationFeature` reads it on every fix. A preference rather than a
+    /// constant because PRD calls it configurable, though no S12 row sets it yet (#197).
+    var turnLeadDistanceMeters: Double = Self.defaultTurnLeadDistanceMeters
+
     /// Whether the rider has finished onboarding (S01→S02) at least once (#105). Gates
     /// `AppFeature`'s launch presentation — once true, onboarding never reappears, even
     /// if a permission it once checked is later revoked.
@@ -135,6 +142,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
         hasCompletedWelcomeStep = try container.decodeIfPresent(
             Bool.self, forKey: .hasCompletedWelcomeStep
         ) ?? false
+        turnLeadDistanceMeters = try container.decodeIfPresent(
+            Double.self, forKey: .turnLeadDistanceMeters
+        ) ?? Self.defaultTurnLeadDistanceMeters
     }
 }
 

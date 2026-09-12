@@ -976,6 +976,69 @@ struct ActiveRideFeatureStateMachineTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    /// #197: the route a ride starts on is loaded into navigation by `.task` — fresh or resumed,
+    /// since a resumed ride's route comes back through `State(resuming:)`.
+    @Test("task loads the ride's route into navigation")
+    func taskLoadsTheRideRoute() async throws {
+        let route = RouteSummary.previewRoutes[1].reference
+        let detail = RouteDetail(
+            summary: .empty, coordinates: RouteFixtures.path(legs: [(0, 300), (90, 300)]), cuePoints: []
+        )
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(route: route)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(routeDetails: [route.id: detail])
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.navigation.routeLoaded) {
+            $0.navigation.activeRoute = NavigationRoute(detail: detail)
+        }
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    /// #197: what a relaunch mid-route reads back. Awaited for the same reason as
+    /// `taskCreatesRide`.
+    @Test("a checkpoint carries the route, and how far along it the ride has got")
+    func checkpointCarriesTheRouteAndProgress() async throws {
+        let route = RouteSummary.previewRoutes[1].reference
+        let (written, write) = AsyncStream<RideSummaryUpdate>.makeStream()
+        var state = ActiveRideFeature.State(route: route, recordingState: .active)
+        state.navigation.progressMeters = 1_234
+        let store = TestStore(initialState: state) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(onUpdateRideSummary: { write.yield($0) })
+        }
+        store.exhaustivity = .off
+
+        await store.send(.pauseTapped)
+        var updates = written.makeAsyncIterator()
+        let next = await updates.next()
+        let update = try #require(next)
+        #expect(update.route == route)
+        #expect(update.routeProgressMeters == 1_234)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
     // MARK: - State(resuming:) (#175)
 
     @Test("State(resuming:) seeds cumulative aggregates from a persisted snapshot, weighted by the real sample counts")
@@ -1062,6 +1125,23 @@ struct ActiveRideFeatureStateMachineTests {
         let state = ActiveRideFeature.State(resuming: summary)
 
         #expect(state.recordingState == .paused)
+    }
+
+    @Test("State(resuming:) restores the route, and how far along it the ride had got (#197)")
+    func stateResumingRestoresTheRoute() {
+        let route = RouteSummary.previewRoutes[1].reference
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .active,
+            durationSeconds: 60, distanceMeters: 500, averageSpeedMPS: 8, maxSpeedMPS: 10,
+            route: route, routeProgressMeters: 1_234
+        )
+
+        let state = ActiveRideFeature.State(resuming: summary)
+
+        #expect(state.route == route)
+        #expect(state.navigation.progressMeters == 1_234)
+        // Loaded by `.task`, as for a fresh ride, not seeded here.
+        #expect(state.navigation.activeRoute == nil)
     }
 
     @Test("State(resuming:) restores isAutoPaused and zeroSpeedSeconds from the persisted snapshot")
@@ -2433,6 +2513,54 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = false
         }
+    }
+
+    /// #197: PRD §8.9 suspends calibration during turn alerts too. Navigation sets one inside its
+    /// own `Scope`, where the `.onChange` on `Reduce` cannot see it — this is the test that
+    /// catches that forward going missing.
+    @Test("A turn alert suspends calibration until the turn is made")
+    func turnAlertSuspendsCalibration() async throws {
+        let legs: [RouteFixtures.Leg] = [(0, 600), (90, 100)]
+        var state = ActiveRideFeature.State(recordingState: .active)
+        state.navigation.activeRoute = try #require(NavigationRoute(
+            coordinates: RouteFixtures.path(legs: legs),
+            maneuvers: [Maneuver(
+                coordinate: RouteFixtures.point(along: legs, at: 600),
+                direction: .right,
+                name: nil,
+                distanceAlongRouteMeters: 600
+            )]
+        ))
+        let store = TestStore(initialState: state) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.bleCSCClient = .testValue
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        // 100 m out: the turn is announced.
+        await store.send(.locationUpdated(RouteFixtures.fix(
+            RouteFixtures.point(along: legs, at: 500), speed: 10, at: testDate, course: 0
+        )))
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+
+        // Round the corner: the turn is made.
+        await store.send(.locationUpdated(RouteFixtures.fix(
+            RouteFixtures.point(along: legs, at: 620), speed: 10, at: testDate.addingTimeInterval(12), course: 90
+        )))
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = false
+        }
+
+        await store.skipInFlightEffects(strict: false)
     }
 
     @Test("Suspension is forwarded on the transition, not on every radar update")

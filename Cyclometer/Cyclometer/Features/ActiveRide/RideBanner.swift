@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Brief, non-intrusive banner for transient ride notices — the BLE→GPS speed
-/// fallback (PRD §8.4) and wheel auto-calibration (PRD §8.9). Purely presentational —
-/// the owning feature's reducer is responsible for setting/clearing the text via a
-/// cancellable clock-sleep effect (see `SpeedFeature.fallBackToGPS`).
+/// Brief, non-intrusive banner for ride notices — the BLE→GPS speed fallback (PRD §8.4),
+/// wheel auto-calibration (PRD §8.9), and turns and off-route (PRD §8.6, #197). Purely
+/// presentational — the owning feature's reducer sets and clears it: a cancellable
+/// clock-sleep effect for the transient ones (see `SpeedFeature.fallBackToGPS`), rejoining
+/// the route for off-route.
 struct RideBanner: View {
     let text: String
     /// Defaults to the source-switch glyph, which is what the majority of these
@@ -37,6 +38,28 @@ struct RideBanner: View {
 
 #Preview("Wheel calibration") {
     RideBanner(text: WheelCalibration.bannerText(mm: 2145), icon: "ruler")
+        .padding(.top, Spacing.xl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.cyBgSecondary)
+}
+
+#Preview("Turn") {
+    RideBanner(
+        text: NavigationFeature.bannerText(for: Maneuver(
+            coordinate: RouteCoordinate(latitude: 0, longitude: 0, elevationMeters: nil),
+            direction: .left,
+            name: "Turn left onto County Road S",
+            distanceAlongRouteMeters: 0
+        )),
+        icon: "arrow.turn.up.left"
+    )
+    .padding(.top, Spacing.xl)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color.cyBgSecondary)
+}
+
+#Preview("Off route") {
+    RideBanner(text: NavigationFeature.offRouteBannerText, icon: "exclamationmark.triangle")
         .padding(.top, Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)

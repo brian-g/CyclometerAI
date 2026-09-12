@@ -109,8 +109,8 @@ struct ActiveRideFeature {
         var rideId: UUID = UUID()
         /// The route this ride follows, nil for a free ride (#196): chosen on S05.1 and written to
         /// the `Ride` by `.task`'s `createRide`, which is what S20's Previous Rides reads back.
-        /// A resumed ride leaves it nil — its `Ride` keeps the route, but reading it back needs
-        /// `routeId` on `RideSummaryUpdate`, which is #197's.
+        /// A resumed ride reads it back from its `Ride` (`State(resuming:)`, #197), so a ride
+        /// killed mid-route comes back still navigating.
         var route: RouteReference? = nil
         var recordingState: RideRecordingState = .idle
         var elapsedSeconds: Int = 0
@@ -215,6 +215,7 @@ struct ActiveRideFeature {
         @SharedReader(.appPreferences) var preferences
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
+        var navigation = NavigationFeature.State()
         var maxSpeedKPH: Double = 0
         var speedSampleCount: Int = 0
         var speedSampleSum: Double = 0
@@ -275,11 +276,13 @@ struct ActiveRideFeature {
         /// tap — the only kind motion is allowed to auto-resume (#102).
         var isAutoPaused: Bool = false
         /// Wheel auto-calibration stands down while the rider has something more
-        /// urgent to attend to, and whenever the ride isn't actively recording — a
-        /// paused ride still receives GPS fixes, and stationary scatter would poison
-        /// the window (PRD §8.9).
+        /// urgent to attend to — a radar alert, or a turn announced and not yet made
+        /// (#197) — and whenever the ride isn't actively recording: a paused ride still
+        /// receives GPS fixes, and stationary scatter would poison the window (PRD §8.9).
         var isCalibrationSuspended: Bool {
-            recordingState != .active || radarTargets.contains { $0.threatLevel != .allClear }
+            recordingState != .active
+                || radarTargets.contains { $0.threatLevel != .allClear }
+                || navigation.isTurnAlertActive
         }
         /// Reads through to `AppPreferences.preferredUnit` — mirrors
         /// `SettingsFeature.State.preferredUnit` so a Settings toggle propagates
@@ -314,6 +317,7 @@ struct ActiveRideFeature {
         case alertOrchestrator(AlertOrchestratorFeature.Action)
         case speed(SpeedFeature.Action)
         case calibration(WheelCalibrationFeature.Action)
+        case navigation(NavigationFeature.Action)
         case trackRecorder(TrackPointRecorderFeature.Action)
         case locationUpdated(LocationUpdate)
         case locationAuthorizationResult(PermissionState)
@@ -341,6 +345,19 @@ struct ActiveRideFeature {
         }
         Scope(state: \.trackRecorder, action: \.trackRecorder) {
             TrackPointRecorderFeature()
+        }
+        Scope(state: \.navigation, action: \.navigation) {
+            NavigationFeature()
+        }
+        // An `.onChange` sees only what its own base reducer changes — `_OnChangeReducer`
+        // compares state before and after that base and nothing else. Navigation flips
+        // `isCalibrationSuspended` inside this `Scope`, when a turn is announced and when it
+        // is made, where the `.onChange` on `Reduce` below would never see it (#197). So
+        // each base that can flip the value forwards it.
+        .onChange(of: \.isCalibrationSuspended) { _, isSuspended in
+            Reduce { _, _ in
+                .send(.calibration(.suspensionChanged(isSuspended)))
+            }
         }
         Reduce { state, action in
             switch action {
@@ -372,6 +389,9 @@ struct ActiveRideFeature {
                     isResuming ? .none : .run { [persistenceClient, route = state.route] _ in
                         try? await persistenceClient.createRide(rideId, startedAt, route)
                     },
+                    // Fresh or resumed alike — a resumed ride's route comes back through
+                    // `State(resuming:)` (#197).
+                    state.route.map { Effect<Action>.send(.navigation(.loadRoute($0.id))) } ?? .none,
                     .run { send in
                         for await _ in clock.timer(interval: .seconds(1)) {
                             await send(.elapsedTick)
@@ -821,7 +841,9 @@ struct ActiveRideFeature {
                 if kph > state.maxSpeedKPH { state.maxSpeedKPH = kph }
                 return .merge(
                     .send(.speed(.gpsSpeedReceived(update.speed))),
-                    .send(.calibration(.locationUpdated(update)))
+                    .send(.calibration(.locationUpdated(update))),
+                    // Only while a route is loaded: a free ride never involves navigation at all (#197).
+                    state.navigation.activeRoute == nil ? .none : .send(.navigation(.locationUpdated(update)))
                 )
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = status.isGranted
@@ -836,6 +858,8 @@ struct ActiveRideFeature {
                 }
                 return .none
             case .calibration:
+                return .none
+            case .navigation:
                 return .none
             case .alertOrchestrator:
                 return .none
@@ -960,7 +984,9 @@ struct ActiveRideFeature {
             zeroSpeedSeconds: state.zeroSpeedSeconds,
             speedSampleCount: state.speedSampleCount,
             hrSampleCount: state.hrSampleCount,
-            cadenceSampleCount: state.cadence.pedalingSampleCount
+            cadenceSampleCount: state.cadence.pedalingSampleCount,
+            route: state.route,
+            routeProgressMeters: state.navigation.progressMeters
         )
     }
 
@@ -1079,5 +1105,10 @@ extension ActiveRideFeature.State {
         }
         cadence.maxCadenceRPM = summary.maxCadenceRPM ?? 0
         vehiclePassCount = summary.vehiclePassCount ?? 0
+        // The route, and how far along it the ride had got (#197): `.task` reloads the route,
+        // and the first fix looks for the rider from that far in — so the leg of an
+        // out-and-back they were on is the one they come back on.
+        route = summary.route
+        navigation.progressMeters = summary.routeProgressMeters
     }
 }

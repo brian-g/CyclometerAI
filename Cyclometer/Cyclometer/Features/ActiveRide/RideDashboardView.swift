@@ -277,18 +277,57 @@ struct RideDashboardView: View {
         reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity)
     }
 
-    /// The banner slot holds exactly one notice. Two sources can be armed at once —
-    /// a speed-source switch and a wheel auto-calibration — so they are resolved to a
-    /// single value here rather than each rendering its own capsule and stacking.
-    /// Source switching wins: it changes what the rider is currently reading.
     private var activeBanner: (text: String, icon: String)? {
-        if let text = store.speed.sourceSwitchBanner { return (text, "shuffle") }
-        if let text = store.calibration.banner { return (text, "ruler") }
+        Self.banner(
+            turn: store.navigation.turnBanner,
+            sourceSwitch: store.speed.sourceSwitchBanner,
+            calibration: store.calibration.banner,
+            isOffRoute: store.navigation.isOffRoute
+        )
+    }
+
+    /// The banner slot holds exactly one notice. Four sources can be armed at once, so they
+    /// are resolved to a single value here rather than each rendering its own capsule and
+    /// stacking:
+    ///
+    /// 1. **A turn** (#197) — the one notice the rider has to act on within seconds.
+    /// 2. **A speed-source switch** — it changes what the rider is currently reading.
+    /// 3. **A wheel auto-calibration.**
+    /// 4. **Off route** — last because it is the only one that lasts. It stays up until the
+    ///    rider rejoins, so ranking it higher would hide any of the others for their whole
+    ///    four seconds.
+    ///
+    /// Takes the four inputs rather than the state, so the view keeps observing exactly those
+    /// four and the order can be tested without rendering a dashboard.
+    static func banner(
+        turn: Maneuver?,
+        sourceSwitch: String?,
+        calibration: String?,
+        isOffRoute: Bool
+    ) -> (text: String, icon: String)? {
+        if let turn { return (NavigationFeature.bannerText(for: turn), turn.direction.systemImage) }
+        if let sourceSwitch { return (sourceSwitch, "shuffle") }
+        if let calibration { return (calibration, "ruler") }
+        if isOffRoute { return (NavigationFeature.offRouteBannerText, "exclamationmark.triangle") }
         return nil
     }
 
     private func ringBell() {
         AudioServicesPlaySystemSound(1005) // 1005 = system "Tink"; route via AudioClient later
+    }
+}
+
+private extension Maneuver.Direction {
+    /// The turn's arrow, in SF Symbols' own navigation vocabulary.
+    var systemImage: String {
+        switch self {
+        case .left: "arrow.turn.up.left"
+        case .right: "arrow.turn.up.right"
+        case .slightLeft: "arrow.up.left"
+        case .slightRight: "arrow.up.right"
+        // A maneuver does not say which way to turn around, so neither does its arrow.
+        case .uTurn: "arrow.uturn.down"
+        }
     }
 }
 
