@@ -29,7 +29,8 @@
       "Bash(git fetch *)",
       "Bash(git merge *)",
       "Bash(xcodebuild build-for-testing *)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "mcp__sketch__run_code"
     ]
   },
   "spinnerTipsEnabled": false
