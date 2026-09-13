@@ -88,6 +88,9 @@ struct AppPreferencesTests {
         // other field, or a broken decodeIfPresent line for either would pass here.
         preferences.hasCompletedOnboarding = true
         preferences.hasCompletedWelcomeStep = true
+        // Added by #197.
+        preferences.turnLeadDistanceMeters = 150
+        preferences.isTurnByTurnEnabled = false
 
         let data = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
@@ -114,6 +117,10 @@ struct AppPreferencesTests {
         // itself against named locales; this pins that the fallback is the locale
         // default rather than a hardcoded case.
         #expect(decoded.preferredUnit == .system)
+        // Added by #197, likewise absent from an older document.
+        #expect(decoded.turnLeadDistanceMeters == AppPreferences.defaultTurnLeadDistanceMeters)
+        // Added by #197's review; turn-by-turn starts on.
+        #expect(decoded.isTurnByTurnEnabled)
     }
 
     /// #93 moved `SensorRole` out of `BLECSCClient` and added `.radar` / `.heartRate`.

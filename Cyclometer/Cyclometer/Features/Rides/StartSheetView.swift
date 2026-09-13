@@ -17,6 +17,14 @@ struct StartSheetView: View {
                     NavigationLink(state: store.routePicker) {
                         ActiveRouteRow(routeName: store.route?.name)
                     }
+                    // Only with a route: a free ride has nothing to follow (#197 review). Bound the
+                    // way Settings' toggles are, through an action rather than the shared state.
+                    if store.route != nil {
+                        Toggle("Turn-by-Turn", isOn: Binding(
+                            get: { store.isTurnByTurnEnabled },
+                            set: { _ in store.send(.turnByTurnToggled) }
+                        ))
+                    }
                 }
                 Section("Sensors") {
                     // Every paired sensor, connected or not — a rider setting up a ride

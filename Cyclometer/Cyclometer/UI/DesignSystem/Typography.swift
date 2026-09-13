@@ -32,4 +32,8 @@ extension Font {
     /// rather than Dynamic Type-scaled, because a map annotation is anchored to a point on
     /// the ground — growing it only makes neighbouring chevrons collide.
     static let cyMapAnnotation = Font.system(size: 20, weight: .bold)
+    /// 64 pt SF Pro Rounded semibold — the turn overlay's arrow (Sketch "Sxx - Route overlay")
+    static let cyTurnGlyph = Font.system(size: 64, weight: .semibold, design: .rounded)
+    /// 34 pt SF Pro regular — the turn overlay's instruction, under the arrow
+    static let cyTurnInstruction = Font.system(size: 34)
 }

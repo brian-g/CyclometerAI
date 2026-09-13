@@ -22,4 +22,11 @@ struct RideSummaryUpdate: Sendable, Equatable {
     var speedSampleCount: Int = 0
     var hrSampleCount: Int = 0
     var cadenceSampleCount: Int = 0
+    /// The route the ride was started on (#197), read back so a resumed ride is still following
+    /// it. `RidePersistenceActor.apply` never writes it: a ride's route is set once, by
+    /// `createRide`, and no checkpoint may change it.
+    var route: RouteReference? = nil
+    /// How far along its route the ride had got (#197) — where a resumed ride starts looking for
+    /// the rider. Nil for a free ride, and before the rider first reached the route.
+    var routeProgressMeters: Double? = nil
 }

@@ -52,6 +52,11 @@ final class Ride {
     // is then left dangling and this is all S15 has to show. Optional, so #186's
     // mandatory-attribute backfill trap doesn't apply to either field.
     var routeName: String?
+    // How far along its route the ride had got at the last checkpoint (#197), so a ride resumed
+    // after a kill looks for the rider from there rather than from the start — which, on an
+    // out-and-back, is the difference between the way out and the way back. Optional for the
+    // same reason as the two above.
+    var routeProgressMeters: Double?
     var gpxFileURL: URL?
 
     // MARK: - Weather (OQDM10)
@@ -156,7 +161,10 @@ extension Ride {
             zeroSpeedSeconds: zeroSpeedSeconds,
             speedSampleCount: speedSampleCount,
             hrSampleCount: hrSampleCount,
-            cadenceSampleCount: cadenceSampleCount
+            cadenceSampleCount: cadenceSampleCount,
+            // `createRide` writes the id and name together, so this is both or neither.
+            route: routeId.flatMap { id in routeName.map { RouteReference(id: id, name: $0) } },
+            routeProgressMeters: routeProgressMeters
         )
     }
 }

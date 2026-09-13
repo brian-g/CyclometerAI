@@ -106,6 +106,7 @@ Units should always be set baseline aligned with their corresponding values.
 - Opacity values must be tokenized, not inline literals. Tokens live in `DesignSystem/Opacity.swift`.
 - `watermark` (0.2) — background sparkline / watermark behind a dashboard hero number (e.g. W1 speed history).
 - `iconTile` (0.14) — tinted square behind a sensor row's SF Symbol (`SensorListRowView`).
+- `turnOverlay` (0.9) — the centred turn instruction's card (`TurnInstructionOverlay`, Sketch `Sxx - Route overlay`).
 
 ### Navigation Pattern
 The navigation in the app will follow standard iOS application guidelines patterns. In this case, the application to model is the Apple Music app. The bottom TabView should have the following 3 items:
@@ -286,6 +287,7 @@ the screen differs only in its title, the **Next** button, and the helper text, 
 
 - Group: Ride Setup
   - Route picker
+  - Turn-by-Turn toggle, directly under the route and only while one is chosen (#197 review). Remembered as the next ride's starting point (`AppPreferences.isTurnByTurnEnabled`), on until the rider first turns it off. Off, the route is drawn on the map but not followed: no turn instruction, no off-route banner
   - Bike picker (Phase 2) — selecting a bike selects its sensors, so the sensor list below follows this control, and the wheel circumference follows from whichever speed sensor that bike carries. See DataModel.md §3.9
 
 - Group: Sensors
@@ -437,6 +439,8 @@ The grid always occupies the full screen height between the Dynamic Island and t
 **Empty cells** Any unoccupied cells render as empty space with no content and no interactive behaviour.
 
 **Grabber** A minimal grabber-style strip sits between the Dynamic Island and the top grid row. This allows the user to minimize the ride and look at other aspects of the app while riding (typically while stopped).
+
+**Turn instructions** When turn-by-turn is on and a turn comes within the lead distance, the dashboard shows the instruction centred over everything else, per `Sxx - Route overlay` in Design.sketch (#197 review). It is a card, 136 pt square at its smallest, with a 16 pt continuous corner radius, filled `borderSubtle` with a 1 pt `borderStrong` border, and the whole card at `turnOverlay` opacity. Inside, the turn's arrow sits in `primaryDark` at 64 pt (SF Pro Rounded Semibold), with the instruction under it in `textPrimary` at 34 pt (SF Pro Regular). The instruction is the cue's own words when the route file gave some, and the direction otherwise. The card is solid rather than glass, so the dashboard stays readable through it. It stays up for four seconds and never takes a touch. Transient notices (source switch, calibration) and off-route keep the top banner slot.
 
 ### Factory Default — S05.4
 
