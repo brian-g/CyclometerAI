@@ -407,3 +407,36 @@ that the scope will probably have to increase for this issue."
 - Before following a prescription to the letter, check what it is *for*, and satisfy that.
 - Code that bypasses the architecture is not precedent. Before citing a sibling as "how we do it here", check
   that it is built the way the codebase's own rules say.
+
+---
+
+## A revert check can leave its mutation in the build (2026-09-12, #197 review)
+
+**What happened.** The review round's revert checks mutated `NavigationFeature.swift` in place, ran the guard
+tests, and restored the file with `cp`. The source diff hash matched afterwards, so I reported "restored
+byte-for-byte". The next simulator drive then followed the route with the Turn-by-Turn switch **off**, and the
+rider got the "Turn right" overlay. The code on disk was right. The installed app was not.
+- Disassembling `isFollowingRoute`'s getter from the installed dylib showed only `activeRoute != nil`, which is
+  revert check (i)'s mutation.
+- `touch`ing the file did not fix it. The next build logged `SwiftCompile … NavigationFeature.swift`, yet
+  `NavigationFeature.o` kept its old mtime and the linked getter was still the mutation.
+- A build into a fresh `-derivedDataPath` with `COMPILATION_CACHE_ENABLE_CACHING=NO` produced the right getter:
+  112 lines with a `preferences.getter` call, against 89 without.
+- How the mutation got stuck is not proven. Xcode had the project open on the same DerivedData (the "build
+  database is locked" failures were the tell), and that folder has a `CompilationCache.noindex`. A cache entry is
+  the likeliest suspect.
+
+**My own misstep inside it.** I called the stale build [Certain] from a listing of the getter's `bl` calls,
+before I had a known-good build to compare it with. When the rebuilt getter looked the same, I briefly suspected
+the opposite, that the bug was real. Only the isolated build settled it, by showing what the correct getter
+looks like.
+
+**Rules.**
+- "Source restored byte-for-byte" says nothing about build products, and `touch` is not a fix.
+- Run mutation checks in their own `-derivedDataPath`, with `COMPILATION_CACHE_ENABLE_CACHING=NO`, and throw it
+  away afterwards. Never share the DerivedData Xcode has open.
+- After a mutation run, build fresh the same way and verify from that product with `test-without-building`, so
+  the binary checked is the binary that runs.
+- When the running app contradicts green tests, check the binary before the code (`nm`, then
+  `objdump --disassemble-symbols=`). Judge the disassembly against a known-good build, not against what you
+  expect the source to compile to.

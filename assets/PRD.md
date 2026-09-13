@@ -488,7 +488,8 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 
 **Turn-by-Turn Navigation (MVP):**
 - Route overlaid on live map as a polyline in `brPrimary` color
-- Turn notifications: Warning audio tone + banner at configurable distance from turn
+- Turn notifications: audio tone (#198) + a centred turn instruction (UX.md §S05, "Turn instructions") at configurable distance from turn
+- A Turn-by-Turn toggle on S05.1, remembered from ride to ride, turns turn notifications and the off-route banner off; the route is then only drawn on the map (#197 review)
 - No recalculation in MVP; if the rider goes off-route, an "Off route" banner displays with no auto-reroute
 
 **Acceptance Criteria:**

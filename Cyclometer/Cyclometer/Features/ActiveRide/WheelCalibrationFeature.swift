@@ -48,7 +48,8 @@ struct WheelCalibrationFeature {
         @Shared(.appPreferences) var preferences
 
         /// Driven by `ActiveRideFeature` via `.suspensionChanged`: an L2/L3 radar
-        /// alert is up, or the ride isn't actively recording.
+        /// alert is up, a turn has been announced and not yet made (#197), or the
+        /// ride isn't actively recording.
         ///
         /// Defaults to `false` so it agrees with the parent's derived value for a
         /// state constructed mid-ride; nothing accumulates on this alone, since
@@ -191,7 +192,7 @@ struct WheelCalibrationFeature {
                 // radar-driven suspension is otherwise invisible in a collected log.
                 if state.isSuspended != isSuspended {
                     logger.notice(
-                        "calibration suspension gate \(isSuspended ? "shut — radar alert or ride not recording" : "open", privacy: .public)"
+                        "calibration suspension gate \(isSuspended ? "shut — radar alert, turn alert, or ride not recording" : "open", privacy: .public)"
                     )
                 }
                 state.isSuspended = isSuspended

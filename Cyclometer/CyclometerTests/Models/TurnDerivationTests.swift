@@ -7,37 +7,17 @@ struct TurnDerivationTests {
 
     // MARK: - Fixtures
     //
-    // Built in metres rather than as literal coordinates. At 36°N one ten-thousandth of a
-    // degree is 11.06 m of latitude but 8.95 m of longitude, so "turn 90 degrees right" is
-    // not something a hand-written lat/lon pair says legibly. Walking a path by bearing and
-    // distance inverts the tangent-plane arithmetic the code under test uses, which makes
-    // the fixture an independent second route to the same geometry.
+    // Built in metres rather than as literal coordinates — see `RouteFixtures`, where the walker
+    // moved when #197's navigation suites needed it too.
 
-    private static let origin = RouteCoordinate(latitude: 36.0, longitude: -80.0, elevationMeters: nil)
+    private static let origin = RouteFixtures.origin
 
     private func path(
         from start: RouteCoordinate = TurnDerivationTests.origin,
         legs: [(bearingDegrees: Double, meters: Double)],
         spacingMeters: Double = 5
     ) -> [RouteCoordinate] {
-        var points = [start]
-        var latitude = start.latitude
-        var longitude = start.longitude
-        for leg in legs {
-            let steps = max(1, Int((leg.meters / spacingMeters).rounded()))
-            let step = leg.meters / Double(steps)
-            for _ in 0..<steps {
-                let meanLatitude = latitude * .pi / 180
-                let sinLatitude = sin(meanLatitude)
-                let w = 1 - 0.006_694_379_990_141_316 * sinLatitude * sinLatitude
-                let meridional = 6_378_137.0 * (1 - 0.006_694_379_990_141_316) / (w * w.squareRoot())
-                let normal = 6_378_137.0 / w.squareRoot()
-                latitude += (step * cos(leg.bearingDegrees * .pi / 180) / meridional) * 180 / .pi
-                longitude += (step * sin(leg.bearingDegrees * .pi / 180) / (normal * cos(meanLatitude))) * 180 / .pi
-                points.append(RouteCoordinate(latitude: latitude, longitude: longitude, elevationMeters: nil))
-            }
-        }
-        return points
+        RouteFixtures.path(from: start, legs: legs, spacingMeters: spacingMeters)
     }
 
     /// A constant-radius turn, so "90 degrees drawn with a 30 m corner radius" is expressible.
@@ -328,6 +308,21 @@ struct TurnDerivationTests {
             cue(corner, name: "Turn right onto Elm", type: "Right"),
         ])
         #expect(found.count == 1)
+    }
+
+    @Test("a cue at a junction the route passes twice goes on the pass where the road turns")
+    func aCueOnARouteThatPassesTwiceGoesWhereTheRoadTurns() throws {
+        // North 600 m through a junction at 300 m, back south to it 4 m further east, then left
+        // (east) at it: both legs pass the junction, only the way back turns there (#197 review).
+        let route = path(legs: [(0, 600), (90, 4), (180, 300), (90, 300)])
+        // The cue sits on the way-out line — the leg that rides straight through — so nearest alone
+        // would put it there, 604 m early.
+        let junction = RouteFixtures.point(along: [(0, 600)], at: 300)
+        let found = maneuvers(route, [cue(junction, name: "Turn left")])
+        #expect(found.count == 1)
+        let turn = try #require(found.first)
+        #expect(abs(turn.distanceAlongRouteMeters - 904) < 10)
+        #expect(turn.direction == .left)
     }
 
     @Test("a cue that states no direction takes it from the polyline")

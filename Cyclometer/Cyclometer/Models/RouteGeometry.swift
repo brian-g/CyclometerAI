@@ -141,8 +141,18 @@ enum RouteGeometry {
         return samples
     }
 
-    /// Where `point` falls on the polyline: the nearest point on the nearest segment, how far
-    /// along the route that is, and how far off the route `point` itself lies.
+    /// Where a point falls on a polyline: the nearest point on the route itself, how far along
+    /// the route that is, how far off the route the point lies, and which segment it landed on.
+    struct Projection: Equatable, Sendable {
+        var coordinate: RouteCoordinate
+        var distanceAlongRouteMeters: Double
+        var offsetMeters: Double
+        /// `coordinates[segmentIndex]` to `coordinates[segmentIndex + 1]`. #197 keeps it so the
+        /// next fix's search is anchored where the last one matched.
+        var segmentIndex: Int
+    }
+
+    /// Where `point` falls on the polyline: the nearest point on the nearest segment.
     ///
     /// Perpendicular projection rather than nearest vertex. A cue snapped to the closest
     /// *vertex* is off by up to half the point spacing — ~5 m on a 10 m-sampled route, which
@@ -152,45 +162,162 @@ enum RouteGeometry {
         of point: RouteCoordinate,
         onto coordinates: [RouteCoordinate],
         cumulative: [Double]
-    ) -> (coordinate: RouteCoordinate, distanceAlongRouteMeters: Double, offsetMeters: Double)? {
-        guard coordinates.count > 1, cumulative.count == coordinates.count else { return nil }
+    ) -> Projection? {
+        // `min(by:)` keeps the first of equals, so a tie still goes to the earlier segment.
+        candidates(of: point, onto: coordinates, cumulative: cumulative)
+            .min { $0.offsetMeters < $1.offsetMeters }
+    }
 
-        var best: (coordinate: RouteCoordinate, distanceAlongRouteMeters: Double, offsetMeters: Double)?
-        for index in 0..<(coordinates.count - 1) {
-            let start = coordinates[index]
-            let end = coordinates[index + 1]
+    /// `point` projected onto every segment overlapping `alongRoute` that runs with `heading` — the
+    /// candidates a caller with more to go on than distance chooses between. #197's tracking ranks
+    /// them by how far along the route each would move the rider, as well as by how far off it.
+    ///
+    /// `alongRoute` confines the search to the segments overlapping that stretch of the route.
+    /// Nearest over the whole polyline is right for a cue, which has no prior position to go on,
+    /// and wrong for a moving rider: the two legs of an out-and-back lie on the same road, so a
+    /// rider still riding out is as near the way back — nearer, on the right of a two-way road —
+    /// and snapping there would announce the return leg's turns (#197). `nil` searches every
+    /// segment.
+    ///
+    /// `heading` skips segments running against it by more than a right angle. A window cannot
+    /// tell the two legs of an out-and-back apart within half its width of the turnaround, where
+    /// the way back falls inside it; the rider's course can, anywhere, because the legs run
+    /// opposite ways. `nil` ignores direction, which is what a cue or a stationary rider needs.
+    static func candidates(
+        of point: RouteCoordinate,
+        onto coordinates: [RouteCoordinate],
+        cumulative: [Double],
+        alongRoute window: ClosedRange<Double>? = nil,
+        heading: Double? = nil
+    ) -> [Projection] {
+        guard coordinates.count > 1, cumulative.count == coordinates.count else { return [] }
+        let segmentCount = coordinates.count - 1
 
-            // One frame for both vectors, anchored at the segment start. Taking the segment
-            // from `tangentPlaneOffset(start, end)` and the cue from `(start, point)` would
-            // flatten the ellipsoid at two different mean latitudes and quietly leave the dot
-            // product non-orthogonal.
-            let segment = tangentPlaneOffset(from: start, to: end)
-            let toPoint = tangentPlaneOffset(from: start, to: point)
-
-            let lengthSquared = segment.north * segment.north + segment.east * segment.east
-            // A zero-length segment gives 0/0. NaN loses every comparison, so left unguarded
-            // it would neither win nor lose the argmin — and as segment 0 it would seed `best`
-            // and then never be displaced.
-            let t = lengthSquared <= 0
-                ? 0
-                : min(max((toPoint.north * segment.north + toPoint.east * segment.east) / lengthSquared, 0), 1)
-
-            let offsetNorth = toPoint.north - segment.north * t
-            let offsetEast = toPoint.east - segment.east * t
-            let offset = (offsetNorth * offsetNorth + offsetEast * offsetEast).squareRoot()
-            guard best == nil || offset < best!.offsetMeters else { continue }
-
-            best = (
-                coordinate: RouteCoordinate(
-                    latitude: start.latitude + (end.latitude - start.latitude) * t,
-                    longitude: start.longitude + (end.longitude - start.longitude) * t,
-                    elevationMeters: nil
-                ),
-                distanceAlongRouteMeters: cumulative[index] + lengthSquared.squareRoot() * t,
-                offsetMeters: offset
-            )
+        var segments = 0..<segmentCount
+        if let window {
+            // Prefix sums never decrease, so both ends of the window are a binary search away —
+            // a window is a few hundred metres of a route that can run to tens of thousands of
+            // points.
+            let first = partitioningIndex(in: 0..<segmentCount) { cumulative[$0 + 1] >= window.lowerBound }
+            let pastLast = partitioningIndex(in: 0..<segmentCount) { cumulative[$0] > window.upperBound }
+            guard first < pastLast else { return [] }
+            segments = first..<pastLast
         }
-        return best
+
+        let direction = unitVector(heading)
+        return segments.compactMap {
+            segmentProjection(of: point, segment: $0, coordinates: coordinates, cumulative: cumulative, direction: direction)
+        }
+    }
+
+    /// Every separate stretch of the polyline, at or beyond `floor` metres in, that passes within
+    /// `tolerance` of `point` — each as its nearest point, in route order.
+    ///
+    /// A route that goes by the same place twice has two answers to "where is this on the route",
+    /// and which is right depends on who is asking. #197's navigation, placing a rider with no match
+    /// to window around, wants the first pass after where they are known to have got to
+    /// (`limit: 1`) — the nearer of two is decided by a metre of GPS scatter. #192's cue placement
+    /// wants every pass, to put a cue on the one where the road turns the way the cue says.
+    ///
+    /// A stretch ends at the first segment that no longer comes within `tolerance`; `heading` works
+    /// as it does for `candidates`, so a segment running against it neither starts nor continues
+    /// one. O(n) from the floor — `limit` stops at the first stretches found.
+    static func passes(
+        of point: RouteCoordinate,
+        onto coordinates: [RouteCoordinate],
+        cumulative: [Double],
+        fromMeters floor: Double = 0,
+        within tolerance: Double,
+        heading: Double? = nil,
+        limit: Int = .max
+    ) -> [Projection] {
+        guard coordinates.count > 1, cumulative.count == coordinates.count, limit > 0 else { return [] }
+        let segmentCount = coordinates.count - 1
+        let first = partitioningIndex(in: 0..<segmentCount) { cumulative[$0 + 1] >= floor }
+
+        let direction = unitVector(heading)
+        var passes: [Projection] = []
+        var nearest: Projection?
+        for index in first..<segmentCount {
+            guard let candidate = segmentProjection(
+                of: point, segment: index, coordinates: coordinates, cumulative: cumulative, direction: direction
+            ), candidate.offsetMeters <= tolerance
+            else {
+                // Whatever stretch was in progress has ended.
+                if let pass = nearest {
+                    passes.append(pass)
+                    nearest = nil
+                    if passes.count == limit { return passes }
+                }
+                continue
+            }
+            if nearest == nil || candidate.offsetMeters < nearest!.offsetMeters { nearest = candidate }
+        }
+        if let pass = nearest { passes.append(pass) }
+        return passes
+    }
+
+    /// A compass heading as a unit vector in the (north, east) frame `tangentPlaneOffset` works in.
+    private static func unitVector(_ heading: Double?) -> (north: Double, east: Double)? {
+        heading.map { (north: cos($0 * .pi / 180), east: sin($0 * .pi / 180)) }
+    }
+
+    /// `point` projected onto one segment — the arithmetic both searches above share. Nil when
+    /// the segment runs against `direction` by more than a right angle.
+    private static func segmentProjection(
+        of point: RouteCoordinate,
+        segment index: Int,
+        coordinates: [RouteCoordinate],
+        cumulative: [Double],
+        direction: (north: Double, east: Double)?
+    ) -> Projection? {
+        let start = coordinates[index]
+        let end = coordinates[index + 1]
+
+        // One frame for both vectors, anchored at the segment start. Taking the segment
+        // from `tangentPlaneOffset(start, end)` and the cue from `(start, point)` would
+        // flatten the ellipsoid at two different mean latitudes and quietly leave the dot
+        // product non-orthogonal.
+        let segment = tangentPlaneOffset(from: start, to: end)
+        // A dot product rather than a difference of bearings: there is no wraparound at north to
+        // get wrong, and a zero-length segment — which has no direction — scores zero and is kept.
+        if let direction, segment.north * direction.north + segment.east * direction.east < 0 {
+            return nil
+        }
+        let toPoint = tangentPlaneOffset(from: start, to: point)
+
+        let lengthSquared = segment.north * segment.north + segment.east * segment.east
+        // A zero-length segment gives 0/0. NaN loses every comparison, so left unguarded
+        // it would neither win nor lose the argmin — and as segment 0 it would seed `best`
+        // and then never be displaced.
+        let t = lengthSquared <= 0
+            ? 0
+            : min(max((toPoint.north * segment.north + toPoint.east * segment.east) / lengthSquared, 0), 1)
+
+        let offsetNorth = toPoint.north - segment.north * t
+        let offsetEast = toPoint.east - segment.east * t
+        return Projection(
+            coordinate: RouteCoordinate(
+                latitude: start.latitude + (end.latitude - start.latitude) * t,
+                longitude: start.longitude + (end.longitude - start.longitude) * t,
+                elevationMeters: nil
+            ),
+            distanceAlongRouteMeters: cumulative[index] + lengthSquared.squareRoot() * t,
+            offsetMeters: (offsetNorth * offsetNorth + offsetEast * offsetEast).squareRoot(),
+            segmentIndex: index
+        )
+    }
+
+    /// The first index in `range` at which `isPast` holds, for a predicate that keeps holding
+    /// from there on — `range.upperBound` when it never does.
+    private static func partitioningIndex(in range: Range<Int>, where isPast: (Int) -> Bool) -> Int {
+        var low = range.lowerBound
+        var high = range.upperBound
+        while low < high {
+            let middle = low + (high - low) / 2
+            if isPast(middle) { high = middle } else { low = middle + 1 }
+        }
+        return low
     }
 
     /// Cumulative ascent and descent, or `nil` when no point in the route carries an

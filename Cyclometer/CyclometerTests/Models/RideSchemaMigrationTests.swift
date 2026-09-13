@@ -154,6 +154,7 @@ struct RideSchemaMigrationTests {
             // than to a zero UUID or an empty string.
             #expect(legacyRide.routeId == nil)
             #expect(legacyRide.routeName == nil)
+            #expect(legacyRide.routeProgressMeters == nil)
 
             context.insert(Route(imported: ImportedRoute(
                 name: "Hanging Rock",

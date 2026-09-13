@@ -185,5 +185,7 @@ actor RidePersistenceActor {
         ride.speedSampleCount = update.speedSampleCount
         ride.hrSampleCount = update.hrSampleCount
         ride.cadenceSampleCount = update.cadenceSampleCount
+        // `update.route` is deliberately not written: the route is `createRide`'s alone.
+        ride.routeProgressMeters = update.routeProgressMeters
     }
 }
