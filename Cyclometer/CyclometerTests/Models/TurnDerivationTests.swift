@@ -310,6 +310,21 @@ struct TurnDerivationTests {
         #expect(found.count == 1)
     }
 
+    @Test("a cue at a junction the route passes twice goes on the pass where the road turns")
+    func aCueOnARouteThatPassesTwiceGoesWhereTheRoadTurns() throws {
+        // North 600 m through a junction at 300 m, back south to it 4 m further east, then left
+        // (east) at it: both legs pass the junction, only the way back turns there (#197 review).
+        let route = path(legs: [(0, 600), (90, 4), (180, 300), (90, 300)])
+        // The cue sits on the way-out line — the leg that rides straight through — so nearest alone
+        // would put it there, 604 m early.
+        let junction = RouteFixtures.point(along: [(0, 600)], at: 300)
+        let found = maneuvers(route, [cue(junction, name: "Turn left")])
+        #expect(found.count == 1)
+        let turn = try #require(found.first)
+        #expect(abs(turn.distanceAlongRouteMeters - 904) < 10)
+        #expect(turn.direction == .left)
+    }
+
     @Test("a cue that states no direction takes it from the polyline")
     func unstatedCuesFallBackToGeometry() throws {
         let route = path(legs: [(0, 100), (270, 100)])

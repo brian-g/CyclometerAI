@@ -90,6 +90,7 @@ struct AppPreferencesTests {
         preferences.hasCompletedWelcomeStep = true
         // Added by #197.
         preferences.turnLeadDistanceMeters = 150
+        preferences.isTurnByTurnEnabled = false
 
         let data = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
@@ -118,6 +119,8 @@ struct AppPreferencesTests {
         #expect(decoded.preferredUnit == .system)
         // Added by #197, likewise absent from an older document.
         #expect(decoded.turnLeadDistanceMeters == AppPreferences.defaultTurnLeadDistanceMeters)
+        // Added by #197's review; turn-by-turn starts on.
+        #expect(decoded.isTurnByTurnEnabled)
     }
 
     /// #93 moved `SensorRole` out of `BLECSCClient` and added `.radar` / `.heartRate`.

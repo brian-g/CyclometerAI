@@ -63,6 +63,11 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// constant because PRD calls it configurable, though no S12 row sets it yet (#197).
     var turnLeadDistanceMeters: Double = Self.defaultTurnLeadDistanceMeters
 
+    /// Whether a ride on a route is followed turn by turn (#197 review): the turn overlay and the
+    /// off-route banner. Chosen on S05.1 for each ride and remembered as the next ride's starting
+    /// point — on until the rider first turns it off. Off, the route is only drawn on the map.
+    var isTurnByTurnEnabled: Bool = true
+
     /// Whether the rider has finished onboarding (S01→S02) at least once (#105). Gates
     /// `AppFeature`'s launch presentation — once true, onboarding never reappears, even
     /// if a permission it once checked is later revoked.
@@ -145,6 +150,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
         turnLeadDistanceMeters = try container.decodeIfPresent(
             Double.self, forKey: .turnLeadDistanceMeters
         ) ?? Self.defaultTurnLeadDistanceMeters
+        isTurnByTurnEnabled = try container.decodeIfPresent(
+            Bool.self, forKey: .isTurnByTurnEnabled
+        ) ?? true
     }
 }
 

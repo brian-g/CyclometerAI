@@ -15,4 +15,7 @@ enum Opacity {
     /// Drop shadow under a `RangeSlider` thumb, matching the lift a system `Slider` gives its
     /// own so the two read as the same control.
     static let thumbShadow: Double = 0.25
+    /// The centred turn overlay's card (Sketch "Sxx - Route overlay") — solid, not a material, and
+    /// just short of opaque so the dashboard stays visible under it.
+    static let turnOverlay: Double = 0.9
 }

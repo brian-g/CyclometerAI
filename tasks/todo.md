@@ -124,3 +124,53 @@ shape as the #210 lesson: a green revert check proves the fixture, not just the 
 - #201: GPX from disk through to an announced turn.
 - #202 has a comment asking for `Ride.routeProgressMeters` and the NavigationFeature §4/§10 entries.
 
+---
+
+# Review round — PR #232 (Brian's two comments + `/code-review high` findings)
+
+Plan: `~/.claude/plans/immutable-sauteeing-eich.md` (overwritten for this round).
+
+- [x] **Turn overlay** (`RideBanner.swift:46`): `TurnInstructionOverlay` per Sketch "Sxx - Route overlay", centred; turn out of
+      the banner slot; renames; tokens; snapshots + CI skip line. 5 references recorded and opened: translucent card with
+      the dashboard showing through, green arrow, 34 pt text; dark uses dark tokens; long cue wraps to two lines
+- [x] **Turn-by-turn toggle** (`tasks/todo.md:1`): `AppPreferences.isTurnByTurnEnabled`; S05.1 row under Route when a route
+      is chosen; `isFollowingRoute` gates matching — off = no overlay, no off-route
+- [x] **F1 loops**: `isLoop`, `lapStartMeters`, finish needs half a lap, wrap round the end
+- [x] **F2 stationary jumps**: tracking ranks `offset + 0.1·|Δalong|`; `RouteGeometry.candidates`
+- [x] **F3 cue placement**: `RouteGeometry.passes`; cue goes on the pass whose turn agrees with it
+- [x] Specs: UX.md §S05 overlay, §S05.1 toggle, Opacity token; DataModel §3.6; PRD §8.6
+- [x] Targeted run: 277 passed; only the 5 new snapshots failed, on first record
+- [x] Full run 1: exit 0, **1,078 passed, 0 failed** = 1,060 + 19 new − 1 removed (`turnOutranksEverything`); every new test
+      named. The line count read 1,077: `WheelCalibrationFeatureTests/stationaryFixPauses()` passed, but its log line lost
+      its `Test case '` prefix to interleaved output from the parallel test clones (log line 4159), so the regex missed it
+- [x] Revert checks, each turning exactly its guards red, source restored byte-for-byte:
+      (f) continuity weight 0 → `aStoppedRiderIsNotMovedOntoALaterPass`, `standingStillAtAShortLoopsStartNeverFinishesIt`;
+      (g) finish without the half-lap rule and (h) no wrap → `aLoopJoinedNearItsEndCarriesOnRound`,
+      `rejoiningALoopAtItsStartDoesNotFinishIt`; (i) no turn-by-turn gate → `turnByTurnOffIgnoresFixes`,
+      `turnByTurnOffKeepsFixesFromNavigation`; (j) no cue disambiguation → `aCueOnARouteThatPassesTwiceGoesWhereTheRoadTurns`.
+      (f) and (i) first died on "build database is locked" — Xcode's own build on the same DerivedData — and were rerun
+- [x] Simulator drives, switch on and switch off, each from a clean install:
+      - Attempt 1 resumed round 1's unfinished ride, so there was no Start ride button. `drive.sh` now uninstalls first.
+      - Attempt 2 was void twice over. The Mac slept, so each UI test ran about 4 h and the location feed jumped on wake.
+        And the app was a **stale build**: the installed `isFollowingRoute` getter disassembles to revert check (i)'s
+        mutation, `activeRoute != nil` only. With the switch off, the rider got the "Turn right" overlay.
+      - Attempt 3, after `touch`: the build logged the recompile, but still linked the mutated getter. Its "on" half
+        was sound: the turn was announced 96.7 m out, calibration paused for 11 s, and the route completed. The "off"
+        half was stopped.
+      - The source is correct. A fresh build in `.build/review/dd`, with compilation caching off, has the right getter:
+        112 lines with a `preferences.getter` call, where the stale one is 89 lines without. The drives now run
+        `test-without-building` from that build (`drive2.sh`). Lesson and memory written.
+      - **Attempt 4, from that build.**
+        - Switch on: the turn was announced 97.9 m out (lead 100), calibration paused for 11 s, and the route completed.
+          At ride time 01:12 the centred "Turn right" card is on screen, with the dashboard readable around it.
+        - Switch off: "route loaded" and nothing else, and no card at 01:12.
+        - The only fault in either is onboarding's `ifLet` warning (`AppFeature.swift:294`), which predates this branch.
+        - The throwaway tests are deleted from the tree; copies are kept in `.build/review/simdrive/`.
+- [x] Full run 2, after the throwaway tests were deleted, from the verified build (`.build/review/dd`, caching off):
+      - The result bundle reports **1,078 / 1,078 passed**, 0 failed, 0 skipped, and the host app's `isFollowingRoute`
+        is the correct getter.
+      - The cases are exactly run 1's, plus `stationaryFixPauses()`, whose line run 1's log lost.
+      - The only warnings from changed files are 21 `fixedNow` isolation warnings in `ActiveRideFeatureTests`.
+        `git blame` puts every one of them on main (`be13d330`), none on this branch.
+- [ ] Push; reply on both threads; update PR description
+

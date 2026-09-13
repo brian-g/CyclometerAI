@@ -512,6 +512,10 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// #197. How far before a turn NavigationFeature announces it — PRD §8.6's
     /// "configurable distance from turn". No S12 row sets it yet.
     var turnLeadDistanceMeters: Double = defaultTurnLeadDistanceMeters   // 100 m
+    /// #197 review. Whether a ride on a route is followed turn by turn — the centred turn
+    /// overlay and the off-route banner. Chosen on S05.1 per ride, remembered as the next ride's
+    /// starting point; on by default. Off, the route is only drawn on the map.
+    var isTurnByTurnEnabled: Bool = true
 
     func pairedSensor(for role: SensorRole) -> PairedSensor?
     /// CSC-role records only (#93). The collection also holds radar and HR records,

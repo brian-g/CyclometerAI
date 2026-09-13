@@ -40,6 +40,7 @@ struct NavigationFeatureTests {
         route: NavigationRoute?,
         progressMeters: Double? = nil,
         leadMeters: Double = AppPreferences.defaultTurnLeadDistanceMeters,
+        turnByTurn: Bool = true,
         exhaustive: Bool = false,
         clock: TestClock<Duration> = TestClock(),
         persistenceClient: PersistenceClient = .testValue
@@ -49,7 +50,10 @@ struct NavigationFeatureTests {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.turnLeadDistanceMeters = leadMeters }
+            $preferences.withLock {
+                $0.turnLeadDistanceMeters = leadMeters
+                $0.isTurnByTurnEnabled = turnByTurn
+            }
             var state = NavigationFeature.State()
             state.activeRoute = route
             state.progressMeters = progressMeters
@@ -180,28 +184,28 @@ struct NavigationFeatureTests {
         await store.skipInFlightEffects(strict: false)
     }
 
-    @Test("the turn banner shows the turn and dismisses itself; the alert holds until the turn")
-    func turnBannerDismissesItself() async throws {
+    @Test("the turn instruction shows the turn and dismisses itself; the alert holds until the turn")
+    func turnInstructionDismissesItself() async throws {
         let legs: [RouteFixtures.Leg] = [(0, 600), (90, 100)]
         let clock = TestClock()
         let store = makeStore(route: try route(legs, turns: [(600, .right)]), clock: clock)
 
         await store.send(.locationUpdated(fix(legs, at: 500, second: 0)))
-        #expect(store.state.turnBanner?.direction == .right)
+        #expect(store.state.turnInstruction?.direction == .right)
 
-        await clock.advance(by: NavigationFeature.bannerDismissDelay)
-        await store.receive(\.bannerDismissed) {
-            $0.turnBanner = nil
+        await clock.advance(by: NavigationFeature.instructionDuration)
+        await store.receive(\.instructionDismissed) {
+            $0.turnInstruction = nil
         }
         #expect(store.state.isTurnAlertActive)
     }
 
-    @Test("the banner reads the cue's own words, or the direction when there are none")
-    func bannerText() {
+    @Test("the instruction reads the cue's own words, or the direction when there are none")
+    func instructionText() {
         let named = Maneuver(
             coordinate: RouteFixtures.origin, direction: .left, name: "Turn left onto Elm St", distanceAlongRouteMeters: 0
         )
-        #expect(NavigationFeature.bannerText(for: named) == "Turn left onto Elm St")
+        #expect(NavigationFeature.instructionText(for: named) == "Turn left onto Elm St")
 
         let expected: [(Maneuver.Direction, String)] = [
             (.left, "Turn left"), (.right, "Turn right"),
@@ -212,7 +216,7 @@ struct NavigationFeatureTests {
         for (direction, text) in expected {
             // Whitespace is no name at all.
             let bare = Maneuver(coordinate: RouteFixtures.origin, direction: direction, name: "  ", distanceAlongRouteMeters: 0)
-            #expect(NavigationFeature.bannerText(for: bare) == text)
+            #expect(NavigationFeature.instructionText(for: bare) == text)
         }
     }
 
@@ -331,13 +335,13 @@ struct NavigationFeatureTests {
             await store.send(.locationUpdated(fix(straight, at: 600, lateral: 60, second: Double(miss))))
         }
         #expect(store.state.isOffRoute)
-        #expect(store.state.turnBanner == nil)
+        #expect(store.state.turnInstruction == nil)
         #expect(!store.state.isTurnAlertActive)
 
         await store.send(.locationUpdated(fix(straight, at: 650, second: 6)))
         #expect(!store.state.isOffRoute)
         #expect(store.state.announcedManeuverIndex == 0)
-        #expect(store.state.turnBanner?.direction == .left)
+        #expect(store.state.turnInstruction?.direction == .left)
         await store.skipInFlightEffects(strict: false)
     }
 
@@ -352,7 +356,7 @@ struct NavigationFeatureTests {
         #expect(store.state.isOffRoute)
         #expect(store.state.snappedIndex == nil)
         #expect(store.state.announcedManeuverIndex == nil)
-        #expect(store.state.turnBanner == nil)
+        #expect(store.state.turnInstruction == nil)
     }
 
     @Test("rejoining further on skips the turns in between without announcing them")
@@ -470,5 +474,167 @@ struct NavigationFeatureTests {
         await store.send(.locationUpdated(fix(outAndBack, at: 1_350, lateral: 3, speed: 8, second: 0)))
         #expect(abs((store.state.progressMeters ?? -1) - 1_350) < 2)
         #expect(store.state.nextManeuverIndex == 1)
+    }
+
+    // MARK: - Turn-by-turn off
+
+    @Test("with turn-by-turn off the route is not followed: no match, no turn, no off-route")
+    func turnByTurnOffIgnoresFixes() async throws {
+        let store = makeStore(route: try route(straight, turns: [(150, .left)]), turnByTurn: false, exhaustive: true)
+        await store.send(.locationUpdated(fix(straight, at: 100, second: 0)))
+        for second in 1...NavigationFeature.offRouteConsecutiveFixes {
+            await store.send(.locationUpdated(fix(straight, at: 100, lateral: 200, second: Double(second))))
+        }
+    }
+
+    // MARK: - Standing still
+
+    @Test("a rider stopped short of a turnaround stays there, however the scatter falls")
+    func aStoppedRiderIsNotMovedOntoALaterPass() async throws {
+        let store = makeStore(route: try outAndBackRoute())
+        var second = 0.0
+        for meters in stride(from: 0.0, through: 980, by: 10) {
+            await store.send(.locationUpdated(fix(outAndBack, at: meters, second: second)))
+            second += 1
+        }
+        // Stopped 20 m short of the turnaround — no speed, so no course — with every fix scattered
+        // 3 m east: 1 m from the way back, which passes the same spot 44 m further along the route.
+        for _ in 1...10 {
+            await store.send(.locationUpdated(
+                fix(outAndBack, at: 980, lateral: 3, speed: 0, second: second, course: -1)
+            ))
+            second += 1
+            #expect(abs((store.state.progressMeters ?? -1) - 980) < 2, "stopped at 980 m")
+            #expect(store.state.nextManeuverIndex == 0, "the U-turn is still ahead")
+        }
+        // Riding on out to the turnaround is still riding the route.
+        for meters in stride(from: 990.0, through: 1_000, by: 10) {
+            await store.send(.locationUpdated(fix(outAndBack, at: meters, second: second)))
+            second += 1
+            #expect(!store.state.isOffRoute, "riding on at \(meters) m")
+            #expect(store.state.nextManeuverIndex == 0, "riding on at \(meters) m")
+        }
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    // MARK: - Loops
+
+    /// 2 km round a square: 500 m north, east, south and west, back to the start. Three turns, all
+    /// right; the corner that closes the loop is also where it starts.
+    private let loop: [RouteFixtures.Leg] = [(0, 500), (90, 500), (180, 500), (270, 500)]
+
+    private func loopRoute() throws -> NavigationRoute {
+        try route(loop, turns: [(500, .right), (1_000, .right), (1_500, .right)])
+    }
+
+    @Test("a loop joined near its end is ridden round, and finished only after the lap")
+    func aLoopJoinedNearItsEndCarriesOnRound() async throws {
+        let navigation = try loopRoute()
+        try #require(navigation.isLoop)
+        let store = makeStore(route: navigation)
+        var second = 0.0
+        // Joined 200 m before the end, riding the last leg the loop's way.
+        for meters in stride(from: 1_800.0, through: 1_990, by: 10) {
+            await store.send(.locationUpdated(fix(loop, at: meters, second: second)))
+            second += 1
+            #expect(!store.state.isRouteComplete, "on the last leg at \(meters) m")
+        }
+        // On past the start and round the whole loop.
+        var announced: [Int] = []
+        for meters in stride(from: 0.0, through: 1_980, by: 10) {
+            let before = store.state.announcedManeuverIndex
+            await store.send(.locationUpdated(fix(loop, at: meters, second: second)))
+            second += 1
+            if let index = store.state.announcedManeuverIndex, index != before { announced.append(index) }
+            if meters >= 20, meters < 1_970 {
+                #expect(abs((store.state.progressMeters ?? -1) - meters) < 2, "round the loop at \(meters) m")
+                #expect(!store.state.isRouteComplete, "round the loop at \(meters) m")
+            }
+        }
+        #expect(announced == [0, 1, 2])
+        #expect(store.state.isRouteComplete)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("coming back to a loop's start after leaving it does not finish the loop")
+    func rejoiningALoopAtItsStartDoesNotFinishIt() async throws {
+        let store = makeStore(route: try loopRoute())
+        var second = 0.0
+        for meters in stride(from: 0.0, through: 200, by: 10) {
+            await store.send(.locationUpdated(fix(loop, at: meters, second: second)))
+            second += 1
+        }
+        // Off to the west, well clear of the loop, until off route is raised...
+        for _ in 1...NavigationFeature.offRouteConsecutiveFixes {
+            await store.send(.locationUpdated(fix(loop, at: 200, lateral: -100, second: second)))
+            second += 1
+        }
+        try #require(store.state.isOffRoute)
+        // ...then back at the start, and off round the loop again.
+        for meters in stride(from: 0.0, through: 450, by: 10) {
+            await store.send(.locationUpdated(fix(loop, at: meters, second: second)))
+            second += 1
+            #expect(!store.state.isRouteComplete, "at \(meters) m after coming back")
+        }
+        #expect(abs((store.state.progressMeters ?? -1) - 450) < 2)
+        #expect(store.state.announcedManeuverIndex == 0)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("a loop ridden from its start is finished at its end")
+    func aLoopRiddenFromItsStartFinishes() async throws {
+        let store = makeStore(route: try loopRoute())
+        var second = 0.0
+        for meters in stride(from: 0.0, through: 1_990, by: 10) {
+            await store.send(.locationUpdated(fix(loop, at: meters, second: second)))
+            second += 1
+        }
+        #expect(store.state.isRouteComplete)
+        #expect(store.state.nextManeuverIndex == 3)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("standing still at the start of a short loop never finishes it")
+    func standingStillAtAShortLoopsStartNeverFinishesIt() async throws {
+        // 400 m round, so the whole loop, closing corner and all, sits inside one forward window.
+        let small: [RouteFixtures.Leg] = [(0, 100), (90, 100), (180, 100), (270, 100)]
+        let store = makeStore(route: try route(small, turns: []))
+        await store.send(.locationUpdated(fix(small, at: 0, speed: 0, second: 0, course: -1)))
+        // Scattered 2 m south-east of the start: nearer the leg that closes the loop than the one
+        // that opens it.
+        let scattered = RouteFixtures.offset(
+            RouteFixtures.offset(RouteFixtures.origin, bearingDegrees: 90, meters: 2),
+            bearingDegrees: 180, meters: 2
+        )
+        for second in 1...20 {
+            await store.send(.locationUpdated(
+                RouteFixtures.fix(scattered, speed: 0, at: Self.start.addingTimeInterval(Double(second)))
+            ))
+            #expect(!store.state.isRouteComplete, "still at the start after \(second) s")
+            #expect((store.state.progressMeters ?? .infinity) < 10, "still at the start after \(second) s")
+        }
+    }
+
+    @Test("a ride resumed late in a loop finishes it at the end")
+    func aResumedLoopFinishesAtItsEnd() async throws {
+        let store = makeStore(route: nil, progressMeters: 1_850)
+        await store.send(.routeLoaded(try loopRoute()))
+        var second = 0.0
+        for meters in stride(from: 1_860.0, through: 1_990, by: 10) {
+            await store.send(.locationUpdated(fix(loop, at: meters, second: second)))
+            second += 1
+        }
+        #expect(store.state.isRouteComplete)
+    }
+
+    @Test("joining a route that is not a loop near its end still finishes it there")
+    func aLateJoinerFinishesAPointToPointRoute() async throws {
+        let store = makeStore(route: try route(straight, turns: [(1_000, .left)]))
+        var second = 0.0
+        for meters in stride(from: 2_800.0, through: 2_990, by: 10) {
+            await store.send(.locationUpdated(fix(straight, at: meters, second: second)))
+            second += 1
+        }
+        #expect(store.state.isRouteComplete)
     }
 }

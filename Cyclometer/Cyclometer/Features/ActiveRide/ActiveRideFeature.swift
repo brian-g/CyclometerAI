@@ -842,8 +842,9 @@ struct ActiveRideFeature {
                 return .merge(
                     .send(.speed(.gpsSpeedReceived(update.speed))),
                     .send(.calibration(.locationUpdated(update))),
-                    // Only while a route is loaded: a free ride never involves navigation at all (#197).
-                    state.navigation.activeRoute == nil ? .none : .send(.navigation(.locationUpdated(update)))
+                    // Only while a route is being followed: a free ride, and a ride with turn-by-turn
+                    // off, never involve navigation at all (#197).
+                    state.navigation.isFollowingRoute ? .send(.navigation(.locationUpdated(update))) : .none
                 )
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = status.isGranted

@@ -424,18 +424,37 @@ struct RouteGeometryProjectionTests {
     /// spot 502 m in.
     private var rider: RouteCoordinate { RouteFixtures.point(along: outAndBack, at: 300, lateralMeters: 3) }
 
+    /// The nearest of the candidates — what a caller with nothing else to rank them by takes.
     private func projection(
         of point: RouteCoordinate? = nil,
         alongRoute window: ClosedRange<Double>? = nil,
         heading: Double? = nil
     ) -> RouteGeometry.Projection? {
         let coordinates = route
-        return RouteGeometry.projection(
+        return RouteGeometry.candidates(
             of: point ?? rider,
             onto: coordinates,
             cumulative: RouteGeometry.cumulativeDistances(coordinates),
             alongRoute: window,
             heading: heading
+        ).min { $0.offsetMeters < $1.offsetMeters }
+    }
+
+    private func passes(
+        of point: RouteCoordinate? = nil,
+        from floor: Double,
+        heading: Double? = nil,
+        limit: Int = .max
+    ) -> [RouteGeometry.Projection] {
+        let coordinates = route
+        return RouteGeometry.passes(
+            of: point ?? rider,
+            onto: coordinates,
+            cumulative: RouteGeometry.cumulativeDistances(coordinates),
+            fromMeters: floor,
+            within: 50,
+            heading: heading,
+            limit: limit
         )
     }
 
@@ -444,15 +463,7 @@ struct RouteGeometryProjectionTests {
         from floor: Double,
         heading: Double? = nil
     ) -> RouteGeometry.Projection? {
-        let coordinates = route
-        return RouteGeometry.firstPass(
-            of: point ?? rider,
-            onto: coordinates,
-            cumulative: RouteGeometry.cumulativeDistances(coordinates),
-            fromMeters: floor,
-            within: 50,
-            heading: heading
-        )
+        passes(of: point, from: floor, heading: heading, limit: 1).first
     }
 
     // MARK: - Direction
@@ -554,5 +565,30 @@ struct RouteGeometryProjectionTests {
     func firstPassIsNilOffTheRoute() {
         let faraway = RouteFixtures.point(along: outAndBack, at: 300, lateralMeters: 200)
         #expect(firstPass(of: faraway, from: 0) == nil)
+    }
+
+    // MARK: - passes
+
+    @Test("passes lists every stretch within tolerance, in route order")
+    func passesListsEveryStretch() {
+        let found = passes(from: 0).map(\.distanceAlongRouteMeters)
+        #expect(found.count == 2)
+        #expect(abs((found.first ?? -1) - 300) < 0.5)
+        #expect(abs((found.last ?? -1) - 502) < 0.5)
+    }
+
+    @Test("a limit stops at the first stretches found")
+    func passesStopsAtItsLimit() {
+        #expect(passes(from: 0, limit: 1).count == 1)
+        #expect(passes(from: 0, limit: 0).isEmpty)
+    }
+
+    @Test("the whole-route projection is the nearest of every candidate")
+    func projectionIsTheNearestCandidate() {
+        let coordinates = route
+        let whole = RouteGeometry.projection(
+            of: rider, onto: coordinates, cumulative: RouteGeometry.cumulativeDistances(coordinates)
+        )
+        #expect(whole == projection())
     }
 }

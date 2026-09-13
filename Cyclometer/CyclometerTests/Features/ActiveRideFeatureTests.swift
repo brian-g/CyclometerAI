@@ -425,6 +425,64 @@ struct ActiveRideFeatureLocationTests {
         }
     }
 
+    /// #197 review: with turn-by-turn off the route is drawn on the map but not followed, so — as
+    /// for a free ride — a fix never reaches navigation. Exhaustive: a `.navigation` action fails it.
+    /// The route starts where the fix is, so it is the toggle keeping the fix out, not distance.
+    @Test("With turn-by-turn off, a fix never reaches navigation even with a route loaded")
+    func turnByTurnOffKeepsFixesFromNavigation() async throws {
+        let navigation = try #require(NavigationRoute(
+            coordinates: RouteFixtures.path(
+                from: RouteCoordinate(latitude: 43.0731, longitude: -89.4012, elevationMeters: nil),
+                legs: [(0, 500)]
+            ),
+            maneuvers: []
+        ))
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.isTurnByTurnEnabled = false }
+            var state = ActiveRideFeature.State(recordingState: .active)
+            state.navigation.activeRoute = navigation
+            return TestStore(initialState: state) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.continuousClock = TestClock()
+                $0.date = .constant(testDate)
+                $0.hapticsClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.defaultFileStorage = storage
+            }
+        }
+
+        await store.send(.locationUpdated(Self.sampleUpdate)) {
+            $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.trackCoordinates = [Coordinate(latitude: 43.0731, longitude: -89.4012)]
+            $0.altitude = 280.0
+            $0.horizontalAccuracy = 5.0
+            $0.isFixRecordable = true
+            $0.lastRecordablePositionAt = testDate
+            $0.heading = 192.0
+            $0.speedKPH = 8.5 * 3.6
+            $0.speedSampleCount = 1
+            $0.speedSampleSum = 8.5 * 3.6
+            $0.maxSpeedKPH = 8.5 * 3.6
+        }
+        await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.speed.speedMPS = 8.5
+            $0.speed.activeSpeedSource = .gps
+            $0.speed.latestGPSSpeedMPS = 8.5
+            $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
+        }
+        await store.receive(\.calibration.locationUpdated) {
+            $0.calibration.isGPSUsable = true
+            $0.calibration.lastFixTimestamp = Self.sampleUpdate.timestamp
+        }
+    }
+
     @Test("A poor-accuracy fix moves the marker but is kept out of the recorded track")
     func poorAccuracyFixIsNotRecorded() async {
         let store = makeStore()
@@ -2521,8 +2579,7 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
     @Test("A turn alert suspends calibration until the turn is made")
     func turnAlertSuspendsCalibration() async throws {
         let legs: [RouteFixtures.Leg] = [(0, 600), (90, 100)]
-        var state = ActiveRideFeature.State(recordingState: .active)
-        state.navigation.activeRoute = try #require(NavigationRoute(
+        let navigation = try #require(NavigationRoute(
             coordinates: RouteFixtures.path(legs: legs),
             maneuvers: [Maneuver(
                 coordinate: RouteFixtures.point(along: legs, at: 600),
@@ -2531,16 +2588,26 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
                 distanceAlongRouteMeters: 600
             )]
         ))
-        let store = TestStore(initialState: state) {
-            ActiveRideFeature()
-        } withDependencies: {
-            $0.continuousClock = TestClock()
-            $0.date = .constant(testDate)
-            $0.hapticsClient = .testValue
-            $0.variaRadarClient = .testValue
-            $0.bleHRClient = .testValue
-            $0.locationClient = .testValue
-            $0.bleCSCClient = .testValue
+        // In its own storage: whether turn-by-turn is on is a preference, and the machine's own
+        // `app-preferences.json` must not decide this test.
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            var state = ActiveRideFeature.State(recordingState: .active)
+            state.navigation.activeRoute = navigation
+            return TestStore(initialState: state) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.continuousClock = TestClock()
+                $0.date = .constant(testDate)
+                $0.hapticsClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.bleCSCClient = .testValue
+                $0.defaultFileStorage = storage
+            }
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 

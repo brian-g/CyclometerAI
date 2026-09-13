@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Brief, non-intrusive banner for ride notices — the BLE→GPS speed fallback (PRD §8.4),
-/// wheel auto-calibration (PRD §8.9), and turns and off-route (PRD §8.6, #197). Purely
+/// wheel auto-calibration (PRD §8.9), and off-route (PRD §8.6, #197); a turn has the centred
+/// `TurnInstructionOverlay` instead. Purely
 /// presentational — the owning feature's reducer sets and clears it: a cancellable
 /// clock-sleep effect for the transient ones (see `SpeedFeature.fallBackToGPS`), rejoining
 /// the route for off-route.
@@ -41,21 +42,6 @@ struct RideBanner: View {
         .padding(.top, Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
-}
-
-#Preview("Turn") {
-    RideBanner(
-        text: NavigationFeature.bannerText(for: Maneuver(
-            coordinate: RouteCoordinate(latitude: 0, longitude: 0, elevationMeters: nil),
-            direction: .left,
-            name: "Turn left onto County Road S",
-            distanceAlongRouteMeters: 0
-        )),
-        icon: "arrow.turn.up.left"
-    )
-    .padding(.top, Spacing.xl)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color.cyBgSecondary)
 }
 
 #Preview("Off route") {

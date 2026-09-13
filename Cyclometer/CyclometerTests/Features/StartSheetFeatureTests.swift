@@ -30,6 +30,19 @@ struct StartSheetFeatureTests {
         #expect(isDismissed.value)
     }
 
+    /// #197 review: the toggle is the rider's remembered preference, not the sheet's own state, so
+    /// the ride — and a ride resumed after a kill — reads the same answer.
+    @Test("The turn-by-turn toggle writes the rider's preference, both ways")
+    func turnByTurnToggleWritesThePreference() async {
+        let store = makeStore()
+        await store.send(.turnByTurnToggled) {
+            $0.$preferences.withLock { $0.isTurnByTurnEnabled = false }
+        }
+        await store.send(.turnByTurnToggled) {
+            $0.$preferences.withLock { $0.isTurnByTurnEnabled = true }
+        }
+    }
+
     @Test("Radar connection states map to the radar row badge")
     func radarStatusMapping() async {
         let store = TestStore(initialState: StartSheetFeature.State()) {

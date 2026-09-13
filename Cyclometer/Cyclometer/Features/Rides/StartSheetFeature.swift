@@ -31,6 +31,10 @@ struct StartSheetFeature {
         /// a free ride.
         var route: RouteReference? = nil
 
+        /// Whether the ride will be followed turn by turn — the rider's last choice, remembered in
+        /// `AppPreferences` (#197 review). Only offered while a route is chosen.
+        var isTurnByTurnEnabled: Bool { preferences.isTurnByTurnEnabled }
+
         /// The sheet's own navigation stack: S05.2, pushed from the Route row (#196).
         var path = StackState<Path.State>()
 
@@ -69,6 +73,7 @@ struct StartSheetFeature {
         case batteryUpdated(SensorRow.Kind, Int?)
         case cancelButtonTapped
         case startRideButtonTapped
+        case turnByTurnToggled
         case path(StackActionOf<Path>)
         case delegate(Delegate)
 
@@ -174,6 +179,12 @@ struct StartSheetFeature {
 
             case .startRideButtonTapped:
                 return .send(.delegate(.startRide(state.route)))
+
+            case .turnByTurnToggled:
+                // The preference itself, not a copy: the ride reads it from there — a ride resumed
+                // after a kill included.
+                state.$preferences.withLock { $0.isTurnByTurnEnabled.toggle() }
+                return .none
 
             case let .path(.element(id: id, action: .routePicker(.delegate(.routeSelected(route))))):
                 // The sheet pops rather than the picker dismissing itself, so the answer and the

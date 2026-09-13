@@ -331,8 +331,11 @@ enum TurnDerivation {
             guard reading != .notATurn else { continue }
 
             let point = RouteCoordinate(latitude: cue.latitude, longitude: cue.longitude, elevationMeters: nil)
-            guard let projection = RouteGeometry.projection(of: point, onto: coordinates, cumulative: cumulative),
-                  projection.offsetMeters <= maximumCueSnapMeters else { continue }
+            guard let projection = pass(
+                for: reading,
+                among: RouteGeometry.passes(of: point, onto: coordinates, cumulative: cumulative, within: maximumCueSnapMeters),
+                turns: turns
+            ) else { continue }
 
             let direction: Maneuver.Direction
             switch reading {
@@ -368,6 +371,43 @@ enum TurnDerivation {
         // Two cues for one turn that agree on direction therefore resolve to the earlier of
         // them in importer order, which the sort above has already made deterministic.
         return separated(ordered.map { ($0.maneuver, Double($0.maneuver.direction.severity)) })
+    }
+
+    /// Which pass of the route a cue belongs to, when the route goes by the cue's spot more than once.
+    ///
+    /// Nearest was the rule, and on an out-and-back it is a coin toss: a cue for the turn the way
+    /// back makes at a junction the way out rode straight through lands on whichever leg the file's
+    /// coordinates happen to sit nearer. On the way out it then announces the way back's turn, and
+    /// `separated` can drop the way out's own cue for that junction as a duplicate (#197 review).
+    /// The road's shape settles it: the cue goes on the pass where the road turns the way the cue
+    /// says. Nearest stays the rule wherever the shape does not decide.
+    private static func pass(
+        for reading: CueReading,
+        among passes: [RouteGeometry.Projection],
+        turns: [Turn]
+    ) -> RouteGeometry.Projection? {
+        guard passes.count > 1 else { return passes.first }
+        let turning = passes.filter { pass in
+            turns.contains { turn in
+                abs(turn.distanceAlongRouteMeters - pass.distanceAlongRouteMeters) <= minimumSeparationMeters
+                    && agrees(turn.direction, with: reading)
+            }
+        }
+        return (turning.isEmpty ? passes : turning).min { $0.offsetMeters < $1.offsetMeters }
+    }
+
+    /// Whether the road turning `direction` is what `reading` describes. Sides are compared, not
+    /// degrees: a cue saying "left" means the geometry's slight left as much as its left.
+    private static func agrees(_ direction: Maneuver.Direction, with reading: CueReading) -> Bool {
+        switch reading {
+        case .direction(let stated):
+            guard stated != .uTurn, direction != .uTurn else { return stated == direction }
+            return stated.isLeft == direction.isLeft
+        case .unstated:
+            return true
+        case .notATurn:
+            return false
+        }
     }
 
     /// Reads a cue's `type`, then its `name`, then its `<desc>` — the order they get more
