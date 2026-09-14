@@ -1,5 +1,9 @@
 import ComposableArchitecture
 import Foundation
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "alerts")
 
 @Reducer
 struct AlertOrchestratorFeature {
@@ -30,6 +34,10 @@ struct AlertOrchestratorFeature {
         case alertLevelChanged(AlertLevel)
         /// A hard radar unpair: data loss, not a resolved threat.
         case hardDisconnected
+        /// A turn navigation has just announced (#198). Its own action, never an
+        /// `alertLevelChanged`: `activeAlertLevel` also drives the radar sidebar and calibration
+        /// suspension, and a turn is not a threat.
+        case turnAnnounced(Maneuver.Direction)
     }
 
     private enum CancelID { case dangerAudioRepeat }
@@ -53,7 +61,41 @@ struct AlertOrchestratorFeature {
                 state.activeAlertLevel = .clear
                 state.lastAlertDispatchAt = [:]
                 return .cancel(id: CancelID.dangerAudioRepeat)
+
+            case .turnAnnounced(let direction):
+                return turnTone(direction, state)
             }
+        }
+    }
+
+    // MARK: - Turn tones
+
+    /// The turn's tone, unless radar has the speaker (#198). Radar wins wherever both would sound:
+    /// throughout L3, whose burst repeats until the threat recedes, and while a Warning is still
+    /// sounding. Not for the rest of an L2 — the Warning plays once, on entry, and L2 can hold for
+    /// much of a busy road, which is where turns are hardest to find. A held tone is dropped, not
+    /// replayed; the turn instruction still shows.
+    ///
+    /// The engine enforces the same rule where this can't see: a turn tone's `play()` and a radar
+    /// tone's can reach the speaker in either order. `AudioEngineState.play` lets a radar tone cut
+    /// off a sounding turn tone, and never the reverse (`ToneKind.yields(to:)`), a Danger burst
+    /// still trailing the loop's cancellation included.
+    ///
+    /// The Warning is timed from its dispatch stamp, which an L3 → L2 downgrade also sets, with no
+    /// tone of its own; the turn tone is held then too.
+    private func turnTone(_ direction: Maneuver.Direction, _ state: State) -> Effect<Action> {
+        let now = self.now  // read once, as in dispatchAlert
+        let isWarningSounding = state.lastAlertDispatchAt[.caution]
+            .map { now.timeIntervalSince($0) < ToneKind.warning.duration } ?? false
+        guard state.activeAlertLevel != .danger, !isWarningSounding else {
+            let reason = state.activeAlertLevel == .danger ? "radar at L3" : "Warning sounding"
+            logger.notice("turn tone held — \(reason, privacy: .public)")
+            return .none
+        }
+        logger.notice("turn tone — \(String(describing: direction), privacy: .public)")
+        // Default priority: PRD §8.6's ±10 m is a second at 40 km/h, not radar's 200 ms.
+        return .run { [audioClient] _ in
+            await audioClient.playTurn(direction)
         }
     }
 

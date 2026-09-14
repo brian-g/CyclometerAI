@@ -2630,6 +2630,100 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    /// #198: a turn's tone goes from navigation, through this reducer, to the orchestrator — the one
+    /// place that knows whether radar has the speaker.
+    @Test("A turn's tone sounds once, through the orchestrator, and leaves the radar level alone")
+    func turnToneSoundsOnceThroughTheOrchestrator() async throws {
+        let turns = LockIsolated<[Maneuver.Direction]>([])
+        let store = try leftTurnStore(radarLevel: .clear, turns: turns)
+
+        // 100 m out: announced, handed on, and played.
+        await store.send(.locationUpdated(fixOnLeftTurn(at: 500)))
+        await store.receive(.navigation(.delegate(.turnAnnounced(.left))))
+        await store.receive(.alertOrchestrator(.turnAnnounced(.left)))
+        #expect(turns.value == [.left])
+
+        // On to the corner and round it: the same turn is not played again.
+        for meters in [550.0, 590, 610, 650] {
+            await store.send(.locationUpdated(fixOnLeftTurn(at: meters)))
+        }
+        #expect(turns.value == [.left])
+        // A turn is no threat: the radar sidebar and calibration suspension read this level.
+        #expect(store.state.alertOrchestrator.activeAlertLevel == .clear)
+        #expect(store.state.alertOrchestrator.lastAlertDispatchAt.isEmpty)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("During an L3 alert a turn's tone is held, and the alert level is untouched")
+    func turnToneIsHeldDuringDanger() async throws {
+        let turns = LockIsolated<[Maneuver.Direction]>([])
+        let store = try leftTurnStore(radarLevel: .danger, turns: turns)
+
+        await store.send(.locationUpdated(fixOnLeftTurn(at: 500)))
+        await store.receive(.alertOrchestrator(.turnAnnounced(.left)))
+        #expect(turns.value.isEmpty)
+        #expect(store.state.alertOrchestrator.activeAlertLevel == .danger)
+        // The turn is still announced — only its tone is held.
+        #expect(store.state.navigation.turnInstruction?.direction == .left)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    /// 600 m north, then left — the ride both turn-tone tests take.
+    private let leftTurnLegs: [RouteFixtures.Leg] = [(0, 600), (270, 100)]
+
+    /// A fix `meters` along `leftTurnLegs`, at 10 m/s and timed to match.
+    private func fixOnLeftTurn(at meters: Double) -> LocationUpdate {
+        RouteFixtures.fix(
+            RouteFixtures.point(along: leftTurnLegs, at: meters),
+            speed: 10,
+            at: testDate.addingTimeInterval(meters / 10),
+            course: RouteFixtures.bearing(along: leftTurnLegs, at: meters)
+        )
+    }
+
+    /// A ride following `leftTurnLegs` with radar at `radarLevel`, recording every turn tone played.
+    private func leftTurnStore(
+        radarLevel: AlertLevel, turns: LockIsolated<[Maneuver.Direction]>
+    ) throws -> TestStoreOf<ActiveRideFeature> {
+        let navigation = try #require(NavigationRoute(
+            coordinates: RouteFixtures.path(legs: leftTurnLegs),
+            maneuvers: [Maneuver(
+                coordinate: RouteFixtures.point(along: leftTurnLegs, at: 600),
+                direction: .left,
+                name: nil,
+                distanceAlongRouteMeters: 600
+            )]
+        ))
+        var audio = AudioClient.testValue
+        audio.playTurn = { direction in turns.withValue { $0.append(direction) } }
+        // In its own storage, as `turnAlertSuspendsCalibration`: turn-by-turn is a preference.
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            var state = ActiveRideFeature.State(recordingState: .active)
+            state.navigation.activeRoute = navigation
+            state.alertOrchestrator.activeAlertLevel = radarLevel
+            return TestStore(initialState: state) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.continuousClock = TestClock()
+                $0.date = .constant(testDate)
+                $0.hapticsClient = .testValue
+                $0.audioClient = audio
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.bleCSCClient = .testValue
+                $0.defaultFileStorage = storage
+            }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        return store
+    }
+
     @Test("Suspension is forwarded on the transition, not on every radar update")
     func suspensionForwardedOnlyOnTransition() async {
         let store = makeStore()

@@ -1,9 +1,9 @@
 # Cyclometer — Audio Alert Specification
-**Version:** 0.1 Draft  
-**Date:** 2026-04-05  
+**Version:** 0.2 Draft  
+**Date:** 2026-09-13  
 **Status:** In Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
-**Companion Documents:** `PRD.md §8.3` (Haptic Alert System), `PRD.md §8.2` (Radar Visualization)
+**Companion Documents:** `PRD.md §8.3` (Haptic Alert System), `PRD.md §8.2` (Radar Visualization), `PRD.md §8.6` (Navigation — turn notifications)
 
 ---
 
@@ -18,6 +18,14 @@ Cyclometer uses three distinct audio tones to communicate radar threat state. Un
 | **Danger** | L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Overrides if user opt-in |
 
 > **L1 Advisory**: No audio tone. Haptic only. Audio would be too disruptive for minor advisory-level events that may occur frequently on busy roads.
+
+Three more tones announce the turns of a route being followed (`PRD.md §8.6`, #198). They stand for no alert level, and radar takes the speaker wherever both would sound (see [Turn Cues and Radar](#turn-cues-and-radar)):
+
+| Tone | Trigger | Silent Mode |
+|---|---|---|
+| **Turn Left** | A left or slight-left turn, announced at the rider's lead distance | Never overrides |
+| **Turn Right** | A right or slight-right turn, announced at the rider's lead distance | Never overrides |
+| **U-turn** | A U-turn, announced at the rider's lead distance | Never overrides |
 
 ---
 
@@ -52,11 +60,13 @@ Each tone must be instantly distinguishable from the others and from iOS system 
 | All Clear | Relief / resolution | Signals the threat has passed. Non-startling. Must not be confused with a new alert. |
 | Warning | Attention / caution | "Pay attention." Not panic-inducing, but clearly not ambient. |
 | Danger | Urgency / emergency | Instinctive response. Must cut through even moderate distraction. |
+| Turn Left / Turn Right / U-turn | Direction / information | "This way." Clearly a signal, never an alarm — must not be mistaken for a radar alert. |
 
 ### 4. User Control
 
 - All Clear and Warning tones: on/off toggle in Settings (S12), default **on**
 - Danger tone: separate on/off toggle, default **on**; Silent Mode override is a third independent setting, default **off**
+- Turn tones: no toggle of their own. They follow the Turn-by-Turn toggle on S05.1, which turns turn notifications off as a whole, and no radar tone toggle silences them — muting radar warnings never mutes turns
 - Volume: follows system volume at the time of alert (no separate in-app volume control in MVP)
 
 ---
@@ -122,6 +132,29 @@ Each tone must be instantly distinguishable from the others and from iOS system 
 
 ---
 
+### Turn Left, Turn Right and U-turn
+
+**Purpose:** Tell the rider which way the route goes next, at their lead distance from the turn (`PRD.md §8.6`), without a look at the phone. One tone for each side, and one for a U-turn: a U-turn has no side to give — at 180° the sign of the heading change is noise, and a cue that says "U-turn" names none. A slight turn plays its side's tone; the centred turn instruction's arrow says how sharp.
+
+| Parameter | Turn Right | Turn Left | U-turn |
+|---|---|---|---|
+| Pattern | Three notes, rising | Three notes, falling | Five notes, up and back down |
+| Frequencies | 1,047 → 1,319 → 1,661 Hz (C6 → E6 → G♯6) | 1,661 → 1,319 → 1,047 Hz | 1,047 → 1,319 → 1,661 → 1,319 → 1,047 Hz |
+| Duration | 90 ms on, 40 ms off, 90 ms on, 40 ms off, 240 ms on | As Turn Right | 90 ms notes with 40 ms off between, the last held 240 ms |
+| Total duration | 500 ms | 500 ms | 760 ms |
+| Amplitude envelope | Fast attack (5 ms); fast decay (20 ms) on the short notes, gentle exponential decay (60 ms) on the last | As Turn Right | As Turn Right |
+| Waveform | Triangle | Triangle | Triangle |
+| Volume | 80% of system volume | 80% of system volume | 80% of system volume |
+| Repeat | Once per announcement — again only if the rider leaves the route and rejoins it before the turn | Same | Same |
+
+**Design note:** The direction is in the contour. All three share one pitch set, the C6 augmented triad, so Turn Left is Turn Right reversed and nothing but the direction of travel tells them apart; listeners map higher pitch to the right, and on a keyboard right is up. The U-turn goes out and comes back. The last note is held because it is where the figure lands, and so the note that says which way it went. The augmented triad was chosen over a major arpeggio, which reads as a notification chime.
+
+Every note sits in the 1–4 kHz audibility band, and none is a pitch Warning (1,400 Hz) or Danger (2,100 Hz) uses, so no fragment of a turn tone can pass for a radar pulse. The triangle wave gives the presence needed in wind, and separates the falling Turn Left from All Clear's falling sine, which is also an octave lower and slower. Volume matches Warning's, not All Clear's: a turn tone missed at speed is a missed turn, and All Clear alone is quieter because it asks nothing of the rider.
+
+These values are a starting point, as OQA5 says of the others; validation at speed is OQ16 (M11).
+
+---
+
 ## Tone Relationships and Progression
 
 ```
@@ -144,6 +177,18 @@ L3 (danger) → [triple burst]
 - L2 → L0: All Clear tone plays once
 - L3 → L0: Danger tone stops; All Clear tone plays once
 - L1 → L0: No audio (no audio was played on L1 entry)
+
+### Turn Cues and Radar
+
+A turn tone never changes the alert level — the level drives the radar sidebar and wheel-calibration suspension, and a turn is no threat. The level decides only whether the turn tone sounds:
+
+- **L0, L1:** the turn tone plays.
+- **L2:** the turn tone plays, except within 480 ms of an L2 alert firing — the Warning tone's length. The Warning plays once, on entry, and L2 can hold for much of a busy road, which is where turns are hardest to find.
+- **L3:** the turn tone is held for as long as L3 lasts.
+- A radar tone that starts while a turn tone is sounding cuts it off (tones are interruptible).
+- A turn tone never cuts off a Warning or Danger that is still sounding, a Danger burst trailing the end of L3 included; it is held.
+
+A held turn tone is dropped, not replayed; the centred turn instruction still shows.
 
 ---
 
@@ -184,7 +229,7 @@ If synthesis proves difficult to tune in context, short `.caf` (Core Audio Forma
 ### AVAudioSession Configuration
 
 ```swift
-// For Warning and All Clear tones (respect Silent Mode):
+// For Warning, All Clear and turn tones (respect Silent Mode):
 try AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default)
 
 // For Danger tone when overrideSilentModeForL3 is enabled:
@@ -212,6 +257,13 @@ try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
 - [ ] All tones fully testable via mock radar data in `AudioAlertClient` without hardware
 - [ ] Tone volume does not exceed system volume setting
 - [ ] Tones are interruptible — if threat level changes mid-tone, the new tone takes priority
+- [ ] Turn Left, Turn Right and U-turn tones are immediately distinguishable from each other and from All Clear, Warning and Danger in a blind listening test
+- [ ] No turn tone resembles any stock iOS system sound (test on current iOS release)
+- [ ] Turn tones perceptible from jersey pocket at 30 km/h riding speed
+- [ ] Turn tones respect Silent Mode
+- [ ] A turn tone plays at L0, L1 and through a sustained L2; it is held at L3 and while a Warning is sounding
+- [ ] A turn tone never changes the alert level
+- [ ] Turning off the All Clear/Warning or Danger tones does not silence turn tones
 
 ---
 
@@ -222,8 +274,8 @@ try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
 - [ ] **OQA3** — Earphone behavior: should the app detect if earphones are connected and adjust the Warning/Danger tone volume/character accordingly? (Earphones at full volume could be startling at 2,100 Hz)
 - [ ] **OQA4** — Should the All Clear tone be a user-toggleable setting? Some riders may find any audio at "clear" distracting. Current spec: on by default, configurable in S12.
 - [ ] **OQA5** — Tone fine-tuning: exact frequencies and patterns above are a starting point. User testing on a real ride (phone in pocket, at speed) is required to validate audibility and distinctiveness before finalizing.
-- [ ] **OQA6** — Turn right and Turn left sounds must also be incorporated when turn by turn directions are added.
+- [x] **OQA6** — Turn right and Turn left sounds must also be incorporated when turn by turn directions are added. **Resolved (#198):** three turn tones — Turn Left, Turn Right and U-turn — distinct from the radar tones and from each other; radar takes the speaker at L3 and while a Warning sounds. See "Turn Left, Turn Right and U-turn" and "Turn Cues and Radar".
 
 ---
 
-*Cyclometer Audio Alert Specification v0.1 · Draft · 2026-04-05*
+*Cyclometer Audio Alert Specification v0.2 · Draft · 2026-09-13*

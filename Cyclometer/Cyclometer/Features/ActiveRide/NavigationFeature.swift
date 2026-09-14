@@ -184,6 +184,15 @@ struct NavigationFeature {
         case routeLoaded(NavigationRoute?)
         case locationUpdated(LocationUpdate)
         case instructionDismissed
+        case delegate(Delegate)
+
+        @CasePathable
+        enum Delegate: Equatable {
+            /// A turn has just been announced — once per announcement, so again for a turn a rejoin
+            /// announces again. `ActiveRideFeature` hands it to `AlertOrchestratorFeature`, which plays
+            /// its tone unless radar has the speaker (#198).
+            case turnAnnounced(Maneuver.Direction)
+        }
     }
 
     private enum CancelID { case instructionTimer }
@@ -236,6 +245,9 @@ struct NavigationFeature {
 
             case .instructionDismissed:
                 state.turnInstruction = nil
+                return .none
+
+            case .delegate:
                 return .none
             }
         }
@@ -398,11 +410,15 @@ struct NavigationFeature {
             (lead \(lead, format: .fixed(precision: 0), privacy: .public) m)
             """
         )
-        return .run { send in
-            try await clock.sleep(for: Self.instructionDuration)
-            await send(.instructionDismissed)
-        }
-        .cancellable(id: CancelID.instructionTimer, cancelInFlight: true)
+        return .merge(
+            // Its tone (#198): the parent hands it to the orchestrator, which decides whether it sounds.
+            .send(.delegate(.turnAnnounced(maneuver.direction))),
+            .run { send in
+                try await clock.sleep(for: Self.instructionDuration)
+                await send(.instructionDismissed)
+            }
+            .cancellable(id: CancelID.instructionTimer, cancelInFlight: true)
+        )
     }
 }
 

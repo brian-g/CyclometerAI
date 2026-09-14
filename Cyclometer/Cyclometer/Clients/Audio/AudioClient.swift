@@ -5,15 +5,20 @@ import os
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
 private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "audio")
 
-/// TCA dependency for three-tone audio safety alerts (per Audio.md spec).
+/// TCA dependency for the app's synthesized tones (per Audio.md spec): the three radar safety
+/// alerts, and the turn tones navigation announces (#198).
 ///
 ///   L0 All Clear : 880→587 Hz sine, descending, ~680 ms — jersey-pocket audible
 ///   L2 Warning   : 1,400 Hz triangle, double staccato pulse, ~480 ms
 ///   L3 Danger    : 2,100 Hz square, triple burst, ~580 ms — overrides Silent Mode (user opt-in, unwired in MVP)
+///   Turns        : C6–E6–G♯6 triangle — rising for right, falling for left, up and back for a U-turn
 struct AudioClient {
     var playAllClear:           @Sendable () async -> Void
     var playWarning:            @Sendable () async -> Void
     var playDanger:              @Sendable () async -> Void
+    /// Its own closure, not a case of the safety tones': a setting that silences radar warnings
+    /// must not silence turns with them (#198).
+    var playTurn:               @Sendable (Maneuver.Direction) async -> Void
     var setOverridesSilentMode: @Sendable (Bool) async -> Void
 }
 
@@ -24,6 +29,7 @@ extension AudioClient: DependencyKey {
             playAllClear:           { await state.play(.allClear) },
             playWarning:            { await state.play(.warning) },
             playDanger:              { await state.play(.danger) },
+            playTurn:               { direction in await state.play(ToneKind(turn: direction)) },
             setOverridesSilentMode: { enabled in state.setOverridesSilentMode(enabled) }
         )
     }()
@@ -32,6 +38,7 @@ extension AudioClient: DependencyKey {
         playAllClear:           { },
         playWarning:            { },
         playDanger:              { },
+        playTurn:               { _ in },
         setOverridesSilentMode: { _ in }
     )
 }
@@ -45,10 +52,23 @@ extension DependencyValues {
 
 // MARK: - Tone Synthesis (pure — no engine/session state, unit-testable)
 
-/// One tone's identity — the escalation level `AlertOrchestratorFeature` drives.
-/// No case for L1 advisory: Audio.md specifies haptic-only for L1, no tone.
+/// One tone's identity. The radar alerts are the escalation levels `AlertOrchestratorFeature`
+/// drives — no case for L1 advisory: Audio.md specifies haptic-only for L1, no tone. The turn
+/// tones are navigation's (#198), and stand for no alert level.
 enum ToneKind: CaseIterable, Sendable {
     case allClear, warning, danger
+    case turnLeft, turnRight, uTurn
+
+    /// The tone for a turn. A slight turn is still a turn to its side: the rider needs the side,
+    /// and the turn instruction's arrow says how sharp. A U-turn has no side to give — at 180° the
+    /// sign of the heading change is noise — so it has a tone of its own.
+    init(turn direction: Maneuver.Direction) {
+        switch direction {
+        case .slightLeft, .left: self = .turnLeft
+        case .slightRight, .right: self = .turnRight
+        case .uTurn: self = .uTurn
+        }
+    }
 
     /// Fraction of system volume (Audio.md's per-tone volume spec). A scalar multiplier
     /// on top of whatever the system output level already is — never boosts past it.
@@ -57,6 +77,24 @@ enum ToneKind: CaseIterable, Sendable {
         case .allClear: 0.6
         case .warning:  0.8
         case .danger:   1.0
+        // Warning's, not All Clear's: a turn tone missed at speed is a missed turn. All Clear
+        // alone is quieter, because it asks nothing of the rider.
+        case .turnLeft, .turnRight, .uTurn: 0.8
+        }
+    }
+
+    /// How long the tone sounds, start to finish.
+    var duration: TimeInterval {
+        segments.reduce(0) { $0 + $1.durationMs } / 1_000
+    }
+
+    /// Whether this tone, started while `sounding` is still sounding, gives way rather than cut it
+    /// off. Only a turn tone does, and only to a Warning or a Danger: radar keeps the speaker
+    /// (#198). Every other tone cuts off whatever is sounding — Audio.md: tones are interruptible.
+    func yields(to sounding: ToneKind) -> Bool {
+        switch self {
+        case .allClear, .warning, .danger: false
+        case .turnLeft, .turnRight, .uTurn: sounding == .warning || sounding == .danger
         }
     }
 
@@ -90,7 +128,33 @@ enum ToneKind: CaseIterable, Sendable {
                 .silence(ms: 80),
                 .tone(freq: 2_100, ms: 140, waveform: .square, attackMs: 1, decayMs: 10)
             ]
+        // One pitch set, the C6 augmented triad, so that the contour alone says which way (#198):
+        // rising for right — listeners hear higher as further right — and falling for left.
+        case .turnRight:
+            Self.turnFigure(1_047, 1_319, 1_661)
+        case .turnLeft:
+            Self.turnFigure(1_661, 1_319, 1_047)
+        case .uTurn:
+            // Up, and back down: out, and round.
+            Self.turnFigure(1_047, 1_319, 1_661, 1_319, 1_047)
         }
+    }
+
+    /// A turn tone: quick notes stepping through `frequencies`, the last one held — where the figure
+    /// lands, and so the note that says which way it went. Triangle for presence in wind, as Warning,
+    /// on pitches neither Warning nor Danger uses, so that no part of a turn tone can pass for a
+    /// radar pulse.
+    private static func turnFigure(_ frequencies: Double...) -> [ToneSegment] {
+        var segments: [ToneSegment] = []
+        for (index, frequency) in frequencies.enumerated() {
+            if index > 0 { segments.append(.silence(ms: 40)) }
+            segments.append(
+                index == frequencies.count - 1
+                    ? .tone(freq: frequency, ms: 240, waveform: .triangle, attackMs: 5, decayMs: 60, decayShape: .exponential)
+                    : .tone(freq: frequency, ms: 90, waveform: .triangle, attackMs: 5, decayMs: 20)
+            )
+        }
+        return segments
     }
 }
 
@@ -203,6 +267,10 @@ private final class AudioEngineState: @unchecked Sendable {
     /// not a setting at this time," so nothing calls `setOverridesSilentMode`. The
     /// plumbing stays in case a later milestone reintroduces the row.
     private var silentModeOverrideEnabled = false
+    /// The last tone started, and when it stops sounding. A deadline, not a flag the completion
+    /// callback clears: `stop()` runs under `lock` and may fire that callback before returning,
+    /// and `NSLock` isn't recursive.
+    private var sounding: (kind: ToneKind, until: ContinuousClock.Instant)?
     private let lock = NSLock()
 
     func setOverridesSilentMode(_ enabled: Bool) {
@@ -226,23 +294,35 @@ private final class AudioEngineState: @unchecked Sendable {
             return
         }
 
-        player.volume = kind.volume
-        // Tones are interruptible (Audio.md acceptance criteria) — a new tone always
-        // takes priority over whatever is currently scheduled/sounding. Two overlapping
-        // `play()` calls (e.g. a fast caution→danger escalation) can each reach this
-        // point concurrently, so the stop/scheduleBuffer/play triple itself runs under
-        // `lock` — otherwise two tasks' calls can interleave on the shared node with no
-        // ordering guarantee. Only the completion await sits outside the lock: an
+        // Tones are interruptible (Audio.md acceptance criteria) — a new tone takes
+        // priority over whatever is currently scheduled/sounding, except that a turn tone
+        // never cuts off a sounding Warning or Danger (`ToneKind.yields(to:)`, #198). Two
+        // overlapping `play()` calls (e.g. a fast caution→danger escalation, or a turn
+        // announced as radar escalates) can each reach this point concurrently, in either
+        // order, so that check, the volume and the stop/scheduleBuffer/play triple run
+        // under `lock` — otherwise two tasks' calls can interleave on the shared node with
+        // no ordering guarantee. Only the completion await sits outside the lock: an
         // interrupted call's `stop()` fires the *previous* call's completion callback,
         // so that call's wait resolves promptly rather than blocking the tone that just
         // preempted it.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            lock.withLock {
+            let heldBy = lock.withLock { () -> ToneKind? in
+                let now = ContinuousClock.now
+                if let sounding, now < sounding.until, kind.yields(to: sounding.kind) {
+                    return sounding.kind
+                }
+                player.volume = kind.volume
                 player.stop()
                 player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in
                     continuation.resume()
                 }
                 player.play()
+                sounding = (kind: kind, until: now + .seconds(kind.duration))
+                return nil
+            }
+            if let heldBy {
+                logger.notice("\(String(describing: kind), privacy: .public) held — \(String(describing: heldBy), privacy: .public) sounding")
+                continuation.resume()
             }
         }
     }
