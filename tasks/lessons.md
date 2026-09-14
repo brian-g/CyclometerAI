@@ -440,3 +440,22 @@ looks like.
 - When the running app contradicts green tests, check the binary before the code (`nm`, then
   `objdump --disassemble-symbols=`). Judge the disassembly against a known-good build, not against what you
   expect the source to compile to.
+
+---
+
+## Don't loosen a literal AC to make room for an option (2026-09-14, #199)
+
+**What happened.** #199's AC said "The grid widget never downgrades out of heading-up follow". The same issue asked
+for a persisted heading-up/north-up toggle, and pointed at #62: "Dashboard map widget should not allow the user to
+toggle out of follow/tracking mode". I read the AC as "never leaves the rider's *chosen* follow mode", on the grounds
+that north-up is a choice, not a downgrade. On that reading I recommended a toggle button on the widget itself.
+Brian: "The widget should not have a toggle out of heading-up mode."
+
+**Why I was wrong.** The literal reading agreed with everything around it. #62 wants no way out of follow on the
+widget, and the issue had already asked for "more controls" on the sheet, which gave the toggle a natural home. The
+looser reading existed only to make room for the option I had in mind. With the toggle on the sheet, the persisted
+choice governs the sheet, and nothing the issue asked for is lost.
+
+**Rule.** When an AC's literal wording agrees with a linked issue, read it literally. If a design only works under a
+looser reading, that is evidence against the design, not a reason to loosen the AC. When presenting options, say
+which reading of the AC they rest on, so a reinterpretation is visible before it becomes a recommendation.

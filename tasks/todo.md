@@ -1,149 +1,209 @@
-# tasks/todo.md — #198 Turn tones: resolve OQA6 with distinct turn cues
+# tasks/todo.md — #199 W8 route polyline overlay + persisted map orientation
 
-Branch: `feat/198-turn-tones` · Milestone M8 · Plan: `~/.claude/plans/wild-exploring-swan.md`
+Branch: `feat/199-map-route-orientation` · Milestone M8 · Plan: `~/.claude/plans/joyful-crunching-starlight.md`
 
-Decisions (Brian, planning): a third, distinct U-turn tone; a turn cue is suppressed through L3 or while a Warning
-sounds, and otherwise plays — including through a sustained L2.
+Decisions (Brian, planning):
+- The widget is always heading-up and has no controls.
+- `mapOrientation` governs the sheet only.
+- A loaded route tilts both maps, north-up included.
+- No pixel snapshots of a live Map: logic tests, a button snapshot and simulator shots instead.
+- The sheet gains `MapPitchToggle`, route overview and the orientation toggle.
 
-## 1. Tones — `AudioClient.swift`
+## 0. Spike: tilted follow (gate). PASSED, `spike-a`
 
-- [x] `ToneKind`: `.turnLeft` / `.turnRight` / `.uTurn` segments + volume; `init(turn:)`; `duration`; doc comments
-- [x] `AudioClient.playTurn(Maneuver.Direction)`: live + test values; header comment
+- [x] Throwaway seed-then-follow plus camera logging in `ActiveRideMapView` (replaced by the real view)
+- [x] Sim run on `42B5213B`, a free ride at 8 m/s (`.build/199/spike.sh`):
+  - A seed lands within about 5 ms of the write, and the next `.onEnd` switches to follow.
+  - **Pitch holds.** The widget read 35.0° across 1,921 continuous samples, the sheet 35.0° across 194.
+  - MapKit clamps a 60° (and a 40°) request to **35°** at the default follow distance: 1.6 km on the widget,
+    5.3 km on the sheet.
+  - The tilt is visible in the screenshots: 3D buildings at the widget's edge, and the sheet's toggle reading "2D".
+  - **MapKit never dropped the widget's heading-follow by itself:** 0 of 671 samples between seed A and the
+    deliberate north-up seed C.
+  - The north-up seed holds heading 0 with `followsHdg=false`.
+  - **The simulator never rotates:** heading stayed 0°/360° through the right turn. Heading-up rotation is a
+    device check.
+- Moved to the final drive: body cost with a 5,000-point route (it needs the route plumbing), and location denied
+- Harness findings for the final drive:
+  - **The tap missed.** A tap on the widget's user-location dot didn't open the sheet. Later found to be the
+    auto-dim wake tap (section 8), not the dot.
+  - **"Open" hit the map.** The minimised-ride accessory's "Open" stays in the hierarchy under the dashboard, so
+    `app.buttons["Open"]` exists even when the dashboard isn't minimised, and tapping it hits the map widget.
+  - **The grabber ignored drags.** Neither XCUITest drag on it minimised the dashboard.
 
-## 2. Reducers
+## 1. Preference
 
-- [x] `NavigationFeature`: `.delegate(.turnAnnounced(direction))`, sent with the announcement
-- [x] `AlertOrchestratorFeature`: `.turnAnnounced` — held at L3 or within the Warning's duration of a caution
-      dispatch; never touches state; `alerts` logger (`turn tone — <dir>` / `turn tone held — <reason>`). Default task
-      priority, not the radar effects' `.userInteractive`: that is deprecated, and a turn has no 200 ms budget
-- [x] `ActiveRideFeature`: navigation delegate → `.alertOrchestrator(.turnAnnounced)`
+- [x] `MapOrientation.swift`; `AppPreferences.mapOrientation` plus its decode line
 
-## 3. Tests
+## 2. Camera policy
 
-- [x] `AudioToneRendererTests`: durations; pairwise distinct; contour; pitch band + no shared radar pitch; `init(turn:)`
-- [x] `AlertOrchestratorFeatureTests`: L0, L1, Warning window both sides, sustained L2, L3 + loop unaffected
-- [x] `NavigationFeatureTests`: delegate carries the direction (left/right/U-turn); rejoin re-sends
-- [x] `ActiveRideFeatureTests`: a turn reaches the speaker exactly once, level untouched; silent at L3
+- [x] `RoutesMapCamera.region(fitting:)` extracted
+- [x] `LiveMapCamera.swift`:
+  - Surface, Mode, mode, needsSeed, seed, follow, isFollowing, needsCorrection, orientationTap, overviewRegion
+  - a 1 s fallback in case a seed never reports landing
 
-## 4. Specs
+## 3–5. Views and wiring
 
-- [x] `Audio.md` v0.2: overview table, Turn Tones section, §3, §4, Turn Cues and Radar, ACs, OQA6 resolved
-- [x] `PRD.md` §8.6 turn-notification line
+- [x] `ActiveRideMapView`: route line, camera sequence, widget correction, the sheet's control column (`.mapScope`)
+- [x] `MapSheetButtons.swift`: orientation and overview buttons
+- [x] `Spacing.strokeMapRoute` / `strokeMapTrack`, and `Spacing.mapControl`
+- [x] `MapWidget`, and one `mapWidget` helper for both `RideDashboardView` call sites
+- [x] `ActiveRideFeature`: `@Shared`, `mapOrientationToggled`, comments
 
-## 5. Verify
+## 6. Tests
 
-- [x] Build clean — no warnings from changed files. First build: the one new warning was the turn tone's deprecated
-      `.userInteractive`, since removed. The fresh drive build (`.build/198/dd-drive`) has only pre-existing ones: the
-      radar effects' four `.userInteractive`, and the `fixedNow` warnings in `ActiveRideFeatureTests`, which stop at
-      line 2457, before this branch's insert, and blame to `be13d330` on main
-- [x] Targeted suites: **198 tests in 19 suites passed**; all 15 new test functions found by display name, the
-      parameterized one with its 3 cases. With `-parallel-testing-enabled NO` the log carries Swift Testing's own
-      `✔ Test "…"` lines, so a `^Test case '` count reads 0 — caught by the count check, not trusted
-- [x] Revert checks (a)–(h), scripted (`scratchpad/revert-checks.sh`), each rebuilt in `.build/198/dd-revert` with
-      caching off and run over the 5 turn-tone suites (61 tests). Every one failed exactly its predicted guards and
-      nothing else; source diff hash `b39b4a28…` identical before and after:
-      (a) no gate → held-through-L3, Warning window, parent L3;
-      (b) Warning clause removed → Warning window only;
-      (c) the issue's `< .caution` rule → Warning window only (its sustained-L2 half);
-      (d) a turn sets the level → all three orchestrator tests + both parent tests;
-      (e) no parent forward → both parent tests;
-      (f) Turn Left given Turn Right's notes → distinctness, contour;
-      (g) U-turn → left tone → the mapping test;
-      (h) no delegate → both navigation tone tests + both parent tests
-- [x] Ear check: 7 WAVs rendered by the real `ToneRenderer` at each tone's volume (sizes match 500 / 760 ms exactly),
-      sent to Brian; throwaway test deleted. **Brian: good for now** (2026-09-14). Any later tuning changes `ToneKind`
-      and Audio.md together
-- [x] Sim drive (`.build/198/drive198.sh`, the #197 kit against a fresh `.build/198/dd-drive`, iPhone 17 Pro iOS 26.5,
-      clean install, turn-by-turn on, 800 m N then right, `simctl location` at 10 m/s). UI test exit 0 after 227 s.
-      The app's own log:
-      - route loaded (1 turn over 1,200 m) → on route at 0 m
-      - **turn 0 announced 95.6 m out (lead 100 m)**, then **`turn tone — right` 6 ms later**
-      - calibration gate shut, then open 11 s later as the turn was made → route complete
-      - zero `audio` log lines, so no session or engine setup failure
-      - the only fault is onboarding's `ifLet` at `AppFeature.swift:294`, already recorded as pre-existing in #197
-      The built app was checked for the new code first: `turn tone`, `radar at L3` and `Warning sounding` are in it.
-      Both throwaway tests deleted before the final build
-- Aside: the final build first failed to find its destination. `65732455` runs iOS 26.3 and `73EBBB62` 26.4, both
-  below the app's 26.5 deployment target, so `42B5213B` is the only simulator that can run it
-- [x] Full `CyclometerTests`, from the fresh throwaway-free build (`.build/198/dd-final`, caching off), parallel on,
-      after uninstalling the drive's app. The xcresult summary: **1,093 / 1,093 passed**, 0 failed, 0 skipped. That is
-      exactly #197's 1,078 plus the 15 new test functions. Every new test is in the log by name, and no throwaway ran.
-      The log shows 1,092 distinct names; one line lost its prefix to interleaved clone output, as in #197
-- [x] Commit + PR: `8725bb6`, #233
-- [ ] #202 comment on Brian's go-ahead
+- [x] `AppPreferencesTests`: round trip and legacy decode
+- [x] `LiveMapCameraTests`
+- [x] `ActiveRideFeatureTests`: the toggle
+- [x] `MapSheetButtonsSnapshotTests`, plus its CI skip line
+- [x] Run the targeted suites; record and verify the snapshots; look at every image (section 8)
 
-## 6. Review fix — `/code-review` on #233
+## 7. Specs
 
-A turn tone's `play()` and a radar tone's reach the engine's lock in whatever order their setup finishes. A turn
-announced a moment before an L3 jump could stop the first Danger burst (the next then came 0.8 s late), or leave
-Danger at the turn's 0.8 volume.
+- [x] UX.md §W8
+- [x] PRD §8.6: orientation, route colour, tilt
+- [x] DataModel.md §3.6: the field, its consumers, the #94 note, OQDM8
 
-- [x] `ToneKind.yields(to:)`: a turn tone gives way to a sounding Warning or Danger; nothing else gives way
-- [x] `AudioEngineState`: a `sounding` deadline; the check and `player.volume` inside the lock; a held tone is logged
-- [x] `turnTone` doc comment; Audio.md "Turn Cues and Radar"; PRD §8.6's Audio.md section name
-- [x] Pair test in `ToneKindTurnTests` passes: tone suites 25 tests in 3 suites, the new one by name
-- [x] Fresh build (`.build/233/dd`, caching off), no new warnings. Touched files carry only the radar effects' four
-      pre-existing `.userInteractive` deprecations, 3 lines lower for the longer doc comment
-- [x] Throwaway live test (`ThrowawayTurnYieldLiveTests`) 3 / 3, each run in its own process on the live engine:
-      1. Danger, a turn 100 ms in: the turn is held after 4–9 ms; Danger plays through, 640–642 ms
-      2. A turn, Danger 100 ms in: the turn is cut off at 104–109 ms; Danger plays through, 641–646 ms
-      3. A Warning to its end (539–544 ms), then a turn: the turn plays through, 555–567 ms
-- [x] Throwaway deleted: moved to the scratchpad, never committed
-- [x] Revert checks (`scratchpad/revert-233.sh`), each built fresh into its own derived data, over the tone suites and
-      the live test:
-      (i) no engine check → only live case 1 fails: the turn plays through (564 ms) and cuts Danger off at 110 ms;
-      (j) turns give way only to Danger → only the pair test fails, once per turn tone.
-      `AudioClient.swift` is byte-identical to both pre-mutation copies. The script's "HASH DIFFERS" is this file,
-      edited mid-run 8 s after the "before" hash
-- [x] Full `CyclometerTests` from a fresh, throwaway-free build (`.build/233/dd-final`, caching off):
-      - CI-equivalent (serial, CI's 12 snapshot skips): **1,021 tests in 96 suites passed**, CI's 1,020 plus the pair
-        test; xcresult 1,028 / 1,028, 0 failed, 0 skipped
-      - parallel, 2 workers: xcresult **1,094 / 1,094 passed**, #198's 1,093 plus the pair test
-      - the pair test is in both logs by name, and the throwaway in neither
-      - The first attempt was killed for low memory 217 tests in, with none failed. The leftover `flake-repro`
-        simulator was shut down, and both runs repeated on the same build
-- [x] Commit + push to #233: `36a98ca`, CI green (1,021 tests in 96 suites); PR description gained a "Review fix"
-      section
+## 8. Verify
+
+- [x] Build clean, no new warnings: every warning in the log is in a file this branch doesn't touch, or is one of the
+      pre-existing `fixedNow` warnings in `ActiveRideFeatureTests` (lines 2219–2457, above this branch's insert)
+- [x] Targeted suites: **157 tests in 18 suites passed**. All 19 new or changed test names are in the log, each once
+- [x] Button snapshots recorded (6 fail on first record, as expected), then verified (6 pass). Looked at all six:
+      the glyphs render in `cyPrimary`, light and dark. **The glass circle doesn't render in the offscreen harness**,
+      so the snapshots pin glyph, colour and size; the sim shots judge the material
+- [x] Drive build (`.build/199/dd-drive`, fresh, caching off). `Cyclometer.debug.dylib` carries "Show whole route",
+      "Map orientation", `location.north.line.fill` and `n.circle`
+- Edits after the drive's build, so not in the drive binary (they are in the revert and final builds):
+  - the `Spacing` map strokes became literals, with the same values;
+  - `engage()`'s no-camera branch now asks `needsSeed`.
+- First final drive, stopped after run 1 of 7:
+  - **The route widget looked right:** `cyMapRoute` ahead of the rider, the track inside the wider route line over
+    the part ridden, and no compass.
+  - **The sheet never opened.** The tap at (0.2, 0.78) didn't reach the widget, like the spike's tap on the location
+    dot. The UI test now tries six points and prints which one opened the sheet.
+  - **A new fault, caused by #199:** `Bound preference MapScopeRegistryKey tried to update multiple times per frame`,
+    as the route loaded. Fixed: only the sheet is map-scoped now, since the widget has no controls to scope.
+- [x] Second drive, route-light only (fresh `dd-drive` with both fixes): **passed**, and there is no MapScopeRegistryKey fault.
+  - Every sheet check held: heading-up → north-up; overview; re-engage without switching; the ride resumes after
+    a relaunch (on route at 467 m) and the sheet reopens north-up.
+  - **Widget taps "missed": not a bug, and my first diagnosis was wrong.** 3 of 6 widget taps across the drives
+    didn't open the sheet. I blamed MapKit and moved the tap into a clear overlay, and the next drive missed the same
+    way.
+    - The cause is the auto-dim (#110). After `dimAfterSeconds` (30 s) without a touch the dashboard dims, and its
+      blocker swallows the first tap to wake it. The dim lowers backlight only, so no screenshot shows it.
+    - The timings fit: every miss came 32 s or more after the last touch, while the post-relaunch taps (about 12 s)
+      and the taps just after a wake all worked.
+    - The overlay is reverted. The UI test keeps its retry, with a corrected comment.
+  - **The shared column looked wrong:** MapKit's scoped controls lost their styling (a green square re-centre, a bare
+    "2D"), and my glass buttons were about 63 pt against MapKit's 42 pt.
+- **Brian: one column, restyled** (asked with both screenshots, 2026-09-14). MapKit's controls get
+  `.buttonBorderShape(.circle)` (WWDC23), and my buttons shrink to MapKit's size.
+- Revert checks stopped (SIGINT, so the script restored its mutation) to rerun on the final code. Every mutation
+  target was checked present exactly once afterwards.
+- Results of the stopped pass:
+  - baseline: 0 failed (35 Swift Testing and 6 XCTest);
+  - (a) to (g): each failed exactly its predicted tests, and every file was restored.
+- [x] Restyled build (incremental `dd-drive`, caching off): clean, with no warnings from touched files. Button
+      snapshots re-recorded (6 recorded, then 6 verified), and all six looked at. They still show only the glyph:
+      the glass circle doesn't render offscreen, with `glassEffect` either. So the snapshots pin glyph and colour,
+      not the button's size or material (a glyph swap still fails them); the sim shots judge the circle
+- [x] Restyled column checked on route-light: five matching 44 pt glass circles (re-centre, 2D/3D, compass,
+      orientation, overview), and every sheet state right
+- [x] Final drive, all seven runs: fresh `dd-drive` with the app code final (scope fix, restyle, overlay reverted).
+      The build is clean, with no warnings from touched files, and the binary carries the new strings
+  - Route light and dark, free ride light and dark, cpu-L and cpu-dense: **all passed**. On the free rides the
+    sheet offers no route overview.
+  - **Screens:** route, light and dark, and free ride, light and dark, all look right. Dark mode draws the route in
+    the lighter `mapRoute` (#7D7AFF), and the glass column is dark too.
+  - **CPU:** the 123-point route averaged 10.3% (max 145%), the 5,000-point route 11.6% (max 149%). A dense route costs
+    about a point.
+  - **Denied couldn't run.** With location denied, onboarding's "Next" stays disabled (#105's own gate), so no ride
+    starts. It isn't driven. The map's denied path is safe by construction: a `.userLocation` position counts as
+    following even without a fix, so the correction never fires.
+  - **The MapScopeRegistryKey fault came back, once per route run and never on a free ride.** In both runs it fell
+    about 0.1 s before the post-relaunch sheet tap, the one opening north-up:
+    - `onAppear` wrote heading-up → north-up follow while the sheet's map registered its scope;
+    - heading-up openings write the value already there, and none of the five has faulted;
+    - one earlier north-up opening didn't fault, which fits a same-frame race.
+  - Fix: the initial position comes from `init`, and `onAppear` no longer writes it.
+- [x] Verified the fix (incremental `dd-drive`, no warnings from touched files):
+  - two light route runs and one dark route run all passed;
+  - each opened the sheet north-up after the relaunch, with **0 MapScopeRegistryKey faults and no other new fault**
+    (2 of 3 north-up openings faulted before the fix);
+  - each first sheet tap still hit the auto-dim wake, as expected.
+- [x] Screenshots sent to Brian: the widget and sheet with a route (light and dark), heading-up, north-up, overview,
+      and the free ride (light and dark)
+- [x] `.build/199/final.sh`:
+  - **Throwaways moved out:** no `SimDrive` file is in the tree, and none appears in either test log.
+  - **Revert checks,** from a fresh `dd-revert`. The baseline passes. Each of 16 mutations fails exactly its predicted
+    tests, and every file is restored byte-for-byte:
+    - (a) decode line → round trip; (b) fallback → legacy decode;
+    - (c) widget honours orientation → both widget tests; (d1)/(d2) controls, gestures → the #62 guard;
+    - (e) sheet hardcoded → the sheet test; (f)/(g) tilt rules → tilt, flat;
+    - (h) heading reset → the north-up seed test; (i) `region(for:)` → overview contains, tiny-route floor;
+    - (j) always toggle → both re-engage tests; (k)/(l) correction → sheet left alone, widget put back;
+    - (m) no write → the TestStore test; (n) never seed → the seed rule; (o) glyphs → the 4 orientation snapshots;
+    - (p) unpadded `region(fitting:)` → a `RoutesMapCameraTests` floor test and both overview tests.
+  - **"TREE DIFFERS FROM START" is my own edit.** The script printed it because I wrote this file at 19:31:06, a
+    second after the script hashed the tree (about 19:31:05). Every file it mutated was verified restored, and
+    `git status` shows exactly this branch's files.
+  - **Final build**, from a fresh `dd-final` with caching off: clean, with no warnings from touched files.
+  - **Full suite, parallel: 1,117 / 1,117 passed.**
+  - **CI-equivalent** (serial, 13 snapshot suites skipped): **1,045 / 1,045 passed**, with **1,038 Swift Testing
+    tests in 98 suites**.
+  - That is `main`'s 1,094 / 1,021, plus 17 new Swift Testing tests and 6 snapshots. The new tests are in both logs
+    by name.
+- [x] Memory:
+  - `mapkit-heading-follow-gotchas`: the #62 outcome, tilted follow, map-scope faults;
+  - `mapkit-snapshot-flaky`: the pattern, replacing an example that never existed;
+  - `simulator-ui-drive`: the auto-dim wake tap, the hidden "Open", grabber drags.
+- [ ] Commit and PR
+
+## Carried over
+
+- [ ] #202 comment on Brian's go-ahead (open from #198). Add #199's flags to it; draft in the scratchpad
+  (`comment-202.md`):
+  - S19/S20's route colour;
+  - PRD's `UserProfile` appendix.
+  - Dropped: UX §W8's "position dot in `brPrimary`". The system marker takes the app tint and is green in every
+    drive screenshot.
 
 ## Review
 
-**Built.** Each turn announcement now sounds a tone: Turn Left, Turn Right or U-turn. All three step through the
-same three notes, the C6 augmented triad; rising means right and falling means left, and the U-turn goes up and back.
-- **Where the tone comes from.** Navigation sends a delegate with each announcement, and the orchestrator plays the
-  tone.
-- **Radar keeps the speaker.** The tone is held throughout L3, and for the Warning's 480 ms after an L2 alert fires.
-  Otherwise it plays, through a sustained L2 as well.
-- **The alert level is never touched.** The tone can't change the level, so the radar sidebar and calibration
-  suspension are unaffected.
-- **Specs.** Audio.md v0.2 resolves OQA6.
+**Built.**
+- The route being ridden is drawn in `cyMapRoute`, beneath the travelled track, on the W8 widget and its sheet.
+- The widget is always heading-up and has no controls. Its compass was #62's way out, and it's gone.
+- The sheet opens in the saved `mapOrientation`. Its one restyled column holds re-centre, 2D/3D, compass, orientation
+  and route overview.
+- A loaded route tilts both maps: 35° at MapKit's default follow distance.
 
 **Verified.**
-- Targeted run: 198 tests in 19 suites passed.
-- Revert checks: 8 scripted mutations, each failing exactly its predicted guards, with the source restored
-  byte-for-byte.
-- Sim drive: the tone logged 6 ms after the turn was announced, 95.6 m out.
-- Full suite: 1,093 / 1,093 passed.
-- Ear check: Brian says the tones are good for now.
+- A spike proved seed-then-follow before anything was built on it.
+- Targeted suites: 157 tests in 18 suites.
+- Revert checks: 16 mutations, each failing exactly its predicted tests.
+- Drives: light and dark, with and without a route, and dense against normal CPU. No new faults after the two scope
+  fixes.
+- Full suite: 1,117 parallel, 1,045 CI-equivalent.
 
 **Deviations from the approved plan.**
-- **"Turn tone", not "turn cue".** The log lines use Audio.md's section name, "Turn Tones".
-- **Default task priority.** The turn tone's effect doesn't use `.userInteractive`: that API is deprecated, and a turn
-  has no 200 ms budget. The radar effects keep theirs.
-- **A separate overview table for the turn tones.** They don't get rows in Audio.md's radar table, because that
-  table's columns are per alert level.
-- **An eighth revert check, (h).** It removes the delegate; the plan had only (a)–(g).
+- **Only the sheet is map-scoped, and the initial camera comes from `init`.** Each change fixed a
+  MapScopeRegistryKey fault.
+- **The sheet's column is restyled** (Brian's call, after the first drive). It gets `.buttonBorderShape(.circle)` and
+  44 pt glass buttons (`Spacing.mapControl`), instead of buttons the size of a tap target.
+- **`needsSeed` is added.** A free ride's widget never seeds, so it starts exactly as it did before.
+- **Re-engaging after the overview keeps the current distance**, rather than the last following camera's, as native
+  re-centre does.
+- **Location-denied wasn't driven**, because onboarding blocks without location.
+- **The snapshots pin glyph and colour only.** Glass doesn't render offscreen.
 
-**Review fix (`/code-review`).** A turn tone could cut off a radar tone that started at the same moment, because both
-`play()` calls reach the engine's lock in whatever order their setup finishes.
-- The engine now holds a turn tone while a Warning or Danger is sounding, and sets the volume under the lock.
-- The fix was tested against the live engine: 3 / 3 passed, and the test fails with the check removed.
-- Full suite passes, CI-style and in parallel.
+**Caught before shipping.**
+- The widget-tap "misses" were the auto-dim wake tap (#110). I blamed MapKit first, and a tap-overlay "fix" went
+  through one drive before I checked the timings. It is reverted.
 
 **For Brian.**
-- **Ear check.** Good for now. Any later tuning changes `ToneKind` and Audio.md together.
-- **Flag: the All Clear interval.** Audio.md and `ToneKind` both call All Clear's A5 → D5 a minor third. It's a
-  perfect fifth. Not fixed.
-- **Flag: no S12 tone toggles.** None exist anywhere yet. Audio.md §4 describes them, and UX.md §S12 has no rows for
-  them. Outside #198.
-- **Only one simulator can run the app.** `42B5213B` (iOS 26.5) is the only iPhone 17 Pro at or above the 26.5
-  deployment target; the 26.3 and 26.4 ones can't run it.
+- **Tilt:** 35° is MapKit's clamp. A steeper view needs a closer camera, which is zoom, excluded by #199.
+- **Heading-up rotation** needs a ride on a device.
+- **#62** can close with this PR; your call.
+- **#202:** the comment is drafted (S19/S20's route colour, PRD's `UserProfile` appendix).
+- **Onboarding:** its location step keeps Next disabled when location is denied. Seen in the drive; not in scope.

@@ -68,6 +68,12 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// point — on until the rider first turns it off. Off, the route is only drawn on the map.
     var isTurnByTurnEnabled: Bool = true
 
+    /// Which way up the full-screen map sheet opens (#199). Toggled on the sheet and remembered, so it
+    /// opens the same way next ride and after a relaunch.
+    ///
+    /// The sheet only: the W8 widget is always heading-up and offers no way out of it (#62).
+    var mapOrientation: MapOrientation = .headingUp
+
     /// Whether the rider has finished onboarding (S01→S02) at least once (#105). Gates
     /// `AppFeature`'s launch presentation — once true, onboarding never reappears, even
     /// if a permission it once checked is later revoked.
@@ -153,6 +159,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
         isTurnByTurnEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isTurnByTurnEnabled
         ) ?? true
+        mapOrientation = try container.decodeIfPresent(
+            MapOrientation.self, forKey: .mapOrientation
+        ) ?? .headingUp
     }
 }
 
