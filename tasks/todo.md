@@ -51,7 +51,8 @@ sounds, and otherwise plays — including through a sustained L2.
       (g) U-turn → left tone → the mapping test;
       (h) no delegate → both navigation tone tests + both parent tests
 - [x] Ear check: 7 WAVs rendered by the real `ToneRenderer` at each tone's volume (sizes match 500 / 760 ms exactly),
-      sent to Brian; throwaway test deleted. **Awaiting his ears** — any tuning changes `ToneKind` and Audio.md together
+      sent to Brian; throwaway test deleted. **Brian: good for now** (2026-09-14). Any later tuning changes `ToneKind`
+      and Audio.md together
 - [x] Sim drive (`.build/198/drive198.sh`, the #197 kit against a fresh `.build/198/dd-drive`, iPhone 17 Pro iOS 26.5,
       clean install, turn-by-turn on, 800 m N then right, `simctl location` at 10 m/s). UI test exit 0 after 227 s.
       The app's own log:
@@ -68,7 +69,8 @@ sounds, and otherwise plays — including through a sustained L2.
       after uninstalling the drive's app. The xcresult summary: **1,093 / 1,093 passed**, 0 failed, 0 skipped. That is
       exactly #197's 1,078 plus the 15 new test functions. Every new test is in the log by name, and no throwaway ran.
       The log shows 1,092 distinct names; one line lost its prefix to interleaved clone output, as in #197
-- [ ] Commit + PR on Brian's go-ahead (body drafted in the scratchpad as `pr-198.md`); #202 comment on his go-ahead
+- [x] Commit + PR: `8725bb6`, #233
+- [ ] #202 comment on Brian's go-ahead
 
 ## 6. Review fix — `/code-review` on #233
 
@@ -100,7 +102,8 @@ Danger at the turn's 0.8 volume.
       - the pair test is in both logs by name, and the throwaway in neither
       - The first attempt was killed for low memory 217 tests in, with none failed. The leftover `flake-repro`
         simulator was shut down, and both runs repeated on the same build
-- [ ] Commit + push to #233 on Brian's go-ahead
+- [x] Commit + push to #233: `36a98ca`, CI green (1,021 tests in 96 suites); PR description gained a "Review fix"
+      section
 
 ## Review
 
@@ -120,7 +123,7 @@ same three notes, the C6 augmented triad; rising means right and falling means l
   byte-for-byte.
 - Sim drive: the tone logged 6 ms after the turn was announced, 95.6 m out.
 - Full suite: 1,093 / 1,093 passed.
-- Ear check: WAVs sent; the verdict is Brian's.
+- Ear check: Brian says the tones are good for now.
 
 **Deviations from the approved plan.**
 - **"Turn tone", not "turn cue".** The log lines use Audio.md's section name, "Turn Tones".
@@ -137,7 +140,7 @@ same three notes, the C6 augmented triad; rising means right and falling means l
 - Full suite passes, CI-style and in parallel.
 
 **For Brian.**
-- **Ear check.** Your verdict on the WAVs is pending. Any tuning changes `ToneKind` and Audio.md together.
+- **Ear check.** Good for now. Any later tuning changes `ToneKind` and Audio.md together.
 - **Flag: the All Clear interval.** Audio.md and `ToneKind` both call All Clear's A5 → D5 a minor third. It's a
   perfect fifth. Not fixed.
 - **Flag: no S12 tone toggles.** None exist anywhere yet. Audio.md §4 describes them, and UX.md §S12 has no rows for
