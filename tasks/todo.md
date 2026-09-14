@@ -158,7 +158,7 @@ Decisions (Brian, planning):
   - `mapkit-heading-follow-gotchas`: the #62 outcome, tilted follow, map-scope faults;
   - `mapkit-snapshot-flaky`: the pattern, replacing an example that never existed;
   - `simulator-ui-drive`: the auto-dim wake tap, the hidden "Open", grabber drags.
-- [ ] Commit and PR
+- [x] Commit and PR: `de31541`, #235
 
 ## Carried over
 
