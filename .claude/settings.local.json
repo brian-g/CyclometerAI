@@ -2,18 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(find /Users/brian/Projects/CyclometerAI -maxdepth 1 -name .* -type f)",
-      "Bash(git config:*)",
       "Bash(file:*)",
       "Bash(find /Users/brian/Projects/CyclometerAI -not -path */.git/* -type f -o -type d)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)",
       "Bash(xcodebuild build *)",
       "Bash(xcodebuild test *)",
-      "Bash(gh api *)",
       "Bash(xcodebuild -project /Users/brian/Projects/CyclometerAI/Cyclometer/Cyclometer.xcodeproj -scheme Cyclometer -destination 'platform=iOS Simulator,id=65732455-DE68-4C3F-B545-9F24E4B2A555' build)",
       "Bash(xcrun simctl *)",
-      "Bash(osascript *)",
       "Bash(xcodebuild -project /Users/brian/Projects/CyclometerAI/Cyclometer/Cyclometer.xcodeproj -scheme Cyclometer -destination 'platform=iOS Simulator,id=42B5213B-30F2-4CAD-9649-EDC4243822D7' build-for-testing)",
       "Bash(xcodebuild -project /Users/brian/Projects/CyclometerAI/Cyclometer/Cyclometer.xcodeproj -scheme Cyclometer -destination 'platform=iOS Simulator,id=42B5213B-30F2-4CAD-9649-EDC4243822D7' build)",
       "WebSearch",
@@ -21,17 +17,17 @@
       "Bash(find \"/Applications/SF Symbols.app/Contents/Resources\" -name \"*.svg\" -maxdepth 2 2>/dev/null | head -20)",
       "Bash(find \"/Applications/SF Symbols.app/Contents\" -name \"*.svg\" -path \"*template*\" -o -name \"*.svg\" -path \"*export*\" 2>/dev/null | head -5)",
       "Bash(find \"/Applications/SF Symbols.app/Contents\" -name \"symbolTemplate*\" -o -name \"SymbolTemplate*\" 2>/dev/null | head -10)",
-      "Bash(python3 -)",
-      "Bash(git checkout *)",
       "Bash(git commit *)",
       "Bash(xcrun xcresulttool *)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d\\)[:3000]\\)\")",
-      "Bash(git fetch *)",
       "Bash(git merge *)",
       "Bash(xcodebuild build-for-testing *)",
       "Bash(echo \"exit=$?\")",
       "mcp__sketch__run_code"
     ]
   },
-  "spinnerTipsEnabled": false
+  "spinnerTipsEnabled": false,
+  "enabledPlugins": {
+    "cloudflare@cloudflare": false
+  }
 }

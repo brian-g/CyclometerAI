@@ -6,38 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **CyclometerAI** is a premium iOS cycling app (SwiftUI/Swift) designed as a modern bicycle computer. Implementation is **underway**: a buildable Xcode project and TCA app source live under `Cyclometer/`, alongside the design specs, assets, and documentation. Work is milestone-driven (see GitHub issues/milestones); the codebase is the source of truth for what is actually built — treat the "Planned Architecture" below as the design intent, which the current tree may not yet fully match.
 
-## Repository Contents
+## Specs
 
-```
-CyclometerAI/
-├── CLAUDE.md                        ← This file
-├── README.md                        ← Full product specification
-├── LICENSE
-├── .gitignore
-├── Cyclometer/                      ← Xcode project + app source (implementation)
-│   ├── Cyclometer.xcodeproj
-│   ├── Cyclometer/                  ← App target (App, Features, Clients, Models, UI, PreviewContent)
-│   ├── CyclometerTests/             ← Unit + snapshot tests
-│   └── CyclometerUITests/
-└── assets/
-    ├── PRD.md                       ← Product Requirements Document (v0.2)
-    ├── UX.md                        ← Screen-level UX specification
-    ├── TCA.md                       ← TCA architecture spec (feature tree, file layout, test strategy)
-    └── design/                      ← All manual design assets
-        ├── colors.md                ← Canonical color token reference (light + dark)
-        ├── Design.sketch            ← Primary UI/UX design file (all screens)
-        ├── CyclometerIcon.sketch    ← App icon designs
-        └── d-din/                   ← D-DIN font family (SIL Open Font License)
-            ├── D-DIN.otf
-            ├── D-DIN-Bold.otf
-            ├── D-DIN-Italic.otf
-            ├── D-DINCondensed.otf
-            ├── D-DINCondensed-Bold.otf
-            ├── D-DINExp.otf
-            ├── D-DINExp-Bold.otf
-            ├── D-DINExp-Italic.otf
-            └── SIL Open Font License.txt
-```
+`README.md` (product spec) · `assets/PRD.md` (requirements, OQ log) · `assets/UX.md` (screen-level UX) · `assets/TCA.md` (TCA architecture)
 
 ## Design Assets
 
@@ -58,15 +29,6 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 
 **Architecture Pattern:** The Composable Architecture (TCA) — explicit state, side-effect isolation via `Effect`, hardware abstraction via `@DependencyClient`, and `TestStore` for all safety-critical logic.
 
-**Core Apple Frameworks:**
-- `CoreLocation` — GPS and location
-- `CoreBluetooth` — BLE sensor connectivity (Garmin Varia RTL515/RCT715, HR strap, CSC sensor)
-- `HealthKit` — Resting HR, max HR, date of birth (read); `HKWorkout` (write, at ride end)
-- `MapKit` — Live map, route overlay
-- `WeatherKit` - Current weather, wind overlaw
-- `AVFoundation` — Audio tone alerts (L3 danger override)
-- `CoreHaptics` / `UIFeedbackGenerator` — Haptic escalation (L1–L3)
-
 **Persistence:** SwiftData (iOS 26+) for ride summaries and history. CoreData via `NSBatchInsertRequest` for high-frequency per-second `TrackPoint` time-series during active rides. GPX export via `gpxtpx:TrackPointExtension` v2 schema.
 
 **BLE Targets (Phase 1):**
@@ -76,45 +38,9 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 
 > **Not targeted:** Garmin Varia RVR820 (proprietary secured BLE protocol). ANT+ (no iOS hardware support).
 
-**TCA Feature Tree:**
-```
-AppFeature
-├── OnboardingFeature
-├── HomeFeature
-├── ActiveRideFeature              ← Primary; safety-critical
-│   ├── RadarFeature
-│   ├── HeartRateFeature
-│   ├── SpeedCadenceFeature
-│   ├── NavigationFeature
-│   ├── TrackPointRecorderFeature
-│   └── AlertOrchestratorFeature
-├── RideHistoryFeature
-├── RideDetailFeature
-└── SettingsFeature
-```
-
-**Project Folder Structure (actual — `Cyclometer/Cyclometer/`):**
-```
-Cyclometer/Cyclometer/
-├── App/                           ← AppFeature, AppView, CyclometerApp; StartRideToolbar
-├── Features/                      ← <Name>Feature.swift + <Name>View.swift pairs
-│   ├── ActiveRide/                ← ActiveRide, Speed, Cadence, Map widgets, RideDashboard
-│   ├── Rides/                     ← RidesFeature/View, StartSheetFeature/View (S05.1)
-│   ├── Routes/  └── Settings/
-├── Clients/                       ← TCA @Dependency clients (BLE/, Audio, Location, HealthKit, Persistence)
-├── Models/                        ← Ride, RadarTarget, HeartRateZone, CadenceZone, UnitSystem, Item
-├── UI/
-│   ├── DesignSystem/              ← Color+Cyclometer (cy tokens), Typography, AppFonts, Spacing, Opacity
-│   └── Components/                ← HeroNumber, HRZoneBadge, WidgetLabel, MetricTile, RadarColumn
-├── PreviewContent/                ← Demo/stub data for SwiftUI previews
-├── Assets.xcassets/  └── Resources/Fonts/
-```
-> Note: `assets/TCA.md` §8 describes a more nested target layout (e.g. `Features/Tab/RidesTab/`) that the repo does **not** follow — match the flat `Features/<Area>/` grouping above when adding files.
+> Note: `assets/TCA.md` §8 describes a more nested target layout (e.g. `Features/Tab/RidesTab/`) that the repo does **not** follow — match the existing flat `Cyclometer/Cyclometer/Features/<Area>/` grouping when adding files.
 
 ## Design System
-
-**Brand color:** `#60BD10` (green, outdoor-visibility optimized)  
-**Canonical token reference:** `assets/design/colors.md`
 
 **Typography ramp:**
 | Role | Font | Size | Notes |
@@ -126,13 +52,9 @@ Cyclometer/Cyclometer/
 | Units | GillSans-Light | 17pt | Baseline-aligned with value |
 | Caption | GillSans-Light | 14pt | |
 
-D-DIN font files are in `assets/design/d-din/` and must be added to the Xcode project target's "Copy Bundle Resources" build phase.
-
 Labels: **ALL CAPS** · Units: *lowercase* · Units: baseline-aligned to their corresponding value
 
 ## Build & Development
-
-The Xcode project exists at `Cyclometer/Cyclometer.xcodeproj` (scheme: `Cyclometer`, target iOS 26.0+, iPhone only). Dependencies are resolved via SPM (The Composable Architecture, swift-snapshot-testing, etc.).
 
 Build and test from `Cyclometer/`:
 ```
@@ -147,12 +69,6 @@ xcodebuild test  -project Cyclometer.xcodeproj -scheme Cyclometer \
 - UI — `pointfreeco/swift-snapshot-testing` via XCTest, fixed-size canvases, light + dark variants (e.g. `SpeedWidgetSnapshotTests.swift`).
 - Snapshot references are recorded against a local simulator, so the four snapshot suites are skipped in CI (see `.github/workflows/tests.yml`). The full local suite passes.
 - Don't snapshot against ambient environment values (`.accentColor`, `.primary` where the token matters) — pass an explicit `cy*` token, or the reference silently encodes whatever the host bundle resolved at record time.
-
-**Open Questions (resolve before or during M2):**
-- OQ2: Garmin mobile SDK vs. raw CoreBluetooth for Varia BLE integration
-- OQ7: Minimum Varia RTL515/RCT715 firmware version for BLE characteristic support
-- OQ11: Whether RTL515/RCT715 exposes radar return signal amplitude for vehicle size inference
-- OQ12: MVP navigation — `MKDirections` routing or GPX import only
 
 ## Business Model
 
