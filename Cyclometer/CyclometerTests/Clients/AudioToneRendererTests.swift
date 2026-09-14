@@ -146,6 +146,15 @@ struct ToneKindTurnTests {
         }
     }
 
+    @Test("Only a turn tone gives way, and only to a sounding Warning or Danger — radar keeps the speaker")
+    func onlyATurnToneGivesWay() {
+        let turns: [ToneKind] = [.turnLeft, .turnRight, .uTurn]
+        for kind in ToneKind.allCases {
+            let givesWayTo = ToneKind.allCases.filter { kind.yields(to: $0) }
+            #expect(givesWayTo == (turns.contains(kind) ? [.warning, .danger] : []), "\(kind)")
+        }
+    }
+
     /// What a listener hears, segment by segment: pitch, waveform and length, or a rest.
     private func signature(_ kind: ToneKind) -> [String] {
         kind.segments.map { segment in

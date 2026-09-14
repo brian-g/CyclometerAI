@@ -186,6 +186,7 @@ A turn tone never changes the alert level — the level drives the radar sidebar
 - **L2:** the turn tone plays, except within 480 ms of an L2 alert firing — the Warning tone's length. The Warning plays once, on entry, and L2 can hold for much of a busy road, which is where turns are hardest to find.
 - **L3:** the turn tone is held for as long as L3 lasts.
 - A radar tone that starts while a turn tone is sounding cuts it off (tones are interruptible).
+- A turn tone never cuts off a Warning or Danger that is still sounding, a Danger burst trailing the end of L3 included; it is held.
 
 A held turn tone is dropped, not replayed; the centred turn instruction still shows.
 

@@ -70,6 +70,38 @@ sounds, and otherwise plays — including through a sustained L2.
       The log shows 1,092 distinct names; one line lost its prefix to interleaved clone output, as in #197
 - [ ] Commit + PR on Brian's go-ahead (body drafted in the scratchpad as `pr-198.md`); #202 comment on his go-ahead
 
+## 6. Review fix — `/code-review` on #233
+
+A turn tone's `play()` and a radar tone's reach the engine's lock in whatever order their setup finishes. A turn
+announced a moment before an L3 jump could stop the first Danger burst (the next then came 0.8 s late), or leave
+Danger at the turn's 0.8 volume.
+
+- [x] `ToneKind.yields(to:)`: a turn tone gives way to a sounding Warning or Danger; nothing else gives way
+- [x] `AudioEngineState`: a `sounding` deadline; the check and `player.volume` inside the lock; a held tone is logged
+- [x] `turnTone` doc comment; Audio.md "Turn Cues and Radar"; PRD §8.6's Audio.md section name
+- [x] Pair test in `ToneKindTurnTests` passes: tone suites 25 tests in 3 suites, the new one by name
+- [x] Fresh build (`.build/233/dd`, caching off), no new warnings. Touched files carry only the radar effects' four
+      pre-existing `.userInteractive` deprecations, 3 lines lower for the longer doc comment
+- [x] Throwaway live test (`ThrowawayTurnYieldLiveTests`) 3 / 3, each run in its own process on the live engine:
+      1. Danger, a turn 100 ms in: the turn is held after 4–9 ms; Danger plays through, 640–642 ms
+      2. A turn, Danger 100 ms in: the turn is cut off at 104–109 ms; Danger plays through, 641–646 ms
+      3. A Warning to its end (539–544 ms), then a turn: the turn plays through, 555–567 ms
+- [x] Throwaway deleted: moved to the scratchpad, never committed
+- [x] Revert checks (`scratchpad/revert-233.sh`), each built fresh into its own derived data, over the tone suites and
+      the live test:
+      (i) no engine check → only live case 1 fails: the turn plays through (564 ms) and cuts Danger off at 110 ms;
+      (j) turns give way only to Danger → only the pair test fails, once per turn tone.
+      `AudioClient.swift` is byte-identical to both pre-mutation copies. The script's "HASH DIFFERS" is this file,
+      edited mid-run 8 s after the "before" hash
+- [x] Full `CyclometerTests` from a fresh, throwaway-free build (`.build/233/dd-final`, caching off):
+      - CI-equivalent (serial, CI's 12 snapshot skips): **1,021 tests in 96 suites passed**, CI's 1,020 plus the pair
+        test; xcresult 1,028 / 1,028, 0 failed, 0 skipped
+      - parallel, 2 workers: xcresult **1,094 / 1,094 passed**, #198's 1,093 plus the pair test
+      - the pair test is in both logs by name, and the throwaway in neither
+      - The first attempt was killed for low memory 217 tests in, with none failed. The leftover `flake-repro`
+        simulator was shut down, and both runs repeated on the same build
+- [ ] Commit + push to #233 on Brian's go-ahead
+
 ## Review
 
 **Built.** Each turn announcement now sounds a tone: Turn Left, Turn Right or U-turn. All three step through the
@@ -97,6 +129,12 @@ same three notes, the C6 augmented triad; rising means right and falling means l
 - **A separate overview table for the turn tones.** They don't get rows in Audio.md's radar table, because that
   table's columns are per alert level.
 - **An eighth revert check, (h).** It removes the delegate; the plan had only (a)–(g).
+
+**Review fix (`/code-review`).** A turn tone could cut off a radar tone that started at the same moment, because both
+`play()` calls reach the engine's lock in whatever order their setup finishes.
+- The engine now holds a turn tone while a Warning or Danger is sounding, and sets the volume under the lock.
+- The fix was tested against the live engine: 3 / 3 passed, and the test fails with the check removed.
+- Full suite passes, CI-style and in parallel.
 
 **For Brian.**
 - **Ear check.** Your verdict on the WAVs is pending. Any tuning changes `ToneKind` and Audio.md together.

@@ -88,6 +88,16 @@ enum ToneKind: CaseIterable, Sendable {
         segments.reduce(0) { $0 + $1.durationMs } / 1_000
     }
 
+    /// Whether this tone, started while `sounding` is still sounding, gives way rather than cut it
+    /// off. Only a turn tone does, and only to a Warning or a Danger: radar keeps the speaker
+    /// (#198). Every other tone cuts off whatever is sounding — Audio.md: tones are interruptible.
+    func yields(to sounding: ToneKind) -> Bool {
+        switch self {
+        case .allClear, .warning, .danger: false
+        case .turnLeft, .turnRight, .uTurn: sounding == .warning || sounding == .danger
+        }
+    }
+
     /// Audio.md's exact segment breakdown for this tone. `playDanger()` renders one
     /// 580ms triple-burst cycle only — the 800ms inter-burst pause and "repeat
     /// continuously until level drops" behavior belong to `AlertOrchestratorFeature`,
@@ -257,6 +267,10 @@ private final class AudioEngineState: @unchecked Sendable {
     /// not a setting at this time," so nothing calls `setOverridesSilentMode`. The
     /// plumbing stays in case a later milestone reintroduces the row.
     private var silentModeOverrideEnabled = false
+    /// The last tone started, and when it stops sounding. A deadline, not a flag the completion
+    /// callback clears: `stop()` runs under `lock` and may fire that callback before returning,
+    /// and `NSLock` isn't recursive.
+    private var sounding: (kind: ToneKind, until: ContinuousClock.Instant)?
     private let lock = NSLock()
 
     func setOverridesSilentMode(_ enabled: Bool) {
@@ -280,23 +294,35 @@ private final class AudioEngineState: @unchecked Sendable {
             return
         }
 
-        player.volume = kind.volume
-        // Tones are interruptible (Audio.md acceptance criteria) — a new tone always
-        // takes priority over whatever is currently scheduled/sounding. Two overlapping
-        // `play()` calls (e.g. a fast caution→danger escalation) can each reach this
-        // point concurrently, so the stop/scheduleBuffer/play triple itself runs under
-        // `lock` — otherwise two tasks' calls can interleave on the shared node with no
-        // ordering guarantee. Only the completion await sits outside the lock: an
+        // Tones are interruptible (Audio.md acceptance criteria) — a new tone takes
+        // priority over whatever is currently scheduled/sounding, except that a turn tone
+        // never cuts off a sounding Warning or Danger (`ToneKind.yields(to:)`, #198). Two
+        // overlapping `play()` calls (e.g. a fast caution→danger escalation, or a turn
+        // announced as radar escalates) can each reach this point concurrently, in either
+        // order, so that check, the volume and the stop/scheduleBuffer/play triple run
+        // under `lock` — otherwise two tasks' calls can interleave on the shared node with
+        // no ordering guarantee. Only the completion await sits outside the lock: an
         // interrupted call's `stop()` fires the *previous* call's completion callback,
         // so that call's wait resolves promptly rather than blocking the tone that just
         // preempted it.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            lock.withLock {
+            let heldBy = lock.withLock { () -> ToneKind? in
+                let now = ContinuousClock.now
+                if let sounding, now < sounding.until, kind.yields(to: sounding.kind) {
+                    return sounding.kind
+                }
+                player.volume = kind.volume
                 player.stop()
                 player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in
                     continuation.resume()
                 }
                 player.play()
+                sounding = (kind: kind, until: now + .seconds(kind.duration))
+                return nil
+            }
+            if let heldBy {
+                logger.notice("\(String(describing: kind), privacy: .public) held — \(String(describing: heldBy), privacy: .public) sounding")
+                continuation.resume()
             }
         }
     }

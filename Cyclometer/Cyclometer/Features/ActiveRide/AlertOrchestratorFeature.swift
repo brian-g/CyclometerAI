@@ -74,12 +74,15 @@ struct AlertOrchestratorFeature {
     /// throughout L3, whose burst repeats until the threat recedes, and while a Warning is still
     /// sounding. Not for the rest of an L2 — the Warning plays once, on entry, and L2 can hold for
     /// much of a busy road, which is where turns are hardest to find. A held tone is dropped, not
-    /// replayed; the turn instruction still shows. A radar tone that starts mid-turn-tone cuts it
-    /// off (`AudioEngineState.play`), so radar wins that way round too.
+    /// replayed; the turn instruction still shows.
+    ///
+    /// The engine enforces the same rule where this can't see: a turn tone's `play()` and a radar
+    /// tone's can reach the speaker in either order. `AudioEngineState.play` lets a radar tone cut
+    /// off a sounding turn tone, and never the reverse (`ToneKind.yields(to:)`), a Danger burst
+    /// still trailing the loop's cancellation included.
     ///
     /// The Warning is timed from its dispatch stamp, which an L3 → L2 downgrade also sets, with no
-    /// tone of its own. Holding the turn tone then as well keeps it off a danger burst still
-    /// trailing the loop's cancellation.
+    /// tone of its own; the turn tone is held then too.
     private func turnTone(_ direction: Maneuver.Direction, _ state: State) -> Effect<Action> {
         let now = self.now  // read once, as in dispatchAlert
         let isWarningSounding = state.lastAlertDispatchAt[.caution]
