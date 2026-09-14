@@ -860,6 +860,10 @@ struct ActiveRideFeature {
                 return .none
             case .calibration:
                 return .none
+            case .navigation(.delegate(.turnAnnounced(let direction))):
+                // Whether the turn's tone sounds is the orchestrator's call: it knows whether radar
+                // has the speaker (#198).
+                return .send(.alertOrchestrator(.turnAnnounced(direction)))
             case .navigation:
                 return .none
             case .alertOrchestrator:

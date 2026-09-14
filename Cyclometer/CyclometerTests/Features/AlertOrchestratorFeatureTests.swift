@@ -19,6 +19,7 @@ struct AlertOrchestratorFeatureTests {
     private struct Counts: Sendable {
         var hapticAdvisory = 0, hapticWarning = 0, hapticDanger = 0, hapticAllClear = 0
         var audioWarning = 0, audioDanger = 0, audioAllClear = 0
+        var turns: [Maneuver.Direction] = []
     }
 
     private func makeStore(
@@ -35,6 +36,7 @@ struct AlertOrchestratorFeatureTests {
         audio.playWarning = { counts.withValue { $0.audioWarning += 1 } }
         audio.playDanger = { counts.withValue { $0.audioDanger += 1 } }
         audio.playAllClear = { counts.withValue { $0.audioAllClear += 1 } }
+        audio.playTurn = { direction in counts.withValue { $0.turns.append(direction) } }
 
         return TestStore(initialState: AlertOrchestratorFeature.State()) {
             AlertOrchestratorFeature()
@@ -380,5 +382,91 @@ struct AlertOrchestratorFeatureTests {
             $0.activeAlertLevel = .clear
             $0.lastAlertDispatchAt = [:]
         }
+    }
+
+    // MARK: - Turn tones (#198)
+
+    @Test("A turn tone plays at L0 and L1 — and nothing else: no haptic, no radar tone, no state")
+    func turnTonePlaysAtClearAndAdvisory() async {
+        let counts = LockIsolated(Counts())
+        let store = makeStore(clock: TestClock(), counts: counts)
+
+        // No state closure: the exhaustive store proves the level, and every guard stamp, untouched —
+        // the radar sidebar and calibration suspension both read them.
+        await store.send(.turnAnnounced(.left))
+        #expect(counts.value.turns == [.left])
+
+        await store.send(.alertLevelChanged(.advisory)) {
+            $0.activeAlertLevel = .advisory
+            $0.lastAlertDispatchAt = [.advisory: testDate]
+        }
+        await store.send(.turnAnnounced(.uTurn))
+        #expect(counts.value.turns == [.left, .uTurn])
+
+        // A path of its own, so no radar tone's setting can silence it.
+        #expect(counts.value.audioWarning == 0)
+        #expect(counts.value.audioAllClear == 0)
+        #expect(counts.value.audioDanger == 0)
+        #expect(counts.value.hapticAdvisory == 1)  // L1's own
+        #expect(counts.value.hapticWarning == 0)
+        #expect(counts.value.hapticDanger == 0)
+        #expect(counts.value.hapticAllClear == 0)
+    }
+
+    @Test("A turn tone waits out a sounding Warning, then plays through the rest of L2")
+    func turnToneWaitsOutTheWarningNotL2() async {
+        let counts = LockIsolated(Counts())
+        let store = makeStore(clock: TestClock(), counts: counts)
+
+        await store.send(.alertLevelChanged(.caution)) {
+            $0.activeAlertLevel = .caution
+            $0.lastAlertDispatchAt = [.caution: testDate]
+        }
+        #expect(counts.value.audioWarning == 1)
+
+        // Just inside the Warning's 480 ms: radar has the speaker.
+        store.dependencies.date.now = testDate.addingTimeInterval(ToneKind.warning.duration - 0.01)
+        await store.send(.turnAnnounced(.right))
+        #expect(counts.value.turns.isEmpty)
+
+        // Just after it, with L2 holding on — as it can for much of a busy road.
+        store.dependencies.date.now = testDate.addingTimeInterval(ToneKind.warning.duration + 0.01)
+        await store.send(.turnAnnounced(.right))
+        #expect(counts.value.turns == [.right])
+
+        store.dependencies.date.now = testDate.addingTimeInterval(60)
+        await store.send(.turnAnnounced(.left))
+        #expect(counts.value.turns == [.right, .left])
+        #expect(counts.value.audioWarning == 1)  // radar's tone never re-fired for either
+    }
+
+    @Test("A turn tone is held throughout L3, and the danger loop carries on regardless")
+    func turnToneIsHeldThroughDanger() async {
+        let clock = TestClock()
+        let counts = LockIsolated(Counts())
+        let store = makeStore(clock: clock, counts: counts)
+
+        await store.send(.alertLevelChanged(.danger)) {
+            $0.activeAlertLevel = .danger
+            $0.lastAlertDispatchAt = [.danger: testDate]
+        }
+        #expect(counts.value.audioDanger == 1)
+
+        // Long after any one burst: it is the level that holds it, not a tone that is sounding.
+        let laterDate = testDate.addingTimeInterval(10)
+        store.dependencies.date.now = laterDate
+        await store.send(.turnAnnounced(.left))
+        #expect(counts.value.turns.isEmpty)
+
+        await clock.advance(by: .milliseconds(800))
+        #expect(counts.value.audioDanger == 2)  // the loop never noticed
+
+        // Exit L3 so the repeating effect doesn't leak past the end of the test — and the hold lifts.
+        await store.send(.alertLevelChanged(.clear)) {
+            $0.activeAlertLevel = .clear
+            $0.lastAlertDispatchAt = [.clear: laterDate]
+        }
+        await store.send(.turnAnnounced(.left))
+        #expect(counts.value.turns == [.left])
     }
 }

@@ -5,15 +5,20 @@ import os
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
 private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "audio")
 
-/// TCA dependency for three-tone audio safety alerts (per Audio.md spec).
+/// TCA dependency for the app's synthesized tones (per Audio.md spec): the three radar safety
+/// alerts, and the turn tones navigation announces (#198).
 ///
 ///   L0 All Clear : 880→587 Hz sine, descending, ~680 ms — jersey-pocket audible
 ///   L2 Warning   : 1,400 Hz triangle, double staccato pulse, ~480 ms
 ///   L3 Danger    : 2,100 Hz square, triple burst, ~580 ms — overrides Silent Mode (user opt-in, unwired in MVP)
+///   Turns        : C6–E6–G♯6 triangle — rising for right, falling for left, up and back for a U-turn
 struct AudioClient {
     var playAllClear:           @Sendable () async -> Void
     var playWarning:            @Sendable () async -> Void
     var playDanger:              @Sendable () async -> Void
+    /// Its own closure, not a case of the safety tones': a setting that silences radar warnings
+    /// must not silence turns with them (#198).
+    var playTurn:               @Sendable (Maneuver.Direction) async -> Void
     var setOverridesSilentMode: @Sendable (Bool) async -> Void
 }
 
@@ -24,6 +29,7 @@ extension AudioClient: DependencyKey {
             playAllClear:           { await state.play(.allClear) },
             playWarning:            { await state.play(.warning) },
             playDanger:              { await state.play(.danger) },
+            playTurn:               { direction in await state.play(ToneKind(turn: direction)) },
             setOverridesSilentMode: { enabled in state.setOverridesSilentMode(enabled) }
         )
     }()
@@ -32,6 +38,7 @@ extension AudioClient: DependencyKey {
         playAllClear:           { },
         playWarning:            { },
         playDanger:              { },
+        playTurn:               { _ in },
         setOverridesSilentMode: { _ in }
     )
 }
@@ -45,10 +52,23 @@ extension DependencyValues {
 
 // MARK: - Tone Synthesis (pure — no engine/session state, unit-testable)
 
-/// One tone's identity — the escalation level `AlertOrchestratorFeature` drives.
-/// No case for L1 advisory: Audio.md specifies haptic-only for L1, no tone.
+/// One tone's identity. The radar alerts are the escalation levels `AlertOrchestratorFeature`
+/// drives — no case for L1 advisory: Audio.md specifies haptic-only for L1, no tone. The turn
+/// tones are navigation's (#198), and stand for no alert level.
 enum ToneKind: CaseIterable, Sendable {
     case allClear, warning, danger
+    case turnLeft, turnRight, uTurn
+
+    /// The tone for a turn. A slight turn is still a turn to its side: the rider needs the side,
+    /// and the turn instruction's arrow says how sharp. A U-turn has no side to give — at 180° the
+    /// sign of the heading change is noise — so it has a tone of its own.
+    init(turn direction: Maneuver.Direction) {
+        switch direction {
+        case .slightLeft, .left: self = .turnLeft
+        case .slightRight, .right: self = .turnRight
+        case .uTurn: self = .uTurn
+        }
+    }
 
     /// Fraction of system volume (Audio.md's per-tone volume spec). A scalar multiplier
     /// on top of whatever the system output level already is — never boosts past it.
@@ -57,7 +77,15 @@ enum ToneKind: CaseIterable, Sendable {
         case .allClear: 0.6
         case .warning:  0.8
         case .danger:   1.0
+        // Warning's, not All Clear's: a turn tone missed at speed is a missed turn. All Clear
+        // alone is quieter, because it asks nothing of the rider.
+        case .turnLeft, .turnRight, .uTurn: 0.8
         }
+    }
+
+    /// How long the tone sounds, start to finish.
+    var duration: TimeInterval {
+        segments.reduce(0) { $0 + $1.durationMs } / 1_000
     }
 
     /// Audio.md's exact segment breakdown for this tone. `playDanger()` renders one
@@ -90,7 +118,33 @@ enum ToneKind: CaseIterable, Sendable {
                 .silence(ms: 80),
                 .tone(freq: 2_100, ms: 140, waveform: .square, attackMs: 1, decayMs: 10)
             ]
+        // One pitch set, the C6 augmented triad, so that the contour alone says which way (#198):
+        // rising for right — listeners hear higher as further right — and falling for left.
+        case .turnRight:
+            Self.turnFigure(1_047, 1_319, 1_661)
+        case .turnLeft:
+            Self.turnFigure(1_661, 1_319, 1_047)
+        case .uTurn:
+            // Up, and back down: out, and round.
+            Self.turnFigure(1_047, 1_319, 1_661, 1_319, 1_047)
         }
+    }
+
+    /// A turn tone: quick notes stepping through `frequencies`, the last one held — where the figure
+    /// lands, and so the note that says which way it went. Triangle for presence in wind, as Warning,
+    /// on pitches neither Warning nor Danger uses, so that no part of a turn tone can pass for a
+    /// radar pulse.
+    private static func turnFigure(_ frequencies: Double...) -> [ToneSegment] {
+        var segments: [ToneSegment] = []
+        for (index, frequency) in frequencies.enumerated() {
+            if index > 0 { segments.append(.silence(ms: 40)) }
+            segments.append(
+                index == frequencies.count - 1
+                    ? .tone(freq: frequency, ms: 240, waveform: .triangle, attackMs: 5, decayMs: 60, decayShape: .exponential)
+                    : .tone(freq: frequency, ms: 90, waveform: .triangle, attackMs: 5, decayMs: 20)
+            )
+        }
+        return segments
     }
 }
 

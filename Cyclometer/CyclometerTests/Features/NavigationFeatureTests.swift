@@ -220,6 +220,35 @@ struct NavigationFeatureTests {
         }
     }
 
+    // MARK: - Turn tone (#198)
+
+    @Test("an announcement tells the parent which way the turn goes, for its tone", arguments: [Maneuver.Direction.left, .right, .uTurn])
+    func announcementCarriesTheDirection(direction: Maneuver.Direction) async throws {
+        let store = makeStore(route: try route(straight, turns: [(1_000, direction)]))
+        await store.send(.locationUpdated(fix(straight, at: 850, second: 0)))
+        #expect(store.state.announcedManeuverIndex == nil)
+        // 100 m out.
+        await store.send(.locationUpdated(fix(straight, at: 900, second: 1)))
+        await store.receive(.delegate(.turnAnnounced(direction)))
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("a turn a rejoin announces again is sent again")
+    func rejoiningSendsTheTurnAgain() async throws {
+        let store = makeStore(route: try route(straight, turns: [(700, .left)]))
+        await store.send(.locationUpdated(fix(straight, at: 600, second: 0)))
+        await store.receive(.delegate(.turnAnnounced(.left)))
+
+        for miss in 1...NavigationFeature.offRouteConsecutiveFixes {
+            await store.send(.locationUpdated(fix(straight, at: 600, lateral: 60, second: Double(miss))))
+        }
+        try #require(store.state.isOffRoute)
+
+        await store.send(.locationUpdated(fix(straight, at: 650, second: 6)))
+        await store.receive(.delegate(.turnAnnounced(.left)))
+        await store.skipInFlightEffects(strict: false)
+    }
+
     // MARK: - Staying on the leg being ridden
 
     @Test("an out-and-back is followed out and back, though the other leg is always the nearer")
