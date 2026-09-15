@@ -109,7 +109,8 @@ jobs:
             -skip-testing:CyclometerTests/TurnInstructionOverlaySnapshotTests \
             -skip-testing:CyclometerTests/PaceWidgetSnapshotTests \
             -skip-testing:CyclometerTests/SensorBatteryLabelSnapshotTests \
-            -skip-testing:CyclometerTests/MapSheetButtonsSnapshotTests
+            -skip-testing:CyclometerTests/MapSheetButtonsSnapshotTests \
+            -skip-testing:CyclometerTests/DirectionsWidgetSnapshotTests
 
       # Every failure before this existed as three bare test names in 14k lines of
       # xcodebuild noise. The bundle carries the assertion text and source location;

@@ -83,7 +83,8 @@ struct RideDashboardView: View {
     // Rows 1-2: Speed (W1 2×2)
     // Row 3:    HR (W4 1×1) + HR Zones (W12 1×1)
     // Row 4:    Pace (W11), full width — Radar (W7) is not a grid cell
-    // Row 5:    Cadence (W5 1×1) + Weather (W10 1×1) [placeholder]
+    // Row 5:    Cadence (W5 1×1) + Weather (W10 1×1) [placeholder], or
+    //           Directions (W9 1×1) in Weather's place while a route is followed (#200)
     // Rows 6-7: Map (W8 2×2) — bleeds behind the floating toolbar
     //
     // Radar (W7, S06) is a full-height lane beside the grid, not a grid row —
@@ -132,7 +133,10 @@ struct RideDashboardView: View {
                             .frame(height: unit)
                     }
 
-                    // W5 Cadence + W10 Weather placeholder
+                    // W5 Cadence + W10 Weather placeholder. W9 Directions takes Weather's cell
+                    // while a route is followed (#200): customisation (S07/S08) is Phase 2, so
+                    // this is the only way a rider on a route sees it. Turn-by-turn off matches
+                    // no fixes, so W9 would read "—" all ride — Weather stays.
                     GridRow {
                         CadenceWidget(
                             cadence: store.cadence.cadenceRPM,
@@ -142,8 +146,14 @@ struct RideDashboardView: View {
                             size: .oneByOne
                         )
                         .frame(height: unit)
-                        WeatherWidget()
-                            .frame(height: unit)
+                        Group {
+                            if store.navigation.isFollowingRoute {
+                                directionsWidget
+                            } else {
+                                WeatherWidget()
+                            }
+                        }
+                        .frame(height: unit)
                     }
 
                     // W8 — Map 2×2 (extends behind the floating toolbar)
@@ -179,6 +189,20 @@ struct RideDashboardView: View {
     /// saved orientation with the action that switches it.
     private var mapWidget: MapWidget {
         MapWidget(
+            coordinates: store.trackCoordinates,
+            route: store.navigation.activeRoute?.coordinates ?? [],
+            sheetOrientation: store.preferences.mapOrientation,
+            onOrientationToggle: { store.send(.mapOrientationToggled) }
+        )
+    }
+
+    /// W9 (#200). Its tap opens W8's map sheet, so it carries the same sheet inputs as `mapWidget`.
+    private var directionsWidget: DirectionsWidget {
+        DirectionsWidget(
+            hasRoute: store.navigation.activeRoute != nil,
+            nextTurn: store.navigation.nextManeuver,
+            distanceMeters: store.navigation.distanceToNextTurnMeters,
+            unit: store.unitSystem,
             coordinates: store.trackCoordinates,
             route: store.navigation.activeRoute?.coordinates ?? [],
             sheetOrientation: store.preferences.mapOrientation,
