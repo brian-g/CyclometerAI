@@ -83,8 +83,7 @@ struct RideDashboardView: View {
     // Rows 1-2: Speed (W1 2×2)
     // Row 3:    HR (W4 1×1) + HR Zones (W12 1×1)
     // Row 4:    Pace (W11), full width — Radar (W7) is not a grid cell
-    // Row 5:    Cadence (W5 1×1) + Weather (W10 1×1) [placeholder], or
-    //           Directions (W9 1×1) in Weather's place while a route is followed (#200)
+    // Row 5:    Cadence (W5 1×1) + Directions (W9 1×1)
     // Rows 6-7: Map (W8 2×2) — bleeds behind the floating toolbar
     //
     // Radar (W7, S06) is a full-height lane beside the grid, not a grid row —
@@ -133,10 +132,8 @@ struct RideDashboardView: View {
                             .frame(height: unit)
                     }
 
-                    // W5 Cadence + W10 Weather placeholder. W9 Directions takes Weather's cell
-                    // while a route is followed (#200): customisation (S07/S08) is Phase 2, so
-                    // this is the only way a rider on a route sees it. Turn-by-turn off matches
-                    // no fixes, so W9 would read "—" all ride — Weather stays.
+                    // W5 Cadence + W9 Directions — always present; on a free ride it reads
+                    // "No Route" (#200). Removing it is S07/S08's job, not this grid's.
                     GridRow {
                         CadenceWidget(
                             cadence: store.cadence.cadenceRPM,
@@ -146,14 +143,8 @@ struct RideDashboardView: View {
                             size: .oneByOne
                         )
                         .frame(height: unit)
-                        Group {
-                            if store.navigation.isFollowingRoute {
-                                directionsWidget
-                            } else {
-                                WeatherWidget()
-                            }
-                        }
-                        .frame(height: unit)
+                        directionsWidget(size: .oneByOne)
+                            .frame(height: unit)
                     }
 
                     // W8 — Map 2×2 (extends behind the floating toolbar)
@@ -196,13 +187,15 @@ struct RideDashboardView: View {
         )
     }
 
-    /// W9 (#200). Its tap opens W8's map sheet, so it carries the same sheet inputs as `mapWidget`.
-    private var directionsWidget: DirectionsWidget {
+    /// W9 (#200), on both pages. Its tap opens W8's map sheet, so it carries the same sheet inputs as
+    /// `mapWidget`.
+    private func directionsWidget(size: WidgetSize) -> DirectionsWidget {
         DirectionsWidget(
             hasRoute: store.navigation.activeRoute != nil,
             nextTurn: store.navigation.nextManeuver,
             distanceMeters: store.navigation.distanceToNextTurnMeters,
             unit: store.unitSystem,
+            size: size,
             coordinates: store.trackCoordinates,
             route: store.navigation.activeRoute?.coordinates ?? [],
             sheetOrientation: store.preferences.mapOrientation,
@@ -229,6 +222,12 @@ struct RideDashboardView: View {
                         averageCadence: store.cadence.averageCadenceRPM,
                         maxCadence: store.cadence.maxCadenceRPM,
                         size: .twoByOne)
+                }
+                // W9 — Directions 2×1 (#200 review)
+                GridRow {
+                    directionsWidget(size: .twoByOne)
+                        .gridCellColumns(2)
+                        .frame(height: unit)
                 }
             }
         }
@@ -445,20 +444,6 @@ struct PaceWidget: View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetLabel("Pace")
             HeroNumber(pace, unit: unit.paceLabel).heroNumberSize(.medium)
-            Spacer()
-        }
-        .padding(Spacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.cyBgSecondary)
-    }
-}
-
-/// W10 — Weather 1×1 (placeholder)
-private struct WeatherWidget: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            WidgetLabel("Weather")
-            HeroNumber("77°", unit: "").heroNumberSize(.medium)
             Spacer()
         }
         .padding(Spacing.sm)

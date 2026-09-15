@@ -546,13 +546,6 @@ struct NavigationFeatureTests {
 
     // MARK: - Turn-by-turn off
 
-    @Test("a route is followed only with turn-by-turn on — the gate that puts W9 on the dashboard (#200)")
-    func isFollowingRouteNeedsARouteAndTurnByTurn() throws {
-        #expect(makeStore(route: try route(straight, turns: [])).state.isFollowingRoute)
-        #expect(!makeStore(route: try route(straight, turns: []), turnByTurn: false).state.isFollowingRoute)
-        #expect(!makeStore(route: nil).state.isFollowingRoute)
-    }
-
     @Test("with turn-by-turn off the route is not followed: no match, no turn, no off-route")
     func turnByTurnOffIgnoresFixes() async throws {
         let store = makeStore(route: try route(straight, turns: [(150, .left)]), turnByTurn: false, exhaustive: true)

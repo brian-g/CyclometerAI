@@ -198,6 +198,24 @@ when the snap appeared and nothing else.
 - A bug report's numbers can be right and its mechanism wrong. Reproduce the mechanism from raw data before
   committing to a filter shape — an issue's "Scope" bullets are a hypothesis, not a spec.
 - When a filter's job is to remove bad data, measure what it removes *and* what the output looks like after.
+
+
+## Dashboard widgets are always present; state doesn't hide them (2026-09-15, #200 review)
+
+**What happened.** #200's Scope said to show W9 "in place of an existing cell only while a route is loaded", and
+I built exactly that: W9 swapped in for Weather behind `isFollowingRoute`. Brian, at review: "Don't do this. The
+Directions widget is there all of the time. Later, when we allow customization of the dashboard, the user can
+turn it off." He also cut W9's 2×2 variant, which UX.md §S05 W9 had listed.
+
+**Why it matters.** A widget that appears and disappears moves the grid under a rider who is reading it, and
+the empty state ("No Route") already covers the case the gate existed for. Whether a widget is present is a
+layout decision the rider will own (S07/S08), not something the dashboard infers from ride state.
+
+**Rules.**
+- A dashboard widget is placed unconditionally; its own empty state handles "nothing to show". Don't gate a
+  grid cell on ride state, even when an issue's Scope says to — flag the gate as a question instead.
+- An issue's or UX.md's size list is a proposal until review. Keep variants cheap to drop: one `switch` case
+  plus its snapshots, as the siblings do.
   "Rejects all four listed timestamps" was true of a design that improved nothing.
 - Prefer filtering on a measurement the app already makes (`horizontalAccuracy`, cross-checked against a log
   archive) over a derived heuristic with a threshold tuned to one ride.

@@ -6,8 +6,8 @@ import SwiftUI
 /// `NavigationFeature`'s `nextManeuver` and `distanceToNextTurnMeters`. Tapping opens the map sheet,
 /// the same one W8 opens (UX.md §S05 W9, "Sheet: Map").
 ///
-/// The dashboard shows it only while a route is being followed, in W10's cell. "No Route" is
-/// therefore for when S07/S08 let a rider place it themselves.
+/// Always on the dashboard: on a free ride it reads "No Route". Hiding it is the rider's call once
+/// S07/S08 customisation exists, not the dashboard's.
 struct DirectionsWidget: View {
     let hasRoute: Bool
     /// The turn ahead. Shown only together with a distance: without one — before the first match,
@@ -15,7 +15,7 @@ struct DirectionsWidget: View {
     let nextTurn: Maneuver?
     let distanceMeters: Double?
     let unit: UnitSystem
-    var size: WidgetSize = .oneByOne
+    var size: WidgetSize = .oneByOne   // only .oneByOne / .twoByOne used by W9
     /// The map sheet's inputs, as `MapWidget` takes them.
     var coordinates: [Coordinate] = []
     var route: [RouteCoordinate] = []
@@ -48,28 +48,21 @@ struct DirectionsWidget: View {
     @ViewBuilder
     private var content: some View {
         switch size {
-        case .oneByOne:
+        case .oneByOne, .twoByTwo:
             VStack(alignment: .leading, spacing: 0) {
                 WidgetLabel("Directions")
-                hero(.medium)
+                hero
                 Spacer()
             }
         case .twoByOne:
             VStack(alignment: .leading, spacing: 0) {
                 WidgetLabel("Directions")
                 HStack(alignment: .lastTextBaseline, spacing: Spacing.lg) {
-                    hero(.medium)
+                    hero
                     Spacer()
                     instruction
                         .multilineTextAlignment(.trailing)
                 }
-                Spacer()
-            }
-        // UX.md §S05: the label is hidden on 2×2 widgets.
-        case .twoByTwo:
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                hero(.large)
-                instruction
                 Spacer()
             }
         }
@@ -78,17 +71,17 @@ struct DirectionsWidget: View {
     // MARK: - Sub-Views
 
     @ViewBuilder
-    private func hero(_ heroSize: HeroSize) -> some View {
+    private var hero: some View {
         if let turn {
             HeroNumber(turn.distance.value, unit: turn.distance.unit)
-                .heroNumberSize(heroSize)
+                .heroNumberSize(.medium)
                 .heroAccessory {
                     Image(systemName: turn.maneuver.direction.systemImage)
-                        .font(heroSize == .large ? .cyTurnGlyph : .cyTurnGlyphCompact)
+                        .font(.cyTurnGlyphCompact)
                         .foregroundStyle(Color.cyPrimaryDark)
                 }
         } else if hasRoute {
-            HeroNumber("—", unit: "").heroNumberSize(heroSize)
+            HeroNumber("—", unit: "").heroNumberSize(.medium)
         } else {
             Text("No Route")
                 .font(.cyCaption)
@@ -131,11 +124,6 @@ private let previewTurn = Maneuver(
     name: "Turn right onto County Road S",
     distanceAlongRouteMeters: 0
 )
-
-#Preview("2×2 — Turn") {
-    DirectionsWidget(hasRoute: true, nextTurn: previewTurn, distanceMeters: 347, unit: .metric, size: .twoByTwo)
-        .frame(width: 393, height: 200)
-}
 
 #Preview("2×1 — Turn") {
     DirectionsWidget(hasRoute: true, nextTurn: previewTurn, distanceMeters: 347, unit: .metric, size: .twoByOne)

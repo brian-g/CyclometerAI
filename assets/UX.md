@@ -453,7 +453,7 @@ This is the arrangement every new user sees. It demonstrates the full range of w
 | 1–2 | Speed | Speed (continued) | W1 — 2×2 |
 | 3 | HR | HR Zones | W4, W12 — 1×1 |
 | 4 | Radar | Pace | W7, W11 — 1×1 |
-| 5 | Cadence | Weather | W5, W10 — 1×1 |
+| 5 | Cadence | Directions | W5, W9 — 1×1 (was W10 Weather; #200 review) |
 | 6–7 | Map | Map (continued) | W8 — 2×2 |
 
 **Rationale for factory choices:**
@@ -627,10 +627,10 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 
 #### W9 — Directions
 
-**Sizes:** 2x2, 2x1, 1x1
+**Sizes:** 2x1, 1x1 (no 2x2 — #200 review)
 
-- Displays next turn maneuver icon and distance to turn
-- Empty state when no route is loaded: hidden or shows "No Route"
+- Displays next turn maneuver icon and distance to turn; 2x1 adds the turn's instruction text
+- Always on the dashboard (#200). Empty state when no route is loaded: "No Route"
 - Sheet: Map
 
 ---

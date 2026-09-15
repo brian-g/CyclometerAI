@@ -50,5 +50,17 @@ Spec tensions:
 **Observed, not changed:**
 - Above 0.1 mi the imperial display steps in 0.1 mi (161 m), so on a live approach "0.2 mi" held for 10 s. The
   metre-level countdown is proven in `NavigationFeatureTests`. Apple Maps uses the same steps.
-- The "No Route" state can't be reached on today's dashboard. It's for S07/S08.
+
+## Review round 1 (Brian, on PR #237)
+
+- [x] "There is no 2x2 variant of this." The `.twoByTwo` case now falls through to the 1×1 layout, as W5 does.
+  The 4 2×2 snapshots and their references are gone. UX.md §W9 now lists sizes 2x1 and 1x1.
+- [x] "The Directions widget is there all of the time." The `isFollowingRoute` gate is removed and W9 always sits in
+  row 5 right. With it went the gate test and the now-unused `WeatherWidget` placeholder, and UX.md §S05.4's row 5
+  now says Directions. "No Route" is what a free ride shows.
+- [x] "Add a 2x1 route widget to the second page under the cadence." Page 2 now has a W9 2×1 row under Cadence.
+- [x] Lesson and memory: dashboard widgets are always present, and ride state never gates a grid cell.
+- [x] Full suite green: 1042 Swift Testing tests in 98 suites plus 89 XCTest, 0 failures. All 10 W9 snapshots pass.
+  A first run was killed by the system for low memory; I shut down the drive simulator and re-ran.
+- [x] Push, and update the PR body
 
