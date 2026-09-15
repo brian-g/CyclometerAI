@@ -114,6 +114,24 @@ Why it's needed: with TCA 1.25.5 the project doesn't build on Xcode 27.
 - [x] Full suite on iOS 27.0: **1094/1094 passed**, with only `AudioClient.swift` recompiled
 - [x] Commit, push to #236, and update the PR body
 
+## 8. Merge main (#235, #234)
+
+- [x] Merged `origin/main` into this branch rather than rebasing, so the PR needs no force-push: `ca990fb`
+  - `tests.yml`: both sides extended the snapshot skip list, and all three additions are kept.
+  - `tasks/todo.md`: this branch's copy is kept. #199's is in main's history at `aebfd5a`.
+  - pbxproj and Info.plist merged byte-identical to this branch's copies, because #235 carried the same "Xcode upgrade"
+    changes.
+- [x] Fresh build and full suite on iOS 27.0, with #199's code at the 27.0 target: 1111/1117 passed.
+  - Swift Testing ran 1038 tests in 98 suites, all passing.
+  - The 6 failures are exactly `MapSheetButtonsSnapshotTests`, recorded on iOS 26.5.
+  - Warnings are unchanged (19 vs 19, compared by file and message).
+- [x] Re-recorded `MapSheetButtonsSnapshotTests` on iOS 27.0. #235 had recorded it on iOS 26.5.
+  - The diffs were antialiasing: at worst 0.29% of pixels, by at most 30 levels, with no size change. The route-overview pair looks
+    identical.
+  - None of the new references is blank (new/old size ratios of 0.99–1.00).
+  - Verify run: **1117/1117 passed**, made up of 1038 Swift Testing tests in 98 suites and 79 XCTest snapshot tests.
+- [ ] Push, then confirm PR #236 is mergeable and CI is green
+
 ## Review
 
 **Outcome.**
@@ -133,8 +151,7 @@ Why it's needed: with TCA 1.25.5 the project doesn't build on Xcode 27.
 2. Done in §7: the `AudioClient` iOS 27 deprecations, as the second commit on #236.
 3. AppView's Swift-side filter and RidePersistenceActor's `endedAt` proxies can become `recordingState` predicates. Their comments
    describe a fault that no supported OS has any more.
-4. feat/199 (#235) is still on TCA 1.25.5, so it doesn't build on Xcode 27. Rebase it once this merges; the cherry-picked 7816f55
-   drops out.
+4. Resolved differently: #235 merged into main first, and main is merged into this branch (§8).
 5. Optional: the iOS 26.3–26.5 simulator runtimes can no longer run this app.
 
 **Caught along the way:**
