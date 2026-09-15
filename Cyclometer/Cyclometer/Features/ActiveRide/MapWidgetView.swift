@@ -24,17 +24,37 @@ struct MapWidget: View {
             .background(Color.cyBgSecondary)
             .contentShape(Rectangle())
             .onTapGesture { showMapSheet = true }
-            .sheet(isPresented: $showMapSheet) {
-                ActiveRideMapView(
-                    coordinates: coordinates,
-                    route: route,
-                    surface: .sheet,
-                    orientation: sheetOrientation,
-                    onOrientationToggle: onOrientationToggle
-                )
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-            }
+            .liveMapSheet(
+                isPresented: $showMapSheet,
+                coordinates: coordinates,
+                route: route,
+                orientation: sheetOrientation,
+                onOrientationToggle: onOrientationToggle
+            )
+    }
+}
+
+extension View {
+    /// The full-screen map sheet. Shared by every widget whose tap opens the map — W8, and W9's
+    /// "Sheet: Map" (#200) — so they cannot present it differently.
+    func liveMapSheet(
+        isPresented: Binding<Bool>,
+        coordinates: [Coordinate],
+        route: [RouteCoordinate],
+        orientation: MapOrientation,
+        onOrientationToggle: @escaping () -> Void
+    ) -> some View {
+        sheet(isPresented: isPresented) {
+            ActiveRideMapView(
+                coordinates: coordinates,
+                route: route,
+                surface: .sheet,
+                orientation: orientation,
+                onOrientationToggle: onOrientationToggle
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
     }
 }
 

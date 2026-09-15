@@ -83,4 +83,27 @@ struct UnitSystemTests {
     func elevationLabelMatchesUnit(unit: UnitSystem, expected: String) {
         #expect(unit.elevationLabel == expected)
     }
+
+    // MARK: - Turn distance (#200)
+
+    @Test("A turn close in is metres or feet rounded to 10; from 1 km or 0.1 mi, one decimal", arguments: [
+        (UnitSystem.metric, 347.0, "350", "m"),
+        (UnitSystem.metric, 994.0, "990", "m"),
+        (UnitSystem.metric, 996.0, "1.0", "km"),     // rounds to 1,000 m, so it reads in km
+        (UnitSystem.metric, 1_234.0, "1.2", "km"),
+        (UnitSystem.imperial, 100.0, "330", "ft"),   // 328 ft
+        (UnitSystem.imperial, 158.0, "520", "ft"),   // 518 ft
+        (UnitSystem.imperial, 162.0, "0.1", "mi"),   // 531 ft rounds to 530, past 528
+        (UnitSystem.imperial, 1_000.0, "0.6", "mi")
+    ])
+    func turnDistanceSwitchesUnitClose(unit: UnitSystem, meters: Double, value: String, symbol: String) {
+        let distance = unit.turnDistance(fromMeters: meters)
+        #expect(distance.value == value)
+        #expect(distance.unit == symbol)
+    }
+
+    @Test("A turn distance never reads negative", arguments: UnitSystem.allCases)
+    func turnDistanceClampsAtZero(unit: UnitSystem) {
+        #expect(unit.turnDistance(fromMeters: -5).value == "0")
+    }
 }

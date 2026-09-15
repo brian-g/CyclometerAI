@@ -55,6 +55,23 @@ enum UnitSystem: String, Equatable, Sendable, Codable, CaseIterable {
             .converted(to: elevationUnit).value
     }
 
+    /// How far off a turn is, as W9 shows it (#200): metres or feet close in, where a tenth of a
+    /// kilometre or mile is too coarse to act on, and kilometres or miles to one decimal beyond
+    /// 1 km / 0.1 mi. The close-in value is rounded to 10 so it does not tick over with every metre
+    /// ridden, and the switch is decided on that rounded value, so 996 m reads "1.0 km", never
+    /// "1,000 m". Close in is `elevationUnit` — each system's small unit.
+    func turnDistance(fromMeters meters: Double) -> (value: String, unit: String) {
+        let distance = Measurement(value: max(meters, 0), unit: UnitLength.meters)
+        let near = (distance.converted(to: elevationUnit).value / 10).rounded() * 10
+        let switchover = Measurement(value: self == .metric ? 1 : 0.1, unit: lengthUnit)
+            .converted(to: elevationUnit).value
+        if near < switchover {
+            return (near.formatted(.number.precision(.fractionLength(0))), elevationUnit.symbol)
+        }
+        let far = distance.converted(to: lengthUnit).value
+        return (far.formatted(.number.precision(.fractionLength(1))), lengthUnit.symbol)
+    }
+
     /// Seconds required to cover one distance unit (mile or kilometer) at the
     /// given speed. `nil` when speed is non-positive (pace is undefined).
     /// Built on `speed(fromMPS:)` rather than a separate factor, so pace and
