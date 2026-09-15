@@ -25,11 +25,11 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 
 ## Planned Architecture (from PRD.md)
 
-**Platform:** iOS 26+, iPhone only. No iPad, no Mac Catalyst.
+**Platform:** iOS 27+, iPhone only. No iPad, no Mac Catalyst.
 
 **Architecture Pattern:** The Composable Architecture (TCA) — explicit state, side-effect isolation via `Effect`, hardware abstraction via `@DependencyClient`, and `TestStore` for all safety-critical logic.
 
-**Persistence:** SwiftData (iOS 26+) for ride summaries and history. CoreData via `NSBatchInsertRequest` for high-frequency per-second `TrackPoint` time-series during active rides. GPX export via `gpxtpx:TrackPointExtension` v2 schema.
+**Persistence:** SwiftData (iOS 27+) for ride summaries and history. CoreData via `NSBatchInsertRequest` for high-frequency per-second `TrackPoint` time-series during active rides. GPX export via `gpxtpx:TrackPointExtension` v2 schema.
 
 **BLE Targets (Phase 1):**
 - Garmin Varia RTL515 / RCT715 radar (Cycling Radar GATT profile)
@@ -56,6 +56,8 @@ Labels: **ALL CAPS** · Units: *lowercase* · Units: baseline-aligned to their c
 
 ## Build & Development
 
+Requires **Xcode 27**. TCA 1.25 and earlier don't compile on it, and `Package.resolved` pins Xcode 27's dependency graph. CI runs on the `xcode-27` runner to match.
+
 Build and test from `Cyclometer/`:
 ```
 xcodebuild build -project Cyclometer.xcodeproj -scheme Cyclometer \
@@ -67,7 +69,7 @@ xcodebuild test  -project Cyclometer.xcodeproj -scheme Cyclometer \
 **Testing conventions** (target `CyclometerTests`):
 - Reducer logic — Swift Testing (`@Suite`/`@Test`/`#expect`) + TCA `TestStore` with `withDependencies` for mocks (e.g. `SpeedFeatureTests.swift`).
 - UI — `pointfreeco/swift-snapshot-testing` via XCTest, fixed-size canvases, light + dark variants (e.g. `SpeedWidgetSnapshotTests.swift`).
-- Snapshot references are recorded against a local simulator, so the four snapshot suites are skipped in CI (see `.github/workflows/tests.yml`). The full local suite passes.
+- Snapshot references are recorded against a local simulator (iPhone 17 Pro, iOS 27.0), so the snapshot suites are skipped in CI (see `.github/workflows/tests.yml`). The full local suite passes.
 - Don't snapshot against ambient environment values (`.accentColor`, `.primary` where the token matters) — pass an explicit `cy*` token, or the reference silently encodes whatever the host bundle resolved at record time.
 
 ## Business Model

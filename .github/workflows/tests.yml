@@ -12,10 +12,13 @@ concurrency:
 jobs:
   unit-tests:
     name: CyclometerTests
-    # Pinned, not macos-latest: the app targets iOS 26.5, and macos-latest is still
-    # macOS 15 / Xcode 16 with no iOS 26 SDK. macos-26 defaults to Xcode 26.5 and
-    # ships an iOS 26.5 runtime with iPhone 17 Pro.
-    runs-on: macos-26
+    # Xcode 27, not macos-26 (Xcode 26.6). TCA 1.25 doesn't compile on Xcode 27, and
+    # TCA 1.26.2 ships two manifests: Swift 6.4 (swift-issue-reporting 2.1) and a Swift
+    # 6.1 fallback (xctest-dynamic-overlay). Package.resolved pins Xcode 27's graph, so
+    # an Xcode 26 runner would build a dependency set nobody builds locally. xcode-27 is
+    # a preview image (Xcode 27.0 beta 6 as of 2026-09-07, and GitHub warns of queueing)
+    # with an iOS 27.0 runtime and iPhone 17 Pro. Move to the GA label once one ships.
+    runs-on: xcode-27
 
     # The backstop for a genuinely hung test, and the right altitude for one.
     #
@@ -103,7 +106,9 @@ jobs:
             -skip-testing:CyclometerTests/SettingsSnapshotTests \
             -skip-testing:CyclometerTests/RoutesSnapshotTests \
             -skip-testing:CyclometerTests/RouteDetailSnapshotTests \
-            -skip-testing:CyclometerTests/TurnInstructionOverlaySnapshotTests
+            -skip-testing:CyclometerTests/TurnInstructionOverlaySnapshotTests \
+            -skip-testing:CyclometerTests/PaceWidgetSnapshotTests \
+            -skip-testing:CyclometerTests/SensorBatteryLabelSnapshotTests
 
       # Every failure before this existed as three bare test names in 14k lines of
       # xcodebuild noise. The bundle carries the assertion text and source location;

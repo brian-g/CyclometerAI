@@ -3,7 +3,7 @@
 **Date:** 2026-09-11  
 **Status:** Fourth Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
-**Platform:** iOS 26+ · iPhone-first · Apple Watch companion  
+**Platform:** iOS 27+ · iPhone-first · Apple Watch companion  
 **App Name:** Cyclometer
 
 ---
@@ -185,7 +185,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Segment detection
 
 ### Resolved Decisions (cumulative)
-- **Persistence:** SwiftData (iOS 26+ minimum target confirmed)
+- **Persistence:** SwiftData (iOS 27+ minimum target; raised from iOS 26 on 2026-09-15 with the Xcode 27 upgrade)
 - **Platform:** iPhone only; no iPad support
 - **Audio alerts:** Three tones — All Clear, Warning, Danger. Full spec in `Audio.md`.
 - **Silent Mode:** Danger tone overrides with user opt-in; Warning and All Clear always respect Silent Mode
@@ -1221,7 +1221,7 @@ Cyclometer/
 - GPX timestamps: UTC per GPX 1.1 spec
 
 ### Platform
-- **iOS 26.0 minimum**
+- **iOS 27.0 minimum**
 - iPhone only (no iPad support)
 - No Mac Catalyst
 

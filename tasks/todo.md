@@ -1,149 +1,127 @@
-# tasks/todo.md — #198 Turn tones: resolve OQA6 with distinct turn cues
+# tasks/todo.md — Xcode 27 + TCA 1.26.2
 
-Branch: `feat/198-turn-tones` · Milestone M8 · Plan: `~/.claude/plans/wild-exploring-swan.md`
+Branch: `chore/xcode-27` (off main, with Brian's 7816f55 "Xcode upgrade" cherry-picked) · Plan: `~/.claude/plans/tender-watching-cat.md`
 
-Decisions (Brian, planning): a third, distinct U-turn tone; a turn cue is suppressed through L3 or while a Warning
-sounds, and otherwise plays — including through a sustained L2.
+Decisions (Brian, planning):
+- CI moves to the `xcode-27` preview label.
+- This lands as its own PR off main.
+- "Complete install" means what this iPhone app can use, so no tvOS/visionOS runtimes.
 
-## 1. Tones — `AudioClient.swift`
+Why it's needed: with TCA 1.25.5 the project doesn't build on Xcode 27.
+- TCA's own `NavigationStack+Observation.swift:149` fails with "cannot form key path to main actor-isolated subscript".
+- TCA 1.26.0 (#3931, "Xcode 27 Beta 1 Support") changed exactly that file.
 
-- [x] `ToneKind`: `.turnLeft` / `.turnRight` / `.uTurn` segments + volume; `init(turn:)`; `duration`; doc comments
-- [x] `AudioClient.playTurn(Maneuver.Direction)`: live + test values; header comment
+## 1. Branch
 
-## 2. Reducers
+- [x] Stash the Xcode-written `traits = ( );`, branch off `origin/main`, cherry-pick 7816f55, then pop
 
-- [x] `NavigationFeature`: `.delegate(.turnAnnounced(direction))`, sent with the announcement
-- [x] `AlertOrchestratorFeature`: `.turnAnnounced` — held at L3 or within the Warning's duration of a caution
-      dispatch; never touches state; `alerts` logger (`turn tone — <dir>` / `turn tone held — <reason>`). Default task
-      priority, not the radar effects' `.userInteractive`: that is deprecated, and a turn has no 200 ms budget
-- [x] `ActiveRideFeature`: navigation delegate → `.alertOrchestrator(.turnAnnounced)`
+## 2. Xcode 27 install
 
-## 3. Tests
+- [x] iPhone 17 Pro on iOS 27.0 (`3200CB84`). Xcode had created 18 Pro/18 Pro Max there instead.
+- [x] MetalToolchain component: 27A266a, `Status: installed` (839 MB)
+- [x] `-runFirstLaunch -checkForNewerComponents`: "No new updates for 27A266a"
 
-- [x] `AudioToneRendererTests`: durations; pairwise distinct; contour; pitch band + no shared radar pitch; `init(turn:)`
-- [x] `AlertOrchestratorFeatureTests`: L0, L1, Warning window both sides, sustained L2, L3 + loop unaffected
-- [x] `NavigationFeatureTests`: delegate carries the direction (left/right/U-turn); rejoin re-sends
-- [x] `ActiveRideFeatureTests`: a turn reaches the speaker exactly once, level untouched; silent at L3
+## 3. TCA 1.25.5 → 1.26.2
 
-## 4. Specs
+- [x] pbxproj `minimumVersion` set to 1.26.2
+- [x] Resolve: swift-issue-reporting 2.1.0 replaces xctest-dynamic-overlay, and snapshot-testing stays at 1.19.2
+  - A plain re-resolve fails with `multiple packages ('swift-issue-reporting', 'xctest-dynamic-overlay') declare targets
+    with a conflicting name: 'IssueReporting'`. Xcode keeps the old transitive pins, which still point at the renamed repo.
+  - Pruning `Package.resolved` alone didn't help either. The DerivedData package state from the failed resolve re-supplied
+    the old versions.
+  - Fix: prune to just the snapshot-testing pin, then resolve against clean package state. The result matches the
+    no-pins probe exactly.
 
-- [x] `Audio.md` v0.2: overview table, Turn Tones section, §3, §4, Turn Cues and Radar, ACs, OQA6 resolved
-- [x] `PRD.md` §8.6 turn-notification line
+## 4. CI
 
-## 5. Verify
+- [x] `tests.yml`: `runs-on: xcode-27`
 
-- [x] Build clean — no warnings from changed files. First build: the one new warning was the turn tone's deprecated
-      `.userInteractive`, since removed. The fresh drive build (`.build/198/dd-drive`) has only pre-existing ones: the
-      radar effects' four `.userInteractive`, and the `fixedNow` warnings in `ActiveRideFeatureTests`, which stop at
-      line 2457, before this branch's insert, and blame to `be13d330` on main
-- [x] Targeted suites: **198 tests in 19 suites passed**; all 15 new test functions found by display name, the
-      parameterized one with its 3 cases. With `-parallel-testing-enabled NO` the log carries Swift Testing's own
-      `✔ Test "…"` lines, so a `^Test case '` count reads 0 — caught by the count check, not trusted
-- [x] Revert checks (a)–(h), scripted (`scratchpad/revert-checks.sh`), each rebuilt in `.build/198/dd-revert` with
-      caching off and run over the 5 turn-tone suites (61 tests). Every one failed exactly its predicted guards and
-      nothing else; source diff hash `b39b4a28…` identical before and after:
-      (a) no gate → held-through-L3, Warning window, parent L3;
-      (b) Warning clause removed → Warning window only;
-      (c) the issue's `< .caution` rule → Warning window only (its sustained-L2 half);
-      (d) a turn sets the level → all three orchestrator tests + both parent tests;
-      (e) no parent forward → both parent tests;
-      (f) Turn Left given Turn Right's notes → distinctness, contour;
-      (g) U-turn → left tone → the mapping test;
-      (h) no delegate → both navigation tone tests + both parent tests
-- [x] Ear check: 7 WAVs rendered by the real `ToneRenderer` at each tone's volume (sizes match 500 / 760 ms exactly),
-      sent to Brian; throwaway test deleted. **Brian: good for now** (2026-09-14). Any later tuning changes `ToneKind`
-      and Audio.md together
-- [x] Sim drive (`.build/198/drive198.sh`, the #197 kit against a fresh `.build/198/dd-drive`, iPhone 17 Pro iOS 26.5,
-      clean install, turn-by-turn on, 800 m N then right, `simctl location` at 10 m/s). UI test exit 0 after 227 s.
-      The app's own log:
-      - route loaded (1 turn over 1,200 m) → on route at 0 m
-      - **turn 0 announced 95.6 m out (lead 100 m)**, then **`turn tone — right` 6 ms later**
-      - calibration gate shut, then open 11 s later as the turn was made → route complete
-      - zero `audio` log lines, so no session or engine setup failure
-      - the only fault is onboarding's `ifLet` at `AppFeature.swift:294`, already recorded as pre-existing in #197
-      The built app was checked for the new code first: `turn tone`, `radar at L3` and `Warning sounding` are in it.
-      Both throwaway tests deleted before the final build
-- Aside: the final build first failed to find its destination. `65732455` runs iOS 26.3 and `73EBBB62` 26.4, both
-  below the app's 26.5 deployment target, so `42B5213B` is the only simulator that can run it
-- [x] Full `CyclometerTests`, from the fresh throwaway-free build (`.build/198/dd-final`, caching off), parallel on,
-      after uninstalling the drive's app. The xcresult summary: **1,093 / 1,093 passed**, 0 failed, 0 skipped. That is
-      exactly #197's 1,078 plus the 15 new test functions. Every new test is in the log by name, and no throwaway ran.
-      The log shows 1,092 distinct names; one line lost its prefix to interleaved clone output, as in #197
-- [x] Commit + PR: `8725bb6`, #233
-- [ ] #202 comment on Brian's go-ahead
+## 5. Docs and memory
 
-## 6. Review fix — `/code-review` on #233
+- [x] CLAUDE.md: requires Xcode 27
+- [x] Project memory: `xcode27-tca-toolchain.md`
 
-A turn tone's `play()` and a radar tone's reach the engine's lock in whatever order their setup finishes. A turn
-announced a moment before an L3 jump could stop the first Danger burst (the next then came 0.8 s late), or leave
-Danger at the turn's 0.8 volume.
+## 5b. Minimum target → iOS 27.0 (Brian, mid-task)
 
-- [x] `ToneKind.yields(to:)`: a turn tone gives way to a sounding Warning or Danger; nothing else gives way
-- [x] `AudioEngineState`: a `sounding` deadline; the check and `player.volume` inside the lock; a held tone is logged
-- [x] `turnTone` doc comment; Audio.md "Turn Cues and Radar"; PRD §8.6's Audio.md section name
-- [x] Pair test in `ToneKindTurnTests` passes: tone suites 25 tests in 3 suites, the new one by name
-- [x] Fresh build (`.build/233/dd`, caching off), no new warnings. Touched files carry only the radar effects' four
-      pre-existing `.userInteractive` deprecations, 3 lines lower for the longer doc comment
-- [x] Throwaway live test (`ThrowawayTurnYieldLiveTests`) 3 / 3, each run in its own process on the live engine:
-      1. Danger, a turn 100 ms in: the turn is held after 4–9 ms; Danger plays through, 640–642 ms
-      2. A turn, Danger 100 ms in: the turn is cut off at 104–109 ms; Danger plays through, 641–646 ms
-      3. A Warning to its end (539–544 ms), then a turn: the turn plays through, 555–567 ms
-- [x] Throwaway deleted: moved to the scratchpad, never committed
-- [x] Revert checks (`scratchpad/revert-233.sh`), each built fresh into its own derived data, over the tone suites and
-      the live test:
-      (i) no engine check → only live case 1 fails: the turn plays through (564 ms) and cuts Danger off at 110 ms;
-      (j) turns give way only to Danger → only the pair test fails, once per turn tone.
-      `AudioClient.swift` is byte-identical to both pre-mutation copies. The script's "HASH DIFFERS" is this file,
-      edited mid-run 8 s after the "before" hash
-- [x] Full `CyclometerTests` from a fresh, throwaway-free build (`.build/233/dd-final`, caching off):
-      - CI-equivalent (serial, CI's 12 snapshot skips): **1,021 tests in 96 suites passed**, CI's 1,020 plus the pair
-        test; xcresult 1,028 / 1,028, 0 failed, 0 skipped
-      - parallel, 2 workers: xcresult **1,094 / 1,094 passed**, #198's 1,093 plus the pair test
-      - the pair test is in both logs by name, and the throwaway in neither
-      - The first attempt was killed for low memory 217 tests in, with none failed. The leftover `flake-repro`
-        simulator was shut down, and both runs repeated on the same build
-- [x] Commit + push to #233: `36a98ca`, CI green (1,021 tests in 96 suites); PR description gained a "Review fix"
-      section
+- [x] `IPHONEOS_DEPLOYMENT_TARGET` 26.5 → 27.0, in all four configs
+- [x] Docs that state the minimum:
+  - CLAUDE.md
+  - PRD.md: the header, Resolved Decisions (which records the raise) and §Platform
+  - DataModel.md
+  - UX.md §typography
+  - Left as-is: UX.md's "requires iOS 26" API notes, which are still true, and BootstrapPlan.md, which is historical.
+- [x] `recordingStatePredicateThrowsAtRuntime` renamed `recordingStatePredicateFiltersOnCapturedEnum`. It now pins iOS 27's fixed
+  behaviour, comparing IDs with an active ride present.
+- [x] Build at the 27 target: 248 files recompiled, 0 errors. Two warnings appear only at a 27 minimum, both in `AudioClient.swift`:
+  `AVAudioPlayerNode.play()` at :319 and `AVAudioEngine.connect(_:to:format:)` at :347. That's the alert-tone path, left for a
+  follow-up.
+- [x] CI skip list: added `PaceWidgetSnapshotTests` and `SensorBatteryLabelSnapshotTests`, which had been missed.
+  - The workflow's stated policy excludes snapshot suites.
+  - CI's iOS 27.0 runtime comes from a beta Xcode, so it won't match pixels recorded locally.
+- Found by the iOS 27 snapshots, and pre-existing: on Routes' **no-matches** screen, the "0 of 4" + chips row renders flush against
+  x=0. `RoutesView.swift:49-53` stacks `filterChips` in a bare `VStack` with no horizontal inset, while the populated list gets its
+  inset from its section header.
+  - iOS 26's snapshot drew that area blank, so nobody saw it. It needs a follow-up; this change doesn't fix it.
+- [x] Re-record snapshots on iOS 27.0, since an iOS 27-minimum app can't run on 26.5.
+  - Looked at the biggest diffs before recording:
+    - The toolbar and large title now render, where iOS 26 drew a blank band.
+    - Inset-grouped lists sit about 10 pt higher.
+    - `ContentUnavailableView` descriptions wrap onto a second line.
+  - Recorded with `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`: 112 PNGs rewritten, 0 new files, and none blank (the smallest
+    new/old size ratio is 0.97).
+  - The verify run, with recording off: **1094/1094 passed**, 0 skipped, on the iPhone 17 Pro with iOS 27.0.
+- Follow-up, not part of this change: AppView's Swift-side filter and RidePersistenceActor's `endedAt` proxies can become plain
+  `recordingState` predicates, and their comments now describe a fault that no supported OS has.
+
+## 6. Verify
+
+- [x] Build: zero errors. The 43 unique project-source warnings are identical, file:line for file:line, to main's Xcode 26.6 /
+  TCA 1.25.5 CI build (run 34883838666). The upgrade adds none and removes none.
+- [x] Full suite on the iOS 26.5 iPhone 17 Pro (`42B5213B`): **1094/1094 passed**, 0 failed, 0 skipped
+  - Swift Testing ran 1021 tests in 96 suites, exactly main's CI count.
+  - XCTest ran the other 73: every snapshot test, across 14 suites.
+  - Found along the way, and pre-existing: `PaceWidgetSnapshotTests` (4) and `SensorBatteryLabelSnapshotTests` (3) aren't in
+    CI's skip list, so CI runs pixel snapshots too.
+- [x] Full suite on the iOS 27.0 iPhone 17 Pro (the `name=iPhone 17 Pro` destination resolves to 27.0, 24A434):
+  **1020/1094 passed**. The 74 failures are all 73 snapshot tests plus one Swift Testing test.
+  - `PersistenceClientTests.recordingStatePredicateThrowsAtRuntime`: iOS 27's SwiftData **fixed** captured-enum
+    `#Predicate`s. A throwaway probe (1 active + 1 ended ride), run on both OSes and then deleted, showed:
+    - 26.5: `== .active`, `.ended` and `.paused` all throw `unsupportedPredicate`.
+    - 27.0: they return `[active]`, `[ended]` and `[]`, all correct.
+    - The Swift-side filter must stay while the deployment target is 26.5. The test's premise now holds only below iOS 27.
+  - Snapshots: none of the 112 images is identical, and no sizes changed. Differing-pixel counts per image: 72 under 0.2%,
+    22 at 0.2–1%, 10 at 1–5%, and 9 at 5% or more. The worst are `RoutesSnapshotTests.testNoMatchingRoutes` (25%), the
+    StartSheet route rows (11–14%), and the Routes empty/populated and StartSheet picker states.
+  - CI impact: `PaceWidgetSnapshotTests` and `SensorBatteryLabelSnapshotTests` (not in CI's skip list) and the predicate
+    test all fail on iOS 27, so `runs-on: xcode-27` as it stands would be red.
+- [x] Diff review. Only the intended files changed, and the throwaway probe was deleted: 0 untracked files.
+- [ ] Commit, push and PR, only on Brian's go
 
 ## Review
 
-**Built.** Each turn announcement now sounds a tone: Turn Left, Turn Right or U-turn. All three step through the
-same three notes, the C6 augmented triad; rising means right and falling means left, and the U-turn goes up and back.
-- **Where the tone comes from.** Navigation sends a delegate with each announcement, and the orchestrator plays the
-  tone.
-- **Radar keeps the speaker.** The tone is held throughout L3, and for the Warning's 480 ms after an L2 alert fires.
-  Otherwise it plays, through a sustained L2 as well.
-- **The alert level is never touched.** The tone can't change the level, so the radar sidebar and calibration
-  suspension are unaffected.
-- **Specs.** Audio.md v0.2 resolves OQA6.
+**Outcome.**
+- Xcode 27.0 (27A266a) is fully installed, TCA is on 1.26.2, the minimum target is iOS 27.0, and CI runs on `xcode-27`.
+- Locally, on the iPhone 17 Pro with iOS 27.0: **1094/1094 passed**, made up of 1021 Swift Testing tests in 96 suites and 73 XCTest
+  snapshot tests.
+- No warnings were added other than the two iOS 27 audio deprecations.
 
-**Verified.**
-- Targeted run: 198 tests in 19 suites passed.
-- Revert checks: 8 scripted mutations, each failing exactly its predicted guards, with the source restored
-  byte-for-byte.
-- Sim drive: the tone logged 6 ms after the turn was announced, 95.6 m out.
-- Full suite: 1,093 / 1,093 passed.
-- Ear check: Brian says the tones are good for now.
+**Not verified yet:** the first `xcode-27` CI run.
+- The image is a preview running Xcode 27.0 beta 6, with a beta-build iOS 27.0 runtime.
+- `recordingStatePredicateFiltersOnCapturedEnum` relies on a SwiftData fix that was verified only on 24A434.
 
-**Deviations from the approved plan.**
-- **"Turn tone", not "turn cue".** The log lines use Audio.md's section name, "Turn Tones".
-- **Default task priority.** The turn tone's effect doesn't use `.userInteractive`: that API is deprecated, and a turn
-  has no 200 ms budget. The radar effects keep theirs.
-- **A separate overview table for the turn tones.** They don't get rows in Audio.md's radar table, because that
-  table's columns are per alert level.
-- **An eighth revert check, (h).** It removes the delegate; the plan had only (a)–(g).
+**Follow-ups, not part of this change:**
+1. Routes' no-matches chips row sits flush against x=0 (`RoutesView.swift:49-53`). It's pre-existing, exposed by the iOS 27
+   snapshots.
+2. `AudioClient` iOS 27 deprecations: `try player.playAudio()` at :319 and `try engine.connectNode(_:to:format:)` at :347. That's
+   the alert-tone path, so it gets its own change.
+3. AppView's Swift-side filter and RidePersistenceActor's `endedAt` proxies can become `recordingState` predicates. Their comments
+   describe a fault that no supported OS has any more.
+4. feat/199 (#235) is still on TCA 1.25.5, so it doesn't build on Xcode 27. Rebase it once this merges; the cherry-picked 7816f55
+   drops out.
+5. Optional: the iOS 26.3–26.5 simulator runtimes can no longer run this app.
 
-**Review fix (`/code-review`).** A turn tone could cut off a radar tone that started at the same moment, because both
-`play()` calls reach the engine's lock in whatever order their setup finishes.
-- The engine now holds a turn tone while a Warning or Danger is sounding, and sets the volume under the lock.
-- The fix was tested against the live engine: 3 / 3 passed, and the test fails with the check removed.
-- Full suite passes, CI-style and in parallel.
-
-**For Brian.**
-- **Ear check.** Good for now. Any later tuning changes `ToneKind` and Audio.md together.
-- **Flag: the All Clear interval.** Audio.md and `ToneKind` both call All Clear's A5 → D5 a minor third. It's a
-  perfect fifth. Not fixed.
-- **Flag: no S12 tone toggles.** None exist anywhere yet. Audio.md §4 describes them, and UX.md §S12 has no rows for
-  them. Outside #198.
-- **Only one simulator can run the app.** `42B5213B` (iOS 26.5) is the only iPhone 17 Pro at or above the 26.5
-  deployment target; the 26.3 and 26.4 ones can't run it.
+**Caught along the way:**
+- A plain re-resolve can't cross the xctest-dynamic-overlay → swift-issue-reporting rename. It needs pruned pins and clean package
+  state. This is in memory as `xcode27-tca-toolchain`.
+- I first called the snapshot drift sub-visual, from two eyeballed pairs and the *tail* of a worst-first list. The summary line
+  showed a 25% diff. Read the worst rows before characterising a diff.
