@@ -299,26 +299,41 @@ private final class AudioEngineState: @unchecked Sendable {
         // never cuts off a sounding Warning or Danger (`ToneKind.yields(to:)`, #198). Two
         // overlapping `play()` calls (e.g. a fast caution→danger escalation, or a turn
         // announced as radar escalates) can each reach this point concurrently, in either
-        // order, so that check, the volume and the stop/scheduleBuffer/play triple run
+        // order, so that check, the volume and the stop/play/scheduleBuffer triple run
         // under `lock` — otherwise two tasks' calls can interleave on the shared node with
         // no ordering guarantee. Only the completion await sits outside the lock: an
         // interrupted call's `stop()` fires the *previous* call's completion callback,
         // so that call's wait resolves promptly rather than blocking the tone that just
         // preempted it.
+        //
+        // `playAudio()` comes before `scheduleBuffer`, because since iOS 27 starting the node
+        // can throw. Had the buffer already been scheduled, its completion (this call's resume)
+        // would fire at some later `stop()`, so the catch couldn't resume without resuming
+        // twice. Started first, a failure leaves nothing scheduled, and the catch resumes
+        // exactly once. `sounding` is cleared after `stop()`, which has silenced it, so a
+        // failed start doesn't leave a turn tone yielding to a Warning that isn't sounding.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let heldBy = lock.withLock { () -> ToneKind? in
-                let now = ContinuousClock.now
-                if let sounding, now < sounding.until, kind.yields(to: sounding.kind) {
-                    return sounding.kind
+            let heldBy: ToneKind?
+            do {
+                heldBy = try lock.withLock { () throws -> ToneKind? in
+                    let now = ContinuousClock.now
+                    if let sounding, now < sounding.until, kind.yields(to: sounding.kind) {
+                        return sounding.kind
+                    }
+                    player.volume = kind.volume
+                    player.stop()
+                    sounding = nil
+                    try player.playAudio()
+                    player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in
+                        continuation.resume()
+                    }
+                    sounding = (kind: kind, until: now + .seconds(kind.duration))
+                    return nil
                 }
-                player.volume = kind.volume
-                player.stop()
-                player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in
-                    continuation.resume()
-                }
-                player.play()
-                sounding = (kind: kind, until: now + .seconds(kind.duration))
-                return nil
+            } catch {
+                logger.error("player failed to start for \(String(describing: kind)): \(error)")
+                continuation.resume()
+                return
             }
             if let heldBy {
                 logger.notice("\(String(describing: kind), privacy: .public) held — \(String(describing: heldBy), privacy: .public) sounding")
@@ -342,9 +357,14 @@ private final class AudioEngineState: @unchecked Sendable {
     }
 
     private func ensureEngineRunning() throws {
-        if engine.attachedNodes.isEmpty {
+        // Attach and connect are checked separately. Since iOS 27 `connectNode` can throw, and a
+        // failed connect must leave the next call something to retry. A single "anything
+        // attached?" check would step over an attached but unconnected player.
+        if player.engine == nil {
             engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: ToneRenderer.format)
+        }
+        if engine.outputConnectionPoints(for: player, outputBus: 0).isEmpty {
+            try engine.connectNode(player, to: engine.mainMixerNode, format: ToneRenderer.format)
         }
         if !engine.isRunning {
             try engine.start()

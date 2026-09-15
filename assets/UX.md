@@ -86,7 +86,7 @@ The design should be aligned with Apple HIG and use standard SwiftUI components 
 
 ### Typography Scale
 
-The type ramp is scalable on the dashboard depending on the device and scale using Apple Dynamic Type. Cyclometer should be able to run on any iPhone that supports iOS 26. Use the standard font style on iOS, SF Pro Rounded.
+The type ramp is scalable on the dashboard depending on the device and scale using Apple Dynamic Type. Cyclometer should be able to run on any iPhone that supports iOS 27. Use the standard font style on iOS, SF Pro Rounded.
 
 Units should always be set baseline aligned with their corresponding values.
 

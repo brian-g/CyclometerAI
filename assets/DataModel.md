@@ -46,7 +46,7 @@
 | RadarEvent, VehiclePassEvent — discrete | SwiftData — low frequency; UI-queryable |
 | PairedSensor — a handful of records, never queried, read whole | Nested `Codable` array in the AppPreferences JSON document (#67, see §3.6) — synchronous reads, no ModelContainer |
 | ConnectedService — low-frequency writes | Open. The Keychain-identifier pattern is a separate problem and nothing consumes it yet |
-| iOS minimum | iOS 26 — SwiftData and Swift concurrency fully supported |
+| iOS minimum | iOS 27 — SwiftData and Swift concurrency fully supported |
 
 ### Checkpoint Policy
 

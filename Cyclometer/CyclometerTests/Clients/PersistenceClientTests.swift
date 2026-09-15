@@ -404,24 +404,33 @@ struct PersistenceClientTests {
 
     // MARK: - Ride.RecordingState query behavior (#171 follow-up)
 
-    // SwiftData's #Predicate macro compiles a comparison against a captured
-    // RawRepresentable-enum value fine, but faults at runtime — confirmed live via
-    // a device log archive ("Unsupported Predicate: Captured/constant values of
-    // type 'RecordingState' are not supported") after AppView's Rides list silently
-    // never showed a completed ride. This documents the failure so a future revert
-    // to a #Predicate-based filter breaks a test instead of shipping silently broken.
-    @Test("a #Predicate comparing recordingState against a captured enum value throws at fetch time")
-    func recordingStatePredicateThrowsAtRuntime() async throws {
+    // On iOS 26, SwiftData's #Predicate macro compiled a comparison against a captured
+    // RawRepresentable-enum value fine but faulted at runtime ("Unsupported Predicate:
+    // Captured/constant values of type 'RecordingState' are not supported"). That was
+    // confirmed live via a device log archive after AppView's Rides list silently never
+    // showed a completed ride. iOS 27 fixed it. On 2026-09-15 all three states threw on
+    // 26.5, and 27.0 returned the right rows. The deployment target is now 27.0, so this
+    // pins the fixed behaviour. AppView and RidePersistenceActor still work around the
+    // old fault, and no longer need to.
+    @Test("a #Predicate comparing recordingState against a captured enum value returns only the matching rides")
+    func recordingStatePredicateFiltersOnCapturedEnum() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
-        try await client.createRide(UUID(), Date(), nil)
+        let base = Date()
+        let activeId = UUID()
+        let endedId = UUID()
+        try await client.createRide(activeId, base, nil)
+        try await client.createRide(endedId, base.addingTimeInterval(60), nil)
+        let finishUpdate = RideSummaryUpdate(
+            rideId: endedId, recordingState: .ended,
+            durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
+        )
+        try await client.finalizeRide(endedId, base.addingTimeInterval(120), finishUpdate, nil)
 
         let context = ModelContext(swiftDataStack.container)
         let ended = Ride.RecordingState.ended
         let descriptor = FetchDescriptor<Ride>(predicate: #Predicate<Ride> { $0.recordingState == ended })
 
-        #expect(throws: (any Error).self) {
-            try context.fetch(descriptor)
-        }
+        #expect(try context.fetch(descriptor).map(\.id) == [endedId])
     }
 
     @Test("filtering fetched Rides in Swift (AppView's approach) returns only .ended rides, newest first")

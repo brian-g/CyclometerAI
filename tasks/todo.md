@@ -1,209 +1,161 @@
-# tasks/todo.md — #199 W8 route polyline overlay + persisted map orientation
+# tasks/todo.md — Xcode 27 + TCA 1.26.2
 
-Branch: `feat/199-map-route-orientation` · Milestone M8 · Plan: `~/.claude/plans/joyful-crunching-starlight.md`
+Branch: `chore/xcode-27` (off main, with Brian's 7816f55 "Xcode upgrade" cherry-picked) · Plan: `~/.claude/plans/tender-watching-cat.md`
 
 Decisions (Brian, planning):
-- The widget is always heading-up and has no controls.
-- `mapOrientation` governs the sheet only.
-- A loaded route tilts both maps, north-up included.
-- No pixel snapshots of a live Map: logic tests, a button snapshot and simulator shots instead.
-- The sheet gains `MapPitchToggle`, route overview and the orientation toggle.
+- CI moves to the `xcode-27` preview label.
+- This lands as its own PR off main.
+- "Complete install" means what this iPhone app can use, so no tvOS/visionOS runtimes.
 
-## 0. Spike: tilted follow (gate). PASSED, `spike-a`
+Why it's needed: with TCA 1.25.5 the project doesn't build on Xcode 27.
+- TCA's own `NavigationStack+Observation.swift:149` fails with "cannot form key path to main actor-isolated subscript".
+- TCA 1.26.0 (#3931, "Xcode 27 Beta 1 Support") changed exactly that file.
 
-- [x] Throwaway seed-then-follow plus camera logging in `ActiveRideMapView` (replaced by the real view)
-- [x] Sim run on `42B5213B`, a free ride at 8 m/s (`.build/199/spike.sh`):
-  - A seed lands within about 5 ms of the write, and the next `.onEnd` switches to follow.
-  - **Pitch holds.** The widget read 35.0° across 1,921 continuous samples, the sheet 35.0° across 194.
-  - MapKit clamps a 60° (and a 40°) request to **35°** at the default follow distance: 1.6 km on the widget,
-    5.3 km on the sheet.
-  - The tilt is visible in the screenshots: 3D buildings at the widget's edge, and the sheet's toggle reading "2D".
-  - **MapKit never dropped the widget's heading-follow by itself:** 0 of 671 samples between seed A and the
-    deliberate north-up seed C.
-  - The north-up seed holds heading 0 with `followsHdg=false`.
-  - **The simulator never rotates:** heading stayed 0°/360° through the right turn. Heading-up rotation is a
-    device check.
-- Moved to the final drive: body cost with a 5,000-point route (it needs the route plumbing), and location denied
-- Harness findings for the final drive:
-  - **The tap missed.** A tap on the widget's user-location dot didn't open the sheet. Later found to be the
-    auto-dim wake tap (section 8), not the dot.
-  - **"Open" hit the map.** The minimised-ride accessory's "Open" stays in the hierarchy under the dashboard, so
-    `app.buttons["Open"]` exists even when the dashboard isn't minimised, and tapping it hits the map widget.
-  - **The grabber ignored drags.** Neither XCUITest drag on it minimised the dashboard.
+## 1. Branch
 
-## 1. Preference
+- [x] Stash the Xcode-written `traits = ( );`, branch off `origin/main`, cherry-pick 7816f55, then pop
 
-- [x] `MapOrientation.swift`; `AppPreferences.mapOrientation` plus its decode line
+## 2. Xcode 27 install
 
-## 2. Camera policy
+- [x] iPhone 17 Pro on iOS 27.0 (`3200CB84`). Xcode had created 18 Pro/18 Pro Max there instead.
+- [x] MetalToolchain component: 27A266a, `Status: installed` (839 MB)
+- [x] `-runFirstLaunch -checkForNewerComponents`: "No new updates for 27A266a"
 
-- [x] `RoutesMapCamera.region(fitting:)` extracted
-- [x] `LiveMapCamera.swift`:
-  - Surface, Mode, mode, needsSeed, seed, follow, isFollowing, needsCorrection, orientationTap, overviewRegion
-  - a 1 s fallback in case a seed never reports landing
+## 3. TCA 1.25.5 → 1.26.2
 
-## 3–5. Views and wiring
+- [x] pbxproj `minimumVersion` set to 1.26.2
+- [x] Resolve: swift-issue-reporting 2.1.0 replaces xctest-dynamic-overlay, and snapshot-testing stays at 1.19.2
+  - A plain re-resolve fails with `multiple packages ('swift-issue-reporting', 'xctest-dynamic-overlay') declare targets
+    with a conflicting name: 'IssueReporting'`. Xcode keeps the old transitive pins, which still point at the renamed repo.
+  - Pruning `Package.resolved` alone didn't help either. The DerivedData package state from the failed resolve re-supplied
+    the old versions.
+  - Fix: prune to just the snapshot-testing pin, then resolve against clean package state. The result matches the
+    no-pins probe exactly.
 
-- [x] `ActiveRideMapView`: route line, camera sequence, widget correction, the sheet's control column (`.mapScope`)
-- [x] `MapSheetButtons.swift`: orientation and overview buttons
-- [x] `Spacing.strokeMapRoute` / `strokeMapTrack`, and `Spacing.mapControl`
-- [x] `MapWidget`, and one `mapWidget` helper for both `RideDashboardView` call sites
-- [x] `ActiveRideFeature`: `@Shared`, `mapOrientationToggled`, comments
+## 4. CI
 
-## 6. Tests
+- [x] `tests.yml`: `runs-on: xcode-27`
 
-- [x] `AppPreferencesTests`: round trip and legacy decode
-- [x] `LiveMapCameraTests`
-- [x] `ActiveRideFeatureTests`: the toggle
-- [x] `MapSheetButtonsSnapshotTests`, plus its CI skip line
-- [x] Run the targeted suites; record and verify the snapshots; look at every image (section 8)
+## 5. Docs and memory
 
-## 7. Specs
+- [x] CLAUDE.md: requires Xcode 27
+- [x] Project memory: `xcode27-tca-toolchain.md`
 
-- [x] UX.md §W8
-- [x] PRD §8.6: orientation, route colour, tilt
-- [x] DataModel.md §3.6: the field, its consumers, the #94 note, OQDM8
+## 5b. Minimum target → iOS 27.0 (Brian, mid-task)
 
-## 8. Verify
+- [x] `IPHONEOS_DEPLOYMENT_TARGET` 26.5 → 27.0, in all four configs
+- [x] Docs that state the minimum:
+  - CLAUDE.md
+  - PRD.md: the header, Resolved Decisions (which records the raise) and §Platform
+  - DataModel.md
+  - UX.md §typography
+  - Left as-is: UX.md's "requires iOS 26" API notes, which are still true, and BootstrapPlan.md, which is historical.
+- [x] `recordingStatePredicateThrowsAtRuntime` renamed `recordingStatePredicateFiltersOnCapturedEnum`. It now pins iOS 27's fixed
+  behaviour, comparing IDs with an active ride present.
+- [x] Build at the 27 target: 248 files recompiled, 0 errors. Two warnings appear only at a 27 minimum, both in `AudioClient.swift`:
+  `AVAudioPlayerNode.play()` at :319 and `AVAudioEngine.connect(_:to:format:)` at :347. That's the alert-tone path, left for a
+  follow-up.
+- [x] CI skip list: added `PaceWidgetSnapshotTests` and `SensorBatteryLabelSnapshotTests`, which had been missed.
+  - The workflow's stated policy excludes snapshot suites.
+  - CI's iOS 27.0 runtime comes from a beta Xcode, so it won't match pixels recorded locally.
+- Found by the iOS 27 snapshots, and pre-existing: on Routes' **no-matches** screen, the "0 of 4" + chips row renders flush against
+  x=0. `RoutesView.swift:49-53` stacks `filterChips` in a bare `VStack` with no horizontal inset, while the populated list gets its
+  inset from its section header.
+  - iOS 26's snapshot drew that area blank, so nobody saw it. It needs a follow-up; this change doesn't fix it.
+- [x] Re-record snapshots on iOS 27.0, since an iOS 27-minimum app can't run on 26.5.
+  - Looked at the biggest diffs before recording:
+    - The toolbar and large title now render, where iOS 26 drew a blank band.
+    - Inset-grouped lists sit about 10 pt higher.
+    - `ContentUnavailableView` descriptions wrap onto a second line.
+  - Recorded with `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`: 112 PNGs rewritten, 0 new files, and none blank (the smallest
+    new/old size ratio is 0.97).
+  - The verify run, with recording off: **1094/1094 passed**, 0 skipped, on the iPhone 17 Pro with iOS 27.0.
+- Follow-up, not part of this change: AppView's Swift-side filter and RidePersistenceActor's `endedAt` proxies can become plain
+  `recordingState` predicates, and their comments now describe a fault that no supported OS has.
 
-- [x] Build clean, no new warnings: every warning in the log is in a file this branch doesn't touch, or is one of the
-      pre-existing `fixedNow` warnings in `ActiveRideFeatureTests` (lines 2219–2457, above this branch's insert)
-- [x] Targeted suites: **157 tests in 18 suites passed**. All 19 new or changed test names are in the log, each once
-- [x] Button snapshots recorded (6 fail on first record, as expected), then verified (6 pass). Looked at all six:
-      the glyphs render in `cyPrimary`, light and dark. **The glass circle doesn't render in the offscreen harness**,
-      so the snapshots pin glyph, colour and size; the sim shots judge the material
-- [x] Drive build (`.build/199/dd-drive`, fresh, caching off). `Cyclometer.debug.dylib` carries "Show whole route",
-      "Map orientation", `location.north.line.fill` and `n.circle`
-- Edits after the drive's build, so not in the drive binary (they are in the revert and final builds):
-  - the `Spacing` map strokes became literals, with the same values;
-  - `engage()`'s no-camera branch now asks `needsSeed`.
-- First final drive, stopped after run 1 of 7:
-  - **The route widget looked right:** `cyMapRoute` ahead of the rider, the track inside the wider route line over
-    the part ridden, and no compass.
-  - **The sheet never opened.** The tap at (0.2, 0.78) didn't reach the widget, like the spike's tap on the location
-    dot. The UI test now tries six points and prints which one opened the sheet.
-  - **A new fault, caused by #199:** `Bound preference MapScopeRegistryKey tried to update multiple times per frame`,
-    as the route loaded. Fixed: only the sheet is map-scoped now, since the widget has no controls to scope.
-- [x] Second drive, route-light only (fresh `dd-drive` with both fixes): **passed**, and there is no MapScopeRegistryKey fault.
-  - Every sheet check held: heading-up → north-up; overview; re-engage without switching; the ride resumes after
-    a relaunch (on route at 467 m) and the sheet reopens north-up.
-  - **Widget taps "missed": not a bug, and my first diagnosis was wrong.** 3 of 6 widget taps across the drives
-    didn't open the sheet. I blamed MapKit and moved the tap into a clear overlay, and the next drive missed the same
-    way.
-    - The cause is the auto-dim (#110). After `dimAfterSeconds` (30 s) without a touch the dashboard dims, and its
-      blocker swallows the first tap to wake it. The dim lowers backlight only, so no screenshot shows it.
-    - The timings fit: every miss came 32 s or more after the last touch, while the post-relaunch taps (about 12 s)
-      and the taps just after a wake all worked.
-    - The overlay is reverted. The UI test keeps its retry, with a corrected comment.
-  - **The shared column looked wrong:** MapKit's scoped controls lost their styling (a green square re-centre, a bare
-    "2D"), and my glass buttons were about 63 pt against MapKit's 42 pt.
-- **Brian: one column, restyled** (asked with both screenshots, 2026-09-14). MapKit's controls get
-  `.buttonBorderShape(.circle)` (WWDC23), and my buttons shrink to MapKit's size.
-- Revert checks stopped (SIGINT, so the script restored its mutation) to rerun on the final code. Every mutation
-  target was checked present exactly once afterwards.
-- Results of the stopped pass:
-  - baseline: 0 failed (35 Swift Testing and 6 XCTest);
-  - (a) to (g): each failed exactly its predicted tests, and every file was restored.
-- [x] Restyled build (incremental `dd-drive`, caching off): clean, with no warnings from touched files. Button
-      snapshots re-recorded (6 recorded, then 6 verified), and all six looked at. They still show only the glyph:
-      the glass circle doesn't render offscreen, with `glassEffect` either. So the snapshots pin glyph and colour,
-      not the button's size or material (a glyph swap still fails them); the sim shots judge the circle
-- [x] Restyled column checked on route-light: five matching 44 pt glass circles (re-centre, 2D/3D, compass,
-      orientation, overview), and every sheet state right
-- [x] Final drive, all seven runs: fresh `dd-drive` with the app code final (scope fix, restyle, overlay reverted).
-      The build is clean, with no warnings from touched files, and the binary carries the new strings
-  - Route light and dark, free ride light and dark, cpu-L and cpu-dense: **all passed**. On the free rides the
-    sheet offers no route overview.
-  - **Screens:** route, light and dark, and free ride, light and dark, all look right. Dark mode draws the route in
-    the lighter `mapRoute` (#7D7AFF), and the glass column is dark too.
-  - **CPU:** the 123-point route averaged 10.3% (max 145%), the 5,000-point route 11.6% (max 149%). A dense route costs
-    about a point.
-  - **Denied couldn't run.** With location denied, onboarding's "Next" stays disabled (#105's own gate), so no ride
-    starts. It isn't driven. The map's denied path is safe by construction: a `.userLocation` position counts as
-    following even without a fix, so the correction never fires.
-  - **The MapScopeRegistryKey fault came back, once per route run and never on a free ride.** In both runs it fell
-    about 0.1 s before the post-relaunch sheet tap, the one opening north-up:
-    - `onAppear` wrote heading-up → north-up follow while the sheet's map registered its scope;
-    - heading-up openings write the value already there, and none of the five has faulted;
-    - one earlier north-up opening didn't fault, which fits a same-frame race.
-  - Fix: the initial position comes from `init`, and `onAppear` no longer writes it.
-- [x] Verified the fix (incremental `dd-drive`, no warnings from touched files):
-  - two light route runs and one dark route run all passed;
-  - each opened the sheet north-up after the relaunch, with **0 MapScopeRegistryKey faults and no other new fault**
-    (2 of 3 north-up openings faulted before the fix);
-  - each first sheet tap still hit the auto-dim wake, as expected.
-- [x] Screenshots sent to Brian: the widget and sheet with a route (light and dark), heading-up, north-up, overview,
-      and the free ride (light and dark)
-- [x] `.build/199/final.sh`:
-  - **Throwaways moved out:** no `SimDrive` file is in the tree, and none appears in either test log.
-  - **Revert checks,** from a fresh `dd-revert`. The baseline passes. Each of 16 mutations fails exactly its predicted
-    tests, and every file is restored byte-for-byte:
-    - (a) decode line → round trip; (b) fallback → legacy decode;
-    - (c) widget honours orientation → both widget tests; (d1)/(d2) controls, gestures → the #62 guard;
-    - (e) sheet hardcoded → the sheet test; (f)/(g) tilt rules → tilt, flat;
-    - (h) heading reset → the north-up seed test; (i) `region(for:)` → overview contains, tiny-route floor;
-    - (j) always toggle → both re-engage tests; (k)/(l) correction → sheet left alone, widget put back;
-    - (m) no write → the TestStore test; (n) never seed → the seed rule; (o) glyphs → the 4 orientation snapshots;
-    - (p) unpadded `region(fitting:)` → a `RoutesMapCameraTests` floor test and both overview tests.
-  - **"TREE DIFFERS FROM START" is my own edit.** The script printed it because I wrote this file at 19:31:06, a
-    second after the script hashed the tree (about 19:31:05). Every file it mutated was verified restored, and
-    `git status` shows exactly this branch's files.
-  - **Final build**, from a fresh `dd-final` with caching off: clean, with no warnings from touched files.
-  - **Full suite, parallel: 1,117 / 1,117 passed.**
-  - **CI-equivalent** (serial, 13 snapshot suites skipped): **1,045 / 1,045 passed**, with **1,038 Swift Testing
-    tests in 98 suites**.
-  - That is `main`'s 1,094 / 1,021, plus 17 new Swift Testing tests and 6 snapshots. The new tests are in both logs
-    by name.
-- [x] Memory:
-  - `mapkit-heading-follow-gotchas`: the #62 outcome, tilted follow, map-scope faults;
-  - `mapkit-snapshot-flaky`: the pattern, replacing an example that never existed;
-  - `simulator-ui-drive`: the auto-dim wake tap, the hidden "Open", grabber drags.
-- [x] Commit and PR: `de31541`, #235
+## 6. Verify
 
-## Carried over
+- [x] Build: zero errors. The 43 unique project-source warnings are identical, file:line for file:line, to main's Xcode 26.6 /
+  TCA 1.25.5 CI build (run 34883838666). The upgrade adds none and removes none.
+- [x] Full suite on the iOS 26.5 iPhone 17 Pro (`42B5213B`): **1094/1094 passed**, 0 failed, 0 skipped
+  - Swift Testing ran 1021 tests in 96 suites, exactly main's CI count.
+  - XCTest ran the other 73: every snapshot test, across 14 suites.
+  - Found along the way, and pre-existing: `PaceWidgetSnapshotTests` (4) and `SensorBatteryLabelSnapshotTests` (3) aren't in
+    CI's skip list, so CI runs pixel snapshots too.
+- [x] Full suite on the iOS 27.0 iPhone 17 Pro (the `name=iPhone 17 Pro` destination resolves to 27.0, 24A434):
+  **1020/1094 passed**. The 74 failures are all 73 snapshot tests plus one Swift Testing test.
+  - `PersistenceClientTests.recordingStatePredicateThrowsAtRuntime`: iOS 27's SwiftData **fixed** captured-enum
+    `#Predicate`s. A throwaway probe (1 active + 1 ended ride), run on both OSes and then deleted, showed:
+    - 26.5: `== .active`, `.ended` and `.paused` all throw `unsupportedPredicate`.
+    - 27.0: they return `[active]`, `[ended]` and `[]`, all correct.
+    - The Swift-side filter must stay while the deployment target is 26.5. The test's premise now holds only below iOS 27.
+  - Snapshots: none of the 112 images is identical, and no sizes changed. Differing-pixel counts per image: 72 under 0.2%,
+    22 at 0.2–1%, 10 at 1–5%, and 9 at 5% or more. The worst are `RoutesSnapshotTests.testNoMatchingRoutes` (25%), the
+    StartSheet route rows (11–14%), and the Routes empty/populated and StartSheet picker states.
+  - CI impact: `PaceWidgetSnapshotTests` and `SensorBatteryLabelSnapshotTests` (not in CI's skip list) and the predicate
+    test all fail on iOS 27, so `runs-on: xcode-27` as it stands would be red.
+- [x] Diff review. Only the intended files changed, and the throwaway probe was deleted: 0 untracked files.
+- [x] Commit, push and PR: `c6cd2a2` on `chore/xcode-27`, PR #236
 
-- [ ] #202 comment on Brian's go-ahead (open from #198). Add #199's flags to it; draft in the scratchpad
-  (`comment-202.md`):
-  - S19/S20's route colour;
-  - PRD's `UserProfile` appendix.
-  - Dropped: UX §W8's "position dot in `brPrimary`". The system marker takes the app tint and is green in every
-    drive screenshot.
+## 7. AudioClient iOS 27 APIs (follow-up 2, a separate commit on #236)
+
+- [x] `engine.connect(_:to:format:)` → `try engine.connectNode(_:to:format:)`. Attach and connect are now checked separately,
+  via `player.engine` and `outputConnectionPoints`, so a failed connect gets retried on the next call. Before, the guard would
+  step over it and the player would stay silent.
+- [x] `player.play()` → `try player.playAudio()`, moved to before `scheduleBuffer`.
+  - A failed start then leaves no completion pending, and the catch resumes the continuation exactly once.
+  - `sounding` is cleared after `stop()`, so a failed start doesn't leave turn tones yielding to a stopped Warning.
+- [x] Throwaway live-audio probe on the iOS 27 simulator, since deleted:
+  - Returns: Warning 0.567 s, Danger 0.640 s, turn-left 0.558 s, and All Clear 1.18 s (the first call, including engine setup).
+    Each is its tone length plus output latency.
+  - A Danger cut off by a Warning 100 ms later: both calls returned at 0.652 s.
+  - Nothing in the `audio` log, so no call took the error path.
+- [x] Warnings: 45 → 43. Exactly the two `AudioClient` deprecations are gone, and nothing is new.
+- [x] Full suite on iOS 27.0: **1094/1094 passed**, with only `AudioClient.swift` recompiled
+- [x] Commit, push to #236, and update the PR body
+
+## 8. Merge main (#235, #234)
+
+- [x] Merged `origin/main` into this branch rather than rebasing, so the PR needs no force-push: `ca990fb`
+  - `tests.yml`: both sides extended the snapshot skip list, and all three additions are kept.
+  - `tasks/todo.md`: this branch's copy is kept. #199's is in main's history at `aebfd5a`.
+  - pbxproj and Info.plist merged byte-identical to this branch's copies, because #235 carried the same "Xcode upgrade"
+    changes.
+- [x] Fresh build and full suite on iOS 27.0, with #199's code at the 27.0 target: 1111/1117 passed.
+  - Swift Testing ran 1038 tests in 98 suites, all passing.
+  - The 6 failures are exactly `MapSheetButtonsSnapshotTests`, recorded on iOS 26.5.
+  - Warnings are unchanged (19 vs 19, compared by file and message).
+- [x] Re-recorded `MapSheetButtonsSnapshotTests` on iOS 27.0. #235 had recorded it on iOS 26.5.
+  - The diffs were antialiasing: at worst 0.29% of pixels, by at most 30 levels, with no size change. The route-overview pair looks
+    identical.
+  - None of the new references is blank (new/old size ratios of 0.99–1.00).
+  - Verify run: **1117/1117 passed**, made up of 1038 Swift Testing tests in 98 suites and 79 XCTest snapshot tests.
+- [ ] Push, then confirm PR #236 is mergeable and CI is green
 
 ## Review
 
-**Built.**
-- The route being ridden is drawn in `cyMapRoute`, beneath the travelled track, on the W8 widget and its sheet.
-- The widget is always heading-up and has no controls. Its compass was #62's way out, and it's gone.
-- The sheet opens in the saved `mapOrientation`. Its one restyled column holds re-centre, 2D/3D, compass, orientation
-  and route overview.
-- A loaded route tilts both maps: 35° at MapKit's default follow distance.
+**Outcome.**
+- Xcode 27.0 (27A266a) is fully installed, TCA is on 1.26.2, the minimum target is iOS 27.0, and CI runs on `xcode-27`.
+- Locally, on the iPhone 17 Pro with iOS 27.0: **1094/1094 passed** with both commits, made up of 1021 Swift Testing tests in 96
+  suites and 73 XCTest snapshot tests.
+- No warnings were added. The two iOS 27 audio deprecations that the 27.0 target surfaced are fixed in §7.
 
-**Verified.**
-- A spike proved seed-then-follow before anything was built on it.
-- Targeted suites: 157 tests in 18 suites.
-- Revert checks: 16 mutations, each failing exactly its predicted tests.
-- Drives: light and dark, with and without a route, and dense against normal CPU. No new faults after the two scope
-  fixes.
-- Full suite: 1,117 parallel, 1,045 CI-equivalent.
+**CI:** the first `xcode-27` run (34983789777, on `c6cd2a2`) passed on Xcode 27.0 beta 6 (27A5252f).
+- Swift Testing ran 1021 tests in 96 suites, the same count as locally. So `recordingStatePredicateFiltersOnCapturedEnum` holds on the
+  runner's beta iOS 27.0 runtime too.
+- XCTest executed 0 tests, because all 14 snapshot suites are skipped. `main`'s CI had been running 7.
 
-**Deviations from the approved plan.**
-- **Only the sheet is map-scoped, and the initial camera comes from `init`.** Each change fixed a
-  MapScopeRegistryKey fault.
-- **The sheet's column is restyled** (Brian's call, after the first drive). It gets `.buttonBorderShape(.circle)` and
-  44 pt glass buttons (`Spacing.mapControl`), instead of buttons the size of a tap target.
-- **`needsSeed` is added.** A free ride's widget never seeds, so it starts exactly as it did before.
-- **Re-engaging after the overview keeps the current distance**, rather than the last following camera's, as native
-  re-centre does.
-- **Location-denied wasn't driven**, because onboarding blocks without location.
-- **The snapshots pin glyph and colour only.** Glass doesn't render offscreen.
+**Follow-ups, not part of this change:**
+1. Routes' no-matches chips row sits flush against x=0 (`RoutesView.swift:49-53`). It's pre-existing, exposed by the iOS 27
+   snapshots.
+2. Done in §7: the `AudioClient` iOS 27 deprecations, as the second commit on #236.
+3. AppView's Swift-side filter and RidePersistenceActor's `endedAt` proxies can become `recordingState` predicates. Their comments
+   describe a fault that no supported OS has any more.
+4. Resolved differently: #235 merged into main first, and main is merged into this branch (§8).
+5. Optional: the iOS 26.3–26.5 simulator runtimes can no longer run this app.
 
-**Caught before shipping.**
-- The widget-tap "misses" were the auto-dim wake tap (#110). I blamed MapKit first, and a tap-overlay "fix" went
-  through one drive before I checked the timings. It is reverted.
-
-**For Brian.**
-- **Tilt:** 35° is MapKit's clamp. A steeper view needs a closer camera, which is zoom, excluded by #199.
-- **Heading-up rotation** needs a ride on a device.
-- **#62** can close with this PR; your call.
-- **#202:** the comment is drafted (S19/S20's route colour, PRD's `UserProfile` appendix).
-- **Onboarding:** its location step keeps Next disabled when location is denied. Seen in the drive; not in scope.
+**Caught along the way:**
+- A plain re-resolve can't cross the xctest-dynamic-overlay → swift-issue-reporting rename. It needs pruned pins and clean package
+  state. This is in memory as `xcode27-tca-toolchain`.
+- I first called the snapshot drift sub-visual, from two eyeballed pairs and the *tail* of a worst-first list. The summary line
+  showed a 25% diff. Read the worst rows before characterising a diff.
