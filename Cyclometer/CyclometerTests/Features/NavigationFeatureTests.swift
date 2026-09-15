@@ -184,6 +184,45 @@ struct NavigationFeatureTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    @Test("the distance to the next turn counts down, and moves on to the turn after at each apex (W9, #200)")
+    func distanceToNextTurnCountsDownAndRollsOver() async throws {
+        let store = makeStore(route: try route(straight, turns: [(1_000, .left), (2_000, .right)]))
+        var second = 0.0
+        // Offset from the apexes by 25 m, so no fix lands exactly on one.
+        for meters in stride(from: 25.0, to: 2_000, by: 50) {
+            await store.send(.locationUpdated(fix(straight, at: meters, second: second)))
+            second += 1
+            let target = meters < 1_000 ? 1_000.0 : 2_000.0
+            #expect(store.state.nextManeuver?.distanceAlongRouteMeters == target, "at \(meters) m")
+            let distance = try #require(store.state.distanceToNextTurnMeters, "at \(meters) m")
+            #expect(abs(distance - (target - meters)) < 1, "at \(meters) m")
+        }
+
+        // Past the last turn there is nothing to point at, though the route runs on to 3 km.
+        await store.send(.locationUpdated(fix(straight, at: 2_025, second: second)))
+        #expect(store.state.nextManeuver == nil)
+        #expect(store.state.distanceToNextTurnMeters == nil)
+        #expect(!store.state.isRouteComplete)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("off route there is no distance to the next turn, and rejoining brings it back (W9, #200)")
+    func distanceToNextTurnIsNilOffRoute() async throws {
+        let store = makeStore(route: try route(straight, turns: [(1_000, .left)]))
+        await store.send(.locationUpdated(fix(straight, at: 500, second: 0)))
+        try #require(store.state.distanceToNextTurnMeters != nil)
+
+        for miss in 1...NavigationFeature.offRouteConsecutiveFixes {
+            await store.send(.locationUpdated(fix(straight, at: 500, lateral: 60, second: Double(miss))))
+        }
+        try #require(store.state.isOffRoute)
+        #expect(store.state.distanceToNextTurnMeters == nil)
+
+        await store.send(.locationUpdated(fix(straight, at: 520, second: 6)))
+        let distance = try #require(store.state.distanceToNextTurnMeters)
+        #expect(abs(distance - 480) < 1)
+    }
+
     @Test("the turn instruction shows the turn and dismisses itself; the alert holds until the turn")
     func turnInstructionDismissesItself() async throws {
         let legs: [RouteFixtures.Leg] = [(0, 600), (90, 100)]
