@@ -910,7 +910,7 @@ struct ActiveRideFeatureStateMachineTests {
     /// (#102) to interact with what the test is actually isolating.
     ///
     /// `state` is an autoclosure, evaluated *inside* the dependency scope below —
-    /// otherwise `ActiveRideFeature.State`'s `@SharedReader(.appPreferences)` would
+    /// otherwise `ActiveRideFeature.State`'s `@Shared(.appPreferences)` would
     /// resolve against the ambient live storage before this function ever runs.
     private func makeStore(
         state: @autoclosure () -> ActiveRideFeature.State,
@@ -3112,5 +3112,34 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
 
         await store.send(.pauseTapped)
         #expect(updatedSummary.value?.vehiclePassCount == 1)
+    }
+}
+
+@MainActor
+@Suite("ActiveRideFeature — map orientation")
+struct ActiveRideFeatureMapOrientationTests {
+
+    /// The sheet's orientation button writes the preference itself, not a copy (#199), so the
+    /// next ride's sheet, and one reopened after a relaunch, open the way the rider left it.
+    /// Mirrors `StartSheetFeatureTests.turnByTurnToggleWritesThePreference`.
+    @Test("The map sheet's orientation toggle writes the saved preference")
+    func mapOrientationToggleWritesThePreference() async {
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.defaultFileStorage = storage
+            }
+        }
+
+        await store.send(.mapOrientationToggled) {
+            $0.$preferences.withLock { $0.mapOrientation = .northUp }
+        }
+        await store.send(.mapOrientationToggled) {
+            $0.$preferences.withLock { $0.mapOrientation = .headingUp }
+        }
     }
 }

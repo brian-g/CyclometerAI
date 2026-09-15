@@ -464,7 +464,8 @@ Zone boundaries:
 **Live Map (MVP):**
 - Embedded `MapKit` view within the dashboard (as a widget — see UX.md S05)
 - Updates position at minimum 1Hz using `CoreLocation`
-- Heading-up orientation by default; user-toggleable to north-up
+- Heading-up orientation by default. The dashboard widget always stays heading-up; the full-screen map sheet is
+  user-toggleable to north-up and remembers the choice (#199)
 - No base-map download required; uses standard MapKit tile cache
 - During L3 radar alert, map view may be obscured by full-screen alert wash — this is acceptable given the safety priority
 
@@ -487,7 +488,8 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 > **Resolved (OQ12):** MVP does not use `MKDirections` (Apple Maps routing). Route creation is not an in-app feature in MVP — riders plan routes externally using tools like tribos.studio, Komoot, Strava, or OnTheGoMap.com and import the resulting GPX file.
 
 **Turn-by-Turn Navigation (MVP):**
-- Route overlaid on live map as a polyline in `brPrimary` color
+- Route overlaid on the live map as a polyline in `brMapRoute`, beneath the travelled track; while a route is loaded
+  the map tilts into a 3D navigation view (#199)
 - Turn notifications: a turn tone — left, right or U-turn (Audio.md, "Turn Left, Turn Right and U-turn"), held back during an L3 alert or a sounding Warning — plus a centred turn instruction (UX.md §S05, "Turn instructions") at configurable distance from turn
 - A Turn-by-Turn toggle on S05.1, remembered from ride to ride, turns turn notifications and the off-route banner off; the route is then only drawn on the map (#197 review)
 - No recalculation in MVP; if the rider goes off-route, an "Off route" banner displays with no auto-reroute

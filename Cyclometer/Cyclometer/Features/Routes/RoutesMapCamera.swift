@@ -34,6 +34,13 @@ enum RoutesMapCamera {
         guard let bounds = RouteBounds.union(routes.map(\.bounds)) else {
             return riderRegion(centeredOn: fallbackCenter)
         }
+        return region(fitting: bounds)
+    }
+
+    /// A region fitted around content, so the polylines don't touch the edges and a tiny route
+    /// doesn't zoom to the pavement. S19 fits every saved route; the live map's sheet fits the
+    /// one being ridden (#199). Unlike `region(for:)`, which restores a viewport exactly.
+    static func region(fitting bounds: RouteBounds) -> MKCoordinateRegion {
         let center = bounds.center
         return MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: center.latitude, longitude: center.longitude),

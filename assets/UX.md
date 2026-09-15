@@ -608,10 +608,20 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 
 - MapKit view embedded in the widget
 - Current position dot in `brPrimary`; heading indicator
-- Route polyline in `brPrimary` when a route is loaded
-- Heading-up by default; tap toggles to north-up
+- Route polyline in `brMapRoute` when a route is loaded, drawn beneath the travelled track in `brMapTravelPath` (#199)
+- Always heading-up and following the rider (#199). The widget takes no gestures and shows no map controls, so nothing
+  on it can take the map out of follow (#62). A tap opens the sheet
+- While a route is loaded, the map tilts into a 3D navigation view. MapKit limits the tilt to what its follow distance
+  allows, about 35°
 - When positioned in the first or last row of the grid, the map extends into the safe area
-- Sheet: Full-screen map
+- Sheet: Full-screen map. It takes pinch-zoom, pan, rotate and tilt, and has re-centre, 2D/3D, compass and scale
+  controls, plus two of its own (#199):
+  - **Orientation:** heading-up or north-up. The sheet opens in the rider's last choice, remembered across rides and
+    relaunches (`AppPreferences.mapOrientation`). While the map is following, a tap switches orientation. After the
+    rider has panned away, a tap returns to following in the saved orientation
+  - **Route overview**, shown while a route is loaded: frames the whole route, flat. The map stops following until the
+    orientation button brings it back
+  - The same route polyline and 3D tilt as the widget, in either orientation
 
 ---
 

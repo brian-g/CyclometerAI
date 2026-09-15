@@ -91,6 +91,8 @@ struct AppPreferencesTests {
         // Added by #197.
         preferences.turnLeadDistanceMeters = 150
         preferences.isTurnByTurnEnabled = false
+        // Added by #199.
+        preferences.mapOrientation = .northUp
 
         let data = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
@@ -121,6 +123,8 @@ struct AppPreferencesTests {
         #expect(decoded.turnLeadDistanceMeters == AppPreferences.defaultTurnLeadDistanceMeters)
         // Added by #197's review; turn-by-turn starts on.
         #expect(decoded.isTurnByTurnEnabled)
+        // Added by #199; the map sheet starts heading-up.
+        #expect(decoded.mapOrientation == .headingUp)
     }
 
     /// #93 moved `SensorRole` out of `BLECSCClient` and added `.radar` / `.heartRate`.
