@@ -148,7 +148,7 @@ struct RideDashboardView: View {
 
                     // W8 — Map 2×2 (extends behind the floating toolbar)
                     GridRow {
-                        MapWidget(coordinates: store.trackCoordinates)
+                        mapWidget
                         .gridCellColumns(2)
                         .frame(height: unit * 2)
                     }
@@ -175,6 +175,17 @@ struct RideDashboardView: View {
         }
     }
 
+    /// W8, fed the same way on both pages: the track, the route being ridden (#199), and the sheet's
+    /// saved orientation with the action that switches it.
+    private var mapWidget: MapWidget {
+        MapWidget(
+            coordinates: store.trackCoordinates,
+            route: store.navigation.activeRoute?.coordinates ?? [],
+            sheetOrientation: store.preferences.mapOrientation,
+            onOrientationToggle: { store.send(.mapOrientationToggled) }
+        )
+    }
+
     // ── Page 2 — Static page to test other configurations
     
     private var secondPage: some View {
@@ -183,7 +194,7 @@ struct RideDashboardView: View {
             Grid(horizontalSpacing: 0, verticalSpacing: 0) {
                 // W1 — Speed 2×2
                 GridRow {
-                    MapWidget(coordinates: store.trackCoordinates)
+                    mapWidget
                         .gridCellColumns(2)
                         .frame(height: unit * 2)
                 }

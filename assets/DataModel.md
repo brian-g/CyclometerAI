@@ -516,6 +516,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// overlay and the off-route banner. Chosen on S05.1 per ride, remembered as the next ride's
     /// starting point; on by default. Off, the route is only drawn on the map.
     var isTurnByTurnEnabled: Bool = true
+    /// #199. Which way up the full-screen map sheet opens; toggled on the sheet itself. The W8
+    /// widget is always heading-up and ignores it (#62).
+    var mapOrientation: MapOrientation = .headingUp   // enum MapOrientation: String, Codable { case headingUp, northUp }
 
     func pairedSensor(for role: SensorRole) -> PairedSensor?
     /// CSC-role records only (#93). The collection also holds radar and HR records,
@@ -541,24 +544,16 @@ Consumed by `SettingsFeature` (read/write, pushing each change to
 `BLECSCClient.setWheelCircumference`), `SpeedFeature` (`@SharedReader`, applied at ride start),
 `DeviceManagementFeature` (read/write, pushing each pairing change to
 `BLECSCClient.setPairedSensors`), `AppFeature` (`@SharedReader`, pushing the assignments once at
-launch so paired sensors reconnect without the Sensors screen being open) and `NavigationFeature`
-(`@SharedReader`, the turn lead distance on every fix — #197).
+launch so paired sensors reconnect without the Sensors screen being open), `NavigationFeature`
+(`@SharedReader`, the turn lead distance on every fix — #197) and `ActiveRideFeature` (`@Shared`:
+reads auto-pause, and writes `mapOrientation` from the map sheet's orientation button — #199).
 
-**Still to land**, with the feature that consumes it:
-
-```swift
-// OQDM8 resolved: mapOrientation is real — PRD section 8.6 specifies heading-up vs north-up
-// as a user-toggleable setting. Persisted so the rider's choice survives app restarts.
-var mapOrientation: MapOrientation  // default .headingUp
-
-enum MapOrientation: String, Codable { case headingUp, northUp }
-```
-
-> **`mapOrientation` deferred at #94 (2026-08-16).** The other three fields of that issue landed;
-> this one did not, because it has no consumer and none planned in M10. PRD §8.6 puts the
-> heading-up/north-up choice on the map's own compass, not in Settings, and UX.md §S12 has no row
-> for it — so the field would persist a value nothing writes and nothing reads. It lands with the
-> issue that makes `ActiveRideMapView`'s camera orientation survive a relaunch.
+> **`mapOrientation` deferred at #94 (2026-08-16), landed at #199 (2026-09-14).** It was deferred
+> because it had no consumer: nothing would have written or read it. It landed with the issue that
+> makes the map's orientation survive a relaunch, and it governs the **full-screen map sheet only**.
+> The W8 widget is always heading-up with no controls, so nothing on it can take the rider out of
+> follow (#62). The choice is toggled on the sheet, not in Settings, and UX.md §S12 still has no row
+> for it.
 
 > **`shouldSetDoNotDisturb` removed 2026-08-14 (M10).** iOS exposes no public API for an app to enable a
 > Focus, so the field had no behavior to persist and the S12 toggle it backed has been deleted — from
@@ -1094,7 +1089,7 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 | OQDM5 | Why is the entity called UserProfile? | Resolved — split into RiderProfile (physiology) and AppPreferences (preferences, sensors, services). #96 kept them separate documents and narrowed RiderProfile to HR overrides: the rest of "physiology" (resting HR, date of birth) is HealthKit's, not the app's |
 | OQDM6 | Sensor storage limited to fixed fields | Resolved. PairedSensor @Model with role: SensorRole. Any number of sensors of any role |
 | OQDM7 | Connected services list is fixed | Resolved. ConnectedService @Model with serviceType: ExternalService. New services add an enum case |
-| OQDM8 | What is mapOrientation for? | Resolved — it is real. PRD section 8.6 specifies heading-up vs north-up as a user-toggleable setting; stored in AppPreferences to persist across sessions |
+| OQDM8 | What is mapOrientation for? | Resolved — it is real. PRD section 8.6 specifies heading-up vs north-up as a user-toggleable setting; stored in AppPreferences to persist across sessions. Landed at #199, governing the full-screen map sheet only; the W8 widget is always heading-up |
 | OQDM9 | Store bike information | Deferred to Phase 2, shape recorded in §3.9. A rider owns several bikes; each bike owns its speed/cadence/radar/power sensors and maps to a Strava gear id. Wheel circumference lives on the speed sensor, not on the bike and not on a wheelset entity — a hub-mounted CSC sensor is already bound to one wheel (research: PRD §8.9.1). Heart rate stays rider-scoped. Ride gains `bike` + a `bikeName` snapshot so history always names the bike ridden |
 | OQDM10 | Capture weather conditions for a ride | Resolved. RideWeather Codable value type stored as JSON on Ride. Fields: temperature, wind speed, wind direction, conditions, humidity, capture timestamp |
 

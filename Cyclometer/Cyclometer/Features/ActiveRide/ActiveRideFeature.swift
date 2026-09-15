@@ -210,9 +210,11 @@ struct ActiveRideFeature {
         /// to 190/55 before #96, which disagreed with the 60 that DataModel.md §3.5
         /// has always specified as the resting default.
         @SharedReader(.riderProfile) var riderProfile
-        /// Read-only here — Settings owns the write side (#102). Consulted for
-        /// `isAutoPauseEnabled`.
-        @SharedReader(.appPreferences) var preferences
+        /// Consulted for `isAutoPauseEnabled`. Written only for `mapOrientation`, from
+        /// the map sheet's orientation button (#199); Settings owns every other field
+        /// (#102), and `calibration` writes the wheel circumference through its own
+        /// reference.
+        @Shared(.appPreferences) var preferences
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
         var navigation = NavigationFeature.State()
@@ -298,6 +300,9 @@ struct ActiveRideFeature {
         case resumeTapped
         case finishTapped
         case finishAlert(PresentationAction<FinishAlert>)
+        /// The map sheet's orientation button (#199). Flips the saved `mapOrientation`,
+        /// which the sheet's camera follows.
+        case mapOrientationToggled
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)
@@ -440,6 +445,11 @@ struct ActiveRideFeature {
                         await locationClient.stopUpdates()
                     }
                 )
+            case .mapOrientationToggled:
+                // The preference itself, not a copy: the next ride's sheet, and one reopened
+                // after a relaunch, open the way the rider left it.
+                state.$preferences.withLock { $0.mapOrientation.toggle() }
+                return .none
             case .pauseTapped:
                 guard state.recordingState == .active else { return .none }
                 state.recordingState = .paused
