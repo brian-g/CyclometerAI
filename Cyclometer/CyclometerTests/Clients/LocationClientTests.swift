@@ -95,8 +95,10 @@ struct LocationClientTests {
 /// instance. That is enough to cover what the one-shot actually risks: the continuation table
 /// is what a double resume would crash on, and a waiter that is never resumed hangs forever.
 ///
-/// The simulator has no location set under `xcodebuild test`, so `requestLocation()` never
-/// delivers — which is precisely the timeout path.
+/// On a simulator never asked for authorization, as CI's fresh one is, no fix ever comes, and
+/// CoreLocation answers every `requestLocation()` and `startUpdatingLocation()` with
+/// `kCLErrorDenied` about 2 s later. The 200 ms timeouts here expire well before that, which
+/// is precisely the timeout path.
 @Suite("LocationManagerState — one-shot fix")
 struct LocationOneShotTests {
 
@@ -128,6 +130,11 @@ struct LocationOneShotTests {
     /// end a recording ride's stream. This pins the pairing: a live subscriber survives it.
     @Test("Asking for a one-shot leaves an active update stream running")
     func oneShotDoesNotDisturbAnActiveStream() async {
+        // A denial finishes every stream, and the other tests leave their requests outstanding.
+        // Given 2 s, one is denied — on CI a main-queue stall let that land after the stream
+        // below opened. Stopping first cancels them; one already due is delivered before it.
+        await LocationManagerState.shared.stopUpdates()
+
         let stream = LocationManagerState.shared.makeUpdateStream()
         var iterator = stream.makeAsyncIterator()
 
@@ -135,6 +142,7 @@ struct LocationOneShotTests {
 
         // Finishing the stream would make the next element nil immediately; instead this
         // races the (never-arriving) first fix, so a timeout means the stream is still open.
+        // Keep the race well under 2 s: past that, this stream's own start is denied.
         let finished = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
             group.addTask { _ = await iterator.next(); return true }
             group.addTask { try? await Task.sleep(for: .milliseconds(300)); return false }
