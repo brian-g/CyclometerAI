@@ -95,25 +95,42 @@ Why it's needed: with TCA 1.25.5 the project doesn't build on Xcode 27.
   - CI impact: `PaceWidgetSnapshotTests` and `SensorBatteryLabelSnapshotTests` (not in CI's skip list) and the predicate
     test all fail on iOS 27, so `runs-on: xcode-27` as it stands would be red.
 - [x] Diff review. Only the intended files changed, and the throwaway probe was deleted: 0 untracked files.
-- [ ] Commit, push and PR, only on Brian's go
+- [x] Commit, push and PR: `c6cd2a2` on `chore/xcode-27`, PR #236
+
+## 7. AudioClient iOS 27 APIs (follow-up 2, a separate commit on #236)
+
+- [x] `engine.connect(_:to:format:)` → `try engine.connectNode(_:to:format:)`. Attach and connect are now checked separately,
+  via `player.engine` and `outputConnectionPoints`, so a failed connect gets retried on the next call. Before, the guard would
+  step over it and the player would stay silent.
+- [x] `player.play()` → `try player.playAudio()`, moved to before `scheduleBuffer`.
+  - A failed start then leaves no completion pending, and the catch resumes the continuation exactly once.
+  - `sounding` is cleared after `stop()`, so a failed start doesn't leave turn tones yielding to a stopped Warning.
+- [x] Throwaway live-audio probe on the iOS 27 simulator, since deleted:
+  - Returns: Warning 0.567 s, Danger 0.640 s, turn-left 0.558 s, and All Clear 1.18 s (the first call, including engine setup).
+    Each is its tone length plus output latency.
+  - A Danger cut off by a Warning 100 ms later: both calls returned at 0.652 s.
+  - Nothing in the `audio` log, so no call took the error path.
+- [x] Warnings: 45 → 43. Exactly the two `AudioClient` deprecations are gone, and nothing is new.
+- [x] Full suite on iOS 27.0: **1094/1094 passed**, with only `AudioClient.swift` recompiled
+- [x] Commit, push to #236, and update the PR body
 
 ## Review
 
 **Outcome.**
 - Xcode 27.0 (27A266a) is fully installed, TCA is on 1.26.2, the minimum target is iOS 27.0, and CI runs on `xcode-27`.
-- Locally, on the iPhone 17 Pro with iOS 27.0: **1094/1094 passed**, made up of 1021 Swift Testing tests in 96 suites and 73 XCTest
-  snapshot tests.
-- No warnings were added other than the two iOS 27 audio deprecations.
+- Locally, on the iPhone 17 Pro with iOS 27.0: **1094/1094 passed** with both commits, made up of 1021 Swift Testing tests in 96
+  suites and 73 XCTest snapshot tests.
+- No warnings were added. The two iOS 27 audio deprecations that the 27.0 target surfaced are fixed in §7.
 
-**Not verified yet:** the first `xcode-27` CI run.
-- The image is a preview running Xcode 27.0 beta 6, with a beta-build iOS 27.0 runtime.
-- `recordingStatePredicateFiltersOnCapturedEnum` relies on a SwiftData fix that was verified only on 24A434.
+**CI:** the first `xcode-27` run (34983789777, on `c6cd2a2`) passed on Xcode 27.0 beta 6 (27A5252f).
+- Swift Testing ran 1021 tests in 96 suites, the same count as locally. So `recordingStatePredicateFiltersOnCapturedEnum` holds on the
+  runner's beta iOS 27.0 runtime too.
+- XCTest executed 0 tests, because all 14 snapshot suites are skipped. `main`'s CI had been running 7.
 
 **Follow-ups, not part of this change:**
 1. Routes' no-matches chips row sits flush against x=0 (`RoutesView.swift:49-53`). It's pre-existing, exposed by the iOS 27
    snapshots.
-2. `AudioClient` iOS 27 deprecations: `try player.playAudio()` at :319 and `try engine.connectNode(_:to:format:)` at :347. That's
-   the alert-tone path, so it gets its own change.
+2. Done in §7: the `AudioClient` iOS 27 deprecations, as the second commit on #236.
 3. AppView's Swift-side filter and RidePersistenceActor's `endedAt` proxies can become `recordingState` predicates. Their comments
    describe a fault that no supported OS has any more.
 4. feat/199 (#235) is still on TCA 1.25.5, so it doesn't build on Xcode 27. Rebase it once this merges; the cherry-picked 7816f55
