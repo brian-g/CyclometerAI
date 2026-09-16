@@ -25,6 +25,12 @@ struct AppRouteSelectionTests {
         await store.receive(\.routes.delegate.useRoute, Self.route.reference)
     }
 
+    /// Swipes `route`'s S19 row left to right and taps Use This Route (#230).
+    private func swipeRoute(on store: TestStoreOf<AppFeature>) async {
+        await store.send(.routes(.useRouteSwiped(Self.route.reference)))
+        await store.receive(\.routes.delegate.useRoute, Self.route.reference)
+    }
+
     /// Taps the sheet's own Start Ride. The delegate is *received*, not sent, so the route that
     /// arrives is the one the sheet was holding.
     private func startRide(on store: TestStoreOf<AppFeature>, expecting route: RouteReference?) async {
@@ -54,6 +60,34 @@ struct AppRouteSelectionTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await useRoute(on: store)
+        await store.finish()
+
+        #expect(store.state.startSheet == nil)
+        #expect(log.value.isEmpty)
+    }
+
+    @Test("Swiping a route row opens the Start sheet on that route, with its pairing scan")
+    func swipeOpensTheStartSheet() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let store = StartSheetPresentationTests.makeStore(into: log)
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await swipeRoute(on: store)
+        await store.finish()
+
+        #expect(store.state.startSheet?.route == Self.route.reference)
+        #expect(log.value == Self.begun)
+    }
+
+    @Test("Swiping a route row does nothing while a ride is recording")
+    func swipeIsIgnoredDuringARide() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let store = StartSheetPresentationTests.makeStore(into: log) {
+            AppFeature.State(activeRide: ActiveRideFeature.State())
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await swipeRoute(on: store)
         await store.finish()
 
         #expect(store.state.startSheet == nil)

@@ -28,7 +28,7 @@ struct RouteDetailView: View {
                 if !isUseRouteHidden {
                     ToolbarItem(placement: .topBarTrailing) {
                         // Styled like Start Ride, the other way into the same sheet.
-                        Button("Use This Route") { store.send(.useRouteButtonTapped) }
+                        Button("Use Route") { store.send(.useRouteButtonTapped) }
                             .buttonStyle(.bordered)
                             .foregroundStyle(Color.cyPrimary)
                     }
