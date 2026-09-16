@@ -141,6 +141,18 @@ struct RoutesView: View {
                         // the brand green.
                         .tint(Color.cyDestructive)
                     }
+                    // A full swipe is safe here: it only opens the Start sheet, which has Cancel.
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        if !isStartRideHidden {
+                            Button {
+                                store.send(.useRouteSwiped(route.reference))
+                            } label: {
+                                Label("Use Route", systemImage: "play.fill")
+                            }
+                            // Explicit for the same reason as Delete: never the ambient tint.
+                            .tint(Color.cyPrimary)
+                        }
+                    }
                 }
             } header: {
                 filterChips(shown: routes.count)
@@ -279,8 +291,8 @@ struct RoutesView: View {
 /// XCTest — and cannot push.
 struct RoutesNavigationStack: View {
     @Bindable var store: StoreOf<RoutesFeature>
-    /// Hides both ways into the Start sheet while a ride records: S19's Start Ride and S20's
-    /// Use This Route.
+    /// Hides every way into the Start sheet while a ride records: S19's Start Ride and its row
+    /// swipe, and S20's Use Route.
     var isStartRideHidden: Bool = false
     var onStartRide: () -> Void = {}
 

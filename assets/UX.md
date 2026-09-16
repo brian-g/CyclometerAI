@@ -1077,6 +1077,7 @@ ContentUnavailableView {
 - List view: route rows map thumbnail, name, distance, terrain description
 - Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls. The map can act as a filter. When switching back to the list will show only those routes displayed on the map. Map will initially zoom to a 50 mile radius around the user's current location. 
 - Tap a route → navigates to S20
+- Swipe a route row left to right → "Use Route" (`play.fill`, a full swipe allowed): opens the Start Sheet with that route in S05.1's Route row, as S20's CTA does. Absent while a ride is recording.
 - Empty state: `ContentUnavailableView` with "No Routes" label and import action
 - Route import action — Opens the Files browser sheet that browses the File system of the iPhone and iCloud.
 - Route filter action — Opens a sheet that contains basic filter options: distance slider (min, max), elevation gain slider (max). 

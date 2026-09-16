@@ -377,6 +377,19 @@ struct RoutesFeatureTests {
         #expect(store.state.routes == [route])
         #expect(store.state.alert?.title == TextState("Couldn't Delete Route"))
     }
+
+    // MARK: Use This Route
+
+    /// S20's CTA sends the same delegate (`RoutesNavigationTests`), which is what makes the swipe
+    /// open the Start sheet exactly as S20 does.
+    @Test("The leading swipe sends the Use This Route delegate for that row (#230)")
+    func useRouteSwipeSendsTheDelegate() async {
+        let route = Self.summary(name: "River Loop")
+        let store = makeStore()
+
+        await store.send(.useRouteSwiped(route.reference))
+        await store.receive(\.delegate.useRoute, route.reference)
+    }
 }
 
 // MARK: - Regressions from the #193 review

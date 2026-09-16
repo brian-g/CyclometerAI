@@ -131,6 +131,9 @@ struct RoutesFeature {
         case deleteButtonTapped(UUID)
         case deleteFailed
 
+        /// S19's leading swipe: "Use Route" without pushing S20 first (#230).
+        case useRouteSwiped(RouteReference)
+
         case alert(PresentationAction<Alert>)
         case path(StackActionOf<Path>)
         case delegate(Delegate)
@@ -139,7 +142,8 @@ struct RoutesFeature {
 
         @CasePathable
         enum Delegate: Equatable {
-            /// S20's "Use This Route", on its way to `AppFeature`, which owns the Start sheet.
+            /// "Use Route", from S20's CTA or S19's row swipe, on its way to `AppFeature`,
+            /// which owns the Start sheet.
             case useRoute(RouteReference)
         }
     }
@@ -354,6 +358,10 @@ struct RoutesFeature {
                 // Re-read rather than re-insert the row we dropped: the store, not this
                 // reducer, is the authority on what survived the failed write.
                 return .send(.reloadRoutes)
+
+            // The same delegate S20 sends, so the sheet opens exactly as it does from there.
+            case .useRouteSwiped(let route):
+                return .send(.delegate(.useRoute(route)))
 
             case .path(.element(id: _, action: .detail(.delegate(.useRoute(let route))))):
                 return .send(.delegate(.useRoute(route)))

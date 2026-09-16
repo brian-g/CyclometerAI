@@ -275,9 +275,9 @@ struct AppFeature {
                 return .none
 
             case .routes(.delegate(.useRoute(let route))):
-                // S20 hides the button while a ride records, as every tab hides Start Ride — but
-                // the rule lives here too, because presenting the sheet mid-ride would offer to
-                // start a second ride over the first.
+                // S20's button and S19's row swipe hide while a ride records, as every tab hides
+                // Start Ride — but the rule lives here too, because presenting the sheet mid-ride
+                // would offer to start a second ride over the first.
                 guard state.activeRide == nil else { return .none }
                 return presentStartSheet(&state, route: route)
 
