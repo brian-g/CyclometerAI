@@ -1104,7 +1104,7 @@ ContentUnavailableView {
 - Current weather section: temperature, wind direction (`WindDirectionView` — rotated arrow SF Symbol + compass label + degrees), wind speed
 - Strava segments: name, distance, best time, best time date
 - Previous rides: date, elapsed time, conditions
-- "Use This Route" CTA — sets active route in Start Sheet and navigates to S05.1
+- "Use Route" CTA — sets active route in Start Sheet and navigates to S05.1
 
 ### Open UX Questions
 - [x] Should weather be fetched live or cached at route-save time? The weather should be fetched live since the user is trying to plan a route.
