@@ -61,24 +61,38 @@ struct NavigationPipelineTests {
         let tones = LockIsolated<[Maneuver.Direction]>([])
         /// Every route read the app makes.
         let routeFetches = LockIsolated(0)
-        /// The test's own view of the store, uncounted — what it reads to check the app's writes.
-        let reader: PersistenceClient
-        nonisolated private let readerContainer: ModelContainer
+        /// The running launch's container, and a second client of the test's own over it.
+        ///
+        /// One container, two clients: the app's, and the test's uncounted one. A second
+        /// *container* on the same file is the lock-contention flake 31edca0 removed, and kept
+        /// the file open past cleanup (#242) — while a second client stands up its own
+        /// persistence actors, so its `ModelContext` is not the one the app writes through and
+        /// a read still has to come off the store rather than out of the writer's context.
+        private let launched = LockIsolated<(container: ModelContainer, reader: PersistenceClient)?>(nil)
 
-        init(storeURL: URL) throws {
+        init(storeURL: URL) {
             self.storeURL = storeURL
-            readerContainer = try openStore(at: storeURL)
-            reader = PersistenceClient.live(coreDataContainer: coreData.container, modelContainer: readerContainer)
         }
 
         deinit { try? FileManager.default.removeItem(at: gpxDirectory) }
 
-        /// A cold start: a new container on the store file, and a new `AppFeature` over it.
-        func launch() throws -> TestStoreOf<AppFeature> {
-            var client = PersistenceClient.live(
-                coreDataContainer: coreData.container,
-                modelContainer: try openStore(at: storeURL)
-            )
+        /// The test's own view of the store, uncounted — what it reads to check the app's writes.
+        nonisolated var reader: PersistenceClient {
+            guard let reader = launched.value?.reader else { fatalError("read the store before the first launch") }
+            return reader
+        }
+
+        /// A cold start: once the last launch has let go of the store file, a new container on
+        /// it, and a new `AppFeature` over that.
+        func launch() async throws -> TestStoreOf<AppFeature> {
+            launched.setValue(nil)
+            await expectStoreClosed(at: storeURL)
+            let container = try openStore(at: storeURL)
+            var client = PersistenceClient.live(coreDataContainer: coreData.container, modelContainer: container)
+            launched.setValue((
+                container,
+                PersistenceClient.live(coreDataContainer: coreData.container, modelContainer: container)
+            ))
             let fetchRoute = client.fetchRoute
             client.fetchRoute = { [routeFetches] id in
                 routeFetches.withValue { $0 += 1 }
@@ -123,7 +137,8 @@ struct NavigationPipelineTests {
         nonisolated func rideRow(_ id: UUID) -> Ride? {
             var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == id })
             descriptor.fetchLimit = 1
-            return try? ModelContext(readerContainer).fetch(descriptor).first
+            guard let container = launched.value?.container else { fatalError("read the store before the first launch") }
+            return try? ModelContext(container).fetch(descriptor).first
         }
     }
 
@@ -211,8 +226,8 @@ struct NavigationPipelineTests {
     @Test("a GPX file on disk fires each turn's tone within ±10 m of the lead distance", arguments: [20.0, 30.0, 40.0])
     func turnsFireWithinTenMetres(kph: Double) async throws {
         try await withTemporaryStoreURL(prefix: "NavigationPipeline") { url in
-            let harness = try Harness(storeURL: url)
-            let store = try harness.launch()
+            let harness = Harness(storeURL: url)
+            let store = try await harness.launch()
             let summary = try await importFixture(on: store)
             #expect(summary.name == Self.routeName)
             let route = try await startRide(on: summary, store)
@@ -255,8 +270,8 @@ struct NavigationPipelineTests {
     @Test("leaving the route raises Off route within 5 s, and rejoining clears it")
     func offRouteWithinFiveSecondsAndClearsOnRejoin() async throws {
         try await withTemporaryStoreURL(prefix: "NavigationPipeline") { url in
-            let harness = try Harness(storeURL: url)
-            let store = try harness.launch()
+            let harness = Harness(storeURL: url)
+            let store = try await harness.launch()
             let route = try await startRide(on: try await importFixture(on: store), store)
             let banner = {
                 RideDashboardView.banner(
@@ -299,8 +314,8 @@ struct NavigationPipelineTests {
     @Test("a route the rider never joins is off route, with no turns")
     func neverJoinedRouteIsOffRouteWithoutTurns() async throws {
         try await withTemporaryStoreURL(prefix: "NavigationPipeline") { url in
-            let harness = try Harness(storeURL: url)
-            let store = try harness.launch()
+            let harness = Harness(storeURL: url)
+            let store = try await harness.launch()
             let route = try await startRide(on: try await importFixture(on: store), store)
 
             // The route's shape the whole way, a kilometre to its right — nowhere near any of it.
@@ -328,10 +343,10 @@ struct NavigationPipelineTests {
     @Test("a ride with no route never touches navigation, through a checkpoint and a relaunch")
     func noRouteRideNeverTouchesNavigation() async throws {
         try await withTemporaryStoreURL(prefix: "NavigationPipeline") { url in
-            let harness = try Harness(storeURL: url)
+            let harness = Harness(storeURL: url)
             let rideId: UUID
             do {
-                let store = try harness.launch()
+                let store = try await harness.launch()
                 // A route exists — it just isn't the ride's.
                 let summary = try await importFixture(on: store)
                 let polyline = try #require(try await harness.reader.fetchRoute(summary.id)).coordinates
@@ -367,7 +382,7 @@ struct NavigationPipelineTests {
                 await store.skipInFlightEffects(strict: false)
             }
 
-            let relaunched = try harness.launch()
+            let relaunched = try await harness.launch()
             await relaunched.send(.task)
             await relaunched.receive(\.resumableRideFetched, timeout: effectDrainTimeout)
             await relaunched.receive(\.activeRide.task)
@@ -396,11 +411,11 @@ struct NavigationPipelineTests {
     @Test("a deleted route leaves its rides' routeName, and a re-import starts with no history")
     func deletedRouteKeepsHistoryOffItsReimport() async throws {
         try await withTemporaryStoreURL(prefix: "NavigationPipeline") { url in
-            let harness = try Harness(storeURL: url)
+            let harness = Harness(storeURL: url)
             let original: RouteSummary
             let rideId: UUID
             do {
-                let store = try harness.launch()
+                let store = try await harness.launch()
                 original = try await importFixture(on: store)
                 let route = try await startRide(on: original, store)
                 rideId = try #require(store.state.activeRide?.rideId)
@@ -421,7 +436,7 @@ struct NavigationPipelineTests {
             }
 
             // Cold: the route is gone, the ride remembers what it was ridden on.
-            let store = try harness.launch()
+            let store = try await harness.launch()
             #expect(try await harness.reader.fetchRoutes().isEmpty)
             #expect(harness.rideRow(rideId)?.routeName == Self.routeName)
             #expect(harness.rideRow(rideId)?.routeId == original.id)
@@ -452,13 +467,13 @@ struct NavigationPipelineTests {
     @Test("a ride killed mid-route relaunches still navigating")
     func killedRideRelaunchesStillNavigating() async throws {
         try await withTemporaryStoreURL(prefix: "NavigationPipeline") { url in
-            let harness = try Harness(storeURL: url)
+            let harness = Harness(storeURL: url)
             let summary: RouteSummary
             let rideId: UUID
             var second = 0.0
             let killedAt = 1_350.0
             do {
-                let store = try harness.launch()
+                let store = try await harness.launch()
                 summary = try await importFixture(on: store)
                 let route = try await startRide(on: summary, store)
                 rideId = try #require(store.state.activeRide?.rideId)
@@ -477,7 +492,7 @@ struct NavigationPipelineTests {
             harness.tones.setValue([])
             let fetchesBeforeRelaunch = harness.routeFetches.value
 
-            let store = try harness.launch()
+            let store = try await harness.launch()
             await store.send(.task)
             await store.receive(\.resumableRideFetched, timeout: effectDrainTimeout)
             await store.receive(\.activeRide.navigation.routeLoaded, timeout: effectDrainTimeout)

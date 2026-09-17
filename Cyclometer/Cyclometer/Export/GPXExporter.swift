@@ -28,12 +28,17 @@ extension DependencyValues {
 /// dependencies, no I/O — so `GPXExporterTests` can exercise the schema/omission
 /// rules directly against fixtures, the same shape as `VehiclePassDetector`.
 enum GPXExporter {
-    @Dependency(\.persistenceClient) static var persistenceClient
-    @Dependency(\.gpxDocumentsDirectory) static var documentsDirectory
-
     /// Fetches persisted Ride/TrackPoint/VehiclePassEvent data by rideId, builds the
     /// GPX document, and atomically writes it to `Documents/Rides/`.
+    ///
+    /// The two dependencies are resolved here rather than held in `static` properties: a
+    /// `@Dependency` snapshots the values current when it is initialized, and a `static` one
+    /// is initialized once per process and then keeps that snapshot for the process's life.
+    /// In tests that means the first client to reach this export is retained forever, holding
+    /// its `ModelContainer` open on a store file the test then deletes (#242).
     static func generate(rideId: UUID) async throws -> URL {
+        @Dependency(\.persistenceClient) var persistenceClient
+        @Dependency(\.gpxDocumentsDirectory) var documentsDirectory
         // fetchTrackPoints (CoreData) is independent of the other two, which both
         // route through RidePersistenceActor and so serialize against each other
         // regardless — but letting it overlap still saves latency on a long ride's

@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import Foundation
 import SwiftData
 import Testing
@@ -97,17 +98,90 @@ func fetchRideIfPresent(_ id: UUID, from swiftDataStack: SwiftDataStack) -> Ride
 /// large polyline to force externalization leaks real bytes per run without it — dozens of
 /// orphaned `_SUPPORT` directories had already accumulated in the simulator container from
 /// the earlier version of this helper, which only deleted the three SQLite files.
-func withTemporaryStoreURL(prefix: String, _ body: (URL) throws -> Void) throws {
+///
+/// Either overload records an issue if `body` leaves the store open: deleting a database SQLite
+/// still has open is what `vnode unlinked while in use` reports (#242).
+func withTemporaryStoreURL(
+    prefix: String,
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ body: (URL) throws -> Void
+) throws {
     let url = temporaryStoreURL(prefix: prefix)
     defer { removeStore(at: url) }
     try body(url)
+    // Blocking waits, because this overload's callers are synchronous. The wait is for a
+    // container the closure has already dropped, so nothing it holds needs this thread.
+    var open = openStoreFiles(at: url)
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(10))
+    while !open.isEmpty, clock.now < deadline {
+        sweepReleasedDependencies()
+        usleep(5_000)
+        open = openStoreFiles(at: url)
+    }
+    #expect(open.isEmpty, "the store is still open at cleanup: \(open)", sourceLocation: sourceLocation)
 }
 
 /// `withTemporaryStoreURL`'s async twin, for suites whose work goes through an actor.
-func withTemporaryStoreURL(prefix: String, _ body: (URL) async throws -> Void) async throws {
+func withTemporaryStoreURL(
+    prefix: String,
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ body: (URL) async throws -> Void
+) async throws {
     let url = temporaryStoreURL(prefix: prefix)
     defer { removeStore(at: url) }
     try await body(url)
+    await expectStoreClosed(at: url, sourceLocation: sourceLocation)
+}
+
+/// Waits until nothing in the process has the store at `url` open, and records an issue if
+/// something still does.
+///
+/// A container handed to a `TestStore` outlives the store. swift-dependencies keeps the
+/// `DependencyValues` of every object a `withDependencies` operation returns in a global table
+/// (`DependencyObjects` in its `WithDependencies.swift`), weak on the object but strong on the
+/// values, and `TestStore.init` returns its `TestReducer` from one. An entry whose object is gone
+/// is only swept by a `Task` that the *next* such call starts. So the last test store's
+/// `persistenceClient`, and the container its actors hold, stay open until something else makes
+/// that call — which is what `sweepReleasedDependencies` is (#242).
+///
+/// Call it before opening a new container on a store a test store has used: two containers
+/// open on one file at once is the lock-contention flake 31edca0 removed.
+func expectStoreClosed(at url: URL, sourceLocation: SourceLocation = #_sourceLocation) async {
+    var open = openStoreFiles(at: url)
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(10))
+    while !open.isEmpty, clock.now < deadline {
+        sweepReleasedDependencies()
+        try? await Task.sleep(for: .milliseconds(5))
+        open = openStoreFiles(at: url)
+    }
+    #expect(open.isEmpty, "the store is still open: \(open)", sourceLocation: sourceLocation)
+}
+
+/// Starts swift-dependencies' sweep of the values it holds for objects that are now gone, by
+/// making the one call that schedules it.
+private func sweepReleasedDependencies() {
+    final class Sweep {}
+    _ = withDependencies { _ in } operation: { Sweep() }
+}
+
+/// The names of the store's files this process has a descriptor open on.
+///
+/// Both shapes SwiftData puts on disk: the SQLite files at `<name>.store*`, and the
+/// external-storage payloads under the sibling `.<name>*_SUPPORT` directory that `removeStore`
+/// deletes — a blob file held open would be unlinked just as a `.store-wal` would.
+private func openStoreFiles(at url: URL) -> [String] {
+    let directory = url.deletingLastPathComponent().resolvingSymlinksInPath().path
+    let name = url.deletingPathExtension().lastPathComponent
+    let prefixes = ["\(directory)/\(name)", "\(directory)/.\(name)"]
+    var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+    return (0..<getdtablesize()).compactMap { descriptor in
+        guard fcntl(descriptor, F_GETPATH, &path) != -1 else { return nil }
+        let open = URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath().path
+        guard prefixes.contains(where: open.hasPrefix) else { return nil }
+        return (open as NSString).lastPathComponent
+    }
 }
 
 private func temporaryStoreURL(prefix: String) -> URL {
