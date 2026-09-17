@@ -121,6 +121,91 @@ struct StartSheetPresentationTests {
         #expect(ends.count == 6)
     }
 
+    /// A ride a kill left behind, as `fetchResumableRide` hands it back.
+    private static func resumable(_ rideId: UUID) -> RideSummaryUpdate {
+        RideSummaryUpdate(
+            rideId: rideId, recordingState: .active,
+            durationSeconds: 300, distanceMeters: 2_000, averageSpeedMPS: 5, maxSpeedMPS: 9
+        )
+    }
+
+    /// #231, order one: the resumed ride lands *while* S05.1 is open.
+    ///
+    /// `.task`'s resume fetch races the UI, so the rider can be looking at the Start sheet when
+    /// the ride they were already on comes back. The sheet has to go — left up, its Start Ride
+    /// would replace the resumed ride without finalizing it, and that orphaned Ride row would be
+    /// the only non-`.ended` one at the next launch, resuming stale as if it were live.
+    @Test("A resumed ride arriving while the sheet is up dismisses it and survives")
+    func resumedRideArrivingWhileTheSheetIsUpDismissesIt() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let finalized = LockIsolated<[UUID]>([])
+        let resumedRideId = UUID()
+        let store = Self.makeStore(into: log)
+        store.dependencies.persistenceClient = .mock(
+            onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } }
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.startRideButtonTapped)
+        await store.send(.startSheet(.presented(.task)))
+        #expect(log.value == Self.begun)
+
+        await store.send(.resumableRideFetched(Self.resumable(resumedRideId)))
+
+        // The sheet is gone, so its Start Ride can no longer reach the reducer at all: TCA drops
+        // a presented action aimed at an absent destination.
+        #expect(store.state.startSheet == nil)
+        #expect(store.state.activeRide?.rideId == resumedRideId)
+        #expect(store.state.isDashboardPresented == true)
+
+        // The resumed ride is live, not orphaned — finalizing it here is exactly the bug.
+        #expect(finalized.value.isEmpty)
+
+        await store.finish()
+        #expect(log.value == Self.begun + Self.ended)
+    }
+
+    /// #231, order two: the rider gets a brand-new ride started before the fetch resolves.
+    ///
+    /// The #175 finalize path, now asserted with a sheet in the picture. The started ride must
+    /// survive and the orphan must still be closed out — and the scan must *not* be released a
+    /// second time, which is what would drive the clients' refcount below zero.
+    @Test("A resumed ride arriving after Start Ride finalizes the orphan and leaves the new ride")
+    func resumedRideArrivingAfterStartRideFinalizesTheOrphan() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let finalized = LockIsolated<[UUID]>([])
+        let orphanedRideId = UUID()
+        let store = Self.makeStore(into: log)
+        store.dependencies.persistenceClient = .mock(
+            onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } }
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.startRideButtonTapped)
+        await store.send(.startSheet(.presented(.task)))
+        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        #expect(store.state.activeRide != nil)
+        #expect(log.value == Self.begun + Self.ended)
+
+        await store.send(.resumableRideFetched(Self.resumable(orphanedRideId)))
+
+        // The rider's ride is untouched, and the stale one is closed out rather than left a
+        // phantom row.
+        //
+        // Asserted against the *orphan's* id rather than one captured before the send: a fresh
+        // ride's `rideId` starts as a placeholder that `activeRide(.task)` replaces with the
+        // deterministic `@Dependency(\.uuid)` value (`ActiveRideFeature.State.rideId`), so a
+        // captured id goes stale for reasons that have nothing to do with this bug. Replacement
+        // is what the test is actually about, and only the orphan could have done it.
+        #expect(store.state.activeRide != nil)
+        #expect(store.state.activeRide?.rideId != orphanedRideId)
+        #expect(finalized.value == [orphanedRideId])
+
+        await store.finish()
+        // Still exactly one release: the sheet was already gone, so nothing was released twice.
+        #expect(log.value == Self.begun + Self.ended)
+    }
+
     /// A double tap on Start Ride before the sheet covers the button. The second must not take a scan
     /// the one dismissal cannot release, nor replace the sheet the first opened.
     @Test("A second Start Ride while the sheet is up takes no second scan")
