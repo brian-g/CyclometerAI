@@ -90,22 +90,27 @@ struct RoutesImportIntegrationTests {
             #expect(imported.distanceMeters > 3_000 && imported.distanceMeters < 8_000)
             #expect(imported.elevationGainMeters != nil)
 
-            // Second "launch": a brand-new container over the same file, as a cold start does.
-            let reopened = PersistenceClient.live(
-                coreDataContainer: CoreDataStack(inMemory: true).container,
-                modelContainer: try openStore(at: storeURL)
-            )
-            let onDisk = try await reopened.fetchRoutes()
-            #expect(onDisk.map(\.id) == [imported.id])
-            #expect(onDisk.first?.name == "Coastal Loop")
+            // Second "launch": a brand-new container over the same file, as a cold start does. The
+            // first launch's container has to close first, and a test store keeps it open.
+            await expectStoreClosed(at: storeURL)
+            do {
+                let reopened = PersistenceClient.live(
+                    coreDataContainer: CoreDataStack(inMemory: true).container,
+                    modelContainer: try openStore(at: storeURL)
+                )
+                let onDisk = try await reopened.fetchRoutes()
+                #expect(onDisk.map(\.id) == [imported.id])
+                #expect(onDisk.first?.name == "Coastal Loop")
 
-            // The polyline and the file's cue survived external storage.
-            let detail = try #require(try await reopened.fetchRoute(imported.id))
-            #expect(detail.coordinates.count == 5)
-            #expect(detail.cuePoints.first?.name == "Turn left onto Foothill")
+                // The polyline and the file's cue survived external storage.
+                let detail = try #require(try await reopened.fetchRoute(imported.id))
+                #expect(detail.coordinates.count == 5)
+                #expect(detail.cuePoints.first?.name == "Turn left onto Foothill")
 
-            // And the delete the swipe action performs is durable too.
-            try await reopened.deleteRoute(imported.id)
+                // And the delete the swipe action performs is durable too.
+                try await reopened.deleteRoute(imported.id)
+            }
+            await expectStoreClosed(at: storeURL)
             let afterDelete = PersistenceClient.live(
                 coreDataContainer: CoreDataStack(inMemory: true).container,
                 modelContainer: try openStore(at: storeURL)

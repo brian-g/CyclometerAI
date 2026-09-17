@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import Foundation
 import SwiftData
 import Testing
@@ -97,17 +98,68 @@ func fetchRideIfPresent(_ id: UUID, from swiftDataStack: SwiftDataStack) -> Ride
 /// large polyline to force externalization leaks real bytes per run without it — dozens of
 /// orphaned `_SUPPORT` directories had already accumulated in the simulator container from
 /// the earlier version of this helper, which only deleted the three SQLite files.
-func withTemporaryStoreURL(prefix: String, _ body: (URL) throws -> Void) throws {
+///
+/// Either overload records an issue if `body` leaves the store open: deleting a database SQLite
+/// still has open is what `vnode unlinked while in use` reports (#242).
+func withTemporaryStoreURL(
+    prefix: String,
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ body: (URL) throws -> Void
+) throws {
     let url = temporaryStoreURL(prefix: prefix)
     defer { removeStore(at: url) }
     try body(url)
+    let open = openStoreFiles(at: url)
+    #expect(open.isEmpty, "the store is still open at cleanup: \(open)", sourceLocation: sourceLocation)
 }
 
 /// `withTemporaryStoreURL`'s async twin, for suites whose work goes through an actor.
-func withTemporaryStoreURL(prefix: String, _ body: (URL) async throws -> Void) async throws {
+func withTemporaryStoreURL(
+    prefix: String,
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ body: (URL) async throws -> Void
+) async throws {
     let url = temporaryStoreURL(prefix: prefix)
     defer { removeStore(at: url) }
     try await body(url)
+    await expectStoreClosed(at: url, sourceLocation: sourceLocation)
+}
+
+/// Waits until nothing in the process has the store at `url` open, and records an issue if
+/// something still does.
+///
+/// A container handed to a `TestStore` outlives the store. swift-dependencies keeps the
+/// `DependencyValues` of every object a `withDependencies` operation returns in a global table
+/// (`DependencyObjects` in its `WithDependencies.swift`), weak on the object but strong on the
+/// values, and `TestStore.init` returns its `TestReducer` from one. An entry whose object is gone
+/// is only swept by a `Task` that the *next* such call starts. So the last test store's
+/// `persistenceClient`, and the container its actors hold, stay open until something else makes
+/// that call. This makes it, and waits for the sweep (#242).
+///
+/// Call it before opening a new container on a store a test store has used: two containers
+/// open on one file at once is the lock-contention flake 31edca0 removed.
+func expectStoreClosed(at url: URL, sourceLocation: SourceLocation = #_sourceLocation) async {
+    final class Sweep {}
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(10))
+    repeat {
+        _ = withDependencies { _ in } operation: { Sweep() }
+        try? await Task.sleep(for: .milliseconds(5))
+        if openStoreFiles(at: url).isEmpty { return }
+    } while clock.now < deadline
+    let open = openStoreFiles(at: url)
+    #expect(open.isEmpty, "the store is still open: \(open)", sourceLocation: sourceLocation)
+}
+
+/// The names of the store's files this process has a descriptor open on.
+private func openStoreFiles(at url: URL) -> [String] {
+    let store = url.resolvingSymlinksInPath().path
+    var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+    return (0..<getdtablesize()).compactMap { descriptor in
+        guard fcntl(descriptor, F_GETPATH, &path) != -1 else { return nil }
+        let open = URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath().path
+        return open.hasPrefix(store) ? (open as NSString).lastPathComponent : nil
+    }
 }
 
 private func temporaryStoreURL(prefix: String) -> URL {
