@@ -23,6 +23,7 @@
 | 0.4.5 | 2026-08-17 | Brian / Claude | §8.5 corrected: **HealthKit has no max-heart-rate type**, so max HR comes from the 220 − age estimate or manual entry, never from a `.discreteMax` query over historical samples. §9.4 acceptance criteria updated to match. `RiderProfile` (#96) narrowed to storing HR *overrides* only — resting HR and date of birth stay HealthKit's, resolution is `override ?? healthKit ?? default` at read time — which makes §8.5's long-standing "app-stored values are always considered overrides" literally true rather than aspirational |
 | 0.5.0 | 2026-09-11 | Brian | Moved the Route picker from Phase 2 to MVP. The work on Routes is done and the Route picker seems to be an easy win. |
 | 0.5.1 | 2026-09-17 | Brian / Claude | M8 spec reconciliation (#202). The Routes tab, S19 and S20 move from Phase 2 to MVP everywhere — §6, the §7 screen inventory, §12's feature tree and tab table, and §13 — following UX.md v0.8; the "Coming in a future update" placeholder is gone, because the tab is built. §6's MVP bullet no longer offers tribos.studio as a route source, which §8.6's 2026-08-14 revision had already moved to Phase 2 with Accounts. `.fit` import removed from §8.6's Files row and recorded in §15 as out of scope — it appeared in no other spec and nothing parses it. §12's `NavigationClient` and `NavigationFeature` comments drop tribos.studio; `RouteFeature` becomes the built `RoutesFeature` |
+| 0.6.0 | 2026-09-17 | Brian | Review and update before the M9 milestone. |
 
 ---
 
@@ -116,6 +117,7 @@ The Garmin Varia RTL515 and RCT715 expose real-time radar alert data over BLE. C
 | **Strava** | ❌ | ❌ | Basic | ❌ | Limited | ✅ |
 | **Garmin Connect Mobile** | ✅ (own device) | ❌ | ✅ | ❌ | ✅ | ✅ |
 | **Cyclometer** | ✅ First-class | ✅ Phase 3 | ✅ Zone-aware | ✅ Core design | ✅ GPX import MVP | ✅ GPX+ext+vehicle pass |
+| **BikeIQ** | ✅ First-class | ❌ | ❌ | ❌ | ✅ | ✅ |
 
 **Key differentiator:** Cyclometer is the only app designed from the ground up around eyes-free interaction patterns as a primary design constraint, with a complete three-tone audio alert system (including a deliberate All Clear tone that Cadence lacks), full-fidelity GPX export with per-point biometric correlation, and vehicle pass event recording.
 
@@ -156,7 +158,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Three-tone audio alert system: All Clear, Warning, Danger (spec: `Audio.md`)
 - BLE sensor priority system — HR strap, speed/cadence sensor, with Apple Watch and GPS as fallbacks
 - Heart rate zone display (Zones 1–5) via BLE HR sensor or Apple Watch / HealthKit
-- Watch haptic alert system (3 escalation levels) with Silent Mode override for Danger
+- ~~Watch haptic alert system (3 escalation levels) with Silent Mode override for Danger~~
 - GPS track recording with live map view
 - Route loading from GPX file import (Files app). Route service integrations are Phase 2 (§8.6)
 - Routes tab (S19, S20): route list with list and map views, map-as-filter, and route detail with elevation profile
@@ -224,8 +226,8 @@ Controls must be large enough to tap without looking. The active ride screen mus
 | S11 | Device Management | MVP | Single flat BLE device list; pair / unpair; role assignment at pairing; one sensor per role with replace-or-cancel on collision |
 | S12 | App Settings | MVP | Units, wheel size (navigation row), auto-pause, auto-dim, sensors, HR zones, about. Accounts deferred to Phase 2 |
 | S13 | HR Zone Configuration | Deprecated | Pulled from Apple Health; manual override; Karvonen calculation display. See S12 - App Settings for details. |
-| S14 | Ride History List | Phase 2 | Scrollable list of past rides with summary stats |
-| S15 | Ride Detail | Phase 2 | Full ride: map replay, HR graph, cadence graph, radar event + vehicle pass timeline |
+| S14 | Ride History List | MVP | Scrollable list of past rides with summary stats |
+| S15 | Ride Detail | MVP | Full ride: map replay, HR graph, cadence graph, radar event + vehicle pass timeline |
 | S16 | Training Zones Graph | Cut | Time-in-zone breakdown across recent rides |
 | S17 | Apple Watch | Phase 2 | Glanceable watch app. |
 | S18 | AR HUD Configuration | Phase 3 | Configure ENGO 2 / ActiveLook display layout |

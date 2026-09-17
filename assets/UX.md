@@ -66,8 +66,8 @@ All design artifacts are in `assets/design/`. These files are the source of trut
 | [S11](#s11-device-management) | Device Management | MVP | Complete |
 | [S12](#s12-app-settings) | App Settings | MVP | Stub |
 | [S13](#s13-hr-zone-configuration) | HR Zone Configuration | Deprecated | Stub |
-| [S14](#s14-ride-history-list) | Ride History List | Phase 2 | Stub |
-| [S15](#s15-ride-detail) | Ride Detail | Phase 2 | Stub |
+| [S14](#s14-ride-history-list) | Ride History List | MVP | Stub |
+| [S15](#s15-ride-detail) | Ride Detail | MVP | Stub |
 | [S16](#s16-training-zones-graph) | Training Zones Graph | Cut | Stub |
 | [S17](#s17-apple-watch) | Apple Watch | Phase 2 | Stub |
 | [S18](#s18-ar-hud-configuration) | AR HUD Configuration | Phase 3 | Stub |
@@ -776,7 +776,7 @@ The visual dashboard is otherwise unchanged — all metric widgets continue disp
 ## S10 — Ride Summary
 
 **Phase:** MVP  
-**Purpose:** Post-ride overview of completed ride with key metrics.
+**Purpose:** Post-ride overview sheet of completed ride with key metrics. Triggered from the Finish button. This will mark a ride as finished, show it in the list, and initiate the sync to linked services.
 
 ### Layout
 > *Refer to `assets/design/Design.sketch` — S10.*
@@ -984,7 +984,7 @@ but not used would be dead weight on the MVP settings screen. The section remain
 
 ## S14 — Ride History List
 
-**Phase:** Phase 2  
+**Phase:** MVP  
 **Purpose:** Browsable list of all recorded rides.
 
 ### Layout
@@ -1018,14 +1018,14 @@ ContentUnavailableView {
 
 ## S15 — Ride Detail
 
-**Phase:** Phase 2  
-**Purpose:** Deep view of a completed ride — map, HR over time, cadence, elevation, Strava segments.
+**Phase:** MVP  
+**Purpose:** Deep view of a completed ride — map, HR over time, cadence, elevation, Strava segments. Lots of the same information as the S10 - Ride Summary.
 
 ### Layout
-> *Refer to `assets/design/Design.sketch` — S15 when available.*
+> *Standard detail view. The content is the king.*
 
 ### Key Components
-- Full-width MapKit view (240pt height, rounded corners, inset to list edges)
+- Full-width MapKit view (240pt height, rounded corners, inset to list edges). Tap to open full screen map as a sheet with full map controls. 
 - Elevation profile chart (Swift Charts, AreaMark + LineMark in `brPrimary`)
 - Stats section: avg/max speed, avg/max cadence
 - HR zone graph over elapsed time
