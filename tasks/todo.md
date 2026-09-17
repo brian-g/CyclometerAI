@@ -24,7 +24,7 @@ Decisions:
 - [x] Suite alone: 8 cases counted
 - [x] Mutation checks bite (approved temp edits, fresh build)
 - [x] Full `CyclometerTests` green, count = main + 8
-- [ ] PR
+- [x] PR
 
 ## Review
 
