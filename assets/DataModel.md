@@ -68,7 +68,9 @@ RiderProfile (1)          AppPreferences (1) [JSON document]
                     (ownership open — see §3.6, §3.7)
                     ⇢ Phase 2: moves under Bike (§3.9)
 
-(∞) Ride
+(∞) Route ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
+                                ┆  routeId (FK, no @Relationship)
+(∞) Ride ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘
     ⇢ Phase 2: gains bike: Bike? + bikeName snapshot
     │
     ├──────────────┬────────────────┐
@@ -87,7 +89,7 @@ TrackPoint    RadarEvent   VehiclePassEvent
 - **PairedSensor is app-wide only for MVP.** In Phase 2 sensors belong to a bike: each bike has its own speed, cadence, radar and power sensors, and the speed sensor also carries that wheel's circumference. Heart rate is the exception and stays rider-scoped, since the strap follows the rider across bikes. The MVP ownership #67 picked has to survive gaining that bike dimension — as a nested value it does: the array grows a `bikeID` field and the lookup key becomes (bike, role), which is a decode shim rather than a schema stage — see §3.9
 - Ride and RiderProfile have no relationship — single rider; rides queried by date range. Since #96 RiderProfile is its own JSON document (§3.5), so a relationship is not expressible in any case
 - RadarVehicle is a value type embedded as JSON in RadarEvent, not a separate table
-- Phase 2: Ride gains a route: Route? relationship when Route becomes a first-class entity
+- **Route is a first-class entity in MVP** (§3.10, M8), but Ride links to it by id — `Ride.routeId: UUID?` — not by a SwiftData `@Relationship`, matching how TrackPoint and VehiclePassEvent link back to Ride. A `Ride.route: Route?` relationship stays deferred; see OQDM1
 
 ---
 
@@ -132,9 +134,18 @@ final class Ride {
     var vehiclePassCount: Int?
 
     // MARK: - Route
-    // MVP: plain string matching GPX or tribos.studio route name.
-    // Phase 2: replaced by relationship to Route @Model (OQDM1 deferred).
+    // FK by id, matching how TrackPoint and VehiclePassEvent link back here — no SwiftData
+    // @Relationship. Written once at ride start; nil for a free ride.
+    var routeId: UUID?
+    // The denormalized historical copy, written alongside routeId. It stays a plain String
+    // precisely so deleting a route cannot erase what a past ride *was*: the id is then left
+    // dangling and this is all S15 has to show.
     var routeName: String?
+    // How far along its route the ride had got at the last 30 s checkpoint, so a ride resumed
+    // after a kill looks for the rider from there rather than from the start — which, on an
+    // out-and-back, is the difference between the way out and the way back. Written by every
+    // updateRideSummary and finalizeRide, read back through fetchResumableRide.
+    var routeProgressMeters: Double?
     var gpxFileURL: URL?
 
     // MARK: - Weather (OQDM10)
@@ -225,7 +236,15 @@ enum SyncStatus: String, Codable, Sendable {
 
 > **OQDM2 resolved — speedSourceAtEnd removed.** The active speed source is recorded per TrackPoint in speedSourceRaw. Derivable from the last TrackPoint; no separate persisted field needed.
 
-> **OQDM1 — Route relationship deferred to Phase 2.** routeName is a plain String for MVP. Phase 2 schema v1.1 migrates it to a Route relationship.
+> **OQDM1 — partly resolved (M8).** `Route` is a first-class entity in MVP (§3.10), and a Ride
+> names its route by `routeId` plus the denormalized `routeName`. Only the `Ride.route: Route?`
+> *relationship* stays deferred — superseded, not scheduled: `routeId` does the job and survives the
+> route being deleted, which a relationship would not. All three route fields are optional, so
+> §9's mandatory-attribute backfill trap does not apply to any of them.
+
+> **`RideSummaryUpdate.route`** carries a `RouteReference` on the checkpoint path, but
+> `RidePersistenceActor.apply` never writes it — a ride's route is set once, by `createRide`. It is
+> there to be *read back*, so a ride resumed after a kill still knows what it was following.
 
 ---
 
@@ -783,6 +802,89 @@ PRD §8.9.1.
 
 ---
 
+### 3.10 Route
+
+Brought forward from schema v1.1 into MVP by M8 (#191), resolving the first half of OQDM1. A route
+is written once at import from a `.gpx` file and read whole at ride start; nothing ever edits one.
+
+```swift
+@Model
+final class Route {
+    static let defaultName = "Imported Route"
+
+    // MARK: - Identity
+    var id: UUID
+    var name: String
+    var terrainDescription: String?            // S19's row subtitle: the file's <desc>, else <type>
+    var importedAt: Date
+
+    // MARK: - Derived at import (RouteGeometry)
+    var distanceMeters: Double
+    var coordinateCount: Int
+    var elevationGainMeters: Double?           // nil = the GPX carried no <ele> at all; 0 = flat
+    var elevationLossMeters: Double?
+
+    // MARK: - Bounding box
+    // Flat columns rather than a nested value so a #Predicate can filter on them: S19's
+    // map-as-filter narrows routes to a viewport without loading a single polyline.
+    var minLatitude: Double
+    var maxLatitude: Double
+    var minLongitude: Double
+    var maxLongitude: Double
+
+    // MARK: - Geometry (external storage)
+    @Attribute(.externalStorage) var polylineData: Data?     // [RouteCoordinate], JSON
+    @Attribute(.externalStorage) var cuePointsData: Data?    // [RouteCuePoint], JSON
+
+    var coordinates: [RouteCoordinate] { /* get-only decode */ }
+    var cuePoints: [RouteCuePoint] { /* get-only decode */ }
+
+    init(imported: ImportedRoute, id: UUID = UUID(), importedAt: Date = .now)
+}
+
+struct RouteCoordinate: Equatable, Sendable, Codable {
+    var latitude: Double
+    var longitude: Double
+    var elevationMeters: Double?
+}
+
+/// A turn cue as the source file stated it — not yet a maneuver. Direction is resolved at route
+/// *load* by `TurnDerivation`, from `type`/`name` or from the polyline geometry, and never persisted.
+struct RouteCuePoint: Equatable, Sendable, Codable {
+    var latitude: Double
+    var longitude: Double
+    var name: String?          // e.g. "Turn left onto County Road S"
+    var cueDescription: String?
+    var type: String?          // Ride with GPS states the turn here; Komoot usually leaves it nil
+}
+```
+
+**Why the geometry is two JSON blobs and not child rows.** Nothing queries *inside* a polyline. The
+scalar columns above it are what S19's list, its filters and S05.1's route row actually read, so
+none of those screens should pay to decode a polyline that — for a route exported from a recorded
+ride — can run to tens of thousands of points.
+
+**Elevation is deliberately not a third blob.** `RouteCoordinate.elevationMeters` already carries it
+per point, and a second copy could drift from the first.
+
+**Boundary types.** `@Model` classes are not `Sendable`, so these are what cross `PersistenceClient`'s
+`@Sendable` closures:
+
+| Type | Contents | Read by |
+|---|---|---|
+| `RouteSummary` | Every scalar above, no geometry | S19's list and filter sheet, S05.1's route row, S05.2's picker |
+| `RouteDetail` | `RouteSummary` + coordinates + cue points | S20, and ride start (`NavigationFeature.loadRoute`) |
+| `RouteReference` | `(id, name)` | What a `Ride` denormalizes at start — one value, so a ride cannot be written with an id and a mismatched name |
+
+`RouteSummary.init(imported:)` is the single place the derivation arithmetic lives, so
+`PersistenceClient.mock` returns the same numbers the live path would have written.
+
+> **Migration note.** `Route` is new to the schema, so it has no existing rows to backfill and §9's
+> declaration-site-default rule does not bind its attributes. Any non-optional attribute *added*
+> later does need one.
+
+---
+
 ## 4. CoreData Entity — TrackPoint
 
 ### 4.1 CoreData Schema
@@ -931,14 +1033,17 @@ Ride end sequence:
 var rides: [Ride]
 ```
 
-### Previous Rides for Route (S20, Phase 2)
+### Previous Rides for Route (S20)
 ```swift
-@Query(
-    filter: #Predicate<Ride> { $0.routeName == routeName },
-    sort: \Ride.startedAt, order: .reverse
+// RidePersistenceActor.fetchRides(routeId:) — not an @Query: S20 is a TCA feature, so the
+// read goes through PersistenceClient and comes back as [RouteRideSummary] values.
+FetchDescriptor<Ride>(
+    predicate: #Predicate { $0.routeId == routeId && $0.endedAt != nil },
+    sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
 )
-var previousRides: [Ride]
-// Phase 2: replaced by filter on Ride.route?.id == routeId
+// By id, not name: two routes may share a name, and a rider may rename a GPX file.
+// endedAt != nil keeps a ride in progress out of its own route's history.
+// A re-import of the same file gets a fresh id and so starts with an empty history.
 ```
 
 ### Paired Sensor for a Role
@@ -1039,7 +1144,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 | Schema Version | Changes |
 |---|---|
 | 1.0 (MVP) | All entities as specified above |
-| 1.1 (Phase 2 — Routes) | Add Route @Model; add Ride.route: Route?; migrate Ride.routeName |
+| 1.1 (MVP — Routes, M8) | Add Route @Model (§3.10). Add `Ride.routeId: UUID?` and `Ride.routeProgressMeters: Double?` alongside the existing `Ride.routeName`. All three are optional, so there is no backfill: a pre-M8 store opens with them nil (`RideSchemaMigrationTests`). `Ride.route: Route?` was **not** added — see OQDM1 |
 | 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 
@@ -1082,7 +1187,7 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 
 | # | Question | Status |
 |---|---|---|
-| OQDM1 | Route should be a first-class entity referenced by Ride | Deferred to Phase 2. routeName is a String for MVP; migrated to Ride.route: Route? in schema v1.1 |
+| OQDM1 | Route should be a first-class entity referenced by Ride | Partly resolved (M8). `Route` §3.10 is a first-class entity in MVP, and Ride references it by `routeId` + the denormalized `routeName` snapshot. The `Ride.route: Route?` relationship is superseded rather than deferred: a FK by id matches TrackPoint and VehiclePassEvent, and it survives the route being deleted, which is what lets a past ride still show what it rode |
 | OQDM2 | Why store speedSourceAtEnd? | Resolved — removed. Active source is recorded per TrackPoint in speedSourceRaw; derivable from last TrackPoint |
 | OQDM3 | Is RadarVehicle persisted? | Resolved — yes. Embedded as JSON-encoded Data in RadarEvent via @Attribute(.externalStorage) |
 | OQDM4 | VehiclePassEvent should be persisted | Resolved — it is. Full @Model with initializer |
@@ -1095,4 +1200,4 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 
 ---
 
-*Cyclometer Data Model Spec v1.4 · 2026-08-17*
+*Cyclometer Data Model Spec v1.5 · 2026-09-17*
