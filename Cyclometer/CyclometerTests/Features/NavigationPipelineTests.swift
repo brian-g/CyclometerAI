@@ -61,11 +61,13 @@ struct NavigationPipelineTests {
         let tones = LockIsolated<[Maneuver.Direction]>([])
         /// Every route read the app makes.
         let routeFetches = LockIsolated(0)
-        /// The running launch's container, and its client before the fetch counter.
+        /// The running launch's container, and a second client of the test's own over it.
         ///
-        /// The test reads through the app's own container rather than opening one of its own:
-        /// two containers open on one store file at once is the lock-contention flake 31edca0
-        /// removed, and the second one kept the file open past cleanup (#242).
+        /// One container, two clients: the app's, and the test's uncounted one. A second
+        /// *container* on the same file is the lock-contention flake 31edca0 removed, and kept
+        /// the file open past cleanup (#242) — while a second client stands up its own
+        /// persistence actors, so its `ModelContext` is not the one the app writes through and
+        /// a read still has to come off the store rather than out of the writer's context.
         private let launched = LockIsolated<(container: ModelContainer, reader: PersistenceClient)?>(nil)
 
         init(storeURL: URL) {
@@ -87,7 +89,10 @@ struct NavigationPipelineTests {
             await expectStoreClosed(at: storeURL)
             let container = try openStore(at: storeURL)
             var client = PersistenceClient.live(coreDataContainer: coreData.container, modelContainer: container)
-            launched.setValue((container, client))
+            launched.setValue((
+                container,
+                PersistenceClient.live(coreDataContainer: coreData.container, modelContainer: container)
+            ))
             let fetchRoute = client.fetchRoute
             client.fetchRoute = { [routeFetches] id in
                 routeFetches.withValue { $0 += 1 }
@@ -132,7 +137,7 @@ struct NavigationPipelineTests {
         nonisolated func rideRow(_ id: UUID) -> Ride? {
             var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == id })
             descriptor.fetchLimit = 1
-            guard let container = launched.value?.container else { return nil }
+            guard let container = launched.value?.container else { fatalError("read the store before the first launch") }
             return try? ModelContext(container).fetch(descriptor).first
         }
     }

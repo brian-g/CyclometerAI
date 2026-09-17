@@ -109,7 +109,16 @@ func withTemporaryStoreURL(
     let url = temporaryStoreURL(prefix: prefix)
     defer { removeStore(at: url) }
     try body(url)
-    let open = openStoreFiles(at: url)
+    // Blocking waits, because this overload's callers are synchronous. The wait is for a
+    // container the closure has already dropped, so nothing it holds needs this thread.
+    var open = openStoreFiles(at: url)
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(10))
+    while !open.isEmpty, clock.now < deadline {
+        sweepReleasedDependencies()
+        usleep(5_000)
+        open = openStoreFiles(at: url)
+    }
     #expect(open.isEmpty, "the store is still open at cleanup: \(open)", sourceLocation: sourceLocation)
 }
 
@@ -134,31 +143,44 @@ func withTemporaryStoreURL(
 /// values, and `TestStore.init` returns its `TestReducer` from one. An entry whose object is gone
 /// is only swept by a `Task` that the *next* such call starts. So the last test store's
 /// `persistenceClient`, and the container its actors hold, stay open until something else makes
-/// that call. This makes it, and waits for the sweep (#242).
+/// that call — which is what `sweepReleasedDependencies` is (#242).
 ///
 /// Call it before opening a new container on a store a test store has used: two containers
 /// open on one file at once is the lock-contention flake 31edca0 removed.
 func expectStoreClosed(at url: URL, sourceLocation: SourceLocation = #_sourceLocation) async {
-    final class Sweep {}
+    var open = openStoreFiles(at: url)
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: .seconds(10))
-    repeat {
-        _ = withDependencies { _ in } operation: { Sweep() }
+    while !open.isEmpty, clock.now < deadline {
+        sweepReleasedDependencies()
         try? await Task.sleep(for: .milliseconds(5))
-        if openStoreFiles(at: url).isEmpty { return }
-    } while clock.now < deadline
-    let open = openStoreFiles(at: url)
+        open = openStoreFiles(at: url)
+    }
     #expect(open.isEmpty, "the store is still open: \(open)", sourceLocation: sourceLocation)
 }
 
+/// Starts swift-dependencies' sweep of the values it holds for objects that are now gone, by
+/// making the one call that schedules it.
+private func sweepReleasedDependencies() {
+    final class Sweep {}
+    _ = withDependencies { _ in } operation: { Sweep() }
+}
+
 /// The names of the store's files this process has a descriptor open on.
+///
+/// Both shapes SwiftData puts on disk: the SQLite files at `<name>.store*`, and the
+/// external-storage payloads under the sibling `.<name>*_SUPPORT` directory that `removeStore`
+/// deletes — a blob file held open would be unlinked just as a `.store-wal` would.
 private func openStoreFiles(at url: URL) -> [String] {
-    let store = url.resolvingSymlinksInPath().path
+    let directory = url.deletingLastPathComponent().resolvingSymlinksInPath().path
+    let name = url.deletingPathExtension().lastPathComponent
+    let prefixes = ["\(directory)/\(name)", "\(directory)/.\(name)"]
     var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
     return (0..<getdtablesize()).compactMap { descriptor in
         guard fcntl(descriptor, F_GETPATH, &path) != -1 else { return nil }
         let open = URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath().path
-        return open.hasPrefix(store) ? (open as NSString).lastPathComponent : nil
+        guard prefixes.contains(where: open.hasPrefix) else { return nil }
+        return (open as NSString).lastPathComponent
     }
 }
 
