@@ -153,6 +153,16 @@ struct AppFeature {
                 return Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
 
             case .startSheet(.presented(.delegate(.startRide(let route)))):
+                // Never start a second ride over a live one (#231). `resumableRideFetched`
+                // dismisses the sheet, which stops this delegate being *emitted* — it
+                // originates inside the child (`StartSheetFeature.startRideButtonTapped`),
+                // so nil state means no delegate. But that is a fact about where the action
+                // comes from, not a guarantee from the framework: TCA skips only the *child*
+                // reducer for a presented action against absent state and still runs this
+                // one (`PresentationReducer`, `case (.none, .some)`). The day the sheet emits
+                // this from an effect that awaits anything, the unguarded version silently
+                // replaces the resumed ride and double-releases the scan.
+                guard state.activeRide == nil else { return .none }
                 // The sheet's route is what the ride writes to its `Ride` (#196).
                 Self.presentActiveRide(ActiveRideFeature.State(route: route), in: &state)
                 state.startSheet = nil
@@ -216,8 +226,25 @@ struct AppFeature {
                     }
                 }
 
+                // The rider can have S05.1 open when this lands — the fetch races the UI —
+                // and a sheet offering to start a ride they are already on is not a state
+                // to leave them in: tapping its Start Ride would replace the resumed ride
+                // without finalizing it, orphaning that Ride row forever (#231). Nil'ing
+                // the sheet here is what makes the two unrepresentable together: the
+                // start-ride delegate is only ever emitted from inside the child, so an
+                // absent sheet cannot produce one. The delegate case guards on
+                // `activeRide` as well, because that is a property of where the action
+                // originates rather than something the framework enforces.
+                //
+                // Read before the nil, and only released if a sheet was actually up:
+                // `endStartSheetScan` unconditionally would drive the refcount below zero
+                // on the ordinary launch path, where no sheet ever took a scan.
+                let releaseStartSheetScan = state.startSheet != nil
+                    ? Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
+                    : .none
+                state.startSheet = nil
                 Self.presentActiveRide(ActiveRideFeature.State(resuming: summary), in: &state)
-                return .send(.activeRide(.task))
+                return .merge(releaseStartSheetScan, .send(.activeRide(.task)))
 
             case .scenePhaseChanged(let isActive):
                 state.isForeground = isActive
@@ -275,10 +302,6 @@ struct AppFeature {
                 return .none
 
             case .routes(.delegate(.useRoute(let route))):
-                // S20's button and S19's row swipe hide while a ride records, as every tab hides
-                // Start Ride — but the rule lives here too, because presenting the sheet mid-ride
-                // would offer to start a second ride over the first.
-                guard state.activeRide == nil else { return .none }
                 return presentStartSheet(&state, route: route)
 
             case .rides, .routes, .settings, .activeRide, .onboarding:
@@ -338,9 +361,15 @@ struct AppFeature {
     ///
     /// `route` is what S20's "Use This Route" chose; from here the sheet holds it (#196).
     private func presentStartSheet(_ state: inout State, route: RouteReference? = nil) -> Effect<Action> {
-        // A second tap before the sheet covers the button — or Use This Route with it already up — must
-        // not replace the sheet, losing its route, or take a scan the one dismissal cannot release.
-        guard state.startSheet == nil else { return .none }
+        // Nothing opens the sheet while a ride records. Every entry point hides itself then —
+        // the toolbar's Start Ride, S20's button, S19's row swipe — but the rule lives here,
+        // at the one place they all funnel through, because presenting the sheet mid-ride
+        // would offer to start a second ride over the first.
+        //
+        // And a second tap before the sheet covers the button — or Use This Route with it already
+        // up — must not replace the sheet, losing its route, or take a scan the one dismissal
+        // cannot release.
+        guard state.activeRide == nil, state.startSheet == nil else { return .none }
         state.startSheet = StartSheetFeature.State(route: route)
         return .run { [bleCSCClient, variaRadarClient, bleHRClient] _ in
             await bleCSCClient.beginPairingScan()
