@@ -151,7 +151,8 @@ AppFeature
 │   │   ├── StartSheetFeature          (S05.1)
 │   │   │   └── RoutePickerFeature     (S05.2 — pushed on the sheet's own stack)
 │   │   └── ActiveRideAccessoryFeature (S05.3 — accessory strip above TabBar)
-│   ├── RoutesTabFeature               (S19/S20 — Phase 2; "Coming Soon" in MVP)
+│   ├── RoutesFeature                  (S19 — route list, map-as-filter, import, filter sheet)
+│   │   └── RouteDetailFeature         (S20 — pushed onto RoutesFeature.path)
 │   └── SettingsTabFeature
 │       ├── DeviceManagementFeature    (S11)
 │       ├── HRZoneSettingsFeature      (embedded in S12)
@@ -769,6 +770,108 @@ For each selected service:
 
 ---
 
+### 4.14 NavigationFeature
+
+Scoped into `ActiveRideFeature`. Follows the route a ride was started on: places the rider on its
+polyline, tracks how far along it they are, announces each turn at the rider's lead distance, and
+says when they have left it. Nothing reroutes — PRD §15 keeps that out of scope, so off-route is a
+banner and no more. Built in M8 (#197); W9 (#200) and the pipeline tests (#201) read from it.
+
+**How the parent drives it.**
+- `.task` sends `.navigation(.loadRoute(id))` for any ride that has a `routeId`, fresh or resumed.
+- `.locationUpdated` forwards a fix only while `navigation.isFollowingRoute`, so a free ride — and a
+  ride with the S05.1 Turn-by-Turn toggle off, whose route is only drawn on the map — never reaches
+  the matching at all.
+- `progressMeters` rides out to the `Ride` on every `updateRideSummary` and `finalizeRide`, and comes
+  back through `fetchResumableRide` (DataModel.md §3.1, `Ride.routeProgressMeters`).
+- `.delegate(.turnAnnounced)` goes to `AlertOrchestratorFeature`, which plays the turn tone unless
+  radar has the speaker (#198).
+- `isTurnAlertActive` suspends wheel calibration (PRD §8.9).
+
+```swift
+@Reducer
+struct NavigationFeature {
+    @ObservableState
+    struct State: Equatable {
+        @SharedReader(.appPreferences) var preferences   // lead distance; turn-by-turn on/off
+
+        // The route, nil for a free ride and for a routeId whose route has been deleted
+        var activeRoute: NavigationRoute?        // polyline + cumulative distances + maneuvers
+
+        // Where the rider is on it
+        var progressMeters: Double?              // checkpointed to Ride; the floor a resume searches from
+        var snappedIndex: Int?                   // this session's last match; nil until a fix confirms one
+        var lapStartMeters: Double?              // where the current unbroken run began (loops)
+
+        // Turns
+        var nextManeuverIndex = 0
+        var announcedManeuverIndex: Int?         // fired, not yet passed
+        var turnInstruction: Maneuver?           // the centred overlay, nil when hidden
+
+        // Off route and route end
+        var offRouteStreak = 0
+        var isOffRoute = false
+        var isRouteComplete = false
+
+        var isFollowingRoute: Bool               // a route exists AND turn-by-turn is on
+        var nextManeuver: Maneuver?
+        var distanceToNextTurnMeters: Double?    // what W9 (#200) reads; nil off-route or complete
+        var isTurnAlertActive: Bool              // suspends wheel calibration (PRD §8.9)
+    }
+
+    enum Action: Equatable {
+        case loadRoute(UUID)                     // sent by ActiveRideFeature.task
+        case routeLoaded(NavigationRoute?)
+        case locationUpdated(LocationUpdate)
+        case instructionDismissed
+        case delegate(Delegate)
+
+        @CasePathable
+        enum Delegate: Equatable { case turnAnnounced(Maneuver.Direction) }
+    }
+
+    @Dependency(\.persistenceClient) var persistenceClient
+    @Dependency(\.continuousClock) var clock
+}
+```
+
+`.loadRoute` does its work in an effect, not the reducer: decoding the polyline and deriving its
+turns (`TurnDerivation`) walks every point, and a route exported from a recorded ride can carry tens
+of thousands. Maneuvers are derived at load and never persisted, so a later fix to the derivation
+cannot leave old routes on stale output.
+
+**Snapping.** The nearest point anywhere on the polyline is the wrong answer for any route that
+passes the same place twice — on an out-and-back a rider still riding out is as near the way back.
+Four rules keep the match on the leg actually being ridden. The two searches are
+`RouteGeometry.candidates` (windowed) and `RouteGeometry.passes` (first pass); the constants and
+the continuity scoring live on `NavigationFeature`:
+
+| Rule | Constant | What it buys |
+|---|---|---|
+| A window around the last match | `backWindowMeters` 100, `forwardWindowMeters` 500 | A match cannot jump legs; a run of dropped fixes still cannot outpace it |
+| Direction | `courseSpeedFloorMPS` 2.0 | Once the GPS course means anything, a segment running against it is not a candidate — which tells the way back from a rider who turned round short of the turnaround |
+| Continuity | `continuityWeight` 0.1 | The match that moves the rider least far from where they were expected wins, not simply the nearest. A stopped rider has no course, and a metre of scatter would otherwise move them past turns they would never be told about |
+| *First* pass, not nearest | — | Wherever there is no match to window around — ride start, off-route, a relaunch mid-ride — searched from just behind `progressMeters` |
+
+**Loops.** A loop's end is also its start, so arriving there is ambiguous. A loop counts as finished
+only once the rider has ridden at least half of it since `lapStartMeters`; short of that the match
+carries on round from the start, as the road does. `loopClosureMeters` (50) is how close a route's
+two ends have to be to count as a loop.
+
+**Turn timing.** PRD §8.6 allows ±10 m of the lead distance, but at 40 km/h a rider covers 11.1 m
+between fixes, so announcing at the first fix inside the lead distance can be 11 m late. A turn is
+announced instead when what remains beyond the lead distance is at most half the ground the next fix
+is expected to cover — `distance − lead ≤ speed · expectedFixInterval / 2`. That halves the worst
+case to ±5.6 m at 40 km/h.
+
+**Off route and arrival.** Raised after `offRouteConsecutiveFixes` (5) fixes beyond `offRouteMeters`
+(50) — at CoreLocation's 1 Hz the fifth lands inside PRD §8.6's five seconds. Cleared by one fix
+within `rejoinMeters` (30); the gap between the two is deliberate, so a rider running 40–50 m out
+does not flap. Within `arrivalMeters` (30) of the end the route is done: no more turns, and riding
+on past the finish is not being off-route.
+
+---
+
 ## 5. Data Flow Diagram — L3 Danger Alert
 
 ```
@@ -933,10 +1036,14 @@ Cyclometer/
 │   │   ├── HRZoneSettingsFeature.swift
 │   │   └── AccountsFeature.swift
 │   │
-│   └── Routes/                                // Phase 2
-│       ├── RoutesTabFeature.swift
-│       ├── RouteManagementFeature.swift
-│       └── RouteDetailFeature.swift
+│   └── Routes/
+│       ├── RoutesFeature.swift                 // S19
+│       ├── RoutesView.swift
+│       ├── RouteDetailFeature.swift            // S20
+│       ├── RouteDetailView.swift
+│       ├── RouteFilter.swift                   // distance + elevation filter, pure value
+│       ├── RouteLibrary.swift
+│       └── RoutesMapCamera.swift               // camera logic as a pure enum, so it is testable
 │
 ├── Clients/
 │   ├── BluetoothClient.swift
@@ -1009,7 +1116,7 @@ The following components from `Test-ToolbarAndAccessoryView` are production-read
 | `OpenRingProgressView` | `DesignSystem/Components/OpenRingProgressView.swift` | Production-ready as-is |
 | `SensorListRowView` | `UI/Components/SensorListRow/SensorListRowView.swift` | **Shared** (closes #11). The row skeleton behind both sensor lists: tinted icon tile, title over optional subtitle, trailing control. The two callers model different things — `SensorStatusRow` (private to `StartSheetView`) a fixed *category* (Radar / HR / Speed / Cadence), `DeviceRow` (private to `DeviceManagementView`) a *device* that appears and disappears while scanning — so each keeps its own thin wrapper and passes the trailing control in as a view. `SensorRowButton`, in the same file, is the shared capsule button ("Pair" / "Unpair" / "Tap to Pair") |
 | `AppFonts` | `DesignSystem/AppFonts.swift` | Production-ready |
-| `RouteStub` data structures | Replace with `Route` SwiftData model | Shape matches; swap stub for real persistence |
+| `RouteStub` data structures | **Done (M8).** Replaced by the `Route` SwiftData model | DataModel.md §3.10. `RouteSummary` / `RouteDetail` / `RouteReference` are the `Sendable` boundary values that cross `PersistenceClient` |
 | `CSCMeasurementPayload` layout | Formalize in `SpeedFeature` + `CadenceFeature` | Prototype has `DemoRideData` shape to reference |
 
 Navigation structure from prototype is **directly adopted**:
@@ -1072,8 +1179,11 @@ func testL3AlertFiresHapticAndAudio() async {
 | `VehiclePassDetection` | Overtake vs. turn-off discrimination; 2s minimum tracking |
 | Full ride state machine | `idle → active → paused → active → ended`; crash recovery from checkpoint |
 | `RideSummaryFeature` | HKWorkout write on appear; failure handled gracefully; sync sheet presented on tap |
+| `NavigationFeature` | The ±10 m turn sweep across every fix phase; the rider's own lead distance; multi-turn order and apex; out-and-back followed both ways though the other leg is nearer; a turnaround short of the turnaround; loops (joined near the end, left and re-entered, ridden whole, stood still on); off-route hysteresis at 50/30 m and the five-fix streak; rejoin re-announcing a dropped turn; route end; no route; turn-by-turn off; resume from a checkpointed `progressMeters` |
+| `NavigationPipelineTests` | End to end over a real `.gpx` on disk and a live store: each turn's tone within ±10 m at 20/30/40 km/h; Off route raised within 5 s and cleared on rejoin; a route never joined; a ride with no route through a checkpoint and a relaunch; a deleted route leaving its rides' `routeName`; a ride killed mid-route relaunching still navigating |
+| `RoutesFeature` / `RouteDetailFeature` | Import, list, map-as-filter, filter sheet, swipe-to-use (S19 → S05.1); S20 detail, elevation section hidden on nil gain, "Use This Route" |
 | `RideSyncSheetFeature` | Services loaded; toggle selection; upload per service; status updates; remoteId stored |
 
 ---
 
-*Cyclometer TCA Architecture Map v1.2 · 2026-05-22*
+*Cyclometer TCA Architecture Map v1.3 · 2026-09-17*

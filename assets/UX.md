@@ -1,7 +1,8 @@
 # Cyclometer — UX Specification
-**Version:** 0.8  
-**Date:** 2026-09-06
+**Version:** 0.8.1  
+**Date:** 2026-09-17
 
+**Updated:** 2026-09-17 — M8 spec reconciliation (#202): the "Coming Soon" placeholder sentence in §S04 is gone — the Routes tab is built; S19's purpose no longer reads as though the service imports are MVP sources.  
 **Updated:** 2026-09-06 — M8 scope pass: Add Routes View and Route Detail to M8 work.  
 **Updated:** 2026-08-14 — M10 scope pass: S11 rewritten as the flat device list the Sketch frame shows; S12 loses Set Do Not Disturb, defers Accounts to Phase 2, and moves wheel size to a detail screen; S01 drops the Files permission and asks for Location When In Use  
 **Previously updated:** 2026-05-21 — Dashboard vision rewritten; S05.4 reframed as factory default; S05.5 removed  
@@ -122,7 +123,7 @@ There will be a button in a toolbar at the top-right of the screen to start a ri
 - Hidden when a ride is active
 - When pressed, will display the Start Ride sheet.
 
-When a ride is active, the Start ride toolbar item will be hidden. The Routes tab is present in the tab bar during MVP but shows a "Coming Soon" placeholder view until Phase 2 content is ready.
+When a ride is active, the Start ride toolbar item will be hidden. All three tabs are functional in MVP; the Routes tab is S19.
 
 ### Widget Size Convention
 
@@ -1067,7 +1068,7 @@ ContentUnavailableView {
 ## S19 — Route Management
 
 **Phase:** MVP  
-**Purpose:** Browsable list of saved routes with list and map views. Allows the user to import new routes from  services such as Ride with GPS, Strava, iCloud Files, Tribos Studio. Although all of those but iCloud Files (the Files app) are deferred until later. 
+**Purpose:** Browsable list of saved routes with list and map views. In MVP the one import source is the Files app (iCloud Drive or on-device), reading `.gpx` — routes are planned externally, in Ride with GPS, Strava, tribos.studio, Komoot or similar, and exported. Importing *directly* from those services needs the Settings → Accounts section that authenticates them, so both are Phase 2 (PRD §8.6).
 
 ### Layout
 > *Refer to `RoutesView` as prototyped in the source..*
@@ -1083,8 +1084,8 @@ ContentUnavailableView {
 - Route filter action — Opens a sheet that contains basic filter options: distance slider (min, max), elevation gain slider (max). 
 
 ### Open UX Questions
-- [x] How does the user import a route here (vs. at ride start)? There will be a route import action. Routes can be imported from Files, from Strava, other from other connected services that have routes.
-- [x] Should routes from tribos.studio be shown in a separate section or merged with local routes? Merged
+- [x] How does the user import a route here (vs. at ride start)? There will be a route import action. In MVP it opens the Files browser; connected-service imports (Strava and the rest) arrive with Accounts in Phase 2.
+- [x] Should routes from tribos.studio be shown in a separate section or merged with local routes? Merged — decided ahead of the work; the service integrations themselves are Phase 2
 - [ ] In the future, Phase 4, there will be a route suggestion tool.
 
 ---
@@ -1112,4 +1113,4 @@ ContentUnavailableView {
 
 ---
 
-*Cyclometer UX Specification v0.6 · 2026-03-31 · Updated 2026-05-21*
+*Cyclometer UX Specification v0.8.1 · 2026-03-31 · Updated 2026-09-17*

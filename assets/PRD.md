@@ -22,6 +22,7 @@
 | 0.4.4 | 2026-08-14 | Brian / Claude | M10 scope pass. S11 corrected to the flat device list in `Design.sketch` (no role sections); one sensor per role confirmed, with a replace-or-cancel prompt on collision; S12 loses Set Do Not Disturb (no public iOS API for enabling a Focus) and defers Accounts to Phase 2; wheel size becomes a navigation row to a detail screen; S01 drops the Files permission (there is no such prompt) and requests Location When In Use, escalating to Always at first ride start; HR zone entry moves to a manually entered `RiderProfile` in M10, HealthKit-sourced in M5; route service integrations follow Accounts to Phase 2, leaving GPX file import as the MVP source; M10 issue set created. Version 0.4.3 is the wheel auto-calibration revision on `feat/70-wheel-auto-calibration`, unmerged at the time of writing |
 | 0.4.5 | 2026-08-17 | Brian / Claude | §8.5 corrected: **HealthKit has no max-heart-rate type**, so max HR comes from the 220 − age estimate or manual entry, never from a `.discreteMax` query over historical samples. §9.4 acceptance criteria updated to match. `RiderProfile` (#96) narrowed to storing HR *overrides* only — resting HR and date of birth stay HealthKit's, resolution is `override ?? healthKit ?? default` at read time — which makes §8.5's long-standing "app-stored values are always considered overrides" literally true rather than aspirational |
 | 0.5.0 | 2026-09-11 | Brian | Moved the Route picker from Phase 2 to MVP. The work on Routes is done and the Route picker seems to be an easy win. |
+| 0.5.1 | 2026-09-17 | Brian / Claude | M8 spec reconciliation (#202). The Routes tab, S19 and S20 move from Phase 2 to MVP everywhere — §6, the §7 screen inventory, §12's feature tree and tab table, and §13 — following UX.md v0.8; the "Coming in a future update" placeholder is gone, because the tab is built. §6's MVP bullet no longer offers tribos.studio as a route source, which §8.6's 2026-08-14 revision had already moved to Phase 2 with Accounts. `.fit` import removed from §8.6's Files row and recorded in §15 as out of scope — it appeared in no other spec and nothing parses it. §12's `NavigationClient` and `NavigationFeature` comments drop tribos.studio; `RouteFeature` becomes the built `RoutesFeature` |
 
 ---
 
@@ -157,7 +158,8 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Heart rate zone display (Zones 1–5) via BLE HR sensor or Apple Watch / HealthKit
 - Watch haptic alert system (3 escalation levels) with Silent Mode override for Danger
 - GPS track recording with live map view
-- Route loading from GPX file import (Files app) or tribos.studio integration
+- Route loading from GPX file import (Files app). Route service integrations are Phase 2 (§8.6)
+- Routes tab (S19, S20): route list with list and map views, map-as-filter, and route detail with elevation profile
 - Route picker in the Start Sheet (S05.2)
 - GPX export with `gpxtpx:TrackPointExtension` (HR, cadence, speed per track point) and `cyc:VehiclePassEvent` waypoints
 - GPX files available in iOS Files app
@@ -168,7 +170,8 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Open TestFlight beta
 
 ### Phase 2
-- Routes tab (S19, S20): route list with list and map views, route detail with elevation profile, current weather, Strava segments, and previous ride history
+- Route service integrations (tribos.studio, Strava, Ride with GPS) — ship with the Settings → Accounts section that authenticates them (§8.6)
+- S20's current weather and Strava segments — the rest of the Routes tab is MVP
 - Ride history (S14) with map replay and vehicle pass event visualization
 - Ride detail view (S15): HR graph, cadence graph, radar event + vehicle pass timeline
 - Heart rate zone training graphs
@@ -226,8 +229,8 @@ Controls must be large enough to tap without looking. The active ride screen mus
 | S16 | Training Zones Graph | Cut | Time-in-zone breakdown across recent rides |
 | S17 | Apple Watch | Phase 2 | Glanceable watch app. |
 | S18 | AR HUD Configuration | Phase 3 | Configure ENGO 2 / ActiveLook display layout |
-| S19 | Route Management | Phase 2 | Browsable list of saved routes with list and map views |
-| S20 | Route Detail | Phase 2 | Route detail: MapView, elevation profile, distance, current weather, Strava segments, previous ride history |
+| S19 | Route Management | MVP | Browsable list of saved routes with list and map views |
+| S20 | Route Detail | MVP | Route detail: MapView, elevation profile, distance, previous ride history. Current weather and Strava segments are Phase 2 |
 
 > **Note:** Screen-level UX detail — layout, component hierarchy, interaction patterns, and annotation — is specified in `UX.md`. The PRD defines *what* each screen must accomplish; UX.md defines *how* it is structured.
 
@@ -475,7 +478,7 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 
 | Source | Method | Notes |
 |---|---|---|
-| iOS Files app | Import GPX file | Rider selects a `.gpx` or `.fit` file from any location accessible via the Files app (iCloud Drive, local storage, imported from another app) |
+| iOS Files app | Import GPX file | Rider selects a `.gpx` file from any location accessible via the Files app (iCloud Drive, local storage, imported from another app). `.fit` is not read — see §15 |
 | tribos.studio | Service integration — **Phase 2** | Rider connects their tribos.studio account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
 | Strava | Service integration — **Phase 2** | Rider connects their Strava account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
 | Ride with GPS | Service integration — **Phase 2** | Rider connects their Ride with GPS account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
@@ -498,7 +501,6 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 - [ ] Map renders current position within 5 seconds of ride start (GPS lock)
 - [ ] Position updates smoothly at 1Hz minimum with no jumping
 - [ ] Route overlay renders correctly from imported GPX file
-- [ ] tribos.studio route browsing and import functional (service integration — Phase 2)
 - [ ] Turn notification fires within ±10m of configured distance from turn
 - [ ] "Off route" banner displays within 5 seconds of deviation from route polyline
 - [ ] Map remains functional when radar BLE and HR BLE are simultaneously active (no resource contention)
@@ -1091,7 +1093,7 @@ enum MapOrientation: String, Codable { case headingUp, northUp }
 @DependencyClient struct HapticClient
 @DependencyClient struct AudioAlertClient     // Three tones: allClear, warning, danger
 @DependencyClient struct PersistenceClient
-@DependencyClient struct NavigationClient     // GPX import, tribos.studio routes, turn calc
+@DependencyClient struct NavigationClient     // GPX import, turn calc
 @DependencyClient struct WheelCalibrationClient  // GPS vs BLE distance comparison
 ```
 
@@ -1106,13 +1108,13 @@ AppFeature
 │   ├── RadarFeature                    ← BLE stream, alert level, vehicle pass detection
 │   ├── HeartRateFeature
 │   ├── SpeedCadenceFeature
-│   ├── NavigationFeature               ← GPX import, tribos.studio, turn alerts
+│   ├── NavigationFeature               ← route following, turn alerts, off-route
 │   ├── TrackPointRecorderFeature       ← 1Hz track points + vehicle pass event recording
 │   ├── WheelCalibrationFeature         ← GPS vs BLE auto-calibration
 │   └── AlertOrchestratorFeature        ← Combines all streams → haptic/audio/screen
 ├── RideHistoryFeature                  ← Phase 2
 ├── RideDetailFeature                   ← Phase 2
-├── RouteFeature                        ← Phase 2; Routes tab (list, map, detail)
+├── RoutesFeature                       ← Routes tab: S19 list/map + S20 detail
 └── SettingsFeature
     ├── DeviceSettingsFeature
     ├── HRZoneSettingsFeature
@@ -1125,10 +1127,10 @@ The app uses a `TabView` with three tabs:
 | Tab | Icon | Phase |
 |---|---|---|
 | Rides | `figure.outdoor.cycle` | MVP |
-| Routes | `point.topleft.down.curvedto.point.bottomright.up` | Phase 2 |
+| Routes | `point.topleft.down.curvedto.point.bottomright.up` | MVP |
 | Settings | `gearshape` | MVP |
 
-The Routes tab is hidden or shows a "Coming in a future update" placeholder in MVP and becomes fully functional in Phase 2.
+All three tabs are functional in MVP. The Routes tab (S19, S20) came into MVP with UX.md v0.8 and shipped in M8.
 
 **Project Folder Structure:**
 ```
@@ -1244,14 +1246,14 @@ Cyclometer/
 | M5 | HealthKit integration; HR zone display; BLE HR fallback to Apple Watch |
 | M6 | Wire CSC client (built in M2, #20) into the metrics pipeline; GPS fallback for speed; wheel circumference presets + manual entry + GPS auto-calibration; minimal BLE pairing UI + CSC role assignment (precursor to full S11 in M10) |
 | M7 | TrackPoint recording; vehicle pass event detection; GPX export with `gpxtpx` + `cyc:` extensions |
-| M8 | Navigation: live map; GPX route import; turn alerts (tribos.studio integration moves to Phase 2 with Accounts) |
+| M8 | Navigation: live map; GPX route import; turn alerts; off-route banner; Routes tab (S19, S20) and the S05.2 route picker (tribos.studio and the other route services move to Phase 2 with Accounts) |
 | M9 | Ride summary; ride history persistence; vehicle pass event count in summary |
 | M10 | Settings (S12, less Accounts); full device management (S11 flat list, extending the M6 pairing sheet); replace-or-cancel on role collision; radar and HR pairing brought under the paired-record gate; `RiderProfile` + HR zones; onboarding (S01, S02) |
 | M11 | QA; TestFlight open beta; bug fixes |
 | M12 | App Store submission |
 
-### Phase 2 — Companion, History & Routes (Target: +2 months post-launch)
-Routes tab (S19, S20): route list with list and map views, route detail with elevation profile, current weather, Strava segments, and previous ride history. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). Dynamic Island. HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Multi-bike management — bikes own their sensors, circumference lives on the speed sensor (DataModel.md §3.9) — plus the S05.1 bike picker.
+### Phase 2 — Companion & History (Target: +2 months post-launch)
+Route service integrations (tribos.studio, Strava, Ride with GPS) with the Settings → Accounts section that authenticates them, plus S20's current weather and Strava segments — the Routes tab itself shipped in M8. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). Dynamic Island. HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Multi-bike management — bikes own their sensors, circumference lives on the speed sensor (DataModel.md §3.9) — plus the S05.1 bike picker.
 
 ### Phase 3 — AR, Power & Platform (Target: +4 months post-Phase 2)
 Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detection.
@@ -1297,6 +1299,7 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detec
 | **iPad** | iPhone-only by product decision |
 | **Mac Catalyst** | Not planned |
 | **Auto-reroute navigation** | MVP shows "Off route" banner only |
+| **`.fit` route import** | GPX only. Every route source the rider plans on exports GPX, and a second parser buys nothing |
 | **In-app route creation** | Riders plan routes externally (tribos.studio, Komoot, Strava) and import GPX |
 | **`MKDirections` routing** | Resolved out of scope for MVP (OQ12) |
 
