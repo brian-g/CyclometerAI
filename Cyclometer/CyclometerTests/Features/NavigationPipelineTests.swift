@@ -376,6 +376,15 @@ struct NavigationPipelineTests {
             let untouched = withDependencies { $0 = relaunched.dependencies } operation: { NavigationFeature.State() }
             #expect(relaunched.state.activeRide?.navigation == untouched)
 
+            // A load would arrive as an effect after `.task`, so checking the fetch counter here would
+            // prove nothing. Wait for it instead: the only issue allowed is the timeout that says it
+            // never came, which a case-path `receive` reports twice.
+            await withKnownIssue("a resumed free ride must not load a route") {
+                await relaunched.receive(\.activeRide.navigation.loadRoute, timeout: .seconds(1))
+            } matching: { issue in
+                issue.description.contains("Expected to receive a matching action, but received none")
+                    || issue.description.contains("Expected to receive an action matching case path, but didn't get one")
+            }
             await relaunched.skipInFlightEffects(strict: false)
             #expect(harness.routeFetches.value == 0)
             #expect(harness.tones.value.isEmpty)
