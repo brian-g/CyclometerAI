@@ -1,38 +1,38 @@
-# tasks/todo.md — #230 [M8] S19 swipe a route row to use it for a new ride
+# tasks/todo.md — #201 [M8] Unit tests: the navigation pipeline end to end
 
-Branch: `feat/230-swipe-use-route` · Plan: `~/.claude/plans/zany-snuggling-flamingo.md`
+Branch: `feat/201-navigation-pipeline-tests` (off `main`, not stacked on #231) · Plan: `~/.claude/plans/hazy-cooking-piglet.md`
 
-Spec notes:
-- The issue and UX.md §S19 agree. §S19 listed no swipes at all; only the leading one is added, as the issue asks.
-- It reuses `Delegate.useRoute`, so `AppFeature` gets no new code path. Its guard only gets a comment update.
+Decisions:
+- A checked-in `.gpx` fixture, not a generated one.
+- "S20 doesn't resurrect a deleted route" means a re-import of the same file (new id) has an empty Previous Rides.
 
 ## Implementation
 
 - [x] Branch
-- [x] `RoutesFeature.Action.useRouteSwiped(RouteReference)` → `.delegate(.useRoute)`
-- [x] `RoutesView` leading `.swipeActions`: "Use This Route", `play.fill`, `cyPrimary`, full swipe, hidden while recording
-- [x] Doc comments: `Delegate`, `RoutesNavigationStack.isStartRideHidden`, `AppFeature`'s guard
-- [x] UX.md §S19 Key Components
-
-## Tests
-
-- [x] `RoutesFeatureTests`: the swipe emits `.delegate(.useRoute(route.reference))`
-- [x] `AppRouteSelectionTests`: the swipe opens the sheet on the route with the pairing scan; it's ignored mid-ride
+- [x] `NavigationPipeline.gpx` fixture; confirm it is bundled in `CyclometerTests.xctest`
+- [x] `RouteFixtures` polyline walker (`point(alongPolyline:)`, `bearing(alongPolyline:)`)
+- [x] `NavigationPipelineTests` harness: live on-disk store, AppFeature store, import → S20 → start
+- [x] 1. File on disk → turn tones within ±10 m (20/30/40 km/h)
+- [x] 2. Off route within 5 s, clears on rejoin
+- [x] 3. No-route ride never touches navigation
+- [x] 4. Never-joined route: off route, no turns
+- [x] 5. Deleted route keeps routeName; re-import has no history
+- [x] 6. Killed mid-route ride relaunches still navigating
 
 ## Verify
 
-- [x] Build + full `CyclometerTests` green locally (`** TEST SUCCEEDED **`), re-run after Brian's "Use Route" rename —
-  no snapshot reference moved. The three new tests pass by name.
-- [x] Live sim (throwaway XCUITest, since deleted), three of the four rider-facing criteria:
-  - The leading swipe reveals a green "Use Route" with `play.fill`
-  - Tapping it opens the Start sheet with **Route: Swipe Seed 230**
-  - The trailing red Delete is unchanged
-- [ ] Live sim, **no leading action mid-ride: not driven** — stopped at Brian's request. Three attempts never got back to
-  the Routes tab while recording: the dashboard is a sheet over the tabs, so `Open` and `tabBars.buttons["Routes"]`
-  both exist (and report hittable) while it still covers them, and the tap lands on the sheet. Covered by
-  `AppRouteSelectionTests.swipeIsIgnoredDuringARide` and by the same `isStartRideHidden` flag that already hides
-  S19's Start Ride and S20's CTA.
+- [x] Suite alone: 8 cases counted
+- [x] Mutation checks bite (approved temp edits, fresh build)
+- [x] Full `CyclometerTests` green, count = main + 8
 - [x] PR
 
-Note: Brian renamed the CTA to **"Use Route"** mid-task, in `RoutesView` (this swipe) and `RouteDetailView` (S20).
-UX.md §S20's "Use This Route" line and a few comments elsewhere still use the old wording — left alone, not this issue.
+## Review
+
+- The suite alone passes: 6 tests, 8 cases (the turn test runs at 20/30/40 km/h).
+- Full local `CyclometerTests` is green: 1,051 Swift Testing tests in 99 suites (+6 on `main`), and 89 XCTest cases, 0 failures.
+- Mutation checks each failed only the test that should catch them. Each ran on its own `-derivedDataPath` with `COMPILATION_CACHE_ENABLE_CACHING=NO`, and the source was restored after (clean `git diff`):
+  - Announce at the first fix inside the lead distance → only the ±10 m test fails.
+  - `offRouteConsecutiveFixes = 8` → only the off-route test fails.
+  - `State(resuming:)` drops `routeProgressMeters` → only the relaunch test fails.
+- **Lesson (first run):** `ActiveRideFeature` forwards a fix to navigation as an effect. Reading navigation state right after `store.send` saw the *previous* fix, which is 11 m late at 40 km/h. `ride(...)` now does `receive(\.activeRide.navigation.locationUpdated)` while a route is being followed.
+- No production code changed. The fixture's street names are Winston-Salem streets, but the geometry is synthetic (straight legs, 10 m points).

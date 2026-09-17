@@ -83,6 +83,68 @@ enum RouteFixtures {
         return legs.last?.bearingDegrees ?? 0
     }
 
+    // MARK: - Along a polyline
+
+    /// Where a rider `meters` along `coordinates` would be, `lateralMeters` to the right of their
+    /// direction of travel — `point(along:at:)` for a route that came from a file rather than legs.
+    ///
+    /// Measures each segment by inverting `offset`, not with `RouteGeometry`, so a test placing
+    /// fixes with it is not also grading the code under test with that code's own ruler. Past the
+    /// end it carries on along the last segment.
+    static func point(
+        alongPolyline coordinates: [RouteCoordinate],
+        at meters: Double,
+        lateralMeters: Double = 0
+    ) -> RouteCoordinate {
+        let (start, bearing, into) = segment(of: coordinates, at: meters)
+        let point = offset(start, bearingDegrees: bearing, meters: into)
+        guard lateralMeters != 0 else { return point }
+        return offset(point, bearingDegrees: bearing + 90, meters: lateralMeters)
+    }
+
+    /// The bearing of the segment `meters` along `coordinates`: the course a rider there is riding.
+    static func bearing(alongPolyline coordinates: [RouteCoordinate], at meters: Double) -> Double {
+        segment(of: coordinates, at: meters).bearingDegrees
+    }
+
+    /// The length of `coordinates`, by the same measure as `point(alongPolyline:at:)`.
+    static func length(ofPolyline coordinates: [RouteCoordinate]) -> Double {
+        zip(coordinates, coordinates.dropFirst()).reduce(0) { $0 + displacement(from: $1.0, to: $1.1).meters }
+    }
+
+    /// The segment `meters` along falls on: its start, its bearing, and how far into it.
+    private static func segment(
+        of coordinates: [RouteCoordinate],
+        at meters: Double
+    ) -> (start: RouteCoordinate, bearingDegrees: Double, meters: Double) {
+        var remaining = max(0, meters)
+        var last = (start: coordinates[0], bearingDegrees: 0.0, meters: 0.0)
+        for (from, to) in zip(coordinates, coordinates.dropFirst()) {
+            let step = displacement(from: from, to: to)
+            guard step.meters > 0 else { continue }
+            last = (from, step.bearingDegrees, remaining)
+            if remaining <= step.meters { return last }
+            remaining -= step.meters
+        }
+        return last
+    }
+
+    /// `offset` run backwards: the distance and bearing from `start` to `end`, on the plane
+    /// tangent to the ellipsoid at `start` — the same flattening, so the two round-trip.
+    private static func displacement(
+        from start: RouteCoordinate,
+        to end: RouteCoordinate
+    ) -> (meters: Double, bearingDegrees: Double) {
+        let latitude = start.latitude * .pi / 180
+        let sinLatitude = sin(latitude)
+        let w = 1 - 0.006_694_379_990_141_316 * sinLatitude * sinLatitude
+        let meridional = 6_378_137.0 * (1 - 0.006_694_379_990_141_316) / (w * w.squareRoot())
+        let normal = 6_378_137.0 / w.squareRoot()
+        let north = (end.latitude - start.latitude) * .pi / 180 * meridional
+        let east = (end.longitude - start.longitude) * .pi / 180 * normal * cos(latitude)
+        return ((north * north + east * east).squareRoot(), atan2(east, north) * 180 / .pi)
+    }
+
     /// A clean fix at `coordinate`: accuracy well inside `GPSFixFilter`'s gate. `course` is
     /// CoreLocation's, so `-1` means it has none.
     static func fix(
