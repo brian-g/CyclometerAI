@@ -1,139 +1,161 @@
-# tasks/todo.md — #202 [M8] Spec reconciliation — navigation and routes
+# tasks/todo.md — Sprint: M9 Ride Summary & History
 
-Branch: `docs/202-spec-reconciliation-navigation-routes` (off `main`)
+**Dates:** Fri 2026-09-18 → Thu 2026-10-01 (2 weeks) · **Team:** 1 (Brian + Claude)
 
-Docs-only. No Swift changes, no build impact.
+**Sprint Goal:** A finished ride lands on a real Ride Summary screen and stays in real history —
+`DemoRide` is deleted from the app.
 
-## Findings that change the issue's scope
+---
 
-- **CLAUDE.md has no Open Questions section at all** (`grep OQ1[0-9]` → no match in `CLAUDE.md` or
-  `README.md`). That AC is already satisfied; nothing to edit. Recorded here so the AC can be ticked.
-- **The M8 milestone description is already correct** — it was retitled "M8 — Navigation, Live Map &
-  Routes" and already drops tribos.studio and names the Routes tab. That AC is already satisfied.
-- **UX.md §S05.1's route row** — per the issue's own first comment, PR #229 already covered it, and the
-  row now opens the S05.2 picker rather than being read-only. Dropped, as the comment says.
-- **The issue's second comment describes `turnBanner`; the code has `turnInstruction`**, and the built
-  snapping has two rules the comment omits (continuity weighting, and loop handling via `lapStartMeters`).
-  TCA.md §4.14 will document what `NavigationFeature.swift` actually does, not the comment.
+## Why this sprint exists
 
-## Edits
+M9 is due 2026-10-23 with **two** issues filed, and neither is the summary screen. Verified against
+the tree, not the milestone:
 
-### assets/PRD.md
-- [x] §6 MVP bullet: "or tribos.studio integration" → GPX file import from the Files app only
-- [x] §6 MVP list: add the Routes tab (S19, S20)
-- [x] §6 Phase 2 list: delete the "Routes tab (S19, S20)…" bullet
-- [x] §7 screen inventory: S19 and S20 `Phase 2` → `MVP`
-- [x] §8.6 route-source table: `.gpx` or `.fit` → `.gpx`; `.fit` added to §15 Out of Scope
-- [x] §8.6 AC: "tribos.studio route browsing and import functional" → drop (it is a Phase 2 line in an
-      MVP AC list; §8.6's own 2026-08-14 note already says so)
-- [x] §12 client comment: `NavigationClient // GPX import, tribos.studio routes, turn calc` → drop tribos
-- [x] §12 feature tree: `NavigationFeature ← GPX import, tribos.studio, turn alerts` → drop tribos;
-      `RouteFeature ← Phase 2` → `RoutesFeature ← Routes tab (S19 list/map, S20 detail)`, MVP
-- [x] §12 tab table: Routes `Phase 2` → `MVP`; delete the "hidden or shows a 'Coming in a future update'
-      placeholder" sentence
-- [x] §13 M8 row: drop the tribos parenthetical, add the Routes tab; §13 Phase 2 paragraph: drop the
-      Routes tab sentence
-- [x] §15: add a `.fit` import row (out of scope — GPX only)
-- [x] §2 revision history: new row 0.5.1, 2026-09-17, for this pass
+- `RidesFeature.swift:9` — `var demoRides: [DemoRide] = DemoRide.sampleRides`. The Rides tab is a
+  prototype against sample data.
+- UX.md screen inventory — S10, S14 and S15 are all `Stub`.
+- `ActiveRideFeature.swift:550` finalizes the ride to SwiftData and exports GPX, then presents
+  **nothing**. There is no post-ride screen.
+- No `HKWorkout` is ever written. `PermissionsClient.swift:120-125` already requests the
+  authorization; nothing uses it.
 
-### assets/TCA.md
-- [x] §3 tree: `RoutesTabFeature (S19/S20 — Phase 2; "Coming Soon" in MVP)` → the built shape
-      (`RoutesFeature` S19 → `RouteDetailFeature` S20, MVP)
-- [x] New §4.14 `NavigationFeature` — as built: scoping into `ActiveRideFeature`, state, the four
-      snapping rules, loop handling, turn timing, off-route hysteresis, `isTurnAlertActive`
-- [x] §8 file layout: `Routes/ // Phase 2` → the flat built layout (`RoutesFeature`, `RoutesView`,
-      `RouteDetailFeature`, `RouteDetailView`, `RouteFilter`, `RouteLibrary`, `RoutesMapCamera`)
-- [x] §9: `RouteStub … Phase 2` note → "Replaced by the `Route` @Model in M8"
-- [x] §10 coverage table: add `NavigationFeature` row (the ±10 m sweep across fix phases, out-and-back
-      both ways, early turnaround, loops, off-route hysteresis, route end, no route, resume from
-      checkpoint) and a `NavigationPipelineTests` end-to-end row
-- [x] Footer version bump
+What already exists and does **not** need rebuilding: `Ride` carries every field S10 needs
+(`hrZoneDurations`, `averageCadenceRPM`, `vehiclePassCount`, elevation gain/drop, `maxSpeedMPS`);
+`finalizeRide` / `RideSummaryUpdate` / `PendingRideEnd` crash recovery are all built and tested;
+`RidesView.swift` already has chart and map components (`HeartRateProfileView`,
+`ElevationProfileView`, `RideMapView`) — they just read demo data.
 
-### assets/DataModel.md
-- [x] §2 ERD key relationships: "Phase 2: Ride gains a route: Route?" → Route is MVP, linked by
-      `Ride.routeId` (FK by id, as TrackPoint/VehiclePassEvent do); the `@Relationship` stays deferred
-- [x] §3.1 Ride: `routeId: UUID?`, `routeName: String?` (comment rewritten), `routeProgressMeters: Double?`
-- [x] §3.1 OQDM1 callout: rewrite to the revised status
-- [x] New §3.10 `Route` entity, matching `Route.swift` (scalars + `polylineData`/`cuePointsData` external
-      storage, bounding-box columns, `RouteSummary`/`RouteDetail`/`RouteReference` boundary types)
-- [x] §6/§3.1 note on `RideSummaryUpdate.route` (read back only; the route is written once by `createRide`)
-- [x] §7 "Previous Rides for Route (S20, Phase 2)" → MVP, filtering on `Ride.routeId == routeId`
-- [x] §9 schema table: `1.1 (Phase 2 — Routes)` → `1.1 (MVP — Routes, M8)`, describing what shipped
-- [x] §11 OQDM1 row: partly resolved — `Route` @Model in MVP, `Ride.route: Route?` superseded by `routeId`
-- [x] Footer version bump
+Design sources confirmed present in `Design.sketch`: **S10 — Ride Summary**, **S14 — Ride History**.
+S15 has no artboard by design — UX.md §S15 spec's it as a standard detail view.
 
-### assets/UX.md
-- [x] §S04 line 125: delete the "Coming Soon placeholder until Phase 2" sentence
-- [x] §S19 purpose: rewrite so the service imports read as deferred rather than MVP sources
-- [x] §S19 open question on tribos.studio sectioning: mark as Phase 2
+---
 
-### GitHub
-- [x] Confirm the M8 milestone description needs no change (verify, then tick the AC)
-- [x] PR against `main` referencing #202
+## Capacity
 
-## Verification
-- [x] `grep -rn "tribos\|Coming Soon\|\.fit" assets/*.md README.md` — every surviving hit is
-      explicitly Phase 2 / out of scope
-- [x] `grep -rn "S19\|S20\|Routes tab" assets/*.md` — no remaining "Phase 2"
-- [x] Walk each of the 8 ACs against the diff
-- [x] Spot-check §4.14 and §3.10 line by line against `NavigationFeature.swift` / `Route.swift`
+1 point ≈ one merged PR of this repo's typical size.
+
+| Person | Available | Allocation | Notes |
+|---|---|---|---|
+| Brian + Claude | 10 working days | 24 pts | Travel GSO→SDY 9/19, working through it (confirmed) |
+| **Total** | **10 days** | **24 pts** | Median 12 merged PRs/wk over W33–W38 (12, 14, 10, 12, 14, 10) |
+
+**Planned capacity: 24 pts · Sprint load: 19 pts (79%)** — inside the 70–80% band.
+
+---
+
+## Sprint Backlog
+
+| Pri | Item | Issue | Est | Depends on |
+|---|---|---|---|---|
+| P0 | Rides tab on real persisted rides — `fetchRides` + kill `DemoRide` | **#247** | 2 | — |
+| P0 | S14 Ride History list — real rows, relative dates, swipe-to-delete, `ContentUnavailableView` empty state | **#248** | 2 | P0-1 |
+| P0 | Capture + persist static map thumbnail at ride end | **#177** | 3 | — |
+| P0 | S10 Ride Summary — screen + ride-end presentation | **#249** | 4 | P0-3 |
+| P0 | Write `HKWorkout` at ride end, before S10 presents | **#250** | 2 | — |
+| P1 | S15 Ride Detail on real data, via `StackState` + `NavigationLink(state:)` | **#251** | 2 | P0-1 |
+| P1 | Unpaired HR strap connects and streams with no confirmation | **#180** | 2 | — |
+| P1 | HR strap connects but never streams — no notify-state check, no staleness watchdog | **#181** | 2 | — |
+| P2 | HealthKit HR zone tracking (`HKWorkoutZoneGroup`) — **stretch, not committed** | **#238** | 5 | — |
+
+**P0 = 13 pts · P1 = 6 pts · committed = 19 pts · stretch = 5 pts**
+
+### Order of play
+
+Week 1 — P0-1 → P0-2 → P0-3 → P0-5
+Week 2 — P0-4 → P1-6 → P1-7 → P1-8
+
+P0-4 (S10) is the headline and is scheduled second week on purpose: it consumes the thumbnail from
+P0-3 and the `HKWorkout` write from P0-5, and it is the item most likely to expand.
+
+---
+
+## Tasks
+
+### Before any code
+- [x] File the five missing M9 issues — #247, #248, #249, #250, #251
+- [x] Move #180 and #181 into M9 — both are HR-path correctness bugs and S10 renders an HR zone breakdown
+- [ ] Re-date M9 from 2026-10-23 to 2026-10-02 to match this plan (see Risks)
+
+### P0-1 — Rides tab on real persisted rides — #247 (2)
+- [ ] `PersistenceClient.fetchRides` returning finished rides, newest first (mirror `fetchRides(routeId:)`)
+- [ ] `RidesFeature.State` holds `[Ride]`-derived value types, loaded on `.task`
+- [ ] Delete `DemoRide` and `DemoRide.sampleRides` outright
+- [ ] `TestStore` coverage with a seeded in-memory container
+
+### P0-2 — S14 Ride History list — #248 (2)
+- [ ] Rows per UX.md §S14: 56×56pt thumbnail, name + relative date, distance (`HeroNumber` small), elapsed (D-DIN Condensed 20pt)
+- [ ] Trailing swipe: Delete (destructive). Leading Sync / Make Route are Phase 2 — do not build
+- [ ] `ContentUnavailableView` empty state exactly as UX.md §S14 gives it
+- [ ] Snapshot tests, light + dark, empty and populated
+
+### P0-3 — Ride map thumbnail (#177) (3)
+- [ ] `@Attribute(.externalStorage)` light + dark variants on `Ride`, mirroring `weatherData`
+- [ ] `MKMapSnapshotter` over the recorded track at ride end, POI labels suppressed
+- [ ] Polyline composited in `cyPrimary` via the snapshot's `point(for:)`
+- [ ] Bounding-box + pixel-projection logic unit-testable without live map tiles
+
+### P0-4 — S10 Ride Summary — #249 (4)
+- [ ] `RideSummaryFeature` + view against the `Design.sketch` **S10** artboard
+- [ ] Map thumbnail, distance / time / avg speed, elevation profile, HR zone pie, avg cadence, vehicle pass count
+- [ ] Rename field — tapping the title focuses it; defaults to route name
+- [ ] Presented from the ride-end sequence; Done dismisses to the dashboard
+- [ ] No Sync button — the sync sheet is Phase 2 (UX.md §S10). No GPX export action — the file is already written
+- [ ] `TestStore` for the reducer, snapshots light + dark
+
+### P0-5 — HKWorkout at ride end — #250 (2)
+- [ ] Write the workout in the ride-end sequence, before S10 presents (UX.md §S10)
+- [ ] Failure degrades and logs — never blocks the ride ending, matching `finalizeRide`'s existing posture
+
+### P1-6 — S15 Ride Detail — #251 (2)
+- [ ] Drill down from S14 on `StackState` + `NavigationLink(state:)` + delegate — not a workaround
+- [ ] Repoint the existing chart/map components at real `TrackPoint` data
+
+### P1-7 — #180 unpaired strap streams (2)
+- [ ] Reproduce and confirm what actually fires `pairButtonTapped`
+- [ ] Pairing requires a real confirm step; no single `Button` tap can commit it
+
+### P1-8 — #181 strap connects, never streams (2)
+- [ ] `BLEClient` implements `didUpdateNotificationStateFor`; failure stops `broadcastPairing(true)`
+- [ ] Staleness watchdog on the BLE HR stream, mirroring the HealthKit staleness handling in `ActiveRideFeature.swift:14`
+
+---
+
+## Risks
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| The milestone chain has no slack: M9 10/23 → M10.5 10/29 (17 issues) → M10.6 11/02 → M11 11/06 | Any M9 slip eats M10.5 whole, and M10.5 is the largest open milestone | Re-date M9 to 2026-10-02. M9 finishing on its filed date leaves M10.5 six days for 17 issues; finishing 10/02 leaves four weeks |
+| Travel 9/19, no return flight booked | Capacity assumption of "normal" is unverified past week 1 | Mid-sprint check-in 9/25 is the decision point — cut P1 first, in listed order |
+| S10 is the one screen with no existing code and the most surface | 4 pts could become 6 | Artboard exists and `Ride` already has every field — no data work inside it. Scheduled week 2 so it can absorb the slip |
+| ~~Five of eight items have no issue yet~~ **Resolved 2026-09-17** | — | All eight committed items now have filed issues with ACs |
+| #180's trigger was never mechanically confirmed from logs | A fix could miss the real cause | AC-1 is reproduce-and-confirm before fixing |
+
+---
+
+## Definition of Done
+
+- [ ] Feature branch + PR — no direct commits to `main`
+- [ ] Reducer logic covered by Swift Testing + `TestStore` with `withDependencies`
+- [ ] UI covered by snapshot tests, light + dark, explicit `cy*` tokens (never ambient `.primary`/`.accentColor`)
+- [ ] `xcodebuild build` and `xcodebuild test -only-testing:CyclometerTests` green on iPhone 17 Pro
+- [ ] Specs reconciled — UX.md screen inventory flipped `Stub` → `Complete` for S10, S14, S15
+- [ ] Issue ACs ticked against verified behavior, not assumed
+
+---
+
+## Key Dates
+
+| Date | Event |
+|---|---|
+| Fri 2026-09-18 | Sprint start |
+| Sat 2026-09-19 | Travel — GSO → ORD → BIL → SDY |
+| Fri 2026-09-25 | Mid-sprint check-in — cut P1 here if week 1 landed under 10 pts |
+| Thu 2026-10-01 | Sprint end |
+| Thu 2026-10-23 | M9 due (recommend re-dating to 10/02) |
+
+---
 
 ## Review
 
-Docs only — four `.md` files, no Swift touched, nothing to build or test.
-
-**PRD.md (14 edits).** The Routes tab, S19 and S20 are MVP in §6, the §7 screen inventory, §12's
-feature tree and tab table, and §13's M8 row; the "Coming in a future update" sentence is gone.
-§6's MVP bullet no longer offers tribos.studio. §8.6's Files row reads `.gpx` only and points at
-§15, which gains a `.fit` row. §8.6's AC list loses its one Phase 2 line. §13's Phase 2 heading is
-now "Companion & History" — no ToC anchor pointed at the old one. Revision 0.5.1.
-
-**TCA.md (7 edits).** New §4.14 `NavigationFeature`, written from `NavigationFeature.swift` rather
-than from the issue comment — see the discrepancies below. §3's tree and §8's file layout match the
-built `Features/Routes/`. §9's `RouteStub` row is marked done. §10 gains three rows. v1.3.
-
-**DataModel.md (11 edits).** New §3.10 `Route`, plus `Route` in the §2 ERD linked by `routeId` with
-no `@Relationship`. §3.1 gains `routeId` and `routeProgressMeters`, and its OQDM1 callout is
-rewritten with a second note on `RideSummaryUpdate.route`. §7's S20 query is the real
-`RidePersistenceActor.fetchRides(routeId:)`, id-based and excluding rides still in progress. §9's
-v1.1 row is MVP/M8. §11's OQDM1 is partly resolved. v1.5.
-
-**UX.md (6 edits).** §S04's placeholder sentence gone; S19's purpose and its two answered open
-questions no longer read as though the service imports are MVP. v0.8.1.
-
-**Three ACs needed no edit, and were verified rather than assumed:**
-- CLAUDE.md has no Open Questions section — `grep -n "OQ1[0-9]\|Open Question" CLAUDE.md README.md`
-  is empty, so there is no stale OQ12 to fix.
-- The M8 milestone description already drops tribos.studio, already names the Routes tab, and the
-  milestone is already retitled "M8 — Navigation, Live Map & Routes".
-- UX.md §S05.1's route row was covered by PR #229, as the issue's own first comment says.
-
-**Where the issue's second comment disagreed with the code, the code won.**
-- It names `State.turnBanner`; the built property is `turnInstruction`, and it holds a `Maneuver`
-  rather than text, so the overlay can draw the arrow.
-- It lists three snapping rules. There are four: the missing one is **continuity weighting**
-  (`continuityWeight = 0.1`), which is what stops a stopped rider's GPS scatter moving the match onto
-  a later pass of the same road, past turns they would then never be told about.
-- It does not mention **loops** at all — `lapStartMeters`, `loopClosureMeters`, and the
-  half-the-loop rule that decides when a loop is actually finished. §4.14 documents it.
-- It says both searches are in `RouteGeometry`. The searches are (`candidates`, `passes`); the
-  constants and the continuity scoring are on `NavigationFeature`. §4.14 says so.
-
-**Left alone, deliberately.**
-- `README.md:47` "Tribos.studio: Pull routes" — an unphased product wishlist, not an MVP claim, so
-  it contradicts nothing.
-- `DataModel.md` §3.1's `Ride` listing is stale beyond routes (no `isAutoPaused`, sample counts,
-  `recordingState`, `RideSyncRecord`). Out of scope for #202; worth its own issue.
-- `PRD.md` §12's feature tree still says `SpeedCadenceFeature`, which split into `SpeedFeature` and
-  `CadenceFeature` long ago. Same reason.
-
-**Verification.**
-- `grep -rni "tribos\|coming soon\|\.fit"` over the four specs and CLAUDE.md: every surviving hit is
-  a revision-history entry, an explicit Phase 2 row, the `ExternalService` enum case, an
-  external-planning-tool mention in OQ12/§15, or the new out-of-scope row.
-- `grep -rn "S19\|S20\|Routes tab" assets/*.md | grep -i "phase 2"`: only revision history and the
-  two genuinely-Phase-2 sub-items (S20's weather and Strava segments).
-- §4.14's ten constants, both `RouteGeometry` function names, `fetchResumableRide`,
-  `RidePersistenceActor.apply`, and §3.10's every field checked line by line against the source.
-- Code fences balanced in all four files; the two ASCII diagrams re-aligned to their existing
-  column grid.
+_To be completed at sprint end._
