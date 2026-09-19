@@ -327,8 +327,13 @@ struct RoutesFeature {
                     // `public.xml` or a `dyn.*` identifier names what it has to allow
                     // alongside it. Kept rather than measured once and deleted: it costs a
                     // line and makes the next report of a greyed-out picker self-diagnosing.
+                    //
+                    // `.notice`, not `.debug`: debug is memory-only unless the subsystem is
+                    // configured for it, which an Xcode-launched run does and a rider tapping
+                    // the icon does not — so a `.debug` line would be missing from exactly
+                    // the archives this one exists to appear in.
                     let resolved = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType
-                    logger.debug("importing a file typed \(resolved?.identifier ?? "unresolved", privacy: .public)")
+                    logger.notice("importing a file typed \(resolved?.identifier ?? "unresolved", privacy: .public)")
 
                     do {
                         var imported = try GPXRouteImporter.route(contentsOf: url)
