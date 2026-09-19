@@ -477,3 +477,34 @@ choice governs the sheet, and nothing the issue asked for is lost.
 **Rule.** When an AC's literal wording agrees with a linked issue, read it literally. If a design only works under a
 looser reading, that is evidence against the design, not a reason to loosen the AC. When presenting options, say
 which reading of the AC they rest on, so a reinterpretation is visible before it becomes a recommendation.
+
+---
+
+## A simulator-green UTI test proves nothing about the device (2026-09-19, #256)
+
+**What happened.** Every `.gpx` came up greyed out in the S19 picker on device. The picker filtered on
+`com.topografix.gpx`, the identifier the app declares in `UTImportedTypeDeclarations`, and
+`RoutesGPXTypeTests` asserted `UTType(filenameExtension: "gpx")?.identifier == "com.topografix.gpx"` —
+green throughout. iOS 27 declares `public.gpx` itself; a system declaration outranks an imported one, so
+on device the file resolved to `public.gpx`, which does not conform to our identifier. The iOS 27
+*simulator* still resolves the extension to `com.topografix.gpx`, so the test passed on exactly the thing
+that was broken. Brian had said up front "in iOS 27.0 we need to register file extensions using the
+intents framework" — wrong about the mechanism, right that iOS 27 had moved something.
+
+**Why it took so long.** Two of my own assertions sent the investigation sideways. The code comment claimed
+a dynamic type "conforms to nothing", which made the `[.item]` fallback look safe; it conforms to
+`public.data` and `public.item`. And I read a missing log line as proof that `.debug` doesn't survive
+collection, when the build simply hadn't been installed.
+
+**Rules.**
+- LaunchServices databases differ between the simulator and the device. A test that asserts a UTI
+  *identifier* is a test of the host, not of the behaviour — pin the mechanism ("the filter admits whatever
+  this install binds the extension to") and the identifier assertion becomes impossible to write.
+- Filter on the binding, not on a name: `UTType(filenameExtension:)` is what the provider will have typed
+  the file as, and survives the OS moving it. The same applies to `LSItemContentTypes`.
+- When the user says an OS version changed something, check whether the new OS declares a type, entitlement
+  or default that outranks the app's own — even when the mechanism they name is wrong.
+- Log the value the system actually resolved before theorising about why it disagrees. One `.notice` line
+  answered in a minute what three rounds of log-archive reading could not. `.debug` is memory-only unless
+  the subsystem is configured for it, so a diagnostic meant for a collected archive must be `.notice`.
+- Don't conclude from an absent log line until confirming the build under test contains it.
