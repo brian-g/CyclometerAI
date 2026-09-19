@@ -16,19 +16,33 @@ struct RoutesView: View {
     var isStartRideHidden: Bool = false
     var onStartRide: () -> Void = {}
 
-    /// Resolved from the app's own `UTImportedTypeDeclarations` (`Info.plist`). iOS does
-    /// **not** know GPX on its own — measured on iOS 26, `UTType("com.topografix.gpx")` is
-    /// nil and `UTType(filenameExtension: "gpx")` answers a *dynamic* type conforming to
-    /// nothing, which greys out every `.gpx` in the picker. `RoutesGPXTypeTests` pins the
-    /// declaration, since removing it breaks the picker with no compile or runtime error.
-    private static let gpxContentTypes: [UTType] = {
-        guard let gpx = UTType("com.topografix.gpx"), !gpx.isDynamic else {
-            // Reached only if the declaration is gone. `.xml` would be no help — the
-            // measurement above is that an undeclared `.gpx` conforms to nothing — so fall
-            // back to showing everything rather than a picker where nothing is selectable.
-            return [.item]
+    /// iOS 27 declares `public.gpx` itself, and a system declaration outranks the app's
+    /// `UTImportedTypeDeclarations` entry — so a `.gpx` resolves to `public.gpx` on device,
+    /// which does **not** conform to `com.topografix.gpx`. Filtering on our own identifier
+    /// greyed out every file in the picker (measured on iOS 27.0, and by the `routes` log
+    /// line in `RoutesFeature`, which prints what the file actually resolved to).
+    ///
+    /// So the binding is *asked for* rather than named: whatever this install maps `gpx` to
+    /// is what the provider will have typed the file as. That also survives the next OS that
+    /// changes its mind. The declared identifier stays alongside it for a provider that
+    /// carries our own type, and `.xml` for one that only recognised the markup.
+    ///
+    /// Worth knowing when reading the tests: the iOS 27 *simulator* still resolves the
+    /// extension to `com.topografix.gpx`, so no test pinned to an identifier can catch this
+    /// — which is why `RoutesGPXTypeTests` pins the mechanism instead.
+    static let gpxContentTypes: [UTType] = {
+        let known = [UTType(filenameExtension: "gpx"), UTType("com.topografix.gpx")]
+            .compactMap(\.self)
+            .filter { !$0.isDynamic }
+        // Reached only if the extension binds to nothing *and* the declaration is gone.
+        // `.data` still leaves folders unselectable, so the picker stays usable rather than
+        // offering a screen where nothing can be tapped.
+        guard !known.isEmpty else { return [.data] }
+        // Deduplicated because the two lookups agree on any install that hasn't moved
+        // the binding — the simulator being the one that matters for the tests.
+        return (known + [.xml]).reduce(into: [UTType]()) {
+            if !$0.contains($1) { $0.append($1) }
         }
-        return [gpx]
     }()
 
     var body: some View {

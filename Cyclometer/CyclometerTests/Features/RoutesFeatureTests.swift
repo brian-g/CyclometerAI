@@ -514,7 +514,7 @@ struct RoutesFeatureReviewTests {
     /// the two-tap version passed alone and failed under suite load, because it assumed the
     /// second send lands inside the first effect's sleep. The guard is the behaviour; the
     /// double tap is only the motivation for it.
-    @Test("A file picked while an import is already running is ignored")
+    @Test("A file picked while an import is already running is refused, and says so")
     func concurrentImportIsRefused() async throws {
         let url = try Self.gpx(named: "Coastal Loop")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
@@ -542,8 +542,18 @@ struct RoutesFeatureReviewTests {
             }
         }
 
-        // No state change and no effect: the in-flight import owns the screen.
-        await store.send(.fileSelected(url))
+        // No effect: the in-flight import owns the screen. The alert is the only change —
+        // a file handed over by `AppFeature.fileOpened` has no disabled button to bounce off,
+        // so dropping it silently would read as the app losing it.
+        await store.send(.fileSelected(url)) {
+            $0.alert = AlertState {
+                TextState("Still Importing")
+            } actions: {
+                ButtonState(role: .cancel) { TextState("OK") }
+            } message: {
+                TextState("Cyclometer is finishing the last route. Try this one again in a moment.")
+            }
+        }
         await store.finish()
 
         #expect(imports.value == 0)

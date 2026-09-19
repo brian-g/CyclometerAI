@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import Foundation
+import UniformTypeIdentifiers
 import os
 
 private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "routes")
@@ -297,15 +298,41 @@ struct RoutesFeature {
                 state.isImporterPresented = false
                 // A 16 MB file is seconds of parsing. Without this a rider who taps Import
                 // again mid-parse gets the same route saved twice.
-                guard !state.isImporting else { return .none }
+                //
+                // Unreachable from the picker, whose Import button is disabled while this is
+                // true, but not from `AppFeature.fileOpened` — a second "Open in Cyclometer"
+                // has no such gate, and dropping it silently reads as the app losing the file.
+                guard !state.isImporting else {
+                    state.alert = Self.alert("Still Importing",
+                                             "Cyclometer is finishing the last route. Try this one again in a moment.")
+                    return .none
+                }
                 state.isImporting = true
                 return .run { send in
                     // The picker vends a security-scoped URL and this is the only place
                     // that owns its lifetime (GPXRouteImporter.swift:23-25). Held across
                     // the save as well as the parse: `Data(contentsOf:options:.mappedIfSafe)`
                     // memory-maps the file, so releasing early is releasing under the read.
+                    //
+                    // The discard is declared first so it runs last: the copy goes only
+                    // once the read is over and the scope released. A no-op for anything
+                    // outside the Inbox.
+                    defer { DocumentFolders.discardInboxCopy(at: url) }
                     let didAccess = url.startAccessingSecurityScopedResource()
                     defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+
+                    // What `RoutesView.gpxContentTypes` has to admit. This is the line that
+                    // found the bug: on iOS 27.0 a `.gpx` came through as `public.gpx`, not
+                    // the `com.topografix.gpx` the filter named and the simulator resolves.
+                    // Kept rather than deleted now it has answered once — it costs a line and
+                    // makes the next report of a greyed-out picker self-diagnosing.
+                    //
+                    // `.notice`, not `.debug`: debug is memory-only unless the subsystem is
+                    // configured for it, which an Xcode-launched run does and a rider tapping
+                    // the icon does not — so a `.debug` line would be missing from exactly
+                    // the archives this one exists to appear in.
+                    let resolved = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType
+                    logger.notice("importing a file typed \(resolved?.identifier ?? "unresolved", privacy: .public)")
 
                     do {
                         var imported = try GPXRouteImporter.route(contentsOf: url)
