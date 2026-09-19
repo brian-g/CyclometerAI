@@ -5,8 +5,8 @@ import SwiftUI
 /// stays visible through.
 ///
 /// Solid rather than a material — a blur would smear exactly the numbers the rider is watching.
-/// Purely presentational: `NavigationFeature` sets the maneuver and takes it down after
-/// `instructionDuration`.
+/// Purely presentational: `NavigationFeature` sets the maneuver and takes it down once the rider
+/// is within `instructionClearanceMeters` of the turn.
 struct TurnInstructionOverlay: View {
     let maneuver: Maneuver
 

@@ -296,13 +296,13 @@ struct NavigationPipelineTests {
             #expect(raised - lastOnRoute <= 5)
             #expect(banner() == NavigationFeature.offRouteBannerText)
 
-            // Back on, well before the second turn's lead point.
-            await ride(store, along: route.coordinates, from: 1_368, through: 1_368, kph: 30, second: &second)
+            // Back on, well before the second turn's lead point. A rejoin takes consecutive fixes.
+            await ride(store, along: route.coordinates, from: 1_368, through: 1_377, kph: 30, second: &second)
             #expect(store.state.activeRide?.navigation.isOffRoute == false)
             #expect(banner() == nil)
 
             // And the turns ahead of the rejoin are still announced.
-            await ride(store, along: route.coordinates, from: 1_376, through: route.totalDistanceMeters, kph: 30, second: &second)
+            await ride(store, along: route.coordinates, from: 1_385, through: route.totalDistanceMeters, kph: 30, second: &second)
             let cueCount = Self.cues.count
             await expectEventually { harness.tones.value.count >= cueCount }
             #expect(harness.tones.value == Self.cues.map(\.direction))

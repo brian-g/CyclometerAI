@@ -46,7 +46,11 @@ enum TurnDerivation {
     static let turnThresholdDegrees = 40.0
 
     /// At or above this, "left" and "right" stop describing what the rider has to do.
-    static let uTurnThresholdDegrees = 135.0
+    ///
+    /// A U-turn reverses direction, so the bar is close to a reversal. It was 135°, which
+    /// called a 90° left followed by the road curving 70° more a U-turn and sent the rider
+    /// back the way they came; there is no `sharpLeft` to catch that case, so it is a left.
+    static let uTurnThresholdDegrees = 165.0
 
     /// Two maneuvers closer together than this are one maneuver.
     ///
@@ -59,21 +63,35 @@ enum TurnDerivation {
     /// The companion to `turnThresholdDegrees`, and the reason the angle no longer has to
     /// do two jobs at once: the sum says *how far* the road turns, this says whether it
     /// turns *sharply enough to be an event*. A 90° change over 300 m of sweeping road is
-    /// not a turn; the same 90° over 40 m is. 60 m is about where a rider stops steering
+    /// not a turn; the same 90° over 40 m is. 50 m is about where a rider stops steering
     /// for a corner and simply follows the road round.
-    static let maximumTurnRadiusMeters = 60.0
+    ///
+    /// It was 60 m, which is on the wrong side of that line: a road bending 72° over 70 m
+    /// on the way home read as a maneuver, and the rider was told to turn left where there
+    /// is no junction. (It went unnoticed while the noise floor was 3°, because the bend
+    /// was being swallowed by the corner before it instead — one false instruction hiding
+    /// inside another.)
+    static let maximumTurnRadiusMeters = 50.0
 
     /// A heading change smaller than this does not start or end a turn.
     ///
     /// Deliberately *not* a floor on what counts toward the total — sub-threshold changes
-    /// inside an open turn still accumulate, or a long climb taken in half-degree steps
-    /// would never register. It exists so that floating-point dust on a dead-straight road
-    /// cannot hold a turn open across it.
+    /// *inside* an open turn still accumulate, or a corner drawn as a polyline arc with a
+    /// flat spot in the middle would be reported as two.
     ///
-    /// Chosen just under `resampleStepMeters / maximumTurnRadiusMeters` in degrees (9.5°),
-    /// so anything sharp enough for the radius gate to accept is comfortably sharp enough
-    /// to open a turn in the first place.
-    static let turningNoiseFloorDegrees = 3.0
+    /// It is the turning rate of `maximumTurnRadiusMeters` exactly, because the two
+    /// constants have to agree on what "turning" means. It was 3° — a third of that — and
+    /// the gap is where the spurious U-turns came from: a road sweeping at 5-13° per sample
+    /// is by the radius gate's own definition *not* a maneuver, yet at 3° it could open a
+    /// run 90 m before a corner and add its 47° to the corner's 80°, which classifies as a
+    /// U-turn. Nothing is lost by raising it: a turn gentle enough to have no sample this
+    /// sharp has a radius over 50 m, and the radius gate would reject it anyway.
+    ///
+    /// The rate holds at `resampleStepMeters`, which is the step for every route longer than
+    /// four of them. `adaptiveStep` shortens it below that, where a sample subtends less and
+    /// this floor is correspondingly stricter — but a route under 40 m end to end has no
+    /// maneuver in it to lose.
+    static let turningNoiseFloorDegrees = resampleStepMeters / maximumTurnRadiusMeters * 180 / .pi
 
     /// How far the road has to bend back the other way before that counts as a new turn.
     ///
@@ -213,6 +231,15 @@ enum TurnDerivation {
         var sign = 0.0
 
         func close() {
+            // Trailing gentle samples are dropped. A turn ends at the last sample that was
+            // actually turning; what follows is the road straightening out, and counting it
+            // inflates both the angle and the span — a 90° corner followed by a road bending
+            // gently the same way for another 60 m read as a 158° U-turn. Gentle samples
+            // *between* two turning ones still count: that is the flat spot in the middle of
+            // a corner drawn as an arc, and it belongs to the corner.
+            while let last = current.last, abs(last.delta) < turningNoiseFloorDegrees {
+                current.removeLast()
+            }
             if !current.isEmpty { runs.append(current) }
             current = []
             lastTurning = nil

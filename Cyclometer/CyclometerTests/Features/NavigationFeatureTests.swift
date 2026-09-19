@@ -218,13 +218,15 @@ struct NavigationFeatureTests {
         try #require(store.state.isOffRoute)
         #expect(store.state.distanceToNextTurnMeters == nil)
 
-        await store.send(.locationUpdated(fix(straight, at: 520, second: 6)))
+        for rejoin in 1...NavigationFeature.rejoinConsecutiveFixes {
+            await store.send(.locationUpdated(fix(straight, at: 520, second: 5 + Double(rejoin))))
+        }
         let distance = try #require(store.state.distanceToNextTurnMeters)
         #expect(abs(distance - 480) < 1)
     }
 
-    @Test("the turn instruction shows the turn and dismisses itself; the alert holds until the turn")
-    func turnInstructionDismissesItself() async throws {
+    @Test("the turn instruction stays up until the rider is on the turn, not for a fixed time")
+    func turnInstructionHoldsUntilTheTurn() async throws {
         let legs: [RouteFixtures.Leg] = [(0, 600), (90, 100)]
         let clock = TestClock()
         let store = makeStore(route: try route(legs, turns: [(600, .right)]), clock: clock)
@@ -232,11 +234,138 @@ struct NavigationFeatureTests {
         await store.send(.locationUpdated(fix(legs, at: 500, second: 0)))
         #expect(store.state.turnInstruction?.direction == .right)
 
-        await clock.advance(by: NavigationFeature.instructionDuration)
+        // The old four-second timer would have taken it down here, with 90 m still to ride.
+        await clock.advance(by: .seconds(10))
+        await store.send(.locationUpdated(fix(legs, at: 590, second: 10)))
+        #expect(store.state.turnInstruction?.direction == .right)
+        #expect(store.state.isTurnAlertActive)
+
+        // Inside 10 ft of the apex it comes down, and the alert goes with the turn itself.
+        await store.send(.locationUpdated(fix(legs, at: 598, second: 11)))
+        #expect(store.state.turnInstruction == nil)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("the instruction comes down on its own if fixes stop arriving")
+    func turnInstructionFallsBackToATimer() async throws {
+        let legs: [RouteFixtures.Leg] = [(0, 600), (90, 100)]
+        let clock = TestClock()
+        let store = makeStore(route: try route(legs, turns: [(600, .right)]), clock: clock)
+
+        await store.send(.locationUpdated(fix(legs, at: 500, second: 0)))
+        try #require(store.state.turnInstruction != nil)
+
+        await clock.advance(by: NavigationFeature.instructionFallbackDuration)
         await store.receive(\.instructionDismissed) {
             $0.turnInstruction = nil
         }
         #expect(store.state.isTurnAlertActive)
+    }
+
+    @Test("a rider held short of their turn keeps the instruction, however long they wait")
+    func turnInstructionSurvivesALongStopShortOfTheTurn() async throws {
+        let legs: [RouteFixtures.Leg] = [(0, 600), (90, 100)]
+        let clock = TestClock()
+        let store = makeStore(route: try route(legs, turns: [(600, .right)]), clock: clock)
+
+        await store.send(.locationUpdated(fix(legs, at: 500, second: 0)))
+        try #require(store.state.turnInstruction != nil)
+
+        // Stopped at a light 100 m short of the turn, for longer than the fallback — which every
+        // fix re-arms, so it measures silence from CoreLocation rather than time on screen.
+        for second in 1...4 {
+            await clock.advance(by: NavigationFeature.instructionFallbackDuration / 2)
+            await store.send(.locationUpdated(
+                fix(legs, at: 500, speed: 0, second: Double(second), course: -1)
+            ))
+            #expect(store.state.turnInstruction?.direction == .right, "after stop \(second)")
+        }
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("coming round a loop takes down an instruction for a turn the rider never reached")
+    func wrappingALoopTakesDownTheInstruction() async throws {
+        // A 400 m loop with a turn 20 m before its end, and a 100 m lead — so the turn is
+        // announced while the rider is still short of the end, and the very next fixes wrap.
+        let small: [RouteFixtures.Leg] = [(0, 100), (90, 100), (180, 100), (270, 100)]
+        let store = makeStore(route: try route(small, turns: [(380, .right)]), leadMeters: 100)
+        var second = 0.0
+        for meters in stride(from: 100.0, through: 290, by: 10) {
+            await store.send(.locationUpdated(fix(small, at: meters, second: second)))
+            second += 1
+        }
+        try #require(store.state.turnInstruction?.direction == .right)
+        try #require(store.state.announcedManeuverIndex == 0)
+
+        // Round past the start without ever reaching the turn's clearance.
+        for meters in stride(from: 300.0, through: 420, by: 10) {
+            await store.send(.locationUpdated(fix(small, at: meters.truncatingRemainder(dividingBy: 400), second: second)))
+            second += 1
+        }
+        #expect(store.state.turnInstruction == nil)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("the second turn of a staggered junction is still announced")
+    func aCloselyFollowingTurnIsStillAnnounced() async throws {
+        // Two turns `minimumSeparationMeters` apart — the closest the derivation ever emits.
+        let separation = TurnDerivation.minimumSeparationMeters
+        let store = makeStore(route: try route(straight, turns: [(600, .left), (600 + separation, .right)]))
+        var second = 0.0
+        var announced: [Maneuver.Direction] = []
+        for meters in stride(from: 480.0, through: 640, by: 5) {
+            let before = store.state.announcedManeuverIndex
+            await store.send(.locationUpdated(fix(straight, at: meters, second: second)))
+            second += 1
+            if let index = store.state.announcedManeuverIndex, index != before,
+               let turn = store.state.nextManeuver {
+                announced.append(turn.direction)
+            }
+        }
+        #expect(announced == [.left, .right])
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("a turn already under the rider's wheels is not announced (#197 ride review)")
+    func aTurnTooCloseIsNotAnnounced() async throws {
+        let legs: [RouteFixtures.Leg] = [(0, 600), (90, 400)]
+        let store = makeStore(route: try route(legs, turns: [(600, .right)]))
+
+        // Off route, then back on it 10 m short of the turn — the shape of a rider rejoining at a
+        // junction, which used to announce it 2.5 m out.
+        for miss in 1...NavigationFeature.offRouteConsecutiveFixes {
+            await store.send(.locationUpdated(fix(legs, at: 400, lateral: 200, second: Double(miss))))
+        }
+        try #require(store.state.isOffRoute)
+
+        for rejoin in 1...NavigationFeature.rejoinConsecutiveFixes {
+            await store.send(.locationUpdated(fix(legs, at: 590, second: 10 + Double(rejoin))))
+        }
+        try #require(!store.state.isOffRoute)
+        #expect(store.state.turnInstruction == nil)
+        #expect(!store.state.isTurnAlertActive)
+    }
+
+    @Test("a rejoin takes consecutive fixes, so a single stray one does not clear off-route")
+    func rejoiningTakesConsecutiveFixes() async throws {
+        let store = makeStore(route: try route(straight, turns: []))
+        await store.send(.locationUpdated(fix(straight, at: 500, second: 0)))
+
+        for miss in 1...NavigationFeature.offRouteConsecutiveFixes {
+            await store.send(.locationUpdated(fix(straight, at: 500, lateral: 60, second: Double(miss))))
+        }
+        try #require(store.state.isOffRoute)
+
+        // One fix back on the line is not a rejoin...
+        await store.send(.locationUpdated(fix(straight, at: 510, second: 6)))
+        #expect(store.state.isOffRoute)
+        // ...and one that misses again starts the count over.
+        await store.send(.locationUpdated(fix(straight, at: 515, lateral: 60, second: 7)))
+        await store.send(.locationUpdated(fix(straight, at: 520, second: 8)))
+        #expect(store.state.isOffRoute)
+
+        await store.send(.locationUpdated(fix(straight, at: 525, second: 9)))
+        #expect(!store.state.isOffRoute)
     }
 
     @Test("the instruction reads the cue's own words, or the direction when there are none")
@@ -283,7 +412,8 @@ struct NavigationFeatureTests {
         }
         try #require(store.state.isOffRoute)
 
-        await store.send(.locationUpdated(fix(straight, at: 650, second: 6)))
+        await store.send(.locationUpdated(fix(straight, at: 645, second: 6)))
+        await store.send(.locationUpdated(fix(straight, at: 650, second: 7)))
         await store.receive(.delegate(.turnAnnounced(.left)))
         await store.skipInFlightEffects(strict: false)
     }
@@ -367,8 +497,8 @@ struct NavigationFeatureTests {
         }
     }
 
-    @Test("once off route, only a fix within 30 m brings the rider back")
-    func rejoiningNeedsThirtyMetres() async throws {
+    @Test("once off route, only a fix within the off-route distance brings the rider back")
+    func rejoiningNeedsToBeOnTheRoute() async throws {
         let store = makeStore(route: try route(straight, turns: []))
         var second = 0.0
         await store.send(.locationUpdated(fix(straight, at: 500, second: second)))
@@ -378,17 +508,19 @@ struct NavigationFeatureTests {
         }
         try #require(store.state.isOffRoute)
 
-        // 35–45 m off: inside the 50 m that raised it, outside the 30 m that clears it.
+        // 55–65 m off: still further from the route than the distance that raised it.
         for step in 1...6 {
             second += 1
             await store.send(.locationUpdated(
-                fix(straight, at: 500 + second * 10, lateral: step.isMultiple(of: 2) ? 35 : 45, second: second)
+                fix(straight, at: 500 + second * 10, lateral: step.isMultiple(of: 2) ? 55 : 65, second: second)
             ))
             #expect(store.state.isOffRoute, "step \(step)")
         }
 
-        second += 1
-        await store.send(.locationUpdated(fix(straight, at: 500 + second * 10, lateral: 25, second: second)))
+        for _ in 1...NavigationFeature.rejoinConsecutiveFixes {
+            second += 1
+            await store.send(.locationUpdated(fix(straight, at: 500 + second * 10, lateral: 25, second: second)))
+        }
         #expect(!store.state.isOffRoute)
         #expect(abs((store.state.progressMeters ?? -1) - (500 + second * 10)) < 2)
     }
@@ -406,7 +538,8 @@ struct NavigationFeatureTests {
         #expect(store.state.turnInstruction == nil)
         #expect(!store.state.isTurnAlertActive)
 
-        await store.send(.locationUpdated(fix(straight, at: 650, second: 6)))
+        await store.send(.locationUpdated(fix(straight, at: 645, second: 6)))
+        await store.send(.locationUpdated(fix(straight, at: 650, second: 7)))
         #expect(!store.state.isOffRoute)
         #expect(store.state.announcedManeuverIndex == 0)
         #expect(store.state.turnInstruction?.direction == .left)
@@ -440,10 +573,12 @@ struct NavigationFeatureTests {
         }
         try #require(store.state.isOffRoute)
 
-        second += 1
-        await store.send(.locationUpdated(fix(straight, at: 1_700, second: second)))
+        for rejoin in 1...NavigationFeature.rejoinConsecutiveFixes {
+            second += 1
+            await store.send(.locationUpdated(fix(straight, at: 1_690 + Double(rejoin) * 10, second: second)))
+        }
         #expect(!store.state.isOffRoute)
-        #expect(abs((store.state.progressMeters ?? -1) - 1_700) < 2)
+        #expect(abs((store.state.progressMeters ?? -1) - 1_710) < 2)
         #expect(store.state.nextManeuverIndex == 2)
         #expect(store.state.announcedManeuverIndex == nil)
     }
@@ -646,6 +781,31 @@ struct NavigationFeatureTests {
         }
         #expect(abs((store.state.progressMeters ?? -1) - 450) < 2)
         #expect(store.state.announcedManeuverIndex == 0)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("a detour in a loop's back half does not stop it finishing (#197 ride review)")
+    func aDetourLateInALoopStillFinishes() async throws {
+        let store = makeStore(route: try loopRoute())
+        var second = 0.0
+        // Three quarters of the way round...
+        for meters in stride(from: 0.0, through: 1_500, by: 10) {
+            await store.send(.locationUpdated(fix(loop, at: meters, second: second)))
+            second += 1
+        }
+        // ...off around a closed road, far enough out to raise off route...
+        for _ in 1...NavigationFeature.offRouteConsecutiveFixes {
+            await store.send(.locationUpdated(fix(loop, at: 1_500, lateral: 200, second: second)))
+            second += 1
+        }
+        try #require(store.state.isOffRoute)
+        // ...and back onto the loop past the detour. The lap started at 0 m, not here, so the
+        // last 400 m still finish it; measuring from the rejoin never would.
+        for meters in stride(from: 1_600.0, through: 1_990, by: 10) {
+            await store.send(.locationUpdated(fix(loop, at: meters, second: second)))
+            second += 1
+        }
+        #expect(store.state.isRouteComplete)
         await store.skipInFlightEffects(strict: false)
     }
 

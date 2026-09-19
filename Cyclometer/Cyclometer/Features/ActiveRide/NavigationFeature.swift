@@ -38,7 +38,7 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "navig
 ///
 /// A loop's end is also its start, so arriving there is ambiguous: a rider who joined 200 m before
 /// the end has not finished the loop by reaching it. A loop is finished only once the rider has
-/// ridden at least half of it since their run began (`lapStartMeters`); short of that, the match
+/// ridden at least half of it on this lap (`lapCoveredMeters`); short of that, the match
 /// carries on round from the start, as the road does.
 ///
 /// # When a turn is announced
@@ -67,10 +67,13 @@ struct NavigationFeature {
     /// past 50 m never raise it.
     static let offRouteConsecutiveFixes = 5
 
-    /// Once off-route, the rider has to come this close to be back on. Nearer than
-    /// `offRouteMeters` on purpose: a rider running 40–50 m from the route would otherwise flap in
-    /// and out of it.
-    static let rejoinMeters = 30.0
+    /// How many fixes in a row have to find the route before a rider who left it is back on it.
+    ///
+    /// The flap a rider running 40–50 m out would otherwise cause, handled the same way leaving
+    /// the route is. It used to be handled with a tighter radius — 30 m against off-route's 50 —
+    /// which cost the rider the 20 m of riding in between, seconds in which the app still said
+    /// they were off a route they were on. Two fixes is a second.
+    static let rejoinConsecutiveFixes = 2
 
     /// Within this of the end, the route is done: no more turns, and riding on past the finish —
     /// home, say — is not being off-route.
@@ -95,8 +98,30 @@ struct NavigationFeature {
     /// one nearer, which keeps the error inside the same bound.
     static let expectedFixInterval: TimeInterval = 1
 
-    /// How long the turn instruction stays up. Matches `SpeedFeature`'s banner.
-    static let instructionDuration: Duration = .seconds(4)
+    /// How close to the turn the instruction comes down: the rider keeps it all the way in.
+    ///
+    /// It used to be a flat four seconds, which at a 100 m lead took the instruction away with
+    /// 90 m still to ride — the rider was shown the turn and then left to remember it.
+    static let instructionClearanceMeters = Measurement(value: 10, unit: UnitLength.feet)
+        .converted(to: .meters).value
+
+    /// How long the overlay outlives the last fix. Re-armed by every fix that still has the turn
+    /// ahead (`instructionFallback`), so it measures silence from CoreLocation rather than time
+    /// since the announcement — a rider stopped at a light short of their turn keeps the
+    /// instruction, and a dead GPS cannot leave it covering the dashboard for the rest of the ride.
+    static let instructionFallbackDuration: Duration = .seconds(120)
+
+    /// A turn nearer than this is not news. The rider is in the junction; announcing it now
+    /// startles rather than informs, and the tone lands after the decision.
+    ///
+    /// Reachable by rejoining the route right at a turn, which is exactly what happened on the
+    /// ride that prompted this: an announcement 2.5 m out, at a 100 m lead.
+    ///
+    /// Well under `TurnDerivation.minimumSeparationMeters`, and it has to be: that is the closest
+    /// two maneuvers are allowed to be, so a floor at 25 m would silence the second turn of every
+    /// staggered junction — the fix that steps past the first lands a few metres beyond it, and
+    /// the second is inside the floor from then on.
+    static let minimumAnnounceDistanceMeters = 10.0
 
     /// PRD §8.6's wording.
     static let offRouteBannerText = "Off route"
@@ -104,9 +129,9 @@ struct NavigationFeature {
     /// What the overlay says for a turn: the cue's own words when the file gave some, which already
     /// read as an instruction ("Turn left onto County Road S"), otherwise the direction.
     ///
-    /// No distance. The overlay appears at the lead distance and stays up for
-    /// `instructionDuration`, so a distance frozen into its text would be wrong within a second;
-    /// W9 (#200) is where a live one belongs.
+    /// No distance. The overlay appears at the lead distance and stays up until the rider is on
+    /// the turn, so a distance frozen into its text would be wrong within a second; W9 (#200) is
+    /// where a live one belongs.
     static func instructionText(for maneuver: Maneuver) -> String {
         if let name = maneuver.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
             return name
@@ -139,10 +164,20 @@ struct NavigationFeature {
         /// The segment of the last match *this session*. Nil until one is made — including after a
         /// relaunch, where `progressMeters` is restored but not yet confirmed by a fix.
         var snappedIndex: Int? = nil
-        /// Where the rider's current unbroken run along the route began: their first match, a
-        /// rejoin after off-route, or a new lap of a loop — and 0 for a resumed ride, whose run
-        /// began before the kill. What finishing a loop is measured from.
-        var lapStartMeters: Double? = nil
+        /// How much of the route the rider has actually covered on this lap, in metres. What
+        /// finishing a loop is measured against.
+        ///
+        /// Only ground ridden *on* the route counts: it grows by the gap between one on-route fix
+        /// and the next, and a rejoin after off-route adds nothing, because a rider who left the
+        /// route at 200 m and came back at 2 km did not ride the 1.8 km in between.
+        ///
+        /// This used to be "where the lap began", subtracted from the current progress — which
+        /// measures the rider's span along the route rather than their riding, and is wrong in
+        /// both directions. It let a rider who bailed 200 m into a loop and came back to the start
+        /// be told they had finished it, so a rejoin reset it; and the reset then made a loop
+        /// uncompletable after any detour in its back half, which is what a real ride hit: round a
+        /// closed road at 4.6 km of a 6.9 km loop, and the finish never arrived.
+        var lapCoveredMeters = 0.0
         /// Index into `activeRoute.maneuvers` of the next turn ahead; `maneuvers.count` once past
         /// the last. Only goes back when a loop comes round to its start again.
         var nextManeuverIndex = 0
@@ -150,6 +185,8 @@ struct NavigationFeature {
         /// stands down while this is set (PRD §8.9).
         var announcedManeuverIndex: Int? = nil
         var offRouteStreak = 0
+        /// Consecutive fixes that have found the route while off it. Reset by any that misses.
+        var rejoinStreak = 0
         var isOffRoute = false
         var isRouteComplete = false
         /// The turn on the dashboard's centred overlay, nil when hidden — the maneuver rather than
@@ -228,9 +265,11 @@ struct NavigationFeature {
             case .routeLoaded(let route):
                 state.activeRoute = route
                 guard let route else { return .none }
-                // A resumed ride's run along the route began before the kill, so its lap counts from
-                // the start: a relaunch late in a loop still finishes it at the end.
-                if state.progressMeters != nil, state.lapStartMeters == nil { state.lapStartMeters = 0 }
+                // A resumed ride already rode this lap's ground before the kill, so a relaunch
+                // late in a loop still finishes it at the end.
+                if let resumed = state.progressMeters, state.lapCoveredMeters == 0 {
+                    state.lapCoveredMeters = resumed
+                }
                 logger.notice(
                     """
                     route loaded — \(route.maneuvers.count, privacy: .public) turns over \
@@ -267,6 +306,12 @@ struct NavigationFeature {
         guard let match = match(update, on: route, state) else { return missedRoute(&state) }
         let progress = match.projection.distanceAlongRouteMeters
 
+        if state.isOffRoute {
+            // One fix finding the route again is not a rejoin; `rejoinConsecutiveFixes` are.
+            state.rejoinStreak += 1
+            guard state.rejoinStreak >= Self.rejoinConsecutiveFixes else { return .none }
+        }
+
         if state.isOffRoute || state.snappedIndex == nil || match.wrapped {
             // Read out first: `Logger`'s interpolations are escaping autoclosures, and cannot
             // capture an `inout` parameter.
@@ -275,10 +320,18 @@ struct NavigationFeature {
                 "\(event, privacy: .public) at \(progress, format: .fixed(precision: 0), privacy: .public) m"
             )
         }
-        // A run along the route begins at a rider's first match, a rejoin and a new lap. A resumed
-        // ride's began before the kill, and `.routeLoaded` has already set it.
-        if match.wrapped || state.isOffRoute || state.lapStartMeters == nil {
-            state.lapStartMeters = progress
+        // The overlay's fate, decided before the wrap below clears `announcedManeuverIndex` and
+        // before the loop further down steps past the turns now behind the rider — between them
+        // they take away what says which turn is on screen.
+        let instruction = updateInstruction(at: progress, on: route, wrapped: match.wrapped, &state)
+
+        // Only ground ridden on the route counts toward the lap: the step from the last on-route
+        // fix to this one. A first match, a rejoin and the moment a loop comes round all start
+        // from where the rider is rather than crediting the gap.
+        if match.wrapped {
+            state.lapCoveredMeters = 0
+        } else if !state.isOffRoute, state.snappedIndex != nil, let previous = state.progressMeters {
+            state.lapCoveredMeters += max(0, progress - previous)
         }
         if match.wrapped {
             // A new lap: every turn from here on is ahead again.
@@ -288,6 +341,7 @@ struct NavigationFeature {
         }
         state.isOffRoute = false
         state.offRouteStreak = 0
+        state.rejoinStreak = 0
         state.progressMeters = progress
         state.snappedIndex = match.projection.segmentIndex
 
@@ -298,13 +352,54 @@ struct NavigationFeature {
             state.nextManeuverIndex += 1
         }
 
-        if hasFinished(at: progress, on: route, lapStart: state.lapStartMeters) {
+        if hasFinished(at: progress, on: route, covered: state.lapCoveredMeters) {
             state.isRouteComplete = true
             state.announcedManeuverIndex = nil
+            state.turnInstruction = nil
             logger.notice("route complete")
-            return .none
+            return .cancel(id: CancelID.instructionTimer)
         }
-        return announceTurnIfDue(speed: update.speed, &state)
+        return .merge(instruction, announceTurnIfDue(speed: update.speed, &state))
+    }
+
+    /// What becomes of the overlay on this fix. It comes down once the rider is within
+    /// `instructionClearanceMeters` of the turn it shows — which is what replaced its four-second
+    /// timer — and while the turn is still ahead its fallback is re-armed, so that timer only ever
+    /// fires when fixes have stopped coming.
+    private func updateInstruction(
+        at progress: Double, on route: NavigationRoute, wrapped: Bool, _ state: inout State
+    ) -> Effect<Action> {
+        guard state.turnInstruction != nil else { return .none }
+
+        let done: Bool
+        if wrapped {
+            // Coming round a loop puts the turn on screen behind the rider without their ever
+            // having reached it. Nothing else here would take it down: the wrap is about to clear
+            // the index that says which turn it is.
+            done = true
+        } else if let announced = state.announcedManeuverIndex,
+                  route.maneuvers.indices.contains(announced) {
+            done = route.maneuvers[announced].distanceAlongRouteMeters - progress
+                <= Self.instructionClearanceMeters
+        } else {
+            done = true
+        }
+        guard !done else {
+            state.turnInstruction = nil
+            return .cancel(id: CancelID.instructionTimer)
+        }
+        return instructionFallback()
+    }
+
+    /// Takes the overlay down when no fix ever brings the rider to the turn. Re-armed by every fix
+    /// that leaves the turn ahead, so what it actually measures is silence from CoreLocation —
+    /// a rider held at a light 100 m short of their turn keeps the instruction.
+    private func instructionFallback() -> Effect<Action> {
+        .run { send in
+            try await clock.sleep(for: Self.instructionFallbackDuration)
+            await send(.instructionDismissed)
+        }
+        .cancellable(id: CancelID.instructionTimer, cancelInFlight: true)
     }
 
     /// A place on the route for a fix, and whether reaching it went round the end of a loop.
@@ -329,7 +424,7 @@ struct NavigationFeature {
                 onto: route.coordinates,
                 cumulative: route.cumulativeDistances,
                 fromMeters: max(0, (state.progressMeters ?? 0) - Self.backWindowMeters),
-                within: state.isOffRoute ? Self.rejoinMeters : Self.offRouteMeters,
+                within: Self.offRouteMeters,
                 heading: course,
                 limit: 1
             ).first.map { Match(projection: $0) }
@@ -366,17 +461,18 @@ struct NavigationFeature {
     }
 
     /// Whether a match this far along finishes the route. A loop's end is also its start, so there
-    /// it takes having ridden at least half the loop since the run began; anywhere else, arriving
-    /// is enough.
-    private func hasFinished(at progress: Double, on route: NavigationRoute, lapStart: Double?) -> Bool {
+    /// it takes having ridden at least half the loop on this lap; anywhere else, arriving is enough.
+    private func hasFinished(at progress: Double, on route: NavigationRoute, covered: Double) -> Bool {
         guard progress >= route.totalDistanceMeters - Self.arrivalMeters else { return false }
         guard route.isLoop else { return true }
-        return progress - (lapStart ?? progress) >= route.totalDistanceMeters / 2
+        return covered >= route.totalDistanceMeters / 2
     }
 
     /// A fix that puts the rider nowhere on the route. It counts toward off-route and moves nothing
     /// else: the last match stays where the rider was last known to be.
     private func missedRoute(_ state: inout State) -> Effect<Action> {
+        // A rejoin has to be consecutive fixes, so a miss among them starts the count over.
+        state.rejoinStreak = 0
         guard !state.isOffRoute else { return .none }
         state.offRouteStreak += 1
         guard state.offRouteStreak >= Self.offRouteConsecutiveFixes else { return .none }
@@ -393,7 +489,10 @@ struct NavigationFeature {
     private func announceTurnIfDue(speed: Double, _ state: inout State) -> Effect<Action> {
         guard let distance = state.distanceToNextTurnMeters,
               let maneuver = state.nextManeuver,
-              state.announcedManeuverIndex != state.nextManeuverIndex
+              state.announcedManeuverIndex != state.nextManeuverIndex,
+              // Too close to be news. Nothing marks it announced: the turn simply goes by
+              // unannounced, and the loop in `follow` steps past it like any other.
+              distance >= Self.minimumAnnounceDistanceMeters
         else { return .none }
         let lead = state.preferences.turnLeadDistanceMeters
         // See "When a turn is announced" above. An unknown speed (CoreLocation's -1) predicts no
@@ -413,11 +512,7 @@ struct NavigationFeature {
         return .merge(
             // Its tone (#198): the parent hands it to the orchestrator, which decides whether it sounds.
             .send(.delegate(.turnAnnounced(maneuver.direction))),
-            .run { send in
-                try await clock.sleep(for: Self.instructionDuration)
-                await send(.instructionDismissed)
-            }
-            .cancellable(id: CancelID.instructionTimer, cancelInFlight: true)
+            instructionFallback()
         )
     }
 }
