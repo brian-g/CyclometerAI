@@ -2,13 +2,16 @@ import Testing
 import UniformTypeIdentifiers
 @testable import Cyclometer
 
-/// The Files picker in S19 filters on `com.topografix.gpx`, and iOS only knows that
-/// identifier because the app declares it in `Info.plist` under
-/// `UTImportedTypeDeclarations` (#193).
+/// Two separate things, both easy to break silently.
 ///
-/// Worth a test because deleting that declaration breaks the import flow *silently*:
-/// `UTType(filenameExtension:)` still returns a type, just a dynamic one conforming to
-/// nothing, so the picker compiles, runs, and shows every `.gpx` greyed out.
+/// The `UTImportedTypeDeclarations` entry in `Info.plist` (#193) is what makes
+/// `com.topografix.gpx` a real identifier on this device. The S19 picker no longer filters
+/// on it — see `RoutesView.gpxContentTypes` — but `CFBundleDocumentTypes` still names it in
+/// `LSItemContentTypes`, so deleting the declaration would leave the app claiming a type
+/// nothing resolves, and "Open in Cyclometer" would quietly stop being offered.
+///
+/// The filter is the other half: it has to admit whatever the provider hands over, which is
+/// the failure this suite exists to prevent recurring.
 @Suite("Routes GPX content type")
 struct RoutesGPXTypeTests {
 
@@ -28,19 +31,16 @@ struct RoutesGPXTypeTests {
 
     /// The picker asks whether the *file's* type conforms to an allowed one, and that runs
     /// one way: `com.topografix.gpx` conforming to `public.xml` does nothing for a file the
-    /// provider typed as plain `public.xml` or as a `dyn.*` type — which is how a fresh
-    /// install came to grey out every `.gpx` already in iCloud Drive. So the filter has to
-    /// name those two directly; asserting the GPX type's own conformance would pass while
-    /// the picker stayed broken.
-    @Test("The picker filter admits provider types that don't conform to GPX")
-    func filterAdmitsPartlyRecognisedFiles() {
-        let allowed = RoutesView.gpxContentTypes
-        #expect(allowed.contains(UTType("com.topografix.gpx")!))
-        #expect(UTType.xml.conforms(toAnyOf: allowed))
-        // A stand-in for the `dyn.*` type a provider hands back for an extension its own
-        // LaunchServices database has no binding for — which is what a `.gpx` synced before
-        // the app was installed looks like.
-        #expect(UTType(filenameExtension: "cyclometer-not-a-real-extension")!.conforms(toAnyOf: allowed))
+    /// provider typed as plain `public.xml`, or as a `dyn.*` type — which is how a fresh
+    /// install came to grey out every `.gpx` already in iCloud Drive. Naming the GPX type in
+    /// the filter is exactly what broke, so the assertion is that nothing is excluded.
+    @Test("The filter admits every file type, however the provider typed it")
+    func filterAdmitsEveryFileType() {
+        let dynamic = UTType(filenameExtension: "cyclometer-not-a-real-extension")!
+        for type: UTType in [UTType("com.topografix.gpx")!, .xml, .plainText, .jpeg, dynamic] {
+            #expect(type.conforms(toAnyOf: RoutesView.gpxContentTypes),
+                    "\(type.identifier) would be greyed out")
+        }
     }
 
     /// Folders must stay unselectable, or the picker offers a directory it cannot import.

@@ -16,25 +16,24 @@ struct RoutesView: View {
     var isStartRideHidden: Bool = false
     var onStartRide: () -> Void = {}
 
-    /// The picker compares each file's *resolved* content type against these, and
-    /// conformance runs one way only: a file the provider typed `public.xml`, or as a
-    /// `dyn.*` type, does **not** conform to `com.topografix.gpx`, so filtering on the GPX
-    /// type alone greys out every `.gpx` that iCloud Drive typed before the app declared
-    /// the extension. Measured on iOS 27 against a fresh install: `UTType(...)` resolved in
-    /// the app, the picker still greyed the files out.
+    /// Every file, deliberately — this filters nothing.
     ///
-    /// So `.xml` and `.data` ride along as the two ways a provider can hand us a GPX it
-    /// only partly recognises. That lets a non-GPX file through, which is the right split:
-    /// `GPXRouteImporter` is the real validator and already answers `.parse` for one.
-    static let gpxContentTypes: [UTType] = {
-        guard let gpx = UTType("com.topografix.gpx"), !gpx.isDynamic else {
-            // Reached only if the `UTImportedTypeDeclarations` entry is gone. `.data` still
-            // leaves folders unselectable, so the picker stays usable rather than offering
-            // a screen where nothing can be tapped.
-            return [.data]
-        }
-        return [gpx, .xml, .data]
-    }()
+    /// The picker compares each file's *resolved* content type against the allowed ones, and
+    /// conformance runs one way only: a file the provider typed `public.xml`, or as a `dyn.*`
+    /// type because it synced before the app declared the extension, does **not** conform to
+    /// `com.topografix.gpx`. Filtering on the GPX type greyed out every `.gpx` on a fresh
+    /// install (iOS 27.0) even though `UTType("com.topografix.gpx")` resolved in the app.
+    ///
+    /// Which of those two the provider actually answered is unmeasured, so naming them —
+    /// `[gpx, .xml]` — would be guessing at the one that matters. `.data` covers both, and
+    /// listing the narrower types alongside it would be decoration: everything that conforms
+    /// to either conforms to `.data` too. Folders still can't be picked.
+    ///
+    /// The cost is that a rider can select a photo and be told it isn't valid GPX rather than
+    /// finding it greyed out. `GPXRouteImporter` is the real validator either way, and a
+    /// picker that rejects the file the rider came to import is the worse failure. Narrow
+    /// this once the device measurement says which type to narrow to.
+    static let gpxContentTypes: [UTType] = [.data]
 
     var body: some View {
         Group {
