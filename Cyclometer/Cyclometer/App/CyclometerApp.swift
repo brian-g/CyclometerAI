@@ -6,6 +6,7 @@ import ComposableArchitecture
 struct CyclometerApp: App {
     init() {
         AppFonts.registerFonts()
+        DocumentFolders.create()
     }
 
     var body: some Scene {

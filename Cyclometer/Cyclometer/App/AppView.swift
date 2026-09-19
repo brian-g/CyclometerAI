@@ -148,6 +148,8 @@ struct AppView: View {
         // Hands the rider's persisted pairings to BLECSCClient, which connects
         // nothing it hasn't been told about.
         .task { await store.send(.task).finish() }
+        // "Open in Cyclometer" on a `.gpx` from Files, Mail or Safari.
+        .onOpenURL { store.send(.fileOpened($0)) }
     }
 }
 

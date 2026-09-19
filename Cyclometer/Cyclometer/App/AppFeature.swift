@@ -1,4 +1,5 @@
 import ComposableArchitecture
+import Foundation
 import SwiftData
 
 /// Root feature — owns tab selection and active ride lifecycle.
@@ -62,6 +63,9 @@ struct AppFeature {
     enum Action {
         case task
         case tabSelected(Tab)
+        /// A `.gpx` handed over by Files, Mail or Safari (`CFBundleDocumentTypes`), which
+        /// the app imports through the same path as the in-app picker.
+        case fileOpened(URL)
         case startRideButtonTapped
         case startSheet(PresentationAction<StartSheetFeature.Action>)
         case onboarding(OnboardingFeature.Action)
@@ -143,6 +147,19 @@ struct AppFeature {
             case .tabSelected(let tab):
                 state.selectedTab = tab
                 return .none
+
+            case .fileOpened(let url):
+                // GPX is the only declared document type, so anything arriving here is a
+                // route. A non-file URL would be a custom scheme the app doesn't register.
+                guard url.isFileURL else { return .none }
+                state.selectedTab = .routes
+                // Straight to the list: a route detail left on the stack would hide the row
+                // the import is about to insert, and the failure alert with it.
+                state.routes.path.removeAll()
+                // Forwarded rather than reimplemented — `.fileSelected` owns the
+                // security-scoped read, the re-entrancy guard and both alert paths, and an
+                // in-place open is scoped exactly like a picked file.
+                return .send(.routes(.fileSelected(url)))
 
             case .startRideButtonTapped:
                 return presentStartSheet(&state)
