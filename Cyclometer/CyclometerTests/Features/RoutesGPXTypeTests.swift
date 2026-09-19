@@ -2,19 +2,24 @@ import Testing
 import UniformTypeIdentifiers
 @testable import Cyclometer
 
-/// Two separate things, both easy to break silently.
+/// What the S19 picker will and won't let a rider select.
 ///
-/// The `UTImportedTypeDeclarations` entry in `Info.plist` (#193) is what makes
-/// `com.topografix.gpx` a real identifier on this device. The S19 picker no longer filters
-/// on it — see `RoutesView.gpxContentTypes` — but `CFBundleDocumentTypes` still names it in
-/// `LSItemContentTypes`, so deleting the declaration would leave the app claiming a type
-/// nothing resolves, and "Open in Cyclometer" would quietly stop being offered.
+/// The bug this suite exists to prevent recurring: the filter named `com.topografix.gpx`, the
+/// identifier the app declares in `UTImportedTypeDeclarations` (#193). iOS 27 declares
+/// `public.gpx` itself, a system declaration outranks an imported one, and conformance runs
+/// one way — so every `.gpx` on device resolved to a type that didn't conform to the filter
+/// and came up greyed out.
 ///
-/// The filter is the other half: it has to admit whatever the provider hands over, which is
-/// the failure this suite exists to prevent recurring.
+/// **Nothing here may assert an identifier.** The iOS 27 simulator still binds the extension
+/// to `com.topografix.gpx` while the device binds it to `public.gpx`, so an identifier
+/// assertion passes here and tells you nothing about the thing that broke. These tests pin
+/// the mechanism: whatever *this* install binds `gpx` to is what the filter must admit.
 @Suite("Routes GPX content type")
 struct RoutesGPXTypeTests {
 
+    /// Still required even though the filter no longer names it: `CFBundleDocumentTypes`
+    /// lists it in `LSItemContentTypes`, so without the declaration the app claims a type
+    /// nothing resolves and "Open in Cyclometer" quietly stops being offered.
     @Test("The app declares com.topografix.gpx")
     func identifierResolves() {
         let gpx = UTType("com.topografix.gpx")
@@ -22,31 +27,37 @@ struct RoutesGPXTypeTests {
         #expect(gpx?.isDynamic == false)
     }
 
-    @Test("A .gpx filename resolves to that declared type, not a dynamic one")
-    func extensionResolvesToTheDeclaredType() {
+    /// Which identifier it is depends on the install; that some real type owns the extension
+    /// does not. A dynamic answer would mean nothing declares `gpx` at all.
+    @Test("Something declared owns the .gpx extension")
+    func extensionResolvesToADeclaredType() {
         let gpx = UTType(filenameExtension: "gpx")
-        #expect(gpx?.identifier == "com.topografix.gpx")
+        #expect(gpx != nil)
         #expect(gpx?.isDynamic == false)
     }
 
-    /// The picker asks whether the *file's* type conforms to an allowed one, and that runs
-    /// one way: `com.topografix.gpx` conforming to `public.xml` does nothing for a file the
-    /// provider typed as plain `public.xml`, or as a `dyn.*` type — which is how a fresh
-    /// install came to grey out every `.gpx` already in iCloud Drive. Naming the GPX type in
-    /// the filter is exactly what broke, so the assertion is that nothing is excluded.
-    @Test("The filter admits every file type, however the provider typed it")
-    func filterAdmitsEveryFileType() {
-        let dynamic = UTType(filenameExtension: "cyclometer-not-a-real-extension")!
-        for type: UTType in [UTType("com.topografix.gpx")!, .xml, .plainText, .jpeg, dynamic] {
-            #expect(type.conforms(toAnyOf: RoutesView.gpxContentTypes),
-                    "\(type.identifier) would be greyed out")
-        }
+    /// The assertion that would have caught the bug on either platform.
+    @Test("The filter admits whatever this install binds .gpx to")
+    func filterAdmitsTheExtensionBinding() throws {
+        let bound = try #require(UTType(filenameExtension: "gpx"))
+        #expect(bound.conforms(toAnyOf: RoutesView.gpxContentTypes),
+                "a .gpx typed \(bound.identifier) would be greyed out")
     }
 
-    /// Folders must stay unselectable, or the picker offers a directory it cannot import.
-    @Test("The filter does not admit folders")
-    func filterExcludesFolders() {
-        #expect(UTType.folder.conforms(toAnyOf: RoutesView.gpxContentTypes) == false)
+    /// For a provider that got as far as recognising the markup and no further.
+    @Test("The filter admits plain XML")
+    func filterAdmitsXML() {
+        #expect(UTType.xml.conforms(toAnyOf: RoutesView.gpxContentTypes))
+    }
+
+    /// The filter is meant to filter again — `.data` was the stopgap while the type the
+    /// device resolves was unknown, and it made every photo and video selectable.
+    @Test("The filter excludes files that aren't GPX")
+    func filterExcludesOtherFiles() {
+        for type: UTType in [.jpeg, .mp3, .pdf, .folder] {
+            #expect(type.conforms(toAnyOf: RoutesView.gpxContentTypes) == false,
+                    "\(type.identifier) should not be selectable")
+        }
     }
 }
 

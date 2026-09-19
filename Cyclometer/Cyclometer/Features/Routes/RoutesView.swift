@@ -16,24 +16,34 @@ struct RoutesView: View {
     var isStartRideHidden: Bool = false
     var onStartRide: () -> Void = {}
 
-    /// Every file, deliberately — this filters nothing.
+    /// iOS 27 declares `public.gpx` itself, and a system declaration outranks the app's
+    /// `UTImportedTypeDeclarations` entry — so a `.gpx` resolves to `public.gpx` on device,
+    /// which does **not** conform to `com.topografix.gpx`. Filtering on our own identifier
+    /// greyed out every file in the picker (measured on iOS 27.0, and by the `routes` log
+    /// line in `RoutesFeature`, which prints what the file actually resolved to).
     ///
-    /// The picker compares each file's *resolved* content type against the allowed ones, and
-    /// conformance runs one way only: a file the provider typed `public.xml`, or as a `dyn.*`
-    /// type because it synced before the app declared the extension, does **not** conform to
-    /// `com.topografix.gpx`. Filtering on the GPX type greyed out every `.gpx` on a fresh
-    /// install (iOS 27.0) even though `UTType("com.topografix.gpx")` resolved in the app.
+    /// So the binding is *asked for* rather than named: whatever this install maps `gpx` to
+    /// is what the provider will have typed the file as. That also survives the next OS that
+    /// changes its mind. The declared identifier stays alongside it for a provider that
+    /// carries our own type, and `.xml` for one that only recognised the markup.
     ///
-    /// Which of those two the provider actually answered is unmeasured, so naming them —
-    /// `[gpx, .xml]` — would be guessing at the one that matters. `.data` covers both, and
-    /// listing the narrower types alongside it would be decoration: everything that conforms
-    /// to either conforms to `.data` too. Folders still can't be picked.
-    ///
-    /// The cost is that a rider can select a photo and be told it isn't valid GPX rather than
-    /// finding it greyed out. `GPXRouteImporter` is the real validator either way, and a
-    /// picker that rejects the file the rider came to import is the worse failure. Narrow
-    /// this once the device measurement says which type to narrow to.
-    static let gpxContentTypes: [UTType] = [.data]
+    /// Worth knowing when reading the tests: the iOS 27 *simulator* still resolves the
+    /// extension to `com.topografix.gpx`, so no test pinned to an identifier can catch this
+    /// — which is why `RoutesGPXTypeTests` pins the mechanism instead.
+    static let gpxContentTypes: [UTType] = {
+        let known = [UTType(filenameExtension: "gpx"), UTType("com.topografix.gpx")]
+            .compactMap(\.self)
+            .filter { !$0.isDynamic }
+        // Reached only if the extension binds to nothing *and* the declaration is gone.
+        // `.data` still leaves folders unselectable, so the picker stays usable rather than
+        // offering a screen where nothing can be tapped.
+        guard !known.isEmpty else { return [.data] }
+        // Deduplicated because the two lookups agree on any install that hasn't moved
+        // the binding — the simulator being the one that matters for the tests.
+        return (known + [.xml]).reduce(into: [UTType]()) {
+            if !$0.contains($1) { $0.append($1) }
+        }
+    }()
 
     var body: some View {
         Group {

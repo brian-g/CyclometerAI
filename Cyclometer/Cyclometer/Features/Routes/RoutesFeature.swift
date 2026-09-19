@@ -321,12 +321,11 @@ struct RoutesFeature {
                     let didAccess = url.startAccessingSecurityScopedResource()
                     defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
 
-                    // The open question behind `RoutesView.gpxContentTypes`, which admits
-                    // every file because we don't know which type a provider answers here.
-                    // `com.topografix.gpx` means the filter can be narrowed to the GPX type;
-                    // `public.xml` or a `dyn.*` identifier names what it has to allow
-                    // alongside it. Kept rather than measured once and deleted: it costs a
-                    // line and makes the next report of a greyed-out picker self-diagnosing.
+                    // What `RoutesView.gpxContentTypes` has to admit. This is the line that
+                    // found the bug: on iOS 27.0 a `.gpx` came through as `public.gpx`, not
+                    // the `com.topografix.gpx` the filter named and the simulator resolves.
+                    // Kept rather than deleted now it has answered once — it costs a line and
+                    // makes the next report of a greyed-out picker self-diagnosing.
                     //
                     // `.notice`, not `.debug`: debug is memory-only unless the subsystem is
                     // configured for it, which an Xcode-launched run does and a rider tapping
