@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import Foundation
+import UniformTypeIdentifiers
 import os
 
 private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "routes")
@@ -313,11 +314,21 @@ struct RoutesFeature {
                     // the save as well as the parse: `Data(contentsOf:options:.mappedIfSafe)`
                     // memory-maps the file, so releasing early is releasing under the read.
                     //
-                    // The discard is declared first so it runs last: the copy goes only once the read is
-                    // over and the scope released. A no-op for anything outside the Inbox.
+                    // The discard is declared first so it runs last: the copy goes only
+                    // once the read is over and the scope released. A no-op for anything
+                    // outside the Inbox.
                     defer { DocumentFolders.discardInboxCopy(at: url) }
                     let didAccess = url.startAccessingSecurityScopedResource()
                     defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+
+                    // The open question behind `RoutesView.gpxContentTypes`, which admits
+                    // every file because we don't know which type a provider answers here.
+                    // `com.topografix.gpx` means the filter can be narrowed to the GPX type;
+                    // `public.xml` or a `dyn.*` identifier names what it has to allow
+                    // alongside it. Kept rather than measured once and deleted: it costs a
+                    // line and makes the next report of a greyed-out picker self-diagnosing.
+                    let resolved = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType
+                    logger.debug("importing a file typed \(resolved?.identifier ?? "unresolved", privacy: .public)")
 
                     do {
                         var imported = try GPXRouteImporter.route(contentsOf: url)
