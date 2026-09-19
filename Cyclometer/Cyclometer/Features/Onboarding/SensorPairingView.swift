@@ -1,7 +1,7 @@
 import ComposableArchitecture
 import SwiftUI
 
-/// S02 — Add Sensors (#107). Title, helper text and a Next button wrap S11's
+/// S02 — Add Sensors (#107). Title, helper text and a Finish button wrap S11's
 /// `DeviceListView` unmodified (UX.md §S02) — an onboarding rider sees the same list,
 /// role prompts and replace-or-cancel behavior as Settings' Manage Sensors, just with
 /// copy that talks to someone seeing it for the first time.
@@ -25,14 +25,15 @@ struct SensorPairingView: View {
             // Onboarding's background is `cyBgPrimary` (white), not the system's
             // grouped-list gray `DeviceListView` paints by default in Settings' own
             // NavigationStack — hidden here so the list sits on the same background as
-            // the title and Next button around it.
+            // the title and Finish button around it.
             DeviceListView(store: store.scope(state: \.deviceManagement, action: \.deviceManagement))
                 .scrollContentBackground(.hidden)
 
             Button {
                 store.send(.nextButtonTapped)
             } label: {
-                Text("Next")
+                // Last step of onboarding (#255) — "Finish", not "Next".
+                Text("Finish")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Spacing.md)
             }

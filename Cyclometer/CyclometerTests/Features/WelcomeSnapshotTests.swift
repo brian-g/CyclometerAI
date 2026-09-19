@@ -103,6 +103,24 @@ final class WelcomeSnapshotTests: XCTestCase {
         )
     }
 
+    /// #254 — at an accessibility text size the copy used to collapse to one truncated
+    /// line each instead of wrapping: a plain `VStack` handed it whatever vertical space
+    /// was left over and `Text` answers a too-short proposal by truncating. What this pins
+    /// is that every paragraph wraps in full, with the overflow scrolled rather than
+    /// squeezed, and that the Next button stays pinned below.
+    func testLargeTypeWrapsCopy() {
+        assertSnapshot(
+            of: UIHostingController(
+                rootView: screen(permissionStates: [.bluetooth: .granted]).preferredColorScheme(.light)
+            ),
+            as: .image(
+                on: device,
+                traits: UITraitCollection(preferredContentSizeCategory: .accessibilityLarge)
+            ),
+            named: "largeType-light"
+        )
+    }
+
     /// Bluetooth denied — neither existing `#Preview` exercises
     /// `PermissionStatusOval`'s red-X branch, which only `.denied`/`.restricted`
     /// render. Next stays disabled and the guidance text stays visible.
