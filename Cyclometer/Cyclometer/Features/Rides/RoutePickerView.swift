@@ -44,7 +44,7 @@ struct RoutePickerList: View {
             case .loaded(let routes):
                 if routes.isEmpty {
                     message("No Routes", systemImage: RouteLibrary.symbolName,
-                            "Import a route from the Routes tab to ride it.") { EmptyView() }
+                            "Import a route in the Routes tab, or connect a service.") { EmptyView() }
                 } else {
                     Section {
                         ForEach(routes) { route in

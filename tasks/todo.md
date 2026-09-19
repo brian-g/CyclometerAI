@@ -85,3 +85,8 @@ height and overflow scrolls instead of being squeezed. The guidance text and Nex
 pinned below, unchanged. At default type on a full-size phone nothing scrolls — the three
 existing Welcome references passed unmodified, which is the proof the layout is untouched
 where it was already correct. `testLargeTypeWrapsCopy` pins the regression.
+
+**Follow-up.** S20's route picker carried its own variant of the #253 string. Aligned to
+"Import a route in the Routes tab, or connect a service." — that screen has no import button
+of its own, so it keeps the "where" and picks up the "or connect a service"; one reference
+re-recorded (`StartSheetSnapshotTests.testPickerEmptyLibrary`).
