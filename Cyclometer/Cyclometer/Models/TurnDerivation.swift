@@ -86,6 +86,11 @@ enum TurnDerivation {
     /// run 90 m before a corner and add its 47° to the corner's 80°, which classifies as a
     /// U-turn. Nothing is lost by raising it: a turn gentle enough to have no sample this
     /// sharp has a radius over 50 m, and the radius gate would reject it anyway.
+    ///
+    /// The rate holds at `resampleStepMeters`, which is the step for every route longer than
+    /// four of them. `adaptiveStep` shortens it below that, where a sample subtends less and
+    /// this floor is correspondingly stricter — but a route under 40 m end to end has no
+    /// maneuver in it to lose.
     static let turningNoiseFloorDegrees = resampleStepMeters / maximumTurnRadiusMeters * 180 / .pi
 
     /// How far the road has to bend back the other way before that counts as a new turn.

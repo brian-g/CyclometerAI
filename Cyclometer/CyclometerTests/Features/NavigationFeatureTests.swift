@@ -262,6 +262,70 @@ struct NavigationFeatureTests {
         #expect(store.state.isTurnAlertActive)
     }
 
+    @Test("a rider held short of their turn keeps the instruction, however long they wait")
+    func turnInstructionSurvivesALongStopShortOfTheTurn() async throws {
+        let legs: [RouteFixtures.Leg] = [(0, 600), (90, 100)]
+        let clock = TestClock()
+        let store = makeStore(route: try route(legs, turns: [(600, .right)]), clock: clock)
+
+        await store.send(.locationUpdated(fix(legs, at: 500, second: 0)))
+        try #require(store.state.turnInstruction != nil)
+
+        // Stopped at a light 100 m short of the turn, for longer than the fallback — which every
+        // fix re-arms, so it measures silence from CoreLocation rather than time on screen.
+        for second in 1...4 {
+            await clock.advance(by: NavigationFeature.instructionFallbackDuration / 2)
+            await store.send(.locationUpdated(
+                fix(legs, at: 500, speed: 0, second: Double(second), course: -1)
+            ))
+            #expect(store.state.turnInstruction?.direction == .right, "after stop \(second)")
+        }
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("coming round a loop takes down an instruction for a turn the rider never reached")
+    func wrappingALoopTakesDownTheInstruction() async throws {
+        // A 400 m loop with a turn 20 m before its end, and a 100 m lead — so the turn is
+        // announced while the rider is still short of the end, and the very next fixes wrap.
+        let small: [RouteFixtures.Leg] = [(0, 100), (90, 100), (180, 100), (270, 100)]
+        let store = makeStore(route: try route(small, turns: [(380, .right)]), leadMeters: 100)
+        var second = 0.0
+        for meters in stride(from: 100.0, through: 290, by: 10) {
+            await store.send(.locationUpdated(fix(small, at: meters, second: second)))
+            second += 1
+        }
+        try #require(store.state.turnInstruction?.direction == .right)
+        try #require(store.state.announcedManeuverIndex == 0)
+
+        // Round past the start without ever reaching the turn's clearance.
+        for meters in stride(from: 300.0, through: 420, by: 10) {
+            await store.send(.locationUpdated(fix(small, at: meters.truncatingRemainder(dividingBy: 400), second: second)))
+            second += 1
+        }
+        #expect(store.state.turnInstruction == nil)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("the second turn of a staggered junction is still announced")
+    func aCloselyFollowingTurnIsStillAnnounced() async throws {
+        // Two turns `minimumSeparationMeters` apart — the closest the derivation ever emits.
+        let separation = TurnDerivation.minimumSeparationMeters
+        let store = makeStore(route: try route(straight, turns: [(600, .left), (600 + separation, .right)]))
+        var second = 0.0
+        var announced: [Maneuver.Direction] = []
+        for meters in stride(from: 480.0, through: 640, by: 5) {
+            let before = store.state.announcedManeuverIndex
+            await store.send(.locationUpdated(fix(straight, at: meters, second: second)))
+            second += 1
+            if let index = store.state.announcedManeuverIndex, index != before,
+               let turn = store.state.nextManeuver {
+                announced.append(turn.direction)
+            }
+        }
+        #expect(announced == [.left, .right])
+        await store.skipInFlightEffects(strict: false)
+    }
+
     @Test("a turn already under the rider's wheels is not announced (#197 ride review)")
     func aTurnTooCloseIsNotAnnounced() async throws {
         let legs: [RouteFixtures.Leg] = [(0, 600), (90, 400)]

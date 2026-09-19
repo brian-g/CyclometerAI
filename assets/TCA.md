@@ -801,7 +801,7 @@ struct NavigationFeature {
         // Where the rider is on it
         var progressMeters: Double?              // checkpointed to Ride; the floor a resume searches from
         var snappedIndex: Int?                   // this session's last match; nil until a fix confirms one
-        var lapStartMeters: Double?              // where the current unbroken run began (loops)
+        var lapCoveredMeters = 0.0               // route metres actually ridden this lap (loops)
 
         // Turns
         var nextManeuverIndex = 0
@@ -854,9 +854,12 @@ the continuity scoring live on `NavigationFeature`:
 | *First* pass, not nearest | — | Wherever there is no match to window around — ride start, off-route, a relaunch mid-ride — searched from just behind `progressMeters` |
 
 **Loops.** A loop's end is also its start, so arriving there is ambiguous. A loop counts as finished
-only once the rider has ridden at least half of it since `lapStartMeters`; short of that the match
-carries on round from the start, as the road does. `loopClosureMeters` (50) is how close a route's
-two ends have to be to count as a loop.
+only once `lapCoveredMeters` reaches half of it; short of that the match carries on round from the
+start, as the road does. That counter accumulates only the step between consecutive *on-route*
+fixes, so a rejoin credits nothing — measuring the rider's span along the route instead is wrong in
+both directions, letting a rider who bailed 200 m in and came back to the start be told they had
+finished, while a detour late in a loop left it uncompletable. `loopClosureMeters` (50) is how close
+a route's two ends have to be to count as a loop.
 
 **Turn timing.** PRD §8.6 allows ±10 m of the lead distance, but at 40 km/h a rider covers 11.1 m
 between fixes, so announcing at the first fix inside the lead distance can be 11 m late. A turn is
@@ -865,10 +868,13 @@ is expected to cover — `distance − lead ≤ speed · expectedFixInterval / 2
 case to ±5.6 m at 40 km/h.
 
 **Off route and arrival.** Raised after `offRouteConsecutiveFixes` (5) fixes beyond `offRouteMeters`
-(50) — at CoreLocation's 1 Hz the fifth lands inside PRD §8.6's five seconds. Cleared by one fix
-within `rejoinMeters` (30); the gap between the two is deliberate, so a rider running 40–50 m out
-does not flap. Within `arrivalMeters` (30) of the end the route is done: no more turns, and riding
-on past the finish is not being off-route.
+(50) — at CoreLocation's 1 Hz the fifth lands inside PRD §8.6's five seconds. Cleared by
+`rejoinConsecutiveFixes` (2) fixes back within the same 50 m: the flap a rider running 40–50 m out
+would cause is handled the same way leaving the route is, rather than with a tighter radius, which
+used to cost them 20 m of riding still being told they were off a route they were on. Within
+`arrivalMeters` (30) of the end the route is done: no more turns, and riding on past the finish is
+not being off-route. A turn already within `minimumAnnounceDistanceMeters` (10) is not announced at
+all — reachable by rejoining right at a junction, where the tone would land after the decision.
 
 ---
 

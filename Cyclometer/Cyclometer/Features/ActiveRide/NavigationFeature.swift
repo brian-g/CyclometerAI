@@ -105,10 +105,10 @@ struct NavigationFeature {
     static let instructionClearanceMeters = Measurement(value: 10, unit: UnitLength.feet)
         .converted(to: .meters).value
 
-    /// How long the instruction stays up when no fix ever brings the rider within
-    /// `instructionClearanceMeters`. Only reachable when fixes stop arriving altogether, and it
-    /// exists so a dead GPS cannot leave the overlay covering the dashboard for the rest of the
-    /// ride.
+    /// How long the overlay outlives the last fix. Re-armed by every fix that still has the turn
+    /// ahead (`instructionFallback`), so it measures silence from CoreLocation rather than time
+    /// since the announcement — a rider stopped at a light short of their turn keeps the
+    /// instruction, and a dead GPS cannot leave it covering the dashboard for the rest of the ride.
     static let instructionFallbackDuration: Duration = .seconds(120)
 
     /// A turn nearer than this is not news. The rider is in the junction; announcing it now
@@ -116,7 +116,12 @@ struct NavigationFeature {
     ///
     /// Reachable by rejoining the route right at a turn, which is exactly what happened on the
     /// ride that prompted this: an announcement 2.5 m out, at a 100 m lead.
-    static let minimumAnnounceDistanceMeters = 25.0
+    ///
+    /// Well under `TurnDerivation.minimumSeparationMeters`, and it has to be: that is the closest
+    /// two maneuvers are allowed to be, so a floor at 25 m would silence the second turn of every
+    /// staggered junction — the fix that steps past the first lands a few metres beyond it, and
+    /// the second is inside the floor from then on.
+    static let minimumAnnounceDistanceMeters = 10.0
 
     /// PRD §8.6's wording.
     static let offRouteBannerText = "Off route"
@@ -315,6 +320,11 @@ struct NavigationFeature {
                 "\(event, privacy: .public) at \(progress, format: .fixed(precision: 0), privacy: .public) m"
             )
         }
+        // The overlay's fate, decided before the wrap below clears `announcedManeuverIndex` and
+        // before the loop further down steps past the turns now behind the rider — between them
+        // they take away what says which turn is on screen.
+        let instruction = updateInstruction(at: progress, on: route, wrapped: match.wrapped, &state)
+
         // Only ground ridden on the route counts toward the lap: the step from the last on-route
         // fix to this one. A first match, a rejoin and the moment a loop comes round all start
         // from where the rider is rather than crediting the gap.
@@ -335,10 +345,6 @@ struct NavigationFeature {
         state.progressMeters = progress
         state.snappedIndex = match.projection.segmentIndex
 
-        // The overlay comes down when the rider reaches the turn, not on a clock — read before the
-        // loop below, which is what takes `announcedManeuverIndex` away once the turn is behind.
-        let dismissal = dismissInstructionIfReached(at: progress, on: route, &state)
-
         // Past every turn now behind the rider — including any a rejoin or a relaunch skipped over,
         // which go unannounced because they are behind.
         while let maneuver = state.nextManeuver, maneuver.distanceAlongRouteMeters <= progress {
@@ -353,21 +359,47 @@ struct NavigationFeature {
             logger.notice("route complete")
             return .cancel(id: CancelID.instructionTimer)
         }
-        return .merge(dismissal, announceTurnIfDue(speed: update.speed, &state))
+        return .merge(instruction, announceTurnIfDue(speed: update.speed, &state))
     }
 
-    /// Takes the overlay down once the rider is `instructionClearanceMeters` from the turn it
-    /// shows, which is what replaced its four-second timer.
-    private func dismissInstructionIfReached(
-        at progress: Double, on route: NavigationRoute, _ state: inout State
+    /// What becomes of the overlay on this fix. It comes down once the rider is within
+    /// `instructionClearanceMeters` of the turn it shows — which is what replaced its four-second
+    /// timer — and while the turn is still ahead its fallback is re-armed, so that timer only ever
+    /// fires when fixes have stopped coming.
+    private func updateInstruction(
+        at progress: Double, on route: NavigationRoute, wrapped: Bool, _ state: inout State
     ) -> Effect<Action> {
-        guard state.turnInstruction != nil, let announced = state.announcedManeuverIndex,
-              route.maneuvers.indices.contains(announced),
-              route.maneuvers[announced].distanceAlongRouteMeters - progress
-                  <= Self.instructionClearanceMeters
-        else { return .none }
-        state.turnInstruction = nil
-        return .cancel(id: CancelID.instructionTimer)
+        guard state.turnInstruction != nil else { return .none }
+
+        let done: Bool
+        if wrapped {
+            // Coming round a loop puts the turn on screen behind the rider without their ever
+            // having reached it. Nothing else here would take it down: the wrap is about to clear
+            // the index that says which turn it is.
+            done = true
+        } else if let announced = state.announcedManeuverIndex,
+                  route.maneuvers.indices.contains(announced) {
+            done = route.maneuvers[announced].distanceAlongRouteMeters - progress
+                <= Self.instructionClearanceMeters
+        } else {
+            done = true
+        }
+        guard !done else {
+            state.turnInstruction = nil
+            return .cancel(id: CancelID.instructionTimer)
+        }
+        return instructionFallback()
+    }
+
+    /// Takes the overlay down when no fix ever brings the rider to the turn. Re-armed by every fix
+    /// that leaves the turn ahead, so what it actually measures is silence from CoreLocation —
+    /// a rider held at a light 100 m short of their turn keeps the instruction.
+    private func instructionFallback() -> Effect<Action> {
+        .run { send in
+            try await clock.sleep(for: Self.instructionFallbackDuration)
+            await send(.instructionDismissed)
+        }
+        .cancellable(id: CancelID.instructionTimer, cancelInFlight: true)
     }
 
     /// A place on the route for a fix, and whether reaching it went round the end of a loop.
@@ -480,11 +512,7 @@ struct NavigationFeature {
         return .merge(
             // Its tone (#198): the parent hands it to the orchestrator, which decides whether it sounds.
             .send(.delegate(.turnAnnounced(maneuver.direction))),
-            .run { send in
-                try await clock.sleep(for: Self.instructionFallbackDuration)
-                await send(.instructionDismissed)
-            }
-            .cancellable(id: CancelID.instructionTimer, cancelInFlight: true)
+            instructionFallback()
         )
     }
 }
