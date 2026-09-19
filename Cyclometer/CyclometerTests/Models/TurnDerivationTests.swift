@@ -90,6 +90,44 @@ struct TurnDerivationTests {
         #expect(abs(found[1].distanceAlongRouteMeters - 200) <= TurnDerivation.resampleStepMeters)
     }
 
+    // MARK: - Acceptance: the road either side of a corner is not part of it
+    //
+    // Both shapes are traced off "Home and Around", the route whose first ride reported two
+    // U-turns that are not there. Each used to be summed into one 138-158 degree maneuver.
+
+    @Test("a corner is not a u-turn because the road keeps bending the same way after it")
+    func aCornerFollowedByASweepIsStillACorner() throws {
+        // Turn left at the junction, then the road curves 70 degrees further left over 60 m.
+        // Net 160 degrees, and the rider was told to turn around.
+        let found = maneuvers(
+            path(
+                legs: [(0, 100), (270, 10)]
+                    + arc(startBearing: 270, sweepDegrees: -70, radiusMeters: 45)
+                    + [(200, 100)],
+                spacingMeters: 2
+            )
+        )
+        try #require(found.count == 1)
+        #expect(found[0].direction == .left)
+    }
+
+    @Test("a corner is not a u-turn because the road was already bending into it")
+    func aSweepLeadingIntoACornerIsNotPartOfIt() throws {
+        // 45 degrees of sweeping right-hand bend, then a real 80-degree right at a junction.
+        let found = maneuvers(
+            path(
+                legs: [(0, 60)]
+                    + arc(startBearing: 0, sweepDegrees: 45, radiusMeters: 120)
+                    + [(45, 30), (125, 100)],
+                spacingMeters: 2
+            )
+        )
+        try #require(found.count == 1)
+        #expect(found[0].direction == .right)
+        // The junction, not the bend 90 m before it.
+        #expect(found[0].distanceAlongRouteMeters > 150)
+    }
+
     // MARK: - Acceptance: a smooth curve
 
     @Test("a sweeping bend emits nothing however far it eventually turns")
