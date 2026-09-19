@@ -16,19 +16,24 @@ struct RoutesView: View {
     var isStartRideHidden: Bool = false
     var onStartRide: () -> Void = {}
 
-    /// Resolved from the app's own `UTImportedTypeDeclarations` (`Info.plist`). iOS does
-    /// **not** know GPX on its own — measured on iOS 26, `UTType("com.topografix.gpx")` is
-    /// nil and `UTType(filenameExtension: "gpx")` answers a *dynamic* type conforming to
-    /// nothing, which greys out every `.gpx` in the picker. `RoutesGPXTypeTests` pins the
-    /// declaration, since removing it breaks the picker with no compile or runtime error.
-    private static let gpxContentTypes: [UTType] = {
+    /// The picker compares each file's *resolved* content type against these, and
+    /// conformance runs one way only: a file the provider typed `public.xml`, or as a
+    /// `dyn.*` type, does **not** conform to `com.topografix.gpx`, so filtering on the GPX
+    /// type alone greys out every `.gpx` that iCloud Drive typed before the app declared
+    /// the extension. Measured on iOS 27 against a fresh install: `UTType(...)` resolved in
+    /// the app, the picker still greyed the files out.
+    ///
+    /// So `.xml` and `.data` ride along as the two ways a provider can hand us a GPX it
+    /// only partly recognises. That lets a non-GPX file through, which is the right split:
+    /// `GPXRouteImporter` is the real validator and already answers `.parse` for one.
+    static let gpxContentTypes: [UTType] = {
         guard let gpx = UTType("com.topografix.gpx"), !gpx.isDynamic else {
-            // Reached only if the declaration is gone. `.xml` would be no help — the
-            // measurement above is that an undeclared `.gpx` conforms to nothing — so fall
-            // back to showing everything rather than a picker where nothing is selectable.
-            return [.item]
+            // Reached only if the `UTImportedTypeDeclarations` entry is gone. `.data` still
+            // leaves folders unselectable, so the picker stays usable rather than offering
+            // a screen where nothing can be tapped.
+            return [.data]
         }
-        return [gpx]
+        return [gpx, .xml, .data]
     }()
 
     var body: some View {

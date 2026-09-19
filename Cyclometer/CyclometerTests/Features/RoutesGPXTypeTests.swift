@@ -26,10 +26,32 @@ struct RoutesGPXTypeTests {
         #expect(gpx?.isDynamic == false)
     }
 
-    /// Conformance to `public.xml` is what lets a file exported as generic XML, or offered
-    /// by a provider that only knows it is XML, still be picked.
-    @Test("The declared type conforms to XML")
-    func conformsToXML() {
-        #expect(UTType("com.topografix.gpx")?.conforms(to: .xml) == true)
+    /// The picker asks whether the *file's* type conforms to an allowed one, and that runs
+    /// one way: `com.topografix.gpx` conforming to `public.xml` does nothing for a file the
+    /// provider typed as plain `public.xml` or as a `dyn.*` type — which is how a fresh
+    /// install came to grey out every `.gpx` already in iCloud Drive. So the filter has to
+    /// name those two directly; asserting the GPX type's own conformance would pass while
+    /// the picker stayed broken.
+    @Test("The picker filter admits provider types that don't conform to GPX")
+    func filterAdmitsPartlyRecognisedFiles() {
+        let allowed = RoutesView.gpxContentTypes
+        #expect(allowed.contains(UTType("com.topografix.gpx")!))
+        #expect(UTType.xml.conforms(toAnyOf: allowed))
+        // A stand-in for the `dyn.*` type a provider hands back for an extension its own
+        // LaunchServices database has no binding for — which is what a `.gpx` synced before
+        // the app was installed looks like.
+        #expect(UTType(filenameExtension: "cyclometer-not-a-real-extension")!.conforms(toAnyOf: allowed))
+    }
+
+    /// Folders must stay unselectable, or the picker offers a directory it cannot import.
+    @Test("The filter does not admit folders")
+    func filterExcludesFolders() {
+        #expect(UTType.folder.conforms(toAnyOf: RoutesView.gpxContentTypes) == false)
+    }
+}
+
+private extension UTType {
+    func conforms(toAnyOf others: [UTType]) -> Bool {
+        others.contains { conforms(to: $0) }
     }
 }
