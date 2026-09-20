@@ -49,22 +49,77 @@ enum RouteDirectionMarkers {
         return max(abs(width) / chevronsAcrossViewport, minimumSpacingMeters)
     }
 
+    /// Ground distance between chevrons on a map that reports a camera rather than a region
+    /// (#258, the live ride map). That map is pitched, and a pitched camera's region is the box
+    /// around the whole frustum — it runs to the horizon, so it says nothing about how wide the
+    /// road on screen reads. `MapCamera.distance` does, and it is immune to the tilt.
+    ///
+    /// Same constants as `spacingMeters(for:)`, so the same route reads at the same density
+    /// whether the rider is browsing it on S19 or riding it.
+    static func spacingMeters(forCameraDistanceMeters distance: Double) -> Double {
+        guard distance.isFinite, distance > 0 else { return minimumSpacingMeters }
+        return max(distance / chevronsAcrossViewport, minimumSpacingMeters)
+    }
+
+    /// The on-screen angle a chevron must be drawn at to point along `bearingDegrees`, on a map
+    /// turned to `headingDegrees` and tilted to `pitchDegrees` (#258).
+    ///
+    /// `Annotation` content is screen-space: MapKit neither turns it with the map nor lays it in
+    /// the map plane. S19 and S20 dodge this by refusing rotation and pitch (`RoutesView`), but
+    /// the live map is heading-up and tilted by design, so the angle is computed instead.
+    ///
+    /// Two corrections, in order: the map's heading turns the world under the glyph, and the tilt
+    /// foreshortens the screen's vertical axis by `cos(pitch)` while leaving the horizontal one
+    /// alone. A due-north bearing on a heading-up map pointing north is screen-up either way; a
+    /// bearing at 45° to the camera is drawn nearer the horizontal the more the map is tilted.
+    static func screenAngleDegrees(
+        bearingDegrees: Double,
+        headingDegrees: Double,
+        pitchDegrees: Double
+    ) -> Double {
+        guard bearingDegrees.isFinite, headingDegrees.isFinite else { return 0 }
+        let relative = (bearingDegrees - headingDegrees) * .pi / 180
+        // A pitch MapKit has not reported yet, or one outside the range it can draw, is treated
+        // as flat rather than allowed to flip or collapse the glyph.
+        let pitch = pitchDegrees.isFinite ? min(max(pitchDegrees, 0), 89) * .pi / 180 : 0
+        let angle = atan2(sin(relative), cos(relative) * cos(pitch)) * 180 / .pi
+        return angle < 0 ? angle + 360 : angle
+    }
+
     /// Chevron placements along `coordinates`, spaced for `visibleBounds` and culled to it.
     ///
     /// Nil bounds means no chevrons: the caller has no camera yet, and guessing a spacing from
     /// the route's own length would make the same route read differently on two screens.
+    static func placements(
+        coordinates: [RouteCoordinate],
+        visibleBounds: RouteBounds?,
+        limit: Int = 12
+    ) -> [Placement] {
+        guard let visibleBounds else { return [] }
+        return placements(
+            coordinates: coordinates,
+            spacingMeters: spacingMeters(for: visibleBounds),
+            visibleBounds: visibleBounds,
+            limit: limit
+        )
+    }
+
+    /// The same, for a caller that derives its spacing some other way — the live map, from its
+    /// camera distance rather than from a region it cannot trust (see
+    /// `spacingMeters(forCameraDistanceMeters:)`). `visibleBounds` still culls: off-screen
+    /// chevrons cost annotations for nothing.
     ///
     /// Placement rides on `RouteGeometry.resampled(_:everyMeters:)` (#192) so the result does
     /// not depend on how the source GPX happened to be sampled — a file with a point every
     /// 200 m and one with a point every metre describe the same road and get the same chevrons.
     static func placements(
         coordinates: [RouteCoordinate],
-        visibleBounds: RouteBounds?,
+        spacingMeters spacing: Double,
+        visibleBounds: RouteBounds,
         limit: Int = 12
     ) -> [Placement] {
-        guard coordinates.count > 1, limit > 0, let visibleBounds else { return [] }
+        guard coordinates.count > 1, limit > 0, spacing.isFinite, spacing > 0 else { return [] }
 
-        let spacing = spacingMeters(for: visibleBounds)
         let samples = RouteGeometry.resampled(coordinates, everyMeters: spacing).map(\.coordinate)
 
         if samples.count < 2 {

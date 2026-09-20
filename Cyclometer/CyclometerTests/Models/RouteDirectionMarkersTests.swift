@@ -190,4 +190,104 @@ struct RouteDirectionMarkersTests {
         let longitude = try! #require(capped.first).coordinate.longitude
         #expect(longitude < -121.9833 && longitude > -121.9967)
     }
+
+    // MARK: - The live ride map (#258)
+
+    /// The angles below are exact in the maths and inexact in binary, since every one of them
+    /// goes through a radian round trip. A thousandth of a degree is far tighter than anything
+    /// that could be seen on a map and far looser than the round trip's error.
+    private let angleTolerance = 0.001
+
+    @Test("camera distance sets the spacing, with the same floor as a viewport does")
+    func cameraDistanceSpacing() {
+        // Far enough out that the fraction-of-the-viewport rule governs.
+        #expect(RouteDirectionMarkers.spacingMeters(forCameraDistanceMeters: 4_000)
+                == 4_000 / RouteDirectionMarkers.chevronsAcrossViewport)
+        // Close in, the floor is what stops a widget following the rider from asking for a
+        // chevron every few metres.
+        #expect(RouteDirectionMarkers.spacingMeters(forCameraDistanceMeters: 200)
+                == RouteDirectionMarkers.minimumSpacingMeters)
+        // MapKit has been known to report a camera mid-transition; neither a zero nor a
+        // non-finite distance may produce a spacing that resampling would spin on.
+        #expect(RouteDirectionMarkers.spacingMeters(forCameraDistanceMeters: 0)
+                == RouteDirectionMarkers.minimumSpacingMeters)
+        #expect(RouteDirectionMarkers.spacingMeters(forCameraDistanceMeters: .nan)
+                == RouteDirectionMarkers.minimumSpacingMeters)
+        #expect(RouteDirectionMarkers.spacingMeters(forCameraDistanceMeters: -1)
+                == RouteDirectionMarkers.minimumSpacingMeters)
+    }
+
+    @Test("a spacing passed in places the same chevrons a viewport would derive")
+    func explicitSpacingMatchesDerivedSpacing() {
+        let derived = RouteDirectionMarkers.placements(coordinates: zigzagRoute,
+                                                       visibleBounds: zigzagViewport)
+        let explicit = RouteDirectionMarkers.placements(
+            coordinates: zigzagRoute,
+            spacingMeters: RouteDirectionMarkers.spacingMeters(for: zigzagViewport),
+            visibleBounds: zigzagViewport
+        )
+        #expect(derived == explicit)
+        #expect(!derived.isEmpty)
+    }
+
+    @Test("a north-up flat map draws a chevron at its bearing")
+    func screenAngleOnAFlatNorthUpMap() {
+        for bearing in stride(from: 0.0, to: 360.0, by: 15) {
+            #expect(abs(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: bearing,
+                                                                 headingDegrees: 0,
+                                                                 pitchDegrees: 0) - bearing)
+                    < angleTolerance)
+        }
+    }
+
+    @Test("a heading-up map turns the world under the chevron")
+    func screenAngleCountersTheHeading() {
+        // Riding east with the map heading-up: the route ahead is straight up the screen.
+        #expect(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: 90,
+                                                        headingDegrees: 90,
+                                                        pitchDegrees: 0) == 0)
+
+        // A route heading north while the rider faces east reads as a left turn: 90° anticlockwise
+        // on screen, which is 270 in the clockwise convention rather than a negative angle.
+        #expect(abs(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: 0,
+                                                             headingDegrees: 90,
+                                                             pitchDegrees: 0) - 270)
+                < angleTolerance)
+    }
+
+    @Test("tilt leaves the axes alone and pulls everything between them towards the horizontal")
+    func screenAnglePitch() {
+        let pitch = 35.0   // What MapKit clamps the navigation tilt to at its follow distance.
+        for bearing in [0.0, 90.0, 180.0, 270.0] {
+            let angle = RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: bearing,
+                                                                 headingDegrees: 0,
+                                                                 pitchDegrees: pitch)
+            #expect(abs(angle - bearing) < angleTolerance)
+        }
+        // Foreshortening the screen's vertical axis moves a diagonal towards the horizontal —
+        // away from 0, towards 90 — and by a few degrees at this tilt, not a quadrant.
+        let diagonal = RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: 45,
+                                                                headingDegrees: 0,
+                                                                pitchDegrees: pitch)
+        #expect(diagonal > 45 && diagonal < 55)
+    }
+
+    @Test("the screen angle is always one MapKit can rotate by")
+    func screenAngleIsNormalised() {
+        for bearing in stride(from: 0.0, to: 360.0, by: 11) {
+            for heading in stride(from: 0.0, to: 360.0, by: 23) {
+                let angle = RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: bearing,
+                                                                     headingDegrees: heading,
+                                                                     pitchDegrees: 60)
+                #expect(angle >= 0 && angle < 360)
+            }
+        }
+        // A camera reported mid-transition must not rotate a chevron to NaN.
+        #expect(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: .nan,
+                                                        headingDegrees: 0,
+                                                        pitchDegrees: 0) == 0)
+        #expect(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: 90,
+                                                        headingDegrees: 90,
+                                                        pitchDegrees: .nan) == 0)
+    }
 }

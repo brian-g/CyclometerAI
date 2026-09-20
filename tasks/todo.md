@@ -90,3 +90,71 @@ where it was already correct. `testLargeTypeWrapsCopy` pins the regression.
 "Import a route in the Routes tab, or connect a service." — that screen has no import button
 of its own, so it keeps the "where" and picks up the "or connect a service"; one reference
 re-recorded (`StartSheetSnapshotTests.testPickerEmptyLibrary`).
+
+---
+
+# #258 — Direction-of-travel arrows on the live ride map
+
+Plan: /Users/brian/.claude/plans/velvety-snuggling-whistle.md
+Branch: `fix/route-direction-arrows-live-map`
+
+- [x] 1. RouteDirectionMarkers: spacing-as-input overload
+- [x] 2. RouteDirectionMarkers: `spacingMeters(forCameraDistanceMeters:)`
+- [x] 3. RouteDirectionMarkers: `screenAngleDegrees(bearing:heading:pitch:)`
+- [x] 4. Extract `RouteDirectionChevrons` MapContent; RouteMapContent delegates to it
+- [x] 5. ActiveRideMapView: chevron state, continuous camera capture, draw in cyMapRoute
+- [x] 6. Tests: 10 new, full suite green (1302 passed, 0 failed)
+- [x] 7. Simulator run against a simulated ride — chevrons on both legs, pointing the right way
+
+## Review
+
+### What was wrong
+
+The chevron machinery from #194/#195 was only ever wired to the route-browsing maps. S19 and S20
+draw direction of travel; the live ride map — `ActiveRideMapView`, which is both the W8 dashboard
+widget and its full-screen sheet — drew the loaded route as a bare `MapPolyline`. That is the map
+the rider actually reads mid-ride, and it is where a route doubling back over the same road is
+ambiguous.
+
+### What it took
+
+Reusing the placement arithmetic was most of it. The live map differs from S19/S20 in two ways
+that made the reuse more than a call:
+
+1. **It turns.** `Annotation` content is screen-space and does not counter-rotate, which is why
+   S19 disables rotation outright rather than solving it. Heading-up follow is the live map's whole
+   point, so the angle is now computed: `RouteDirectionMarkers.screenAngleDegrees`.
+2. **It tilts.** A pitched camera's `region` is the box around the frustum and runs to the horizon,
+   so it is useless as a spacing input — `spacingMeters(forCameraDistanceMeters:)` uses
+   `MapCamera.distance`, which the tilt does not touch. The region still culls.
+
+The tilt also foreshortens the screen's vertical axis, so the drawn angle is
+`atan2(sin d, cos d · cos pitch)` rather than `d` — a few degrees at the ~35° MapKit allows at the
+follow distance, but free to get right once the heading correction had to exist anyway.
+
+Placement resamples the whole route, so it runs when the camera settles (and when the rider leaves
+the viewport the current chevrons were placed for — a following widget can go a long way without
+the camera ever settling). Only the rotation follows the camera continuously.
+
+### Verification
+
+Full suite green, 1302 passed. S19/S20 snapshots are unchanged, which is the evidence that the
+extraction of `RouteDirectionChevrons` and the spacing refactor changed nothing for them: both
+defaults are zero, which is a north-up flat map.
+
+Driven on the simulator through a temporary harness view (since importing a route and starting a
+ride through the UI is a much longer road than the thing being checked): a two-leg route, east then
+north, with `simctl location start` riding it at 8 m/s. Chevrons sit on the line, the east leg's
+point east and the north leg's point north, on both the widget and the sheet surface, and they
+re-place as the camera follows.
+
+**Not verified on the simulator:** the heading correction itself. The simulator supplies no compass
+heading, so `followsHeading` never rotates the map there (known — same limitation that shaped #199).
+The correction is covered by unit tests instead, and wants a look on a real ride.
+
+### Judgment call
+
+`minimumSpacingMeters` stays at 300 m. At the widget's follow zoom that is one or two chevrons on
+screen — enough to read the direction, and deliberately not enough to read as the line itself,
+which is what the constant was lowered to 4-across-viewport for in the first place. Easily revisited
+if it reads too sparse on a real ride.

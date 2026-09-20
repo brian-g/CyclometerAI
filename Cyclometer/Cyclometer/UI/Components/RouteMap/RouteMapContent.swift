@@ -12,7 +12,9 @@ import SwiftUI
 ///
 /// Everything that could be *wrong* — where the chevrons go, which way they point — lives in
 /// `RouteDirectionMarkers` as pure arithmetic, because a live `Map` cannot be pixel-snapshot
-/// tested reliably (`RoutesMapCamera.swift:6-9`). This type only draws what it is handed.
+/// tested reliably (`RoutesMapCamera.swift:6-9`). This type only draws what it is handed, and
+/// hands the chevrons themselves to `RouteDirectionChevrons`, which the live ride map draws too
+/// (#258).
 struct RouteMapContent: MapContent {
     let coordinates: [RouteCoordinate]
     /// S19 puts the route's name here, since that is how a rider tells eight polylines apart.
@@ -39,18 +41,9 @@ struct RouteMapContent: MapContent {
                 .stroke(Color.cyPrimary, lineWidth: strokeWidth)
         }
 
-        ForEach(Array(chevrons.enumerated()), id: \.offset) { _, placement in
-            Annotation("", coordinate: placement.coordinate.coordinate2D, anchor: .center) {
-                Image(systemName: "chevron.up")
-                    .font(.cyMapAnnotation)
-                    .foregroundStyle(Color.cyPrimary)
-                    .rotationEffect(.degrees(placement.bearingDegrees))
-                    // Decorative: the flags carry start and finish for VoiceOver, and dozens
-                    // of unlabelled rotated glyphs would only make the map harder to hear.
-                    .accessibilityHidden(true)
-            }
-            .annotationTitles(.hidden)
-        }
+        // No heading or pitch: both screens hold their maps north-up and flat, which is what
+        // lets a screen-space annotation be rotated by the bearing alone (`RoutesView`).
+        RouteDirectionChevrons(placements: chevrons, tint: .cyPrimary)
 
         if let start = coordinates.first {
             Marker(startTitle, systemImage: "flag.fill", coordinate: start.coordinate2D)
