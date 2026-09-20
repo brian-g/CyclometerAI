@@ -116,10 +116,10 @@ extension RouteDetailList where MapRow == RouteDetailMap {
     }
 }
 
-/// S20's map: the route with its start and finish flags and direction-of-travel chevrons, framed
+/// S20's map: the route with its start and finish flags and direction-of-travel arrows, framed
 /// on the route.
 ///
-/// Pan and zoom only, for the chevrons' sake, as on S19's map: `Annotation` content is
+/// Pan and zoom only, for the arrows' sake, as on S19's map: `Annotation` content is
 /// screen-space and does not counter-rotate, so under rotation every arrow would point wrong, and
 /// a pitched camera's region runs to the horizon and would space them for the wrong viewport.
 /// That is why the prototype's `MapPitchToggle` is gone.
@@ -127,7 +127,7 @@ struct RouteDetailMap: View {
     let summary: RouteSummary
     let coordinates: [RouteCoordinate]
 
-    /// What the camera shows. The chevrons space themselves from it, and nil means none at all.
+    /// What the camera shows. The arrows space themselves from it, and nil means none at all.
     @State private var visibleBounds: RouteBounds?
 
     /// Padded and floored around the route's stored bounds, so it is ready before the polyline is.

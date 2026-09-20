@@ -158,3 +158,33 @@ The correction is covered by unit tests instead, and wants a look on a real ride
 screen — enough to read the direction, and deliberately not enough to read as the line itself,
 which is what the constant was lowered to 4-across-viewport for in the first place. Easily revisited
 if it reads too sparse on a real ride.
+
+### Review round two (#258 review — "the arrow is horrible")
+
+Two defects and a glyph, all on S20 as well as the live map:
+
+1. **Arrows pointed up to 90° off the line.** The bearing was taken between arrow *positions* —
+   hundreds of metres apart at a browsing zoom — so on a curving road it described a chord across
+   the bend rather than the stretch of line the arrow sat on. Bearings now come from
+   `RouteGeometry.tangentBearingDegrees`: the line's direction ±15 m of the arrow itself.
+2. **Arrows moved when zooming.** Spacing was a continuous function of the viewport, so every
+   pinch re-placed every arrow. `quantized(_:)` snaps it to a doubling ladder above
+   `baseSpacingMeters`, so a coarse spacing is a multiple of a fine one: zooming in only adds
+   arrows *between* the ones already there.
+3. **Chevron → filled triangle**, at 14 pt rather than 20. An open V on a line its own colour reads
+   as a kink in the line, which is what it looked like.
+
+`minimumSpacingMeters` (300 m) is gone; `baseSpacingMeters` is 100 m, and the ladder means the
+old floor's job — stopping a tight zoom from asking for an arrow every few metres — is done by the
+base rung instead.
+
+Placement no longer resamples the whole route into an array; it walks the distances it wants, and
+`RouteGeometry.coordinate(_:atMeters:cumulative:)` binary-searches the segment, since a long route
+at a fine spacing asks a few hundred times per camera settle.
+
+Tint stays matched to the line (`cyPrimary` on S19/S20, `cyMapRoute` on the live map) — asked and
+confirmed against a white-triangle variant.
+
+Verified with a temporary harness rendering S20's own `RouteMapContent` over a real 1,157-point
+route, at the review screenshot's zoom and at whole-route zoom: triangles sit on the line and point
+along it at both. Full suite green, 1305 passed.

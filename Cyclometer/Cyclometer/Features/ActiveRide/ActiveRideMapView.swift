@@ -29,11 +29,11 @@ struct ActiveRideMapView: View {
     @State private var pendingFollow: MapCameraPosition?
     /// The camera needs seeding, but MapKit has not yet reported one to seed from.
     @State private var isSeedWanted = false
-    /// The route's direction-of-travel chevrons (#258), and the viewport they were placed for.
-    /// Placing them resamples the whole route, so it happens when the camera settles rather than
-    /// on every frame; only their rotation follows the camera continuously.
-    @State private var chevrons: [RouteDirectionMarkers.Placement] = []
-    @State private var chevronBounds: RouteBounds?
+    /// The route's direction-of-travel arrows (#258), and the viewport they were placed for.
+    /// Placing them walks the whole route, so it happens when the camera settles rather than on
+    /// every frame; only their rotation follows the camera continuously.
+    @State private var arrows: [RouteDirectionMarkers.Placement] = []
+    @State private var arrowBounds: RouteBounds?
     @Namespace private var mapScope
 
     init(
@@ -114,8 +114,8 @@ struct ActiveRideMapView: View {
             // Which way the route goes (#258). A route that doubles back over the same road is
             // one ambiguous line without them. Annotations draw above both polylines, so they
             // stay readable over the track already ridden.
-            RouteDirectionChevrons(
-                placements: chevrons,
+            RouteDirectionArrows(
+                placements: arrows,
                 tint: .cyMapRoute,
                 headingDegrees: camera?.heading ?? 0,
                 pitchDegrees: camera?.pitch ?? 0
@@ -127,54 +127,54 @@ struct ActiveRideMapView: View {
         .mapControls {}
         .onMapCameraChange(frequency: .onEnd) { context in
             camera = context.camera
-            placeChevrons(for: context)
+            placeArrows(for: context)
             if pendingFollow != nil {
                 completeSeed()
             } else if isSeedWanted {
                 engage()
             }
         }
-        // A chevron rotated for a heading two seconds old points somewhere the route does not go,
+        // An arrow rotated for a heading two seconds old points somewhere the route does not go,
         // so the heading is taken every frame. This handler only stores the camera — the seeding
         // above still runs on settle, and placement only when the rider has left the viewport the
-        // current chevrons were placed for, which is the case a following widget can reach without
+        // current arrows were placed for, which is the case a following widget can reach without
         // the camera ever settling.
         .onMapCameraChange(frequency: .continuous) { context in
             camera = context.camera
             let center = context.camera.centerCoordinate
-            if let chevronBounds, chevronBounds.contains(latitude: center.latitude,
-                                                         longitude: center.longitude) {
+            if let arrowBounds, arrowBounds.contains(latitude: center.latitude,
+                                                     longitude: center.longitude) {
                 return
             }
-            placeChevrons(for: context)
+            placeArrows(for: context)
         }
     }
 
-    /// Where the chevrons go for the camera `context` reports.
+    /// Where the arrows go for the camera `context` reports.
     ///
     /// Spacing comes from the camera's distance rather than from the region: the map is tilted
     /// while a route is loaded, and a pitched camera's region is the box around the whole frustum,
     /// running to the horizon (`RoutesView.swift`). The region is still what culls.
-    private func placeChevrons(for context: MapCameraUpdateContext) {
+    private func placeArrows(for context: MapCameraUpdateContext) {
         guard route.count > 1, let bounds = RoutesMapCamera.bounds(for: context.region) else {
-            chevrons = []
-            chevronBounds = nil
+            arrows = []
+            arrowBounds = nil
             return
         }
-        chevronBounds = bounds
-        chevrons = RouteDirectionMarkers.placements(
+        arrowBounds = bounds
+        arrows = RouteDirectionMarkers.placements(
             coordinates: route,
             spacingMeters: RouteDirectionMarkers.spacingMeters(
                 forCameraDistanceMeters: context.camera.distance
             ),
             visibleBounds: bounds,
-            limit: Self.chevronLimit
+            limit: Self.arrowLimit
         )
     }
 
-    /// Enough to read the direction along a road on screen without the chevrons becoming the line.
+    /// Enough to read the direction along a road on screen without the arrows becoming the line.
     /// Matches `RouteMapContent`'s cap, since the same spacing constants feed both.
-    private static let chevronLimit = 24
+    private static let arrowLimit = 24
 
     private var sheetControls: some View {
         VStack(spacing: Spacing.sm) {

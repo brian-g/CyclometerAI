@@ -141,6 +141,66 @@ enum RouteGeometry {
         return samples
     }
 
+    /// The point `meters` along the polyline, interpolated within the segment it falls in.
+    ///
+    /// `resampled` answers this for a whole ladder of distances at once; this answers it for one,
+    /// which is what a caller that already knows where it wants to look needs (#258's arrows ask
+    /// for the two points either side of an arrow to read the line's local direction).
+    ///
+    /// Clamped rather than nil at the ends: asking past the finish means the finish.
+    static func coordinate(
+        _ coordinates: [RouteCoordinate],
+        atMeters meters: Double,
+        cumulative: [Double]
+    ) -> RouteCoordinate? {
+        guard coordinates.count > 1, coordinates.count == cumulative.count,
+              let total = cumulative.last, total > 0, meters.isFinite
+        else { return coordinates.first }
+        let distance = min(max(meters, 0), total)
+        // Binary search rather than a walk: an arrow map asks this a few hundred times against a
+        // route that can carry tens of thousands of points, and it runs while the rider is riding.
+        // The segment wanted is the last one starting at or before `distance`.
+        var low = 0
+        var high = coordinates.count - 2
+        while low < high {
+            let middle = (low + high + 1) / 2
+            if cumulative[middle] <= distance { low = middle } else { high = middle - 1 }
+        }
+        let segment = low
+        let spanned = cumulative[segment + 1] - cumulative[segment]
+        let t = spanned <= 0 ? 0 : (distance - cumulative[segment]) / spanned
+        let start = coordinates[segment]
+        let end = coordinates[segment + 1]
+        return RouteCoordinate(
+            latitude: start.latitude + (end.latitude - start.latitude) * t,
+            longitude: start.longitude + (end.longitude - start.longitude) * t,
+            elevationMeters: nil
+        )
+    }
+
+    /// Which way the route runs *where it is* `meters` along it: the bearing of the chord between
+    /// the points `windowMeters` either side, clamped to the route's ends.
+    ///
+    /// The window is what makes this the line's local direction rather than a long-range average.
+    /// #258's first cut took the bearing between arrow positions, which are hundreds of metres
+    /// apart at a browsing zoom — on a curving road that chord can run 90° off the stretch of line
+    /// the arrow is drawn on, and it changed with the zoom, because the positions did.
+    ///
+    /// Nil where the route does not move over the window — a stationary GPX artefact, where due
+    /// north would be a wrong answer that looks like a right one (`bearingDegrees`).
+    static func tangentBearingDegrees(
+        _ coordinates: [RouteCoordinate],
+        atMeters meters: Double,
+        windowMeters window: Double,
+        cumulative: [Double]
+    ) -> Double? {
+        guard window > 0,
+              let behind = coordinate(coordinates, atMeters: meters - window, cumulative: cumulative),
+              let ahead = coordinate(coordinates, atMeters: meters + window, cumulative: cumulative)
+        else { return nil }
+        return bearingDegrees(from: behind, to: ahead)
+    }
+
     /// Where a point falls on a polyline: the nearest point on the route itself, how far along
     /// the route that is, how far off the route the point lies, and which segment it landed on.
     struct Projection: Equatable, Sendable {

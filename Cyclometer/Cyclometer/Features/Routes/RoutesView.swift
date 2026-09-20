@@ -559,7 +559,7 @@ private struct RoutesMapView: View {
             // Pitch and rotation are both off, and both for the filter's sake.
             // `MapCameraUpdateContext.region` is the axis-aligned box around the visible
             // *frustum*: pitched, it runs to the horizon and would match nearly every saved
-            // route while the screen showed a narrow wedge. Rotation is the chevrons' problem —
+            // route while the screen showed a narrow wedge. Rotation is the arrows' problem —
             // `Annotation` content is screen-space and does not counter-rotate, so every arrow
             // would point wrong. A route-browsing map loses nothing by dropping them.
             interactionModes: [.pan, .zoom]
@@ -609,7 +609,7 @@ private struct RoutesMapView: View {
         }
     }
 
-    /// The chevrons need the raw viewport whatever it holds; the filter is absent when the
+    /// The arrows need the raw viewport whatever it holds; the filter is absent when the
     /// viewport already shows everything. Two answers, so two calls.
     private func report(_ region: MKCoordinateRegion) {
         visibleBounds = RoutesMapCamera.bounds(for: region)
@@ -644,7 +644,7 @@ private struct RoutesMapView: View {
     RoutesNavigationStack(store: Store(initialState: RoutesFeature.State()) { RoutesFeature() })
 }
 
-/// Geometry included, so the map draws real polylines with their direction chevrons and end
+/// Geometry included, so the map draws real polylines with their direction arrows and end
 /// flags rather than the bare pins a summary-only mock produces. "River Loop" is closed, which
 /// is the case `RouteMapContent` collapses to a single flag.
 #Preview("Routes — Map") {

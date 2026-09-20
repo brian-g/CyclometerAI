@@ -134,7 +134,7 @@ extension RoutesMapCamera {
     /// nothing is not a filter.
     ///
     /// Separate from `bounds(for:)` because the two answers are wanted in different places: the
-    /// *filter* should be absent at a zoom that shows everything, while the direction chevrons
+    /// *filter* should be absent at a zoom that shows everything, while the direction arrows
     /// still need to know what is on screen in order to space themselves. Collapsing the two
     /// would leave a library spread across two continents with a chip on screen from the moment
     /// the map opened, explaining an exclusion that was not happening.

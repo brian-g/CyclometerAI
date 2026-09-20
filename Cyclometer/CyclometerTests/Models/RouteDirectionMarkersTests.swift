@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Cyclometer
 
-/// #194 / #195 — where the direction-of-travel chevrons go.
+/// #194 / #195 / #258 — where the direction-of-travel arrows go, and which way they point.
 ///
 /// The placement is kept out of the `MapContent` precisely so it can be tested here: a live
 /// `Map` renders tiles asynchronously and cannot be pixel-snapshotted reliably, so anything
@@ -39,7 +39,7 @@ struct RouteDirectionMarkersTests {
         minLongitude: -122.05, maxLongitude: -121.85
     )
 
-    @Test("no viewport means no chevrons")
+    @Test("no viewport means no arrows")
     func nilBoundsYieldsNothing() {
         // Spacing is a fraction of what is on screen. Falling back to the route's own length
         // would make the same route read differently on two screens.
@@ -47,7 +47,7 @@ struct RouteDirectionMarkersTests {
                                                  visibleBounds: nil).isEmpty)
     }
 
-    @Test("spacing is a fraction of the viewport, so zooming in brings chevrons closer together")
+    @Test("spacing is a fraction of the viewport, so zooming in brings arrows closer together")
     func spacingScalesWithTheViewport() {
         let zoomedOut = RouteDirectionMarkers.spacingMeters(for: wideViewport)
         let zoomedIn = RouteDirectionMarkers.spacingMeters(
@@ -55,21 +55,23 @@ struct RouteDirectionMarkersTests {
                              minLongitude: -122.01, maxLongitude: -121.99)
         )
         #expect(zoomedIn < zoomedOut)
-        // ~17.8 km of longitude at this latitude, shared out over however many chevrons the
-        // constant asks for — read from the constant so tuning the density does not silently
-        // invalidate this.
-        #expect(abs(zoomedOut - 17_800 / RouteDirectionMarkers.chevronsAcrossViewport) < 200)
+        // ~17.8 km of longitude at this latitude, shared out over however many arrows the
+        // constant asks for, then rounded up to the next rung of the ladder (#258 review) —
+        // read from the constants so tuning the density does not silently invalidate this.
+        #expect(zoomedOut == RouteDirectionMarkers.quantized(
+            17_800 / RouteDirectionMarkers.arrowsAcrossViewport
+        ))
     }
 
-    @Test("spacing never falls below the floor, however far the rider zooms in")
+    @Test("spacing never falls below the base rung, however far the rider zooms in")
     func spacingIsFloored() {
         let tiny = RouteBounds(minLatitude: 37.0, maxLatitude: 37.0001,
                                minLongitude: -122.0, maxLongitude: -121.9999)
         #expect(RouteDirectionMarkers.spacingMeters(for: tiny)
-                == RouteDirectionMarkers.minimumSpacingMeters)
+                == RouteDirectionMarkers.baseSpacingMeters)
     }
 
-    @Test("chevrons point along the route")
+    @Test("arrows point along the route")
     func bearingFollowsTheRoute() {
         let eastward = RouteDirectionMarkers.placements(coordinates: eastwardRoute,
                                                         visibleBounds: wideViewport)
@@ -85,15 +87,15 @@ struct RouteDirectionMarkersTests {
         }
     }
 
-    @Test("no chevron lands on the route's first point, where the start flag sits")
-    func firstPointCarriesNoChevron() {
+    @Test("no arrow lands on the route's first point, where the start flag sits")
+    func firstPointCarriesNoArrow() {
         let placements = RouteDirectionMarkers.placements(coordinates: eastwardRoute,
                                                           visibleBounds: wideViewport)
         let start = eastwardRoute[0]
         #expect(!placements.contains { $0.coordinate == start })
     }
 
-    @Test("chevrons outside the viewport are culled")
+    @Test("arrows outside the viewport are culled")
     func placementsAreCulledToTheViewport() {
         // Only the western third of the route is on screen.
         let westernSliver = RouteBounds(minLatitude: 36.9, maxLatitude: 37.1,
@@ -116,9 +118,9 @@ struct RouteDirectionMarkersTests {
     }
 
     @Test("a route shorter than one spacing still says which way it runs")
-    func shortRouteStillGetsAChevron() {
-        // 150 m of road with a 2 km spacing resamples to a single point, which would otherwise
-        // leave no pair to take a bearing from.
+    func shortRouteStillGetsAnArrow() {
+        // 150 m of road is shorter than one spacing at any zoom, so the ladder puts no arrow on
+        // it at all — the midpoint case is what still says which way it runs.
         let short = [coordinate(37.0, -122.0), coordinate(37.0, -121.9983)]
         let placements = RouteDirectionMarkers.placements(coordinates: short,
                                                           visibleBounds: wideViewport)
@@ -137,10 +139,10 @@ struct RouteDirectionMarkersTests {
                                                  visibleBounds: wideViewport).isEmpty)
     }
 
-    @Test("how densely the source GPX was sampled does not change the chevrons")
+    @Test("how densely the source GPX was sampled does not change the arrows")
     func samplingDensityDoesNotMatter() {
-        // The same road described by two points and by fifty. #192's whole reason for
-        // `resampled` was that reasoning about array indices as if they were distances makes
+        // The same road described by two points and by fifty. #192's whole reason for measuring
+        // along the route was that reasoning about array indices as if they were distances makes
         // the answer depend on which planning tool wrote the file.
         let sparse = eastwardRoute
         let dense = (0...50).map { step in
@@ -160,7 +162,7 @@ struct RouteDirectionMarkersTests {
         }
     }
 
-    @Test("capping spreads the chevrons over the whole line rather than truncating it")
+    @Test("capping spreads the arrows over the whole line rather than truncating it")
     func limitIsSpreadNotTruncated() {
         // Spacing is measured along the *route*, not across the screen, so a line that doubles
         // back inside one viewport yields far more in-view samples than the cap. Taking the
@@ -172,21 +174,21 @@ struct RouteDirectionMarkersTests {
                                                       visibleBounds: zigzagViewport, limit: 6)
         #expect(uncapped.count > 6)
         #expect(capped.count == 6)
-        // The last capped chevron must sit near the end of the line, not a sixth of the way in.
+        // The last capped arrow must sit near the end of the line, not a sixth of the way in.
         let lastCapped = try! #require(capped.last).coordinate.longitude
         let lastUncapped = try! #require(uncapped.last).coordinate.longitude
         #expect(abs(lastCapped - lastUncapped) < 0.01)
     }
 
-    @Test("a cap of one puts its chevron in the middle of the line")
+    @Test("a cap of one puts its arrow in the middle of the line")
     func limitOfOneDoesNotDivideByZero() {
         let capped = RouteDirectionMarkers.placements(coordinates: zigzagRoute,
                                                       visibleBounds: zigzagViewport, limit: 1)
         #expect(capped.count == 1)
-        // The middle third of the line: the point is that one chevron lands in the body of the
+        // The middle third of the line: the point is that one arrow lands in the body of the
         // route rather than on its opening stretch, not that it hits the exact halfway metre —
-        // placements are indexed from the first sample after the start flag, so the index
-        // midpoint sits slightly beyond the geographic one.
+        // placements are indexed from the first one after the start flag, so the index midpoint
+        // sits slightly beyond the geographic one.
         let longitude = try! #require(capped.first).coordinate.longitude
         #expect(longitude < -121.9833 && longitude > -121.9967)
     }
@@ -198,26 +200,28 @@ struct RouteDirectionMarkersTests {
     /// that could be seen on a map and far looser than the round trip's error.
     private let angleTolerance = 0.001
 
-    @Test("camera distance sets the spacing, with the same floor as a viewport does")
+    @Test("camera distance sets the spacing, on the same ladder as a viewport does")
     func cameraDistanceSpacing() {
-        // Far enough out that the fraction-of-the-viewport rule governs.
+        // Far enough out that the fraction-of-the-viewport rule governs, rounded to its rung.
         #expect(RouteDirectionMarkers.spacingMeters(forCameraDistanceMeters: 4_000)
-                == 4_000 / RouteDirectionMarkers.chevronsAcrossViewport)
-        // Close in, the floor is what stops a widget following the rider from asking for a
-        // chevron every few metres.
+                == RouteDirectionMarkers.quantized(
+                    4_000 / RouteDirectionMarkers.arrowsAcrossViewport
+                ))
+        // Close in, the base rung is what stops a widget following the rider from asking for an
+        // arrow every few metres.
         #expect(RouteDirectionMarkers.spacingMeters(forCameraDistanceMeters: 200)
-                == RouteDirectionMarkers.minimumSpacingMeters)
+                == RouteDirectionMarkers.baseSpacingMeters)
         // MapKit has been known to report a camera mid-transition; neither a zero nor a
-        // non-finite distance may produce a spacing that resampling would spin on.
+        // non-finite distance may produce a spacing the placement walk would spin on.
         #expect(RouteDirectionMarkers.spacingMeters(forCameraDistanceMeters: 0)
-                == RouteDirectionMarkers.minimumSpacingMeters)
+                == RouteDirectionMarkers.baseSpacingMeters)
         #expect(RouteDirectionMarkers.spacingMeters(forCameraDistanceMeters: .nan)
-                == RouteDirectionMarkers.minimumSpacingMeters)
+                == RouteDirectionMarkers.baseSpacingMeters)
         #expect(RouteDirectionMarkers.spacingMeters(forCameraDistanceMeters: -1)
-                == RouteDirectionMarkers.minimumSpacingMeters)
+                == RouteDirectionMarkers.baseSpacingMeters)
     }
 
-    @Test("a spacing passed in places the same chevrons a viewport would derive")
+    @Test("a spacing passed in places the same arrows a viewport would derive")
     func explicitSpacingMatchesDerivedSpacing() {
         let derived = RouteDirectionMarkers.placements(coordinates: zigzagRoute,
                                                        visibleBounds: zigzagViewport)
@@ -289,5 +293,96 @@ struct RouteDirectionMarkersTests {
         #expect(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: 90,
                                                         headingDegrees: 90,
                                                         pitchDegrees: .nan) == 0)
+    }
+
+    // MARK: - #258 review: the arrows shifted on zoom and pointed the wrong way
+
+    /// A road bending through a quarter circle — a suburban curve, the shape that made the first
+    /// cut point an arrow ~90° off the line it was drawn on.
+    private var curvingRoute: [RouteCoordinate] {
+        (0...90).map { degrees in
+            let radians = Double(degrees) * .pi / 180
+            // ~1.1 km radius, from due north at the start round to due east at the end.
+            return coordinate(37.0 + 0.01 * sin(radians), -122.0 + 0.0125 * (1 - cos(radians)))
+        }
+    }
+
+    @Test("an arrow points along the line where it sits, not at the next arrow")
+    func bearingIsLocalNotChordToTheNextArrow() {
+        // The bug: bearings were taken between arrow *positions*, hundreds of metres apart at a
+        // browsing zoom. On a curve that chord runs at an angle to the stretch of line the arrow
+        // is drawn on — up to 90° out, which is what shipped.
+        let bounds = RouteBounds(minLatitude: 36.99, maxLatitude: 37.02,
+                                 minLongitude: -122.01, maxLongitude: -121.98)
+        // An explicit fine spacing: the curve is under 2 km long, so the spacing this viewport
+        // would derive puts two arrows on it, and two is too few to catch a bearing that drifts
+        // round the bend.
+        let placements = RouteDirectionMarkers.placements(
+            coordinates: curvingRoute,
+            spacingMeters: RouteDirectionMarkers.baseSpacingMeters,
+            visibleBounds: bounds,
+            limit: 100
+        )
+        #expect(placements.count > 10)
+        // ...and the arrows must actually turn with the road, or a bearing frozen at the start
+        // would pass the per-arrow check below by accident.
+        let bearings = placements.map(\.bearingDegrees)
+        let first = try! #require(bearings.first)
+        let last = try! #require(bearings.last)
+        #expect(abs(last - first) > 45)
+        let cumulative = RouteGeometry.cumulativeDistances(curvingRoute)
+        for placement in placements {
+            // The direction of the curve at the arrow's own position, measured independently.
+            let projection = try! #require(RouteGeometry.projection(of: placement.coordinate,
+                                                                    onto: curvingRoute,
+                                                                    cumulative: cumulative))
+            let local = try! #require(RouteGeometry.tangentBearingDegrees(
+                curvingRoute,
+                atMeters: projection.distanceAlongRouteMeters,
+                windowMeters: 5,
+                cumulative: cumulative
+            ))
+            var error = abs(placement.bearingDegrees - local)
+            if error > 180 { error = 360 - error }
+            #expect(error < 5)
+        }
+    }
+
+    @Test("zooming in leaves the arrows already on screen where they are")
+    func arrowsDoNotShiftOnZoom() {
+        // The second half of the #258 review: spacing derived straight from the viewport is a
+        // continuous function of it, so every pinch moved every arrow. On the ladder, a coarser
+        // spacing is a multiple of a finer one, so its arrows are a subset of the finer set.
+        let fine = RouteDirectionMarkers.placements(coordinates: curvingRoute,
+                                                    spacingMeters: RouteDirectionMarkers.baseSpacingMeters,
+                                                    visibleBounds: wideViewport,
+                                                    limit: 1_000)
+        let coarse = RouteDirectionMarkers.placements(
+            coordinates: curvingRoute,
+            spacingMeters: RouteDirectionMarkers.baseSpacingMeters * 4,
+            visibleBounds: wideViewport,
+            limit: 1_000
+        )
+        #expect(coarse.count > 1)
+        #expect(fine.count > coarse.count)
+        for placement in coarse {
+            #expect(fine.contains { $0.coordinate == placement.coordinate })
+        }
+    }
+
+    @Test("every spacing the viewport can ask for lands on a rung of the same ladder")
+    func spacingIsAlwaysOnTheLadder() {
+        let base = RouteDirectionMarkers.baseSpacingMeters
+        for desired in stride(from: 10.0, through: 20_000.0, by: 137.0) {
+            let spacing = RouteDirectionMarkers.quantized(desired)
+            #expect(spacing >= base)
+            // A power-of-two multiple of the base, and never finer than asked for by more than
+            // one rung.
+            let rungs = log2(spacing / base)
+            #expect(abs(rungs - rungs.rounded()) < 1e-9)
+            #expect(spacing >= desired || spacing == base)
+        }
+        #expect(RouteDirectionMarkers.quantized(.nan) == base)
+        #expect(RouteDirectionMarkers.quantized(0) == base)
     }
 }
