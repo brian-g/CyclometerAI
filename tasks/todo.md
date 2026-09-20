@@ -60,3 +60,33 @@ there are no maneuvers between 4600 m and 5380 m.
    finished loop. Root cause is that the test measured span along the route rather than ground
    ridden. `lapCoveredMeters` accumulates only the step between consecutive on-route fixes, so a
    rejoin credits nothing and both cases come out right.
+
+---
+
+## #253 / #254 / #255 — onboarding and Routes copy (2026-09-19)
+
+- [x] #253 — Routes empty state: "Import a route from the Files app to ride it." → "Import a route to ride, or connect a service." (`RoutesView.emptyLibrary`)
+- [x] #255 — S02 Add Sensors button: "Next" → "Finish" (last onboarding step), plus the stale "Next button" doc comments in `SensorPairingView`
+- [x] #254 — S01 welcome copy truncated instead of wrapping
+- [x] Re-record moved snapshot references (SensorPairing ×2, Routes empty ×2), full suite green
+
+### Review
+
+**#254 root cause.** `WelcomeView`'s copy sat in a plain `VStack` that handed it whatever
+vertical space was left after the permission rows, guidance text and Next button. `Text`
+answers a too-short height proposal by truncating to a single line, so at an accessibility
+text size — or on a shorter phone — each paragraph collapsed to "Real-time radar, metrics,
+and intelligence —…" and the second paragraph vanished entirely. Reproduced with a throwaway
+snapshot at 375×667 and at `.accessibilityLarge`, both of which showed the truncation.
+
+**Fix.** The header/copy/permission-rows column moved into a `ScrollView` with
+`.fixedSize(horizontal: false, vertical: true)`, so the copy is always proposed its ideal
+height and overflow scrolls instead of being squeezed. The guidance text and Next button stay
+pinned below, unchanged. At default type on a full-size phone nothing scrolls — the three
+existing Welcome references passed unmodified, which is the proof the layout is untouched
+where it was already correct. `testLargeTypeWrapsCopy` pins the regression.
+
+**Follow-up.** S20's route picker carried its own variant of the #253 string. Aligned to
+"Import a route in the Routes tab, or connect a service." — that screen has no import button
+of its own, so it keeps the "where" and picks up the "or connect a service"; one reference
+re-recorded (`StartSheetSnapshotTests.testPickerEmptyLibrary`).

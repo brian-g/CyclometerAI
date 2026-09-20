@@ -7,38 +7,51 @@ struct WelcomeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
-            HStack() {
-                Text("Welcome to Cyclometer").font(Font.largeTitle.bold())
-                Spacer()
-                Image("cyclometer.rider").resizable().frame(width:75, height: 75).aspectRatio(contentMode: .fill)
-                    
-            }
-            Text("Ride faster. Arrive safer.")
-                .font(.title2)
-                .foregroundStyle(Color.cyTextPrimary)
+            // Scrolled rather than squeezed: a plain VStack hands the copy whatever
+            // vertical space is left over, and SwiftUI answers a too-short proposal by
+            // truncating each paragraph to one line instead of wrapping it (#254). The
+            // scroll view proposes the copy's ideal height, so it always wraps in full;
+            // at default type on a full-size phone nothing actually scrolls.
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.xl) {
+                    HStack() {
+                        Text("Welcome to Cyclometer").font(Font.largeTitle.bold())
+                        Spacer()
+                        Image("cyclometer.rider").resizable().frame(width:75, height: 75).aspectRatio(contentMode: .fill)
 
-            Text("""
-            Real-time radar, metrics, and intelligence — built for cyclists who take the road seriously.
+                    }
+                    Text("Ride faster. Arrive safer.")
+                        .font(.title2)
+                        .foregroundStyle(Color.cyTextPrimary)
 
-            Let's get started, first we need you to grant some permissions. Tap on each item to grant permission. When completed, tap Next.
-            """)
-                .font(.body)
-                .foregroundStyle(Color.cyTextPrimary)
+                    Text("""
+                    Real-time radar, metrics, and intelligence — built for cyclists who take the road seriously.
 
-            VStack(spacing: Spacing.md) {
-                ForEach(PermissionDomain.allCases, id: \.self) { domain in
-                    PermissionRow(title: Self.label(for: domain), state: store.state.state(for: domain))
-                        .contentShape(.rect)
-                        .onTapGesture { store.send(.rowTapped(domain)) }
+                    Let's get started, first we need you to grant some permissions. Tap on each item to grant permission. When completed, tap Next.
+                    """)
+                        .font(.body)
+                        .foregroundStyle(Color.cyTextPrimary)
+
+                    VStack(spacing: Spacing.md) {
+                        ForEach(PermissionDomain.allCases, id: \.self) { domain in
+                            PermissionRow(title: Self.label(for: domain), state: store.state.state(for: domain))
+                                .contentShape(.rect)
+                                .onTapGesture { store.send(.rowTapped(domain)) }
+                        }
+                    }
                 }
+                // Every Text above is multi-line at some type size; without this they
+                // each collapse to a truncated single line when space runs short.
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Spacer()
+            .scrollBounceBehavior(.basedOnSize)
 
             if !store.state.isNextEnabled {
                 Text("You must give permissions to use Bluetooth, Location, and Motion. HealthKit is optional.")
                     .font(.subheadline)
                     .foregroundStyle(Color.cyTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Button {

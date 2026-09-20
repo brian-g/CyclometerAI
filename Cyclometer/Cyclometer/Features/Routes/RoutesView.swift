@@ -178,7 +178,7 @@ struct RoutesView: View {
         ContentUnavailableView {
             Label("No Routes", systemImage: RouteLibrary.symbolName)
         } description: {
-            Text("Import a route from the Files app to ride it.")
+            Text("Import a route to ride, or connect a service.")
         } actions: {
             Button("Import Route") { store.send(.importButtonTapped) }
                 .disabled(store.isImporting)
