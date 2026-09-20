@@ -248,3 +248,33 @@ Full suite green, 1308 passed.
 fewer", which is wrong under any correct rule: a tighter viewport holds less line. The requirement
 is only that arrows still on screen have not moved, plus that the spacing never coarsens on the way
 in. Both are now asserted.
+
+### Review round (/code-review high)
+
+Seven findings, all taken. Three were behaviour, and all three sat in zooms or motions my tests
+never entered.
+
+1. **Stacking on a distant route.** Density counted arrows on the visible line with no floor on
+   their separation *on screen*. S19 opens ~160 km wide, where a 5 km route is a dot — counting
+   alone put a dozen arrows on that dot. `spacingFloor(for:)` says two arrows are never closer
+   than a twelfth of the screen, snapped up to a rung so the nesting survives. The climb starts
+   there.
+2. **The live map ran out of arrows ahead of the rider.** The box arrows were culled to and the
+   box that triggered re-placement were the same box, so the supply ahead hit zero exactly as the
+   re-placement fired. Arrows are now *drawn* over a 3× box (`LiveMapCamera.arrowBounds`) and
+   *counted* against the screen-sized one, and `needsArrowRefresh` fires once the rider is half a
+   screen in.
+3. **A camera write per frame.** The continuous handler stored the whole camera, which rebuilt the
+   track polyline — thousands of points on a long ride — at the camera's update rate, on a free
+   ride too. It now stores only heading and pitch, rounded to the degree, and only while a route
+   is loaded.
+4. **Per-route arrow sizes on S19.** Each route ran its own climb and the glyph was sized from the
+   rung it settled at, so two routes on one screen drew different arrows. `Arrows.pointSize` comes
+   from the viewport's floor instead: same screen, same arrow, whatever each route's density.
+5. **The live map's box is north-aligned and square** while the map is heading-up and tilted. The
+   3× drawing margin covers it; both approximations are now written down where the box is built.
+6. A size-stability test compared the same value three times. Distinct spacings on one rung now.
+7. A doc comment for `cyTurnGlyph` had been clipped by an earlier hunk. Restored.
+
+Full suite green, 1314 passed. Read at three zooms including S19's opening one, where the route is
+a blob: 25600 m · 2 arrows, 6400 m · 10 arrows, and no stack.

@@ -389,7 +389,11 @@ struct RouteDirectionMarkersTests {
         // Sized off the raw viewport, a pinch would grow the arrows smoothly; sized off the rung,
         // it changes at exactly the zooms that add or remove arrows.
         let base = RouteDirectionMarkers.baseSpacingMeters
-        let withinARung = [base * 2, base * 2.0, base * 2]
+        // Distinct spacings that sit on the same rung must size identically. (Written first as
+        // the same value three times, which proved nothing — #258 review.)
+        // Between one rung and the midpoint to the next (2^1.5 ≈ 2.83), which is where the
+        // rounding sends a spacing back down to its own rung.
+        let withinARung = [base * 2, base * 2.2, base * 2.7]
         let sizes = Set(withinARung.map(RouteDirectionMarkers.arrowPoints(forSpacingMeters:)))
         #expect(sizes.count == 1)
         // Two viewports a hair apart but either side of a rung boundary place different numbers
@@ -459,5 +463,72 @@ struct RouteDirectionMarkersTests {
         // Spread around the loop, not clustered on one side of it.
         let north = arrows.placements.filter { $0.coordinate.latitude > 37.0 }.count
         #expect(north > 0 && north < arrows.placements.count)
+    }
+
+    // MARK: - #258 review: stacking, sizing and the drawing margin
+
+    @Test("a route that is only a dot on screen does not stack arrows on it")
+    func aDistantRouteDoesNotStack() {
+        // S19 opens on a viewport around 160 km wide (`RoutesMapCamera.riderRadiusMeters`), where
+        // a saved route a few km long renders as a dot. Counting arrows on the visible line alone
+        // would happily put a dozen of them on that dot; the floor is what forbids it.
+        let wholeCounty = RouteBounds(minLatitude: 36.3, maxLatitude: 37.7,
+                                      minLongitude: -122.9, maxLongitude: -121.1)
+        let arrows = RouteDirectionMarkers.arrows(coordinates: eastwardRoute,
+                                                  visibleBounds: wholeCounty)
+        // 8.9 km of route against a ~160 km viewport: the floor is far longer than the route, so
+        // it gets the single midpoint arrow rather than a stack.
+        #expect(arrows.placements.count <= 1)
+        #expect(arrows.spacingMeters >= RouteDirectionMarkers.spacingFloor(for: wholeCounty))
+    }
+
+    @Test("the floor keeps arrows a twelfth of the screen apart, on a rung")
+    func spacingFloorFollowsTheViewport() {
+        let base = RouteDirectionMarkers.baseSpacingMeters
+        // ~17.8 km of longitude at this latitude.
+        let wide = RouteDirectionMarkers.spacingFloor(for: wideViewport)
+        #expect(wide >= 17_800 / Double(RouteDirectionMarkers.targetArrowsInView))
+        let rungs = log2(wide / base)
+        #expect(abs(rungs - rungs.rounded()) < 1e-9)
+        // A viewport a few hundred metres wide asks for nothing finer than the base rung.
+        let street = RouteBounds(minLatitude: 37.0, maxLatitude: 37.002,
+                                 minLongitude: -122.0, maxLongitude: -121.998)
+        #expect(RouteDirectionMarkers.spacingFloor(for: street) == base)
+    }
+
+    @Test("two routes in one viewport draw the same size arrow")
+    func sizeIsPerViewportNotPerRoute() {
+        // S19 draws every saved route at once, each with its own climb. If the glyph were sized
+        // from the rung a route settled at, a short route and a long one on the same screen would
+        // be drawn with different arrows.
+        let long = (0...200).map { coordinate(37.0, -122.0 + 0.4 * Double($0) / 200) }
+        let short = eastwardRoute
+        let viewport = RouteBounds(minLatitude: 36.5, maxLatitude: 37.5,
+                                   minLongitude: -122.5, maxLongitude: -121.5)
+        let fromLong = RouteDirectionMarkers.arrows(coordinates: long, visibleBounds: viewport)
+        let fromShort = RouteDirectionMarkers.arrows(coordinates: short, visibleBounds: viewport)
+        #expect(fromLong.pointSize == fromShort.pointSize)
+    }
+
+    @Test("arrows are drawn beyond the screen when the caller asks for a margin")
+    func drawingBoundsWidensWithoutCoarsening() {
+        let screen = RouteBounds(minLatitude: 36.99, maxLatitude: 37.01,
+                                 minLongitude: -122.0, maxLongitude: -121.985)
+        let wider = RouteBounds(minLatitude: 36.97, maxLatitude: 37.03,
+                                minLongitude: -122.0, maxLongitude: -121.955)
+        let onScreen = RouteDirectionMarkers.arrows(coordinates: eastwardRoute,
+                                                    visibleBounds: screen)
+        let withMargin = RouteDirectionMarkers.arrows(coordinates: eastwardRoute,
+                                                      visibleBounds: screen,
+                                                      drawingBounds: wider)
+        // More arrows, further along the road — and at the same spacing, because the margin must
+        // not be counted into the density.
+        #expect(withMargin.placements.count > onScreen.placements.count)
+        #expect(withMargin.spacingMeters == onScreen.spacingMeters)
+        #expect(withMargin.pointSize == onScreen.pointSize)
+        // Every arrow on screen is still drawn, in the same place.
+        for arrow in onScreen.placements {
+            #expect(withMargin.placements.contains(arrow))
+        }
     }
 }

@@ -34,6 +34,23 @@ struct ActiveRideMapView: View {
     /// every frame; only their rotation follows the camera continuously.
     @State private var arrows = RouteDirectionMarkers.Arrows.none
     @State private var arrowBounds: RouteBounds?
+    /// Which way up the arrows are drawn. Its own state, and rounded to the degree, because it is
+    /// the one thing that has to follow the camera continuously — writing the whole camera on
+    /// every frame would rebuild the track polyline (thousands of points on a long ride) at the
+    /// camera's update rate, on a screen that is on for the whole ride.
+    @State private var arrowPose = ArrowPose()
+
+    /// The camera pose an arrow is drawn at, to the degree.
+    private struct ArrowPose: Equatable {
+        var headingDegrees: Double = 0
+        var pitchDegrees: Double = 0
+
+        init() {}
+        init(_ camera: MapCamera) {
+            headingDegrees = camera.heading.rounded()
+            pitchDegrees = camera.pitch.rounded()
+        }
+    }
     @Namespace private var mapScope
 
     init(
@@ -116,12 +133,10 @@ struct ActiveRideMapView: View {
             // stay readable over the track already ridden.
             RouteDirectionArrows(
                 placements: arrows.placements,
-                pointSize: RouteDirectionMarkers.arrowPoints(
-                    forSpacingMeters: arrows.spacingMeters
-                ),
+                pointSize: arrows.pointSize,
                 tint: .cyMapRoute,
-                headingDegrees: camera?.heading ?? 0,
-                pitchDegrees: camera?.pitch ?? 0
+                headingDegrees: arrowPose.headingDegrees,
+                pitchDegrees: arrowPose.pitchDegrees
             )
         }
         .mapStyle(.standard(elevation: .realistic))
@@ -138,18 +153,16 @@ struct ActiveRideMapView: View {
             }
         }
         // An arrow rotated for a heading two seconds old points somewhere the route does not go,
-        // so the heading is taken every frame. This handler only stores the camera — the seeding
-        // above still runs on settle, and placement only when the rider has left the viewport the
-        // current arrows were placed for, which is the case a following widget can reach without
-        // the camera ever settling.
+        // so the way up is taken every frame — but only that, and only to the degree, and only
+        // while there is a route to draw arrows on. A following widget can also ride a long way
+        // without the camera ever settling, so this is where that re-placement has to happen too.
         .onMapCameraChange(frequency: .continuous) { context in
-            camera = context.camera
-            let center = context.camera.centerCoordinate
-            if let arrowBounds, arrowBounds.contains(latitude: center.latitude,
-                                                     longitude: center.longitude) {
-                return
+            guard route.count > 1 else { return }
+            let pose = ArrowPose(context.camera)
+            if pose != arrowPose { arrowPose = pose }
+            if LiveMapCamera.needsArrowRefresh(camera: context.camera, placedFor: arrowBounds) {
+                placeArrows(for: context)
             }
-            placeArrows(for: context)
         }
     }
 
@@ -159,15 +172,21 @@ struct ActiveRideMapView: View {
     /// while a route is loaded, and a pitched camera's region runs to the horizon — see
     /// `LiveMapCamera.visibleBounds(for:)`.
     private func placeArrows(for context: MapCameraUpdateContext) {
-        guard route.count > 1, let bounds = LiveMapCamera.visibleBounds(for: context.camera) else {
+        guard route.count > 1,
+              let bounds = LiveMapCamera.visibleBounds(for: context.camera)
+        else {
             arrows = .none
             arrowBounds = nil
             return
         }
+        arrowPose = ArrowPose(context.camera)
         arrowBounds = bounds
         arrows = RouteDirectionMarkers.arrows(
             coordinates: route,
             visibleBounds: bounds,
+            // Drawn wider than they are counted, so the rider does not ride into an empty road
+            // between re-placements, and so the tilt's extra ground is covered.
+            drawingBounds: LiveMapCamera.arrowBounds(for: context.camera),
             limit: Self.arrowLimit
         )
     }

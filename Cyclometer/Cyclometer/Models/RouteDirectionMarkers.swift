@@ -99,31 +99,74 @@ enum RouteDirectionMarkers {
     /// cannot disagree.
     struct Arrows: Equatable, Sendable {
         var placements: [Placement]
+        /// The rung the climb settled at. Per route, so it says nothing about the glyph.
         var spacingMeters: Double
+        /// How big to draw each one. Derived from the *viewport*, not from `spacingMeters`, so
+        /// two routes on one screen are drawn with the same arrow even when a long one and a
+        /// short one settle at different rungs (S19 draws every saved route at once).
+        var pointSize: Double
 
-        static let none = Arrows(placements: [], spacingMeters: baseSpacingMeters)
+        static let none = Arrows(placements: [], spacingMeters: baseSpacingMeters,
+                                 pointSize: baseArrowPoints)
     }
 
-    /// Arrows along `coordinates`, as many as `limit` allows, culled to `visibleBounds`.
+    /// The closest two arrows may ever be drawn *on screen*, expressed as a spacing on the ground.
     ///
-    /// The spacing is found rather than given: start at the finest rung of the ladder and climb
-    /// until no more than `limit` arrows are on screen. What sets the density is therefore how
-    /// much *line* is in view, which is what the rider's eye judges — the same viewport reading
-    /// a straight road and a loop that doubles through it four times should not get the same
-    /// number of arrows.
+    /// The density rule counts arrows on the visible line, which is right until the line is barely
+    /// on the screen at all: S19 opens on a viewport 160 km wide, where a 5 km route renders as a
+    /// dot, and counting alone would happily stack a dozen arrows on that dot. A floor of the
+    /// viewport's width over `targetArrowsInView` says that whatever else happens, two arrows are
+    /// never closer together than a twelfth of the screen.
+    ///
+    /// Snapped up to a rung of the ladder, because the climb starts here and every rung above it
+    /// must stay a multiple of the base for the nesting to hold.
+    static func spacingFloor(for visibleBounds: RouteBounds) -> Double {
+        // The viewport's east-west extent, measured on the tangent plane at its own middle
+        // latitude — the same primitive every other distance in this app is built on, so the
+        // floor cannot disagree with the route lengths it is drawn against.
+        let centerLatitude = visibleBounds.center.latitude
+        let width = RouteGeometry.tangentPlaneOffset(
+            from: RouteCoordinate(latitude: centerLatitude,
+                                  longitude: visibleBounds.minLongitude,
+                                  elevationMeters: nil),
+            to: RouteCoordinate(latitude: centerLatitude,
+                                longitude: visibleBounds.maxLongitude,
+                                elevationMeters: nil)
+        ).east
+        guard width.isFinite else { return baseSpacingMeters }
+        let wanted = abs(width) / Double(targetArrowsInView)
+        guard wanted > baseSpacingMeters else { return baseSpacingMeters }
+        return baseSpacingMeters * pow(2, log2(wanted / baseSpacingMeters).rounded(.up))
+    }
+
+    /// Arrows along `coordinates`, as many as `limit` allows, for the viewport `visibleBounds`.
+    ///
+    /// The spacing is found rather than given: start at the floor the viewport sets and climb the
+    /// ladder until no more than `limit` arrows are on screen. What sets the density is therefore
+    /// how much *line* is in view — the same viewport reading a straight road and a loop that
+    /// doubles through it four times should not get the same number of arrows — while the floor
+    /// keeps arrows from stacking on a route that is only a dot on the screen.
+    ///
+    /// `drawingBounds` is where arrows are actually placed, and defaults to the viewport. The live
+    /// map passes something wider: it only re-places when the rider leaves the viewport, so arrows
+    /// have to already exist beyond it or the rider rides into an empty road (#258 review).
     ///
     /// Nil bounds means no arrows: the caller has no camera yet, and there is nothing to count
     /// arrows against.
     static func arrows(
         coordinates: [RouteCoordinate],
         visibleBounds: RouteBounds?,
+        drawingBounds: RouteBounds? = nil,
         limit: Int = targetArrowsInView
     ) -> Arrows {
         guard let visibleBounds else { return .none }
+        let floor = spacingFloor(for: visibleBounds)
         return arrows(
             coordinates: coordinates,
-            spacingMeters: baseSpacingMeters,
+            spacingMeters: floor,
             visibleBounds: visibleBounds,
+            drawingBounds: drawingBounds,
+            pointSize: arrowPoints(forSpacingMeters: floor),
             limit: limit
         )
     }
@@ -147,6 +190,8 @@ enum RouteDirectionMarkers {
         coordinates: [RouteCoordinate],
         spacingMeters requestedSpacing: Double,
         visibleBounds: RouteBounds,
+        drawingBounds: RouteBounds? = nil,
+        pointSize: Double = baseArrowPoints,
         limit: Int = targetArrowsInView
     ) -> Arrows {
         guard coordinates.count > 1, limit > 0,
@@ -158,13 +203,19 @@ enum RouteDirectionMarkers {
 
         var spacing = requestedSpacing
         while true {
-            let placements = placements(coordinates: coordinates, spacingMeters: spacing,
-                                        visibleBounds: visibleBounds, cumulative: cumulative,
-                                        total: total)
+            // Counted against what is on screen, so a wider `drawingBounds` cannot coarsen the
+            // spacing the rider sees.
+            let onScreen = placements(coordinates: coordinates, spacingMeters: spacing,
+                                      visibleBounds: visibleBounds, cumulative: cumulative,
+                                      total: total)
             // Past the route's own length there is no coarser rung to climb to: the whole route
-            // is one span, and the midpoint arrow below is all there is to draw.
-            if placements.count <= limit || spacing >= total {
-                return Arrows(placements: placements, spacingMeters: spacing)
+            // is one span, and the midpoint arrow is all there is to draw.
+            if onScreen.count <= limit || spacing >= total {
+                let drawn = drawingBounds.map {
+                    placements(coordinates: coordinates, spacingMeters: spacing,
+                               visibleBounds: $0, cumulative: cumulative, total: total)
+                } ?? onScreen
+                return Arrows(placements: drawn, spacingMeters: spacing, pointSize: pointSize)
             }
             spacing *= 2
         }

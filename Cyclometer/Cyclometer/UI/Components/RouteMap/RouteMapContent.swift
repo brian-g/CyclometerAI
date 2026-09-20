@@ -45,9 +45,7 @@ struct RouteMapContent: MapContent {
         // lets a screen-space annotation be rotated by the bearing alone (`RoutesView`).
         RouteDirectionArrows(
             placements: arrows.placements,
-            pointSize: RouteDirectionMarkers.arrowPoints(
-                forSpacingMeters: arrows.spacingMeters
-            ),
+            pointSize: arrows.pointSize,
             tint: .cyPrimary
         )
 

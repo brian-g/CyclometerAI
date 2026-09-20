@@ -101,13 +101,49 @@ enum LiveMapCamera {
     ///
     /// `MapCamera.distance` is what the tilt does not touch, so the box is one camera distance
     /// square about where the camera is looking — roughly what fills the screen.
+    ///
+    /// An approximation twice over: the box is north-aligned while the map is heading-up, and the
+    /// tilt pushes the ground at the top of the screen well past `distance / 2`. Both are why the
+    /// arrows are *drawn* over `arrowBounds(for:)` rather than over this — this box decides how
+    /// many, that one decides how far.
     static func visibleBounds(for camera: MapCamera) -> RouteBounds? {
-        guard camera.distance.isFinite, camera.distance > 0 else { return nil }
+        bounds(for: camera, widthMeters: camera.distance)
+    }
+
+    /// How much wider than the screen arrows are drawn (#258 review).
+    ///
+    /// Two jobs. The arrows are re-placed only when the rider leaves `visibleBounds`, so without
+    /// a margin the supply ahead would run out exactly as the re-placement fired — the rider would
+    /// spend the run-up to every re-placement with fewer and fewer arrows ahead, then none. And
+    /// the tilt shows ground beyond the square box, which this covers too.
+    static let arrowBoundsScale = 3.0
+
+    /// Where the live map's arrows are drawn, as against where they are counted.
+    static func arrowBounds(for camera: MapCamera) -> RouteBounds? {
+        bounds(for: camera, widthMeters: camera.distance * arrowBoundsScale)
+    }
+
+    private static func bounds(for camera: MapCamera, widthMeters: Double) -> RouteBounds? {
+        guard widthMeters.isFinite, widthMeters > 0 else { return nil }
         return RoutesMapCamera.bounds(for: MKCoordinateRegion(
             center: camera.centerCoordinate,
-            latitudinalMeters: camera.distance,
-            longitudinalMeters: camera.distance
+            latitudinalMeters: widthMeters,
+            longitudinalMeters: widthMeters
         ))
+    }
+
+    /// How far into the viewport the rider may travel before the arrows are placed again.
+    ///
+    /// Re-placing only when the camera leaves the viewport it placed against is too late: by then
+    /// the far edge of that viewport is where the rider is standing. Half of it means the arrows
+    /// are refreshed with half a screen of them still ahead.
+    static func needsArrowRefresh(camera: MapCamera, placedFor bounds: RouteBounds?) -> Bool {
+        guard let bounds else { return true }
+        guard let inner = self.bounds(for: camera, widthMeters: camera.distance / 2)
+        else { return true }
+        // The rider has moved far enough that the box they were placed against no longer holds
+        // the ground immediately around them.
+        return !bounds.contains(inner)
     }
 
     /// The whole route, fitted the way S19 fits its routes. Nil below two points: nothing to frame.
