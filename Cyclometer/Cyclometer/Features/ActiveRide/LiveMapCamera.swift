@@ -92,6 +92,24 @@ enum LiveMapCamera {
         isFollowing(position, headingUp: saved == .headingUp) ? .toggle : .reengage
     }
 
+    /// The stretch of ground the arrows should be counted against (#258 review).
+    ///
+    /// Not `MapCameraUpdateContext.region`: while a route is loaded the map is tilted, and a
+    /// pitched camera's region is the axis-aligned box around the whole *frustum* — it runs to
+    /// the horizon (`RoutesView`). Counting arrows against that box would count most of the route
+    /// as "in view" and coarsen the spacing until the rider had none in front of them.
+    ///
+    /// `MapCamera.distance` is what the tilt does not touch, so the box is one camera distance
+    /// square about where the camera is looking — roughly what fills the screen.
+    static func visibleBounds(for camera: MapCamera) -> RouteBounds? {
+        guard camera.distance.isFinite, camera.distance > 0 else { return nil }
+        return RoutesMapCamera.bounds(for: MKCoordinateRegion(
+            center: camera.centerCoordinate,
+            latitudinalMeters: camera.distance,
+            longitudinalMeters: camera.distance
+        ))
+    }
+
     /// The whole route, fitted the way S19 fits its routes. Nil below two points: nothing to frame.
     static func overviewRegion(route: [RouteCoordinate]) -> MKCoordinateRegion? {
         guard route.count > 1 else { return nil }

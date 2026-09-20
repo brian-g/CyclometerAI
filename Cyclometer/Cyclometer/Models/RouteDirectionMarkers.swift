@@ -29,58 +29,14 @@ enum RouteDirectionMarkers {
     /// over two such points can point anywhere.
     static let tangentWindowMeters = 15.0
 
-    /// Roughly this many arrows across the viewport, whatever it is showing. This is what
-    /// makes the spacing zoom-adaptive: it is a fraction of what is on screen, not of the
-    /// route, so a 5 km route and a 100 km route read the same at the zoom you view them at.
+    /// How many arrows a screen should carry at most.
     ///
-    /// Halved from 8 after review: the arrows annotate a line the rider can already see, and
-    /// at that density they were reading as the line rather than as its direction.
-    static let arrowsAcrossViewport = 4.0
-
-    /// Ground distance between arrows for a given viewport.
-    static func spacingMeters(for visibleBounds: RouteBounds) -> Double {
-        // The viewport's east-west extent, measured on the tangent plane at its own middle
-        // latitude — the same primitive every other distance in this app is built on, so the
-        // spacing cannot disagree with the route lengths it is drawn against.
-        let centerLatitude = visibleBounds.center.latitude
-        let width = RouteGeometry.tangentPlaneOffset(
-            from: RouteCoordinate(latitude: centerLatitude,
-                                  longitude: visibleBounds.minLongitude,
-                                  elevationMeters: nil),
-            to: RouteCoordinate(latitude: centerLatitude,
-                                longitude: visibleBounds.maxLongitude,
-                                elevationMeters: nil)
-        ).east
-        guard width.isFinite else { return baseSpacingMeters }
-        return quantized(abs(width) / arrowsAcrossViewport)
-    }
-
-    /// The spacing rounded up to the next multiple-of-two rung above `baseSpacingMeters`.
-    ///
-    /// **This is what keeps the arrows still while the rider zooms.** Spacing derived straight
-    /// from the viewport is a continuous function of it, so every pinch moved every arrow to a
-    /// new place on the road. On the ladder, arrows at a coarse zoom are a strict subset of the
-    /// arrows at a fine one: zooming in only puts new arrows *between* the ones already there,
-    /// and zooming out only takes some away.
-    static func quantized(_ desiredSpacingMeters: Double) -> Double {
-        guard desiredSpacingMeters.isFinite, desiredSpacingMeters > baseSpacingMeters else {
-            return baseSpacingMeters
-        }
-        let rungs = (log2(desiredSpacingMeters / baseSpacingMeters)).rounded(.up)
-        return baseSpacingMeters * pow(2, rungs)
-    }
-
-    /// Ground distance between arrows on a map that reports a camera rather than a region
-    /// (#258, the live ride map). That map is pitched, and a pitched camera's region is the box
-    /// around the whole frustum — it runs to the horizon, so it says nothing about how wide the
-    /// road on screen reads. `MapCamera.distance` does, and it is immune to the tilt.
-    ///
-    /// Same constants as `spacingMeters(for:)`, so the same route reads at the same density
-    /// whether the rider is browsing it on S19 or riding it.
-    static func spacingMeters(forCameraDistanceMeters distance: Double) -> Double {
-        guard distance.isFinite, distance > 0 else { return baseSpacingMeters }
-        return quantized(distance / arrowsAcrossViewport)
-    }
+    /// **The density is a count of arrows on the visible line, not a fraction of the screen.**
+    /// Spacing used to be the viewport's width over four, which reads correctly only where the
+    /// route crosses the screen once. A route that meanders — a 7 km loop inside a 5 km viewport —
+    /// has far more line on screen than the screen is wide, and that rule gave it two arrows for
+    /// the whole loop (#258 review). Counting what is actually drawn cannot make that mistake.
+    static let targetArrowsInView = 12
 
     /// The arrow's size at the base rung of the ladder, in points.
     ///
@@ -148,28 +104,33 @@ enum RouteDirectionMarkers {
         static let none = Arrows(placements: [], spacingMeters: baseSpacingMeters)
     }
 
-    /// Arrows along `coordinates`, spaced for `visibleBounds` and culled to it.
+    /// Arrows along `coordinates`, as many as `limit` allows, culled to `visibleBounds`.
     ///
-    /// Nil bounds means no arrows: the caller has no camera yet, and guessing a spacing from
-    /// the route's own length would make the same route read differently on two screens.
+    /// The spacing is found rather than given: start at the finest rung of the ladder and climb
+    /// until no more than `limit` arrows are on screen. What sets the density is therefore how
+    /// much *line* is in view, which is what the rider's eye judges — the same viewport reading
+    /// a straight road and a loop that doubles through it four times should not get the same
+    /// number of arrows.
+    ///
+    /// Nil bounds means no arrows: the caller has no camera yet, and there is nothing to count
+    /// arrows against.
     static func arrows(
         coordinates: [RouteCoordinate],
         visibleBounds: RouteBounds?,
-        limit: Int = 12
+        limit: Int = targetArrowsInView
     ) -> Arrows {
         guard let visibleBounds else { return .none }
         return arrows(
             coordinates: coordinates,
-            spacingMeters: spacingMeters(for: visibleBounds),
+            spacingMeters: baseSpacingMeters,
             visibleBounds: visibleBounds,
             limit: limit
         )
     }
 
-    /// The same, for a caller that derives its spacing some other way — the live map, from its
-    /// camera distance rather than from a region it cannot trust (see
-    /// `spacingMeters(forCameraDistanceMeters:)`). `visibleBounds` still culls: off-screen
-    /// arrows cost annotations for nothing.
+    /// The same, starting the climb at `spacingMeters` rather than at the finest rung — what a
+    /// test uses to pin one rung, and what a caller with a reason to start coarse would use.
+    /// `visibleBounds` culls: off-screen arrows cost annotations for nothing.
     ///
     /// **Too many in view is answered by climbing the ladder, not by dropping arrows.** A route
     /// that doubles back inside one viewport — a criterium lap, a switchback climb — can put far
@@ -186,7 +147,7 @@ enum RouteDirectionMarkers {
         coordinates: [RouteCoordinate],
         spacingMeters requestedSpacing: Double,
         visibleBounds: RouteBounds,
-        limit: Int = 12
+        limit: Int = targetArrowsInView
     ) -> Arrows {
         guard coordinates.count > 1, limit > 0,
               requestedSpacing.isFinite, requestedSpacing > 0

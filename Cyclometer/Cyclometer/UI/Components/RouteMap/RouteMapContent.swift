@@ -27,7 +27,7 @@ struct RouteMapContent: MapContent {
     /// and guessing it from the route's own length would make one route read differently on
     /// two screens.
     var visibleBounds: RouteBounds?
-    var arrowLimit: Int = 24
+    var arrowLimit: Int = RouteDirectionMarkers.targetArrowsInView
 
     /// Start and finish closer together than this is a loop, and a loop has no finish to mark.
     /// Without this every loop route stacks a checkered flag on top of its start flag, which

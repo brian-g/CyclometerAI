@@ -155,11 +155,11 @@ struct ActiveRideMapView: View {
 
     /// Where the arrows go for the camera `context` reports.
     ///
-    /// Spacing comes from the camera's distance rather than from the region: the map is tilted
-    /// while a route is loaded, and a pitched camera's region is the box around the whole frustum,
-    /// running to the horizon (`RoutesView.swift`). The region is still what culls.
+    /// The viewport comes from the camera rather than from `context.region`: the map is tilted
+    /// while a route is loaded, and a pitched camera's region runs to the horizon — see
+    /// `LiveMapCamera.visibleBounds(for:)`.
     private func placeArrows(for context: MapCameraUpdateContext) {
-        guard route.count > 1, let bounds = RoutesMapCamera.bounds(for: context.region) else {
+        guard route.count > 1, let bounds = LiveMapCamera.visibleBounds(for: context.camera) else {
             arrows = .none
             arrowBounds = nil
             return
@@ -167,17 +167,14 @@ struct ActiveRideMapView: View {
         arrowBounds = bounds
         arrows = RouteDirectionMarkers.arrows(
             coordinates: route,
-            spacingMeters: RouteDirectionMarkers.spacingMeters(
-                forCameraDistanceMeters: context.camera.distance
-            ),
             visibleBounds: bounds,
             limit: Self.arrowLimit
         )
     }
 
-    /// Enough to read the direction along a road on screen without the arrows becoming the line.
-    /// Matches `RouteMapContent`'s cap, since the same spacing constants feed both.
-    private static let arrowLimit = 24
+    /// The same cap as the route-browsing maps: the density rule is shared, so a route reads the
+    /// same whether the rider is planning it or riding it.
+    private static let arrowLimit = RouteDirectionMarkers.targetArrowsInView
 
     private var sheetControls: some View {
         VStack(spacing: Spacing.sm) {

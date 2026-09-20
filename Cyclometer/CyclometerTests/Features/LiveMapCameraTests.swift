@@ -150,4 +150,39 @@ struct LiveMapCameraTests {
         #expect(LiveMapCamera.overviewRegion(route: [route[0]]) == nil)
         #expect(LiveMapCamera.overviewRegion(route: []) == nil)
     }
+
+
+    // MARK: - The viewport the arrows are counted against (#258 review)
+
+    @Test("the arrow viewport comes from the camera distance, not the pitched region")
+    func visibleBoundsFollowTheCameraDistance() {
+        let camera = MapCamera(
+            centerCoordinate: CLLocationCoordinate2D(latitude: 37.0, longitude: -122.0),
+            distance: 2_000,
+            heading: 0,
+            pitch: 60
+        )
+        let bounds = try! #require(LiveMapCamera.visibleBounds(for: camera))
+        // A box about one camera distance across, centred where the camera looks.
+        #expect(abs(bounds.center.latitude - 37.0) < 1e-6)
+        #expect(abs(bounds.center.longitude + 122.0) < 1e-6)
+        let heightMeters = (bounds.maxLatitude - bounds.minLatitude) * 111_320
+        #expect(abs(heightMeters - 2_000) < 50)
+        // The tilt must not widen it: a pitched region runs to the horizon, which is the whole
+        // reason this exists.
+        let flat = MapCamera(centerCoordinate: camera.centerCoordinate, distance: 2_000,
+                             heading: 0, pitch: 0)
+        #expect(LiveMapCamera.visibleBounds(for: flat) == bounds)
+    }
+
+    @Test("a camera mid-transition yields no viewport rather than a degenerate one")
+    func visibleBoundsRefusesANonsenseCamera() {
+        let stalled = MapCamera(
+            centerCoordinate: CLLocationCoordinate2D(latitude: 37.0, longitude: -122.0),
+            distance: 0,
+            heading: 0,
+            pitch: 0
+        )
+        #expect(LiveMapCamera.visibleBounds(for: stalled) == nil)
+    }
 }

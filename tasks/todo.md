@@ -225,3 +225,26 @@ Pinned by `zoomingInOnlyAddsArrows`, which walks five halvings of one viewport a
 arrow still on screen is in the same place, and by `limitKeepsTheNesting` for the cap path.
 Read on the simulator over four zooms of a real route: arrows hold position, counts change around
 them. Full suite green, 1309 passed.
+
+### Density (#258 review, fourth pass)
+
+Two arrows on a 7 km loop. The spacing was the viewport's width over four, which is only right
+where the route crosses the screen once — a loop that meanders puts far more line on screen than
+the screen is wide, so a 5 km-wide view of a 7 km loop asked for arrows 3.2 km apart.
+
+The density is now a count of what is actually drawn: start at the finest rung and climb until no
+more than `targetArrowsInView` (12) arrows are on screen. `arrowsAcrossViewport`,
+`spacingMeters(for:)`, `spacingMeters(forCameraDistanceMeters:)` and `quantized(_:)` are all gone —
+the climb expresses the ladder by itself, and nothing has to guess how much line a viewport holds.
+
+The live map needed a viewport it could count against, since a pitched camera's region runs to the
+horizon and would count most of the route as in view. `LiveMapCamera.visibleBounds(for:)` builds a
+box one camera distance square about where the camera looks, which the tilt does not touch.
+
+Read over a real route at three zooms: 1600 m · 10 arrows · 24 pt, 400 m · 7 · 22, 100 m · 5 · 20.
+Full suite green, 1308 passed.
+
+**What the failing tests taught me.** `zoomingInOnlyAddsArrows` asserted "zooming in never draws
+fewer", which is wrong under any correct rule: a tighter viewport holds less line. The requirement
+is only that arrows still on screen have not moved, plus that the spacing never coarsens on the way
+in. Both are now asserted.
