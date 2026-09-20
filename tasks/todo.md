@@ -192,6 +192,16 @@ along it at both. Full suite green, 1305 passed.
 ### Arrow size (#258 review, second pass)
 
 14 pt was too small to see. Rendered 14, 20 and 26 pt over the same real route at a street-level
-zoom and settled on **26 pt**: the arrow is drawn in the line's own colour, so its size is the only
-thing separating it from the line, and below ~20 pt it reads as a thickening rather than as an
-arrowhead. `Font.cyMapAnnotation` is the single dial.
+zoom: the arrow is drawn in the line's own colour, so its size is the only thing separating it from
+the line, and below ~20 pt it reads as a thickening rather than as an arrowhead.
+
+But no single size works, because the map's own features shrink as the camera pulls back — what
+sits well against a street is a speck against a county (semantic zoom, Brian). The size is now a
+ramp: `arrowPoints(forSpacingMeters:)`, 20 pt at the base rung and one point per rung of the
+spacing ladder, capped at 28.
+
+Taking the *rung* rather than the raw viewport is the point: the size changes at exactly the zooms
+the density changes at, so a pinch never smoothly grows the arrows. `Font.cyMapAnnotation(points:)`
+became a function; the numbers and the reasoning live in `RouteDirectionMarkers`.
+
+Read at four zooms over a real route: 400 m spacing · 22 pt, 1600 · 24, 6400 · 26, 12800 · 27.

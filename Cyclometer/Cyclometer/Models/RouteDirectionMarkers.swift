@@ -82,6 +82,35 @@ enum RouteDirectionMarkers {
         return quantized(distance / arrowsAcrossViewport)
     }
 
+    /// The arrow's size at the base rung of the ladder, in points.
+    ///
+    /// Read against a real route at a street-level zoom (#258 review): the arrow is drawn in the
+    /// line's own colour, so its size is the only thing separating it from the line, and below
+    /// this it reads as a thickening rather than as an arrowhead.
+    static let baseArrowPoints = 20.0
+
+    /// How much bigger the arrow gets per rung of the spacing ladder.
+    static let arrowPointsPerRung = 1.0
+
+    /// The largest an arrow is ever drawn. A world-zoom camera is a dozen rungs up, and without a
+    /// ceiling the arrow would dwarf the route it annotates.
+    static let maximumArrowPoints = 28.0
+
+    /// How big to draw an arrow at `spacing` — semantic zoom (#258 review).
+    ///
+    /// A fixed point size cannot be right at two zooms: the map's own features shrink as the
+    /// camera pulls back, so an arrow that sits well against a street reads as a speck against a
+    /// county. The size therefore climbs with the ladder, one point per rung, which keeps it in
+    /// proportion to what is around it.
+    ///
+    /// Taking the rung rather than the raw viewport width is deliberate: the size then changes at
+    /// exactly the zooms the *density* changes at, so a pinch never smoothly grows the arrows.
+    static func arrowPoints(forSpacingMeters spacing: Double) -> Double {
+        guard spacing.isFinite, spacing > baseSpacingMeters else { return baseArrowPoints }
+        let rungs = log2(spacing / baseSpacingMeters).rounded()
+        return min(baseArrowPoints + rungs * arrowPointsPerRung, maximumArrowPoints)
+    }
+
     /// The on-screen angle an arrow must be drawn at to point along `bearingDegrees`, on a map
     /// turned to `headingDegrees` and tilted to `pitchDegrees` (#258).
     ///

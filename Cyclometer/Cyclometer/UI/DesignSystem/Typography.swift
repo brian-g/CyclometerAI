@@ -26,16 +26,20 @@ extension Font {
     static let cyCaption = Font.ddin(size: 10)
 
     // ── Map ─────────────────────────────────────────────────────────────────
-    /// 26 pt — direction-of-travel arrows drawn along a route polyline (S19, S20, the live map).
+    /// Direction-of-travel arrows drawn along a route polyline (S19, S20, the live map).
     ///
-    /// A system symbol weight rather than D-DIN: it sets an SF Symbol, not a number. Fixed
-    /// rather than Dynamic Type-scaled, because a map annotation is anchored to a point on
-    /// the ground — growing it only makes neighbouring arrows collide. 26 pt, arrived at by
-    /// rendering 14, 20 and 26 over a real route at a street-level zoom (#258 review): the arrow
-    /// is drawn in the line's own colour, so its size is the only thing separating it from the
-    /// line, and below ~20 pt it reads as a thickening rather than as an arrowhead.
-    static let cyMapAnnotation = Font.system(size: 26, weight: .bold)
-    /// 64 pt SF Pro Rounded semibold — the turn overlay's arrow (Sketch "Sxx - Route overlay")
+    /// A system symbol weight rather than D-DIN: it sets an SF Symbol, not a number. Fixed rather
+    /// than Dynamic Type-scaled, because a map annotation is anchored to a point on the ground —
+    /// growing it only makes neighbouring arrows collide.
+    ///
+    /// Sized by the caller rather than fixed, because one size cannot be right at two zooms: the
+    /// map's own features shrink as the camera pulls back. The ramp is
+    /// `RouteDirectionMarkers.arrowPoints(forSpacingMeters:)`, which is where the numbers and the
+    /// reasoning live.
+    static func cyMapAnnotation(points: CGFloat) -> Font {
+        .system(size: points, weight: .bold)
+    }
+
     static let cyTurnGlyph = Font.system(size: 64, weight: .semibold, design: .rounded)
     /// 40 pt SF Pro Rounded semibold — W9's arrow beside a medium hero number (#200). The overlay's
     /// 64 pt would stand taller than the number it sits beside.

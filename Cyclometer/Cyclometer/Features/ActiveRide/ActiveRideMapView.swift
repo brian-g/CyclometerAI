@@ -34,6 +34,8 @@ struct ActiveRideMapView: View {
     /// every frame; only their rotation follows the camera continuously.
     @State private var arrows: [RouteDirectionMarkers.Placement] = []
     @State private var arrowBounds: RouteBounds?
+    /// The spacing `arrows` were placed at, which is also what sizes them (#258 review).
+    @State private var arrowSpacingMeters = RouteDirectionMarkers.baseSpacingMeters
     @Namespace private var mapScope
 
     init(
@@ -116,6 +118,9 @@ struct ActiveRideMapView: View {
             // stay readable over the track already ridden.
             RouteDirectionArrows(
                 placements: arrows,
+                pointSize: RouteDirectionMarkers.arrowPoints(
+                    forSpacingMeters: arrowSpacingMeters
+                ),
                 tint: .cyMapRoute,
                 headingDegrees: camera?.heading ?? 0,
                 pitchDegrees: camera?.pitch ?? 0
@@ -162,11 +167,12 @@ struct ActiveRideMapView: View {
             return
         }
         arrowBounds = bounds
+        arrowSpacingMeters = RouteDirectionMarkers.spacingMeters(
+            forCameraDistanceMeters: context.camera.distance
+        )
         arrows = RouteDirectionMarkers.placements(
             coordinates: route,
-            spacingMeters: RouteDirectionMarkers.spacingMeters(
-                forCameraDistanceMeters: context.camera.distance
-            ),
+            spacingMeters: arrowSpacingMeters,
             visibleBounds: bounds,
             limit: Self.arrowLimit
         )

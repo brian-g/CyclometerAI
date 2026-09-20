@@ -385,4 +385,44 @@ struct RouteDirectionMarkersTests {
         #expect(RouteDirectionMarkers.quantized(.nan) == base)
         #expect(RouteDirectionMarkers.quantized(0) == base)
     }
+
+    @Test("the arrow grows with the ladder, so it keeps its proportion as the camera pulls back")
+    func arrowSizeFollowsTheSpacing() {
+        let base = RouteDirectionMarkers.baseSpacingMeters
+        // At the finest spacing — a street-level zoom — the arrow is the size read off a real
+        // route in review.
+        #expect(RouteDirectionMarkers.arrowPoints(forSpacingMeters: base)
+                == RouteDirectionMarkers.baseArrowPoints)
+        // One point per rung.
+        #expect(RouteDirectionMarkers.arrowPoints(forSpacingMeters: base * 2)
+                == RouteDirectionMarkers.baseArrowPoints + RouteDirectionMarkers.arrowPointsPerRung)
+        #expect(RouteDirectionMarkers.arrowPoints(forSpacingMeters: base * 64)
+                == RouteDirectionMarkers.baseArrowPoints + 6 * RouteDirectionMarkers.arrowPointsPerRung)
+        // A world-zoom camera is a dozen rungs up; the ceiling is what stops the arrow dwarfing
+        // the route it annotates.
+        #expect(RouteDirectionMarkers.arrowPoints(forSpacingMeters: base * 4096)
+                == RouteDirectionMarkers.maximumArrowPoints)
+        // Never smaller than the base, whatever it is handed.
+        #expect(RouteDirectionMarkers.arrowPoints(forSpacingMeters: 1)
+                == RouteDirectionMarkers.baseArrowPoints)
+        #expect(RouteDirectionMarkers.arrowPoints(forSpacingMeters: .nan)
+                == RouteDirectionMarkers.baseArrowPoints)
+    }
+
+    @Test("the size changes only where the density does")
+    func arrowSizeIsStableWithinARung() {
+        // Sized off the raw viewport, a pinch would grow the arrows smoothly; sized off the rung,
+        // it changes at exactly the zooms that add or remove arrows.
+        let base = RouteDirectionMarkers.baseSpacingMeters
+        let withinARung = [base * 2, base * 2.0, base * 2]
+        let sizes = Set(withinARung.map(RouteDirectionMarkers.arrowPoints(forSpacingMeters:)))
+        #expect(sizes.count == 1)
+        // Two viewports a hair apart but either side of a rung boundary place different numbers
+        // of arrows, so they are allowed to size them differently.
+        #expect(RouteDirectionMarkers.arrowPoints(
+            forSpacingMeters: RouteDirectionMarkers.quantized(base * 1.9)
+        ) != RouteDirectionMarkers.arrowPoints(
+            forSpacingMeters: RouteDirectionMarkers.quantized(base * 4.1)
+        ))
+    }
 }

@@ -18,6 +18,9 @@ import SwiftUI
 /// it; both default to zero, which is a north-up flat map.
 struct RouteDirectionArrows: MapContent {
     let placements: [RouteDirectionMarkers.Placement]
+    /// How big to draw each arrow. From `RouteDirectionMarkers.arrowPoints(forSpacingMeters:)`,
+    /// so the arrow keeps its proportion to the map as the camera pulls back (#258 review).
+    let pointSize: Double
     var tint: Color = .cyPrimary
     /// The map's heading, in degrees clockwise from true north.
     var headingDegrees: Double = 0
@@ -29,7 +32,7 @@ struct RouteDirectionArrows: MapContent {
         ForEach(Array(placements.enumerated()), id: \.offset) { _, placement in
             Annotation("", coordinate: placement.coordinate.coordinate2D, anchor: .center) {
                 Image(systemName: "arrowtriangle.up.fill")
-                    .font(.cyMapAnnotation)
+                    .font(.cyMapAnnotation(points: pointSize))
                     .foregroundStyle(tint)
                     .rotationEffect(.degrees(RouteDirectionMarkers.screenAngleDegrees(
                         bearingDegrees: placement.bearingDegrees,
