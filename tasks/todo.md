@@ -171,7 +171,7 @@ Two defects and a glyph, all on S20 as well as the live map:
    pinch re-placed every arrow. `quantized(_:)` snaps it to a doubling ladder above
    `baseSpacingMeters`, so a coarse spacing is a multiple of a fine one: zooming in only adds
    arrows *between* the ones already there.
-3. **Chevron → filled triangle**, at 14 pt rather than 20. An open V on a line its own colour reads
+3. **Chevron → filled triangle**, at 26 pt (14 first, then raised — see below). An open V on a line its own colour reads
    as a kink in the line, which is what it looked like.
 
 `minimumSpacingMeters` (300 m) is gone; `baseSpacingMeters` is 100 m, and the ladder means the
@@ -188,3 +188,10 @@ confirmed against a white-triangle variant.
 Verified with a temporary harness rendering S20's own `RouteMapContent` over a real 1,157-point
 route, at the review screenshot's zoom and at whole-route zoom: triangles sit on the line and point
 along it at both. Full suite green, 1305 passed.
+
+### Arrow size (#258 review, second pass)
+
+14 pt was too small to see. Rendered 14, 20 and 26 pt over the same real route at a street-level
+zoom and settled on **26 pt**: the arrow is drawn in the line's own colour, so its size is the only
+thing separating it from the line, and below ~20 pt it reads as a thickening rather than as an
+arrowhead. `Font.cyMapAnnotation` is the single dial.

@@ -26,13 +26,15 @@ extension Font {
     static let cyCaption = Font.ddin(size: 10)
 
     // ── Map ─────────────────────────────────────────────────────────────────
-    /// 14 pt — direction-of-travel arrows drawn along a route polyline (S19, S20, the live map).
+    /// 26 pt — direction-of-travel arrows drawn along a route polyline (S19, S20, the live map).
     ///
     /// A system symbol weight rather than D-DIN: it sets an SF Symbol, not a number. Fixed
     /// rather than Dynamic Type-scaled, because a map annotation is anchored to a point on
-    /// the ground — growing it only makes neighbouring arrows collide. 14 pt rather than the
-    /// original 20: a filled triangle carries at a size an open chevron did not (#258 review).
-    static let cyMapAnnotation = Font.system(size: 14, weight: .bold)
+    /// the ground — growing it only makes neighbouring arrows collide. 26 pt, arrived at by
+    /// rendering 14, 20 and 26 over a real route at a street-level zoom (#258 review): the arrow
+    /// is drawn in the line's own colour, so its size is the only thing separating it from the
+    /// line, and below ~20 pt it reads as a thickening rather than as an arrowhead.
+    static let cyMapAnnotation = Font.system(size: 26, weight: .bold)
     /// 64 pt SF Pro Rounded semibold — the turn overlay's arrow (Sketch "Sxx - Route overlay")
     static let cyTurnGlyph = Font.system(size: 64, weight: .semibold, design: .rounded)
     /// 40 pt SF Pro Rounded semibold — W9's arrow beside a medium hero number (#200). The overlay's
