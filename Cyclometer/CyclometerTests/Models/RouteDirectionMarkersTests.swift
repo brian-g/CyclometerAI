@@ -14,6 +14,22 @@ struct RouteDirectionMarkersTests {
         RouteCoordinate(latitude: latitude, longitude: longitude, elevationMeters: nil)
     }
 
+    /// `RouteDirectionMarkers.arrows` without its spacing, which most of these tests do not read.
+    private func placements(coordinates: [RouteCoordinate],
+                            visibleBounds: RouteBounds?,
+                            limit: Int = 12) -> [RouteDirectionMarkers.Placement] {
+        RouteDirectionMarkers.arrows(coordinates: coordinates, visibleBounds: visibleBounds,
+                                     limit: limit).placements
+    }
+
+    private func placements(coordinates: [RouteCoordinate],
+                            spacingMeters: Double,
+                            visibleBounds: RouteBounds,
+                            limit: Int = 12) -> [RouteDirectionMarkers.Placement] {
+        RouteDirectionMarkers.arrows(coordinates: coordinates, spacingMeters: spacingMeters,
+                                     visibleBounds: visibleBounds, limit: limit).placements
+    }
+
     /// Due east along the 37th parallel, about 8.9 km long.
     private var eastwardRoute: [RouteCoordinate] {
         [coordinate(37.0, -122.0), coordinate(37.0, -121.9)]
@@ -43,7 +59,7 @@ struct RouteDirectionMarkersTests {
     func nilBoundsYieldsNothing() {
         // Spacing is a fraction of what is on screen. Falling back to the route's own length
         // would make the same route read differently on two screens.
-        #expect(RouteDirectionMarkers.placements(coordinates: eastwardRoute,
+        #expect(placements(coordinates: eastwardRoute,
                                                  visibleBounds: nil).isEmpty)
     }
 
@@ -73,14 +89,14 @@ struct RouteDirectionMarkersTests {
 
     @Test("arrows point along the route")
     func bearingFollowsTheRoute() {
-        let eastward = RouteDirectionMarkers.placements(coordinates: eastwardRoute,
+        let eastward = placements(coordinates: eastwardRoute,
                                                         visibleBounds: wideViewport)
         #expect(!eastward.isEmpty)
         for placement in eastward {
             #expect(abs(placement.bearingDegrees - 90) < 1)
         }
 
-        let westward = RouteDirectionMarkers.placements(coordinates: eastwardRoute.reversed(),
+        let westward = placements(coordinates: eastwardRoute.reversed(),
                                                         visibleBounds: wideViewport)
         for placement in westward {
             #expect(abs(placement.bearingDegrees - 270) < 1)
@@ -89,7 +105,7 @@ struct RouteDirectionMarkersTests {
 
     @Test("no arrow lands on the route's first point, where the start flag sits")
     func firstPointCarriesNoArrow() {
-        let placements = RouteDirectionMarkers.placements(coordinates: eastwardRoute,
+        let placements = placements(coordinates: eastwardRoute,
                                                           visibleBounds: wideViewport)
         let start = eastwardRoute[0]
         #expect(!placements.contains { $0.coordinate == start })
@@ -100,7 +116,7 @@ struct RouteDirectionMarkersTests {
         // Only the western third of the route is on screen.
         let westernSliver = RouteBounds(minLatitude: 36.9, maxLatitude: 37.1,
                                         minLongitude: -122.00, maxLongitude: -121.97)
-        let placements = RouteDirectionMarkers.placements(coordinates: eastwardRoute,
+        let placements = placements(coordinates: eastwardRoute,
                                                           visibleBounds: westernSliver)
         #expect(!placements.isEmpty)
         for placement in placements {
@@ -109,12 +125,34 @@ struct RouteDirectionMarkersTests {
         }
     }
 
-    @Test("the limit caps how many a single route can draw")
-    func limitCapsTheCount() {
-        let placements = RouteDirectionMarkers.placements(
+    @Test("too many in view climbs a rung rather than dropping arrows")
+    func limitClimbsTheLadder() {
+        let capped = RouteDirectionMarkers.arrows(
             coordinates: zigzagRoute, visibleBounds: zigzagViewport, limit: 5
         )
-        #expect(placements.count == 5)
+        #expect(capped.placements.count <= 5)
+        #expect(!capped.placements.isEmpty)
+        // It got there by coarsening, not by thinning: the spacing it reports is above the one
+        // the viewport asked for, and it is still a rung of the ladder.
+        let asked = RouteDirectionMarkers.spacingMeters(for: zigzagViewport)
+        #expect(capped.spacingMeters > asked)
+        let rungs = log2(capped.spacingMeters / RouteDirectionMarkers.baseSpacingMeters)
+        #expect(abs(rungs - rungs.rounded()) < 1e-9)
+    }
+
+    @Test("a cap does not move arrows: the survivors are the coarser rung's own")
+    func limitKeepsTheNesting() {
+        // The failure this pins: thinning an over-long list to `limit` evenly spaced entries
+        // keeps every arrow on the lattice but picks a *different* subset at each zoom, so the
+        // arrows appear to move about as the rider pinches.
+        let capped = RouteDirectionMarkers.arrows(
+            coordinates: zigzagRoute, visibleBounds: zigzagViewport, limit: 5
+        )
+        let atThatSpacing = placements(coordinates: zigzagRoute,
+                                       spacingMeters: capped.spacingMeters,
+                                       visibleBounds: zigzagViewport,
+                                       limit: 1_000)
+        #expect(capped.placements == atThatSpacing)
     }
 
     @Test("a route shorter than one spacing still says which way it runs")
@@ -122,7 +160,7 @@ struct RouteDirectionMarkersTests {
         // 150 m of road is shorter than one spacing at any zoom, so the ladder puts no arrow on
         // it at all — the midpoint case is what still says which way it runs.
         let short = [coordinate(37.0, -122.0), coordinate(37.0, -121.9983)]
-        let placements = RouteDirectionMarkers.placements(coordinates: short,
+        let placements = placements(coordinates: short,
                                                           visibleBounds: wideViewport)
         #expect(placements.count == 1)
         #expect(abs(placements[0].bearingDegrees - 90) < 1)
@@ -131,11 +169,11 @@ struct RouteDirectionMarkersTests {
     @Test("a zero-length route yields nothing rather than a made-up direction")
     func degenerateRoutes() {
         let point = coordinate(37.0, -122.0)
-        #expect(RouteDirectionMarkers.placements(coordinates: [point],
+        #expect(placements(coordinates: [point],
                                                  visibleBounds: wideViewport).isEmpty)
-        #expect(RouteDirectionMarkers.placements(coordinates: [point, point],
+        #expect(placements(coordinates: [point, point],
                                                  visibleBounds: wideViewport).isEmpty)
-        #expect(RouteDirectionMarkers.placements(coordinates: [],
+        #expect(placements(coordinates: [],
                                                  visibleBounds: wideViewport).isEmpty)
     }
 
@@ -149,9 +187,9 @@ struct RouteDirectionMarkersTests {
             coordinate(37.0, -122.0 + 0.1 * Double(step) / 50)
         }
 
-        let fromSparse = RouteDirectionMarkers.placements(coordinates: sparse,
+        let fromSparse = placements(coordinates: sparse,
                                                           visibleBounds: wideViewport)
-        let fromDense = RouteDirectionMarkers.placements(coordinates: dense,
+        let fromDense = placements(coordinates: dense,
                                                          visibleBounds: wideViewport)
 
         #expect(fromSparse.count == fromDense.count)
@@ -162,35 +200,35 @@ struct RouteDirectionMarkersTests {
         }
     }
 
-    @Test("capping spreads the arrows over the whole line rather than truncating it")
-    func limitIsSpreadNotTruncated() {
-        // Spacing is measured along the *route*, not across the screen, so a line that doubles
-        // back inside one viewport yields far more in-view samples than the cap. Taking the
-        // first N would leave the back half of a visible route with no direction at all.
-        let uncapped = RouteDirectionMarkers.placements(coordinates: zigzagRoute,
-                                                        visibleBounds: zigzagViewport,
-                                                        limit: 1_000)
-        let capped = RouteDirectionMarkers.placements(coordinates: zigzagRoute,
-                                                      visibleBounds: zigzagViewport, limit: 6)
+    @Test("capping leaves arrows along the whole visible line, not just its start")
+    func cappingCoversTheWholeLine() {
+        // Spacing is measured along the *route*, so a line that doubles back inside one viewport
+        // puts far more arrows on screen than the cap. Truncating the list would leave the back
+        // half of a visible route with no direction at all.
+        let uncapped = placements(coordinates: zigzagRoute, visibleBounds: zigzagViewport,
+                                  limit: 1_000)
+        let capped = placements(coordinates: zigzagRoute, visibleBounds: zigzagViewport, limit: 6)
         #expect(uncapped.count > 6)
-        #expect(capped.count == 6)
+        #expect(capped.count <= 6)
         // The last capped arrow must sit near the end of the line, not a sixth of the way in.
         let lastCapped = try! #require(capped.last).coordinate.longitude
         let lastUncapped = try! #require(uncapped.last).coordinate.longitude
         #expect(abs(lastCapped - lastUncapped) < 0.01)
     }
 
-    @Test("a cap of one puts its arrow in the middle of the line")
-    func limitOfOneDoesNotDivideByZero() {
-        let capped = RouteDirectionMarkers.placements(coordinates: zigzagRoute,
-                                                      visibleBounds: zigzagViewport, limit: 1)
-        #expect(capped.count == 1)
-        // The middle third of the line: the point is that one arrow lands in the body of the
-        // route rather than on its opening stretch, not that it hits the exact halfway metre —
-        // placements are indexed from the first one after the start flag, so the index midpoint
-        // sits slightly beyond the geographic one.
-        let longitude = try! #require(capped.first).coordinate.longitude
-        #expect(longitude < -121.9833 && longitude > -121.9967)
+    @Test("a cap of one coarsens until one arrow is left, and it is on the lattice")
+    func limitOfOne() {
+        let capped = RouteDirectionMarkers.arrows(coordinates: zigzagRoute,
+                                                  visibleBounds: zigzagViewport, limit: 1)
+        #expect(capped.placements.count == 1)
+        let arrow = try! #require(capped.placements.first)
+        // On the lattice for the spacing it settled at, so it is one of the arrows a finer zoom
+        // also draws rather than a point invented for the cap.
+        let atThatSpacing = placements(coordinates: zigzagRoute,
+                                       spacingMeters: capped.spacingMeters,
+                                       visibleBounds: zigzagViewport,
+                                       limit: 1_000)
+        #expect(atThatSpacing.contains(arrow))
     }
 
     // MARK: - The live ride map (#258)
@@ -223,9 +261,9 @@ struct RouteDirectionMarkersTests {
 
     @Test("a spacing passed in places the same arrows a viewport would derive")
     func explicitSpacingMatchesDerivedSpacing() {
-        let derived = RouteDirectionMarkers.placements(coordinates: zigzagRoute,
+        let derived = placements(coordinates: zigzagRoute,
                                                        visibleBounds: zigzagViewport)
-        let explicit = RouteDirectionMarkers.placements(
+        let explicit = placements(
             coordinates: zigzagRoute,
             spacingMeters: RouteDirectionMarkers.spacingMeters(for: zigzagViewport),
             visibleBounds: zigzagViewport
@@ -317,7 +355,7 @@ struct RouteDirectionMarkersTests {
         // An explicit fine spacing: the curve is under 2 km long, so the spacing this viewport
         // would derive puts two arrows on it, and two is too few to catch a bearing that drifts
         // round the bend.
-        let placements = RouteDirectionMarkers.placements(
+        let placements = placements(
             coordinates: curvingRoute,
             spacingMeters: RouteDirectionMarkers.baseSpacingMeters,
             visibleBounds: bounds,
@@ -353,11 +391,11 @@ struct RouteDirectionMarkersTests {
         // The second half of the #258 review: spacing derived straight from the viewport is a
         // continuous function of it, so every pinch moved every arrow. On the ladder, a coarser
         // spacing is a multiple of a finer one, so its arrows are a subset of the finer set.
-        let fine = RouteDirectionMarkers.placements(coordinates: curvingRoute,
+        let fine = placements(coordinates: curvingRoute,
                                                     spacingMeters: RouteDirectionMarkers.baseSpacingMeters,
                                                     visibleBounds: wideViewport,
                                                     limit: 1_000)
-        let coarse = RouteDirectionMarkers.placements(
+        let coarse = placements(
             coordinates: curvingRoute,
             spacingMeters: RouteDirectionMarkers.baseSpacingMeters * 4,
             visibleBounds: wideViewport,
@@ -424,5 +462,37 @@ struct RouteDirectionMarkersTests {
         ) != RouteDirectionMarkers.arrowPoints(
             forSpacingMeters: RouteDirectionMarkers.quantized(base * 4.1)
         ))
+    }
+
+    @Test("pinching in only adds arrows: none of the ones on screen move")
+    func zoomingInOnlyAddsArrows() {
+        // The requirement in Brian's words: at higher zoom levels there should be more arrows,
+        // but arrows should only be added to and subtracted from the line, never moved.
+        let centre = (latitude: 37.0, longitude: -121.955)
+        // Five zoom steps over the same centre, each half the width of the last.
+        let viewports = (0..<5).map { step -> RouteBounds in
+            let half = 0.08 / pow(2, Double(step))
+            return RouteBounds(minLatitude: centre.latitude - half,
+                               maxLatitude: centre.latitude + half,
+                               minLongitude: centre.longitude - half,
+                               maxLongitude: centre.longitude + half)
+        }
+
+        var previous: (bounds: RouteBounds, placements: [RouteDirectionMarkers.Placement])?
+        for bounds in viewports {
+            let current = placements(coordinates: eastwardRoute, visibleBounds: bounds, limit: 24)
+            #expect(!current.isEmpty)
+            if let previous {
+                // Zooming in never draws fewer.
+                #expect(current.count >= previous.placements.count)
+                // And every arrow that was on screen and still is, is in the same place.
+                for arrow in previous.placements
+                where bounds.contains(latitude: arrow.coordinate.latitude,
+                                      longitude: arrow.coordinate.longitude) {
+                    #expect(current.contains(arrow))
+                }
+            }
+            previous = (bounds, current)
+        }
     }
 }

@@ -205,3 +205,23 @@ the density changes at, so a pinch never smoothly grows the arrows. `Font.cyMapA
 became a function; the numbers and the reasoning live in `RouteDirectionMarkers`.
 
 Read at four zooms over a real route: 400 m spacing · 22 pt, 1600 · 24, 6400 · 26, 12800 · 27.
+
+### Nesting under the cap (#258 review, third pass)
+
+"At higher zoom levels there should be more arrows, but arrows should only be added and subtracted
+on the line, never moved" (Brian). The ladder gave that — except through the `limit`, which thinned
+an over-long list to 24 evenly spaced *entries*. Every survivor was still on the lattice, but a
+different subset of it survived at each zoom, so arrows appeared to wander as the rider pinched.
+
+Too many in view now climbs a rung — double the spacing and place again — until the count fits.
+That keeps the nesting exactly: every arrow at a coarse zoom is also an arrow at every finer one.
+`thinned(_:to:)` is gone.
+
+`placements(...)` became `arrows(...)`, returning `Arrows { placements, spacingMeters }`: the
+spacing it settled at is what sizes the glyph, so density and size are two readings of one number
+and cannot disagree.
+
+Pinned by `zoomingInOnlyAddsArrows`, which walks five halvings of one viewport and asserts every
+arrow still on screen is in the same place, and by `limitKeepsTheNesting` for the cap path.
+Read on the simulator over four zooms of a real route: arrows hold position, counts change around
+them. Full suite green, 1309 passed.

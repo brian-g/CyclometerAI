@@ -136,17 +136,29 @@ enum RouteDirectionMarkers {
         return angle < 0 ? angle + 360 : angle
     }
 
-    /// Arrow placements along `coordinates`, spaced for `visibleBounds` and culled to it.
+    /// The arrows to draw on a route, and the spacing they were drawn at.
+    ///
+    /// The spacing comes back because it is what sizes the glyph — see
+    /// `arrowPoints(forSpacingMeters:)`. Density and size are two readings of one number, so they
+    /// cannot disagree.
+    struct Arrows: Equatable, Sendable {
+        var placements: [Placement]
+        var spacingMeters: Double
+
+        static let none = Arrows(placements: [], spacingMeters: baseSpacingMeters)
+    }
+
+    /// Arrows along `coordinates`, spaced for `visibleBounds` and culled to it.
     ///
     /// Nil bounds means no arrows: the caller has no camera yet, and guessing a spacing from
     /// the route's own length would make the same route read differently on two screens.
-    static func placements(
+    static func arrows(
         coordinates: [RouteCoordinate],
         visibleBounds: RouteBounds?,
         limit: Int = 12
-    ) -> [Placement] {
-        guard let visibleBounds else { return [] }
-        return placements(
+    ) -> Arrows {
+        guard let visibleBounds else { return .none }
+        return arrows(
             coordinates: coordinates,
             spacingMeters: spacingMeters(for: visibleBounds),
             visibleBounds: visibleBounds,
@@ -159,26 +171,59 @@ enum RouteDirectionMarkers {
     /// `spacingMeters(forCameraDistanceMeters:)`). `visibleBounds` still culls: off-screen
     /// arrows cost annotations for nothing.
     ///
+    /// **Too many in view is answered by climbing the ladder, not by dropping arrows.** A route
+    /// that doubles back inside one viewport — a criterium lap, a switchback climb — can put far
+    /// more than `limit` arrows on screen. Thinning that list to `limit` evenly spaced *entries*
+    /// (what this did first) keeps every arrow on the lattice but picks a different subset of it
+    /// at each zoom, so arrows appear to move about as the rider pinches. Doubling the spacing
+    /// until the count fits keeps the nesting: every arrow at a coarse zoom is also an arrow at
+    /// every finer one, and zooming only ever adds arrows between the ones already there.
+    ///
     /// Positions are distances *along the route*, not source points, so the result does not
     /// depend on how the GPX happened to be sampled (#192) — a file with a point every 200 m and
     /// one with a point every metre describe the same road and get the same arrows.
-    static func placements(
+    static func arrows(
+        coordinates: [RouteCoordinate],
+        spacingMeters requestedSpacing: Double,
+        visibleBounds: RouteBounds,
+        limit: Int = 12
+    ) -> Arrows {
+        guard coordinates.count > 1, limit > 0,
+              requestedSpacing.isFinite, requestedSpacing > 0
+        else { return .none }
+
+        let cumulative = RouteGeometry.cumulativeDistances(coordinates)
+        guard let total = cumulative.last, total > 0 else { return .none }
+
+        var spacing = requestedSpacing
+        while true {
+            let placements = placements(coordinates: coordinates, spacingMeters: spacing,
+                                        visibleBounds: visibleBounds, cumulative: cumulative,
+                                        total: total)
+            // Past the route's own length there is no coarser rung to climb to: the whole route
+            // is one span, and the midpoint arrow below is all there is to draw.
+            if placements.count <= limit || spacing >= total {
+                return Arrows(placements: placements, spacingMeters: spacing)
+            }
+            spacing *= 2
+        }
+    }
+
+    /// One pass at one spacing: an arrow at every multiple of it that is on screen.
+    private static func placements(
         coordinates: [RouteCoordinate],
         spacingMeters spacing: Double,
         visibleBounds: RouteBounds,
-        limit: Int = 12
+        cumulative: [Double],
+        total: Double
     ) -> [Placement] {
-        guard coordinates.count > 1, limit > 0, spacing.isFinite, spacing > 0 else { return [] }
-
-        let cumulative = RouteGeometry.cumulativeDistances(coordinates)
-        guard let total = cumulative.last, total > 0 else { return [] }
-
-        // Distances along the route to put an arrow at. Multiples of the spacing, so a coarser
-        // spacing is a subset of a finer one and zooming never moves an arrow that stays.
-        var distances = stride(from: spacing, to: total, by: spacing).map { $0 }
+        // Multiples of the spacing, so a coarser spacing is a subset of a finer one and zooming
+        // never moves an arrow that stays.
+        var distances = Array(stride(from: spacing, to: total, by: spacing))
         if distances.isEmpty {
             // The whole route is shorter than one spacing. It still has a direction, and one
-            // arrow in the middle of it is what says so.
+            // arrow in the middle of it is what says so. The only arrow not on the lattice, and
+            // the only one that can move under a zoom — it is also the only one there is.
             distances = [total / 2]
         }
 
@@ -200,24 +245,6 @@ enum RouteDirectionMarkers {
             ) else { continue }
             placements.append(Placement(coordinate: coordinate, bearingDegrees: bearing))
         }
-        return thinned(placements, to: limit)
-    }
-
-    /// At most `limit` placements, spread across the whole line rather than taken from its
-    /// start.
-    ///
-    /// Spacing is measured *along the route*, not across the screen, so a switchback climb or a
-    /// criterium loop that doubles back inside one viewport produces far more in-view samples
-    /// than the cap allows. Truncating would leave the back half of a visible line with no
-    /// arrows at all, which reads as "this part has no direction" rather than as a cap.
-    private static func thinned(_ placements: [Placement], to limit: Int) -> [Placement] {
-        guard placements.count > limit else { return placements }
-        // `limit - 1` is the denominator below, so one arrow is its own case — the middle of
-        // the line, not the start of it.
-        guard limit > 1 else { return [placements[placements.count / 2]] }
-        // Evenly spaced indices across the whole array, endpoints included.
-        return (0..<limit).map { step in
-            placements[Int((Double(step) * Double(placements.count - 1) / Double(limit - 1)).rounded())]
-        }
+        return placements
     }
 }

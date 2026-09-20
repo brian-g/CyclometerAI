@@ -32,10 +32,8 @@ struct ActiveRideMapView: View {
     /// The route's direction-of-travel arrows (#258), and the viewport they were placed for.
     /// Placing them walks the whole route, so it happens when the camera settles rather than on
     /// every frame; only their rotation follows the camera continuously.
-    @State private var arrows: [RouteDirectionMarkers.Placement] = []
+    @State private var arrows = RouteDirectionMarkers.Arrows.none
     @State private var arrowBounds: RouteBounds?
-    /// The spacing `arrows` were placed at, which is also what sizes them (#258 review).
-    @State private var arrowSpacingMeters = RouteDirectionMarkers.baseSpacingMeters
     @Namespace private var mapScope
 
     init(
@@ -117,9 +115,9 @@ struct ActiveRideMapView: View {
             // one ambiguous line without them. Annotations draw above both polylines, so they
             // stay readable over the track already ridden.
             RouteDirectionArrows(
-                placements: arrows,
+                placements: arrows.placements,
                 pointSize: RouteDirectionMarkers.arrowPoints(
-                    forSpacingMeters: arrowSpacingMeters
+                    forSpacingMeters: arrows.spacingMeters
                 ),
                 tint: .cyMapRoute,
                 headingDegrees: camera?.heading ?? 0,
@@ -162,17 +160,16 @@ struct ActiveRideMapView: View {
     /// running to the horizon (`RoutesView.swift`). The region is still what culls.
     private func placeArrows(for context: MapCameraUpdateContext) {
         guard route.count > 1, let bounds = RoutesMapCamera.bounds(for: context.region) else {
-            arrows = []
+            arrows = .none
             arrowBounds = nil
             return
         }
         arrowBounds = bounds
-        arrowSpacingMeters = RouteDirectionMarkers.spacingMeters(
-            forCameraDistanceMeters: context.camera.distance
-        )
-        arrows = RouteDirectionMarkers.placements(
+        arrows = RouteDirectionMarkers.arrows(
             coordinates: route,
-            spacingMeters: arrowSpacingMeters,
+            spacingMeters: RouteDirectionMarkers.spacingMeters(
+                forCameraDistanceMeters: context.camera.distance
+            ),
             visibleBounds: bounds,
             limit: Self.arrowLimit
         )

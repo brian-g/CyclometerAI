@@ -44,8 +44,10 @@ struct RouteMapContent: MapContent {
         // No heading or pitch: both screens hold their maps north-up and flat, which is what
         // lets a screen-space annotation be rotated by the bearing alone (`RoutesView`).
         RouteDirectionArrows(
-            placements: arrows,
-            pointSize: RouteDirectionMarkers.arrowPoints(forSpacingMeters: spacing),
+            placements: arrows.placements,
+            pointSize: RouteDirectionMarkers.arrowPoints(
+                forSpacingMeters: arrows.spacingMeters
+            ),
             tint: .cyPrimary
         )
 
@@ -65,17 +67,9 @@ struct RouteMapContent: MapContent {
         }
     }
 
-    /// Nil bounds means no arrows at all, so the size this yields is never drawn.
-    private var spacing: Double {
-        visibleBounds.map(RouteDirectionMarkers.spacingMeters(for:))
-            ?? RouteDirectionMarkers.baseSpacingMeters
-    }
-
-    private var arrows: [RouteDirectionMarkers.Placement] {
-        guard let visibleBounds else { return [] }
-        return RouteDirectionMarkers.placements(
+    private var arrows: RouteDirectionMarkers.Arrows {
+        RouteDirectionMarkers.arrows(
             coordinates: coordinates,
-            spacingMeters: spacing,
             visibleBounds: visibleBounds,
             limit: arrowLimit
         )
