@@ -150,4 +150,79 @@ struct LiveMapCameraTests {
         #expect(LiveMapCamera.overviewRegion(route: [route[0]]) == nil)
         #expect(LiveMapCamera.overviewRegion(route: []) == nil)
     }
+
+
+    // MARK: - The viewport the arrows are counted against (#258 review)
+
+    @Test("the arrow viewport comes from the camera distance, not the pitched region")
+    func visibleBoundsFollowTheCameraDistance() {
+        let camera = MapCamera(
+            centerCoordinate: CLLocationCoordinate2D(latitude: 37.0, longitude: -122.0),
+            distance: 2_000,
+            heading: 0,
+            pitch: 60
+        )
+        let bounds = try! #require(LiveMapCamera.visibleBounds(for: camera))
+        // A box about one camera distance across, centred where the camera looks.
+        #expect(abs(bounds.center.latitude - 37.0) < 1e-6)
+        #expect(abs(bounds.center.longitude + 122.0) < 1e-6)
+        let heightMeters = (bounds.maxLatitude - bounds.minLatitude) * 111_320
+        #expect(abs(heightMeters - 2_000) < 50)
+        // The tilt must not widen it: a pitched region runs to the horizon, which is the whole
+        // reason this exists.
+        let flat = MapCamera(centerCoordinate: camera.centerCoordinate, distance: 2_000,
+                             heading: 0, pitch: 0)
+        #expect(LiveMapCamera.visibleBounds(for: flat) == bounds)
+    }
+
+    @Test("arrows are drawn over more ground than they are counted against")
+    func arrowBoundsAreWiderThanTheViewport() {
+        let camera = MapCamera(
+            centerCoordinate: CLLocationCoordinate2D(latitude: 37.0, longitude: -122.0),
+            distance: 1_000,
+            heading: 0,
+            pitch: 60
+        )
+        let counted = try! #require(LiveMapCamera.visibleBounds(for: camera))
+        let drawn = try! #require(LiveMapCamera.arrowBounds(for: camera))
+        #expect(drawn.contains(counted))
+        let drawnHeight = (drawn.maxLatitude - drawn.minLatitude) * 111_320
+        #expect(abs(drawnHeight - 1_000 * LiveMapCamera.arrowBoundsScale) < 50)
+    }
+
+    @Test("the arrows are replaced before the rider reaches the edge of the ones they have")
+    func arrowRefreshFiresWithHalfAScreenLeft() {
+        let start = CLLocationCoordinate2D(latitude: 37.0, longitude: -122.0)
+        let camera = MapCamera(centerCoordinate: start, distance: 1_000, heading: 0, pitch: 0)
+        let placedFor = try! #require(LiveMapCamera.visibleBounds(for: camera))
+
+        // Still where they were placed: nothing to do.
+        #expect(!LiveMapCamera.needsArrowRefresh(camera: camera, placedFor: placedFor))
+        // A short way along: still covered.
+        let nudged = MapCamera(
+            centerCoordinate: CLLocationCoordinate2D(latitude: 37.0005, longitude: -122.0),
+            distance: 1_000, heading: 0, pitch: 0
+        )
+        #expect(!LiveMapCamera.needsArrowRefresh(camera: nudged, placedFor: placedFor))
+        // Most of the way to the edge of the box they were placed against — refresh now, while
+        // there are still arrows ahead, rather than when the rider is standing on the last one.
+        let moved = MapCamera(
+            centerCoordinate: CLLocationCoordinate2D(latitude: 37.0030, longitude: -122.0),
+            distance: 1_000, heading: 0, pitch: 0
+        )
+        #expect(LiveMapCamera.needsArrowRefresh(camera: moved, placedFor: placedFor))
+        // Nothing placed yet always refreshes.
+        #expect(LiveMapCamera.needsArrowRefresh(camera: camera, placedFor: nil))
+    }
+
+    @Test("a camera mid-transition yields no viewport rather than a degenerate one")
+    func visibleBoundsRefusesANonsenseCamera() {
+        let stalled = MapCamera(
+            centerCoordinate: CLLocationCoordinate2D(latitude: 37.0, longitude: -122.0),
+            distance: 0,
+            heading: 0,
+            pitch: 0
+        )
+        #expect(LiveMapCamera.visibleBounds(for: stalled) == nil)
+    }
 }

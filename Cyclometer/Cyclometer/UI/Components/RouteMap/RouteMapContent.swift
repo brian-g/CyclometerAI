@@ -2,7 +2,7 @@ import CoreLocation
 import MapKit
 import SwiftUI
 
-/// One route drawn on a map: its polyline, direction-of-travel chevrons, and flags at the ends.
+/// One route drawn on a map: its polyline, direction-of-travel arrows, and flags at the ends.
 ///
 /// A `MapContent` rather than a `View`, so both screens drop it straight into their own
 /// `Map { }` — S19 inside a `ForEach` over every saved route, S20 (#195) once for the route
@@ -10,9 +10,11 @@ import SwiftUI
 /// direction of travel; #194 puts the same treatment on S19 so a route reads the same way
 /// wherever the rider meets it.
 ///
-/// Everything that could be *wrong* — where the chevrons go, which way they point — lives in
+/// Everything that could be *wrong* — where the arrows go, which way they point — lives in
 /// `RouteDirectionMarkers` as pure arithmetic, because a live `Map` cannot be pixel-snapshot
-/// tested reliably (`RoutesMapCamera.swift:6-9`). This type only draws what it is handed.
+/// tested reliably (`RoutesMapCamera.swift:6-9`). This type only draws what it is handed, and
+/// hands the arrows themselves to `RouteDirectionArrows`, which the live ride map draws too
+/// (#258).
 struct RouteMapContent: MapContent {
     let coordinates: [RouteCoordinate]
     /// S19 puts the route's name here, since that is how a rider tells eight polylines apart.
@@ -21,11 +23,11 @@ struct RouteMapContent: MapContent {
     /// Empty on S19, where a second label per route is noise. "Finish" on S20.
     var finishTitle: String = ""
     var strokeWidth: CGFloat = 5
-    /// The current viewport. Nil means no chevrons: spacing is derived from what is on screen,
+    /// The current viewport. Nil means no arrows: spacing is derived from what is on screen,
     /// and guessing it from the route's own length would make one route read differently on
     /// two screens.
     var visibleBounds: RouteBounds?
-    var chevronLimit: Int = 24
+    var arrowLimit: Int = RouteDirectionMarkers.targetArrowsInView
 
     /// Start and finish closer together than this is a loop, and a loop has no finish to mark.
     /// Without this every loop route stacks a checkered flag on top of its start flag, which
@@ -39,18 +41,13 @@ struct RouteMapContent: MapContent {
                 .stroke(Color.cyPrimary, lineWidth: strokeWidth)
         }
 
-        ForEach(Array(chevrons.enumerated()), id: \.offset) { _, placement in
-            Annotation("", coordinate: placement.coordinate.coordinate2D, anchor: .center) {
-                Image(systemName: "chevron.up")
-                    .font(.cyMapAnnotation)
-                    .foregroundStyle(Color.cyPrimary)
-                    .rotationEffect(.degrees(placement.bearingDegrees))
-                    // Decorative: the flags carry start and finish for VoiceOver, and dozens
-                    // of unlabelled rotated glyphs would only make the map harder to hear.
-                    .accessibilityHidden(true)
-            }
-            .annotationTitles(.hidden)
-        }
+        // No heading or pitch: both screens hold their maps north-up and flat, which is what
+        // lets a screen-space annotation be rotated by the bearing alone (`RoutesView`).
+        RouteDirectionArrows(
+            placements: arrows.placements,
+            pointSize: arrows.pointSize,
+            tint: .cyPrimary
+        )
 
         if let start = coordinates.first {
             Marker(startTitle, systemImage: "flag.fill", coordinate: start.coordinate2D)
@@ -68,11 +65,11 @@ struct RouteMapContent: MapContent {
         }
     }
 
-    private var chevrons: [RouteDirectionMarkers.Placement] {
-        RouteDirectionMarkers.placements(
+    private var arrows: RouteDirectionMarkers.Arrows {
+        RouteDirectionMarkers.arrows(
             coordinates: coordinates,
             visibleBounds: visibleBounds,
-            limit: chevronLimit
+            limit: arrowLimit
         )
     }
 

@@ -508,3 +508,32 @@ collection, when the build simply hadn't been installed.
   answered in a minute what three rounds of log-archive reading could not. `.debug` is memory-only unless
   the subsystem is configured for it, so a diagnostic meant for a collected archive must be `.notice`.
 - Don't conclude from an absent log line until confirming the build under test contains it.
+
+---
+
+## "It renders" is not "it is right" (2026-09-20, #258)
+
+**What happened.** I shipped direction arrows, verified them on the simulator, and reported them
+working. Brian looked at S20 and got a mark lying across the route at ~90° to it, which also jumped
+to a different place on the road whenever he zoomed. Both defects were in code I had written tests
+for.
+
+**Why the verification missed them.**
+
+- **The test route was straight.** I drove a two-leg route, east then north, and checked the arrows
+  pointed east and north. A bearing taken between arrows 300 m apart is *exactly right* on a
+  straight, and wrong everywhere else. The bug needed a curve to show, and I never drew one.
+- **I checked one camera.** The arrows' positions were a continuous function of the viewport, so
+  they moved on every pinch. Nothing in my verification changed the zoom and compared.
+- **The unit tests inherited the same blind spot**: `eastwardRoute` and `zigzagRoute` are both made
+  of straight segments, so the tangent and the chord agree on both.
+
+**Rules.**
+
+- Fixture geometry must contain the shape the code has to handle. For anything that computes a
+  direction, a heading or a gradient, a straight-line fixture proves nothing — draw the curve.
+- When a value is derived from the viewport (spacing, density, level of detail), the thing to test
+  is what happens *between* two viewports, not what it is at one. Ask "does this move when the
+  camera does, and should it?"
+- Screenshot the real screen the issue names, at the zoom the issue shows, before saying it works.
+  I had verified my own harness surface and inferred the rest.

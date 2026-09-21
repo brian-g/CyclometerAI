@@ -29,6 +29,28 @@ struct ActiveRideMapView: View {
     @State private var pendingFollow: MapCameraPosition?
     /// The camera needs seeding, but MapKit has not yet reported one to seed from.
     @State private var isSeedWanted = false
+    /// The route's direction-of-travel arrows (#258), and the viewport they were placed for.
+    /// Placing them walks the whole route, so it happens when the camera settles rather than on
+    /// every frame; only their rotation follows the camera continuously.
+    @State private var arrows = RouteDirectionMarkers.Arrows.none
+    @State private var arrowBounds: RouteBounds?
+    /// Which way up the arrows are drawn. Its own state, and rounded to the degree, because it is
+    /// the one thing that has to follow the camera continuously — writing the whole camera on
+    /// every frame would rebuild the track polyline (thousands of points on a long ride) at the
+    /// camera's update rate, on a screen that is on for the whole ride.
+    @State private var arrowPose = ArrowPose()
+
+    /// The camera pose an arrow is drawn at, to the degree.
+    private struct ArrowPose: Equatable {
+        var headingDegrees: Double = 0
+        var pitchDegrees: Double = 0
+
+        init() {}
+        init(_ camera: MapCamera) {
+            headingDegrees = camera.heading.rounded()
+            pitchDegrees = camera.pitch.rounded()
+        }
+    }
     @Namespace private var mapScope
 
     init(
@@ -106,6 +128,16 @@ struct ActiveRideMapView: View {
             }
             MapPolyline(coordinates: coordinates.map(\.clLocationCoordinate2D))
                 .stroke(Color.cyMapTravelPath, lineWidth: Spacing.strokeMapTrack)
+            // Which way the route goes (#258). A route that doubles back over the same road is
+            // one ambiguous line without them. Annotations draw above both polylines, so they
+            // stay readable over the track already ridden.
+            RouteDirectionArrows(
+                placements: arrows.placements,
+                pointSize: arrows.pointSize,
+                tint: .cyMapRoute,
+                headingDegrees: arrowPose.headingDegrees,
+                pitchDegrees: arrowPose.pitchDegrees
+            )
         }
         .mapStyle(.standard(elevation: .realistic))
         // No default controls on either surface. The widget must have none, since a compass tap was
@@ -113,13 +145,55 @@ struct ActiveRideMapView: View {
         .mapControls {}
         .onMapCameraChange(frequency: .onEnd) { context in
             camera = context.camera
+            placeArrows(for: context)
             if pendingFollow != nil {
                 completeSeed()
             } else if isSeedWanted {
                 engage()
             }
         }
+        // An arrow rotated for a heading two seconds old points somewhere the route does not go,
+        // so the way up is taken every frame — but only that, and only to the degree, and only
+        // while there is a route to draw arrows on. A following widget can also ride a long way
+        // without the camera ever settling, so this is where that re-placement has to happen too.
+        .onMapCameraChange(frequency: .continuous) { context in
+            guard route.count > 1 else { return }
+            let pose = ArrowPose(context.camera)
+            if pose != arrowPose { arrowPose = pose }
+            if LiveMapCamera.needsArrowRefresh(camera: context.camera, placedFor: arrowBounds) {
+                placeArrows(for: context)
+            }
+        }
     }
+
+    /// Where the arrows go for the camera `context` reports.
+    ///
+    /// The viewport comes from the camera rather than from `context.region`: the map is tilted
+    /// while a route is loaded, and a pitched camera's region runs to the horizon — see
+    /// `LiveMapCamera.visibleBounds(for:)`.
+    private func placeArrows(for context: MapCameraUpdateContext) {
+        guard route.count > 1,
+              let bounds = LiveMapCamera.visibleBounds(for: context.camera)
+        else {
+            arrows = .none
+            arrowBounds = nil
+            return
+        }
+        arrowPose = ArrowPose(context.camera)
+        arrowBounds = bounds
+        arrows = RouteDirectionMarkers.arrows(
+            coordinates: route,
+            visibleBounds: bounds,
+            // Drawn wider than they are counted, so the rider does not ride into an empty road
+            // between re-placements, and so the tilt's extra ground is covered.
+            drawingBounds: LiveMapCamera.arrowBounds(for: context.camera),
+            limit: Self.arrowLimit
+        )
+    }
+
+    /// The same cap as the route-browsing maps: the density rule is shared, so a route reads the
+    /// same whether the rider is planning it or riding it.
+    private static let arrowLimit = RouteDirectionMarkers.targetArrowsInView
 
     private var sheetControls: some View {
         VStack(spacing: Spacing.sm) {
