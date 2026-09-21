@@ -8,7 +8,6 @@ struct RidesView: View {
     let store: StoreOf<RidesFeature>
     let recordedItems: [Ride]
     let onStartRide: () -> Void
-    @Environment(\.modelContext) private var modelContext
 
     private var rideSummaries: [RideSummary] {
         store.demoRides.map(RideSummary.demo) + recordedItems.map(RideSummary.recorded)
@@ -60,12 +59,16 @@ struct RidesView: View {
         .navigationTitle("Rides")
     }
 
+    /// Both halves go through the reducer. The recorded one used to call
+    /// `modelContext.delete(ride)` straight from here, which removed the one SwiftData
+    /// row and left the ride's GPX file, its CoreData track points and its vehicle-pass
+    /// events behind — nothing else knew the ride was gone (#261).
     private func deleteRide(_ ride: RideSummary) {
         switch ride.source {
         case .demo(let id):
             store.send(.deleteDemoRide(id))
         case .recorded(let ride):
-            modelContext.delete(ride)
+            store.send(.deleteRecordedRide(ride.id))
         }
     }
 }

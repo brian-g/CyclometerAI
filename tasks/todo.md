@@ -278,3 +278,30 @@ never entered.
 
 Full suite green, 1314 passed. Read at three zooms including S19's opening one, where the route is
 a blob: 25600 m · 2 arrows, 6400 m · 10 arrows, and no stack.
+
+### #261 — done (branch `fix/delete-ride-cascade`)
+
+`PersistenceClient.deleteRide` removes the GPX file, batch-deletes the CoreData `TrackPoint`
+rows, then deletes the `VehiclePassEvent` rows and the `Ride` in one save.
+
+The ordering inverts the plan's, deliberately. The plan removed the file last; the `Ride` row
+goes last instead, because it is the only thing that knows the file's path and the only thing a
+screen can reach the other three from. Interrupted anywhere earlier, the rider still sees a ride
+they can delete again, rather than the unreachable leftovers this issue is about. File removal
+stays non-fatal, which was the plan's own reason for its ordering.
+
+`RidesView` no longer touches `modelContext`; the swipe sends `.deleteRecordedRide(id)` through
+`RidesFeature`. `RidePersistenceActor` gains `gpxFileURL(id:)` and `deleteRide(id:)`, the latter
+fetching and deleting the pass events itself — there is no `@Relationship` to cascade, which is
+why they were being left behind.
+
+Tests: 6 in `RideDeletionTests` against real in-memory CoreData + SwiftData stacks, 3 in
+`RidesFeatureTests`.
+
+**Not verified end to end.** The list is an `@Query`, and the delete now happens on the
+persistence actor's context rather than the view's. A unit test pins the half that is testable —
+the container's main context no longer finds the ride — but whether SwiftUI re-runs the query is
+SwiftData's own contract and needs a running app. An attempt to drive it on the simulator failed
+on its own terms: seeding the real store from a host test does not survive the UI run, because
+launching XCUIApplication reinstalls the app and wipes its container. Worth a manual check on
+device before this merges.

@@ -2,6 +2,10 @@ import ComposableArchitecture
 import CoreData
 import Foundation
 import SwiftData
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persistence")
 
 // MARK: - PersistenceClient
 
@@ -32,6 +36,10 @@ struct PersistenceClient: Sendable {
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
     /// Ascending by timestamp, for GPXExporter (#173).
     var fetchVehiclePassEvents: @Sendable (UUID) async throws -> [VehiclePassEventDTO]
+    /// Removes everything one ride owns: its CoreData `TrackPoint` rows, its SwiftData
+    /// `VehiclePassEvent` rows, its exported GPX file and the `Ride` itself (#261).
+    /// Deleting the row alone is what left three orphaned `.gpx` files on a test device.
+    var deleteRide: @Sendable (UUID) async throws -> Void
     /// Read path for app-relaunch resume (#175) — the in-progress Ride left behind
     /// by a kill mid-ride, if one exists.
     var fetchResumableRide: @Sendable () async throws -> RideSummaryUpdate?
@@ -54,6 +62,7 @@ struct PersistenceClient: Sendable {
 
 enum PersistenceError: Error, Equatable {
     case batchInsertFailed
+    case batchDeleteFailed
     case rideNotFound
 }
 
@@ -75,6 +84,7 @@ extension PersistenceClient: DependencyKey {
             finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
+            deleteRide: { try await deleteRideLive(id: $0, rideActor: rideActor, container: coreDataContainer) },
             fetchResumableRide: { try await rideActor.fetchResumableRide() },
             importRoute: { try await routeActor.importRoute($0) },
             fetchRoutes: { try await routeActor.fetchRoutes() },
@@ -98,6 +108,7 @@ extension PersistenceClient: DependencyKey {
         finalizeRide: { _, _, _, _ in },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
+        deleteRide: { _ in },
         fetchResumableRide: { nil },
         importRoute: { _ in RouteSummary.empty },
         fetchRoutes: { [] },
@@ -147,6 +158,51 @@ private func batchInsertTrackPoints(_ points: [TrackPointDTO], container: NSPers
     try await context.perform {
         let result = try context.execute(request) as! NSBatchInsertResult
         guard result.result as? Bool == true else { throw PersistenceError.batchInsertFailed }
+    }
+}
+
+/// Deletes a ride's file, its time series and its rows, in that order (#261).
+///
+/// The order is the whole design: the `Ride` row is the only thing that knows where the
+/// GPX file is and the only thing any screen can reach the other three from, so it goes
+/// last. Interrupted anywhere before that — a crash, a throw — leaves a ride the rider can
+/// see and delete again, rather than the unreachable leftovers this issue is about.
+///
+/// File removal is non-fatal for the same reason: a missing or unreadable file must not
+/// strand the rows behind it, and the rider's intent was to be rid of the ride either way.
+private func deleteRideLive(
+    id: UUID,
+    rideActor: RidePersistenceActor,
+    container: NSPersistentContainer
+) async throws {
+    if let fileURL = try await rideActor.gpxFileURL(id: id) {
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+        } catch CocoaError.fileNoSuchFile {
+            // Already gone — the rider may have deleted it from Files themselves.
+        } catch {
+            logger.error("deleteRide: removing GPX failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+    try await batchDeleteTrackPoints(rideId: id, container: container)
+    try await rideActor.deleteRide(id: id)
+}
+
+/// The CoreData half — a 70-minute ride is roughly 4 200 rows, so this is a batch delete
+/// rather than a fetch-and-delete loop, mirroring `batchInsertTrackPoints`.
+///
+/// Nothing merges the result into `viewContext`, deliberately: no view holds a fetched
+/// `TrackPointMO`. Every read of this table goes through `fetchTrackPointsLive`, which
+/// starts a fresh background context and so sees the deletion already applied.
+private func batchDeleteTrackPoints(rideId: UUID, container: NSPersistentContainer) async throws {
+    let context = container.newBackgroundContext()
+    try await context.perform {
+        let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: "TrackPoint")
+        fetchRequest.predicate = NSPredicate(format: "rideId == %@", rideId as CVarArg)
+        let request = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        request.resultType = .resultTypeStatusOnly
+        let result = try context.execute(request) as! NSBatchDeleteResult
+        guard result.result as? Bool == true else { throw PersistenceError.batchDeleteFailed }
     }
 }
 
