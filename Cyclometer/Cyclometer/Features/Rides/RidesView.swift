@@ -276,8 +276,16 @@ struct RideSummary: Identifiable {
 
     static func recorded(_ ride: RideListSummary) -> RideSummary {
         let detail = RideDetail.recordedRide(timestamp: ride.startedAt)
-        return RideSummary(id: ride.id, title: detail.title, date: ride.startedAt,
-                           elapsedTime: detail.elapsedTime, distance: detail.distance,
-                           detail: detail)
+        let distanceMiles = UnitSystem.imperial.distance(fromMeters: ride.distanceMeters)
+        return RideSummary(
+            id: ride.id,
+            // Every ride's `title` is "" until #249's rename field ships — a blank row
+            // would read as broken, so this falls back rather than showing empty text.
+            title: ride.title.isEmpty ? "Ride" : ride.title,
+            date: ride.startedAt,
+            elapsedTime: Int(ride.durationSeconds).formattedElapsed,
+            distance: distanceMiles.formatted(.number.precision(.fractionLength(1))),
+            detail: detail
+        )
     }
 }
