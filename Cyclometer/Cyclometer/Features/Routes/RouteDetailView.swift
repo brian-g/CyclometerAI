@@ -59,6 +59,7 @@ struct RouteDetailList<MapRow: View>: View {
                     .listRowInsets(EdgeInsets())
                 LabeledContent("Distance", value: distanceLabel(store.summary.distanceMeters, unit))
             }
+            RouteSummarySection(summary: store.summary, unit: unit)
             // The whole section goes for a route with no `<ele>` — that varies per route, and a
             // header over nothing is noise. The chart is gated separately: a polyline that could
             // not be decoded still leaves the stored gain and loss worth showing.

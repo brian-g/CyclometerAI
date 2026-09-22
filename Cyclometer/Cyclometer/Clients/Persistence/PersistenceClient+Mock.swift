@@ -17,7 +17,9 @@ extension PersistenceClient {
         onAppendVehiclePassEvents: @escaping @Sendable ([VehiclePassEventDTO]) -> Void = { _ in },
         onDeleteRide: @escaping @Sendable (UUID) -> Void = { _ in },
         onImportRoute: @escaping @Sendable (ImportedRoute) -> Void = { _ in },
-        onDeleteRoute: @escaping @Sendable (UUID) -> Void = { _ in }
+        onDeleteRoute: @escaping @Sendable (UUID) -> Void = { _ in },
+        onSaveRouteSurface: @escaping @Sendable (UUID, RouteSurfaceBreakdown) -> Void = { _, _ in },
+        backfilledRouteCount: Int = 0
     ) -> PersistenceClient {
         PersistenceClient(
             flushTrackPoints: { onFlush($0) },
@@ -48,7 +50,9 @@ extension PersistenceClient {
             fetchRoutes: { routes },
             fetchRoute: { routeDetails[$0] },
             deleteRoute: { onDeleteRoute($0) },
-            fetchRouteRides: { ridesByRoute[$0] ?? [] }
+            fetchRouteRides: { ridesByRoute[$0] ?? [] },
+            saveRouteSurface: { onSaveRouteSurface($0, $1) },
+            backfillRouteTerrain: { backfilledRouteCount }
         )
     }
 }

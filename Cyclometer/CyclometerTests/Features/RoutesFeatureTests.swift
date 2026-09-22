@@ -17,6 +17,7 @@ struct RoutesFeatureTests {
         showsMap: Bool = false,
         preferredUnit: UnitSystem = .imperial,
         persistenceClient: PersistenceClient = .mock(),
+        overpassClient: OverpassClient = .testValue,
         locationClient: LocationClient = .testValue,
         locationPermission: PermissionState = .denied
     ) -> TestStoreOf<RoutesFeature> {
@@ -30,6 +31,7 @@ struct RoutesFeatureTests {
                 RoutesFeature()
             } withDependencies: {
                 $0.persistenceClient = persistenceClient
+                $0.overpassClient = overpassClient
                 $0.locationClient = locationClient
                 $0.permissionsClient = .mock(initial: [.locationWhenInUse: locationPermission])
                 $0.defaultFileStorage = storage
@@ -104,6 +106,7 @@ struct RoutesFeatureTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
         await store.finish()
     }
@@ -390,6 +393,240 @@ struct RoutesFeatureTests {
         await store.send(.useRouteSwiped(route.reference))
         await store.receive(\.delegate.useRoute, route.reference)
     }
+
+    // MARK: Terrain and surface (#252)
+
+    private static let surveyedPath = RouteFixtures.path(legs: [(0, 1_000)], spacingMeters: 10)
+    private static let asphalt = OSMWay(id: 1, tags: ["highway": "residential", "surface": "asphalt"],
+                                        geometry: [surveyedPath[0], surveyedPath[surveyedPath.count - 1]])
+
+    private static func surveyedDetail(_ route: RouteSummary) -> [UUID: RouteDetail] {
+        [route.id: RouteDetail(summary: route, coordinates: surveyedPath, cuePoints: [])]
+    }
+
+    @Test("a route with no surface is looked up after the read, saved, and shown")
+    func surfaceIsLookedUpAfterTheRead() async {
+        let route = Self.summary()
+        let expected = RouteSurface.breakdown(route: Self.surveyedPath, ways: [Self.asphalt])
+        let saved = LockIsolated<[UUID: RouteSurfaceBreakdown]>([:])
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.surveyedDetail(route),
+                                     onSaveRouteSurface: { id, surface in saved.withValue { $0[id] = surface } }),
+            overpassClient: OverpassClient { _ in [Self.asphalt] }
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+            $0.surfaceLookupsStarted = [route.id]
+        }
+        await store.receive(\.surfaceResolved) { $0.routes[0].surface = expected }
+        await store.finish()
+
+        #expect(saved.value == [route.id: expected])
+        #expect(expected.dominant == .paved)
+    }
+
+    @Test("a failed lookup leaves the route without a surface, saves nothing and raises no alert")
+    func failedLookupIsSilent() async {
+        let route = Self.summary()
+        let saved = LockIsolated(0)
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.surveyedDetail(route),
+                                     onSaveRouteSurface: { _, _ in saved.withValue { $0 += 1 } }),
+            overpassClient: OverpassClient { _ in throw OverpassError.http(status: 429) }
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+            $0.surfaceLookupsStarted = [route.id]
+        }
+        await store.finish()
+
+        #expect(saved.value == 0)
+        #expect(store.state.routes[0].surface == nil)
+        #expect(store.state.alert == nil)
+    }
+
+    @Test("a route that already has a surface is not looked up again")
+    func resolvedRouteIsNotLookedUpAgain() async {
+        var route = Self.summary()
+        route.surface = RouteSurfaceBreakdown(pavedMeters: 1_000)
+        let lookups = LockIsolated(0)
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.surveyedDetail(route)),
+            overpassClient: OverpassClient { _ in
+                lookups.withValue { $0 += 1 }
+                return []
+            }
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+        }
+        await store.finish()
+
+        #expect(lookups.value == 0)
+    }
+
+    @Test("an imported route has its surface looked up once it is saved")
+    func importedRouteIsLookedUp() async throws {
+        let url = try writeGPX(Self.namedGPX, named: "river-loop.gpx")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let imported = Self.summary(name: "River Loop")
+        let store = makeStore(
+            persistenceClient: .mock(routeDetails: Self.surveyedDetail(imported), importResult: imported),
+            overpassClient: OverpassClient { _ in [Self.asphalt] }
+        )
+
+        await store.send(.fileSelected(url)) { $0.isImporting = true }
+        await store.receive(\.importResponse) {
+            $0.isImporting = false
+            $0.routes = [imported]
+            $0.surfaceLookupsStarted = [imported.id]
+        }
+        await store.receive(\.surfaceResolved) {
+            $0.routes[0].surface = RouteSurface.breakdown(route: Self.surveyedPath, ways: [Self.asphalt])
+        }
+        await store.finish()
+    }
+
+    @Test("an open route detail is given the surface too")
+    func surfaceReachesAnOpenDetail() async {
+        let route = Self.summary()
+        let surface = RouteSurfaceBreakdown(gravelMeters: 1_000)
+        let store = makeStore(persistenceClient: .mock(routes: [route]))
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+            $0.surfaceLookupsStarted = [route.id]
+        }
+        await store.send(.path(.push(id: 0, state: .detail(RouteDetailFeature.State(summary: route))))) {
+            $0.path[id: 0] = .detail(RouteDetailFeature.State(summary: route))
+        }
+        await store.send(.surfaceResolved(route.id, surface)) {
+            $0.routes[0].surface = surface
+            $0.path[id: 0, case: \.detail]?.summary.surface = surface
+        }
+        await store.finish()
+    }
+
+    @Test("the first Overpass failure ends the batch instead of asking about every route")
+    func failureStopsTheBatch() async {
+        let first = Self.summary(name: "First")
+        let second = Self.summary(name: "Second")
+        let lookups = LockIsolated(0)
+        let store = makeStore(
+            persistenceClient: .mock(routes: [first, second],
+                                     routeDetails: Self.surveyedDetail(first).merging(Self.surveyedDetail(second)) { a, _ in a }),
+            overpassClient: OverpassClient { _ in
+                lookups.withValue { $0 += 1 }
+                throw OverpassError.http(status: 429)
+            }
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [first, second]
+            $0.surfaceLookupsStarted = [first.id, second.id]
+        }
+        await store.finish()
+
+        #expect(lookups.value == 1)
+    }
+
+    @Test("a later read neither restarts a route's lookup nor blanks the surface it found")
+    func laterReadKeepsTheSurface() async {
+        let route = Self.summary()
+        let expected = RouteSurface.breakdown(route: Self.surveyedPath, ways: [Self.asphalt])
+        let lookups = LockIsolated(0)
+        // The mock's list never changes, so the second read is exactly a read that began
+        // before the surface was saved.
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.surveyedDetail(route)),
+            overpassClient: OverpassClient { _ in
+                lookups.withValue { $0 += 1 }
+                return [Self.asphalt]
+            }
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+            $0.surfaceLookupsStarted = [route.id]
+        }
+        await store.receive(\.surfaceResolved) { $0.routes[0].surface = expected }
+
+        await store.send(.reloadRoutes)
+        await store.receive(\.routesResponse)
+        await store.finish()
+
+        #expect(store.state.routes[0].surface == expected)
+        #expect(lookups.value == 1)
+    }
+
+    @Test("a route whose lookup failed is not asked about again until the next launch")
+    func failedRouteWaitsForTheNextLaunch() async {
+        let route = Self.summary()
+        let lookups = LockIsolated(0)
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.surveyedDetail(route)),
+            overpassClient: OverpassClient { _ in
+                lookups.withValue { $0 += 1 }
+                throw OverpassError.incomplete(remark: "runtime error: Query timed out")
+            }
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+            $0.surfaceLookupsStarted = [route.id]
+        }
+        await store.send(.reloadRoutes)
+        await store.receive(\.routesResponse)
+        await store.finish()
+
+        #expect(lookups.value == 1)
+        #expect(store.state.routes[0].surface == nil)
+    }
+
+    @Test("routes imported before #252 are backfilled with terrain, then re-read")
+    func terrainBackfillRereadsTheList() async {
+        for (backfilled, expectedReads) in [(0, 1), (2, 2)] {
+            let reads = LockIsolated(0)
+            var client = PersistenceClient.mock(backfilledRouteCount: backfilled)
+            client.fetchRoutes = {
+                reads.withValue { $0 += 1 }
+                return []
+            }
+            let store = makeStore(persistenceClient: client)
+            // The backfill runs beside the first read, so the order the two reads' actions
+            // arrive in is not fixed; what matters is how many there are.
+            store.exhaustivity = .off
+
+            await store.send(.task)
+            await store.finish()
+
+            #expect(reads.value == expectedReads)
+        }
+    }
 }
 
 // MARK: - Regressions from the #193 review
@@ -480,9 +717,14 @@ struct RoutesFeatureReviewTests {
     @Test("A route whose polyline cannot load is not re-fetched on every map toggle")
     func unloadablePolylineIsNotRefetchedForever() async {
         let good = UUID(), bad = UUID()
-        let goodSummary = Self.summary(good, "Loads")
+        // Both already have a surface, so #252's lookup — which reads the polyline through the
+        // same `fetchRoute` — stays out of the count this test is about.
+        var goodSummary = Self.summary(good, "Loads")
+        goodSummary.surface = RouteSurfaceBreakdown(pavedMeters: 1)
+        var badSummary = Self.summary(bad, "Fails")
+        badSummary.surface = RouteSurfaceBreakdown(pavedMeters: 1)
         let fetches = LockIsolated<[UUID]>([])
-        var client = PersistenceClient.mock(routes: [goodSummary, Self.summary(bad, "Fails")])
+        var client = PersistenceClient.mock(routes: [goodSummary, badSummary])
         client.fetchRoute = { id in
             fetches.withValue { $0.append(id) }
             guard id == good else { return nil }
@@ -717,6 +959,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
         await store.receive(\.polylinesResponse) {
             $0.polylines = [Self.nearID: details[Self.nearID]!.coordinates,
@@ -865,6 +1108,7 @@ struct RoutesFeatureFilterTests {
         )
         await store.send(.importResponse(.success(imported))) {
             $0.routes.insert(imported, at: 0)
+            $0.surfaceLookupsStarted.insert(imported.id)
             $0.mapFilteredRouteIDs = [Self.nearID, importedID]
         }
         #expect(store.state.filteredRoutes.map(\.name) == ["Imported", "Near"])
@@ -884,6 +1128,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
         await store.receive(\.polylinesResponse)
 
@@ -925,6 +1170,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = [diagonal]
+            $0.surfaceLookupsStarted = [diagonal.id]
         }
         await store.send(.mapRegionChanged(corner)) { $0.visibleMapBounds = corner }
         await store.send(.mapToggled) { $0.showsMap = true }
@@ -1035,6 +1281,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
 
         await store.send(.elevationGainFilterChanged(150)) {
@@ -1053,6 +1300,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
 
         await store.send(.distanceFilterChanged(20_000...30_000)) {
@@ -1064,6 +1312,7 @@ struct RoutesFeatureFilterTests {
                                 elevationGainMeters: 4_000, bounds: Self.far.bounds)
         await store.send(.importResponse(.success(epic))) {
             $0.routes.insert(epic, at: 0)
+            $0.surfaceLookupsStarted.insert(epic.id)
         }
         // The cap survives the domain growing, and the new route is correctly outside it.
         #expect(store.state.filter.distanceMeters == 20_000...30_000)
@@ -1083,6 +1332,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
         await store.send(.elevationGainFilterChanged(50)) {
             $0.filter.maxElevationGainMeters = 50

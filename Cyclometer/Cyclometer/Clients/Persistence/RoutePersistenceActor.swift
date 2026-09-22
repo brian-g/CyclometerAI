@@ -70,6 +70,45 @@ actor RoutePersistenceActor {
         }
     }
 
+    /// Stores a route's OpenStreetMap surface (#252), the one attribute written after import.
+    /// No-op when the route was deleted while the lookup was in flight.
+    func saveRouteSurface(id: UUID, surface: RouteSurfaceBreakdown) throws {
+        guard let route = try routeRow(id: id) else { return }
+        let data = try JSONEncoder().encode(surface)
+        try savingChanges("saveRouteSurface", id: id, context: modelContext) {
+            route.surfaceData = data
+        }
+    }
+
+    /// Derives terrain for routes imported before #252, whose polylines were stored but never
+    /// analysed. Returns how many it filled in, so the caller re-reads only when that is not 0.
+    ///
+    /// Only routes with elevation qualify, so a route without `<ele>` is never decoded here. One
+    /// with elevation can still analyse to nil — a polyline that no longer decodes, or one with
+    /// no length — and that route is marked with an empty `terrainData`, which reads back as no
+    /// analysis but keeps it out of this predicate. Left nil, it would be decoded and
+    /// re-analysed to nil on every visit to the Routes tab, forever.
+    func backfillRouteTerrain() throws -> Int {
+        let descriptor = FetchDescriptor<Route>(
+            predicate: #Predicate { $0.terrainData == nil && $0.elevationGainMeters != nil }
+        )
+        do {
+            var filled = 0
+            for route in try modelContext.fetch(descriptor) {
+                route.terrainData = try RouteTerrain.analyze(route.coordinates).map { try JSONEncoder().encode($0) }
+                    ?? Data()
+                filled += 1
+            }
+            guard filled > 0 else { return 0 }
+            try modelContext.save()
+            logger.notice("backfilled terrain on \(filled, privacy: .public) routes")
+            return filled
+        } catch {
+            logger.error("backfillRouteTerrain failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// The row itself, for the two callers that need the object rather than a DTO.
     /// Named apart from `fetchRoute(id:)` on purpose — overloading on return type alone
     /// would make every call site's meaning depend on inference.

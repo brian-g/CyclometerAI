@@ -225,7 +225,7 @@ struct ElevationProfileView: View {
         .chartXAxis(.hidden)
         .chartYAxis {
             AxisMarks(position: .leading, values: [samples.min() ?? 0, samples.max() ?? 1]) { value in
-                AxisValueLabel { if let e = value.as(Double.self) { Text("\(Int(e)) \(unitLabel)") } }
+                AxisValueLabel { if let e = value.as(Double.self) { Text("\(Int(e)) \(unitLabel)").monospacedDigit() } }
             }
         }
     }

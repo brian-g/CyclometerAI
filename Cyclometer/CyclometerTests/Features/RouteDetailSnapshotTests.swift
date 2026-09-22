@@ -112,4 +112,12 @@ final class RouteDetailSnapshotTests: XCTestCase {
     func testWithoutElevationNeverRidden() {
         assertBothSchemes(screen(RouteSummary.previewRoutes[3], rides: []), named: "no-elevation-no-rides")
     }
+
+    /// "Coffee Spin" once OpenStreetMap has answered (#252): no terrain to show, so the Summary
+    /// section is the surface alone, with its attribution.
+    func testWithoutElevationWithSurface() {
+        var route = RouteSummary.previewRoutes[3]
+        route.surface = RouteSurfaceBreakdown(pavedMeters: 16_900, gravelMeters: 2_600, unknownMeters: 780)
+        assertBothSchemes(screen(route, rides: []), named: "no-elevation-surface")
+    }
 }

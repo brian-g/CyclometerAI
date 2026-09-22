@@ -68,6 +68,13 @@ struct RoutesFeature {
         /// batch of geometry lands. Stored, the sweep runs once per thing that can change it.
         var mapFilteredRouteIDs: Set<UUID>?
 
+        /// Routes whose OpenStreetMap surface has been asked for this session (#252), whether
+        /// the answer came back or not. A route is asked about once per launch: a second read
+        /// or an import mid-lookup skips it rather than restarting it, and a failure — offline,
+        /// a busy server — waits for the next launch instead of hammering Overpass on every
+        /// visit to the tab.
+        var surfaceLookupsStarted: Set<UUID> = []
+
         /// Nil until a fix arrives, and permanently nil when location is denied — which is
         /// an ordinary state for this screen, not a failure. `RoutesMapCamera` falls back.
         var riderCoordinate: Coordinate?
@@ -108,6 +115,8 @@ struct RoutesFeature {
         case reloadRoutes
         case routesResponse(Result<[RouteSummary], PersistenceFailure>)
         case polylinesResponse([UUID: [RouteCoordinate]])
+        /// One route's OpenStreetMap surface, looked up and saved (#252).
+        case surfaceResolved(UUID, RouteSurfaceBreakdown)
         case riderCoordinateResponse(Coordinate?)
 
         case mapToggled
@@ -156,6 +165,7 @@ struct RoutesFeature {
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
+    @Dependency(\.overpassClient) var overpassClient
     @Dependency(\.locationClient) var locationClient
     @Dependency(\.permissionsClient) var permissionsClient
 
@@ -173,6 +183,18 @@ struct RoutesFeature {
                     .run { send in
                         guard await permissionsClient.status(.locationWhenInUse).isGranted else { return }
                         await send(.riderCoordinateResponse(await locationClient.currentCoordinate()))
+                    },
+                    // Routes imported before #252 have no terrain analysis. Concurrent with the
+                    // first read rather than ahead of it, so the list is never held up behind
+                    // decoding polylines; a second read picks up whatever this filled in.
+                    .run { send in
+                        do {
+                            if try await persistenceClient.backfillRouteTerrain() > 0 {
+                                await send(.reloadRoutes)
+                            }
+                        } catch {
+                            logger.error("backfillRouteTerrain failed: \(error.localizedDescription, privacy: .public)")
+                        }
                     }
                 )
 
@@ -183,11 +205,23 @@ struct RoutesFeature {
                     await send(.routesResponse(await persistenceClient.loadRoutes()))
                 }
 
-            case .routesResponse(.success(let routes)):
+            case .routesResponse(.success(var routes)):
                 state.hasLoaded = true
+                // A read that began before a lookup saved its surface can land after
+                // `.surfaceResolved`; keep what state already knows rather than blanking it.
+                let knownSurfaces = Dictionary(
+                    state.routes.compactMap { route in route.surface.map { (route.id, $0) } },
+                    uniquingKeysWith: { first, _ in first }
+                )
+                for index in routes.indices where routes[index].surface == nil {
+                    routes[index].surface = knownSurfaces[routes[index].id]
+                }
                 state.routes = routes
                 Self.refreshFilters(&state)
-                return state.showsMap ? loadMissingPolylines(state) : .none
+                return .merge(
+                    state.showsMap ? loadMissingPolylines(state) : .none,
+                    resolveMissingSurfaces(&state)
+                )
 
             case .polylinesResponse(let polylines):
                 state.polylines.merge(polylines) { _, loaded in loaded }
@@ -198,6 +232,18 @@ struct RoutesFeature {
                 // Geometry that has just landed upgrades those routes from the bounding-box
                 // approximation to the exact test, so the map filter is re-evaluated here.
                 Self.refreshMapFilter(&state)
+                return .none
+
+            case let .surfaceResolved(id, surface):
+                if let index = state.routes.firstIndex(where: { $0.id == id }) {
+                    state.routes[index].surface = surface
+                }
+                // An open S20 was seeded with a copy of the summary, so it is told too.
+                for elementID in state.path.ids {
+                    if state.path[id: elementID, case: \.detail]?.summary.id == id {
+                        state.path[id: elementID, case: \.detail]?.summary.surface = surface
+                    }
+                }
                 return .none
 
             case .routesResponse(.failure):
@@ -357,7 +403,10 @@ struct RoutesFeature {
                 Self.refreshFilters(&state)
                 // Nothing else loads this one's geometry: the two other loaders run on the
                 // map toggle and on a re-read, and importing from the map does neither.
-                return state.showsMap ? loadMissingPolylines(state) : .none
+                return .merge(
+                    state.showsMap ? loadMissingPolylines(state) : .none,
+                    resolveMissingSurfaces(&state)
+                )
 
             case .importResponse(.failure(let failure)):
                 state.isImporting = false
@@ -425,6 +474,50 @@ struct RoutesFeature {
                 }
             }
             await send(.polylinesResponse(polylines))
+        }
+    }
+
+    /// Looks up the OpenStreetMap surface of every route that has none and has not been asked
+    /// about this session, one route at a time (#252). Run after each read and each import.
+    ///
+    /// The import has already saved by the time this runs, so a slow or failed lookup costs the
+    /// rider nothing but the surface word. Failures are logged, never alerted: the surface is a
+    /// nicety, and an alert every time the tab opened on a plane would not be.
+    ///
+    /// The first Overpass failure ends the batch. Offline, or rate-limited (429, 504), every
+    /// remaining request would fail the same way, and the usage policy asks a client that is
+    /// being refused to stop asking. The routes not reached are retried on the next launch.
+    private func resolveMissingSurfaces(_ state: inout State) -> Effect<Action> {
+        let started = state.surfaceLookupsStarted
+        let missing = state.routes.filter { $0.surface == nil && !started.contains($0.id) }.map(\.id)
+        guard !missing.isEmpty else { return .none }
+        state.surfaceLookupsStarted.formUnion(missing)
+        return .run { [persistenceClient, overpassClient] send in
+            for id in missing {
+                let coordinates: [RouteCoordinate]
+                do {
+                    guard let detail = try await persistenceClient.fetchRoute(id) else { continue }
+                    coordinates = detail.coordinates
+                } catch {
+                    logger.error("surface lookup could not read \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    continue
+                }
+                let ways: [OSMWay]
+                do {
+                    ways = try await overpassClient.ways(coordinates)
+                } catch {
+                    logger.error("surface lookup stopped at \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    return
+                }
+                let surface = RouteSurface.breakdown(route: coordinates, ways: ways)
+                do {
+                    try await persistenceClient.saveRouteSurface(id, surface)
+                } catch {
+                    logger.error("surface lookup could not save \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    continue
+                }
+                await send(.surfaceResolved(id, surface))
+            }
         }
     }
 
