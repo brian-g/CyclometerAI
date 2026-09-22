@@ -279,7 +279,17 @@ struct ActiveRideFeature {
         /// `RideSummaryUpdate.vehiclePassCount` at each checkpoint/finalize.
         var vehiclePassCount: Int = 0
         var coordinate: Coordinate? = nil
-        var trackCoordinates: [Coordinate] = []
+        /// The recorded track, one sub-array per continuous stretch of riding (#263).
+        /// A pause ends the current segment and a resume opens the next, so the map draws
+        /// a break where the rider stopped instead of a straight chord across it. Never
+        /// empty: there is always a segment in progress to append to.
+        var trackSegments: [[Coordinate]] = [[]]
+        /// Which segment `makeTrackPoint` stamps onto the points it records: how many times
+        /// this ride has been resumed. Its own field rather than `trackSegments.count - 1`
+        /// because it is the half that survives a kill (`Ride.trackSegmentIndex`) — the
+        /// coordinates are transient and a resumed ride redraws its map from empty, so
+        /// after a resume the two deliberately disagree.
+        var trackSegmentIndex: Int = 0
         var altitude: Double = 0
         var heading: Double = -1
         var horizontalAccuracy: Double = 0
@@ -486,6 +496,10 @@ struct ActiveRideFeature {
                 state.recordingState = .active
                 state.zeroSpeedSeconds = 0
                 state.isAutoPaused = false
+                beginTrackSegment(&state)
+                // After `beginTrackSegment`, so the checkpoint this resume writes already
+                // carries the new segment index — a kill before the next one would
+                // otherwise resume into the segment that just ended (#263).
                 let update = makeRideSummaryUpdate(from: state)
                 return .merge(
                     .send(.trackRecorder(.resumeRecording)),
@@ -853,7 +867,7 @@ struct ActiveRideFeature {
                     // GPS jitter doesn't pollute the polyline — mirrors distanceMeters,
                     // which also only accumulates while active (.elapsedTick).
                     if state.recordingState == .active {
-                        state.trackCoordinates.append(update.coordinate)
+                        state.trackSegments[state.trackSegments.count - 1].append(update.coordinate)
                     }
                 }
                 if wasRecordable != state.isFixRecordable {
@@ -894,6 +908,10 @@ struct ActiveRideFeature {
                     state.recordingState = .active
                     state.isAutoPaused = false
                     state.zeroSpeedSeconds = 0
+                    // An auto-pause is as real a break in the track as a manual one — the
+                    // rider stood at the light and the bike did not travel the ground
+                    // between the two fixes (#263).
+                    beginTrackSegment(&state)
                 }
                 return .none
             case .calibration:
@@ -1028,6 +1046,7 @@ struct ActiveRideFeature {
             speedSampleCount: state.speedSampleCount,
             hrSampleCount: state.hrSampleCount,
             cadenceSampleCount: state.cadence.pedalingSampleCount,
+            trackSegmentIndex: state.trackSegmentIndex,
             route: state.route,
             routeProgressMeters: state.navigation.progressMeters
         )
@@ -1072,8 +1091,21 @@ struct ActiveRideFeature {
             heartRateBPM: state.isHeartRateRecordable ? state.heartRateBPM : nil,
             heartRateSource: state.isHeartRateRecordable ? state.heartRateProvenance : .none,
             cadenceRPM: state.cadence.cadenceRPM,
-            powerWatts: nil
+            powerWatts: nil,
+            segmentIndex: state.trackSegmentIndex
         )
+    }
+
+    /// Opens the next track segment (#263): the points recorded from here on are stamped
+    /// with a new index and the live map starts a new polyline, so neither joins the last
+    /// position before the pause to the first one after it.
+    ///
+    /// Called on both resumes — the manual `.resumeTapped` and the auto-resume in `.speed`
+    /// — and nowhere else. Starting a segment on *pause* instead would leave an empty one
+    /// hanging on any ride the rider finished without resuming.
+    private func beginTrackSegment(_ state: inout State) {
+        state.trackSegmentIndex += 1
+        state.trackSegments.append([])
     }
 
     /// Drops a HealthKit shadow sample once it's aged past `healthKitHRStalenessWindow`
@@ -1091,7 +1123,7 @@ struct ActiveRideFeature {
 extension ActiveRideFeature.State {
     /// Seeds a resumed ride's cumulative aggregates from its last-persisted
     /// checkpoint (#175, `PersistenceClient.fetchResumableRide`). Transient
-    /// UI/sensor fields (coordinate, trackCoordinates, radar/BLE connection state,
+    /// UI/sensor fields (coordinate, trackSegments, radar/BLE connection state,
     /// etc.) are left at `State()`'s defaults — `.task`'s existing scan/reconnect
     /// effects repopulate those naturally, same as a fresh ride; rebuilding them is
     /// explicitly out of scope for #175.
@@ -1120,6 +1152,19 @@ extension ActiveRideFeature.State {
         // field here — worst case, the auto-pause/auto-end grace period runs a
         // little longer than it would have, never a little shorter.
         zeroSpeedSeconds = summary.zeroSpeedSeconds
+        // The coordinates themselves are transient and are not restored (see above), but
+        // the *index* has to be: resuming at 0 would stamp the rest of the ride with the
+        // first segment's index, and the export would merge every earlier stretch of riding
+        // into the last one.
+        //
+        // And a ride that comes back `.active` continues into the *next* segment, not the
+        // one it was killed in. The app was not running for the gap, so no points exist for
+        // it however far the rider travelled — restoring the index unchanged would stamp
+        // the points after the kill with the same one as the points before it, and the
+        // export would draw a chord across the gap. That is #263's defect with a kill in
+        // place of the pause. A ride that comes back `.paused` needs no bump: it records
+        // nothing until the resume that opens its own segment.
+        trackSegmentIndex = summary.trackSegmentIndex + (recordingState == .active ? 1 : 0)
         elapsedSeconds = Int(summary.durationSeconds)
         distanceMeters = summary.distanceMeters
         maxSpeedKPH = Measurement(value: summary.maxSpeedMPS, unit: UnitSpeed.metersPerSecond)

@@ -13,7 +13,9 @@ import MapKit
 /// in `LiveMapCamera`; this view only applies it. The map surface bleeds into the safe areas (S05, Map
 /// widget safe-area bleed), and the sheet's controls stay inside them.
 struct ActiveRideMapView: View {
-    let coordinates: [Coordinate]     // recorded track travelled
+    /// The recorded track, one array per continuous stretch of riding (#263) — drawn as
+    /// one polyline each, so a pause is a gap rather than a chord across it.
+    let trackSegments: [[Coordinate]]
     /// The route being ridden, drawn beneath the track. Empty on a free ride.
     let route: [RouteCoordinate]
     let surface: LiveMapCamera.Surface
@@ -54,13 +56,13 @@ struct ActiveRideMapView: View {
     @Namespace private var mapScope
 
     init(
-        coordinates: [Coordinate],
+        trackSegments: [[Coordinate]],
         route: [RouteCoordinate] = [],
         surface: LiveMapCamera.Surface = .sheet,
         orientation: MapOrientation = .headingUp,
         onOrientationToggle: @escaping () -> Void = {}
     ) {
-        self.coordinates = coordinates
+        self.trackSegments = trackSegments
         self.route = route
         self.surface = surface
         self.orientation = orientation
@@ -126,8 +128,13 @@ struct ActiveRideMapView: View {
                 MapPolyline(coordinates: route.map(\.coordinate2D))
                     .stroke(Color.cyMapRoute, lineWidth: Spacing.strokeMapRoute)
             }
-            MapPolyline(coordinates: coordinates.map(\.clLocationCoordinate2D))
-                .stroke(Color.cyMapTravelPath, lineWidth: Spacing.strokeMapTrack)
+            // One polyline per segment. A segment of a single point draws nothing anyway,
+            // and `enumerated` rather than the array itself because `[Coordinate]` is not
+            // identifiable.
+            ForEach(Array(trackSegments.enumerated()), id: \.offset) { _, segment in
+                MapPolyline(coordinates: segment.map(\.clLocationCoordinate2D))
+                    .stroke(Color.cyMapTravelPath, lineWidth: Spacing.strokeMapTrack)
+            }
             // Which way the route goes (#258). A route that doubles back over the same road is
             // one ambiguous line without them. Annotations draw above both polylines, so they
             // stay readable over the track already ridden.
@@ -262,10 +269,10 @@ private let previewRoute: [RouteCoordinate] = [
 ]
 
 #Preview("Sheet — route") {
-    ActiveRideMapView(coordinates: previewTrack, route: previewRoute)
+    ActiveRideMapView(trackSegments: [previewTrack], route: previewRoute)
 }
 
 #Preview("Widget — no route") {
-    ActiveRideMapView(coordinates: previewTrack, surface: .widget)
+    ActiveRideMapView(trackSegments: [previewTrack], surface: .widget)
         .frame(height: 240)
 }

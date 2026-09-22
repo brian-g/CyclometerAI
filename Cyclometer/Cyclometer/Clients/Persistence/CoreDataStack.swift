@@ -29,6 +29,14 @@ final class CoreDataStack {
     }
     #endif
 
+    /// A store that will not open is a launch crash, deliberately: the alternative is a ride
+    /// recording into a store that silently isn't there. What keeps that from happening on an
+    /// update is `CyclometerTimeSeries.xcdatamodeld` carrying every shipped model version, so
+    /// CoreData can infer the mapping between them — `shouldMigrateStoreAutomatically` and
+    /// `shouldInferMappingModelAutomatically` are both on by default, which is why there is
+    /// nothing to configure here. Adding or removing an attribute needs a *new* model version
+    /// (#263's `segmentIndex`); changing a default value does not, since default values are
+    /// not part of an entity's version hash (#211). `TimeSeriesMigrationTests` covers it.
     private static func load(_ container: NSPersistentContainer) {
         container.loadPersistentStores { _, error in
             if let error { fatalError("CoreData load failed: \(error)") }

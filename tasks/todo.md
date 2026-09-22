@@ -305,3 +305,53 @@ SwiftData's own contract and needs a running app. An attempt to drive it on the 
 on its own terms: seeding the real store from a host test does not survive the UI run, because
 launching XCUIApplication reinstalls the app and wipes its container. Worth a manual check on
 device before this merges.
+
+### #263 — done (branch `fix/pause-track-segments`)
+
+The track is now segmented end to end. `TrackPointDTO` carries a `segmentIndex`, the CoreData
+`TrackPoint` entity carries a matching `Integer 16`, `ActiveRideFeature` opens a new segment on
+both resumes (the manual `.resumeTapped` and the auto-resume in `.speed`), `GPXExporter` emits one
+`<trkseg>` per run of equal index, and the live map draws one `MapPolyline` per segment. The index
+is persisted on `Ride`/`RideSummaryUpdate` and restored by `State(resuming:)`, so a kill mid-ride
+doesn't restart the numbering and merge two stretches back into one.
+
+`ActiveRideFeature.State.trackCoordinates: [Coordinate]` became `trackSegments: [[Coordinate]]`,
+and the view chain (`RideDashboardView` → `MapWidget`/`DirectionsWidget` → `liveMapSheet` →
+`ActiveRideMapView`) takes segments rather than a flat list.
+
+**Deviation from the plan: a second CoreData model version.** The plan said an added attribute
+with a default is an inferrable lightweight migration and `CoreDataStack.load` needs no change.
+The second half is true; the first is only true across model *versions*. Adding an attribute
+changes the entity's version hash, and editing the single `.xcdatamodel` in place would have left
+no old model in the bundle to migrate from — `CoreDataStack.load` calls `fatalError`, so that is a
+launch crash for every rider with existing ride history. `CyclometerTimeSeries 2.xcdatamodel` now
+holds the new attribute, v1 is back to exactly what shipped, and `.xccurrentversion` names v2.
+(#211 got away with an in-place edit because default values are not part of the version hash.)
+`TimeSeriesMigrationTests` writes a store with the shipped model and reopens it with the current
+one, which is the migration a device performs on update.
+
+`GPXParsing` gained `trackSegmentPointCounts` — the flat `trackPoints` list deliberately drops
+segment boundaries, and the boundary is the whole assertion here. Nothing else reads it.
+
+Tests: 5 in `GPXExporterTests`' new "Track segments" section, 6 in `TrackSegmentTests`, 1
+migration test. Three existing resume tests gained the new state mutation.
+
+### #263 — review round (/code-review high)
+
+One finding, taken. A ride killed while `.active` came back `.active` with its segment index
+restored but nothing opening a new one, so the points recorded after the relaunch carried the same
+index as the points before it and the export drew a chord across the whole kill gap — #263's own
+defect, triggered by a kill instead of a pause. `State(resuming:)` now bumps the index on the
+`.active` path only; a ride restored `.paused` records nothing until the resume that opens its own
+segment. My doc comment had claimed the restore already covered this, which it did not. Covered by
+`aKillWhileActiveOpensANewSegment`.
+
+Cleared without change: the migration (v2 differs from v1 by exactly the new attribute), the
+auto-resume writing no checkpoint (points and summary always flush from the same 30 s branch), the
+consecutive-run grouping, `ForEach(id: \.offset)` stability, and `RidesView`'s flat polyline (still
+`PreviewContent` sample data, #251's).
+
+**Not verified end to end.** No ride was recorded on a device or simulator for this. What the
+tests prove is the data path — reducer to DTO to CoreData to XML — and the migration. What they
+do not prove is the drawn result: that the live map shows a visible break rather than two
+polylines that happen to abut.

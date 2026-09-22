@@ -34,14 +34,16 @@ struct GPXExporterTests {
         speedMPS: Double? = 7.2, speedSource: SensorSource = .gps,
         hr: Int? = 142, hrSource: SensorSource = .bleHR,
         cad: Int? = 85,
-        accuracy: Double = 5
+        accuracy: Double = 5,
+        segment: Int = 0
     ) -> TrackPointDTO {
         TrackPointDTO(
             rideId: rideId, timestamp: time, latitude: lat, longitude: lon,
             altitudeMeters: ele, horizontalAccuracyMeters: accuracy,
             speedMPS: speedMPS, speedSource: speedSource,
             heartRateBPM: hr, heartRateSource: hrSource,
-            cadenceRPM: cad, powerWatts: nil
+            cadenceRPM: cad, powerWatts: nil,
+            segmentIndex: segment
         )
     }
 
@@ -364,5 +366,91 @@ struct GPXExporterTests {
         #expect(parsed.trackPoints.isEmpty)
         #expect(parsed.waypoints.isEmpty)
         #expect(parsed.metadataName == Self.filenameStem(for: Self.start))
+    }
+
+    // MARK: - Track segments (#263)
+
+    /// The exported shape of the 2026-09-20 ride: a stretch of riding, a stop the rider
+    /// paused for, and a resume 338 m away. One `<trkseg>` made those two consecutive
+    /// points look like 338 m of travel to every reader of the file.
+    private static func pausedRidePoints() -> [TrackPointDTO] {
+        [
+            point(lat: 36.0909331, lon: -79.5237360, time: start, segment: 0),
+            point(lat: 36.0909400, lon: -79.5237100, time: start.addingTimeInterval(1), segment: 0),
+            point(lat: 36.0939602, lon: -79.5233471, time: start.addingTimeInterval(1596), segment: 1),
+            point(lat: 36.0939700, lon: -79.5233200, time: start.addingTimeInterval(1597), segment: 1)
+        ]
+    }
+
+    @Test("a ride paused once exports two <trkseg> elements, split at the pause")
+    func pausedRideExportsTwoSegments() throws {
+        let parsed = try GPXParsing.parse(
+            GPXExporter.buildXML(ride: Self.ride, trackPoints: Self.pausedRidePoints(), vehiclePassEvents: [])
+        )
+
+        #expect(parsed.trackSegmentPointCounts == [2, 2])
+        // Every point still present, still in order — the break is a boundary in the
+        // track, not a hole in it.
+        #expect(parsed.trackPoints.count == 4)
+        #expect(parsed.trackPoints.first?.latitude == 36.0909331)
+        #expect(parsed.trackPoints.last?.latitude == 36.0939700)
+    }
+
+    @Test("the chord across the pause is no longer inside a single segment")
+    func theChordIsAcrossASegmentBoundary() throws {
+        let xml = GPXExporter.buildXML(
+            ride: Self.ride, trackPoints: Self.pausedRidePoints(), vehiclePassEvents: []
+        )
+        let lastBeforePause = try #require(xml.range(of: "lat=\"36.0909400\""))
+        let firstAfterResume = try #require(xml.range(of: "lat=\"36.0939602\""))
+        let close = try #require(xml.range(of: "</trkseg>"))
+        let reopen = try #require(xml.range(of: "<trkseg>", range: close.upperBound..<xml.endIndex))
+
+        #expect(lastBeforePause.upperBound < close.lowerBound)
+        #expect(reopen.upperBound < firstAfterResume.lowerBound)
+    }
+
+    @Test("a ride with no pause exports exactly one <trkseg>, as it always has")
+    func unpausedRideExportsOneSegment() throws {
+        let points = [
+            Self.point(time: Self.start),
+            Self.point(time: Self.start.addingTimeInterval(1)),
+            Self.point(time: Self.start.addingTimeInterval(2))
+        ]
+        let xml = GPXExporter.buildXML(ride: Self.ride, trackPoints: points, vehiclePassEvents: [])
+
+        #expect(try GPXParsing.parse(xml).trackSegmentPointCounts == [3])
+        #expect(xml.components(separatedBy: "<trkseg>").count - 1 == 1)
+    }
+
+    @Test("three stretches of riding export as three segments in order")
+    func severalPausesExportAsSeveralSegments() throws {
+        let points = [
+            Self.point(time: Self.start, segment: 0),
+            Self.point(time: Self.start.addingTimeInterval(1), segment: 1),
+            Self.point(time: Self.start.addingTimeInterval(2), segment: 1),
+            Self.point(time: Self.start.addingTimeInterval(3), segment: 2)
+        ]
+        let parsed = try GPXParsing.parse(
+            GPXExporter.buildXML(ride: Self.ride, trackPoints: points, vehiclePassEvents: [])
+        )
+
+        #expect(parsed.trackSegmentPointCounts == [1, 2, 1])
+    }
+
+    /// A ride whose first recorded point lands after a resume — the rider started, the
+    /// GPS gate stayed shut through the first stretch, and recording began in segment 1.
+    /// Nothing anchors the numbering to zero, so the grouping must key off *changes*.
+    @Test("a track that starts at a non-zero segment index is still one segment")
+    func trackStartingMidNumberingIsOneSegment() throws {
+        let points = [
+            Self.point(time: Self.start, segment: 2),
+            Self.point(time: Self.start.addingTimeInterval(1), segment: 2)
+        ]
+        let parsed = try GPXParsing.parse(
+            GPXExporter.buildXML(ride: Self.ride, trackPoints: points, vehiclePassEvents: [])
+        )
+
+        #expect(parsed.trackSegmentPointCounts == [2])
     }
 }

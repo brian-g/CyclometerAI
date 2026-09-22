@@ -17,7 +17,7 @@ struct DirectionsWidget: View {
     let unit: UnitSystem
     var size: WidgetSize = .oneByOne   // only .oneByOne / .twoByOne used by W9
     /// The map sheet's inputs, as `MapWidget` takes them.
-    var coordinates: [Coordinate] = []
+    var trackSegments: [[Coordinate]] = [[]]
     var route: [RouteCoordinate] = []
     var sheetOrientation: MapOrientation = .headingUp
     var onOrientationToggle: () -> Void = {}
@@ -33,7 +33,7 @@ struct DirectionsWidget: View {
             .onTapGesture { showMapSheet = true }
             .liveMapSheet(
                 isPresented: $showMapSheet,
-                coordinates: coordinates,
+                trackSegments: trackSegments,
                 route: route,
                 orientation: sheetOrientation,
                 onOrientationToggle: onOrientationToggle

@@ -180,7 +180,7 @@ struct RideDashboardView: View {
     /// saved orientation with the action that switches it.
     private var mapWidget: MapWidget {
         MapWidget(
-            coordinates: store.trackCoordinates,
+            trackSegments: store.trackSegments,
             route: store.navigation.activeRoute?.coordinates ?? [],
             sheetOrientation: store.preferences.mapOrientation,
             onOrientationToggle: { store.send(.mapOrientationToggled) }
@@ -196,7 +196,7 @@ struct RideDashboardView: View {
             distanceMeters: store.navigation.distanceToNextTurnMeters,
             unit: store.unitSystem,
             size: size,
-            coordinates: store.trackCoordinates,
+            trackSegments: store.trackSegments,
             route: store.navigation.activeRoute?.coordinates ?? [],
             sheetOrientation: store.preferences.mapOrientation,
             onOrientationToggle: { store.send(.mapOrientationToggled) }

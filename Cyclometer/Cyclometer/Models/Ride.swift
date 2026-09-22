@@ -102,6 +102,11 @@ final class Ride {
     var speedSampleCount: Int = 0
     var hrSampleCount: Int = 0
     var cadenceSampleCount: Int = 0
+    /// How many times this ride has been resumed, which is the index of the track segment
+    /// currently being recorded (#263). Persisted for the same reason `zeroSpeedSeconds`
+    /// is: a kill and resume mid-ride would otherwise restart the numbering at 0 and merge
+    /// the new stretch of riding into the ride's first segment.
+    var trackSegmentIndex: Int = 0
 
     // MARK: - Relationships
     // TrackPoints and VehiclePassEvents are linked by rideId only (TrackPoint's
@@ -126,6 +131,7 @@ final class Ride {
         self.speedSampleCount = 0
         self.hrSampleCount = 0
         self.cadenceSampleCount = 0
+        self.trackSegmentIndex = 0
     }
 
     /// Nested rather than top-level to avoid colliding with the TCA-side
@@ -162,6 +168,7 @@ extension Ride {
             speedSampleCount: speedSampleCount,
             hrSampleCount: hrSampleCount,
             cadenceSampleCount: cadenceSampleCount,
+            trackSegmentIndex: trackSegmentIndex,
             // `createRide` writes the id and name together, so this is both or neither.
             route: routeId.flatMap { id in routeName.map { RouteReference(id: id, name: $0) } },
             routeProgressMeters: routeProgressMeters
