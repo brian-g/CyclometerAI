@@ -1154,10 +1154,17 @@ extension ActiveRideFeature.State {
         zeroSpeedSeconds = summary.zeroSpeedSeconds
         // The coordinates themselves are transient and are not restored (see above), but
         // the *index* has to be: resuming at 0 would stamp the rest of the ride with the
-        // first segment's index, and the export would merge the two back into one
-        // `<trkseg>` — exactly the chord #263 is about, drawn across the kill instead of
-        // across the pause.
-        trackSegmentIndex = summary.trackSegmentIndex
+        // first segment's index, and the export would merge every earlier stretch of riding
+        // into the last one.
+        //
+        // And a ride that comes back `.active` continues into the *next* segment, not the
+        // one it was killed in. The app was not running for the gap, so no points exist for
+        // it however far the rider travelled — restoring the index unchanged would stamp
+        // the points after the kill with the same one as the points before it, and the
+        // export would draw a chord across the gap. That is #263's defect with a kill in
+        // place of the pause. A ride that comes back `.paused` needs no bump: it records
+        // nothing until the resume that opens its own segment.
+        trackSegmentIndex = summary.trackSegmentIndex + (recordingState == .active ? 1 : 0)
         elapsedSeconds = Int(summary.durationSeconds)
         distanceMeters = summary.distanceMeters
         maxSpeedKPH = Measurement(value: summary.maxSpeedMPS, unit: UnitSpeed.metersPerSecond)

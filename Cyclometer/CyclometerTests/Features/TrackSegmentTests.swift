@@ -120,11 +120,10 @@ struct TrackSegmentTests {
         return captured.value
     }
 
-    @Test("A resume after an app kill continues the numbering instead of restarting it")
-    func resumeAfterAKillDoesNotMergeSegments() async {
-        var persisted = RideSummaryUpdate(
+    private static func persistedRide(recordingState: Ride.RecordingState) -> RideSummaryUpdate {
+        RideSummaryUpdate(
             rideId: UUID(),
-            recordingState: .paused,
+            recordingState: recordingState,
             durationSeconds: 600,
             distanceMeters: 4000,
             averageSpeedMPS: 6,
@@ -135,9 +134,36 @@ struct TrackSegmentTests {
             maxCadenceRPM: nil,
             vehiclePassCount: 0
         )
+    }
+
+    @Test("A ride killed while recording comes back in a new segment, not the one it died in")
+    func aKillWhileActiveOpensANewSegment() async {
+        var persisted = Self.persistedRide(recordingState: .active)
+        persisted.trackSegmentIndex = 2
+        let restored = ActiveRideFeature.State(resuming: persisted)
+
+        // 3, not 2. Nothing was recorded while the app was dead, so the points from here
+        // do not belong to the stretch that was being recorded when it died — joining them
+        // would draw a chord across however far the rider got in the meantime.
+        #expect(restored.recordingState == .active)
+        #expect(restored.trackSegmentIndex == 3)
+
+        let store = makeStore(restored)
+        await store.send(.locationUpdated(Self.update(latitude: 36.0939602, longitude: -79.5233471)))
+        await store.send(.elapsedTick)
+        let recorded = await Self.recordedPoint(from: store)
+
+        #expect(recorded?.segmentIndex == 3)
+    }
+
+    @Test("A resume after an app kill continues the numbering instead of restarting it")
+    func resumeAfterAKillDoesNotMergeSegments() async {
+        var persisted = Self.persistedRide(recordingState: .paused)
         persisted.trackSegmentIndex = 2
 
         let restored = ActiveRideFeature.State(resuming: persisted)
+        // Unbumped, unlike the `.active` case above: a paused ride records nothing until
+        // the resume below, which opens its own segment.
         #expect(restored.trackSegmentIndex == 2)
 
         let store = makeStore(restored)

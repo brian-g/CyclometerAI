@@ -336,6 +336,21 @@ segment boundaries, and the boundary is the whole assertion here. Nothing else r
 Tests: 5 in `GPXExporterTests`' new "Track segments" section, 6 in `TrackSegmentTests`, 1
 migration test. Three existing resume tests gained the new state mutation.
 
+### #263 — review round (/code-review high)
+
+One finding, taken. A ride killed while `.active` came back `.active` with its segment index
+restored but nothing opening a new one, so the points recorded after the relaunch carried the same
+index as the points before it and the export drew a chord across the whole kill gap — #263's own
+defect, triggered by a kill instead of a pause. `State(resuming:)` now bumps the index on the
+`.active` path only; a ride restored `.paused` records nothing until the resume that opens its own
+segment. My doc comment had claimed the restore already covered this, which it did not. Covered by
+`aKillWhileActiveOpensANewSegment`.
+
+Cleared without change: the migration (v2 differs from v1 by exactly the new attribute), the
+auto-resume writing no checkpoint (points and summary always flush from the same 30 s branch), the
+consecutive-run grouping, `ForEach(id: \.offset)` stability, and `RidesView`'s flat polyline (still
+`PreviewContent` sample data, #251's).
+
 **Not verified end to end.** No ride was recorded on a device or simulator for this. What the
 tests prove is the data path — reducer to DTO to CoreData to XML — and the migration. What they
 do not prove is the drawn result: that the live map shows a visible break rather than two
