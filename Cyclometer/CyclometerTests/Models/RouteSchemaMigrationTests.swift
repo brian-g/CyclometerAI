@@ -66,12 +66,22 @@ struct RouteSchemaMigrationTests {
         cuePoints: []
     )
 
+    /// Elevation, so gain is stored, but every point in one place: no length, so no analysis.
+    private static let stationary = ImportedRoute(
+        name: "Trainer",
+        terrainDescription: nil,
+        coordinates: [RouteCoordinate(latitude: 36, longitude: -80, elevationMeters: 100),
+                      RouteCoordinate(latitude: 36, longitude: -80, elevationMeters: 110)],
+        cuePoints: []
+    )
+
     private func writeLegacyStore(at url: URL) throws {
         let schema = RouteSchemaBeforeAnalysis.schema
         let container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, url: url)])
         let context = ModelContext(container)
         context.insert(RouteSchemaBeforeAnalysis.Route(imported: Self.hilly))
         context.insert(RouteSchemaBeforeAnalysis.Route(imported: RoutePersistenceTests.flatlandTrackWithoutElevation()))
+        context.insert(RouteSchemaBeforeAnalysis.Route(imported: Self.stationary))
         try context.save()
     }
 
@@ -81,7 +91,7 @@ struct RouteSchemaMigrationTests {
             try writeLegacyStore(at: url)
 
             let routes = try ModelContext(openStore(at: url)).fetch(FetchDescriptor<Route>())
-            #expect(routes.count == 2)
+            #expect(routes.count == 3)
             #expect(routes.allSatisfy { $0.terrainData == nil && $0.surfaceData == nil })
             #expect(routes.contains { $0.name == "Pilot Mountain" && $0.coordinates == Self.hilly.coordinates })
         }
@@ -93,15 +103,16 @@ struct RouteSchemaMigrationTests {
             try writeLegacyStore(at: url)
             let actor = RoutePersistenceActor(modelContainer: try openStore(at: url))
 
-            // The route without `<ele>` is left alone rather than re-analysed to nil forever.
-            #expect(try await actor.backfillRouteTerrain() == 1)
+            // The route without `<ele>` is never touched. The stationary one has gain but analyses
+            // to nil; it is marked so the second pass does not decode it again.
+            #expect(try await actor.backfillRouteTerrain() == 2)
             #expect(try await actor.backfillRouteTerrain() == 0)
 
             let routes = try await actor.fetchRoutes()
             let hilly = try #require(routes.first { $0.name == "Pilot Mountain" })
             #expect(hilly.terrain == RouteTerrain.analyze(Self.hilly.coordinates))
             #expect(hilly.terrain?.climbs.first?.category == .cat3)
-            #expect(routes.first { $0.name != "Pilot Mountain" }?.terrain == nil)
+            #expect(routes.filter { $0.name != "Pilot Mountain" }.allSatisfy { $0.terrain == nil })
         }
     }
 }

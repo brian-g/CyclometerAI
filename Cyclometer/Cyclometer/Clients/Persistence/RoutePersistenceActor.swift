@@ -83,9 +83,11 @@ actor RoutePersistenceActor {
     /// Derives terrain for routes imported before #252, whose polylines were stored but never
     /// analysed. Returns how many it filled in, so the caller re-reads only when that is not 0.
     ///
-    /// Only routes with elevation qualify: `RouteTerrain.analyze` is nil exactly when
-    /// `elevationGainMeters` is, so a route without `<ele>` would otherwise be decoded and
-    /// re-analysed to nil on every launch, forever.
+    /// Only routes with elevation qualify, so a route without `<ele>` is never decoded here. One
+    /// with elevation can still analyse to nil — a polyline that no longer decodes, or one with
+    /// no length — and that route is marked with an empty `terrainData`, which reads back as no
+    /// analysis but keeps it out of this predicate. Left nil, it would be decoded and
+    /// re-analysed to nil on every visit to the Routes tab, forever.
     func backfillRouteTerrain() throws -> Int {
         let descriptor = FetchDescriptor<Route>(
             predicate: #Predicate { $0.terrainData == nil && $0.elevationGainMeters != nil }
@@ -93,8 +95,8 @@ actor RoutePersistenceActor {
         do {
             var filled = 0
             for route in try modelContext.fetch(descriptor) {
-                guard let terrain = RouteTerrain.analyze(route.coordinates) else { continue }
-                route.terrainData = try JSONEncoder().encode(terrain)
+                route.terrainData = try RouteTerrain.analyze(route.coordinates).map { try JSONEncoder().encode($0) }
+                    ?? Data()
                 filled += 1
             }
             guard filled > 0 else { return 0 }

@@ -125,7 +125,12 @@ struct RoutesView: View {
                 .presentationDragIndicator(.visible)
         }
         .alert($store.scope(state: \.alert, action: \.alert))
-        .task { await store.send(.task).finish() }
+        // Not awaited, unlike the repo's usual `.finish()`. Awaiting ties every effect the read
+        // sets off to this view's lifetime — TCA appends the tasks of actions an effect sends to
+        // the originating send's — and the root disappears whenever S20 is pushed or the tab
+        // changes. That cancelled #252's surface lookup mid-request, every time. Nothing started
+        // here needs tearing down: each effect is finite.
+        .task { store.send(.task) }
     }
 
     // MARK: - Branches

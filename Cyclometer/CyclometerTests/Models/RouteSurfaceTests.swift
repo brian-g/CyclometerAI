@@ -26,6 +26,20 @@ struct RouteSurfaceTests {
         #expect(SurfaceClass(osmTags: ["highway": "track", "tracktype": "grade4", "surface": "asphalt"]) == .paved)
     }
 
+    @Test("sidewalks, steps and unbuilt roads are not ridden; roads, tracks and bike-signed footways are")
+    func rideableWays() {
+        #expect(SurfaceClass.isRideable(osmTags: ["highway": "residential"]))
+        #expect(SurfaceClass.isRideable(osmTags: ["highway": "track"]))
+        #expect(SurfaceClass.isRideable(osmTags: ["highway": "path"]))
+        #expect(SurfaceClass.isRideable(osmTags: ["highway": "cycleway"]))
+        #expect(SurfaceClass.isRideable(osmTags: ["highway": "footway", "bicycle": "designated"]))
+        #expect(!SurfaceClass.isRideable(osmTags: ["highway": "footway", "footway": "sidewalk"]))
+        #expect(!SurfaceClass.isRideable(osmTags: ["highway": "steps"]))
+        #expect(!SurfaceClass.isRideable(osmTags: ["highway": "construction"]))
+        #expect(!SurfaceClass.isRideable(osmTags: ["highway": "path", "bicycle": "no"]))
+        #expect(!SurfaceClass.isRideable(osmTags: ["railway": "rail"]))
+    }
+
     @Test("a road with no surface tag is unknown, never assumed paved")
     func untaggedRoadIsUnknown() {
         #expect(SurfaceClass(osmTags: ["highway": "primary"]) == .unknown)
@@ -86,6 +100,18 @@ struct RouteSurfaceTests {
         ]
         #expect(RouteSurface.breakdown(route: route, ways: ways).dominant == .paved)
         #expect(RouteSurface.breakdown(route: route, ways: ways).gravelMeters == 0)
+    }
+
+    @Test("a dirt sidewalk nearer the line than the road does not take the road's surface")
+    func sidewalkIsIgnored() {
+        let route = RouteFixtures.path(legs: legs, spacingMeters: 10)
+        var sidewalk = way(1, from: 0, to: 1_000, lateral: 2, surface: "ground")
+        sidewalk.tags["highway"] = "footway"
+        sidewalk.tags["footway"] = "sidewalk"
+        let road = way(2, from: 0, to: 1_000, lateral: 6, surface: "asphalt")
+        let breakdown = RouteSurface.breakdown(route: route, ways: [sidewalk, road])
+        #expect(breakdown.unpavedMeters == 0)
+        #expect(breakdown.dominant == .paved)
     }
 
     @Test("a stretch with no way in reach is unknown")
@@ -153,5 +179,15 @@ struct OverpassClientTests {
         #expect(ways.first?.tags["surface"] == "asphalt")
         #expect(ways.last?.tags == [:])
         #expect(ways.last?.geometry.count == 2)
+    }
+
+    @Test("a 200 carrying a remark is a failed query, not an answer")
+    func remarkThrows() {
+        let json = """
+        {"remark": "runtime error: Query timed out in \\"query\\" at line 1 after 26 seconds.",
+         "elements": [{"type": "way", "id": 1, "tags": {"highway": "residential"},
+           "geometry": [{"lat": 36.0, "lon": -80.0}, {"lat": 36.001, "lon": -80.0}]}]}
+        """
+        #expect(throws: OverpassError.self) { try OverpassClient.decode(Data(json.utf8)) }
     }
 }

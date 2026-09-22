@@ -67,8 +67,8 @@ struct RouteTerrainTests {
         #expect(climb.category == .cat3)
         // Smoothing rounds the corners by half a window either end, and no more.
         #expect(abs(climb.lengthMeters - 5_000) <= RouteTerrain.smoothingWindowMeters)
-        // Each end is trimmed to where the road starts rising, costing at most the trim in gain.
-        #expect(abs(climb.gainMeters - 300) <= 2 * RouteTerrain.climbEndTrimMeters)
+        // Each end is trimmed by grade, to where the road starts rising, which costs no real gain.
+        #expect(abs(climb.gainMeters - 300) < 1)
         #expect(abs(climb.averageGradePercent - 6) < 0.1)
         #expect(abs(climb.startMeters - 1_000) <= RouteTerrain.smoothingWindowMeters)
         #expect(abs(climb.maxGradePercent - 6) < 0.1)
@@ -162,11 +162,14 @@ struct RouteTerrainTests {
         #expect(RouteTerrain.character(gainPerKilometer: 6, hardestCategory: .cat2, kicksPer10Kilometers: 0) == .rolling)
     }
 
-    @Test("short steep kicks make a rolling route punchy, but never a flat one")
+    @Test("short steep kicks make a rolling route punchy, but never a flat one or one with a categorized climb")
     func kicksMakeARoutePunchy() {
         #expect(RouteTerrain.character(gainPerKilometer: 7, hardestCategory: nil, kicksPer10Kilometers: 1) == .punchy)
         #expect(RouteTerrain.character(gainPerKilometer: 7, hardestCategory: nil, kicksPer10Kilometers: 0.9) == .rolling)
         #expect(RouteTerrain.character(gainPerKilometer: 4, hardestCategory: nil, kicksPer10Kilometers: 3) == .flat)
+        // A Cat 4 is enough to make it a climbing route rather than a punchy one.
+        #expect(RouteTerrain.character(gainPerKilometer: 12, hardestCategory: .cat4, kicksPer10Kilometers: 3) == .hilly)
+        #expect(RouteTerrain.character(gainPerKilometer: 7, hardestCategory: .cat2, kicksPer10Kilometers: 3) == .rolling)
     }
 
     @Test("a route of repeated 300 m walls is punchy end to end")
@@ -178,6 +181,26 @@ struct RouteTerrainTests {
         let terrain = try analyze(Array([wall, wall, wall, wall].joined()))
         #expect(terrain.climbs.isEmpty)
         #expect(terrain.character == .punchy)
+    }
+
+    @Test("a kick gaining less than the climb dip tolerance still counts")
+    func shortKicksAreFound() throws {
+        // 110 m at 8.5% is 9.4 m — under `climbDipToleranceMeters`, so a climb-sized reversal
+        // tolerance never sees it. Eight of them, 920 m apart, over 7.8 km: the 3 m gain
+        // hysteresis banks at least 6.8 m of each, so the route is still rolling by gain.
+        let kick: [(meters: Double, gradePercent: Double)] = [(110, 8.5), (110, -8.5), (700, 0)]
+        #expect(110 * 0.085 < RouteTerrain.climbDipToleranceMeters)
+        let (total, elevation) = profile(lead: 200, Array(Array(repeating: kick, count: 8).joined()), tail: 200)
+        let terrain = try #require(RouteTerrain.analyze(route(meters: total, profile: elevation)))
+        #expect(terrain.climbs.isEmpty)
+        #expect(terrain.character == .punchy)
+    }
+
+    @Test("a route that only descends has a max grade of zero, not a negative one")
+    func descentOnlyHasNoNegativeGrade() throws {
+        let terrain = try analyze([(5_000, -3)], base: 800)
+        #expect(terrain.maxGradePercent == 0)
+        #expect(terrain.climbs.isEmpty)
     }
 
     @Test("a long HC climb makes the whole route mountainous")

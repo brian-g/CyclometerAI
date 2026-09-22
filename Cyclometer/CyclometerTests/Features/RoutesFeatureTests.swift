@@ -106,6 +106,7 @@ struct RoutesFeatureTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
         await store.finish()
     }
@@ -419,6 +420,7 @@ struct RoutesFeatureTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = [route]
+            $0.surfaceLookupsStarted = [route.id]
         }
         await store.receive(\.surfaceResolved) { $0.routes[0].surface = expected }
         await store.finish()
@@ -442,6 +444,7 @@ struct RoutesFeatureTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = [route]
+            $0.surfaceLookupsStarted = [route.id]
         }
         await store.finish()
 
@@ -488,6 +491,7 @@ struct RoutesFeatureTests {
         await store.receive(\.importResponse) {
             $0.isImporting = false
             $0.routes = [imported]
+            $0.surfaceLookupsStarted = [imported.id]
         }
         await store.receive(\.surfaceResolved) {
             $0.routes[0].surface = RouteSurface.breakdown(route: Self.surveyedPath, ways: [Self.asphalt])
@@ -506,6 +510,7 @@ struct RoutesFeatureTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = [route]
+            $0.surfaceLookupsStarted = [route.id]
         }
         await store.send(.path(.push(id: 0, state: .detail(RouteDetailFeature.State(summary: route))))) {
             $0.path[id: 0] = .detail(RouteDetailFeature.State(summary: route))
@@ -515,6 +520,91 @@ struct RoutesFeatureTests {
             $0.path[id: 0, case: \.detail]?.summary.surface = surface
         }
         await store.finish()
+    }
+
+    @Test("the first Overpass failure ends the batch instead of asking about every route")
+    func failureStopsTheBatch() async {
+        let first = Self.summary(name: "First")
+        let second = Self.summary(name: "Second")
+        let lookups = LockIsolated(0)
+        let store = makeStore(
+            persistenceClient: .mock(routes: [first, second],
+                                     routeDetails: Self.surveyedDetail(first).merging(Self.surveyedDetail(second)) { a, _ in a }),
+            overpassClient: OverpassClient { _ in
+                lookups.withValue { $0 += 1 }
+                throw OverpassError.http(status: 429)
+            }
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [first, second]
+            $0.surfaceLookupsStarted = [first.id, second.id]
+        }
+        await store.finish()
+
+        #expect(lookups.value == 1)
+    }
+
+    @Test("a later read neither restarts a route's lookup nor blanks the surface it found")
+    func laterReadKeepsTheSurface() async {
+        let route = Self.summary()
+        let expected = RouteSurface.breakdown(route: Self.surveyedPath, ways: [Self.asphalt])
+        let lookups = LockIsolated(0)
+        // The mock's list never changes, so the second read is exactly a read that began
+        // before the surface was saved.
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.surveyedDetail(route)),
+            overpassClient: OverpassClient { _ in
+                lookups.withValue { $0 += 1 }
+                return [Self.asphalt]
+            }
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+            $0.surfaceLookupsStarted = [route.id]
+        }
+        await store.receive(\.surfaceResolved) { $0.routes[0].surface = expected }
+
+        await store.send(.reloadRoutes)
+        await store.receive(\.routesResponse)
+        await store.finish()
+
+        #expect(store.state.routes[0].surface == expected)
+        #expect(lookups.value == 1)
+    }
+
+    @Test("a route whose lookup failed is not asked about again until the next launch")
+    func failedRouteWaitsForTheNextLaunch() async {
+        let route = Self.summary()
+        let lookups = LockIsolated(0)
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.surveyedDetail(route)),
+            overpassClient: OverpassClient { _ in
+                lookups.withValue { $0 += 1 }
+                throw OverpassError.incomplete(remark: "runtime error: Query timed out")
+            }
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+            $0.surfaceLookupsStarted = [route.id]
+        }
+        await store.send(.reloadRoutes)
+        await store.receive(\.routesResponse)
+        await store.finish()
+
+        #expect(lookups.value == 1)
+        #expect(store.state.routes[0].surface == nil)
     }
 
     @Test("routes imported before #252 are backfilled with terrain, then re-read")
@@ -869,6 +959,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
         await store.receive(\.polylinesResponse) {
             $0.polylines = [Self.nearID: details[Self.nearID]!.coordinates,
@@ -1017,6 +1108,7 @@ struct RoutesFeatureFilterTests {
         )
         await store.send(.importResponse(.success(imported))) {
             $0.routes.insert(imported, at: 0)
+            $0.surfaceLookupsStarted.insert(imported.id)
             $0.mapFilteredRouteIDs = [Self.nearID, importedID]
         }
         #expect(store.state.filteredRoutes.map(\.name) == ["Imported", "Near"])
@@ -1036,6 +1128,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
         await store.receive(\.polylinesResponse)
 
@@ -1077,6 +1170,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = [diagonal]
+            $0.surfaceLookupsStarted = [diagonal.id]
         }
         await store.send(.mapRegionChanged(corner)) { $0.visibleMapBounds = corner }
         await store.send(.mapToggled) { $0.showsMap = true }
@@ -1187,6 +1281,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
 
         await store.send(.elevationGainFilterChanged(150)) {
@@ -1205,6 +1300,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
 
         await store.send(.distanceFilterChanged(20_000...30_000)) {
@@ -1216,6 +1312,7 @@ struct RoutesFeatureFilterTests {
                                 elevationGainMeters: 4_000, bounds: Self.far.bounds)
         await store.send(.importResponse(.success(epic))) {
             $0.routes.insert(epic, at: 0)
+            $0.surfaceLookupsStarted.insert(epic.id)
         }
         // The cap survives the domain growing, and the new route is correctly outside it.
         #expect(store.state.filter.distanceMeters == 20_000...30_000)
@@ -1235,6 +1332,7 @@ struct RoutesFeatureFilterTests {
         await store.receive(\.routesResponse) {
             $0.hasLoaded = true
             $0.routes = routes
+            $0.surfaceLookupsStarted = Set(routes.map(\.id))
         }
         await store.send(.elevationGainFilterChanged(50)) {
             $0.filter.maxElevationGainMeters = 50

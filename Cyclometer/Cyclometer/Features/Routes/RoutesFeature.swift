@@ -68,6 +68,13 @@ struct RoutesFeature {
         /// batch of geometry lands. Stored, the sweep runs once per thing that can change it.
         var mapFilteredRouteIDs: Set<UUID>?
 
+        /// Routes whose OpenStreetMap surface has been asked for this session (#252), whether
+        /// the answer came back or not. A route is asked about once per launch: a second read
+        /// or an import mid-lookup skips it rather than restarting it, and a failure — offline,
+        /// a busy server — waits for the next launch instead of hammering Overpass on every
+        /// visit to the tab.
+        var surfaceLookupsStarted: Set<UUID> = []
+
         /// Nil until a fix arrives, and permanently nil when location is denied — which is
         /// an ordinary state for this screen, not a failure. `RoutesMapCamera` falls back.
         var riderCoordinate: Coordinate?
@@ -157,8 +164,6 @@ struct RoutesFeature {
         case detail(RouteDetailFeature)
     }
 
-    enum CancelID { case surfaces }
-
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.overpassClient) var overpassClient
     @Dependency(\.locationClient) var locationClient
@@ -200,13 +205,22 @@ struct RoutesFeature {
                     await send(.routesResponse(await persistenceClient.loadRoutes()))
                 }
 
-            case .routesResponse(.success(let routes)):
+            case .routesResponse(.success(var routes)):
                 state.hasLoaded = true
+                // A read that began before a lookup saved its surface can land after
+                // `.surfaceResolved`; keep what state already knows rather than blanking it.
+                let knownSurfaces = Dictionary(
+                    state.routes.compactMap { route in route.surface.map { (route.id, $0) } },
+                    uniquingKeysWith: { first, _ in first }
+                )
+                for index in routes.indices where routes[index].surface == nil {
+                    routes[index].surface = knownSurfaces[routes[index].id]
+                }
                 state.routes = routes
                 Self.refreshFilters(&state)
                 return .merge(
                     state.showsMap ? loadMissingPolylines(state) : .none,
-                    resolveMissingSurfaces(state)
+                    resolveMissingSurfaces(&state)
                 )
 
             case .polylinesResponse(let polylines):
@@ -391,7 +405,7 @@ struct RoutesFeature {
                 // map toggle and on a re-read, and importing from the map does neither.
                 return .merge(
                     state.showsMap ? loadMissingPolylines(state) : .none,
-                    resolveMissingSurfaces(state)
+                    resolveMissingSurfaces(&state)
                 )
 
             case .importResponse(.failure(let failure)):
@@ -463,36 +477,48 @@ struct RoutesFeature {
         }
     }
 
-    /// Looks up the OpenStreetMap surface of every route that has none yet, one route at a
-    /// time (#252). Run after each read and each import, which is also the retry: a lookup that
-    /// failed — offline, a busy server — leaves the route nil and the next visit asks again.
+    /// Looks up the OpenStreetMap surface of every route that has none and has not been asked
+    /// about this session, one route at a time (#252). Run after each read and each import.
     ///
     /// The import has already saved by the time this runs, so a slow or failed lookup costs the
     /// rider nothing but the surface word. Failures are logged, never alerted: the surface is a
     /// nicety, and an alert every time the tab opened on a plane would not be.
     ///
-    /// Restarted, not duplicated, when a second read or an import lands mid-batch: each route is
-    /// saved and sent as it resolves, so the restart re-asks only for what had not come back.
-    private func resolveMissingSurfaces(_ state: State) -> Effect<Action> {
-        let missing = state.routes.filter { $0.surface == nil }.map(\.id)
+    /// The first Overpass failure ends the batch. Offline, or rate-limited (429, 504), every
+    /// remaining request would fail the same way, and the usage policy asks a client that is
+    /// being refused to stop asking. The routes not reached are retried on the next launch.
+    private func resolveMissingSurfaces(_ state: inout State) -> Effect<Action> {
+        let started = state.surfaceLookupsStarted
+        let missing = state.routes.filter { $0.surface == nil && !started.contains($0.id) }.map(\.id)
         guard !missing.isEmpty else { return .none }
+        state.surfaceLookupsStarted.formUnion(missing)
         return .run { [persistenceClient, overpassClient] send in
             for id in missing {
-                // A cancelled `URLSession` request throws `URLError.cancelled`, not
-                // `CancellationError`, so the loop checks for itself.
-                guard !Task.isCancelled else { return }
+                let coordinates: [RouteCoordinate]
                 do {
                     guard let detail = try await persistenceClient.fetchRoute(id) else { continue }
-                    let ways = try await overpassClient.ways(detail.coordinates)
-                    let surface = RouteSurface.breakdown(route: detail.coordinates, ways: ways)
-                    try await persistenceClient.saveRouteSurface(id, surface)
-                    await send(.surfaceResolved(id, surface))
+                    coordinates = detail.coordinates
                 } catch {
-                    logger.error("surface lookup failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    logger.error("surface lookup could not read \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    continue
                 }
+                let ways: [OSMWay]
+                do {
+                    ways = try await overpassClient.ways(coordinates)
+                } catch {
+                    logger.error("surface lookup stopped at \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    return
+                }
+                let surface = RouteSurface.breakdown(route: coordinates, ways: ways)
+                do {
+                    try await persistenceClient.saveRouteSurface(id, surface)
+                } catch {
+                    logger.error("surface lookup could not save \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    continue
+                }
+                await send(.surfaceResolved(id, surface))
             }
         }
-        .cancellable(id: CancelID.surfaces, cancelInFlight: true)
     }
 
     // MARK: - Filters

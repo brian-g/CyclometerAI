@@ -48,7 +48,8 @@ final class Route {
     // migrates lightly with nil in each.
 
     /// `RouteTerrainAnalysis`, derived at import. Nil exactly when `elevationGainMeters` is,
-    /// except on a route imported before #252, which `backfillRouteTerrain` fills in.
+    /// except on a route imported before #252, which `backfillRouteTerrain` fills in — with an
+    /// empty value, read back as no analysis, when the polyline has elevation but no length.
     var terrainData: Data?
 
     /// `RouteSurfaceBreakdown` from OpenStreetMap. Nil until the lookup succeeds, which may

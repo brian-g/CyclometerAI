@@ -108,9 +108,11 @@ enum RouteTerrain {
 
     /// A rise's low point can sit anywhere in the valley before it, which on a level lead-in
     /// may be kilometres back, and its high point anywhere on the plateau after. Each end is
-    /// pulled in to the last (first) point within this much of it, so a climb starts where the
-    /// road starts to rise — at the cost of at most this much gain at either end.
-    static let climbEndTrimMeters = 1.0
+    /// pulled in past every sample step shallower than this, so a rise starts where the road
+    /// starts to climb. Trimmed by grade rather than by height, because a height margin cuts
+    /// the same few metres off a short kick as off a long climb — enough to push a 110 m kick
+    /// under `kickMinimumLengthMeters`.
+    static let riseEndTrimGradePercent = 1.0
 
     /// Strava's floor for a categorized climb.
     static let minimumClimbAverageGradePercent = 3.0
@@ -122,7 +124,12 @@ enum RouteTerrain {
     static let mountainousGainPerKilometer = 20.0
 
     /// A "kick": a short, steep rise. One every `punchyKickSpacingMeters` on a route that is
-    /// not flat and has no big climbs makes it punchy.
+    /// not flat and has no categorized climb makes it punchy. Kicks are found on the resampled
+    /// but *unsmoothed* profile, with `RouteGeometry.elevationNoiseThresholdMeters` as the
+    /// reversal tolerance. The 50 m smoothing spreads a 110 m ramp over about 170 m, halving
+    /// its grade, and `climbDipToleranceMeters` would not register an 8 m rise at all. The 3 m
+    /// tolerance still absorbs terrain-model jitter, and `kickMinimumLengthMeters` rules out a
+    /// one-point spike.
     static let kickMinimumGradePercent = 8.0
     static let kickMinimumLengthMeters = 100.0
     static let kickMaximumLengthMeters = 1_000.0
@@ -143,7 +150,7 @@ enum RouteTerrain {
         let elevation = movingAverage(raw, halfWindow: Int((smoothingWindowMeters / 2 / spacing).rounded()))
         let grades = grades(elevation, spacing: spacing)
         let rises = rises(elevation, tolerance: climbDipToleranceMeters)
-            .map { trimmed($0, elevation, tolerance: climbEndTrimMeters) }
+            .map { trimmed($0, elevation, spacing: spacing) }
 
         let climbs: [Climb] = rises.compactMap { rise in
             let length = Double(rise.top - rise.bottom) * spacing
@@ -164,14 +171,19 @@ enum RouteTerrain {
             )
         }
 
-        let kicks = rises.filter { rise in
-            let length = Double(rise.top - rise.bottom) * spacing
-            guard length >= kickMinimumLengthMeters, length < kickMaximumLengthMeters else { return false }
-            return (elevation[rise.top] - elevation[rise.bottom]) / length * 100 >= kickMinimumGradePercent
-        }.count
+        let kicks = Self.rises(raw, tolerance: RouteGeometry.elevationNoiseThresholdMeters)
+            .map { trimmed($0, raw, spacing: spacing) }
+            .filter { rise in
+                let length = Double(rise.top - rise.bottom) * spacing
+                guard length >= kickMinimumLengthMeters, length < kickMaximumLengthMeters else { return false }
+                return (raw[rise.top] - raw[rise.bottom]) / length * 100 >= kickMinimumGradePercent
+            }
+            .count
 
         return RouteTerrainAnalysis(
-            maxGradePercent: grades.max() ?? 0,
+            // Floored at zero: a route that only descends has no steepest *climb*, and "Max -3%
+            // grade" reads as a bug.
+            maxGradePercent: max(0, grades.max() ?? 0),
             climbs: climbs,
             character: character(gainPerKilometer: gain / (total / 1_000),
                                  hardestCategory: climbs.map(\.category).max(),
@@ -188,20 +200,22 @@ enum RouteTerrain {
             return .mountainous
         }
         if gainPerKilometer < rollingGainPerKilometer { return .flat }
-        if kicksPer10Kilometers >= 1 { return .punchy }
+        // Any categorized climb outranks the kicks: a route with a Cat 3 on it is a climbing
+        // route, whatever else it has.
+        if hardestCategory == nil, kicksPer10Kilometers >= 1 { return .punchy }
         return gainPerKilometer < hillyGainPerKilometer ? .rolling : .hilly
     }
 
     // MARK: - Steps
 
-    /// `rise` with its bottom moved up to the last point still within `tolerance` of the low,
-    /// and its top moved back to the first point within `tolerance` of the high.
+    /// `rise` with every step shallower than `riseEndTrimGradePercent` taken off each end.
     static func trimmed(_ rise: (bottom: Int, top: Int), _ elevation: [Double],
-                        tolerance: Double) -> (bottom: Int, top: Int) {
-        let low = elevation[rise.bottom]
-        let high = elevation[rise.top]
-        let bottom = (rise.bottom...rise.top).last { elevation[$0] <= low + tolerance } ?? rise.bottom
-        let top = (bottom...rise.top).first { elevation[$0] >= high - tolerance } ?? rise.top
+                        spacing: Double) -> (bottom: Int, top: Int) {
+        let minimumStep = riseEndTrimGradePercent / 100 * spacing
+        var bottom = rise.bottom
+        var top = rise.top
+        while bottom < top, elevation[bottom + 1] - elevation[bottom] < minimumStep { bottom += 1 }
+        while top > bottom, elevation[top] - elevation[top - 1] < minimumStep { top -= 1 }
         return (bottom, top)
     }
 

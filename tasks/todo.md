@@ -11,6 +11,12 @@ Branch: `feat/252-route-analysis`
 - [x] 6. Specs: PRD §8.6/§14 + changelog 0.6.1, UX S19/S20, DataModel §3.10
 - [x] 7. Tests: terrain, surface, Overpass, summary line, reducer, persistence, schema migration; 6 snapshot refs re-recorded + 1 new
 - [x] 8. Full local suite green (1404 passed, 0 failed); live Overpass response shape checked
+- [x] 8b. `/code-review high` findings fixed (10): Overpass `remark` throws; lookup detached from the view's
+      `.task` (TCA chains effect-sent actions' tasks onto the originating send); once per route per launch,
+      no restarts, stale reads keep known surfaces; first failure ends the batch; sidewalks/steps/unbuilt
+      ways ignored; punchy excludes any categorized climb; kicks found on the unsmoothed profile with a 3 m
+      tolerance and grade-based end trim; max grade floored at 0; backfill marks unanalysable routes; point-
+      to-segment distance reuses `RouteGeometry.projection`. Full suite: 1412 passed, 0 failed
 - [ ] 9. Simulator end-to-end import with a real GPX (not done)
 - [ ] 10. #252 descoping comment (FIT, NP) — drafted, awaiting approval to post
 

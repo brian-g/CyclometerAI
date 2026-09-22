@@ -4,6 +4,23 @@ import Foundation
 enum SurfaceClass: String, Codable, Sendable, Equatable, CaseIterable {
     case paved, gravel, unpaved, unknown
 
+    /// Whether a bicycle would be on this way rather than beside it. Sidewalks, footpaths and
+    /// steps run metres from the road a route follows, and without this the nearest-way match
+    /// hands a paved road the surface of the dirt path next to it. A footway signed for bikes
+    /// stays in; so do `path` and `track`, which is where gravel routes go.
+    static func isRideable(osmTags tags: [String: String]) -> Bool {
+        guard let highway = tags["highway"], !nonRideableHighways.contains(highway) else { return false }
+        if highway == "footway" || highway == "pedestrian" {
+            return ["yes", "designated", "permissive"].contains(tags["bicycle"] ?? "")
+        }
+        return tags["bicycle"] != "no"
+    }
+
+    private static let nonRideableHighways: Set<String> = [
+        "steps", "corridor", "elevator", "platform", "bus_stop", "construction", "proposed",
+        "abandoned", "razed", "rest_area", "services", "escape", "raceway"
+    ]
+
     /// OpenStreetMap's `surface=*` first, falling back to `tracktype=*` on a farm or forest track
     /// that states no surface. Nothing else is inferred: a road with no surface tag is
     /// `.unknown`, not assumed paved, because in exactly the rural places a cyclist asks the
@@ -138,7 +155,7 @@ enum RouteSurface {
 
         init(ways: [OSMWay], cellDegrees: Double) {
             self.cellDegrees = cellDegrees
-            for way in ways {
+            for way in ways where SurfaceClass.isRideable(osmTags: way.tags) {
                 let surface = SurfaceClass(osmTags: way.tags)
                 for (start, end) in zip(way.geometry, way.geometry.dropFirst()) {
                     let segment = Segment(start: start, end: end, surface: surface)
@@ -178,18 +195,10 @@ enum RouteSurface {
         }
     }
 
-    /// Metres from a point to a segment, on the tangent plane at the point — flat to far better
-    /// than a metre over the tens of metres that matter here.
+    /// Metres from a point to a segment: `RouteGeometry`'s own projection, so the surface match
+    /// and #197's route tracking flatten the ellipsoid the same way.
     static func distance(from point: RouteCoordinate, toSegment start: RouteCoordinate, _ end: RouteCoordinate) -> Double {
-        let a = RouteGeometry.tangentPlaneOffset(from: point, to: start)
-        let b = RouteGeometry.tangentPlaneOffset(from: point, to: end)
-        let dx = b.east - a.east
-        let dy = b.north - a.north
-        let lengthSquared = dx * dx + dy * dy
-        // The point is the origin, so the closest approach is the projection of -a onto the segment.
-        let t = lengthSquared > 0 ? min(1, max(0, -(a.east * dx + a.north * dy) / lengthSquared)) : 0
-        let x = a.east + t * dx
-        let y = a.north + t * dy
-        return (x * x + y * y).squareRoot()
+        // Only the offset is read, so the along-route distances can be anything of the right count.
+        RouteGeometry.projection(of: point, onto: [start, end], cumulative: [0, 0])?.offsetMeters ?? .infinity
     }
 }

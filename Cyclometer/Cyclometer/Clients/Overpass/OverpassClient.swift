@@ -15,6 +15,10 @@ struct OverpassClient: Sendable {
 
 enum OverpassError: Error, Equatable {
     case http(status: Int)
+    /// A 200 that is not an answer: Overpass reports a query that hit its timeout or memory
+    /// limit in a `remark`, with whatever ways it had found so far. Stored, that partial list
+    /// would read as a route that is mostly `.unknown`, and never be asked about again.
+    case incomplete(remark: String)
     /// The inert test and preview value's answer: nothing was asked, so nothing is known.
     case unavailable
 }
@@ -59,6 +63,8 @@ extension OverpassClient: DependencyKey {
     }
 
     /// Highways only: a railway or a river beside the road would otherwise be the nearest way.
+    /// Sidewalks, steps and the like come back too and are dropped on the device
+    /// (`SurfaceClass.isRideable`), where the rule is testable and the query stays one line.
     static func query(_ chunk: [RouteCoordinate]) -> String {
         let line = chunk
             // `String(format:)` is POSIX: a decimal comma from the rider's locale would split
@@ -110,8 +116,14 @@ extension OverpassClient: DependencyKey {
                 var geometry: [Point?]?
             }
             var elements: [Element]
+            var remark: String?
         }
-        return try JSONDecoder().decode(Response.self, from: data).elements.compactMap { element in
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        if let remark = response.remark {
+            logger.error("overpass remark: \(remark, privacy: .public)")
+            throw OverpassError.incomplete(remark: remark)
+        }
+        return response.elements.compactMap { element in
             let geometry = (element.geometry ?? []).compactMap { point in
                 point.map { RouteCoordinate(latitude: $0.lat, longitude: $0.lon) }
             }
