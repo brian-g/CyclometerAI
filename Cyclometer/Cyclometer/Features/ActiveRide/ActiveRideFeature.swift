@@ -42,16 +42,35 @@ struct HeldHeartRate: Equatable, Sendable {
 @Reducer
 struct ActiveRideFeature {
 
-    /// Consecutive zero-speed seconds while active before the ride auto-ends.
+    /// Consecutive stationary seconds while active before the ride auto-ends.
+    /// "Stationary" is `stationarySpeedMPS`, not literally zero (#262).
     /// PRD §8.8: "Auto-end if speed = 0 for > 5 minutes (configurable, default on)".
     static let autoEndZeroSpeedSeconds = 300
 
-    /// Consecutive zero-speed seconds while active before the ride auto-pauses
+    /// Consecutive stationary seconds while active before the ride auto-pauses
     /// (S12, #102). Shorter than auto-end on purpose — this is the stoplight case,
     /// not the abandoned-ride case, and it fires first: reaching `.paused` freezes
     /// `zeroSpeedSeconds`, so auto-end cannot trigger from a stop auto-pause already
     /// caught. No PRD-specified threshold exists; chosen to match a brief stop.
     static let autoPauseZeroSpeedSeconds = 10
+
+    /// At or below this speed the rider counts as stopped (#262).
+    ///
+    /// Not zero: a stationary iPhone's GPS still reports 0.02–0.04 m/s of noise, so the
+    /// `speedMPS == 0` this replaced was never true in the field and auto-pause never
+    /// fired once — ride 2026-09-20 had to be paused by hand after minutes at or under
+    /// 0.2 m/s. 0.5 m/s (1.8 km/h) sits well above that noise floor and well below any
+    /// real pedalling, including a slow uphill grind.
+    static let stationarySpeedMPS: Double = 0.5
+
+    /// The speed a ride must reach to auto-resume itself (#262).
+    ///
+    /// Deliberately higher than `stationarySpeedMPS`: with a single threshold, one noise
+    /// sample a hair above it would un-pause the ride the tick after auto-pause caught
+    /// it, and the two would chatter at the boundary for the whole stop. The gap between
+    /// them is that hysteresis. 1.0 m/s (3.6 km/h) is a rider who has actually started
+    /// moving, not one being nudged in a queue.
+    static let movingSpeedMPS: Double = 1.0
 
     /// How old a HealthKit HR sample can be and still count as "live" (#161).
     /// `HealthKitClient.heartRateStream()`'s own doc comment: outside an active workout
@@ -272,6 +291,8 @@ struct ActiveRideFeature {
         /// what `GPSFixFilter.maxSuppressedInterval` is measured against.
         var lastRecordablePositionAt: Date? = nil
         var isLocationAvailable: Bool = false
+        /// Consecutive seconds at or below `stationarySpeedMPS` — not literally zero,
+        /// which GPS never reports (#262). Name kept for the persisted `Ride` field.
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
         /// Whether the *current* pause was auto-triggered rather than a manual Pause
@@ -667,11 +688,16 @@ struct ActiveRideFeature {
                 expireHeldHR(in: &state)
                 coverSilentStrapWithHealthKit(in: &state)
                 state.elapsedSeconds += 1
-                state.distanceMeters += max(state.speed.speedMPS ?? 0, 0)
-                if (state.speed.speedMPS ?? 0) == 0 {
-                    state.zeroSpeedSeconds += 1
-                } else {
+                // One threshold governs both: a second spent below it adds no distance
+                // and counts toward auto-pause. Integrating the noise floor instead —
+                // what `max(speedMPS, 0)` did — grew the odometer while the bike stood
+                // still (#262).
+                let speedMPS = max(state.speed.speedMPS ?? 0, 0)
+                if speedMPS > Self.stationarySpeedMPS {
+                    state.distanceMeters += speedMPS
                     state.zeroSpeedSeconds = 0
+                } else {
+                    state.zeroSpeedSeconds += 1
                 }
 
                 var effects: [Effect<Action>] = []
@@ -861,8 +887,10 @@ struct ActiveRideFeature {
                 return .none
             case .speed:
                 // Only a pause auto-pause itself made is eligible to auto-resume — a
-                // rider who tapped Pause has to tap Resume (#102).
-                if state.isAutoPaused, (state.speed.speedMPS ?? 0) > 0 {
+                // rider who tapped Pause has to tap Resume (#102). The bar is
+                // `movingSpeedMPS`, not any speed at all: GPS noise alone used to clear
+                // `> 0` and undo the pause on the next sample (#262).
+                if state.isAutoPaused, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
                     state.recordingState = .active
                     state.isAutoPaused = false
                     state.zeroSpeedSeconds = 0
