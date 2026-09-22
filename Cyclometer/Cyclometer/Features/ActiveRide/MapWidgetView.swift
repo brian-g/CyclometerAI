@@ -8,7 +8,8 @@ import MapKit
 /// way to open detail from a widget, where the map supports full pinch-zoom / pan / rotate and opens
 /// in the rider's saved orientation.
 struct MapWidget: View {
-    let coordinates: [Coordinate]
+    /// The recorded track, split into segments at every pause (#263).
+    let trackSegments: [[Coordinate]]
     /// The route being ridden, drawn beneath the track. Empty on a free ride.
     var route: [RouteCoordinate] = []
     /// The sheet's saved orientation (#199). The widget itself is always heading-up.
@@ -19,14 +20,14 @@ struct MapWidget: View {
     @State private var showMapSheet = false
 
     var body: some View {
-        ActiveRideMapView(coordinates: coordinates, route: route, surface: .widget)
+        ActiveRideMapView(trackSegments: trackSegments, route: route, surface: .widget)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.cyBgSecondary)
             .contentShape(Rectangle())
             .onTapGesture { showMapSheet = true }
             .liveMapSheet(
                 isPresented: $showMapSheet,
-                coordinates: coordinates,
+                trackSegments: trackSegments,
                 route: route,
                 orientation: sheetOrientation,
                 onOrientationToggle: onOrientationToggle
@@ -39,14 +40,14 @@ extension View {
     /// "Sheet: Map" (#200) — so they cannot present it differently.
     func liveMapSheet(
         isPresented: Binding<Bool>,
-        coordinates: [Coordinate],
+        trackSegments: [[Coordinate]],
         route: [RouteCoordinate],
         orientation: MapOrientation,
         onOrientationToggle: @escaping () -> Void
     ) -> some View {
         sheet(isPresented: isPresented) {
             ActiveRideMapView(
-                coordinates: coordinates,
+                trackSegments: trackSegments,
                 route: route,
                 surface: .sheet,
                 orientation: orientation,
@@ -73,16 +74,16 @@ private let previewRoute: [RouteCoordinate] = [
 ]
 
 #Preview("2×2 — With Track") {
-    MapWidget(coordinates: previewTrack)
+    MapWidget(trackSegments: [previewTrack])
         .frame(width: 393, height: 200)
 }
 
 #Preview("2×2 — With Route") {
-    MapWidget(coordinates: previewTrack, route: previewRoute)
+    MapWidget(trackSegments: [previewTrack], route: previewRoute)
         .frame(width: 393, height: 200)
 }
 
 #Preview("2×2 — No Track") {
-    MapWidget(coordinates: [])
+    MapWidget(trackSegments: [[]])
         .frame(width: 393, height: 200)
 }

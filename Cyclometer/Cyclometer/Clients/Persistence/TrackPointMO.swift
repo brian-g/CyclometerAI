@@ -18,4 +18,7 @@ final class TrackPointMO: NSManagedObject {
     @NSManaged var heartRateSourceRaw: String
     @NSManaged var cadenceRPM: Int16
     @NSManaged var powerWatts: Int16
+    /// `TrackPointDTO.segmentIndex` (#263). Int16 rather than Int32: a resume per minute
+    /// for a day of riding is still under 1500.
+    @NSManaged var segmentIndex: Int16
 }

@@ -66,6 +66,11 @@ struct ParsedGPX: Equatable {
     /// Every `<trkpt>` in document order, across every `<trkseg>` and every `<trk>`: a
     /// track split into segments is one ordered list of points, not several lists.
     var trackPoints: [TrackPoint] = []
+    /// How many `<trkpt>` each `<trkseg>` held, in document order (#263). The flat
+    /// `trackPoints` list above is what every reader of a track actually wants; this is
+    /// the boundary information that list deliberately drops — where the rider stopped
+    /// and started again, which is exactly what a paused ride's export has to state.
+    var trackSegmentPointCounts: [Int] = []
     /// Every `<rtept>` in document order.
     var routePoints: [RoutePoint] = []
     var waypoints: [Waypoint] = []
@@ -147,6 +152,8 @@ enum GPXParsing {
                     latitude: attributeDict["lat"].flatMap(Double.init),
                     longitude: attributeDict["lon"].flatMap(Double.init)
                 )
+            case "trkseg":
+                result.trackSegmentPointCounts.append(0)
             case "trkpt":
                 guard admitPoint(parser) else { return }
                 trackPoint = ParsedGPX.TrackPoint(
@@ -186,7 +193,16 @@ enum GPXParsing {
                 waypoint = nil
                 return
             case "trkpt":
-                if let trackPoint { result.trackPoints.append(trackPoint) }
+                if let trackPoint {
+                    result.trackPoints.append(trackPoint)
+                    // A `<trkpt>` outside any `<trkseg>` is not something GPX allows, but
+                    // this parser reads other tools' files: count it into a segment of its
+                    // own rather than index into an empty array.
+                    if result.trackSegmentPointCounts.isEmpty {
+                        result.trackSegmentPointCounts.append(0)
+                    }
+                    result.trackSegmentPointCounts[result.trackSegmentPointCounts.count - 1] += 1
+                }
                 trackPoint = nil
                 return
             case "rtept":
