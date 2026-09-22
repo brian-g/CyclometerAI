@@ -117,6 +117,45 @@ struct RoutePersistenceTests {
         #expect(detail.coordinates.allSatisfy { $0.elevationMeters == nil })
     }
 
+    // MARK: - Analysis (#252)
+
+    @Test("import stores the terrain analysis, and none for a route without elevation")
+    func importStoresTerrain() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let imported = Self.climbingRoute()
+
+        let summary = try await client.importRoute(imported)
+        #expect(summary.terrain == RouteTerrain.analyze(imported.coordinates))
+        #expect(summary.terrain != nil)
+        #expect(try await client.fetchRoutes().first?.terrain == summary.terrain)
+        #expect(summary.surface == nil)
+
+        let flat = try await client.importRoute(Self.flatlandTrackWithoutElevation())
+        #expect(flat.terrain == nil)
+    }
+
+    @Test("a saved surface is on the route from then on")
+    func surfaceRoundTrips() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let summary = try await client.importRoute(Self.climbingRoute())
+        let surface = RouteSurfaceBreakdown(pavedMeters: 1_200, gravelMeters: 300, unknownMeters: 50)
+
+        try await client.saveRouteSurface(summary.id, surface)
+
+        #expect(try await client.fetchRoutes().first?.surface == surface)
+        #expect(try await client.fetchRoute(summary.id)?.summary.surface == surface)
+    }
+
+    @Test("saving a surface for a route deleted mid-lookup is a no-op")
+    func surfaceForADeletedRouteIsANoOp() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let summary = try await client.importRoute(Self.climbingRoute())
+        try await client.deleteRoute(summary.id)
+
+        try await client.saveRouteSurface(summary.id, RouteSurfaceBreakdown(pavedMeters: 1))
+        #expect(try await client.fetchRoutes().isEmpty)
+    }
+
     @Test("a route the file names nowhere gets the default name")
     func importedRouteWithNoNameGetsTheDefault() async throws {
         let (client, _) = Self.makeLiveClient()
@@ -309,6 +348,7 @@ struct RoutePersistenceTests {
         #expect(fromMock.elevationLossMeters == fromLive.elevationLossMeters)
         #expect(fromMock.coordinateCount == fromLive.coordinateCount)
         #expect(fromMock.bounds == fromLive.bounds)
+        #expect(fromMock.terrain == fromLive.terrain)
     }
 
     @Test("the mock's delete spy reports the id it was asked to remove")

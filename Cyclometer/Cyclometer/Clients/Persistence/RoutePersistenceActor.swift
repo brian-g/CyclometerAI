@@ -70,6 +70,43 @@ actor RoutePersistenceActor {
         }
     }
 
+    /// Stores a route's OpenStreetMap surface (#252), the one attribute written after import.
+    /// No-op when the route was deleted while the lookup was in flight.
+    func saveRouteSurface(id: UUID, surface: RouteSurfaceBreakdown) throws {
+        guard let route = try routeRow(id: id) else { return }
+        let data = try JSONEncoder().encode(surface)
+        try savingChanges("saveRouteSurface", id: id, context: modelContext) {
+            route.surfaceData = data
+        }
+    }
+
+    /// Derives terrain for routes imported before #252, whose polylines were stored but never
+    /// analysed. Returns how many it filled in, so the caller re-reads only when that is not 0.
+    ///
+    /// Only routes with elevation qualify: `RouteTerrain.analyze` is nil exactly when
+    /// `elevationGainMeters` is, so a route without `<ele>` would otherwise be decoded and
+    /// re-analysed to nil on every launch, forever.
+    func backfillRouteTerrain() throws -> Int {
+        let descriptor = FetchDescriptor<Route>(
+            predicate: #Predicate { $0.terrainData == nil && $0.elevationGainMeters != nil }
+        )
+        do {
+            var filled = 0
+            for route in try modelContext.fetch(descriptor) {
+                guard let terrain = RouteTerrain.analyze(route.coordinates) else { continue }
+                route.terrainData = try JSONEncoder().encode(terrain)
+                filled += 1
+            }
+            guard filled > 0 else { return 0 }
+            try modelContext.save()
+            logger.notice("backfilled terrain on \(filled, privacy: .public) routes")
+            return filled
+        } catch {
+            logger.error("backfillRouteTerrain failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// The row itself, for the two callers that need the object rather than a DTO.
     /// Named apart from `fetchRoute(id:)` on purpose — overloading on return type alone
     /// would make every call site's meaning depend on inference.

@@ -345,10 +345,15 @@ struct NavigationPipelineTests {
         try await withTemporaryStoreURL(prefix: "NavigationPipeline") { url in
             let harness = Harness(storeURL: url)
             let rideId: UUID
+            let fetchesBeforeRide: Int
             do {
                 let store = try await harness.launch()
                 // A route exists — it just isn't the ride's.
                 let summary = try await importFixture(on: store)
+                // The import reads its route back once, for #252's surface lookup. That read is the
+                // Routes tab's, not the ride's, so it is the baseline the ride is measured from.
+                await expectEventually { harness.routeFetches.value == 1 }
+                fetchesBeforeRide = harness.routeFetches.value
                 let polyline = try #require(try await harness.reader.fetchRoute(summary.id)).coordinates
                 let untouched = withDependencies { $0 = store.dependencies } operation: { NavigationFeature.State() }
 
@@ -401,7 +406,7 @@ struct NavigationPipelineTests {
                     || issue.description.contains("Expected to receive an action matching case path, but didn't get one")
             }
             await relaunched.skipInFlightEffects(strict: false)
-            #expect(harness.routeFetches.value == 0)
+            #expect(harness.routeFetches.value == fetchesBeforeRide)
             #expect(harness.tones.value.isEmpty)
         }
     }

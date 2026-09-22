@@ -805,7 +805,8 @@ PRD §8.9.1.
 ### 3.10 Route
 
 Brought forward from schema v1.1 into MVP by M8 (#191), resolving the first half of OQDM1. A route
-is written once at import from a `.gpx` file and read whole at ride start; nothing ever edits one.
+is written once at import from a `.gpx` file and read whole at ride start. The one exception is
+`surfaceData` (#252), which arrives from an OpenStreetMap lookup after the import has saved.
 
 ```swift
 @Model
@@ -823,6 +824,10 @@ final class Route {
     var coordinateCount: Int
     var elevationGainMeters: Double?           // nil = the GPX carried no <ele> at all; 0 = flat
     var elevationLossMeters: Double?
+
+    // MARK: - Analysis (#252) — small inline JSON, optional so older stores migrate lightly
+    var terrainData: Data?                     // RouteTerrainAnalysis; nil exactly when elevationGainMeters is
+    var surfaceData: Data?                     // RouteSurfaceBreakdown; nil until the Overpass lookup succeeds
 
     // MARK: - Bounding box
     // Flat columns rather than a nested value so a #Predicate can filter on them: S19's
@@ -1144,7 +1149,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 | Schema Version | Changes |
 |---|---|
 | 1.0 (MVP) | All entities as specified above |
-| 1.1 (MVP — Routes, M8) | Add Route @Model (§3.10). Add `Ride.routeId: UUID?` and `Ride.routeProgressMeters: Double?` alongside the existing `Ride.routeName`. All three are optional, so there is no backfill: a pre-M8 store opens with them nil (`RideSchemaMigrationTests`). `Ride.route: Route?` was **not** added — see OQDM1 |
+| 1.1 (MVP — Routes, M8) | Add Route @Model (§3.10); #252 later adds its optional `terrainData` and `surfaceData`, backfilling terrain for routes imported before it. Add `Ride.routeId: UUID?` and `Ride.routeProgressMeters: Double?` alongside the existing `Ride.routeName`. All three are optional, so there is no backfill: a pre-M8 store opens with them nil (`RideSchemaMigrationTests`). `Ride.route: Route?` was **not** added — see OQDM1 |
 | 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 

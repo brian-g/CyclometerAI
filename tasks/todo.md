@@ -1,3 +1,32 @@
+# #252 — Cycling-focused route analysis + 80-char summary
+
+Plan: /Users/brian/.claude/plans/polished-knitting-elephant.md
+Branch: `feat/252-route-analysis`
+
+- [x] 1. `RouteTerrain`: 10 m resample, 50 m smoothing, 100 m grade window, climbs Cat 4–HC, FIETS per climb, character
+- [x] 2. `RouteSurface` + `OverpassClient`: OSM surface/tracktype classes, nearest-way matching, chunked `around` query
+- [x] 3. `Route.terrainData` / `surfaceData` (optional JSON), `RouteSummary.terrain` / `.surface`, persistence `saveRouteSurface` + `backfillRouteTerrain`
+- [x] 4. `RoutesFeature`: surface lookup after every read and import (retry = next visit), terrain backfill on `.task`
+- [x] 5. `RouteSummaryLine` (≤ 80 chars, priority drop order), S19 row subtitle, S20 Summary section, monospaced digits
+- [x] 6. Specs: PRD §8.6/§14 + changelog 0.6.1, UX S19/S20, DataModel §3.10
+- [x] 7. Tests: terrain, surface, Overpass, summary line, reducer, persistence, schema migration; 6 snapshot refs re-recorded + 1 new
+- [x] 8. Full local suite green (1404 passed, 0 failed); live Overpass response shape checked
+- [ ] 9. Simulator end-to-end import with a real GPX (not done)
+- [ ] 10. #252 descoping comment (FIT, NP) — drafted, awaiting approval to post
+
+## Review
+
+- Out of scope, per PRD: FIT import (§15), estimated power/NP (Phase 3, no weight/FTP/CdA exist).
+- Deviations from the plan: `OverpassClient` is a plain struct with a throwing `testValue`, matching the
+  repo's other clients rather than `@DependencyClient`; climb dip tolerance is 10 m, not the 3 m noise
+  floor, so false flats don't split climbs; climb ends are trimmed to within 1 m of the low/high.
+- `NavigationPipelineTests.noRouteRideNeverTouchesNavigation` counted every route read; it now
+  baselines after the import's own surface-lookup read.
+- Finding: in OSM much of the US road network has no `surface` tag (30 of 47 ways on a Cupertino
+  sample), so many routes will show no surface word — the rule is "never assume paved".
+
+---
+
 # Navigation fixes from the 2026-09-19 "Home and Around" ride
 
 Plan: /Users/brian/.claude/plans/ticklish-marinating-cocke.md

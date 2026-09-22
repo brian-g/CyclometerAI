@@ -58,6 +58,10 @@ struct PersistenceClient: Sendable {
     /// no hint that the id has to be a *route* id, and S15's own ride-history read will
     /// want the plain name.
     var fetchRouteRides: @Sendable (UUID) async throws -> [RouteRideSummary]
+    /// Stores the OpenStreetMap surface looked up after import (#252).
+    var saveRouteSurface: @Sendable (UUID, RouteSurfaceBreakdown) async throws -> Void
+    /// Analyses terrain on routes imported before #252; returns how many it filled in.
+    var backfillRouteTerrain: @Sendable () async throws -> Int
 }
 
 enum PersistenceError: Error, Equatable {
@@ -90,7 +94,9 @@ extension PersistenceClient: DependencyKey {
             fetchRoutes: { try await routeActor.fetchRoutes() },
             fetchRoute: { try await routeActor.fetchRoute(id: $0) },
             deleteRoute: { try await routeActor.deleteRoute(id: $0) },
-            fetchRouteRides: { try await rideActor.fetchRides(routeId: $0) }
+            fetchRouteRides: { try await rideActor.fetchRides(routeId: $0) },
+            saveRouteSurface: { try await routeActor.saveRouteSurface(id: $0, surface: $1) },
+            backfillRouteTerrain: { try await routeActor.backfillRouteTerrain() }
         )
     }
 
@@ -114,7 +120,9 @@ extension PersistenceClient: DependencyKey {
         fetchRoutes: { [] },
         fetchRoute: { _ in nil },
         deleteRoute: { _ in },
-        fetchRouteRides: { _ in [] }
+        fetchRouteRides: { _ in [] },
+        saveRouteSurface: { _, _ in },
+        backfillRouteTerrain: { 0 }
     )
 }
 

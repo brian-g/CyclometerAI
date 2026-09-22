@@ -2,7 +2,8 @@ import Foundation
 import SwiftData
 
 /// A planned route imported from a `.gpx` file (DataModel.md schema v1.1, brought
-/// forward into MVP by M8). Written once at import, read whole at ride start.
+/// forward into MVP by M8). Written once at import, read whole at ride start — with one
+/// exception, `surfaceData`, which arrives from the network after the import has saved.
 ///
 /// The polyline and the file's turn cues are JSON blobs in external storage rather than
 /// child rows: nothing queries *inside* them, and the scalar columns above them are what
@@ -39,6 +40,28 @@ final class Route {
     /// genuinely flat route. S20 hides its whole elevation section on nil (#195).
     var elevationGainMeters: Double?
     var elevationLossMeters: Double?
+
+    // MARK: - Analysis (#252)
+    // Small JSON blobs rather than columns: nothing filters on them, S19's row reads them
+    // whole, and a climb list has no flat shape. Inline rather than external storage — a few
+    // hundred bytes each, read for every row. Both optional, so a store from before #252
+    // migrates lightly with nil in each.
+
+    /// `RouteTerrainAnalysis`, derived at import. Nil exactly when `elevationGainMeters` is,
+    /// except on a route imported before #252, which `backfillRouteTerrain` fills in.
+    var terrainData: Data?
+
+    /// `RouteSurfaceBreakdown` from OpenStreetMap. Nil until the lookup succeeds, which may
+    /// be long after import — the import never waits on the network.
+    var surfaceData: Data?
+
+    var terrain: RouteTerrainAnalysis? {
+        terrainData.flatMap { try? JSONDecoder().decode(RouteTerrainAnalysis.self, from: $0) }
+    }
+
+    var surface: RouteSurfaceBreakdown? {
+        surfaceData.flatMap { try? JSONDecoder().decode(RouteSurfaceBreakdown.self, from: $0) }
+    }
 
     // MARK: - Bounding box
     // Flat columns rather than a nested value so a #Predicate can filter on them:
@@ -90,6 +113,9 @@ final class Route {
         self.minLongitude = summary.bounds.minLongitude
         self.maxLongitude = summary.bounds.maxLongitude
 
+        self.terrainData = summary.terrain.flatMap { try? JSONEncoder().encode($0) }
+        self.surfaceData = nil
+
         // The stored blobs directly, not the computed accessors above: those are
         // unavailable until every stored property is initialised.
         self.polylineData = try? JSONEncoder().encode(imported.coordinates)
@@ -115,7 +141,9 @@ extension Route {
                 maxLatitude: maxLatitude,
                 minLongitude: minLongitude,
                 maxLongitude: maxLongitude
-            )
+            ),
+            terrain: terrain,
+            surface: surface
         )
     }
 
@@ -148,6 +176,10 @@ struct RouteSummary: Sendable, Equatable, Identifiable {
     var elevationGainMeters: Double?
     var elevationLossMeters: Double?
     var bounds: RouteBounds
+    /// Nil for a route with no `<ele>` (#252).
+    var terrain: RouteTerrainAnalysis?
+    /// Nil until OpenStreetMap has been asked successfully (#252).
+    var surface: RouteSurfaceBreakdown?
 }
 
 extension RouteSummary {
@@ -165,7 +197,10 @@ extension RouteSummary {
             coordinateCount: imported.coordinates.count,
             elevationGainMeters: elevation?.gain,
             elevationLossMeters: elevation?.loss,
-            bounds: RouteGeometry.boundingBox(imported.coordinates)
+            bounds: RouteGeometry.boundingBox(imported.coordinates),
+            terrain: RouteTerrain.analyze(imported.coordinates),
+            // The one thing import does not derive: it needs the network (`RoutesFeature`).
+            surface: nil
         )
     }
 
@@ -188,7 +223,9 @@ extension RouteSummary {
         coordinateCount: 0,
         elevationGainMeters: nil,
         elevationLossMeters: nil,
-        bounds: RouteBounds(minLatitude: 0, maxLatitude: 0, minLongitude: 0, maxLongitude: 0)
+        bounds: RouteBounds(minLatitude: 0, maxLatitude: 0, minLongitude: 0, maxLongitude: 0),
+        terrain: nil,
+        surface: nil
     )
 }
 

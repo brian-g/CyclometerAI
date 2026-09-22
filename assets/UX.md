@@ -1075,7 +1075,7 @@ ContentUnavailableView {
 
 ### Key Components
 - Toolbar toggle: list view / map view (`list.bullet` / `map` SF Symbol)
-- List view: route rows map thumbnail, name, distance, terrain description
+- List view: route rows map thumbnail, name, distance, and the route's summary line without its distance (#252) — gain, the hardest climbs, max grade, character and surface, two lines at most. A route with neither elevation nor a surface falls back to the file's own `<desc>`
 - Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls. The map can act as a filter. When switching back to the list will show only those routes displayed on the map. Map will initially zoom to a 50 mile radius around the user's current location. 
 - Tap a route → navigates to S20
 - Swipe a route row left to right → "Use Route" (`play.fill`, a full swipe allowed): opens the Start Sheet with that route in S05.1's Route row, as S20's CTA does. Absent while a ride is recording.
@@ -1101,6 +1101,7 @@ ContentUnavailableView {
 ### Key Components
 - `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag). Route should show the direction of travel. Forcasted wind direction and vectors should be overlayed (deferred to weather integration)
 - Distance and elevation gain/loss summary (`LabeledContent`)
+- Summary section (#252), after the map: the route's summary line of at most 80 characters, then Character, Max Grade, Hardest Climb (FIETS), one row per categorized climb (category, length, average grade) and a Surface row with its shares, captioned "Surface data © OpenStreetMap contributors". Hidden for a route with neither elevation nor a surface. Values use tabular digits
 - Elevation profile: Swift Charts `AreaMark` + `LineMark` in `brPrimary`, catmullRom interpolation
 - Current weather section: temperature, wind direction (`WindDirectionView` — rotated arrow SF Symbol + compass label + degrees), wind speed
 - Strava segments: name, distance, best time, best time date

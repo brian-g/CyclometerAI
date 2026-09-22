@@ -13,7 +13,9 @@ extension RouteSummary {
         distanceMeters: Double,
         elevationGainMeters: Double?,
         bounds: RouteBounds,
-        importedDaysAgo: Int
+        importedDaysAgo: Int,
+        terrain analysis: RouteTerrainAnalysis? = nil,
+        surface: RouteSurfaceBreakdown? = nil
     ) -> RouteSummary {
         RouteSummary(
             id: id,
@@ -27,13 +29,15 @@ extension RouteSummary {
             coordinateCount: 512,
             elevationGainMeters: elevationGainMeters,
             elevationLossMeters: elevationGainMeters,
-            bounds: bounds
+            bounds: bounds,
+            terrain: analysis,
+            surface: surface
         )
     }
 
-    /// Four routes around Cupertino, newest first — the order `fetchRoutes` returns. One
-    /// carries no terrain description, which is the nil-`<desc>` GPX case the row has to
-    /// render as distance alone.
+    /// Four routes around Cupertino, newest first — the order `fetchRoutes` returns. The first
+    /// three carry #252's analysis, one without a surface looked up yet; the last has neither
+    /// elevation nor a `<desc>`, the case the row has to render as distance alone.
     static let previewRoutes: [RouteSummary] = [
         .preview(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
@@ -41,7 +45,9 @@ extension RouteSummary {
             distanceMeters: 36_050, elevationGainMeters: 256,
             bounds: RouteBounds(minLatitude: 37.3200, maxLatitude: 37.3500,
                                 minLongitude: -122.0500, maxLongitude: -122.0000),
-            importedDaysAgo: 1
+            importedDaysAgo: 1,
+            terrain: RouteTerrainAnalysis(maxGradePercent: 7, climbs: [], character: .rolling),
+            surface: RouteSurfaceBreakdown(pavedMeters: 34_200, unknownMeters: 1_850)
         ),
         .preview(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
@@ -49,7 +55,14 @@ extension RouteSummary {
             distanceMeters: 51_180, elevationGainMeters: 747,
             bounds: RouteBounds(minLatitude: 37.2900, maxLatitude: 37.3400,
                                 minLongitude: -122.1400, maxLongitude: -122.0800),
-            importedDaysAgo: 4
+            importedDaysAgo: 4,
+            terrain: RouteTerrainAnalysis(maxGradePercent: 12, climbs: [
+                Climb(startMeters: 9_400, lengthMeters: 3_100, gainMeters: 186, averageGradePercent: 6,
+                      maxGradePercent: 9, topElevationMeters: 340, category: .cat3),
+                Climb(startMeters: 21_000, lengthMeters: 6_800, gainMeters: 467, averageGradePercent: 6.9,
+                      maxGradePercent: 12, topElevationMeters: 807, category: .cat2)
+            ], character: .hilly),
+            surface: RouteSurfaceBreakdown(pavedMeters: 35_800, gravelMeters: 14_300, unknownMeters: 1_080)
         ),
         .preview(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
@@ -57,7 +70,8 @@ extension RouteSummary {
             distanceMeters: 29_130, elevationGainMeters: 64,
             bounds: RouteBounds(minLatitude: 37.3600, maxLatitude: 37.3800,
                                 minLongitude: -122.0300, maxLongitude: -121.9800),
-            importedDaysAgo: 11
+            importedDaysAgo: 11,
+            terrain: RouteTerrainAnalysis(maxGradePercent: 2, climbs: [], character: .flat)
         ),
         .preview(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,

@@ -108,6 +108,8 @@ struct RoutesFeature {
         case reloadRoutes
         case routesResponse(Result<[RouteSummary], PersistenceFailure>)
         case polylinesResponse([UUID: [RouteCoordinate]])
+        /// One route's OpenStreetMap surface, looked up and saved (#252).
+        case surfaceResolved(UUID, RouteSurfaceBreakdown)
         case riderCoordinateResponse(Coordinate?)
 
         case mapToggled
@@ -155,7 +157,10 @@ struct RoutesFeature {
         case detail(RouteDetailFeature)
     }
 
+    enum CancelID { case surfaces }
+
     @Dependency(\.persistenceClient) var persistenceClient
+    @Dependency(\.overpassClient) var overpassClient
     @Dependency(\.locationClient) var locationClient
     @Dependency(\.permissionsClient) var permissionsClient
 
@@ -173,6 +178,18 @@ struct RoutesFeature {
                     .run { send in
                         guard await permissionsClient.status(.locationWhenInUse).isGranted else { return }
                         await send(.riderCoordinateResponse(await locationClient.currentCoordinate()))
+                    },
+                    // Routes imported before #252 have no terrain analysis. Concurrent with the
+                    // first read rather than ahead of it, so the list is never held up behind
+                    // decoding polylines; a second read picks up whatever this filled in.
+                    .run { send in
+                        do {
+                            if try await persistenceClient.backfillRouteTerrain() > 0 {
+                                await send(.reloadRoutes)
+                            }
+                        } catch {
+                            logger.error("backfillRouteTerrain failed: \(error.localizedDescription, privacy: .public)")
+                        }
                     }
                 )
 
@@ -187,7 +204,10 @@ struct RoutesFeature {
                 state.hasLoaded = true
                 state.routes = routes
                 Self.refreshFilters(&state)
-                return state.showsMap ? loadMissingPolylines(state) : .none
+                return .merge(
+                    state.showsMap ? loadMissingPolylines(state) : .none,
+                    resolveMissingSurfaces(state)
+                )
 
             case .polylinesResponse(let polylines):
                 state.polylines.merge(polylines) { _, loaded in loaded }
@@ -198,6 +218,18 @@ struct RoutesFeature {
                 // Geometry that has just landed upgrades those routes from the bounding-box
                 // approximation to the exact test, so the map filter is re-evaluated here.
                 Self.refreshMapFilter(&state)
+                return .none
+
+            case let .surfaceResolved(id, surface):
+                if let index = state.routes.firstIndex(where: { $0.id == id }) {
+                    state.routes[index].surface = surface
+                }
+                // An open S20 was seeded with a copy of the summary, so it is told too.
+                for elementID in state.path.ids {
+                    if state.path[id: elementID, case: \.detail]?.summary.id == id {
+                        state.path[id: elementID, case: \.detail]?.summary.surface = surface
+                    }
+                }
                 return .none
 
             case .routesResponse(.failure):
@@ -357,7 +389,10 @@ struct RoutesFeature {
                 Self.refreshFilters(&state)
                 // Nothing else loads this one's geometry: the two other loaders run on the
                 // map toggle and on a re-read, and importing from the map does neither.
-                return state.showsMap ? loadMissingPolylines(state) : .none
+                return .merge(
+                    state.showsMap ? loadMissingPolylines(state) : .none,
+                    resolveMissingSurfaces(state)
+                )
 
             case .importResponse(.failure(let failure)):
                 state.isImporting = false
@@ -426,6 +461,38 @@ struct RoutesFeature {
             }
             await send(.polylinesResponse(polylines))
         }
+    }
+
+    /// Looks up the OpenStreetMap surface of every route that has none yet, one route at a
+    /// time (#252). Run after each read and each import, which is also the retry: a lookup that
+    /// failed — offline, a busy server — leaves the route nil and the next visit asks again.
+    ///
+    /// The import has already saved by the time this runs, so a slow or failed lookup costs the
+    /// rider nothing but the surface word. Failures are logged, never alerted: the surface is a
+    /// nicety, and an alert every time the tab opened on a plane would not be.
+    ///
+    /// Restarted, not duplicated, when a second read or an import lands mid-batch: each route is
+    /// saved and sent as it resolves, so the restart re-asks only for what had not come back.
+    private func resolveMissingSurfaces(_ state: State) -> Effect<Action> {
+        let missing = state.routes.filter { $0.surface == nil }.map(\.id)
+        guard !missing.isEmpty else { return .none }
+        return .run { [persistenceClient, overpassClient] send in
+            for id in missing {
+                // A cancelled `URLSession` request throws `URLError.cancelled`, not
+                // `CancellationError`, so the loop checks for itself.
+                guard !Task.isCancelled else { return }
+                do {
+                    guard let detail = try await persistenceClient.fetchRoute(id) else { continue }
+                    let ways = try await overpassClient.ways(detail.coordinates)
+                    let surface = RouteSurface.breakdown(route: detail.coordinates, ways: ways)
+                    try await persistenceClient.saveRouteSurface(id, surface)
+                    await send(.surfaceResolved(id, surface))
+                } catch {
+                    logger.error("surface lookup failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
+        .cancellable(id: CancelID.surfaces, cancelInFlight: true)
     }
 
     // MARK: - Filters

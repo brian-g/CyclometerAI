@@ -490,9 +490,13 @@ struct RouteRow: View {
     let route: RouteSummary
     let unitSystem: UnitSystem
 
-    /// The terrain line, when the file gave one. Distance used to live here too; it now sits
-    /// on the trailing edge as a `HeroNumber`, matching `RideRow`.
-    private var terrain: String? {
+    /// The route's summary line without its distance, which sits on the trailing edge as a
+    /// `HeroNumber`, matching `RideRow` (#252). Falls back to the file's own `<desc>` for a
+    /// route with no elevation whose surface has not been looked up, which has nothing else
+    /// to say about itself.
+    private var subtitle: String? {
+        let line = RouteSummaryLine.text(for: route, unit: unitSystem, includesDistance: false)
+        if !line.isEmpty { return line }
         guard let terrain = route.terrainDescription, !terrain.isEmpty else { return nil }
         return terrain
     }
@@ -507,8 +511,12 @@ struct RouteRow: View {
                             in: RoundedRectangle(cornerRadius: Spacing.cornerMd, style: .continuous))
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(route.name).font(.headline)
-                if let terrain {
-                    Text(terrain).font(.subheadline).foregroundStyle(.secondary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(2)
                 }
             }
             Spacer(minLength: Spacing.sm)
