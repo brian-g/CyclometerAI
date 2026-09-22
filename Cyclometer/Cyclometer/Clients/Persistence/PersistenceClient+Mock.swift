@@ -15,6 +15,7 @@ extension PersistenceClient {
         onUpdateRideSummary: @escaping @Sendable (RideSummaryUpdate) -> Void = { _ in },
         onFinalizeRide: @escaping @Sendable (UUID, Date, RideSummaryUpdate, URL?) -> Void = { _, _, _, _ in },
         onAppendVehiclePassEvents: @escaping @Sendable ([VehiclePassEventDTO]) -> Void = { _ in },
+        onDeleteRide: @escaping @Sendable (UUID) -> Void = { _ in },
         onImportRoute: @escaping @Sendable (ImportedRoute) -> Void = { _ in },
         onDeleteRoute: @escaping @Sendable (UUID) -> Void = { _ in }
     ) -> PersistenceClient {
@@ -33,6 +34,7 @@ extension PersistenceClient {
             finalizeRide: { onFinalizeRide($0, $1, $2, $3) },
             appendVehiclePassEvents: { onAppendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { vehiclePassEvents[$0] ?? [] },
+            deleteRide: { onDeleteRide($0) },
             fetchResumableRide: { resumableRide },
             importRoute: {
                 onImportRoute($0)
