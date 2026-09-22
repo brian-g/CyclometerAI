@@ -6,16 +6,15 @@ import ComposableArchitecture
 
 struct RidesView: View {
     let store: StoreOf<RidesFeature>
-    let recordedItems: [Ride]
     let onStartRide: () -> Void
 
     private var rideSummaries: [RideSummary] {
-        store.demoRides.map(RideSummary.demo) + recordedItems.map(RideSummary.recorded)
+        store.rides.map(RideSummary.recorded)
     }
 
     var body: some View {
         List {
-            if rideSummaries.isEmpty {
+            if store.hasLoaded && rideSummaries.isEmpty {
                 ContentUnavailableView {
                     Label("No Rides Yet", systemImage: "figure.outdoor.cycle")
                 } description: {
@@ -57,19 +56,15 @@ struct RidesView: View {
             }
         }
         .navigationTitle("Rides")
+        .task { store.send(.task) }
     }
 
-    /// Both halves go through the reducer. The recorded one used to call
-    /// `modelContext.delete(ride)` straight from here, which removed the one SwiftData
-    /// row and left the ride's GPX file, its CoreData track points and its vehicle-pass
-    /// events behind — nothing else knew the ride was gone (#261).
+    /// Goes through the reducer, which used to call `modelContext.delete(ride)` straight
+    /// from here — that removed the one SwiftData row and left the ride's GPX file, its
+    /// CoreData track points and its vehicle-pass events behind — nothing else knew the
+    /// ride was gone (#261).
     private func deleteRide(_ ride: RideSummary) {
-        switch ride.source {
-        case .demo(let id):
-            store.send(.deleteDemoRide(id))
-        case .recorded(let ride):
-            store.send(.deleteRecordedRide(ride.id))
-        }
+        store.send(.deleteRecordedRide(ride.id))
     }
 }
 
@@ -241,10 +236,15 @@ struct ElevationPoint: Identifiable {
 }
 
 #Preview("Rides") {
+    let rides = [
+        RideListSummary(id: UUID(), title: "River Loop", startedAt: .now.addingTimeInterval(-86_400),
+                        distanceMeters: 36_050, durationSeconds: 4_712),
+        RideListSummary(id: UUID(), title: "Summit Climb", startedAt: .now.addingTimeInterval(-3 * 86_400),
+                        distanceMeters: 51_200, durationSeconds: 7_865)
+    ]
     NavigationStack {
         RidesView(
-            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
-            recordedItems: [],
+            store: Store(initialState: RidesFeature.State(rides: rides, hasLoaded: true)) { RidesFeature() },
             onStartRide: {}
         )
     }
@@ -254,8 +254,7 @@ struct ElevationPoint: Identifiable {
 #Preview("Rides — empty") {
     NavigationStack {
         RidesView(
-            store: Store(initialState: RidesFeature.State(demoRides: [])) { RidesFeature() },
-            recordedItems: [],
+            store: Store(initialState: RidesFeature.State(hasLoaded: true)) { RidesFeature() },
             onStartRide: {}
         )
     }
@@ -263,21 +262,14 @@ struct ElevationPoint: Identifiable {
 }
 
 struct RideSummary: Identifiable {
-    enum Source { case demo(UUID); case recorded(Ride) }
-    let id: String; let title: String; let date: Date
+    let id: UUID; let title: String; let date: Date
     let elapsedTime: String; let distance: String
-    let detail: RideDetail; let source: Source
+    let detail: RideDetail
 
-    static func demo(_ ride: DemoRide) -> RideSummary {
-        RideSummary(id: ride.id.uuidString, title: ride.title, date: ride.date,
-                    elapsedTime: ride.elapsedTime, distance: ride.distance,
-                    detail: ride.detail, source: .demo(ride.id))
-    }
-    static func recorded(_ ride: Ride) -> RideSummary {
+    static func recorded(_ ride: RideListSummary) -> RideSummary {
         let detail = RideDetail.recordedRide(timestamp: ride.startedAt)
-        return RideSummary(id: ride.id.uuidString,
-                           title: detail.title, date: ride.startedAt,
+        return RideSummary(id: ride.id, title: detail.title, date: ride.startedAt,
                            elapsedTime: detail.elapsedTime, distance: detail.distance,
-                           detail: detail, source: .recorded(ride))
+                           detail: detail)
     }
 }

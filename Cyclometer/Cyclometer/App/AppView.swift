@@ -4,19 +4,6 @@ import ComposableArchitecture
 
 struct AppView: View {
     @Bindable var store: StoreOf<AppFeature>
-    // Only finished rides belong in the Rides list — an in-progress ride is
-    // reflected live via the ActiveRideFeature accessory strip instead, not as a
-    // history entry (#171 review).
-    //
-    // Filtered in Swift rather than via a #Predicate: a `recordingState == .ended`
-    // predicate compiles but faults at runtime ("Unsupported Predicate:
-    // Captured/constant values of type 'RecordingState' are not supported") —
-    // SwiftData's Predicate macro doesn't support comparisons against
-    // RawRepresentable-enum-typed stored properties. Confirmed live via a
-    // device log archive: the query fires, faults, and silently returns nothing,
-    // so the Rides list never showed a completed ride.
-    @Query(sort: \Ride.startedAt, order: .reverse) private var allRides: [Ride]
-    private var items: [Ride] { allRides.filter { $0.recordingState == .ended } }
     @Environment(\.scenePhase) private var scenePhase
 
     /// The accessory strip shows only while a ride is active or paused (S05.3).
@@ -35,7 +22,6 @@ struct AppView: View {
                 NavigationStack {
                     RidesView(
                         store: store.scope(state: \.rides, action: \.rides),
-                        recordedItems: items,
                         onStartRide: { store.send(.startRideButtonTapped) }
                     )
                     .startRideToolbarItem(isHidden: store.activeRide != nil) {

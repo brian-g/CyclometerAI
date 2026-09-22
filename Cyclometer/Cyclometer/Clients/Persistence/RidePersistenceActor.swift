@@ -168,6 +168,32 @@ actor RidePersistenceActor {
         }
     }
 
+    /// Read path for the Rides tab (#247) — every finished ride, newest first.
+    ///
+    /// Filters on `endedAt != nil` rather than `recordingState == .ended` for the same
+    /// SwiftData `#Predicate`-on-enum limitation documented on `fetchResumableRide` and
+    /// `fetchRides(routeId:)` above.
+    func fetchRides() throws -> [RideListSummary] {
+        do {
+            let descriptor = FetchDescriptor<Ride>(
+                predicate: #Predicate { $0.endedAt != nil },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+            )
+            return try modelContext.fetch(descriptor).map {
+                RideListSummary(
+                    id: $0.id,
+                    title: $0.title,
+                    startedAt: $0.startedAt,
+                    distanceMeters: $0.distanceMeters,
+                    durationSeconds: $0.durationSeconds
+                )
+            }
+        } catch {
+            logger.error("fetchRides failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// Read path for `GPXExporter` (#173) — one `<wpt>` per event, oldest first.
     func fetchVehiclePassEvents(rideId: UUID) throws -> [VehiclePassEventDTO] {
         let descriptor = FetchDescriptor<VehiclePassEvent>(

@@ -551,6 +551,46 @@ struct PersistenceClientTests {
         #expect(resumable == checkpoint)
     }
 
+    // MARK: - fetchRides (#247)
+
+    @Test("fetchRides returns only finished rides, newest first")
+    func fetchRidesReturnsOnlyEndedRidesNewestFirst() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+
+        let older = UUID()
+        let newer = UUID()
+        let stillRiding = UUID()
+
+        for (id, startedAt) in [(older, base), (newer, base.addingTimeInterval(86_400)),
+                                (stillRiding, base.addingTimeInterval(172_800))] {
+            try await client.createRide(id, startedAt, nil)
+        }
+        for (id, endedAt) in [(older, base.addingTimeInterval(3_600)),
+                              (newer, base.addingTimeInterval(90_000))] {
+            let summary = RideSummaryUpdate(
+                rideId: id, recordingState: .ended,
+                durationSeconds: 3_600, distanceMeters: 42_000,
+                averageSpeedMPS: 6, maxSpeedMPS: 12
+            )
+            try await client.finalizeRide(id, endedAt, summary, nil)
+        }
+        // stillRiding is left un-finalized, the canary for the endedAt-proxy filter.
+
+        let rides = try await client.fetchRides()
+
+        #expect(rides.map(\.id) == [newer, older])
+        #expect(rides.first?.distanceMeters == 42_000)
+        #expect(rides.first?.durationSeconds == 3_600)
+    }
+
+    @Test("fetchRides with no finished rides returns empty")
+    func fetchRidesWithNoFinishedRidesReturnsEmpty() async throws {
+        let (client, _) = Self.makeLiveClient()
+        try await client.createRide(UUID(), Date(), nil)
+        #expect(try await client.fetchRides().isEmpty)
+    }
+
     // MARK: - VehiclePassEvent (#172)
 
     @Test("appendVehiclePassEvents persists a queryable VehiclePassEvent linked by rideId")

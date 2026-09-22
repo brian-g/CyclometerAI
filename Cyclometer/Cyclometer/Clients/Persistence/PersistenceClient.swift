@@ -43,6 +43,8 @@ struct PersistenceClient: Sendable {
     /// Read path for app-relaunch resume (#175) — the in-progress Ride left behind
     /// by a kill mid-ride, if one exists.
     var fetchResumableRide: @Sendable () async throws -> RideSummaryUpdate?
+    /// Every finished ride, newest first — the Rides tab's list (#247).
+    var fetchRides: @Sendable () async throws -> [RideListSummary]
     /// Persists a parsed `.gpx` (#191) and hands back the stored summary, whose id the
     /// importing screen needs to select what it just imported.
     var importRoute: @Sendable (ImportedRoute) async throws -> RouteSummary
@@ -90,6 +92,7 @@ extension PersistenceClient: DependencyKey {
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
             deleteRide: { try await deleteRideLive(id: $0, rideActor: rideActor, container: coreDataContainer) },
             fetchResumableRide: { try await rideActor.fetchResumableRide() },
+            fetchRides: { try await rideActor.fetchRides() },
             importRoute: { try await routeActor.importRoute($0) },
             fetchRoutes: { try await routeActor.fetchRoutes() },
             fetchRoute: { try await routeActor.fetchRoute(id: $0) },
@@ -116,6 +119,7 @@ extension PersistenceClient: DependencyKey {
         fetchVehiclePassEvents: { _ in [] },
         deleteRide: { _ in },
         fetchResumableRide: { nil },
+        fetchRides: { [] },
         importRoute: { _ in RouteSummary.empty },
         fetchRoutes: { [] },
         fetchRoute: { _ in nil },

@@ -7,47 +7,74 @@ import Testing
 @Suite("RidesFeature")
 struct RidesFeatureTests {
 
-    @Test("Deleting a demo ride drops it from state")
-    func deleteDemoRideRemovesIt() async {
-        let demoRides = DemoRide.sampleRides
-        let doomed = demoRides[0]
-        let store = TestStore(initialState: RidesFeature.State(demoRides: demoRides)) {
+    private static func summary(
+        title: String = "River Loop",
+        id: UUID = UUID(),
+        startedAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
+        distanceMeters: Double = 36_050,
+        durationSeconds: TimeInterval = 4_712
+    ) -> RideListSummary {
+        RideListSummary(id: id, title: title, startedAt: startedAt,
+                        distanceMeters: distanceMeters, durationSeconds: durationSeconds)
+    }
+
+    @Test("task loads the persisted rides into state")
+    func taskLoadsRides() async {
+        let rides = [Self.summary(title: "River Loop"), Self.summary(title: "Summit Climb")]
+        let store = TestStore(initialState: RidesFeature.State()) {
             RidesFeature()
+        } withDependencies: {
+            $0.persistenceClient = .mock(rides: rides)
         }
 
-        await store.send(.deleteDemoRide(doomed.id)) {
-            $0.demoRides.removeAll { $0.id == doomed.id }
+        await store.send(.task)
+        await store.receive(\.reloadRides)
+        await store.receive(\.ridesResponse) {
+            $0.hasLoaded = true
+            $0.rides = rides
         }
     }
 
-    /// The swipe action's whole job (#261). A recorded ride is SwiftData's, reaching the
-    /// list through `AppView`'s `@Query`, so nothing changes in this reducer's state —
-    /// what must happen is that persistence is told to let go of everything the ride owns.
-    @Test("Deleting a recorded ride asks persistence to delete it")
+    /// The swipe action's whole job (#261). Deleting is optimistic: the row leaves
+    /// state immediately, and persistence is told to let go of everything the ride owns.
+    @Test("Deleting a recorded ride removes it from state and asks persistence to delete it")
     func deleteRecordedRideReachesPersistence() async {
         let deleted = LockIsolated<[UUID]>([])
-        let rideId = UUID()
-        let store = TestStore(initialState: RidesFeature.State()) {
+        let ride = Self.summary()
+        let store = TestStore(initialState: RidesFeature.State(rides: [ride])) {
             RidesFeature()
         } withDependencies: {
             $0.persistenceClient = .mock(onDeleteRide: { id in deleted.withValue { $0.append(id) } })
         }
 
-        await store.send(.deleteRecordedRide(rideId))
-
-        #expect(deleted.value == [rideId])
-    }
-
-    /// A failed delete is logged, not propagated: there is no state to roll back and no
-    /// alert in this screen's design to show. It must not crash the reducer.
-    @Test("A persistence failure does not escape the reducer")
-    func deleteFailureIsContained() async {
-        let store = TestStore(initialState: RidesFeature.State()) {
-            RidesFeature()
-        } withDependencies: {
-            $0.persistenceClient.deleteRide = { _ in throw PersistenceError.rideNotFound }
+        await store.send(.deleteRecordedRide(ride.id)) {
+            $0.rides = []
         }
 
-        await store.send(.deleteRecordedRide(UUID()))
+        #expect(deleted.value == [ride.id])
+    }
+
+    /// The row is removed optimistically, so a failed write would otherwise leave the
+    /// list quietly disagreeing with the store — this re-syncs from it instead.
+    @Test("A failed delete re-syncs state from the store rather than trusting the optimistic removal")
+    func deleteFailureRecoversState() async {
+        let ride = Self.summary()
+        let store = TestStore(initialState: RidesFeature.State(rides: [ride])) {
+            RidesFeature()
+        } withDependencies: {
+            var client = PersistenceClient.mock(rides: [ride])
+            client.deleteRide = { _ in throw PersistenceError.rideNotFound }
+            $0.persistenceClient = client
+        }
+
+        await store.send(.deleteRecordedRide(ride.id)) {
+            $0.rides = []
+        }
+        await store.receive(\.deleteFailed)
+        await store.receive(\.reloadRides)
+        await store.receive(\.ridesResponse) {
+            $0.hasLoaded = true
+            $0.rides = [ride]
+        }
     }
 }

@@ -211,7 +211,11 @@ struct AppFeature {
             case .activeRide(.finishAlert(.presented(.confirmFinish))):
                 state.activeRide = nil
                 state.isDashboardPresented = false
-                return .none
+                // The Rides tab only loads on its own `.task`, which fires once when it
+                // first mounts — not when a ride finishes underneath an already-mounted
+                // tab. Without this, the just-finished ride is invisible until something
+                // else (a tab switch) tears the view down and remounts it.
+                return .send(.rides(.reloadRides))
 
             case .resumableRideFetched(let summary):
                 // `.task`'s two effects race: the rider can start a brand-new ride

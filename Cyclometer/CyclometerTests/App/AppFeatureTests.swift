@@ -177,4 +177,47 @@ struct AppFeatureTests {
         #expect(finalized.value?.2 == orphanedSummary)
         #expect(finalized.value?.3 == nil)
     }
+
+    /// The Rides tab only loads on its own `.task`, which fires once when it first
+    /// mounts — not when a ride finishes underneath an already-mounted tab. Without
+    /// this, a just-finished ride stayed invisible until something else (a tab
+    /// switch) tore the view down and remounted it.
+    @Test("Confirming finish reloads the Rides tab so the just-finished ride appears")
+    func confirmFinishReloadsRides() async {
+        let fetchRidesCallCount = LockIsolated(0)
+        let store = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.uuid = .incrementing
+            $0.bleHRClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.locationClient = .testValue
+            $0.hapticsClient = .testValue
+            var client = PersistenceClient.mock()
+            client.fetchRides = {
+                fetchRidesCallCount.withValue { $0 += 1 }
+                return []
+            }
+            $0.persistenceClient = client
+        }
+        store.exhaustivity = .off
+
+        // Real ride-start/finish flow, mirroring `rideEffectsStartAtRideLevel` — a
+        // directly-seeded `activeRide` skips `.task`, leaving effects the finish
+        // sequence expects to tear down (GPX export, calibration) never started.
+        await store.send(.startRideButtonTapped)
+        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        await store.receive(\.activeRide.task)
+
+        await store.send(.activeRide(.pauseTapped))
+        await store.send(.activeRide(.finishTapped))
+        await store.send(.activeRide(.finishAlert(.presented(.confirmFinish))))
+        await store.receive(\.rides.reloadRides)
+        await store.receive(\.rides.ridesResponse)
+        await store.finish()
+
+        #expect(fetchRidesCallCount.value == 1)
+    }
 }
