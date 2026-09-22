@@ -279,54 +279,29 @@ never entered.
 Full suite green, 1314 passed. Read at three zooms including S19's opening one, where the route is
 a blob: 25600 m · 2 arrows, 6400 m · 10 arrows, and no stack.
 
----
+### #261 — done (branch `fix/delete-ride-cascade`)
 
-## Field bugs from the 2026-09-19/20 rides (#261, #262, #263)
+`PersistenceClient.deleteRide` removes the GPX file, batch-deletes the CoreData `TrackPoint`
+rows, then deletes the `VehiclePassEvent` rows and the `Ride` in one save.
 
-Four untracked GPX exports in the repo root. Three outlived the rides that were deleted in the
-app; the fourth, `Cyclometer_2026-09-20_10-45.gpx`, is a 70-minute ride with a manual pause and
-carries the other two defects.
+The ordering inverts the plan's, deliberately. The plan removed the file last; the `Ride` row
+goes last instead, because it is the only thing that knows the file's path and the only thing a
+screen can reach the other three from. Interrupted anywhere earlier, the rider still sees a ride
+they can delete again, rather than the unreachable leftovers this issue is about. File removal
+stays non-fatal, which was the plan's own reason for its ordering.
 
-The data: 2525 points, 14:46:18Z–15:56:37Z, **one `<trkseg>`**. Points 1557→1558 are 1596 s and
-338.4 m apart — the pause. Before it, `<gpxtpx:speed>` reads 0.0 for 21 consecutive seconds and
-stays under 0.2 m/s for minutes, and auto-pause (10 s, on by default) never fired. The exporter
-rounds to one decimal, so those `0.0`s were the 0.02–0.04 m/s noise floor.
+`RidesView` no longer touches `modelContext`; the swipe sends `.deleteRecordedRide(id)` through
+`RidesFeature`. `RidePersistenceActor` gains `gpxFileURL(id:)` and `deleteRide(id:)`, the latter
+fetching and deleting the pass events itself — there is no `@Relationship` to cascade, which is
+why they were being left behind.
 
-- [x] **#262 — auto-pause never fires.** `speedMPS == 0` is never true on real GPS. One
-      stationary-speed threshold with hysteresis, applied to the zero-speed counter, the `.speed`
-      auto-resume (`> 0`, which would undo a working auto-pause on the next noise sample) and
-      `distanceMeters +=`, which accrues phantom metres while stopped. Auto-end's threshold stays
-      out by decision.
-- [ ] **#261 — deleting a ride orphans everything it owns.** `RidesView.deleteRide` calls
-      `modelContext.delete(ride)` from the view; `PersistenceClient` has no `deleteRide` at all.
-      The GPX file, the CoreData `TrackPoint` rows and the `VehiclePassEvent` rows all survive
-      (FK pattern, no `@Relationship`, no cascade). Add `deleteRide` on the client in the shape of
-      `deleteRoute`, and route the swipe action through `RidesFeature`.
-- [ ] **#263 — a pause leaves a straight chord.** `trackCoordinates` is flat and `TrackPointDTO`
-      has no break marker, so `buildXML` emits one `<trkseg>` and `ActiveRideMapView` one
-      `MapPolyline`. Real `segmentIndex` end to end (DTO + MO + xcdatamodeld, lightweight
-      migration), incremented on resume, persisted so a mid-ride kill doesn't merge segments,
-      grouped at export and at draw. Distance is unaffected — it integrates speed, not position.
-      Ride Detail's map is #251's.
+Tests: 6 in `RideDeletionTests` against real in-memory CoreData + SwiftData stacks, 3 in
+`RidesFeatureTests`.
 
-Order: #262, then #261, then #263. Branch per issue off `main`.
-Plan: `~/.claude/plans/vivid-launching-minsky.md`.
-
-### #262 — done (branch `fix/auto-pause-speed-threshold`)
-
-Two constants on `ActiveRideFeature`: `stationarySpeedMPS` 0.5 and `movingSpeedMPS` 1.0. The gap
-between them is the hysteresis — with one threshold, a single noise sample a hair above it would
-un-pause the ride the tick after auto-pause caught it.
-
-- `.elapsedTick` now takes the speed once: above the stationary band it adds distance and clears
-  the counter, at or below it adds nothing and counts a stationary second. That is both the
-  auto-pause fix and the phantom-distance fix, in one branch.
-- The `.speed` auto-resume needs `>= movingSpeedMPS`, not `> 0`.
-- `zeroSpeedSeconds` keeps its name (it is a persisted `Ride` field); its doc says what it now
-  counts.
-
-Tests: `AutoPauseThresholdTests` pins each rule against the raw 0.04 m/s noise floor, and
-`AutoPauseReplayTests` replays the 363 seconds of 15:07:00Z–15:13:02Z through the real reducer
-from `AutoPauseReplayFixtures`. It pauses at t+19 and is paused for 308 of those 363 seconds,
-resuming only for the two shuffles forward that genuinely clear 1.0 m/s. All 8 fail against the
-old comparison, checked by reverting the reducer and re-running.
+**Not verified end to end.** The list is an `@Query`, and the delete now happens on the
+persistence actor's context rather than the view's. A unit test pins the half that is testable —
+the container's main context no longer finds the ride — but whether SwiftUI re-runs the query is
+SwiftData's own contract and needs a running app. An attempt to drive it on the simulator failed
+on its own terms: seeding the real store from a host test does not survive the UI run, because
+launching XCUIApplication reinstalls the app and wipes its container. Worth a manual check on
+device before this merges.

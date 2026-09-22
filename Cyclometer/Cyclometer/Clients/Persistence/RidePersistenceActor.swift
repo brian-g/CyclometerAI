@@ -66,6 +66,39 @@ actor RidePersistenceActor {
         }
     }
 
+    /// Where this ride's export was written, or nil if it has none — a ride whose
+    /// export failed, or one that was never finalized (#261).
+    ///
+    /// Read separately from `deleteRide` below, rather than returned by it, so the row
+    /// stays alive until everything it owns is gone. See `PersistenceClient.live`'s
+    /// `deleteRide` for why that ordering is the point.
+    ///
+    /// Nil rather than a thrown `.rideNotFound` when the id no longer resolves: the only
+    /// caller is a delete, and a ride that is already gone owns no file.
+    func gpxFileURL(id: UUID) throws -> URL? {
+        try rideRow(id: id)?.gpxFileURL
+    }
+
+    /// Removes a ride and the `VehiclePassEvent` rows keyed to it, in one save (#261).
+    /// The CoreData `TrackPoint` rows are the caller's to delete — they live in the other
+    /// stack — as is the GPX file.
+    ///
+    /// No-op when the ride is already gone, mirroring `deleteRoute`: deleting something
+    /// twice is not a failure, and the swipe action can race its own list refresh.
+    func deleteRide(id: UUID) throws {
+        guard let ride = try rideRow(id: id) else { return }
+        try savingChanges("deleteRide", id: id, context: modelContext) {
+            // No `@Relationship` to cascade down (see `Ride`'s Relationships section):
+            // these rows are keyed by a plain `rideId`, so deleting them is this method's
+            // own job. Missing it is what left the events of every deleted ride behind.
+            let events = try modelContext.fetch(
+                FetchDescriptor<VehiclePassEvent>(predicate: #Predicate { $0.rideId == id })
+            )
+            for event in events { modelContext.delete(event) }
+            modelContext.delete(ride)
+        }
+    }
+
     /// Read path for `GPXExporter` (#173) — the rest of this actor is write-only by
     /// design (#171), but GPX export needs the ride's title/startedAt for
     /// `<metadata>`/`<trk><name>`.
@@ -152,6 +185,15 @@ actor RidePersistenceActor {
                 estimatedPassSpeedKph: $0.estimatedPassSpeedKph
             )
         }
+    }
+
+    /// The row itself for the callers that need the object rather than a DTO, and nil
+    /// rather than a throw when it is missing — named apart from `fetchRide(id:)` for the
+    /// same reason `RoutePersistenceActor.routeRow` is.
+    private func rideRow(id: UUID) throws -> Ride? {
+        var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
     }
 
     private func fetchRide(id: UUID) throws -> Ride {
