@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 import MapKit
 import Charts
 import ComposableArchitecture
@@ -242,23 +241,32 @@ struct ElevationPoint: Identifiable {
         RideListSummary(id: UUID(), title: "Summit Climb", startedAt: .now.addingTimeInterval(-3 * 86_400),
                         distanceMeters: 51_200, durationSeconds: 7_865)
     ]
-    NavigationStack {
-        RidesView(
-            store: Store(initialState: RidesFeature.State(rides: rides, hasLoaded: true)) { RidesFeature() },
-            onStartRide: {}
-        )
+    // Seeded through the client, not `RidesFeature.State(rides:)` directly: the view's
+    // own `.task` fires regardless and would otherwise reload through an unmocked
+    // `persistenceClient`, clobbering seeded state with an empty list almost immediately.
+    return withDependencies {
+        $0.persistenceClient = .mock(rides: rides)
+    } operation: {
+        NavigationStack {
+            RidesView(
+                store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+                onStartRide: {}
+            )
+        }
     }
-    .modelContainer(for: Ride.self, inMemory: true)
 }
 
 #Preview("Rides — empty") {
-    NavigationStack {
-        RidesView(
-            store: Store(initialState: RidesFeature.State(hasLoaded: true)) { RidesFeature() },
-            onStartRide: {}
-        )
+    withDependencies {
+        $0.persistenceClient = .mock()
+    } operation: {
+        NavigationStack {
+            RidesView(
+                store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+                onStartRide: {}
+            )
+        }
     }
-    .modelContainer(for: Ride.self, inMemory: true)
 }
 
 struct RideSummary: Identifiable {

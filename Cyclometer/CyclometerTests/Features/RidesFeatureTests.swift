@@ -77,4 +77,61 @@ struct RidesFeatureTests {
             $0.rides = [ride]
         }
     }
+
+    /// `ActiveRideFeature`'s own finish effect (flush → GPX export → `finalizeRide`) is a
+    /// separate effect, unsequenced with this one — the write can easily still be in
+    /// flight the instant a ride ends. `rideFinished` polls rather than reading once.
+    @Test("rideFinished polls until the ride appears, rather than reading once and possibly missing it")
+    func rideFinishedPollsUntilRideAppears() async {
+        let testClock = TestClock()
+        let ride = Self.summary()
+        let callCount = LockIsolated(0)
+        let store = TestStore(initialState: RidesFeature.State()) {
+            RidesFeature()
+        } withDependencies: {
+            $0.continuousClock = testClock
+            var client = PersistenceClient.mock()
+            client.fetchRides = {
+                let count = callCount.withValue { $0 += 1; return $0 }
+                return count >= 2 ? [ride] : []
+            }
+            $0.persistenceClient = client
+        }
+
+        await store.send(.rideFinished(ride.id))
+        await testClock.advance(by: .milliseconds(200))
+        await store.receive(\.ridesResponse) {
+            $0.hasLoaded = true
+            $0.rides = [ride]
+        }
+
+        #expect(callCount.value == 2)
+    }
+
+    /// A write that never lands (or a finalize that genuinely failed) must not poll
+    /// forever — the last read wins once the ceiling is reached.
+    @Test("rideFinished gives up after its poll ceiling rather than waiting forever")
+    func rideFinishedGivesUpAfterCeiling() async {
+        let testClock = TestClock()
+        let callCount = LockIsolated(0)
+        let store = TestStore(initialState: RidesFeature.State()) {
+            RidesFeature()
+        } withDependencies: {
+            $0.continuousClock = testClock
+            var client = PersistenceClient.mock()
+            client.fetchRides = {
+                callCount.withValue { $0 += 1 }
+                return []
+            }
+            $0.persistenceClient = client
+        }
+
+        await store.send(.rideFinished(UUID()))
+        await testClock.advance(by: .seconds(2))
+        await store.receive(\.ridesResponse) {
+            $0.hasLoaded = true
+        }
+
+        #expect(callCount.value == 10)
+    }
 }

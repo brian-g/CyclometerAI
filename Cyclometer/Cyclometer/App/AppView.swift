@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 import ComposableArchitecture
 
 struct AppView: View {
@@ -144,6 +143,7 @@ struct AppView: View {
 #Preview("Rides Tab") {
     withDependencies {
         $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
     } operation: {
         @Shared(.appPreferences) var preferences
         $preferences.withLock { $0.hasCompletedOnboarding = true }
@@ -152,13 +152,13 @@ struct AppView: View {
                 AppFeature()
             }
         )
-        .modelContainer(for: Ride.self, inMemory: true)
     }
 }
 
 #Preview("Active Ride") {
     withDependencies {
         $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
     } operation: {
         @Shared(.appPreferences) var preferences
         $preferences.withLock { $0.hasCompletedOnboarding = true }
@@ -184,6 +184,5 @@ struct AppView: View {
                 AppFeature()
             }
         )
-        .modelContainer(for: Ride.self, inMemory: true)
     }
 }

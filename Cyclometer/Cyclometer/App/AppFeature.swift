@@ -209,13 +209,18 @@ struct AppFeature {
                 return .none
 
             case .activeRide(.finishAlert(.presented(.confirmFinish))):
+                let finishedRideId = state.activeRide?.rideId
                 state.activeRide = nil
                 state.isDashboardPresented = false
                 // The Rides tab only loads on its own `.task`, which fires once when it
                 // first mounts — not when a ride finishes underneath an already-mounted
                 // tab. Without this, the just-finished ride is invisible until something
-                // else (a tab switch) tears the view down and remounts it.
-                return .send(.rides(.reloadRides))
+                // else (a tab switch) tears the view down and remounts it. `rideFinished`,
+                // not `reloadRides`: ActiveRideFeature's own finish effect (flush → GPX
+                // export → finalizeRide) is a separate effect racing this one, so the
+                // write is very often still in flight at this exact moment.
+                guard let finishedRideId else { return .none }
+                return .send(.rides(.rideFinished(finishedRideId)))
 
             case .resumableRideFetched(let summary):
                 // `.task`'s two effects race: the rider can start a brand-new ride
@@ -224,8 +229,9 @@ struct AppFeature {
                 // needs to be closed out, or it stays a phantom non-`.ended` row
                 // forever (invisible in RidesView, never exported) (#175 review).
                 guard state.activeRide == nil else {
-                    return .run { [persistenceClient, date] _ in
+                    return .run { [persistenceClient, date] send in
                         try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
+                        await send(.rides(.reloadRides))
                     }
                 }
 
@@ -234,12 +240,13 @@ struct AppFeature {
                 // out instead of resuming a ride that is over (#188) — otherwise the
                 // recorder restarts and sensors reconnect on a finished ride.
                 if let pending = rideEndIntentClient.load(), pending.rideId == summary.rideId {
-                    return .run { [persistenceClient, rideEndIntentClient] _ in
+                    return .run { [persistenceClient, rideEndIntentClient] send in
                         do {
                             try await persistenceClient.finalizeRide(
                                 pending.rideId, pending.endedAt, summary, pending.gpxFileURL
                             )
                             rideEndIntentClient.clear()
+                            await send(.rides(.reloadRides))
                         } catch {
                             // Logged in RidePersistenceActor. The marker stays so the
                             // next launch tries again rather than resuming the ride.

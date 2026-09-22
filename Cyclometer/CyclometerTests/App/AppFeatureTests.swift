@@ -165,6 +165,7 @@ struct AppFeatureTests {
             $0.date = .constant(fixedDate)
             $0.persistenceClient = .mock(onFinalizeRide: { finalized.setValue(($0, $1, $2, $3)) })
         }
+        store.exhaustivity = .off
 
         await store.send(.resumableRideFetched(orphanedSummary))
 
@@ -182,13 +183,25 @@ struct AppFeatureTests {
     /// mounts — not when a ride finishes underneath an already-mounted tab. Without
     /// this, a just-finished ride stayed invisible until something else (a tab
     /// switch) tore the view down and remounted it.
-    @Test("Confirming finish reloads the Rides tab so the just-finished ride appears")
-    func confirmFinishReloadsRides() async {
+    ///
+    /// `RidesFeature.rideFinished` (not a plain `reloadRides`) is what this actually
+    /// exercises: `ActiveRideFeature`'s own finish effect (flush → GPX export →
+    /// `finalizeRide`) is a separate, unsequenced effect, so the write is very often
+    /// still in flight the instant this fires. `fetchRides` here only starts reporting
+    /// the ride from its second call, standing in for that lag — proving the fix
+    /// survives the race rather than merely firing once and usually losing it.
+    /// (The poll mechanics themselves — the retry ceiling, multi-step chains — are
+    /// `RidesFeatureTests.rideFinished*`'s job; this just proves the wiring at the
+    /// ride-end seam sends the right action.)
+    @Test("Confirming finish polls until the finalize write lands, not just reloads once and often misses it")
+    func confirmFinishPollsUntilRideAppears() async {
+        let testClock = TestClock()
+        let fixedRideId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         let fetchRidesCallCount = LockIsolated(0)
         let store = TestStore(initialState: AppFeature.State()) {
             AppFeature()
         } withDependencies: {
-            $0.continuousClock = TestClock()
+            $0.continuousClock = testClock
             $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
             $0.uuid = .incrementing
             $0.bleHRClient = .testValue
@@ -197,8 +210,10 @@ struct AppFeatureTests {
             $0.hapticsClient = .testValue
             var client = PersistenceClient.mock()
             client.fetchRides = {
-                fetchRidesCallCount.withValue { $0 += 1 }
-                return []
+                let callNumber = fetchRidesCallCount.withValue { $0 += 1; return $0 }
+                guard callNumber >= 2 else { return [] }
+                return [RideListSummary(id: fixedRideId, title: "", startedAt: .now,
+                                        distanceMeters: 0, durationSeconds: 0)]
             }
             $0.persistenceClient = client
         }
@@ -214,10 +229,14 @@ struct AppFeatureTests {
         await store.send(.activeRide(.pauseTapped))
         await store.send(.activeRide(.finishTapped))
         await store.send(.activeRide(.finishAlert(.presented(.confirmFinish))))
-        await store.receive(\.rides.reloadRides)
+        await store.receive(\.rides.rideFinished)
+
+        // Drives the poll's one failed attempt through to its second, successful one.
+        await testClock.advance(by: .milliseconds(200))
         await store.receive(\.rides.ridesResponse)
         await store.finish()
 
-        #expect(fetchRidesCallCount.value == 1)
+        #expect(fetchRidesCallCount.value == 2)
+        #expect(store.state.rides.rides.map(\.id) == [fixedRideId])
     }
 }
