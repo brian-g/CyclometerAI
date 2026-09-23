@@ -110,19 +110,23 @@ extension PermissionsClient {
     static let heartRateType = HKQuantityType(.heartRate)
     static let restingHeartRateType = HKQuantityType(.restingHeartRate)
     static let dateOfBirthType = HKCharacteristicType(.dateOfBirth)
+    static let workoutType = HKWorkoutType.workoutType()
+    static let distanceCyclingType = HKQuantityType(.distanceCycling)
 
     /// PRD.md §9.4 — resting HR and max HR feed the Karvonen zones, date of birth backs
-    /// the age-based max-HR estimate when no measured maximum exists.
+    /// the age-based max-HR estimate when no measured maximum exists. Workouts are read
+    /// only to skip writing a ride another source already recorded (#250).
     static var healthReadTypes: Set<HKObjectType> {
-        [heartRateType, restingHeartRateType, dateOfBirthType]
+        [heartRateType, restingHeartRateType, dateOfBirthType, workoutType]
     }
 
     /// UX.md §S10 — an `HKWorkout` is written at ride end so the ride lands in the
-    /// Fitness app and counts toward Activity rings. Requested here, with the reads, so
-    /// the rider answers one sheet in their lifetime rather than a second one months
-    /// later at the end of their first ride.
+    /// Fitness app. Its distance reaches the workout as a `distanceCycling` sample, which
+    /// `HKWorkoutBuilder` will only accept with share access to that type too. Requested
+    /// here, with the reads, so the rider answers one sheet in their lifetime rather than
+    /// a second one months later at the end of their first ride.
     static var healthShareTypes: Set<HKSampleType> {
-        [HKWorkoutType.workoutType()]
+        [workoutType, distanceCyclingType]
     }
 }
 

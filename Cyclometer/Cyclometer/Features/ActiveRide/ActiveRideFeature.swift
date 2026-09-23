@@ -544,7 +544,7 @@ struct ActiveRideFeature {
                     // write includes whatever URL export produced, so it must come
                     // last. A failed export degrades to a nil gpxFileURL rather than
                     // leaving the ride stuck out of `.ended`.
-                    .run { [rideDataBuffer, persistenceClient, rideEndIntentClient] _ in
+                    .run { [rideDataBuffer, persistenceClient, rideEndIntentClient, healthKitClient] _ in
                         // Recorded before any of the writes below, in storage a SwiftData
                         // failure cannot reach: if `finalizeRide` fails, this is the only
                         // durable trace that the rider ended this ride (#188).
@@ -591,6 +591,25 @@ struct ActiveRideFeature {
                             // stays: AppFeature closes the ride out at next launch rather
                             // than resuming a ride the rider already ended (#188).
                             return
+                        }
+
+                        // After finalize, so only a durably ended ride reaches Apple Health,
+                        // and before the thumbnail, which waits on the network (UX.md §S10,
+                        // #250). Nothing waits on it: a revoked permission costs the workout,
+                        // never the ride. `startedAt` is read back because a resumed ride's
+                        // start only exists in persistence. Write failures are logged in the
+                        // client.
+                        do {
+                            let startedAt = try await persistenceClient.fetchRide(rideId).startedAt
+                            try? await healthKitClient.saveWorkout(RideWorkout(
+                                rideId: rideId,
+                                startedAt: startedAt,
+                                endedAt: endedAt,
+                                // The same value `finalizeRide` just wrote to `Ride.distanceMeters`.
+                                distanceMeters: finalSummary.distanceMeters
+                            ))
+                        } catch {
+                            logger.error("fetchRide failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — no workout written to Apple Health")
                         }
 
                         // Last: the thumbnail needs map tiles from the network, and the

@@ -43,6 +43,10 @@ struct HealthKitClient {
     /// For the 220 − age max estimate. `nil` when the rider has not set one.
     var fetchDateOfBirth:      @Sendable () async throws -> DateComponents?
     var heartRateStream:       @Sendable () -> AsyncStream<Int>     // live BPM from Watch / HR strap
+    /// UX.md §S10 — the finished ride as an outdoor cycling `HKWorkout`. Skipped, not
+    /// thrown, when another source already recorded a cycling workout over the same
+    /// time; logs its own failures before rethrowing them.
+    var saveWorkout:           @Sendable (RideWorkout) async throws -> Void
 }
 
 extension HealthKitClient: DependencyKey {
@@ -57,7 +61,8 @@ extension HealthKitClient: DependencyKey {
             requestAuthorization:  { try await requestAuthorization(store) },
             fetchRestingHeartRate: { try await fetchRestingHeartRate(store) },
             fetchDateOfBirth:      { fetchDateOfBirth(store) },
-            heartRateStream:       { makeHeartRateStream(store) }
+            heartRateStream:       { makeHeartRateStream(store) },
+            saveWorkout:           { try await saveWorkout($0, store) }
         )
     }()
 
@@ -69,7 +74,8 @@ extension HealthKitClient: DependencyKey {
         requestAuthorization:  { },
         fetchRestingHeartRate: { nil },
         fetchDateOfBirth:      { nil },
-        heartRateStream:       { AsyncStream { $0.finish() } }
+        heartRateStream:       { AsyncStream { $0.finish() } },
+        saveWorkout:           { _ in }
     )
 }
 
@@ -161,6 +167,72 @@ extension HealthKitClient {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+}
+
+extension HealthKitClient {
+
+    /// Overlap is the whole duplicate test: a Watch recording an Outdoor Cycle alongside the
+    /// phone writes its own workout over the same stretch of time (#250). Only another
+    /// source's counts — ours carry a sync identifier, so a rewrite replaces rather than
+    /// duplicates. A denied workout read can't be told apart from "none found", so it falls
+    /// through to writing.
+    ///
+    /// Written after the ride is saved and never awaited by the summary (UX.md §S10), so a
+    /// failure here can only cost the workout, which is logged rather than surfaced — §S10
+    /// leaves notifying the rider open.
+    private static func saveWorkout(_ workout: RideWorkout, _ store: HKHealthStore) async throws {
+        do {
+            if let existing = try await overlappingCyclingWorkout(workout, store) {
+                logger.notice(
+                    "workout for ride \(workout.rideId, privacy: .public) skipped — \(existing.sourceRevision.source.name, privacy: .public) already recorded one over the same time"
+                )
+                return
+            }
+
+            let configuration = HKWorkoutConfiguration()
+            configuration.activityType = .cycling
+            configuration.locationType = .outdoor
+            let builder = HKWorkoutBuilder(healthStore: store, configuration: configuration, device: .local())
+
+            try await builder.beginCollection(at: workout.startedAt)
+            // A ride that never moved has no distance to record, and a zero-length sample
+            // adds nothing the workout's own start and end don't already say.
+            if workout.distanceMeters > 0 {
+                try await builder.addSamples([HKQuantitySample(
+                    type: PermissionsClient.distanceCyclingType,
+                    quantity: HKQuantity(unit: .meter(), doubleValue: workout.distanceMeters),
+                    start: workout.startedAt,
+                    end: workout.endedAt
+                )])
+            }
+            try await builder.addMetadata([
+                HKMetadataKeySyncIdentifier: workout.rideId.uuidString,
+                HKMetadataKeySyncVersion: 1,
+            ])
+            try await builder.endCollection(at: workout.endedAt)
+            _ = try await builder.finishWorkout()
+        } catch {
+            logger.error(
+                "workout write failed for ride \(workout.rideId, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            throw error
+        }
+    }
+
+    private static func overlappingCyclingWorkout(_ workout: RideWorkout, _ store: HKHealthStore) async throws -> HKWorkout? {
+        let fromOtherSources = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            HKQuery.predicateForWorkouts(with: .cycling),
+            // No options: any workout that overlaps the ride at all, not only one inside it.
+            HKQuery.predicateForSamples(withStart: workout.startedAt, end: workout.endedAt),
+            NSCompoundPredicate(notPredicateWithSubpredicate: HKQuery.predicateForObjects(from: .default())),
+        ])
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.workout(fromOtherSources)],
+            sortDescriptors: [],
+            limit: 1
+        )
+        return try await descriptor.result(for: store).first
     }
 }
 
