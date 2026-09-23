@@ -1,6 +1,10 @@
 import ComposableArchitecture
 import Foundation
 import SwiftData
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "recording")
 
 /// Root feature — owns tab selection and active ride lifecycle.
 /// Navigation follows Apple Music pattern: Rides / Routes / Settings tabs.
@@ -230,8 +234,11 @@ struct AppFeature {
                 // forever (invisible in RidesView, never exported) (#175 review).
                 guard state.activeRide == nil else {
                     return .run { [persistenceClient, date] send in
-                        try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
+                        let finalized = (try? await persistenceClient.finalizeRide(
+                            summary.rideId, date.now, summary, nil
+                        )) != nil
                         await send(.rides(.reloadRides))
+                        if finalized { await Self.captureMapThumbnail(rideId: summary.rideId) }
                     }
                 }
 
@@ -247,6 +254,7 @@ struct AppFeature {
                             )
                             rideEndIntentClient.clear()
                             await send(.rides(.reloadRides))
+                            await Self.captureMapThumbnail(rideId: pending.rideId)
                         } catch {
                             // Logged in RidePersistenceActor. The marker stays so the
                             // next launch tries again rather than resuming the ride.
@@ -417,6 +425,16 @@ struct AppFeature {
             await bleCSCClient.endPairingScan()
             await variaRadarClient.endPairingScan()
             await bleHRClient.endPairingScan()
+        }
+    }
+
+    /// S14's thumbnail for a ride closed out here rather than by the rider's Finish, which
+    /// never reached `ActiveRideFeature`'s own capture (#177).
+    private static func captureMapThumbnail(rideId: UUID) async {
+        do {
+            try await RideMapThumbnail.capture(rideId: rideId)
+        } catch {
+            logger.error("Map thumbnail capture failed for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 

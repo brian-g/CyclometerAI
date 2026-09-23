@@ -2,6 +2,7 @@ import ComposableArchitecture
 import Foundation
 import SwiftData
 import Testing
+import UIKit
 @testable import Cyclometer
 
 /// #188: the ride-end sequence (`ActiveRideFeature.finishAlert(.presented(.confirmFinish))`)
@@ -34,7 +35,8 @@ struct RideEndFailureTests {
     private static func makeRideStore(
         persistenceClient: PersistenceClient,
         documentsDirectory: URL,
-        rideEndIntentClient: RideEndIntentClient
+        rideEndIntentClient: RideEndIntentClient,
+        mapSnapshotClient: MapSnapshotClient = .testValue
     ) -> TestStoreOf<ActiveRideFeature> {
         let store = TestStore(
             initialState: ActiveRideFeature.State(recordingState: .idle)
@@ -52,9 +54,19 @@ struct RideEndFailureTests {
             $0.persistenceClient = persistenceClient
             $0.gpxDocumentsDirectory = documentsDirectory
             $0.rideEndIntentClient = rideEndIntentClient
+            $0.mapSnapshotClient = mapSnapshotClient
         }
         store.exhaustivity = .off
         return store
+    }
+
+    /// Stands in for MapKit's tiles (#177): counts renders and answers each appearance with
+    /// its own bytes, so a test can tell the two stored images apart.
+    private static func countingSnapshots(_ renders: LockIsolated<Int>) -> MapSnapshotClient {
+        MapSnapshotClient { _, _, style in
+            renders.withValue { $0 += 1 }
+            return Data(style == .dark ? "dark".utf8 : "light".utf8)
+        }
     }
 
     /// Start → record a few seconds → pause → finish → confirm, then drain the
@@ -152,6 +164,58 @@ struct RideEndFailureTests {
         #expect(rideEndIntent.load() == nil)
     }
 
+    // MARK: - Map thumbnail (#177)
+
+    @Test("a finished ride gets its map thumbnail, both appearances, rendered once after it is finalized")
+    func finishedRideGetsItsThumbnail() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let renders = LockIsolated(0)
+
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir,
+            rideEndIntentClient: .inMemory(), mapSnapshotClient: Self.countingSnapshots(renders)
+        )
+        let rideId = await Self.runRideToEnd(store) {
+            fetchRideIfPresent($0, from: swiftDataStack)?.mapThumbnailDark != nil
+        }
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(ride.recordingState == .ended)
+        #expect(ride.mapThumbnailLight == Data("light".utf8))
+        #expect(ride.mapThumbnailDark == Data("dark".utf8))
+        // One light, one dark: captured once, not per list render.
+        #expect(renders.value == 2)
+    }
+
+    @Test("a map thumbnail failure at ride end leaves the ride ended, with its GPX and no thumbnail")
+    func thumbnailFailureStillEndsRide() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let rideEndIntent = RideEndIntentClient.inMemory()
+        let attempts = LockIsolated(0)
+
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
+            mapSnapshotClient: MapSnapshotClient { _, _, _ in
+                attempts.withValue { $0 += 1 }
+                throw MapSnapshotError.unavailable
+            }
+        )
+        // The render is the last step, so an attempt at it means everything before it ran.
+        let rideId = await Self.runRideToEnd(store) { _ in attempts.value > 0 }
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(ride.recordingState == .ended)
+        #expect(ride.endedAt != nil)
+        #expect(ride.gpxFileURL != nil)
+        #expect(ride.mapThumbnailLight == nil)
+        #expect(ride.mapThumbnailDark == nil)
+        #expect(rideEndIntent.load() == nil)
+    }
+
     // MARK: - The path that did not degrade acceptably
 
     @Test("a finalizeRide failure records the end intent, and the next launch closes the ride out instead of resuming it")
@@ -164,7 +228,11 @@ struct RideEndFailureTests {
         defer { try? FileManager.default.removeItem(at: tempDir) }
         let rideEndIntent = RideEndIntentClient.inMemory()
 
-        let store = Self.makeRideStore(persistenceClient: failingClient, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent)
+        let renders = LockIsolated(0)
+        let store = Self.makeRideStore(
+            persistenceClient: failingClient, documentsDirectory: tempDir,
+            rideEndIntentClient: rideEndIntent, mapSnapshotClient: Self.countingSnapshots(renders)
+        )
         // finalizeRide is the thing failing here, so the ride never reaches `.ended`.
         // The recorded intent, carrying the GPX written before the failure, is the
         // pipeline's observable end state instead.
@@ -174,6 +242,9 @@ struct RideEndFailureTests {
         // state that used to be resumed.
         let strandedRide = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(strandedRide.endedAt == nil)
+        // Nor was a thumbnail rendered for a ride that isn't durably over (#177).
+        #expect(renders.value == 0)
+        #expect(strandedRide.mapThumbnailLight == nil)
         let summary = try #require(try await liveClient.fetchResumableRide())
         #expect(summary.rideId == rideId)
 
@@ -200,6 +271,7 @@ struct RideEndFailureTests {
             $0.persistenceClient = liveClient
             $0.gpxDocumentsDirectory = tempDir
             $0.rideEndIntentClient = rideEndIntent
+            $0.mapSnapshotClient = Self.countingSnapshots(renders)
         }
         appStore.exhaustivity = .off
 
@@ -215,6 +287,9 @@ struct RideEndFailureTests {
         #expect(recovered.recordingState == .ended)
         #expect(recovered.endedAt == Self.testDate)
         #expect(recovered.gpxFileURL == pending.gpxFileURL)
+        // And the thumbnail the failed finish never got to is captured now (#177).
+        #expect(recovered.mapThumbnailLight == Data("light".utf8))
+        #expect(recovered.mapThumbnailDark == Data("dark".utf8))
 
         // Intent discharged, and no longer resumable.
         #expect(rideEndIntent.load() == nil)

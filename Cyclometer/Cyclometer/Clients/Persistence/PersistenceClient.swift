@@ -31,6 +31,8 @@ struct PersistenceClient: Sendable {
     /// Writes final aggregates, endedAt, recordingState .ended, and the exported
     /// GPX file's URL (nil if export failed) in one call.
     var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate, URL?) async throws -> Void
+    /// Stores S14's map thumbnail, light then dark, rendered after the ride ended (#177).
+    var saveRideMapThumbnail: @Sendable (UUID, Data, Data) async throws -> Void
     /// Inserts confirmed vehicle-pass events in one batch — `VehiclePassDetector`
     /// can legitimately confirm more than one on the same tick (#172, DataModel.md §3.4).
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
@@ -88,6 +90,7 @@ extension PersistenceClient: DependencyKey {
             createRide: { try await rideActor.createRide(id: $0, startedAt: $1, route: $2) },
             updateRideSummary: { try await rideActor.updateRideSummary($0) },
             finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
+            saveRideMapThumbnail: { try await rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
             deleteRide: { try await deleteRideLive(id: $0, rideActor: rideActor, container: coreDataContainer) },
@@ -115,6 +118,7 @@ extension PersistenceClient: DependencyKey {
         createRide: { _, _, _ in },
         updateRideSummary: { _ in },
         finalizeRide: { _, _, _, _ in },
+        saveRideMapThumbnail: { _, _, _ in },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
         deleteRide: { _ in },

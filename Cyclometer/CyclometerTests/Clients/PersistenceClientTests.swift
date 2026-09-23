@@ -373,6 +373,31 @@ struct PersistenceClientTests {
         }
     }
 
+    // MARK: - Map thumbnail (#177)
+
+    @Test("saveRideMapThumbnail stores both appearances on the ride, each in its own field")
+    func saveRideMapThumbnailRoundTrips() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date(), nil)
+        let light = Data("light".utf8)
+        let dark = Data("dark".utf8)
+
+        try await client.saveRideMapThumbnail(rideId, light, dark)
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(ride.mapThumbnailLight == light)
+        #expect(ride.mapThumbnailDark == dark)
+    }
+
+    @Test("saveRideMapThumbnail on an unknown rideId throws rideNotFound")
+    func saveRideMapThumbnailUnknownRideThrows() async throws {
+        let (client, _) = Self.makeLiveClient()
+        await #expect(throws: PersistenceError.rideNotFound) {
+            try await client.saveRideMapThumbnail(UUID(), Data(), Data())
+        }
+    }
+
     // MARK: - Ride read path (#173, for GPXExporter)
 
     @Test("fetchRide returns the ride's title and startedAt")

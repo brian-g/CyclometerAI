@@ -1,3 +1,40 @@
+# #177 — Capture + persist a static map thumbnail at ride end
+
+Plan: /Users/brian/.claude/plans/nifty-petting-boole.md
+Branch: `feat/177-ride-map-thumbnail`
+
+- [x] 1. `Ride.mapThumbnailLight` / `mapThumbnailDark` (externalStorage PNG)
+- [x] 2. Move `GPXExporter.segments(of:)` to `TrackPointDTO.segments(of:)`
+- [x] 3. `RideMapThumbnail` pure enum: drawable segments, region, path, `capture(rideId:)`
+- [x] 4. `MapSnapshotClient` (live: MKMapSnapshotter muted + POIs off, cyMapTravelPath resolved per variant)
+- [x] 5. `PersistenceClient.saveRideMapThumbnail` + actor + mock
+- [x] 6. Ride end: capture after finalize (no Task shield — mutation test showed ifLet's cancel never reaches this effect)
+- [x] 7. AppFeature recovery paths capture after finalize
+- [x] 8. Docs: DataModel §3.1, UX §S10/§S14, RideListSummary comment
+- [ ] 8b. Issue #177 edits + route-thumbnail follow-up — drafted, awaiting approval to post
+- [x] 9. Tests (thumbnail, persistence, migration, ride end, AppFeature teardown + recovery); mutation checks both ways
+- [x] 10. Full local suite green (1193 Swift Testing + 91 XCTest, 0 failures; the 2 known issues are
+      NavigationPipelineTests' existing `withKnownIssue`). Real MKMapSnapshotter render on the simulator
+      via a throwaway test, both PNGs inspected (168×168, trace per appearance, no chord across the pause)
+
+## Review
+
+- Trace colour changed from the plan's `cyPrimary` to `cyMapTravelPath` (Brian's call): colors.md defines
+  it as the recorded-track token and the live ride map already uses it. UX §S14 updated; S10's own trace
+  colour is left to #249.
+- Dropped the plan's unstructured-`Task` shield. Reading `_IfLetReducer` said the ride-end effect is
+  cancelled when AppFeature nils `activeRide`; a mutation test proved the cancel never reaches it. The
+  AppFeature test now guards that behaviour instead (it fails if cancellation ever reaches the render).
+- Labels: POIs are hidden, but city names and road shields still render (Madison + US-12 in the sample).
+  Rendering larger at lower scale made it worse: full label, plus MapKit's "Maps" attribution mark,
+  which it omits at 56 pt. 56 pt @3x kept.
+- For #248: the thumbnail lands after `finalizeRide`, so `rideFinished`'s poll can load the row before
+  its image exists. The row will need a refresh once the capture is saved.
+- Not done: a full UI drive of a real recorded ride (the render and the pipeline were each verified
+  separately).
+
+---
+
 # #252 — Cycling-focused route analysis + 80-char summary
 
 Plan: /Users/brian/.claude/plans/polished-knitting-elephant.md
