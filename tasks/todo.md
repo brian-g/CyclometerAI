@@ -44,6 +44,76 @@ Branch: `feat/250-hkworkout`
   hierarchy"), the request stayed pending, and at Finish the overlap check hit "Authorization not determined"
   and the write "Not authorized". Moved the request to AppFeature's launch `.task` (onboarded riders only,
   before the resumable-ride fetch). Mutation-checked; full suite 1438 passed, 0 failed.
+
+---
+
+# #248 — S14 Ride History list on real rides
+
+Plan: /Users/brian/.claude/plans/noble-tinkering-valley.md
+Branch: `feat/248-ride-history`
+
+- [x] 1. `RideListSummary` carries light/dark thumbnail data; `fetchRides` maps it
+- [x] 2. `RidesFeature`: `@Shared` preferences → `unitSystem`; `rideFinished` owns the Finish-path backfill + reload
+- [x] 3. Remove the backfill from `ActiveRideFeature`'s finish effect
+- [x] 4. `RideDateText` pure formatter (relative within the week, absolute beyond)
+- [x] 5. `RidesView`: Sketch row, stored-image thumbnail + placeholder, drop leading swipes, units from S12
+- [x] 6. UX.md §S14 + inventory
+- [x] 7. Tests: RideDateText, RidesFeature backfill, persistence round-trip, AppFeature teardown, snapshots
+- [x] 8. Full local suite green; snapshots compared with Sketch; simulator check
+
+
+## Review
+
+- Issue drift: Delete was already done (#261) and the thumbnail field already existed (#177). Both were
+  verified, not rebuilt.
+- Layout per Sketch (Brian's call): time and distance as small vertical `HeroNumber`s side by side.
+  Follow-ups after the first snapshots:
+  - plain lists on Rides **and** Routes
+  - a 64pt minimum column width (`Spacing.rideMetric`) so values right-align
+  - elapsed time as h:mm, truncated, not h:mm:ss
+  - `.fixedSize()` on the metrics, because the first render clipped them to "1:1…" while the title
+    kept its room
+- The Finish-path capture moved from `ActiveRideFeature`'s finish effect to `RidesFeature`. The poll
+  hands off to `captureMapThumbnails`, which is deliberately **not** under `CancelID.reload`: a
+  delete in the seconds after a Finish would otherwise cancel the render. Proved by mutation (putting
+  it back under the id fails `deleteDuringCaptureKeepsTheCapture`).
+- `RideEndFailureTests`' two thumbnail tests now end the ride, then drive `rideFinished` on the same
+  live stack.
+- Simulator drive (throwaway XCUITest, deleted):
+  - the empty state's action opens the Start sheet
+  - after Finish the row shows the placeholder, then the real map image about 15 s later with no
+    relaunch
+  - the swipe shows a red Delete only
+  - a delete survives a relaunch
+- Gotchas:
+  - `testEmptyState.empty-*.png` collided with `RoutesSnapshotTests`' references ("Multiple commands
+    produce"). Snapshot PNGs are copied flat into the bundle.
+  - A test build against a stale `Cyclometer` module reported "extra arguments"; a fresh
+    `-derivedDataPath` fixed it.
+  - ICU puts U+202F before AM/PM.
+- Not touched: `assets/design/Design.sketch` showed as modified after MCP reads. Left out of the
+  commit; it's clean again as of the review round.
+
+### `/code-review high` follow-up (Brian chose the fixes)
+- **Findings 1–2, real regressions from my move:** the capture started from inside the list poll, so a
+  delete or reload cancelled it, and the poll's 2 s ceiling fired the capture before a slow finalize.
+  Now `rideFinished` starts a second effect on its own id: it waits for the finalize (1 s reads, up to
+  60 s), then sends `captureMapThumbnails`. Mutation-proved by `deleteBeforeFinalizeKeepsTheCapture`.
+- **#8:** first attempt routed `AppFeature`'s launch backfill through `.rides(.captureMapThumbnails)`.
+  That put a timing-dependent received action into every exhaustive `.task` test (onboarding tests
+  failed). Replaced by `MapThumbnailGate`, a dependency so parallel tests don't share it, which runs
+  backfills one at a time. The first version of its test passed without the gate (50 yields never
+  forced an overlap). The rewrite gives the second call 200 ms of real time and asserts it hasn't
+  read yet: it fails unguarded and passes guarded.
+- **#4/#5:** thumbnails left `RideListSummary`. Rows request theirs on appear through
+  `fetchRideMapThumbnail`, decoded once off-main (`byPreparingForDisplay`) into
+  `RidesFeature.State.thumbnails`. After a capture, rows on screen marked `.missing` read again.
+- **#6/#10:** a cached `DateFormatter` (Mutex) with the locale's relative pattern: "Today at 7:45 AM".
+  Cost: "Yesterday at 2:0…" truncates beside a wide time value.
+- **#9:** the poll sends the last read's failure instead of an empty success.
+- The simulator drive was repeated: placeholder, then the image with no relaunch, then the image again
+  after a relaunch via the per-row read.
+
 ---
 
 # #177 — Capture + persist a static map thumbnail at ride end

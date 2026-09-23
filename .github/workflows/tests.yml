@@ -106,6 +106,7 @@ jobs:
             -skip-testing:CyclometerTests/SettingsSnapshotTests \
             -skip-testing:CyclometerTests/RoutesSnapshotTests \
             -skip-testing:CyclometerTests/RouteDetailSnapshotTests \
+            -skip-testing:CyclometerTests/RidesSnapshotTests \
             -skip-testing:CyclometerTests/TurnInstructionOverlaySnapshotTests \
             -skip-testing:CyclometerTests/PaceWidgetSnapshotTests \
             -skip-testing:CyclometerTests/SensorBatteryLabelSnapshotTests \

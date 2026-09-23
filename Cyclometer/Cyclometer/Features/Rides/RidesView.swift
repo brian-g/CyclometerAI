@@ -6,14 +6,13 @@ import ComposableArchitecture
 struct RidesView: View {
     let store: StoreOf<RidesFeature>
     let onStartRide: () -> Void
-
-    private var rideSummaries: [RideSummary] {
-        store.rides.map(RideSummary.recorded)
-    }
+    /// What the row dates are relative to. A parameter so snapshots can pin it; the app
+    /// takes the time of the render.
+    var now: Date = .now
 
     var body: some View {
         List {
-            if store.hasLoaded && rideSummaries.isEmpty {
+            if store.hasLoaded && store.rides.isEmpty {
                 ContentUnavailableView {
                     Label("No Rides Yet", systemImage: "figure.outdoor.cycle")
                 } description: {
@@ -24,36 +23,31 @@ struct RidesView: View {
                 .frame(maxWidth: .infinity, minHeight: 220)
                 .listRowBackground(Color.clear)
             } else {
-                ForEach(rideSummaries) { ride in
+                ForEach(store.rides) { ride in
                     NavigationLink {
-                        RideDetailView(ride: ride.detail)
+                        RideDetailView(ride: .recordedRide(timestamp: ride.startedAt))
                     } label: {
-                        RideRow(ride: ride)
+                        RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
+                                unitSystem: store.unitSystem, now: now)
                     }
-                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                        Button { } label: {
-                            Label("Sync", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        .tint(.blue)
-                        Button { } label: {
-                            Label("Make Route", systemImage: RouteLibrary.symbolName)
-                        }
-                        .tint(.green)
-                    }
+                    .onAppear { store.send(.rowAppeared(ride.id)) }
+                    // Trailing Delete only. §S14's leading Sync and Make Route wait on
+                    // service sync (Phase 2) and a route-from-ride model, neither built (#248).
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
-                            deleteRide(ride)
+                            deleteRide(ride.id)
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
                         // `role: .destructive` alone is not enough: the app-wide `.tint` wins
                         // over the role inside a swipe action, so Delete rendered in the brand
-                        // green — the same colour as "Make Route" beside it.
+                        // green.
                         .tint(Color.cyDestructive)
                     }
                 }
             }
         }
+        .listStyle(.plain)
         .navigationTitle("Rides")
         .task { store.send(.task) }
     }
@@ -62,31 +56,90 @@ struct RidesView: View {
     /// from here — that removed the one SwiftData row and left the ride's GPX file, its
     /// CoreData track points and its vehicle-pass events behind — nothing else knew the
     /// ride was gone (#261).
-    private func deleteRide(_ ride: RideSummary) {
-        store.send(.deleteRecordedRide(ride.id))
+    private func deleteRide(_ id: UUID) {
+        store.send(.deleteRecordedRide(id))
     }
 }
 
 // MARK: - Ride Row
 
+/// One ride in S14, laid out as `Design.sketch`'s S14 frame: thumbnail, name over date, then
+/// time and distance side by side, each a small `HeroNumber` with its label beneath (#248).
+/// Everything is formatted here from the stored values, so a units change in S12 shows on
+/// the next render without a reload.
 struct RideRow: View {
-    let ride: RideSummary
+    let ride: RideListSummary
+    let thumbnail: RidesFeature.Thumbnail?
+    let unitSystem: UnitSystem
+    let now: Date
+
+    /// Hours and minutes, no seconds ("0:45", "1:18") — a list reads at a glance, and the
+    /// narrower value leaves the name room. Truncated like a ride clock, not rounded, so a
+    /// 1:18:32 ride doesn't read as 1:19.
+    private var elapsed: String {
+        Duration.seconds(ride.durationSeconds)
+            .formatted(.time(pattern: .hourMinute(padHourToLength: 1, roundSeconds: .down)))
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
-            RideMapThumbnailView(ride: ride.detail)
-                .frame(width: 56, height: 56)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(ride.title).font(.headline)
-                Text(ride.date, format: .dateTime.month(.abbreviated).day().hour().minute())
-                    .font(.subheadline).foregroundStyle(.secondary)
+        HStack(spacing: Spacing.sm) {
+            RideThumbnail(thumbnail: thumbnail)
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                // Every ride's `title` is "" until #249's rename field ships — a blank row
+                // would read as broken, so this falls back rather than showing empty text.
+                Text(ride.title.isEmpty ? "Ride" : ride.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(RideDateText.text(for: ride.startedAt, now: now))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            Spacer(minLength: 10)
-            VStack(alignment: .trailing, spacing: 4) {
-                HeroNumber(ride.distance, unit: "mi").heroNumberSize(.small).layout(.horizontal)
-                Text(ride.elapsedTime).dDINCondensed(size: 20, relativeTo: .footnote)
+            Spacer(minLength: Spacing.sm)
+            // Fixed-size so the name and date truncate first — a clipped "1:1…" is no reading
+            // at all. A minimum column width keeps values right-aligned down the list for the
+            // common widths; a longer one (100 mi and up) widens only its own row.
+            HStack(alignment: .top, spacing: Spacing.xs) {
+                HeroNumber(elapsed, unit: "time")
+                    .heroNumberSize(.small)
+                    .layout(.vertical)
+                    .frame(minWidth: Spacing.rideMetric, alignment: .trailing)
+                HeroNumber(unitSystem.distance(fromMeters: ride.distanceMeters),
+                           unit: unitSystem.distanceLabel)
+                    .heroNumberSize(.small)
+                    .layout(.vertical)
+                    .frame(minWidth: Spacing.rideMetric, alignment: .trailing)
+            }
+            .fixedSize()
+        }
+    }
+}
+
+/// The ride's stored map image (#177) in the current appearance, or a placeholder while it
+/// loads and for a ride with none — recorded before #177, with no GPS track, or whose capture
+/// hasn't landed yet. Same frame either way, so a missing image never collapses the row.
+struct RideThumbnail: View {
+    let thumbnail: RidesFeature.Thumbnail?
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Group {
+            if case .loaded(let images) = thumbnail {
+                Image(uiImage: colorScheme == .dark ? images.dark : images.light)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.cyBgTertiary
+                    .overlay {
+                        Image(systemName: "map")
+                            .font(.title3)
+                            .foregroundStyle(Color.cyTextTertiary)
+                    }
+                    .accessibilityHidden(true)
             }
         }
+        .frame(width: Spacing.rideThumbnail, height: Spacing.rideThumbnail)
+        .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerSm, style: .continuous))
     }
 }
 
@@ -141,14 +194,6 @@ struct RideDetailView: View {
 }
 
 // MARK: - Map Views
-
-struct RideMapThumbnailView: View {
-    let ride: RideDetail
-    var body: some View {
-        RideMapView(ride: ride, showsMarkers: false, showsControls: false)
-            .allowsHitTesting(false)
-    }
-}
 
 struct RideMapView: View {
     let ride: RideDetail
@@ -266,26 +311,5 @@ struct ElevationPoint: Identifiable {
                 onStartRide: {}
             )
         }
-    }
-}
-
-struct RideSummary: Identifiable {
-    let id: UUID; let title: String; let date: Date
-    let elapsedTime: String; let distance: String
-    let detail: RideDetail
-
-    static func recorded(_ ride: RideListSummary) -> RideSummary {
-        let detail = RideDetail.recordedRide(timestamp: ride.startedAt)
-        let distanceMiles = UnitSystem.imperial.distance(fromMeters: ride.distanceMeters)
-        return RideSummary(
-            id: ride.id,
-            // Every ride's `title` is "" until #249's rename field ships — a blank row
-            // would read as broken, so this falls back rather than showing empty text.
-            title: ride.title.isEmpty ? "Ride" : ride.title,
-            date: ride.startedAt,
-            elapsedTime: Int(ride.durationSeconds).formattedElapsed,
-            distance: distanceMiles.formatted(.number.precision(.fractionLength(1))),
-            detail: detail
-        )
     }
 }

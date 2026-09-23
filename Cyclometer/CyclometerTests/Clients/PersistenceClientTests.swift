@@ -637,6 +637,23 @@ struct PersistenceClientTests {
         #expect(try await client.fetchRides().isEmpty)
     }
 
+    /// S14's row reads its thumbnail per ride rather than with `fetchRides` (#248), so a
+    /// list reload doesn't pull every image off disk.
+    @Test("fetchRideMapThumbnail returns both stored appearances, nil for a ride without them or an unknown id")
+    func fetchRideMapThumbnailRoundTrips() async throws {
+        let (client, _) = PersistenceClientTests.makeLiveClient()
+        let captured = UUID(), uncaptured = UUID()
+        for id in [captured, uncaptured] {
+            try await client.createRide(id, Date(), nil)
+        }
+        try await client.saveRideMapThumbnail(captured, Data("light".utf8), Data("dark".utf8))
+
+        #expect(try await client.fetchRideMapThumbnail(captured)
+                == RideMapThumbnailData(light: Data("light".utf8), dark: Data("dark".utf8)))
+        #expect(try await client.fetchRideMapThumbnail(uncaptured) == nil)
+        #expect(try await client.fetchRideMapThumbnail(UUID()) == nil)
+    }
+
     // MARK: - VehiclePassEvent (#172)
 
     @Test("appendVehiclePassEvents persists a queryable VehiclePassEvent linked by rideId")

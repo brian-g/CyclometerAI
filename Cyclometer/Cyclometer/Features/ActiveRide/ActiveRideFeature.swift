@@ -593,12 +593,11 @@ struct ActiveRideFeature {
                             return
                         }
 
-                        // After finalize, so only a durably ended ride reaches Apple Health,
-                        // and before the thumbnail, which waits on the network (UX.md §S10,
-                        // #250). Nothing waits on it: a revoked permission costs the workout,
-                        // never the ride. `startedAt` is read back because a resumed ride's
-                        // start only exists in persistence. Write failures are logged in the
-                        // client.
+                        // After finalize, so only a durably ended ride reaches Apple Health
+                        // (UX.md §S10, #250). Nothing waits on it: a revoked permission costs
+                        // the workout, never the ride. `startedAt` is read back because a
+                        // resumed ride's start only exists in persistence. Write failures are
+                        // logged in the client.
                         do {
                             let startedAt = try await persistenceClient.fetchRide(rideId).startedAt
                             try? await healthKitClient.saveWorkout(RideWorkout(
@@ -611,11 +610,8 @@ struct ActiveRideFeature {
                         } catch {
                             logger.error("fetchRide failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — no workout written to Apple Health")
                         }
-
-                        // Last: the thumbnail needs map tiles from the network, and the
-                        // ride must be durably over without waiting on them (#177). This
-                        // ride is the newest without one; a failure is retried at launch.
-                        await RideMapThumbnail.backfill()
+                        // The map thumbnail (#177) is captured by `RidesFeature.rideFinished`,
+                        // which waits for this write to land and refreshes the list after it (#248).
                     },
                     .run { [bleHRClient, variaRadarClient, locationClient] _ in
                         async let hr: Void = bleHRClient.disconnect()

@@ -71,6 +71,23 @@ actor RidePersistenceActor {
         }
     }
 
+    /// One ride's stored thumbnail (#248). Nil for a ride without one, and for an unknown
+    /// id: a row can outlive its ride by the moment a delete takes, and a missing image is
+    /// what the row already shows then.
+    func fetchMapThumbnail(id: UUID) throws -> RideMapThumbnailData? {
+        do {
+            var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == id })
+            descriptor.fetchLimit = 1
+            guard let ride = try modelContext.fetch(descriptor).first,
+                  let light = ride.mapThumbnailLight, let dark = ride.mapThumbnailDark
+            else { return nil }
+            return RideMapThumbnailData(light: light, dark: dark)
+        } catch {
+            logger.error("fetchMapThumbnail(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// Inserts confirmed vehicle-pass events in one batch and one save (#172) —
     /// `VehiclePassDetector` can confirm more than one on the same radar tick.
     /// Plain inserts against the same long-lived context as the Ride writes above;

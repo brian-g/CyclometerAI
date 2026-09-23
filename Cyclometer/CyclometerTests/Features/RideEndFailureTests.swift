@@ -36,7 +36,6 @@ struct RideEndFailureTests {
         persistenceClient: PersistenceClient,
         documentsDirectory: URL,
         rideEndIntentClient: RideEndIntentClient,
-        mapSnapshotClient: MapSnapshotClient = .testValue,
         healthKitClient: HealthKitClient = .testValue,
         date: DateGenerator = .constant(testDate)
     ) -> TestStoreOf<ActiveRideFeature> {
@@ -56,11 +55,31 @@ struct RideEndFailureTests {
             $0.persistenceClient = persistenceClient
             $0.gpxDocumentsDirectory = documentsDirectory
             $0.rideEndIntentClient = rideEndIntentClient
-            $0.mapSnapshotClient = mapSnapshotClient
             $0.healthKitClient = healthKitClient
         }
         store.exhaustivity = .off
         return store
+    }
+
+    /// The Rides tab's half of a Finish (#248): `AppFeature` forwards the ride to
+    /// `RidesFeature.rideFinished`, which captures the thumbnail once the ride is finalized.
+    /// Driven directly here, on the same real persistence stack the ride ended on;
+    /// `AppFeatureTests.thumbnailSurvivesRideTeardown` pins the forwarding itself.
+    private static func finishOnRidesTab(
+        _ rideId: UUID,
+        persistenceClient: PersistenceClient,
+        mapSnapshotClient: MapSnapshotClient
+    ) async {
+        let store = TestStore(initialState: RidesFeature.State()) {
+            RidesFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.persistenceClient = persistenceClient
+            $0.mapSnapshotClient = mapSnapshotClient
+        }
+        store.exhaustivity = .off
+        await store.send(.rideFinished(rideId))
+        await store.finish(timeout: effectDrainTimeout)
     }
 
     /// Stands in for MapKit's tiles (#177): counts renders and answers each appearance with
@@ -183,12 +202,14 @@ struct RideEndFailureTests {
         let renders = LockIsolated(0)
 
         let store = Self.makeRideStore(
-            persistenceClient: client, documentsDirectory: tempDir,
-            rideEndIntentClient: .inMemory(), mapSnapshotClient: Self.countingSnapshots(renders)
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory()
         )
         let rideId = await Self.runRideToEnd(store) {
-            fetchRideIfPresent($0, from: swiftDataStack)?.mapThumbnailDark != nil
+            fetchRideIfPresent($0, from: swiftDataStack)?.endedAt != nil
         }
+        await Self.finishOnRidesTab(
+            rideId, persistenceClient: client, mapSnapshotClient: Self.countingSnapshots(renders)
+        )
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(ride.recordingState == .ended)
@@ -207,15 +228,20 @@ struct RideEndFailureTests {
         let attempts = LockIsolated(0)
 
         let store = Self.makeRideStore(
-            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent
+        )
+        let rideId = await Self.runRideToEnd(store) {
+            fetchRideIfPresent($0, from: swiftDataStack)?.endedAt != nil
+        }
+        await Self.finishOnRidesTab(
+            rideId, persistenceClient: client,
             mapSnapshotClient: MapSnapshotClient { _, _, _ in
                 attempts.withValue { $0 += 1 }
                 throw MapSnapshotError.unavailable
             }
         )
-        // The render is the last step, so an attempt at it means everything before it ran.
-        let rideId = await Self.runRideToEnd(store) { _ in attempts.value > 0 }
 
+        #expect(attempts.value > 0)
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(ride.recordingState == .ended)
         #expect(ride.endedAt != nil)
@@ -306,19 +332,22 @@ struct RideEndFailureTests {
 
         let store = Self.makeRideStore(
             persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
-            mapSnapshotClient: Self.countingSnapshots(renders),
             // What a revoked permission looks like from here.
             healthKitClient: .mock(onSaveWorkout: { _ in
                 attempts.withValue { $0 += 1 }
                 throw WriteFailed()
             })
         )
-        // The thumbnail comes after the workout, so its second render means the pipeline
-        // carried on past the failure to its end.
-        let rideId = await Self.runRideToEnd(store) { _ in renders.value == 2 }
+        // The workout is the finish effect's last step.
+        let rideId = await Self.runRideToEnd(store) { _ in attempts.value > 0 }
+        // Then the Rides tab's capture (#248), which the failed write mustn't have stopped.
+        await Self.finishOnRidesTab(
+            rideId, persistenceClient: client, mapSnapshotClient: Self.countingSnapshots(renders)
+        )
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(attempts.value == 1)
+        #expect(renders.value == 2)
         #expect(ride.recordingState == .ended)
         #expect(ride.endedAt != nil)
         #expect(ride.gpxFileURL != nil)
@@ -342,7 +371,7 @@ struct RideEndFailureTests {
         let workoutWrites = LockIsolated(0)
         let store = Self.makeRideStore(
             persistenceClient: failingClient, documentsDirectory: tempDir,
-            rideEndIntentClient: rideEndIntent, mapSnapshotClient: Self.countingSnapshots(renders),
+            rideEndIntentClient: rideEndIntent,
             healthKitClient: .mock(onSaveWorkout: { _ in workoutWrites.withValue { $0 += 1 } })
         )
         // finalizeRide is the thing failing here, so the ride never reaches `.ended`.
