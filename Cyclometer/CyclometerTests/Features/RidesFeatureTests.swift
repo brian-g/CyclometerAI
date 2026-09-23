@@ -36,6 +36,30 @@ struct RidesFeatureTests {
         }
     }
 
+    /// S15 is reducer state on the tab's stack (#251), not a view-built destination — so the
+    /// ride a row pushed is the one whose data the detail reads.
+    @Test("Tapping a ride pushes its detail onto the stack, which loads that ride's data")
+    func tappingARidePushesItsDetail() async {
+        let ride = Self.summary()
+        let stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11, averageCadenceRPM: 88, maxCadenceRPM: 104)
+        let store = TestStore(initialState: RidesFeature.State(rides: [ride])) {
+            RidesFeature()
+        } withDependencies: {
+            $0.persistenceClient = .mock(rideStats: [ride.id: stats])
+        }
+
+        await store.send(.path(.push(id: 0, state: .detail(RideDetailFeature.State(summary: ride))))) {
+            $0.path[id: 0] = .detail(RideDetailFeature.State(summary: ride))
+        }
+        store.exhaustivity = .off
+        await store.send(.path(.element(id: 0, action: .detail(.task))))
+        await store.finish()
+        await store.skipReceivedActions()
+
+        #expect(store.state.path[id: 0, case: \.detail]?.stats == stats)
+        #expect(store.state.path[id: 0, case: \.detail]?.summary == ride)
+    }
+
     /// The swipe action's whole job (#261). Deleting is optimistic: the row leaves
     /// state immediately, and persistence is told to let go of everything the ride owns.
     @Test("Deleting a recorded ride removes it from state and asks persistence to delete it")

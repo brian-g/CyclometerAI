@@ -24,9 +24,7 @@ struct RidesView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ForEach(store.rides) { ride in
-                    NavigationLink {
-                        RideDetailView(ride: .recordedRide(timestamp: ride.startedAt))
-                    } label: {
+                    NavigationLink(state: RidesFeature.Path.State.detail(RideDetailFeature.State(summary: ride))) {
                         RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
                                 unitSystem: store.unitSystem, now: now)
                     }
@@ -58,6 +56,33 @@ struct RidesView: View {
     /// ride was gone (#261).
     private func deleteRide(_ id: UUID) {
         store.send(.deleteRecordedRide(id))
+    }
+}
+
+// MARK: - Navigation stack
+
+/// The Rides tab's navigation stack: S14 at the root, S15 pushed as `RidesFeature.Path` state
+/// (#251). One definition for the app, the previews and the snapshot tests, for the reason
+/// `RoutesNavigationStack` gives: a `NavigationLink(state:)` row outside a store-powered stack
+/// reports an issue and cannot push.
+struct RidesNavigationStack: View {
+    @Bindable var store: StoreOf<RidesFeature>
+    /// Hides Start Ride while a ride records, as every tab does.
+    var isStartRideHidden: Bool = false
+    var onStartRide: () -> Void = {}
+    /// See `RidesView.now`.
+    var now: Date = .now
+
+    var body: some View {
+        NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
+            RidesView(store: store, onStartRide: onStartRide, now: now)
+                .startRideToolbarItem(isHidden: isStartRideHidden, action: onStartRide)
+        } destination: { pathStore in
+            switch pathStore.case {
+            case .detail(let detailStore):
+                RideDetailView(store: detailStore)
+            }
+        }
     }
 }
 
@@ -143,82 +168,6 @@ struct RideThumbnail: View {
     }
 }
 
-// MARK: - Ride Detail View
-
-struct RideDetailView: View {
-    let ride: RideDetail
-    var body: some View {
-        List {
-            Section {
-                RideMapView(ride: ride)
-                    .frame(height: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-            }
-            Section("Elevation Profile") {
-                ElevationProfileView(samples: ride.elevationSamples, unitLabel: "ft")
-                    .frame(height: 140).padding(.vertical, 8)
-            }
-            Section("Stats") {
-                LabeledContent("Avg Speed (mph)", value: ride.averageSpeed)
-                LabeledContent("Max Speed (mph)", value: ride.maxSpeed)
-                LabeledContent("Avg Cadence (rpm)", value: ride.averageCadence)
-                LabeledContent("Max Cadence (rpm)", value: ride.maxCadence)
-            }
-            Section("HR Profile") {
-                HeartRateProfileView(samples: ride.heartRateSamples)
-                    .frame(height: 140).padding(.vertical, 8)
-            }
-            Section("Strava Segments") {
-                ForEach(ride.stravaSegments) { segment in
-                    LabeledContent {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(segment.bestTime).font(.headline)
-                            Text(segment.bestTimeDate, format: .dateTime.month(.abbreviated).day())
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(segment.name).font(.headline)
-                            HStack(spacing: 2) { Text(segment.distance); Text("mi") }
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-        }
-        .navigationTitle(ride.title)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-// MARK: - Map Views
-
-struct RideMapView: View {
-    let ride: RideDetail
-    var showsMarkers = true
-    var showsControls = true
-    var body: some View {
-        Map(initialPosition: .region(ride.mapRegion)) {
-            MapPolyline(coordinates: ride.coordinates)
-                .stroke(Color.cyPrimary, lineWidth: showsMarkers ? 5 : 3)
-            if showsMarkers {
-                Marker("Start", systemImage: "flag.fill", coordinate: ride.startCoordinate)
-                    .tint(Color.cyPrimary)
-                Marker("Finish", systemImage: "flag.checkered", coordinate: ride.finishCoordinate)
-                    .tint(.blue)
-            }
-        }
-        .mapStyle(.standard(elevation: .realistic))
-        .mapControls {
-            if showsControls {
-                MapCompass(); MapScaleView(); MapPitchToggle()
-            }
-        }
-    }
-}
-
 // MARK: - Chart Views
 
 struct HeartRateProfileView: View {
@@ -292,12 +241,10 @@ struct ElevationPoint: Identifiable {
     return withDependencies {
         $0.persistenceClient = .mock(rides: rides)
     } operation: {
-        NavigationStack {
-            RidesView(
-                store: Store(initialState: RidesFeature.State()) { RidesFeature() },
-                onStartRide: {}
-            )
-        }
+        RidesNavigationStack(
+            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+            onStartRide: {}
+        )
     }
 }
 
@@ -305,11 +252,9 @@ struct ElevationPoint: Identifiable {
     withDependencies {
         $0.persistenceClient = .mock()
     } operation: {
-        NavigationStack {
-            RidesView(
-                store: Store(initialState: RidesFeature.State()) { RidesFeature() },
-                onStartRide: {}
-            )
-        }
+        RidesNavigationStack(
+            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+            onStartRide: {}
+        )
     }
 }

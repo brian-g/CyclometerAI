@@ -150,6 +150,18 @@ actor RidePersistenceActor {
         return RideExportMetadata(title: ride.title, startedAt: ride.startedAt)
     }
 
+    /// Read path for S15's Stats section (#251).
+    func fetchRideStats(id: UUID) throws -> RideStats {
+        let ride = try fetchRide(id: id)
+        return RideStats(
+            averageSpeedMPS: ride.averageSpeedMPS,
+            maxSpeedMPS: ride.maxSpeedMPS,
+            averageCadenceRPM: ride.averageCadenceRPM,
+            maxCadenceRPM: ride.maxCadenceRPM,
+            vehiclePassCount: ride.vehiclePassCount
+        )
+    }
+
     /// Read path for app-relaunch resume (#175). Ordinarily at most one non-ended
     /// Ride exists at a time, so `fetchLimit = 1` alone would suffice — the
     /// `startedAt` descending sort is a deliberate second line of defense against

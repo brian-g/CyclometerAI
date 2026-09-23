@@ -448,6 +448,41 @@ struct PersistenceClientTests {
         }
     }
 
+    // MARK: - Ride stats read path (#251, for S15)
+
+    @Test("fetchRideStats returns the finalized aggregates, nil cadence and pass count kept nil")
+    func fetchRideStatsReturnsAggregates() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let withSensors = UUID()
+        try await client.createRide(withSensors, Date(), nil)
+        try await client.finalizeRide(withSensors, Date(), RideSummaryUpdate(
+            rideId: withSensors, durationSeconds: 120, distanceMeters: 500, averageSpeedMPS: 4, maxSpeedMPS: 9,
+            averageCadenceRPM: 0, maxCadenceRPM: 104, vehiclePassCount: 3
+        ), nil)
+        let withoutSensors = UUID()
+        try await client.createRide(withoutSensors, Date(), nil)
+        try await client.finalizeRide(withoutSensors, Date(), RideSummaryUpdate(
+            rideId: withoutSensors, durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
+        ), nil)
+
+        // A real 0 rpm average must survive as 0, not collapse into "no sensor".
+        #expect(try await client.fetchRideStats(withSensors) == RideStats(
+            averageSpeedMPS: 4, maxSpeedMPS: 9, averageCadenceRPM: 0, maxCadenceRPM: 104, vehiclePassCount: 3
+        ))
+        #expect(try await client.fetchRideStats(withoutSensors) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5))
+    }
+
+    @Test("fetchRideStats on an unknown rideId throws rideNotFound, live and mock alike")
+    func fetchRideStatsUnknownRideThrows() async throws {
+        let (client, _) = Self.makeLiveClient()
+        await #expect(throws: PersistenceError.rideNotFound) {
+            try await client.fetchRideStats(UUID())
+        }
+        await #expect(throws: PersistenceError.rideNotFound) {
+            try await PersistenceClient.mock().fetchRideStats(UUID())
+        }
+    }
+
     // MARK: - Ride.RecordingState query behavior (#171 follow-up)
 
     // On iOS 26, SwiftData's #Predicate macro compiled a comparison against a captured
