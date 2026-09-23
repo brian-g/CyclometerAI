@@ -103,7 +103,9 @@ struct PermissionsClientTests {
         #expect(PermissionsClient.healthReadTypes.contains(HKQuantityType(.heartRate)))
         #expect(PermissionsClient.healthReadTypes.contains(HKQuantityType(.restingHeartRate)))
         #expect(PermissionsClient.healthReadTypes.contains(HKCharacteristicType(.dateOfBirth)))
+        #expect(PermissionsClient.healthReadTypes.contains(HKWorkoutType.workoutType()))
         #expect(PermissionsClient.healthShareTypes.contains(HKWorkoutType.workoutType()))
+        #expect(PermissionsClient.healthShareTypes.contains(HKQuantityType(.distanceCycling)))
     }
 
     // MARK: - testValue

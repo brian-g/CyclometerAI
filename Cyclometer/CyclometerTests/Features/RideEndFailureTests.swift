@@ -35,7 +35,9 @@ struct RideEndFailureTests {
     private static func makeRideStore(
         persistenceClient: PersistenceClient,
         documentsDirectory: URL,
-        rideEndIntentClient: RideEndIntentClient
+        rideEndIntentClient: RideEndIntentClient,
+        healthKitClient: HealthKitClient = .testValue,
+        date: DateGenerator = .constant(testDate)
     ) -> TestStoreOf<ActiveRideFeature> {
         let store = TestStore(
             initialState: ActiveRideFeature.State(recordingState: .idle)
@@ -43,7 +45,7 @@ struct RideEndFailureTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
-            $0.date = .constant(testDate)
+            $0.date = date
             $0.uuid = .incrementing
             $0.hapticsClient = .testValue
             $0.audioClient = .testValue
@@ -53,6 +55,7 @@ struct RideEndFailureTests {
             $0.persistenceClient = persistenceClient
             $0.gpxDocumentsDirectory = documentsDirectory
             $0.rideEndIntentClient = rideEndIntentClient
+            $0.healthKitClient = healthKitClient
         }
         store.exhaustivity = .off
         return store
@@ -97,8 +100,11 @@ struct RideEndFailureTests {
     /// than awaiting them: without observing the pipeline first, a loaded machine kills
     /// it mid-flight and the assertions below see a half-ended ride. CI on 2026-09-07
     /// caught exactly that here (`pending.gpxFileURL → nil`).
+    ///
+    /// `speedMPS`, when given, is held for the recorded seconds so the ride covers distance.
     private static func runRideToEnd(
         _ store: TestStoreOf<ActiveRideFeature>,
+        speedMPS: Double? = nil,
         until pipelineFinished: @escaping @Sendable (UUID) -> Bool
     ) async -> UUID {
         await store.send(.task)
@@ -108,6 +114,9 @@ struct RideEndFailureTests {
             coordinate: coordinate, altitude: 12, speed: 5,
             horizontalAccuracy: 5, heading: 90, timestamp: testDate
         )))
+        if let speedMPS {
+            await store.send(.speed(.gpsSpeedReceived(speedMPS)))
+        }
         for _ in 1...3 {
             await store.send(.elapsedTick)
         }
@@ -268,6 +277,84 @@ struct RideEndFailureTests {
         #expect(relaunched.mapThumbnailDark == Data("dark".utf8))
     }
 
+    // MARK: - Apple Health workout (#250)
+
+    @Test("a finished ride is written to Apple Health once, after it is finalized, with the persisted ride's start, end and distance")
+    func finishedRideIsWrittenToHealthAfterFinalize() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let written = LockIsolated<[RideWorkout]>([])
+        // Read inside the write, not after it: what matters is whether the ride was already
+        // durably ended at the moment its workout left for Apple Health.
+        let endedAtWhenWritten = LockIsolated<Date?>(nil)
+
+        // A clock that moves, one second per read: with a constant one the ride starts and ends
+        // at the same instant, and a workout built from the wrong one of the two still matches.
+        let reads = LockIsolated(0.0)
+        let movingClock = DateGenerator {
+            reads.withValue { $0 += 1; return Self.testDate.addingTimeInterval($0) }
+        }
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory(),
+            healthKitClient: .mock(onSaveWorkout: { workout in
+                endedAtWhenWritten.setValue(fetchRideIfPresent(workout.rideId, from: swiftDataStack)?.endedAt)
+                written.withValue { $0.append(workout) }
+            }),
+            date: movingClock
+        )
+        let rideId = await Self.runRideToEnd(store, speedMPS: 5) { _ in !written.value.isEmpty }
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        // Moving, so the distance comparison below can't pass on two zeros.
+        #expect(ride.distanceMeters > 0)
+        let workout = try #require(written.value.first)
+        let endedAt = try #require(ride.endedAt)
+        #expect(written.value.count == 1)
+        #expect(endedAtWhenWritten.value == endedAt)
+        #expect(ride.startedAt < endedAt)
+        #expect(workout == RideWorkout(
+            rideId: rideId,
+            startedAt: ride.startedAt,
+            endedAt: endedAt,
+            distanceMeters: ride.distanceMeters
+        ))
+    }
+
+    @Test("an Apple Health workout write failure at ride end still ends the ride, and the steps after it still run")
+    func workoutWriteFailureStillEndsRide() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let rideEndIntent = RideEndIntentClient.inMemory()
+        let attempts = LockIsolated(0)
+        let renders = LockIsolated(0)
+
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
+            // What a revoked permission looks like from here.
+            healthKitClient: .mock(onSaveWorkout: { _ in
+                attempts.withValue { $0 += 1 }
+                throw WriteFailed()
+            })
+        )
+        // The workout is the finish effect's last step.
+        let rideId = await Self.runRideToEnd(store) { _ in attempts.value > 0 }
+        // Then the Rides tab's capture (#248), which the failed write mustn't have stopped.
+        await Self.finishOnRidesTab(
+            rideId, persistenceClient: client, mapSnapshotClient: Self.countingSnapshots(renders)
+        )
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(attempts.value == 1)
+        #expect(renders.value == 2)
+        #expect(ride.recordingState == .ended)
+        #expect(ride.endedAt != nil)
+        #expect(ride.gpxFileURL != nil)
+        #expect(ride.mapThumbnailDark == Data("dark".utf8))
+        #expect(rideEndIntent.load() == nil)
+    }
+
     // MARK: - The path that did not degrade acceptably
 
     @Test("a finalizeRide failure records the end intent, and the next launch closes the ride out instead of resuming it")
@@ -281,9 +368,11 @@ struct RideEndFailureTests {
         let rideEndIntent = RideEndIntentClient.inMemory()
 
         let renders = LockIsolated(0)
+        let workoutWrites = LockIsolated(0)
         let store = Self.makeRideStore(
             persistenceClient: failingClient, documentsDirectory: tempDir,
-            rideEndIntentClient: rideEndIntent
+            rideEndIntentClient: rideEndIntent,
+            healthKitClient: .mock(onSaveWorkout: { _ in workoutWrites.withValue { $0 += 1 } })
         )
         // finalizeRide is the thing failing here, so the ride never reaches `.ended`.
         // The recorded intent, carrying the GPX written before the failure, is the
@@ -294,6 +383,8 @@ struct RideEndFailureTests {
         // state that used to be resumed.
         let strandedRide = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(strandedRide.endedAt == nil)
+        // A ride that isn't durably ended never reaches Apple Health (#250).
+        #expect(workoutWrites.value == 0)
         let summary = try #require(try await liveClient.fetchResumableRide())
         #expect(summary.rideId == rideId)
 

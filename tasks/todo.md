@@ -1,3 +1,52 @@
+# #250 — Write an HKWorkout at ride end
+
+Plan: /Users/brian/.claude/plans/hidden-stirring-locket.md
+Branch: `feat/250-hkworkout`
+
+- [x] 1. `RideWorkout` value type
+- [x] 2. Authorization sets: share += `distanceCycling`, read += `workoutType` (+ read purpose string)
+- [x] 3. `HealthKitClient.saveWorkout` (overlap skip, builder, sync identifier, log + rethrow) + mock
+- [x] 4. Ride end: write after `finalizeRide`, before the thumbnail backfill
+- [x] 5. Tests: write throws, finalize throws, happy path + ordering, permission sets; mutation-checked
+- [x] 6. Specs: UX §S01/§S10 + Updated line, PRD §9.4 + 0.6.2
+- [x] 7. GitHub: #250 AC + OQ edited, #249 excluded line edited, energy filed as #274 (M10.5)
+- [x] 8. Full local suite green (1435 passed, 0 failed, fresh derived data); simulator drive + Health readback
+
+## Review
+
+- Decisions made in planning: S10 never waits on the write (the "before S10 presents" AC was unmeetable —
+  the pipeline races AppFeature's synchronous teardown); automatic in MVP, Apple Health becomes a Phase 2
+  Service Sync row with a remembered default; permission is the consent; skip on overlap with another
+  source's cycling workout; no energy (#274).
+- Beyond the plan: a `fetchRide` failure before the write is logged (under `recording`) rather than
+  swallowed — the GPX-export-failure seam uses the same endpoint, so that path silently lost the workout.
+- Mutations: write moved before finalize → caught by the ordering test and the finalize-failure test;
+  distance forced to 0 → caught only once the test ride was given speed (the harness ride covered 0 m).
+- Simulator readback: cycling (13), outdoor, start = `Ride.startedAt`, distance 168 m = `Ride.distanceMeters`,
+  sync id = ride id. Rewriting the same ride with the same sync version *replaced* it (count stayed 1,
+  distance 168 → 1234), which also proves our own workout isn't treated as an overlap.
+- Not verified: the skip against a real other-source workout (needs a Watch or another app — device check),
+  and the revoked-permission log line live (covered at the reducer level only).
+- Fitness shows elapsed duration (32.8 s) vs the app's moving time (28 s) — no pause events, as documented.
+- Correction from Brian: a workout with nil `totalEnergyBurned` still counts toward the Exercise ring, just
+  not Move. §S10's note and #274 were fixed to say so.
+- `/code-review xhigh` (15 findings). Fixed: distance sample skipped (not fatal) when its share is off; ride
+  start asks for authorization, since only S01 did and pre-#250 installs were never asked for the new types
+  (my plan assumed otherwise); a failed overlap query counts as "none found"; end ≤ start throws instead of
+  crashing; the distance sample gets its own sync id (simulator: a rewrite left the sample count unchanged,
+  where last session's pre-fix rewrite had added one); `discardWorkout()` on failure; the happy-path test
+  runs on a moving clock (mutation: start taken from end is now caught); PRD §14 privacy line. Filed: the
+  retry/backfill as #277 (M9). Left: overlap timing/threshold and multisport, pause events, delete-ride
+  → workout, thumbnail concurrency, `startedAt` in State. Full suite: 1437 passed, 0 failed.
+- Device test (2026-09-23 `system_logs.logarchive`): no workout. The ride-start authorization request fired
+  from ActiveRideFeature's `.task` while the dashboard sheet was presenting; UIKit refused the Health sheet
+  ("Attempt to present HKHealthPrivacyHostAuthorizationViewController … whose view is not in the window
+  hierarchy"), the request stayed pending, and at Finish the overlap check hit "Authorization not determined"
+  and the write "Not authorized". Moved the request to AppFeature's launch `.task` (onboarded riders only,
+  before the resumable-ride fetch). Mutation-checked; full suite 1438 passed, 0 failed.
+
+---
+
 # #248 — S14 Ride History list on real rides
 
 Plan: /Users/brian/.claude/plans/noble-tinkering-valley.md

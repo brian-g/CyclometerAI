@@ -537,3 +537,24 @@ for.
   camera does, and should it?"
 - Screenshot the real screen the issue names, at the zoom the issue shows, before saying it works.
   I had verified my own harness surface and inferred the rest.
+
+---
+
+## A [Guessing] claim doesn't get promoted to fact by repeating it (2026-09-23, #250)
+
+**What happened.** Planning #250, I tagged "without energy the workout probably adds nothing to Activity
+rings" as **[Guessing]**. I then wrote it into UX.md §S10 and the public #274 as fact, and raised the
+permission text "counting toward Activity rings" as wrong three separate times. Brian: `totalEnergyBurned`
+can be nil, and such a workout still counts toward the Exercise ring, just not Move. The permission text was
+correct all along — "I'd like you to shut up about it."
+
+**Why I was wrong.** The confidence tag stayed in chat while the claim travelled on without it. Each
+restatement (spec note, issue body, review line, summary question) read as more settled than the last,
+though nothing new had been learned. And I kept re-raising a point the user had already seen instead of
+checking the one thing that would settle it: what Apple documents for a workout with no energy.
+
+**Rules.**
+- A claim tagged [Guessing] or [Likely] doesn't go into a spec, an issue, or a user-facing string until
+  it's checked against the framework's documentation. If it can't be checked, it goes in with the hedge.
+- Raise a doubt once, with its evidence. If the user doesn't take it up, it stays in the notes, not in
+  every summary.

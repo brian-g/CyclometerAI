@@ -25,6 +25,7 @@
 | 0.5.1 | 2026-09-17 | Brian / Claude | M8 spec reconciliation (#202). The Routes tab, S19 and S20 move from Phase 2 to MVP everywhere — §6, the §7 screen inventory, §12's feature tree and tab table, and §13 — following UX.md v0.8; the "Coming in a future update" placeholder is gone, because the tab is built. §6's MVP bullet no longer offers tribos.studio as a route source, which §8.6's 2026-08-14 revision had already moved to Phase 2 with Accounts. `.fit` import removed from §8.6's Files row and recorded in §15 as out of scope — it appeared in no other spec and nothing parses it. §12's `NavigationClient` and `NavigationFeature` comments drop tribos.studio; `RouteFeature` becomes the built `RoutesFeature` |
 | 0.6.0 | 2026-09-17 | Brian | Review and update before the M9 milestone. |
 | 0.6.1 | 2026-09-22 | Brian / Claude | Route analysis (#252). §8.6 adds a derived terrain analysis (categorized climbs, max grade, FIETS, route character) and an OpenStreetMap surface lookup at import; §14 records Overpass as the app's first network call, sending a planned route's line and nothing else. `.fit` import stays out of scope (§15), and #252's estimated-power projection is deferred with power (Phase 3). |
+| 0.6.2 | 2026-09-22 | Brian / Claude | HKWorkout write (#250). §9.4 adds `distanceCycling` (write) for the workout's distance and `HKWorkoutType` (read) for skipping a ride another source already recorded. Energy is not written yet (#274). |
 
 ---
 
@@ -888,6 +889,10 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 - `HKCharacteristicTypeIdentifierDateOfBirth` (read — for max HR estimation if not available)
 - `HKWorkoutType` (write — MVP; the ride is written back at ride end per UX.md §S10, and the share
   authorization is requested alongside the reads at S01 so the rider answers one sheet, not two)
+- `HKQuantityTypeIdentifierDistanceCycling` (write — the workout's distance reaches it as a sample,
+  which `HKWorkoutBuilder` only accepts with share access to that type)
+- `HKWorkoutType` (read — only to skip writing a ride another source already recorded over the same
+  time, UX.md §S10)
 
 **Profile Data Read at Onboarding and Ride Start:**
 - `restingHeartRate` → `HKQuantityTypeIdentifierRestingHeartRate`
@@ -1218,7 +1223,7 @@ Cyclometer/
 - High contrast: tested with iOS Increase Contrast enabled
 
 ### Privacy
-- HealthKit data: read-only, apart from the `HKWorkout` the app writes back at ride end (UX.md §S10); no data transmitted to any server
+- HealthKit data: read-only, apart from the `HKWorkout` and its cycling-distance sample the app writes back at ride end (UX.md §S10); no data transmitted to any server
 - GPS and ride data: stored locally only
 - Route surface lookup (#252): after a route is imported, its line — the planned route, never a recorded ride — is sent to the public OpenStreetMap Overpass API (`overpass-api.de`) to read the surface of the roads along it. Nothing else is sent, and no account or identifier is attached. A failed or offline lookup leaves the route without a surface; it is retried on the next launch, and the first failure in a batch stops the rest, so a refusing or unreachable server is not asked again and again. Surface data is credited "© OpenStreetMap contributors" wherever it is shown (ODbL)
 - BLE device identifiers: not transmitted externally

@@ -41,7 +41,7 @@
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Cyclometer uses Bluetooth to connect to your cycling sensors including, heart rate sensor, speed, cadence, power, and radar.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Cyclometer reads your heart rate data to display accurate training zones.</string>
+	<string>Cyclometer reads your heart rate data to display accurate training zones, and your workouts so a ride already saved by another app or your Apple Watch isn't saved twice.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Cyclometer saves each finished ride to Apple Health as a workout, so it appears in the Fitness app and counts toward your Activity rings.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

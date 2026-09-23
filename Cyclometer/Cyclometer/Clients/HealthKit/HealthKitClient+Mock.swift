@@ -10,7 +10,8 @@ extension HealthKitClient {
         restingHeartRate: Int? = nil,
         dateOfBirth: DateComponents? = nil,
         heartRateSamples: [Int] = [],
-        onRequestAuthorization: @escaping @Sendable () async throws -> Void = { }
+        onRequestAuthorization: @escaping @Sendable () async throws -> Void = { },
+        onSaveWorkout: @escaping @Sendable (RideWorkout) async throws -> Void = { _ in }
     ) -> HealthKitClient {
         HealthKitClient(
             requestAuthorization:  onRequestAuthorization,
@@ -21,7 +22,8 @@ extension HealthKitClient {
                     for bpm in heartRateSamples { continuation.yield(bpm) }
                     continuation.finish()
                 }
-            }
+            },
+            saveWorkout: onSaveWorkout
         )
     }
 }
