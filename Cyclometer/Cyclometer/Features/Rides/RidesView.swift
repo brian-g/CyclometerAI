@@ -1,21 +1,19 @@
 import SwiftUI
-import SwiftData
 import MapKit
 import Charts
 import ComposableArchitecture
 
 struct RidesView: View {
     let store: StoreOf<RidesFeature>
-    let recordedItems: [Ride]
     let onStartRide: () -> Void
 
     private var rideSummaries: [RideSummary] {
-        store.demoRides.map(RideSummary.demo) + recordedItems.map(RideSummary.recorded)
+        store.rides.map(RideSummary.recorded)
     }
 
     var body: some View {
         List {
-            if rideSummaries.isEmpty {
+            if store.hasLoaded && rideSummaries.isEmpty {
                 ContentUnavailableView {
                     Label("No Rides Yet", systemImage: "figure.outdoor.cycle")
                 } description: {
@@ -57,19 +55,15 @@ struct RidesView: View {
             }
         }
         .navigationTitle("Rides")
+        .task { store.send(.task) }
     }
 
-    /// Both halves go through the reducer. The recorded one used to call
-    /// `modelContext.delete(ride)` straight from here, which removed the one SwiftData
-    /// row and left the ride's GPX file, its CoreData track points and its vehicle-pass
-    /// events behind — nothing else knew the ride was gone (#261).
+    /// Goes through the reducer, which used to call `modelContext.delete(ride)` straight
+    /// from here — that removed the one SwiftData row and left the ride's GPX file, its
+    /// CoreData track points and its vehicle-pass events behind — nothing else knew the
+    /// ride was gone (#261).
     private func deleteRide(_ ride: RideSummary) {
-        switch ride.source {
-        case .demo(let id):
-            store.send(.deleteDemoRide(id))
-        case .recorded(let ride):
-            store.send(.deleteRecordedRide(ride.id))
-        }
+        store.send(.deleteRecordedRide(ride.id))
     }
 }
 
@@ -241,43 +235,57 @@ struct ElevationPoint: Identifiable {
 }
 
 #Preview("Rides") {
-    NavigationStack {
-        RidesView(
-            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
-            recordedItems: [],
-            onStartRide: {}
-        )
+    let rides = [
+        RideListSummary(id: UUID(), title: "River Loop", startedAt: .now.addingTimeInterval(-86_400),
+                        distanceMeters: 36_050, durationSeconds: 4_712),
+        RideListSummary(id: UUID(), title: "Summit Climb", startedAt: .now.addingTimeInterval(-3 * 86_400),
+                        distanceMeters: 51_200, durationSeconds: 7_865)
+    ]
+    // Seeded through the client, not `RidesFeature.State(rides:)` directly: the view's
+    // own `.task` fires regardless and would otherwise reload through an unmocked
+    // `persistenceClient`, clobbering seeded state with an empty list almost immediately.
+    return withDependencies {
+        $0.persistenceClient = .mock(rides: rides)
+    } operation: {
+        NavigationStack {
+            RidesView(
+                store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+                onStartRide: {}
+            )
+        }
     }
-    .modelContainer(for: Ride.self, inMemory: true)
 }
 
 #Preview("Rides — empty") {
-    NavigationStack {
-        RidesView(
-            store: Store(initialState: RidesFeature.State(demoRides: [])) { RidesFeature() },
-            recordedItems: [],
-            onStartRide: {}
-        )
+    withDependencies {
+        $0.persistenceClient = .mock()
+    } operation: {
+        NavigationStack {
+            RidesView(
+                store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+                onStartRide: {}
+            )
+        }
     }
-    .modelContainer(for: Ride.self, inMemory: true)
 }
 
 struct RideSummary: Identifiable {
-    enum Source { case demo(UUID); case recorded(Ride) }
-    let id: String; let title: String; let date: Date
+    let id: UUID; let title: String; let date: Date
     let elapsedTime: String; let distance: String
-    let detail: RideDetail; let source: Source
+    let detail: RideDetail
 
-    static func demo(_ ride: DemoRide) -> RideSummary {
-        RideSummary(id: ride.id.uuidString, title: ride.title, date: ride.date,
-                    elapsedTime: ride.elapsedTime, distance: ride.distance,
-                    detail: ride.detail, source: .demo(ride.id))
-    }
-    static func recorded(_ ride: Ride) -> RideSummary {
+    static func recorded(_ ride: RideListSummary) -> RideSummary {
         let detail = RideDetail.recordedRide(timestamp: ride.startedAt)
-        return RideSummary(id: ride.id.uuidString,
-                           title: detail.title, date: ride.startedAt,
-                           elapsedTime: detail.elapsedTime, distance: detail.distance,
-                           detail: detail, source: .recorded(ride))
+        let distanceMiles = UnitSystem.imperial.distance(fromMeters: ride.distanceMeters)
+        return RideSummary(
+            id: ride.id,
+            // Every ride's `title` is "" until #249's rename field ships — a blank row
+            // would read as broken, so this falls back rather than showing empty text.
+            title: ride.title.isEmpty ? "Ride" : ride.title,
+            date: ride.startedAt,
+            elapsedTime: Int(ride.durationSeconds).formattedElapsed,
+            distance: distanceMiles.formatted(.number.precision(.fractionLength(1))),
+            detail: detail
+        )
     }
 }

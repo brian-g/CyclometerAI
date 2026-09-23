@@ -6,6 +6,7 @@ extension PersistenceClient {
         rideExportMetadata: [UUID: RideExportMetadata] = [:],
         vehiclePassEvents: [UUID: [VehiclePassEventDTO]] = [:],
         resumableRide: RideSummaryUpdate? = nil,
+        rides: [RideListSummary] = [],
         routes: [RouteSummary] = [],
         routeDetails: [UUID: RouteDetail] = [:],
         importResult: RouteSummary? = nil,
@@ -38,6 +39,7 @@ extension PersistenceClient {
             fetchVehiclePassEvents: { vehiclePassEvents[$0] ?? [] },
             deleteRide: { onDeleteRide($0) },
             fetchResumableRide: { resumableRide },
+            fetchRides: { rides },
             importRoute: {
                 onImportRoute($0)
                 // Unscripted, this runs the caller's route through the same derivation the

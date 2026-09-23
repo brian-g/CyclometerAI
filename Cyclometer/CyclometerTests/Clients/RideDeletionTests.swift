@@ -141,15 +141,15 @@ struct RideDeletionTests {
         #expect(try Self.rideExists(otherRideId, in: fixture.swiftDataStack))
     }
 
-    /// The Rides list is an `@Query`, which runs against the container's main context,
-    /// while `deleteRide` runs on `RidePersistenceActor`'s own. Before #261 the view
-    /// deleted the row itself, on the main context, so the row vanished by construction;
-    /// now it has to reach the main context from another one.
+    /// `deleteRide` runs on `RidePersistenceActor`'s own context, not the container's main
+    /// context the app reads from elsewhere (fetches for GPX export, migration checks,
+    /// etc.). Before #261 the view deleted the row itself, on the main context, so the row
+    /// vanished by construction; now it has to reach the main context from another one.
+    /// (The Rides tab itself reads through `PersistenceClient.fetchRides`, not a live
+    /// `@Query`, since #247 — this test predates and is independent of that change.)
     ///
-    /// This pins the propagation the list depends on — a main-context fetch no longer
-    /// finds the ride — which is the half of that question a unit test can answer. Whether
-    /// SwiftUI then re-runs the query is SwiftData's own contract for `@Query`, and only a
-    /// running app can demonstrate it.
+    /// This pins the cross-context propagation a deletion depends on — a main-context
+    /// fetch no longer finds the ride.
     @Test("A delete on the actor's context is visible to the container's main context")
     func deleteIsVisibleToTheMainContext() async throws {
         let fixture = try await Self.makeRide()
