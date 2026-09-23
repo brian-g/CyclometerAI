@@ -25,6 +25,7 @@ struct AppFeature {
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.rideEndIntentClient) var rideEndIntentClient
     @Dependency(\.date) var date
+    @Dependency(\.healthKitClient) var healthKitClient
 
     @ObservableState
     struct State: Equatable {
@@ -137,7 +138,20 @@ struct AppFeature {
                     },
                     // #175: at most one non-ended Ride can exist; if a kill left one
                     // behind, resume it instead of leaving it permanently orphaned.
-                    .run { [persistenceClient] send in
+                    .run { [
+                        persistenceClient, healthKitClient,
+                        hasCompletedOnboarding = state.preferences.hasCompletedOnboarding
+                    ] send in
+                        // Asks only for HealthKit types the rider hasn't been asked about
+                        // yet (a no-op otherwise): an install onboarded before a type was
+                        // added is prompted here, since S01 won't run again (#250). At
+                        // launch and ahead of the resume below, because the system sheet is
+                        // refused — silently, leaving the request pending — when it lands
+                        // while the dashboard is being presented, as it did from the ride's
+                        // own `.task`. A fresh install is asked by S01 instead.
+                        if hasCompletedOnboarding {
+                            try? await healthKitClient.requestAuthorization()
+                        }
                         if let summary = try? await persistenceClient.fetchResumableRide() {
                             await send(.resumableRideFetched(summary))
                         } else {

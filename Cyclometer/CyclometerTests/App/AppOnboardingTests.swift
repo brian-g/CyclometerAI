@@ -15,7 +15,9 @@ struct AppOnboardingTests {
     static func makeStore(
         hasCompletedOnboarding: Bool = false,
         hasCompletedWelcomeStep: Bool = false,
-        permissionsClient: PermissionsClient = .testValue
+        permissionsClient: PermissionsClient = .testValue,
+        healthKitClient: HealthKitClient = .testValue,
+        persistenceClient: PersistenceClient = .testValue
     ) -> TestStoreOf<AppFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -31,6 +33,8 @@ struct AppOnboardingTests {
             } withDependencies: {
                 $0.defaultFileStorage = storage
                 $0.permissionsClient = permissionsClient
+                $0.healthKitClient = healthKitClient
+                $0.persistenceClient = persistenceClient
                 $0.bleCSCClient = .testValue
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
@@ -46,6 +50,41 @@ struct AppOnboardingTests {
             $0.onboarding = OnboardingFeature.State(step: .welcome)
         }
         await store.finish()
+    }
+
+    @Test("A completed rider's launch asks HealthKit for authorization before resuming a ride (#250)")
+    func completedLaunchRequestsHealthBeforeResume() async {
+        // Before the resume, because HealthKit's sheet is silently refused when it lands
+        // while the dashboard is being presented.
+        let calls = LockIsolated<[String]>([])
+        var persistence = PersistenceClient.testValue
+        persistence.fetchResumableRide = {
+            calls.withValue { $0.append("fetchResumableRide") }
+            return nil
+        }
+        let store = Self.makeStore(
+            hasCompletedOnboarding: true,
+            healthKitClient: .mock(onRequestAuthorization: { calls.withValue { $0.append("requestAuthorization") } }),
+            persistenceClient: persistence
+        )
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish()
+        #expect(calls.value.prefix(2) == ["requestAuthorization", "fetchResumableRide"])
+    }
+
+    @Test("A fresh install's launch leaves HealthKit authorization to S01")
+    func freshLaunchLeavesHealthToOnboarding() async {
+        let requests = LockIsolated(0)
+        let store = Self.makeStore(
+            healthKitClient: .mock(onRequestAuthorization: { requests.withValue { $0 += 1 } })
+        )
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish()
+        #expect(requests.value == 0)
     }
 
     @Test("Relaunch mid-flow resumes at Sensor Pairing, not Welcome")

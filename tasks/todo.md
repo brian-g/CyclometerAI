@@ -38,6 +38,12 @@ Branch: `feat/250-hkworkout`
   runs on a moving clock (mutation: start taken from end is now caught); PRD §14 privacy line. Filed: the
   retry/backfill as #277 (M9). Left: overlap timing/threshold and multisport, pause events, delete-ride
   → workout, thumbnail concurrency, `startedAt` in State. Full suite: 1437 passed, 0 failed.
+- Device test (2026-09-23 `system_logs.logarchive`): no workout. The ride-start authorization request fired
+  from ActiveRideFeature's `.task` while the dashboard sheet was presenting; UIKit refused the Health sheet
+  ("Attempt to present HKHealthPrivacyHostAuthorizationViewController … whose view is not in the window
+  hierarchy"), the request stayed pending, and at Finish the overlap check hit "Authorization not determined"
+  and the write "Not authorized". Moved the request to AppFeature's launch `.task` (onboarded riders only,
+  before the resumable-ride fetch). Mutation-checked; full suite 1438 passed, 0 failed.
 ---
 
 # #177 — Capture + persist a static map thumbnail at ride end

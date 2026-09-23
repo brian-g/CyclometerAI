@@ -445,10 +445,6 @@ struct ActiveRideFeature {
                         }
                     },
                     .run { [healthKitClient, date] send in
-                        // Asks only for types the rider hasn't been asked about yet (a no-op
-                        // otherwise). S01 is the only other place that asks, so without this an
-                        // install onboarded before a type was added never gets the prompt (#250).
-                        try? await healthKitClient.requestAuthorization()
                         async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
                         async let dob = try? healthKitClient.fetchDateOfBirth()
                         let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
