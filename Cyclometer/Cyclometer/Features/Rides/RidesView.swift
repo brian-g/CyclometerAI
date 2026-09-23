@@ -170,24 +170,86 @@ struct RideThumbnail: View {
 
 // MARK: - Chart Views
 
+/// S15's HR Profile (#251): the ride's heart rate over its recorded time, over bands in the
+/// rider's HR zone colours.
+///
+/// The y-axis fits the ride, not the rider's whole reserve. Zone 1 alone runs from resting to
+/// about 60% of the reserve, and scaling to it would flatten the ride into a strip. Only
+/// the bands the ride passes through show.
 struct HeartRateProfileView: View {
     let samples: [Int]
+    /// Each zone's bpm range, zone 1 first (`RideDetailFeature.State.heartRateZoneBounds`).
+    let zoneBounds: [ClosedRange<Int>]
+
+    /// Headroom above and below the ride's own range, so the line never rides the edge.
+    static let paddingBPM = 5
+
+    /// A band shorter than this share of the chart gets no "Z" label — there's no room for one.
+    static let minimumLabelledShare = 0.12
+
+    struct Band: Equatable {
+        let zone: Int
+        let bpm: ClosedRange<Double>
+    }
+
+    /// The y-domain and the zone bands clipped to it. Each band runs from its zone's first bpm
+    /// to the next zone's, so adjacent bands meet without a gap. Zone 1 opens and zone 5 closes
+    /// at the domain's edge, which is where a reading below resting or above max lands.
+    static func layout(samples: [Int], zoneBounds: [ClosedRange<Int>]) -> (domain: ClosedRange<Double>, bands: [Band]) {
+        let low = Double((samples.min() ?? 0) - paddingBPM)
+        let high = Double((samples.max() ?? 0) + paddingBPM)
+        let bands = zoneBounds.indices.compactMap { index -> Band? in
+            let start = index == 0 ? low : max(low, Double(zoneBounds[index].lowerBound))
+            let end = index == zoneBounds.count - 1 ? high : min(high, Double(zoneBounds[index + 1].lowerBound))
+            guard start < end else { return nil }
+            return Band(zone: index + 1, bpm: start...end)
+        }
+        return (low...high, bands)
+    }
+
     private var points: [RideChartPoint] {
         samples.enumerated().map { RideChartPoint(distance: $0.offset, value: Double($0.element)) }
     }
+
     var body: some View {
-        Chart(points) { point in
-            AreaMark(x: .value("Distance", point.distance), y: .value("Heart Rate", point.value))
-                .foregroundStyle(.red.opacity(0.14)).interpolationMethod(.catmullRom)
-            LineMark(x: .value("Distance", point.distance), y: .value("Heart Rate", point.value))
-                .foregroundStyle(.red)
-                .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                .interpolationMethod(.catmullRom)
+        let layout = Self.layout(samples: samples, zoneBounds: zoneBounds)
+        let span = layout.domain.upperBound - layout.domain.lowerBound
+        Chart {
+            ForEach(layout.bands, id: \.zone) { band in
+                RectangleMark(
+                    xStart: .value("Start", 0),
+                    xEnd: .value("End", max(samples.count - 1, 1)),
+                    yStart: .value("Zone floor", band.bpm.lowerBound),
+                    yEnd: .value("Zone ceiling", band.bpm.upperBound)
+                )
+                .foregroundStyle(Color.hrZone(band.zone).opacity(Opacity.zoneBand))
+                .annotation(position: .overlay, alignment: .trailing) {
+                    if (band.bpm.upperBound - band.bpm.lowerBound) / span >= Self.minimumLabelledShare {
+                        Text("Z\(band.zone)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.hrZone(band.zone))
+                            .padding(.trailing, Spacing.xs)
+                    }
+                }
+            }
+            ForEach(points) { point in
+                LineMark(x: .value("Time", point.distance), y: .value("Heart Rate", point.value))
+                    .foregroundStyle(Color.cyTextPrimary)
+                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    .interpolationMethod(.catmullRom)
+            }
         }
+        .chartYScale(domain: layout.domain)
+        .chartXScale(domain: 0...max(samples.count - 1, 1))
         .chartXAxis(.hidden)
         .chartYAxis {
-            AxisMarks(position: .leading, values: [samples.min() ?? 0, samples.max() ?? 1]) { value in
-                AxisValueLabel { if let hr = value.as(Int.self) { Text("\(hr) bpm") } }
+            // The zone edges the ride crosses, which is what the bands mean — or, for a ride
+            // inside one zone, its own low and high, so the axis still has a scale.
+            let edges = layout.bands.dropFirst().map(\.bpm.lowerBound)
+            let ticks = edges.isEmpty ? [samples.min(), samples.max()].compactMap { $0.map(Double.init) } : edges
+            AxisMarks(position: .leading, values: ticks) { value in
+                AxisGridLine()
+                AxisValueLabel { if let bpm = value.as(Double.self) { Text("\(Int(bpm)) bpm") } }
             }
         }
     }

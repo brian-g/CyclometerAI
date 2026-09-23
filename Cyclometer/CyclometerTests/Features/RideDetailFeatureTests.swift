@@ -19,7 +19,10 @@ struct RideDetailFeatureTests {
         distanceMeters: 36_050, durationSeconds: 4_712
     )
 
-    private func makeStore(persistenceClient: PersistenceClient) -> TestStoreOf<RideDetailFeature> {
+    private func makeStore(
+        persistenceClient: PersistenceClient,
+        healthKitClient: HealthKitClient = .testValue
+    ) -> TestStoreOf<RideDetailFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
             $0.defaultFileStorage = storage
@@ -28,6 +31,9 @@ struct RideDetailFeatureTests {
                 RideDetailFeature()
             } withDependencies: {
                 $0.persistenceClient = persistenceClient
+                $0.healthKitClient = healthKitClient
+                // The 220 − age estimate reads it.
+                $0.date = .constant(Date(timeIntervalSince1970: 1_750_000_000))
                 $0.defaultFileStorage = storage
             }
         }
@@ -130,6 +136,27 @@ struct RideDetailFeatureTests {
         #expect(store.state.stats == Self.stats)
     }
 
+    /// The bands follow Health the way S12's table does, so a rider with a Watch sees zones
+    /// from their real resting HR and age rather than the defaults.
+    @Test("the HR zone bands resolve against the Health resting HR and age-estimated max")
+    func zoneBoundsFollowHealth() async {
+        let store = makeStore(
+            persistenceClient: .mock(rideStats: [Self.summary.id: Self.stats]),
+            // Born mid-1985: 39 on the pinned date, so a 181 bpm estimate.
+            healthKitClient: .mock(restingHeartRate: 50, dateOfBirth: DateComponents(year: 1985, month: 7, day: 1))
+        )
+        let defaults = store.state.heartRateZoneBounds
+
+        await load(store)
+
+        #expect(store.state.healthRestingBPM == 50)
+        #expect(store.state.healthMaxBPM == 181)
+        #expect(store.state.heartRateZoneBounds != defaults)
+        #expect(store.state.heartRateZoneBounds == HeartRateZone.allCases.map {
+            HeartRateZone.bounds(for: $0, maxHR: 181, restingHR: 50)
+        })
+    }
+
     @Test("a stats read that fails leaves stats nil and the rest of the screen loaded")
     func failedStatsReadLeavesStatsNil() async {
         let points = Self.track()
@@ -170,5 +197,35 @@ struct RideDetailSeriesTests {
     @Test("no readings at all is an empty series, not zeros")
     func noReadingsIsEmpty() {
         #expect(RideDetailSeries.heartRate(Self.points(heartRates: [nil, nil, nil]), sampleCount: 3).isEmpty)
+    }
+}
+
+@Suite("HeartRateProfileView layout")
+struct HeartRateProfileLayoutTests {
+    /// §8's worked example: resting 60, max 190.
+    private static let bounds = HeartRateZone.allCases.map { HeartRateZone.bounds(for: $0, maxHR: 190, restingHR: 60) }
+
+    @Test("the domain fits the ride, padded, and only the zones it reaches get a band")
+    func domainFitsTheRide() {
+        let layout = HeartRateProfileView.layout(samples: [120, 145, 160], zoneBounds: Self.bounds)
+
+        #expect(layout.domain == 115...165)
+        // Zone edges at 138, 151, 164: zones 1–4 are in reach, zone 5 is not.
+        #expect(layout.bands == [
+            .init(zone: 1, bpm: 115...138), .init(zone: 2, bpm: 138...151),
+            .init(zone: 3, bpm: 151...164), .init(zone: 4, bpm: 164...165)
+        ])
+    }
+
+    @Test("a ride inside one zone is one band over the whole domain")
+    func oneZoneRide() {
+        let layout = HeartRateProfileView.layout(samples: [100, 110], zoneBounds: Self.bounds)
+        #expect(layout.bands == [.init(zone: 1, bpm: 95...115)])
+    }
+
+    @Test("readings above max sit in a zone 5 band that runs to the top of the domain")
+    func aboveMaxIsZone5() {
+        let layout = HeartRateProfileView.layout(samples: [185, 200], zoneBounds: Self.bounds)
+        #expect(layout.bands == [.init(zone: 5, bpm: 180...205)])
     }
 }

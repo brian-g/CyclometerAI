@@ -156,14 +156,24 @@ extension RiderProfile {
         resolvedMaxBPM(healthMax: healthMax) - resolvedRestingBPM(healthResting: healthResting)
     }
 
-    /// The Karvonen zone for a live reading, against the resolved profile.
-    /// Delegates to `HeartRateZone` rather than restating §8's formula.
+    /// The zone for a reading, against the resolved profile — the lowest zone whose
+    /// resolved ceiling (`resolvedBoundaryBPM`) it does not exceed.
+    ///
+    /// Classified by the resolved boundaries, not by `HeartRateZone.zone`'s Karvonen
+    /// formula directly, so a boundary the rider pinned in S12 (#103) moves the live
+    /// zone too, not just the table. With nothing pinned the two agree exactly: a
+    /// boundary is `resting + ⌈p × HRR⌉ − 1`, and for a whole bpm, being at or below
+    /// it is the same as being under `p` of the reserve. Readings below resting fall
+    /// in zone 1 and above max in zone 5, as before.
     func zone(forBPM bpm: Int, healthResting: Int? = nil, healthMax: Int? = nil) -> HeartRateZone {
-        HeartRateZone.zone(
-            bpm: bpm,
-            maxHR: resolvedMaxBPM(healthMax: healthMax),
-            restingHR: resolvedRestingBPM(healthResting: healthResting)
-        )
+        // §8's guard: with no reserve there are no zones to tell apart.
+        guard hrReserve(healthResting: healthResting, healthMax: healthMax) > 0 else { return .zone1 }
+        return HeartRateZone.allCases.first { zone in
+            guard let ceiling = resolvedBoundaryBPM(afterZone: zone, healthResting: healthResting,
+                                                    healthMax: healthMax)
+            else { return true }
+            return bpm <= ceiling
+        } ?? .zone5
     }
 }
 

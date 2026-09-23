@@ -10,7 +10,8 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persi
 ///
 /// Seeded with the `RideListSummary` S14's row already holds, so the title and date are on
 /// screen from the first frame. Everything else is three reads — the CoreData track, the `Ride`
-/// aggregates and the pass events — each shown as it lands.
+/// aggregates and the pass events — each shown as it lands, plus the Health values the HR zones
+/// resolve against.
 ///
 /// An element of `RidesFeature`'s navigation stack, like S20 in `RoutesFeature` (#195): the
 /// reads run from `.task`, and `.forEach` cancels a popped element's effects.
@@ -25,6 +26,14 @@ struct RideDetailFeature {
     struct State: Equatable {
         /// Units follow the S12 picker — the same read-through `RidesFeature` does.
         @Shared(.appPreferences) var preferences
+
+        /// The HR chart's zone bands follow S12's zones, overrides included.
+        @SharedReader(.riderProfile) var riderProfile
+
+        /// HealthKit's terms in `riderProfile`'s `override ?? health ?? default`, as S12 and
+        /// the ride dashboard read them. Nil until fetched, and nil when Health has nothing.
+        var healthRestingBPM: Int?
+        var healthMaxBPM: Int?
 
         var summary: RideListSummary
 
@@ -49,6 +58,14 @@ struct RideDetailFeature {
         }
 
         var unitSystem: UnitSystem { preferences.preferredUnit }
+
+        /// Each zone's bpm range as S12's table shows it, zone 1 first — the chart's bands.
+        /// Resolved now rather than stored with the ride, like every zone in the app.
+        var heartRateZoneBounds: [ClosedRange<Int>] {
+            HeartRateZone.allCases.map {
+                riderProfile.bounds(for: $0, healthResting: healthRestingBPM, healthMax: healthMaxBPM)
+            }
+        }
     }
 
     enum Action: Equatable {
@@ -56,16 +73,19 @@ struct RideDetailFeature {
         case trackLoaded(segments: [[RouteCoordinate]], elevationProfile: [Double]?, heartRate: [Int])
         case statsLoaded(RideStats)
         case vehiclePassesLoaded([VehiclePassEventDTO])
+        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?)
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
+    @Dependency(\.healthKitClient) var healthKitClient
+    @Dependency(\.date) var date
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
 
-            // Three independent reads, merged rather than queued. A failure in any leaves its part
-            // of the screen as it was — `RouteDetailFeature`'s handling.
+            // Independent reads, merged rather than queued. A failure in any leaves its part of
+            // the screen as it was — `RouteDetailFeature`'s handling.
             case .task:
                 let id = state.summary.id
                 return .merge(
@@ -95,6 +115,13 @@ struct RideDetailFeature {
                         } catch {
                             logger.error("fetchVehiclePassEvents failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
                         }
+                    },
+                    // `SettingsFeature`'s read, so the bands match S12's table.
+                    .run { [healthKitClient, date] send in
+                        async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
+                        async let dob = try? healthKitClient.fetchDateOfBirth()
+                        let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
+                        await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM))
                     }
                 )
 
@@ -110,6 +137,11 @@ struct RideDetailFeature {
 
             case .vehiclePassesLoaded(let passes):
                 state.vehiclePasses = passes
+                return .none
+
+            case let .healthProfileFetched(restingBPM, maxBPM):
+                state.healthRestingBPM = restingBPM
+                state.healthMaxBPM = maxBPM
                 return .none
             }
         }

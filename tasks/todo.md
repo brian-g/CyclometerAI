@@ -26,3 +26,17 @@ Branch: `feat/251-ride-detail`
 - Not done (per #251 scope): full-screen map sheet, Strava, GPX re-export, Create Route. The HR chart
   is not zone-coloured, although UX.md §S15 says "HR zone graph". That's noted under §S15.
 - Issue #251's line references were stale (`RideSummary.recorded` no longer existed).
+
+## Follow-up: HR zones on S15 (Brian, after PR #281 opened)
+
+- HR Profile draws S12's zone bands (`cyHRZone1`–`5` at `Opacity.zoneBand`) behind a `cyTextPrimary`
+  line. The y-domain is fitted to the ride ±5 bpm, and only the zones the ride reaches are banded.
+  Ticks go at the zone edges crossed (the ride's min/max when it stays in one zone).
+- Bounds use `RiderProfile.bounds(for:)` with Health resting + 220 − age (Settings' read).
+- Fixed in the same change, at Brian's call: the live `RiderProfile.zone(forBPM:)` ignored S12's pinned
+  boundaries (#103) while the table honoured them. It now classifies by the resolved boundaries and is
+  identical to Karvonen when nothing is pinned (checked over bpm 0–250 × 6 profiles).
+  Mutation-checked: putting Karvonen back fails the pinned-boundary test.
+- The revert-check stale-build trap happened again: the restored source still ran mutated. A fresh
+  derived-data build passed, and the default build folder was cleaned.
+- Full suite: 1232 Swift Testing + 95 XCTest, 0 failures.

@@ -40,7 +40,7 @@ final class RideDetailSnapshotTests: XCTestCase {
             @Shared(.appPreferences) var preferences
             $preferences.withLock { $0.preferredUnit = .imperial }
             let points = RideDetailFeatureTests.track(count: 120, heartRate: { second in
-                heartRate ? 110 + Int(30 * sin(Double(second) / 20)) : nil
+                heartRate ? 125 + Int(40 * sin(Double(second) / 20)) : nil
             })
             var state = RideDetailFeature.State(summary: Self.summary)
             state.trackSegments = RideMapThumbnail.drawableSegments(points)
@@ -87,7 +87,8 @@ final class RideDetailSnapshotTests: XCTestCase {
     //
     // Named for this screen — reference PNGs are flat in the test bundle.
 
-    /// HR, cadence and a paired radar: every section filled.
+    /// HR, cadence and a paired radar: every section filled. HR swings 85–165 bpm, across
+    /// zones 1–4 of the default profile, so the chart shows several bands.
     func testRideDetailAllSensors() {
         assertBothSchemes(screen(heartRate: true, stats: RideStats(
             averageSpeedMPS: 7.6, maxSpeedMPS: 12.4, averageCadenceRPM: 88, maxCadenceRPM: 109, vehiclePassCount: 4

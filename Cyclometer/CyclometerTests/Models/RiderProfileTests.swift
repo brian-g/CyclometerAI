@@ -272,6 +272,35 @@ struct RiderProfileTests {
         #expect(profile.zone(forBPM: 128, healthResting: 50, healthMax: 180) == .zone2)
     }
 
+    /// `zone(forBPM:)` classifies by the resolved boundaries (#251). With none pinned it must
+    /// be exactly Karvonen — for every bpm, over a spread of reserves including odd ones where
+    /// the ceiling rounding matters.
+    @Test("With no boundary pinned, the live zone is exactly the Karvonen zone")
+    func unpinnedZoneIsKarvonen() {
+        for (resting, max) in [(60, 190), (50, 180), (45, 203), (72, 161), (38, 199), (90, 100)] {
+            let profile = RiderProfile(restingOverrideBPM: resting, maxOverrideBPM: max)
+            for bpm in 0...250 {
+                #expect(profile.zone(forBPM: bpm) == HeartRateZone.zone(bpm: bpm, maxHR: max, restingHR: resting),
+                        "resting \(resting), max \(max), bpm \(bpm)")
+            }
+        }
+    }
+
+    /// The mismatch #251 fixed: S12's table honoured a pinned boundary while the live zone
+    /// (W12, the ride's time in zones) kept the Karvonen one.
+    @Test("A pinned boundary moves the live zone, not just the S12 table")
+    func pinnedBoundaryMovesTheLiveZone() throws {
+        // Karvonen puts the zone 1/2 edge at 137/138; pin it at 130.
+        let profile = try RiderProfile().settingBoundaryOverride(130, afterZone: .zone1)
+
+        #expect(profile.zone(forBPM: 130) == .zone1)
+        #expect(profile.zone(forBPM: 131) == .zone2)
+        #expect(profile.bounds(for: .zone2).lowerBound == 131)
+        // Its neighbours are untouched.
+        #expect(profile.zone(forBPM: 150) == .zone2)
+        #expect(profile.zone(forBPM: 151) == .zone3)
+    }
+
     // MARK: - Zone boundary overrides (#103)
 
     /// The §8 worked example: resting 60, max 190 — boundaries sit one bpm below

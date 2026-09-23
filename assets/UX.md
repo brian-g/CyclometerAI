@@ -1040,7 +1040,7 @@ ContentUnavailableView {
 - GPX re-export action
 - Create route action
 
-> **Built (#251):** map (recorded track, per-pass markers with the vehicle's speed), elevation profile, stats (plus vehicle-pass count), HR over elapsed time. **Not yet:** the full-screen map sheet (follow-up); Strava segments (Phase 2, shown as Coming Soon); GPX re-export and Create Route (each needs its own issue). The HR graph is a plain line, not zone-coloured.
+> **Built (#251):** map (recorded track, per-pass markers with the vehicle's speed), elevation profile, stats (plus vehicle-pass count), HR over elapsed time on S12's zone bands (`cyHRZone1`–`5`, y-axis fitted to the ride). **Not yet:** the full-screen map sheet (follow-up); Strava segments (Phase 2, shown as Coming Soon); GPX re-export and Create Route (each needs its own issue).
 
 ---
 

@@ -65,7 +65,7 @@ struct RideDetailList<MapRow: View>: View {
                 if store.heartRateSamples.isEmpty {
                     unavailable("No heart rate recorded")
                 } else {
-                    HeartRateProfileView(samples: store.heartRateSamples)
+                    HeartRateProfileView(samples: store.heartRateSamples, zoneBounds: store.heartRateZoneBounds)
                         .frame(height: RideDetailView.chartHeight)
                         .padding(.vertical, Spacing.sm)
                 }

@@ -46,6 +46,7 @@ struct RidesFeatureTests {
             RidesFeature()
         } withDependencies: {
             $0.persistenceClient = .mock(rideStats: [ride.id: stats])
+            $0.date = .constant(Date(timeIntervalSince1970: 1_750_000_000))
         }
 
         await store.send(.path(.push(id: 0, state: .detail(RideDetailFeature.State(summary: ride))))) {
