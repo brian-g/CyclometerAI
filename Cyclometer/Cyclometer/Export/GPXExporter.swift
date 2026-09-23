@@ -90,7 +90,7 @@ enum GPXExporter {
         // One `<trkseg>` per continuous stretch of riding, so a pause is a break in the
         // track rather than a straight chord across it (#263). Readers that take a single
         // `<trkseg>` as continuous travel — Strava, Garmin Connect — then see the stop.
-        for segment in segments(of: trackPoints) {
+        for segment in TrackPointDTO.segments(of: trackPoints) {
             xml += "    <trkseg>\n\n"
             for point in segment {
                 xml += trkptXML(for: point)
@@ -129,24 +129,6 @@ enum GPXExporter {
             suffix += 1
         }
         return url
-    }
-
-    /// Splits track points into runs of equal `segmentIndex` (#263).
-    ///
-    /// Consecutive runs, not a group-by: the points arrive ascending by timestamp, so a
-    /// change of index is a boundary, and grouping by value would reorder the ride if an
-    /// index ever repeated. Always returns at least one segment, so a ride that recorded
-    /// no points still writes the one empty `<trkseg>` it always has.
-    private static func segments(of trackPoints: [TrackPointDTO]) -> [[TrackPointDTO]] {
-        var segments: [[TrackPointDTO]] = [[]]
-        for point in trackPoints {
-            if let previous = segments[segments.count - 1].last,
-               previous.segmentIndex != point.segmentIndex {
-                segments.append([])
-            }
-            segments[segments.count - 1].append(point)
-        }
-        return segments
     }
 
     // MARK: - Element builders

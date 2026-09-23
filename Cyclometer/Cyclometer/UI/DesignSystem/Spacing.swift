@@ -21,6 +21,7 @@ enum Spacing {
     static let tapTarget: CGFloat     = unit * 13 // 52 — HIG minimum button tap target
     static let mapControl: CGFloat    = unit * 11 // 44 — MapKit's own map-control size; the map sheet's buttons match it
     static let turnOverlay: CGFloat   = unit * 34 // 136 — turn overlay card's minimum side (Sketch "Sxx - Route overlay")
+    static let rideThumbnail: CGFloat = unit * 14 // 56 — S14 row's map thumbnail, square (UX.md §S14)
     static let grabberHeight: CGFloat = unit       //  4 — sheet grabber bar height
     static let pageIndicatorDot: CGFloat = 7       //  7 — dashboard paging indicator dot
     static let hrBorderWidth: CGFloat = 3          //  3 — HR zone left accent bar
@@ -28,6 +29,7 @@ enum Spacing {
     static let strokeHairline: CGFloat = 1         //  1 — hairline border (turn overlay)
     static let strokeMapTrack: CGFloat = 5         //  5 — live map: the track ridden so far
     static let strokeMapRoute: CGFloat = 8         //  8 — live map: the planned route, wider so the track sits inside it
+    static let strokeMapThumbnail: CGFloat = 3     //  3 — ride thumbnail: the recorded track at 56pt
 
     // Corner radii
     static let cornerSm: CGFloat = unit      //  4

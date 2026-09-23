@@ -135,6 +135,11 @@ struct RideSchemaMigrationTests {
             #expect(ride.speedSampleCount == 0)
             #expect(ride.hrSampleCount == 0)
             #expect(ride.cadenceSampleCount == 0)
+
+            // #177's thumbnail: a ride recorded before it has none, and S14 shows its
+            // placeholder rather than a decode failure.
+            #expect(ride.mapThumbnailLight == nil)
+            #expect(ride.mapThumbnailDark == nil)
         }
     }
 

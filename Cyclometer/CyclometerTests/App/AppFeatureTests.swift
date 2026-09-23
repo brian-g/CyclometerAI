@@ -239,4 +239,114 @@ struct AppFeatureTests {
         #expect(fetchRidesCallCount.value == 2)
         #expect(store.state.rides.rides.map(\.id) == [fixedRideId])
     }
+
+    // MARK: - Map thumbnail (#177)
+
+    /// AppFeature nils `activeRide` on the same `confirmFinish` that starts the ride-end
+    /// effect, and `.ifLet` issues a cancel for the child's effects when its state goes nil.
+    /// Today that cancel lands before the new `.run` effect registers, so it misses, and the
+    /// flush → export → finalize → thumbnail sequence completes. The render here checks for
+    /// cancellation the way a real snapshotter may, so this fails if that ever changes —
+    /// which `ActiveRideFeature`'s own tests cannot see; only the composed reducer can.
+    @Test("the map thumbnail is still captured although AppFeature tears the ride down on the same action")
+    func thumbnailSurvivesRideTeardown() async throws {
+        let finalized = LockIsolated<[UUID]>([])
+        let saved = LockIsolated<[UUID]>([])
+        let store = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.uuid = .incrementing
+            $0.bleHRClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.locationClient = .testValue
+            $0.hapticsClient = .testValue
+            var client = PersistenceClient.mock(
+                onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
+                onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
+            )
+            // A finalized ride is the one that is missing its thumbnail.
+            client.fetchRideIdsMissingMapThumbnail = { finalized.value }
+            // Whatever id `.task` gave the ride, it has a track.
+            client.fetchTrackPoints = { rideId in
+                [(43.070, -89.400), (43.071, -89.401)].map { latitude, longitude in
+                    TrackPointDTO(
+                        rideId: rideId, timestamp: Date(timeIntervalSince1970: 1_000_000),
+                        latitude: latitude, longitude: longitude,
+                        altitudeMeters: 0, horizontalAccuracyMeters: 5,
+                        speedSource: .gps, heartRateSource: .none
+                    )
+                }
+            }
+            $0.persistenceClient = client
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in
+                try Task.checkCancellation()
+                return Data([1])
+            }
+        }
+        store.exhaustivity = .off
+
+        await store.send(.startRideButtonTapped)
+        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        await store.receive(\.activeRide.task)
+        let rideId = try #require(store.state.activeRide?.rideId)
+
+        await store.send(.activeRide(.pauseTapped))
+        await store.send(.activeRide(.finishTapped))
+        await store.send(.activeRide(.finishAlert(.presented(.confirmFinish))))
+        // Waits on the save itself: the pipeline (flush → export → finalize → capture) has
+        // no action to receive, and draining the store would instead sit out its timeout on
+        // the Rides tab's `rideFinished` poll, asleep on a TestClock nobody advances.
+        await expectEventually { !saved.value.isEmpty }
+        await store.skipInFlightEffects(strict: false)
+
+        #expect(store.state.activeRide == nil)
+        #expect(saved.value == [rideId])
+    }
+
+    /// #175 review's orphan: a resumable ride found after the rider already started a new
+    /// one is closed out rather than resumed. It never reached a Finish, so it gets its
+    /// thumbnail here.
+    @Test("an orphaned ride closed out at launch gets its map thumbnail")
+    func orphanedRideCloseOutCapturesThumbnail() async {
+        let orphan = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .active,
+            durationSeconds: 120, distanceMeters: 800, averageSpeedMPS: 5, maxSpeedMPS: 9
+        )
+        let track = [(43.070, -89.400), (43.071, -89.401)].map { latitude, longitude in
+            TrackPointDTO(
+                rideId: orphan.rideId, timestamp: Date(timeIntervalSince1970: 1_000_000),
+                latitude: latitude, longitude: longitude,
+                altitudeMeters: 0, horizontalAccuracyMeters: 5,
+                speedSource: .gps, heartRateSource: .none
+            )
+        }
+        let finalized = LockIsolated<[UUID]>([])
+        let saved = LockIsolated<[UUID]>([])
+        let store = TestStore(
+            initialState: AppFeature.State(activeRide: ActiveRideFeature.State(recordingState: .active))
+        ) {
+            AppFeature()
+        } withDependencies: {
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.persistenceClient = .mock(
+                trackPoints: [orphan.rideId: track],
+                rideIdsMissingMapThumbnail: [orphan.rideId],
+                onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
+                onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
+            )
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in Data([1]) }
+        }
+        store.exhaustivity = .off
+
+        await store.send(.resumableRideFetched(orphan))
+        // Reloaded again once the thumbnail landed: the first reload came before it.
+        await store.receive(\.rides.reloadRides)
+        await store.receive(\.rides.reloadRides)
+        await store.finish(timeout: effectDrainTimeout)
+
+        #expect(finalized.value == [orphan.rideId])
+        #expect(saved.value == [orphan.rideId])
+    }
 }

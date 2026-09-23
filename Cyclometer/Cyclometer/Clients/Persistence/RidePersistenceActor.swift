@@ -45,6 +45,32 @@ actor RidePersistenceActor {
         }
     }
 
+    /// S14's map thumbnail, both appearances in one save (#177). A write of its own rather
+    /// than part of `finalizeRide`: rendering needs map tiles from the network, and the ride
+    /// must not wait on them to be durably over.
+    func saveMapThumbnail(id: UUID, light: Data, dark: Data) throws {
+        try savingChanges("saveMapThumbnail", id: id, context: modelContext) {
+            let ride = try fetchRide(id: id)
+            ride.mapThumbnailLight = light
+            ride.mapThumbnailDark = dark
+        }
+    }
+
+    /// Finished rides still without a map thumbnail, newest first (#177). Filters on
+    /// `endedAt != nil` for the enum-predicate reason given on `fetchResumableRide`.
+    func rideIdsMissingMapThumbnail() throws -> [UUID] {
+        do {
+            let descriptor = FetchDescriptor<Ride>(
+                predicate: #Predicate { $0.endedAt != nil && $0.mapThumbnailLight == nil },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+            )
+            return try modelContext.fetch(descriptor).map(\.id)
+        } catch {
+            logger.error("rideIdsMissingMapThumbnail failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// Inserts confirmed vehicle-pass events in one batch and one save (#172) —
     /// `VehiclePassDetector` can confirm more than one on the same radar tick.
     /// Plain inserts against the same long-lived context as the Ride writes above;

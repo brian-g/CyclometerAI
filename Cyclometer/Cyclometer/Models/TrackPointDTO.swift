@@ -26,3 +26,24 @@ struct TrackPointDTO: Sendable, Equatable {
     /// and still means what it did: one segment, index 0.
     var segmentIndex: Int = 0
 }
+
+extension TrackPointDTO {
+    /// Splits track points into runs of equal `segmentIndex` (#263).
+    ///
+    /// Consecutive runs, not a group-by: the points arrive ascending by timestamp, so a
+    /// change of index is a boundary, and grouping by value would reorder the ride if an
+    /// index ever repeated. Always returns at least one segment, possibly empty — the GPX
+    /// export writes it as the one empty `<trkseg>` a pointless ride has always had. Callers
+    /// that draw or measure should drop segments too short for that (`RideMapThumbnail`).
+    static func segments(of trackPoints: [TrackPointDTO]) -> [[TrackPointDTO]] {
+        var segments: [[TrackPointDTO]] = [[]]
+        for point in trackPoints {
+            if let previous = segments[segments.count - 1].last,
+               previous.segmentIndex != point.segmentIndex {
+                segments.append([])
+            }
+            segments[segments.count - 1].append(point)
+        }
+        return segments
+    }
+}

@@ -782,7 +782,7 @@ The visual dashboard is otherwise unchanged — all metric widgets continue disp
 > *Refer to `assets/design/Design.sketch` — S10.*
 
 ### Key Components
-- Map thumbnail (full route trace in `brPrimary`; placeholder in Design.sketch)
+- Map thumbnail (full route trace in `brPrimary`; placeholder in Design.sketch). A live map, not S14's cached image (#177)
 - Primary metrics: total distance, total time, avg speed
 - Elevation profile
 - HR zone breakdown (pie chart)
@@ -991,7 +991,7 @@ but not used would be dead weight on the MVP settings screen. The section remain
 > *Refer to `assets/design/Design.sketch` — S14.*
 
 ### Per-Row Content
-- Map thumbnail (56×56pt, rounded corners). The thumbnail will have to be captured at the completion of a ride. It will be a performance issue if a live map view is shown for each row. 
+- Map thumbnail (56×56pt, rounded corners). A static image captured once after the ride ends, or at the next launch if that capture failed (#177), never a live map per row, which would be a performance issue: the recorded track in `brMapTravelPath` over a muted map with points of interest hidden, stored on the ride in light and dark. Place and road names can't be switched off in MapKit's standard style, so a few may show. A ride recorded before #177, or with no GPS track, shows a placeholder.
 - Ride name and date/time (using relative dates for the previous week)
 - Distance (`HeroNumber` small) and elapsed time (D-DIN Condensed 20pt)
 - Swipe actions: leading — Sync (blue), Make Route (green); trailing — Delete (red, destructive)

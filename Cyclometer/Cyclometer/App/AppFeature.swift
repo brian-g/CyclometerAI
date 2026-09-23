@@ -140,6 +140,12 @@ struct AppFeature {
                     .run { [persistenceClient] send in
                         if let summary = try? await persistenceClient.fetchResumableRide() {
                             await send(.resumableRideFetched(summary))
+                        } else {
+                            // Retries any thumbnail a past Finish failed to capture (#177).
+                            // Only here: a ride closed out by `resumableRideFetched` runs
+                            // the backfill itself once its finalize lands, so the two never
+                            // race over the same ride.
+                            await Self.backfillMapThumbnails(send: send)
                         }
                     }
                 )
@@ -232,6 +238,7 @@ struct AppFeature {
                     return .run { [persistenceClient, date] send in
                         try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
                         await send(.rides(.reloadRides))
+                        await Self.backfillMapThumbnails(send: send)
                     }
                 }
 
@@ -247,6 +254,7 @@ struct AppFeature {
                             )
                             rideEndIntentClient.clear()
                             await send(.rides(.reloadRides))
+                            await Self.backfillMapThumbnails(send: send)
                         } catch {
                             // Logged in RidePersistenceActor. The marker stays so the
                             // next launch tries again rather than resuming the ride.
@@ -417,6 +425,15 @@ struct AppFeature {
             await bleCSCClient.endPairingScan()
             await variaRadarClient.endPairingScan()
             await bleHRClient.endPairingScan()
+        }
+    }
+
+    /// Thumbnails for rides that don't have one yet (#177): rides closed out here, which never
+    /// reached `ActiveRideFeature`'s Finish, and any capture that failed. Reloads the Rides tab
+    /// when any landed, since the list was loaded before them.
+    private static func backfillMapThumbnails(send: Send<Action>) async {
+        if await RideMapThumbnail.backfill() > 0 {
+            await send(.rides(.reloadRides))
         }
     }
 

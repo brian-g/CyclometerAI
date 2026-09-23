@@ -69,6 +69,17 @@ final class Ride {
         set { weatherData = newValue.flatMap { try? JSONEncoder().encode($0) } }
     }
 
+    // MARK: - Map Thumbnail (#177)
+    // S14's row image, rendered once after the ride ends (`RideMapThumbnail.backfill`, which
+    // also retries at launch) so the list never stands up a live Map per row. PNG, one per
+    // appearance: MKMapSnapshotter renders the base map for a fixed trait collection, so the
+    // image cannot adapt after the fact.
+    // Nil for a ride with no drawable track, or until a capture succeeds.
+    @Attribute(.externalStorage)
+    var mapThumbnailLight: Data?
+    @Attribute(.externalStorage)
+    var mapThumbnailDark: Data?
+
     // MARK: - Sync Status
     // Per-service sync tracking. Written by RideSyncSheetFeature after upload.
     @Attribute(.externalStorage)

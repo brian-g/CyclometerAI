@@ -373,6 +373,52 @@ struct PersistenceClientTests {
         }
     }
 
+    // MARK: - Map thumbnail (#177)
+
+    @Test("saveRideMapThumbnail stores both appearances on the ride, each in its own field")
+    func saveRideMapThumbnailRoundTrips() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date(), nil)
+        let light = Data("light".utf8)
+        let dark = Data("dark".utf8)
+
+        try await client.saveRideMapThumbnail(rideId, light, dark)
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(ride.mapThumbnailLight == light)
+        #expect(ride.mapThumbnailDark == dark)
+    }
+
+    @Test("saveRideMapThumbnail on an unknown rideId throws rideNotFound")
+    func saveRideMapThumbnailUnknownRideThrows() async throws {
+        let (client, _) = Self.makeLiveClient()
+        await #expect(throws: PersistenceError.rideNotFound) {
+            try await client.saveRideMapThumbnail(UUID(), Data(), Data())
+        }
+    }
+
+    @Test("fetchRideIdsMissingMapThumbnail returns finished rides without a thumbnail, newest first")
+    func ridesMissingMapThumbnail() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let update = { (id: UUID) in
+            RideSummaryUpdate(rideId: id, recordingState: .ended,
+                              durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 2, maxSpeedMPS: 3)
+        }
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        let older = UUID(), newer = UUID(), captured = UUID(), inProgress = UUID()
+        for (offset, id) in [older, newer, captured, inProgress].enumerated() {
+            try await client.createRide(id, base.addingTimeInterval(TimeInterval(offset) * 3_600), nil)
+        }
+        for id in [older, newer, captured] {
+            try await client.finalizeRide(id, base.addingTimeInterval(86_400), update(id), nil)
+        }
+        try await client.saveRideMapThumbnail(captured, Data([1]), Data([2]))
+
+        // Not the captured one, and not the ride still being recorded.
+        #expect(try await client.fetchRideIdsMissingMapThumbnail() == [newer, older])
+    }
+
     // MARK: - Ride read path (#173, for GPXExporter)
 
     @Test("fetchRide returns the ride's title and startedAt")

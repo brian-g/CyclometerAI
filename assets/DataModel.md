@@ -158,6 +158,18 @@ final class Ride {
         set { weatherData = newValue.flatMap { try? JSONEncoder().encode($0) } }
     }
 
+    // MARK: - Map Thumbnail (#177)
+    // S14's row image: the recorded track (mapTravelPath) over a muted static map with points
+    // of interest hidden, 56×56 pt @3x PNG, one per appearance because a snapshot's base
+    // map cannot adapt after rendering. Rendered by RideMapThumbnail.backfill, which takes
+    // every finished ride still missing one: after each Finish, and at launch, so a failed
+    // capture (offline, suspended) or a ride from before #177 is filled in later. Nil until
+    // then, or for a ride with no drawable track — S14 shows a placeholder. S10 uses a live map.
+    @Attribute(.externalStorage)
+    var mapThumbnailLight: Data?
+    @Attribute(.externalStorage)
+    var mapThumbnailDark: Data?
+
     // MARK: - Sync Status
     // Per-service sync tracking. Written by RideSyncSheetFeature after upload.
     @Attribute(.externalStorage)
