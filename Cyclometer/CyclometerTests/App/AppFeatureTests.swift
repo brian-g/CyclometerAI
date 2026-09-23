@@ -243,19 +243,20 @@ struct AppFeatureTests {
     // MARK: - Map thumbnail (#177)
 
     /// AppFeature nils `activeRide` on the same `confirmFinish` that starts the ride-end
-    /// effect, and `.ifLet` issues a cancel for the child's effects when its state goes nil.
-    /// Today that cancel lands before the new `.run` effect registers, so it misses, and the
-    /// flush → export → finalize → thumbnail sequence completes. The render here checks for
-    /// cancellation the way a real snapshotter may, so this fails if that ever changes —
-    /// which `ActiveRideFeature`'s own tests cannot see; only the composed reducer can.
+    /// effect, and hands the capture to the Rides tab's `rideFinished` (#248), which waits
+    /// for the finalize to land before rendering. The whole Finish → finalize → capture chain
+    /// crosses two features, so only the composed reducer can see it end to end. The render
+    /// checks for cancellation the way a real snapshotter may, so this fails if the ride's
+    /// teardown ever reaches it.
     @Test("the map thumbnail is still captured although AppFeature tears the ride down on the same action")
     func thumbnailSurvivesRideTeardown() async throws {
         let finalized = LockIsolated<[UUID]>([])
         let saved = LockIsolated<[UUID]>([])
+        let testClock = TestClock()
         let store = TestStore(initialState: AppFeature.State()) {
             AppFeature()
         } withDependencies: {
-            $0.continuousClock = TestClock()
+            $0.continuousClock = testClock
             $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
             $0.uuid = .incrementing
             $0.bleHRClient = .testValue
@@ -266,8 +267,15 @@ struct AppFeatureTests {
                 onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
-            // A finalized ride is the one that is missing its thumbnail.
+            // A finalized ride is the one that is missing its thumbnail, and the one
+            // `rideFinished`'s poll is waiting to see.
             client.fetchRideIdsMissingMapThumbnail = { finalized.value }
+            client.fetchRides = {
+                finalized.value.map {
+                    RideListSummary(id: $0, title: "", startedAt: .distantPast,
+                                    distanceMeters: 0, durationSeconds: 0)
+                }
+            }
             // Whatever id `.task` gave the ride, it has a track.
             client.fetchTrackPoints = { rideId in
                 [(43.070, -89.400), (43.071, -89.401)].map { latitude, longitude in
@@ -295,9 +303,15 @@ struct AppFeatureTests {
         await store.send(.activeRide(.pauseTapped))
         await store.send(.activeRide(.finishTapped))
         await store.send(.activeRide(.finishAlert(.presented(.confirmFinish))))
-        // Waits on the save itself: the pipeline (flush → export → finalize → capture) has
-        // no action to receive, and draining the store would instead sit out its timeout on
-        // the Rides tab's `rideFinished` poll, asleep on a TestClock nobody advances.
+        // Waits on the save itself: the pipeline (flush → export → finalize, then the
+        // Rides tab's poll → capture) has no single action to receive. The poll sleeps on the
+        // TestClock between reads, so it's stepped until the capture lands — at most the
+        // poll's ten tries, after which the backfill runs regardless.
+        await expectEventually { !finalized.value.isEmpty }
+        for _ in 0..<20 where saved.value.isEmpty {
+            await testClock.advance(by: .milliseconds(200))
+            await Task.megaYield()
+        }
         await expectEventually { !saved.value.isEmpty }
         await store.skipInFlightEffects(strict: false)
 

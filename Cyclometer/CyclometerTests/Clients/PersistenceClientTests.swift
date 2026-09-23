@@ -637,6 +637,32 @@ struct PersistenceClientTests {
         #expect(try await client.fetchRides().isEmpty)
     }
 
+    /// S14's row reads the thumbnail off the list summary (#248); a ride without one is nil
+    /// in both fields, which is what the row's placeholder keys on.
+    @Test("fetchRides carries each ride's map thumbnail, nil where none was captured")
+    func fetchRidesCarriesMapThumbnail() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let captured = UUID(), uncaptured = UUID()
+        for (id, startedAt) in [(captured, base.addingTimeInterval(86_400)), (uncaptured, base)] {
+            try await client.createRide(id, startedAt, nil)
+            try await client.finalizeRide(id, startedAt.addingTimeInterval(3_600), RideSummaryUpdate(
+                rideId: id, recordingState: .ended,
+                durationSeconds: 3_600, distanceMeters: 42_000,
+                averageSpeedMPS: 6, maxSpeedMPS: 12
+            ), nil)
+        }
+        try await client.saveRideMapThumbnail(captured, Data("light".utf8), Data("dark".utf8))
+
+        let rides = try await client.fetchRides()
+
+        #expect(rides.map(\.id) == [captured, uncaptured])
+        #expect(rides[0].mapThumbnailLight == Data("light".utf8))
+        #expect(rides[0].mapThumbnailDark == Data("dark".utf8))
+        #expect(rides[1].mapThumbnailLight == nil)
+        #expect(rides[1].mapThumbnailDark == nil)
+    }
+
     // MARK: - VehiclePassEvent (#172)
 
     @Test("appendVehiclePassEvents persists a queryable VehiclePassEvent linked by rideId")

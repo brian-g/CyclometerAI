@@ -1,3 +1,52 @@
+# #248 — S14 Ride History list on real rides
+
+Plan: /Users/brian/.claude/plans/noble-tinkering-valley.md
+Branch: `feat/248-ride-history`
+
+- [x] 1. `RideListSummary` carries light/dark thumbnail data; `fetchRides` maps it
+- [x] 2. `RidesFeature`: `@Shared` preferences → `unitSystem`; `rideFinished` owns the Finish-path backfill + reload
+- [x] 3. Remove the backfill from `ActiveRideFeature`'s finish effect
+- [x] 4. `RideDateText` pure formatter (relative within the week, absolute beyond)
+- [x] 5. `RidesView`: Sketch row, stored-image thumbnail + placeholder, drop leading swipes, units from S12
+- [x] 6. UX.md §S14 + inventory
+- [x] 7. Tests: RideDateText, RidesFeature backfill, persistence round-trip, AppFeature teardown, snapshots
+- [x] 8. Full local suite green; snapshots compared with Sketch; simulator check
+
+
+## Review
+
+- Issue drift: Delete was already done (#261) and the thumbnail field already existed (#177). Both were
+  verified, not rebuilt.
+- Layout per Sketch (Brian's call): time and distance as small vertical `HeroNumber`s side by side.
+  Follow-ups after the first snapshots:
+  - plain lists on Rides **and** Routes
+  - a 64pt minimum column width (`Spacing.rideMetric`) so values right-align
+  - elapsed time as h:mm, truncated, not h:mm:ss
+  - `.fixedSize()` on the metrics, because the first render clipped them to "1:1…" while the title
+    kept its room
+- The Finish-path capture moved from `ActiveRideFeature`'s finish effect to `RidesFeature`. The poll
+  hands off to `captureMapThumbnails`, which is deliberately **not** under `CancelID.reload`: a
+  delete in the seconds after a Finish would otherwise cancel the render. Proved by mutation (putting
+  it back under the id fails `deleteDuringCaptureKeepsTheCapture`).
+- `RideEndFailureTests`' two thumbnail tests now end the ride, then drive `rideFinished` on the same
+  live stack.
+- Simulator drive (throwaway XCUITest, deleted):
+  - the empty state's action opens the Start sheet
+  - after Finish the row shows the placeholder, then the real map image about 15 s later with no
+    relaunch
+  - the swipe shows a red Delete only
+  - a delete survives a relaunch
+- Gotchas:
+  - `testEmptyState.empty-*.png` collided with `RoutesSnapshotTests`' references ("Multiple commands
+    produce"). Snapshot PNGs are copied flat into the bundle.
+  - A test build against a stale `Cyclometer` module reported "extra arguments"; a fresh
+    `-derivedDataPath` fixed it.
+  - ICU puts U+202F before AM/PM.
+- Not touched: `assets/design/Design.sketch` shows as modified, though it was only read over MCP.
+  Left out of the commit; Brian to decide.
+
+---
+
 # #177 — Capture + persist a static map thumbnail at ride end
 
 Plan: /Users/brian/.claude/plans/nifty-petting-boole.md

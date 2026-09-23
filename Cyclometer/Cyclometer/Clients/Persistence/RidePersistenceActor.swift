@@ -211,7 +211,9 @@ actor RidePersistenceActor {
                     title: $0.title,
                     startedAt: $0.startedAt,
                     distanceMeters: $0.distanceMeters,
-                    durationSeconds: $0.durationSeconds
+                    durationSeconds: $0.durationSeconds,
+                    mapThumbnailLight: $0.mapThumbnailLight,
+                    mapThumbnailDark: $0.mapThumbnailDark
                 )
             }
         } catch {

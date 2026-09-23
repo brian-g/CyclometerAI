@@ -25,12 +25,18 @@ extension PersistenceClient {
 struct RidesFeature {
     @ObservableState
     struct State: Equatable {
+        /// Row distances follow the S12 units picker, the same read-through
+        /// `RoutesFeature.State.unitSystem` does.
+        @Shared(.appPreferences) var preferences
+
         var rides: [RideListSummary] = []
 
         /// False until the first read comes back — same reason as
         /// `RoutesFeature.State.hasLoaded`: without it, the empty state briefly claims
         /// "No Rides Yet" on every launch before `.task`'s first read lands.
         var hasLoaded = false
+
+        var unitSystem: UnitSystem { preferences.preferredUnit }
     }
 
     enum Action: Equatable {
@@ -43,6 +49,9 @@ struct RidesFeature {
         /// reload usually wins the race and reads a snapshot that still excludes the ride
         /// that just ended.
         case rideFinished(UUID)
+        /// Renders the map thumbnail of any finished ride without one (#177), then reloads
+        /// the list if one landed (#248). Sent by `rideFinished` once its poll ends.
+        case captureMapThumbnails
         case deleteRecordedRide(UUID)
         case deleteFailed
     }
@@ -78,18 +87,36 @@ struct RidesFeature {
             // flight. Ten tries at 200ms is a 2s ceiling — comfortably past a real
             // GPX export — after which the last read wins even if it still misses it;
             // nothing here can wait forever on a write that never lands.
+            //
+            // Then the ride's map thumbnail: once the ride is visible, its finalize has
+            // landed, so it's the newest ride without one. Handed to its own action rather
+            // than run here — see `captureMapThumbnails`.
             case .rideFinished(let id):
                 return .run { [persistenceClient, clock] send in
                     for attempt in 0..<10 {
                         let rides = (try? await persistenceClient.fetchRides()) ?? []
                         if rides.contains(where: { $0.id == id }) || attempt == 9 {
                             await send(.ridesResponse(.success(rides)))
+                            await send(.captureMapThumbnails)
                             return
                         }
                         try? await clock.sleep(for: .milliseconds(200))
                     }
                 }
                 .cancellable(id: CancelID.reload, cancelInFlight: true)
+
+            // Captured here rather than at the end of `ActiveRideFeature`'s finish effect
+            // (#177) so the list can reload once the image lands (#248) — the row is
+            // already on screen by then, showing the placeholder. Deliberately not under
+            // `CancelID.reload`: a delete or a reload in the seconds after a Finish would
+            // otherwise cancel a render in flight and leave the image to the next launch.
+            // Only finalized rides are picked, so it's harmless after a poll that gave up.
+            case .captureMapThumbnails:
+                return .run { send in
+                    if await RideMapThumbnail.backfill() > 0 {
+                        await send(.reloadRides)
+                    }
+                }
 
             // Optimistic, mirroring `RoutesFeature.deleteButtonTapped`: a swiped row that
             // lingers while SwiftData saves reads as a gesture that didn't take. Cancels

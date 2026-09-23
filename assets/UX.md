@@ -992,9 +992,9 @@ but not used would be dead weight on the MVP settings screen. The section remain
 
 ### Per-Row Content
 - Map thumbnail (56×56pt, rounded corners). A static image captured once after the ride ends, or at the next launch if that capture failed (#177), never a live map per row, which would be a performance issue: the recorded track in `brMapTravelPath` over a muted map with points of interest hidden, stored on the ride in light and dark. Place and road names can't be switched off in MapKit's standard style, so a few may show. A ride recorded before #177, or with no GPS track, shows a placeholder.
-- Ride name and date/time (using relative dates for the previous week)
-- Distance (`HeroNumber` small) and elapsed time (D-DIN Condensed 20pt)
-- Swipe actions: leading — Sync (blue), Make Route (green); trailing — Delete (red, destructive)
+- Ride name and date/time, relative within the previous week ("Today 3:45 PM", "Yesterday 2:05 PM", "Tuesday 9:10 AM"), absolute beyond it; the year shows only when it isn't the current one
+- Elapsed time and distance side by side on the trailing edge, each a small `HeroNumber` in the vertical layout with its label beneath (`time`, then the S12 distance unit), as Design.sketch draws them (#248). Time is hours and minutes without seconds ("0:45", "1:18"), truncated rather than rounded. The list is plain (edge to edge), as drawn, and so is S19's
+- Swipe actions: trailing — Delete (`brDestructive`). Leading — Sync (blue) and Make Route (green) are deferred: service sync is Phase 2 (§S10) and making a route from a ride has no issue yet (#248)
 
 ### Empty State
 

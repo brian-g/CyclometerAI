@@ -177,6 +177,8 @@ struct RoutesView: View {
                 filterChips(shown: routes.count)
             }
         }
+        // Plain, like S14's Rides list, as Design.sketch draws it (#248).
+        .listStyle(.plain)
     }
 
     private var emptyLibrary: some View {
