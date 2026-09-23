@@ -4,6 +4,7 @@ extension PersistenceClient {
     static func mock(
         trackPoints: [UUID: [TrackPointDTO]] = [:],
         rideExportMetadata: [UUID: RideExportMetadata] = [:],
+        rideStats: [UUID: RideStats] = [:],
         vehiclePassEvents: [UUID: [VehiclePassEventDTO]] = [:],
         resumableRide: RideSummaryUpdate? = nil,
         rides: [RideListSummary] = [],
@@ -34,6 +35,11 @@ extension PersistenceClient {
                 // itself the faithful live behavior for an unknown rideId.
                 guard let metadata = rideExportMetadata[$0] else { throw PersistenceError.rideNotFound }
                 return metadata
+            },
+            fetchRideStats: {
+                // Throws for an unknown id, like `fetchRide` above and the live actor.
+                guard let stats = rideStats[$0] else { throw PersistenceError.rideNotFound }
+                return stats
             },
             createRide: { onCreateRide($0, $1, $2) },
             updateRideSummary: { onUpdateRideSummary($0) },

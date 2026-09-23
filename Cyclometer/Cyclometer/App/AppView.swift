@@ -18,15 +18,13 @@ struct AppView: View {
             TabView(selection: $store.selectedTab.sending(\.tabSelected)) {
                 
                 // ── Rides ────────────────────────────────────────────────────────
-                NavigationStack {
-                    RidesView(
-                        store: store.scope(state: \.rides, action: \.rides),
-                        onStartRide: { store.send(.startRideButtonTapped) }
-                    )
-                    .startRideToolbarItem(isHidden: store.activeRide != nil) {
-                        store.send(.startRideButtonTapped)
-                    }
-                }
+                // Brings its own stack, driven by `RidesFeature.path`, so a row pushes S15 as
+                // reducer state (#251) — the Routes tab's arrangement.
+                RidesNavigationStack(
+                    store: store.scope(state: \.rides, action: \.rides),
+                    isStartRideHidden: store.activeRide != nil,
+                    onStartRide: { store.send(.startRideButtonTapped) }
+                )
                 .tabItem { Label("Rides", image: "cyclometer.rider") }
                 .tag(AppFeature.Tab.rides)
                 

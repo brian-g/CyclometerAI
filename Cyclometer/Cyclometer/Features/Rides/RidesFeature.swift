@@ -48,6 +48,10 @@ struct RidesFeature {
         /// first appears, so a long history never reads images nobody scrolled to.
         var thumbnails: [UUID: Thumbnail] = [:]
 
+        /// The tab's navigation stack: S15, pushed from a row (#251) — the same shape as
+        /// `RoutesFeature.path`, for the same reason.
+        var path = StackState<Path.State>()
+
         var unitSystem: UnitSystem { preferences.preferredUnit }
     }
 
@@ -78,6 +82,13 @@ struct RidesFeature {
         case thumbnailLoaded(UUID, RideThumbnailImages?)
         case deleteRecordedRide(UUID)
         case deleteFailed
+        case path(StackActionOf<Path>)
+    }
+
+    /// What the Rides tab can push (#251).
+    @Reducer(state: .equatable, action: .equatable)
+    enum Path {
+        case detail(RideDetailFeature)
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
@@ -201,8 +212,12 @@ struct RidesFeature {
             // store, which is the authority on what survived the failed write.
             case .deleteFailed:
                 return .send(.reloadRides)
+
+            case .path:
+                return .none
             }
         }
+        .forEach(\.path, action: \.path)
     }
 
     /// Reads one ride's stored image and decodes both appearances off the main thread. A

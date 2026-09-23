@@ -21,6 +21,8 @@ struct PersistenceClient: Sendable {
     /// Ride metadata read path, for GPXExporter (#173) — the rest of this client is
     /// write-only for Ride by design (#171).
     var fetchRide: @Sendable (UUID) async throws -> RideExportMetadata
+    /// S15's Stats section (#251). Throws `rideNotFound` for an unknown id, as `fetchRide` does.
+    var fetchRideStats: @Sendable (UUID) async throws -> RideStats
     /// Inserts a new Ride record at ride start, denormalizing the route it is being
     /// ridden on (nil for a free ride).
     var createRide: @Sendable (UUID, Date, RouteReference?) async throws -> Void
@@ -94,6 +96,7 @@ extension PersistenceClient: DependencyKey {
             flushTrackPoints: { try await batchInsertTrackPoints($0, container: coreDataContainer) },
             fetchTrackPoints: { try await fetchTrackPointsLive(rideId: $0, container: coreDataContainer) },
             fetchRide: { try await rideActor.fetchRideExportMetadata(id: $0) },
+            fetchRideStats: { try await rideActor.fetchRideStats(id: $0) },
             createRide: { try await rideActor.createRide(id: $0, startedAt: $1, route: $2) },
             updateRideSummary: { try await rideActor.updateRideSummary($0) },
             finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
@@ -124,6 +127,7 @@ extension PersistenceClient: DependencyKey {
         flushTrackPoints: { _ in },
         fetchTrackPoints: { _ in [] },
         fetchRide: { _ in RideExportMetadata(title: "", startedAt: .init(timeIntervalSince1970: 0)) },
+        fetchRideStats: { _ in RideStats(averageSpeedMPS: 0, maxSpeedMPS: 0) },
         createRide: { _, _, _ in },
         updateRideSummary: { _ in },
         finalizeRide: { _, _, _, _ in },

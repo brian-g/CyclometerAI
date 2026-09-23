@@ -68,7 +68,7 @@ All design artifacts are in `assets/design/`. These files are the source of trut
 | [S12](#s12-app-settings) | App Settings | MVP | Stub |
 | [S13](#s13-hr-zone-configuration) | HR Zone Configuration | Deprecated | Stub |
 | [S14](#s14-ride-history-list) | Ride History List | MVP | Stub |
-| [S15](#s15-ride-detail) | Ride Detail | MVP | Stub |
+| [S15](#s15-ride-detail) | Ride Detail | MVP | Complete |
 | [S16](#s16-training-zones-graph) | Training Zones Graph | Cut | Stub |
 | [S17](#s17-apple-watch) | Apple Watch | Phase 2 | Stub |
 | [S18](#s18-ar-hud-configuration) | AR HUD Configuration | Phase 3 | Stub |
@@ -1039,6 +1039,8 @@ ContentUnavailableView {
 - Strava segments list: name, distance, best time + date
 - GPX re-export action
 - Create route action
+
+> **Built (#251):** map (recorded track, per-pass markers with the vehicle's speed), elevation profile, stats (plus vehicle-pass count), HR over elapsed time on S12's zone bands (`cyHRZone1`–`5`, y-axis fitted to the ride). **Not yet:** the full-screen map sheet (follow-up); Strava segments (Phase 2, shown as Coming Soon); GPX re-export and Create Route (each needs its own issue).
 
 ---
 

@@ -104,9 +104,9 @@ final class RidesSnapshotTests: XCTestCase {
                 $0.defaultFileStorage = storage
             }
         }
-        return NavigationStack {
-            RidesView(store: store, onStartRide: {}, now: Self.now)
-        }
+        // The app's own stack, which the rows' `NavigationLink(state:)` needs (#251). Start Ride
+        // hidden, as these references were recorded without it.
+        return RidesNavigationStack(store: store, isStartRideHidden: true, now: Self.now)
         // Explicit rather than ambient: a reference recorded against whatever the host
         // bundle resolved would silently encode that instead of the token.
         .tint(Color.cyPrimary)

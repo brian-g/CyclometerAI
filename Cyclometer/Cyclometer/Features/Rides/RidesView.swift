@@ -24,9 +24,7 @@ struct RidesView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ForEach(store.rides) { ride in
-                    NavigationLink {
-                        RideDetailView(ride: .recordedRide(timestamp: ride.startedAt))
-                    } label: {
+                    NavigationLink(state: RidesFeature.Path.State.detail(RideDetailFeature.State(summary: ride))) {
                         RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
                                 unitSystem: store.unitSystem, now: now)
                     }
@@ -58,6 +56,33 @@ struct RidesView: View {
     /// ride was gone (#261).
     private func deleteRide(_ id: UUID) {
         store.send(.deleteRecordedRide(id))
+    }
+}
+
+// MARK: - Navigation stack
+
+/// The Rides tab's navigation stack: S14 at the root, S15 pushed as `RidesFeature.Path` state
+/// (#251). One definition for the app, the previews and the snapshot tests, for the reason
+/// `RoutesNavigationStack` gives: a `NavigationLink(state:)` row outside a store-powered stack
+/// reports an issue and cannot push.
+struct RidesNavigationStack: View {
+    @Bindable var store: StoreOf<RidesFeature>
+    /// Hides Start Ride while a ride records, as every tab does.
+    var isStartRideHidden: Bool = false
+    var onStartRide: () -> Void = {}
+    /// See `RidesView.now`.
+    var now: Date = .now
+
+    var body: some View {
+        NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
+            RidesView(store: store, onStartRide: onStartRide, now: now)
+                .startRideToolbarItem(isHidden: isStartRideHidden, action: onStartRide)
+        } destination: { pathStore in
+            switch pathStore.case {
+            case .detail(let detailStore):
+                RideDetailView(store: detailStore)
+            }
+        }
     }
 }
 
@@ -143,102 +168,88 @@ struct RideThumbnail: View {
     }
 }
 
-// MARK: - Ride Detail View
-
-struct RideDetailView: View {
-    let ride: RideDetail
-    var body: some View {
-        List {
-            Section {
-                RideMapView(ride: ride)
-                    .frame(height: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-            }
-            Section("Elevation Profile") {
-                ElevationProfileView(samples: ride.elevationSamples, unitLabel: "ft")
-                    .frame(height: 140).padding(.vertical, 8)
-            }
-            Section("Stats") {
-                LabeledContent("Avg Speed (mph)", value: ride.averageSpeed)
-                LabeledContent("Max Speed (mph)", value: ride.maxSpeed)
-                LabeledContent("Avg Cadence (rpm)", value: ride.averageCadence)
-                LabeledContent("Max Cadence (rpm)", value: ride.maxCadence)
-            }
-            Section("HR Profile") {
-                HeartRateProfileView(samples: ride.heartRateSamples)
-                    .frame(height: 140).padding(.vertical, 8)
-            }
-            Section("Strava Segments") {
-                ForEach(ride.stravaSegments) { segment in
-                    LabeledContent {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(segment.bestTime).font(.headline)
-                            Text(segment.bestTimeDate, format: .dateTime.month(.abbreviated).day())
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(segment.name).font(.headline)
-                            HStack(spacing: 2) { Text(segment.distance); Text("mi") }
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-        }
-        .navigationTitle(ride.title)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-// MARK: - Map Views
-
-struct RideMapView: View {
-    let ride: RideDetail
-    var showsMarkers = true
-    var showsControls = true
-    var body: some View {
-        Map(initialPosition: .region(ride.mapRegion)) {
-            MapPolyline(coordinates: ride.coordinates)
-                .stroke(Color.cyPrimary, lineWidth: showsMarkers ? 5 : 3)
-            if showsMarkers {
-                Marker("Start", systemImage: "flag.fill", coordinate: ride.startCoordinate)
-                    .tint(Color.cyPrimary)
-                Marker("Finish", systemImage: "flag.checkered", coordinate: ride.finishCoordinate)
-                    .tint(.blue)
-            }
-        }
-        .mapStyle(.standard(elevation: .realistic))
-        .mapControls {
-            if showsControls {
-                MapCompass(); MapScaleView(); MapPitchToggle()
-            }
-        }
-    }
-}
-
 // MARK: - Chart Views
 
+/// S15's HR Profile (#251): the ride's heart rate over its recorded time, over bands in the
+/// rider's HR zone colours.
+///
+/// The y-axis fits the ride, not the rider's whole reserve. Zone 1 alone runs from resting to
+/// about 60% of the reserve, and scaling to it would flatten the ride into a strip. Only
+/// the bands the ride passes through show.
 struct HeartRateProfileView: View {
     let samples: [Int]
+    /// Each zone's bpm range, zone 1 first (`RideDetailFeature.State.heartRateZoneBounds`).
+    let zoneBounds: [ClosedRange<Int>]
+
+    /// Headroom above and below the ride's own range, so the line never rides the edge.
+    static let paddingBPM = 5
+
+    /// A band shorter than this share of the chart gets no "Z" label — there's no room for one.
+    static let minimumLabelledShare = 0.12
+
+    struct Band: Equatable {
+        let zone: Int
+        let bpm: ClosedRange<Double>
+    }
+
+    /// The y-domain and the zone bands clipped to it. Each band runs from its zone's first bpm
+    /// to the next zone's, so adjacent bands meet without a gap. Zone 1 opens and zone 5 closes
+    /// at the domain's edge, which is where a reading below resting or above max lands.
+    static func layout(samples: [Int], zoneBounds: [ClosedRange<Int>]) -> (domain: ClosedRange<Double>, bands: [Band]) {
+        let low = Double((samples.min() ?? 0) - paddingBPM)
+        let high = Double((samples.max() ?? 0) + paddingBPM)
+        let bands = zoneBounds.indices.compactMap { index -> Band? in
+            let start = index == 0 ? low : max(low, Double(zoneBounds[index].lowerBound))
+            let end = index == zoneBounds.count - 1 ? high : min(high, Double(zoneBounds[index + 1].lowerBound))
+            guard start < end else { return nil }
+            return Band(zone: index + 1, bpm: start...end)
+        }
+        return (low...high, bands)
+    }
+
     private var points: [RideChartPoint] {
         samples.enumerated().map { RideChartPoint(distance: $0.offset, value: Double($0.element)) }
     }
+
     var body: some View {
-        Chart(points) { point in
-            AreaMark(x: .value("Distance", point.distance), y: .value("Heart Rate", point.value))
-                .foregroundStyle(.red.opacity(0.14)).interpolationMethod(.catmullRom)
-            LineMark(x: .value("Distance", point.distance), y: .value("Heart Rate", point.value))
-                .foregroundStyle(.red)
-                .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                .interpolationMethod(.catmullRom)
+        let layout = Self.layout(samples: samples, zoneBounds: zoneBounds)
+        let span = layout.domain.upperBound - layout.domain.lowerBound
+        Chart {
+            ForEach(layout.bands, id: \.zone) { band in
+                RectangleMark(
+                    xStart: .value("Start", 0),
+                    xEnd: .value("End", max(samples.count - 1, 1)),
+                    yStart: .value("Zone floor", band.bpm.lowerBound),
+                    yEnd: .value("Zone ceiling", band.bpm.upperBound)
+                )
+                .foregroundStyle(Color.hrZone(band.zone).opacity(Opacity.zoneBand))
+                .annotation(position: .overlay, alignment: .trailing) {
+                    if (band.bpm.upperBound - band.bpm.lowerBound) / span >= Self.minimumLabelledShare {
+                        Text("Z\(band.zone)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.hrZone(band.zone))
+                            .padding(.trailing, Spacing.xs)
+                    }
+                }
+            }
+            ForEach(points) { point in
+                LineMark(x: .value("Time", point.distance), y: .value("Heart Rate", point.value))
+                    .foregroundStyle(Color.cyTextPrimary)
+                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    .interpolationMethod(.catmullRom)
+            }
         }
+        .chartYScale(domain: layout.domain)
+        .chartXScale(domain: 0...max(samples.count - 1, 1))
         .chartXAxis(.hidden)
         .chartYAxis {
-            AxisMarks(position: .leading, values: [samples.min() ?? 0, samples.max() ?? 1]) { value in
-                AxisValueLabel { if let hr = value.as(Int.self) { Text("\(hr) bpm") } }
+            // The zone edges the ride crosses, which is what the bands mean — or, for a ride
+            // inside one zone, its own low and high, so the axis still has a scale.
+            let edges = layout.bands.dropFirst().map(\.bpm.lowerBound)
+            let ticks = edges.isEmpty ? [samples.min(), samples.max()].compactMap { $0.map(Double.init) } : edges
+            AxisMarks(position: .leading, values: ticks) { value in
+                AxisGridLine()
+                AxisValueLabel { if let bpm = value.as(Double.self) { Text("\(Int(bpm)) bpm") } }
             }
         }
     }
@@ -292,12 +303,10 @@ struct ElevationPoint: Identifiable {
     return withDependencies {
         $0.persistenceClient = .mock(rides: rides)
     } operation: {
-        NavigationStack {
-            RidesView(
-                store: Store(initialState: RidesFeature.State()) { RidesFeature() },
-                onStartRide: {}
-            )
-        }
+        RidesNavigationStack(
+            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+            onStartRide: {}
+        )
     }
 }
 
@@ -305,11 +314,9 @@ struct ElevationPoint: Identifiable {
     withDependencies {
         $0.persistenceClient = .mock()
     } operation: {
-        NavigationStack {
-            RidesView(
-                store: Store(initialState: RidesFeature.State()) { RidesFeature() },
-                onStartRide: {}
-            )
-        }
+        RidesNavigationStack(
+            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+            onStartRide: {}
+        )
     }
 }
