@@ -2,9 +2,13 @@ import ComposableArchitecture
 import CoreGraphics
 import Foundation
 import MapKit
+import os
 
-/// S14's row thumbnail (#177): the ride's recorded track over a static map, rendered once at
-/// ride end so the list never stands up a live `Map` per row (UX.md §S14).
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "recording")
+
+/// S14's row thumbnail (#177): the ride's recorded track over a static map, rendered once
+/// after the ride ends so the list never stands up a live `Map` per row (UX.md §S14).
 ///
 /// Everything that decides what the image shows — which points are drawn, how the map is
 /// framed, where the line lands — is plain arithmetic here. The one step that needs map tiles
@@ -47,20 +51,54 @@ enum RideMapThumbnail {
         return path
     }
 
-    /// Renders both appearances from the ride's persisted track and stores them on the ride.
-    /// A ride with no drawable track is left without one, which is not an error.
+    /// Renders the thumbnail of every finished ride that lacks one, newest first, and returns
+    /// how many it stored.
+    ///
+    /// The one way thumbnails get made, whichever way a ride ended. It runs right after a
+    /// Finish, where the newest ride is the one just finished. It runs again at launch, which
+    /// catches rides AppFeature closed out and any earlier capture that failed. Offline at the
+    /// trailhead, or suspended mid-render, is then a thumbnail late rather than never.
+    ///
+    /// A ride with nothing to draw is skipped and looked at again next time, which is one
+    /// empty track fetch. The first failed render ends the batch: offline, every ride would
+    /// fail the same way, each one waiting on the network first.
+    @discardableResult
+    static func backfill() async -> Int {
+        @Dependency(\.persistenceClient) var persistenceClient
+        let rideIds: [UUID]
+        do {
+            rideIds = try await persistenceClient.fetchRideIdsMissingMapThumbnail()
+        } catch {
+            return 0 // Logged inside RidePersistenceActor.
+        }
+        var stored = 0
+        for rideId in rideIds {
+            do {
+                if try await capture(rideId: rideId) { stored += 1 }
+            } catch {
+                logger.error("Map thumbnail capture failed for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — retried next launch")
+                break
+            }
+        }
+        return stored
+    }
+
+    /// Renders both appearances from one ride's persisted track and stores them on the ride.
+    /// Returns false, having stored nothing, for a ride with no drawable track.
     ///
     /// Reads the track back from persistence, like `GPXExporter.generate`, so it has to run
     /// after the ride-end flush. Dependencies are resolved here rather than held in `static`
     /// properties for the reason given on `GPXExporter.generate` (#242).
-    static func capture(rideId: UUID) async throws {
+    @discardableResult
+    static func capture(rideId: UUID) async throws -> Bool {
         @Dependency(\.persistenceClient) var persistenceClient
         @Dependency(\.mapSnapshotClient) var mapSnapshotClient
         let segments = drawableSegments(try await persistenceClient.fetchTrackPoints(rideId))
-        guard !segments.isEmpty else { return }
+        guard !segments.isEmpty else { return false }
         let region = region(for: segments)
         async let light = mapSnapshotClient.render(region, segments, .light)
         async let dark = mapSnapshotClient.render(region, segments, .dark)
         try await persistenceClient.saveRideMapThumbnail(rideId, light, dark)
+        return true
     }
 }

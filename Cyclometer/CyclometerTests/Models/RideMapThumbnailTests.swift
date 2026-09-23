@@ -165,4 +165,50 @@ struct RideMapThumbnailTests {
         }
         #expect(saveCount.value == 0)
     }
+
+    // MARK: - Backfill
+
+    @Test("backfill captures every ride missing a thumbnail in the order given, skipping one with nothing to draw")
+    func backfillCapturesMissingRides() async {
+        let newest = UUID(), trainer = UUID(), oldest = UUID()
+        let saved = LockIsolated<[UUID]>([])
+
+        let stored = await withDependencies {
+            $0.persistenceClient = .mock(
+                trackPoints: [newest: Self.pausedRide, oldest: Self.pausedRide],
+                rideIdsMissingMapThumbnail: [newest, trainer, oldest],
+                onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
+            )
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in Data([1]) }
+        } operation: {
+            await RideMapThumbnail.backfill()
+        }
+
+        // The trainer ride has no track: skipped, not a failure, so the batch goes on.
+        #expect(saved.value == [newest, oldest])
+        #expect(stored == 2)
+    }
+
+    @Test("backfill stops at the first failed render: offline, every ride would fail the same way")
+    func backfillStopsAtFirstFailure() async {
+        let first = UUID(), second = UUID()
+        let renders = LockIsolated(0)
+
+        let stored = await withDependencies {
+            $0.persistenceClient = .mock(
+                trackPoints: [first: Self.pausedRide, second: Self.pausedRide],
+                rideIdsMissingMapThumbnail: [first, second]
+            )
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in
+                renders.withValue { $0 += 1 }
+                throw MapSnapshotError.unavailable
+            }
+        } operation: {
+            await RideMapThumbnail.backfill()
+        }
+
+        #expect(stored == 0)
+        // Light and dark for the first ride at most; the second ride is never tried.
+        #expect(renders.value <= 2)
+    }
 }

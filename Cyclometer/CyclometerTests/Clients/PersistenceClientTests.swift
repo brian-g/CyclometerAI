@@ -398,6 +398,27 @@ struct PersistenceClientTests {
         }
     }
 
+    @Test("fetchRideIdsMissingMapThumbnail returns finished rides without a thumbnail, newest first")
+    func ridesMissingMapThumbnail() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let update = { (id: UUID) in
+            RideSummaryUpdate(rideId: id, recordingState: .ended,
+                              durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 2, maxSpeedMPS: 3)
+        }
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        let older = UUID(), newer = UUID(), captured = UUID(), inProgress = UUID()
+        for (offset, id) in [older, newer, captured, inProgress].enumerated() {
+            try await client.createRide(id, base.addingTimeInterval(TimeInterval(offset) * 3_600), nil)
+        }
+        for id in [older, newer, captured] {
+            try await client.finalizeRide(id, base.addingTimeInterval(86_400), update(id), nil)
+        }
+        try await client.saveRideMapThumbnail(captured, Data([1]), Data([2]))
+
+        // Not the captured one, and not the ride still being recorded.
+        #expect(try await client.fetchRideIdsMissingMapThumbnail() == [newer, older])
+    }
+
     // MARK: - Ride read path (#173, for GPXExporter)
 
     @Test("fetchRide returns the ride's title and startedAt")

@@ -32,6 +32,15 @@ Branch: `feat/177-ride-map-thumbnail`
   its image exists. The row will need a refresh once the capture is saved.
 - Not done: a full UI drive of a real recorded ride (the render and the pipeline were each verified
   separately).
+- `/code-review xhigh` (14 findings). Fixed: capture was one-shot → `RideMapThumbnail.backfill()` is the
+  single mechanism (after Finish, at launch, after each close-out; stops at first failure; reloads
+  Rides when anything landed); teardown test waits on the save instead of draining (it was silently
+  sitting out the timeout on `rideFinished`'s TestClock poll); `#require` the ride id; finalize-failure
+  test counts renders at the end instead of reading 0 too early; redundant renderer scale; segments doc.
+  Declined: inline external storage (#248's list design owns what it fetches), next-ride cancelling a
+  previous ride-end effect (seconds-long window; guarded by the teardown test), double track fetch
+  (one-off, decoupled), antimeridian (RouteBounds' documented limit), temp-dir leak (not real: the mock's
+  `fetchRide` throws before the exporter writes). Full suite: 1196 + 91, 0 failures.
 
 ---
 

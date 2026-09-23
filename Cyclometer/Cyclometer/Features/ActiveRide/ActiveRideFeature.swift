@@ -589,19 +589,14 @@ struct ActiveRideFeature {
                         } catch {
                             // Logged inside RidePersistenceActor. The marker deliberately
                             // stays: AppFeature closes the ride out at next launch rather
-                            // than resuming a ride the rider already ended (#188), and
-                            // captures the thumbnail then.
+                            // than resuming a ride the rider already ended (#188).
                             return
                         }
 
                         // Last: the thumbnail needs map tiles from the network, and the
-                        // ride must be durably over without waiting on them (#177).
-                        do {
-                            try await RideMapThumbnail.capture(rideId: rideId)
-                        } catch {
-                            // A missing thumbnail leaves the row on its placeholder (#248).
-                            logger.error("Map thumbnail capture failed for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                        }
+                        // ride must be durably over without waiting on them (#177). This
+                        // ride is the newest without one; a failure is retried at launch.
+                        await RideMapThumbnail.backfill()
                     },
                     .run { [bleHRClient, variaRadarClient, locationClient] _ in
                         async let hr: Void = bleHRClient.disconnect()

@@ -33,6 +33,9 @@ struct PersistenceClient: Sendable {
     var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate, URL?) async throws -> Void
     /// Stores S14's map thumbnail, light then dark, rendered after the ride ended (#177).
     var saveRideMapThumbnail: @Sendable (UUID, Data, Data) async throws -> Void
+    /// Finished rides with no map thumbnail yet, newest first — what `RideMapThumbnail.backfill`
+    /// works through: a failed capture, a ride closed out at launch, one recorded before #177.
+    var fetchRideIdsMissingMapThumbnail: @Sendable () async throws -> [UUID]
     /// Inserts confirmed vehicle-pass events in one batch — `VehiclePassDetector`
     /// can legitimately confirm more than one on the same tick (#172, DataModel.md §3.4).
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
@@ -91,6 +94,7 @@ extension PersistenceClient: DependencyKey {
             updateRideSummary: { try await rideActor.updateRideSummary($0) },
             finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
             saveRideMapThumbnail: { try await rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
+            fetchRideIdsMissingMapThumbnail: { try await rideActor.rideIdsMissingMapThumbnail() },
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
             deleteRide: { try await deleteRideLive(id: $0, rideActor: rideActor, container: coreDataContainer) },
@@ -119,6 +123,7 @@ extension PersistenceClient: DependencyKey {
         updateRideSummary: { _ in },
         finalizeRide: { _, _, _, _ in },
         saveRideMapThumbnail: { _, _, _ in },
+        fetchRideIdsMissingMapThumbnail: { [] },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
         deleteRide: { _ in },

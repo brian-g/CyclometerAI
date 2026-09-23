@@ -1,10 +1,6 @@
 import ComposableArchitecture
 import Foundation
 import SwiftData
-import os
-
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "recording")
 
 /// Root feature — owns tab selection and active ride lifecycle.
 /// Navigation follows Apple Music pattern: Rides / Routes / Settings tabs.
@@ -144,6 +140,12 @@ struct AppFeature {
                     .run { [persistenceClient] send in
                         if let summary = try? await persistenceClient.fetchResumableRide() {
                             await send(.resumableRideFetched(summary))
+                        } else {
+                            // Retries any thumbnail a past Finish failed to capture (#177).
+                            // Only here: a ride closed out by `resumableRideFetched` runs
+                            // the backfill itself once its finalize lands, so the two never
+                            // race over the same ride.
+                            await Self.backfillMapThumbnails(send: send)
                         }
                     }
                 )
@@ -234,11 +236,9 @@ struct AppFeature {
                 // forever (invisible in RidesView, never exported) (#175 review).
                 guard state.activeRide == nil else {
                     return .run { [persistenceClient, date] send in
-                        let finalized = (try? await persistenceClient.finalizeRide(
-                            summary.rideId, date.now, summary, nil
-                        )) != nil
+                        try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
                         await send(.rides(.reloadRides))
-                        if finalized { await Self.captureMapThumbnail(rideId: summary.rideId) }
+                        await Self.backfillMapThumbnails(send: send)
                     }
                 }
 
@@ -254,7 +254,7 @@ struct AppFeature {
                             )
                             rideEndIntentClient.clear()
                             await send(.rides(.reloadRides))
-                            await Self.captureMapThumbnail(rideId: pending.rideId)
+                            await Self.backfillMapThumbnails(send: send)
                         } catch {
                             // Logged in RidePersistenceActor. The marker stays so the
                             // next launch tries again rather than resuming the ride.
@@ -428,13 +428,12 @@ struct AppFeature {
         }
     }
 
-    /// S14's thumbnail for a ride closed out here rather than by the rider's Finish, which
-    /// never reached `ActiveRideFeature`'s own capture (#177).
-    private static func captureMapThumbnail(rideId: UUID) async {
-        do {
-            try await RideMapThumbnail.capture(rideId: rideId)
-        } catch {
-            logger.error("Map thumbnail capture failed for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+    /// Thumbnails for rides that don't have one yet (#177): rides closed out here, which never
+    /// reached `ActiveRideFeature`'s Finish, and any capture that failed. Reloads the Rides tab
+    /// when any landed, since the list was loaded before them.
+    private static func backfillMapThumbnails(send: Send<Action>) async {
+        if await RideMapThumbnail.backfill() > 0 {
+            await send(.rides(.reloadRides))
         }
     }
 

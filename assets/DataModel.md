@@ -160,10 +160,11 @@ final class Ride {
 
     // MARK: - Map Thumbnail (#177)
     // S14's row image: the recorded track (mapTravelPath) over a muted static map with points
-    // of interest hidden, 56×56 pt @3x PNG. Rendered once after finalizeRide by
-    // RideMapThumbnail.capture (MKMapSnapshotter), one per appearance because a snapshot's
-    // base map cannot adapt after rendering. Nil for a ride with no drawable track, a failed
-    // capture, or one recorded before #177 — S14 shows a placeholder. S10 uses a live map.
+    // of interest hidden, 56×56 pt @3x PNG, one per appearance because a snapshot's base
+    // map cannot adapt after rendering. Rendered by RideMapThumbnail.backfill, which takes
+    // every finished ride still missing one: after each Finish, and at launch, so a failed
+    // capture (offline, suspended) or a ride from before #177 is filled in later. Nil until
+    // then, or for a ride with no drawable track — S14 shows a placeholder. S10 uses a live map.
     @Attribute(.externalStorage)
     var mapThumbnailLight: Data?
     @Attribute(.externalStorage)

@@ -52,8 +52,8 @@ extension MapSnapshotClient: DependencyKey {
         over snapshot: MKMapSnapshotter.Snapshot,
         traits: UITraitCollection
     ) throws -> Data {
+        // Scale comes from the traits' displayScale, so snapshot and canvas cannot disagree.
         let format = UIGraphicsImageRendererFormat(for: traits)
-        format.scale = RideMapThumbnail.scale
         let image = UIGraphicsImageRenderer(size: RideMapThumbnail.pointSize, format: format).image { context in
             snapshot.image.draw(at: .zero)
             let cgContext = context.cgContext

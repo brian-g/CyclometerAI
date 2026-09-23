@@ -32,8 +32,9 @@ extension TrackPointDTO {
     ///
     /// Consecutive runs, not a group-by: the points arrive ascending by timestamp, so a
     /// change of index is a boundary, and grouping by value would reorder the ride if an
-    /// index ever repeated. Always returns at least one segment, so a ride that recorded
-    /// no points still writes the one empty `<trkseg>` it always has.
+    /// index ever repeated. Always returns at least one segment, possibly empty — the GPX
+    /// export writes it as the one empty `<trkseg>` a pointless ride has always had. Callers
+    /// that draw or measure should drop segments too short for that (`RideMapThumbnail`).
     static func segments(of trackPoints: [TrackPointDTO]) -> [[TrackPointDTO]] {
         var segments: [[TrackPointDTO]] = [[]]
         for point in trackPoints {

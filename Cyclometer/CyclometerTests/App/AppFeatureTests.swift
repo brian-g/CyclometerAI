@@ -249,7 +249,8 @@ struct AppFeatureTests {
     /// cancellation the way a real snapshotter may, so this fails if that ever changes —
     /// which `ActiveRideFeature`'s own tests cannot see; only the composed reducer can.
     @Test("the map thumbnail is still captured although AppFeature tears the ride down on the same action")
-    func thumbnailSurvivesRideTeardown() async {
+    func thumbnailSurvivesRideTeardown() async throws {
+        let finalized = LockIsolated<[UUID]>([])
         let saved = LockIsolated<[UUID]>([])
         let store = TestStore(initialState: AppFeature.State()) {
             AppFeature()
@@ -262,8 +263,11 @@ struct AppFeatureTests {
             $0.locationClient = .testValue
             $0.hapticsClient = .testValue
             var client = PersistenceClient.mock(
+                onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
+            // A finalized ride is the one that is missing its thumbnail.
+            client.fetchRideIdsMissingMapThumbnail = { finalized.value }
             // Whatever id `.task` gave the ride, it has a track.
             client.fetchTrackPoints = { rideId in
                 [(43.070, -89.400), (43.071, -89.401)].map { latitude, longitude in
@@ -286,15 +290,19 @@ struct AppFeatureTests {
         await store.send(.startRideButtonTapped)
         await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
         await store.receive(\.activeRide.task)
-        let rideId = store.state.activeRide?.rideId
+        let rideId = try #require(store.state.activeRide?.rideId)
 
         await store.send(.activeRide(.pauseTapped))
         await store.send(.activeRide(.finishTapped))
         await store.send(.activeRide(.finishAlert(.presented(.confirmFinish))))
-        await store.finish()
+        // Waits on the save itself: the pipeline (flush → export → finalize → capture) has
+        // no action to receive, and draining the store would instead sit out its timeout on
+        // the Rides tab's `rideFinished` poll, asleep on a TestClock nobody advances.
+        await expectEventually { !saved.value.isEmpty }
+        await store.skipInFlightEffects(strict: false)
 
         #expect(store.state.activeRide == nil)
-        #expect(saved.value == [rideId].compactMap { $0 })
+        #expect(saved.value == [rideId])
     }
 
     /// #175 review's orphan: a resumable ride found after the rider already started a new
@@ -324,6 +332,7 @@ struct AppFeatureTests {
             $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
             $0.persistenceClient = .mock(
                 trackPoints: [orphan.rideId: track],
+                rideIdsMissingMapThumbnail: [orphan.rideId],
                 onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
@@ -332,7 +341,10 @@ struct AppFeatureTests {
         store.exhaustivity = .off
 
         await store.send(.resumableRideFetched(orphan))
-        await store.finish()
+        // Reloaded again once the thumbnail landed: the first reload came before it.
+        await store.receive(\.rides.reloadRides)
+        await store.receive(\.rides.reloadRides)
+        await store.finish(timeout: effectDrainTimeout)
 
         #expect(finalized.value == [orphan.rideId])
         #expect(saved.value == [orphan.rideId])
