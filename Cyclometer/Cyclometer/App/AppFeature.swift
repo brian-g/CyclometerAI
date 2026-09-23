@@ -429,11 +429,11 @@ struct AppFeature {
     }
 
     /// Thumbnails for rides that don't have one yet (#177): rides closed out here, which never
-    /// reached `ActiveRideFeature`'s Finish, and any capture that failed. Reloads the Rides tab
-    /// when any landed, since the list was loaded before them.
+    /// reached `ActiveRideFeature`'s Finish, and any capture that failed. Tells the Rides tab
+    /// when any landed, so rows already on screen go back for their image (#248).
     private static func backfillMapThumbnails(send: Send<Action>) async {
         if await RideMapThumbnail.backfill() > 0 {
-            await send(.rides(.reloadRides))
+            await send(.rides(.mapThumbnailsCaptured))
         }
     }
 

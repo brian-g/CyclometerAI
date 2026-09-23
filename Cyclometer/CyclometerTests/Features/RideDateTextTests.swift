@@ -28,12 +28,12 @@ struct RideDateTextTests {
 
     @Test("A ride earlier today reads \"Today\" with its time")
     func today() {
-        #expect(text(Self.date(2026, 9, 23, 7, 5)) == "Today 7:05\u{202F}AM")
+        #expect(text(Self.date(2026, 9, 23, 7, 5)) == "Today at 7:05\u{202F}AM")
     }
 
     @Test("A ride the previous day reads \"Yesterday\" with its time")
     func yesterday() {
-        #expect(text(Self.date(2026, 9, 22, 14, 5)) == "Yesterday 2:05\u{202F}PM")
+        #expect(text(Self.date(2026, 9, 22, 14, 5)) == "Yesterday at 2:05\u{202F}PM")
     }
 
     @Test("Two to six days back reads as the weekday", arguments: [
@@ -60,7 +60,7 @@ struct RideDateTextTests {
     @Test("The boundary is midnight, not a 24-hour span")
     func calendarDayBoundary() {
         let justAfterMidnight = Self.date(2026, 9, 23, 1, 0)
-        #expect(text(Self.date(2026, 9, 22, 23, 0), now: justAfterMidnight) == "Yesterday 11:00\u{202F}PM")
+        #expect(text(Self.date(2026, 9, 22, 23, 0), now: justAfterMidnight) == "Yesterday at 11:00\u{202F}PM")
         #expect(text(Self.date(2026, 9, 21, 23, 30), now: justAfterMidnight) == "Monday 11:30\u{202F}PM")
     }
 }

@@ -637,30 +637,21 @@ struct PersistenceClientTests {
         #expect(try await client.fetchRides().isEmpty)
     }
 
-    /// S14's row reads the thumbnail off the list summary (#248); a ride without one is nil
-    /// in both fields, which is what the row's placeholder keys on.
-    @Test("fetchRides carries each ride's map thumbnail, nil where none was captured")
-    func fetchRidesCarriesMapThumbnail() async throws {
-        let (client, _) = Self.makeLiveClient()
-        let base = Date(timeIntervalSince1970: 1_700_000_000)
+    /// S14's row reads its thumbnail per ride rather than with `fetchRides` (#248), so a
+    /// list reload doesn't pull every image off disk.
+    @Test("fetchRideMapThumbnail returns both stored appearances, nil for a ride without them or an unknown id")
+    func fetchRideMapThumbnailRoundTrips() async throws {
+        let (client, _) = PersistenceClientTests.makeLiveClient()
         let captured = UUID(), uncaptured = UUID()
-        for (id, startedAt) in [(captured, base.addingTimeInterval(86_400)), (uncaptured, base)] {
-            try await client.createRide(id, startedAt, nil)
-            try await client.finalizeRide(id, startedAt.addingTimeInterval(3_600), RideSummaryUpdate(
-                rideId: id, recordingState: .ended,
-                durationSeconds: 3_600, distanceMeters: 42_000,
-                averageSpeedMPS: 6, maxSpeedMPS: 12
-            ), nil)
+        for id in [captured, uncaptured] {
+            try await client.createRide(id, Date(), nil)
         }
         try await client.saveRideMapThumbnail(captured, Data("light".utf8), Data("dark".utf8))
 
-        let rides = try await client.fetchRides()
-
-        #expect(rides.map(\.id) == [captured, uncaptured])
-        #expect(rides[0].mapThumbnailLight == Data("light".utf8))
-        #expect(rides[0].mapThumbnailDark == Data("dark".utf8))
-        #expect(rides[1].mapThumbnailLight == nil)
-        #expect(rides[1].mapThumbnailDark == nil)
+        #expect(try await client.fetchRideMapThumbnail(captured)
+                == RideMapThumbnailData(light: Data("light".utf8), dark: Data("dark".utf8)))
+        #expect(try await client.fetchRideMapThumbnail(uncaptured) == nil)
+        #expect(try await client.fetchRideMapThumbnail(UUID()) == nil)
     }
 
     // MARK: - VehiclePassEvent (#172)

@@ -36,6 +36,10 @@ struct PersistenceClient: Sendable {
     /// Finished rides with no map thumbnail yet, newest first — what `RideMapThumbnail.backfill`
     /// works through: a failed capture, a ride closed out at launch, one recorded before #177.
     var fetchRideIdsMissingMapThumbnail: @Sendable () async throws -> [UUID]
+    /// One ride's map thumbnail, both appearances, or nil when it has none yet (#248). Read
+    /// per row as S14 shows it rather than with `fetchRides`, so a reload of the list never
+    /// pulls every ride's images off disk.
+    var fetchRideMapThumbnail: @Sendable (UUID) async throws -> RideMapThumbnailData?
     /// Inserts confirmed vehicle-pass events in one batch — `VehiclePassDetector`
     /// can legitimately confirm more than one on the same tick (#172, DataModel.md §3.4).
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
@@ -95,6 +99,7 @@ extension PersistenceClient: DependencyKey {
             finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
             saveRideMapThumbnail: { try await rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
             fetchRideIdsMissingMapThumbnail: { try await rideActor.rideIdsMissingMapThumbnail() },
+            fetchRideMapThumbnail: { try await rideActor.fetchMapThumbnail(id: $0) },
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
             deleteRide: { try await deleteRideLive(id: $0, rideActor: rideActor, container: coreDataContainer) },
@@ -124,6 +129,7 @@ extension PersistenceClient: DependencyKey {
         finalizeRide: { _, _, _, _ in },
         saveRideMapThumbnail: { _, _, _ in },
         fetchRideIdsMissingMapThumbnail: { [] },
+        fetchRideMapThumbnail: { _ in nil },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
         deleteRide: { _ in },

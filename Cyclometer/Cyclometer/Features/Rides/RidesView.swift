@@ -27,8 +27,10 @@ struct RidesView: View {
                     NavigationLink {
                         RideDetailView(ride: .recordedRide(timestamp: ride.startedAt))
                     } label: {
-                        RideRow(ride: ride, unitSystem: store.unitSystem, now: now)
+                        RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
+                                unitSystem: store.unitSystem, now: now)
                     }
+                    .onAppear { store.send(.rowAppeared(ride.id)) }
                     // Trailing Delete only. §S14's leading Sync and Make Route wait on
                     // service sync (Phase 2) and a route-from-ride model, neither built (#248).
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -67,6 +69,7 @@ struct RidesView: View {
 /// the next render without a reload.
 struct RideRow: View {
     let ride: RideListSummary
+    let thumbnail: RidesFeature.Thumbnail?
     let unitSystem: UnitSystem
     let now: Date
 
@@ -80,7 +83,7 @@ struct RideRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            RideThumbnail(light: ride.mapThumbnailLight, dark: ride.mapThumbnailDark)
+            RideThumbnail(thumbnail: thumbnail)
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 // Every ride's `title` is "" until #249's rename field ships — a blank row
                 // would read as broken, so this falls back rather than showing empty text.
@@ -112,23 +115,19 @@ struct RideRow: View {
     }
 }
 
-/// The ride's stored map image (#177) in the current appearance, or a placeholder for a ride
-/// with none — recorded before #177, with no GPS track, or whose capture hasn't landed yet.
-/// Same frame either way, so a missing image never collapses the row. Decoded here rather
-/// than when the list loads, so only rows on screen pay for it.
+/// The ride's stored map image (#177) in the current appearance, or a placeholder while it
+/// loads and for a ride with none — recorded before #177, with no GPS track, or whose capture
+/// hasn't landed yet. Same frame either way, so a missing image never collapses the row.
 struct RideThumbnail: View {
-    let light: Data?
-    let dark: Data?
+    let thumbnail: RidesFeature.Thumbnail?
     @Environment(\.colorScheme) private var colorScheme
-
-    private var image: UIImage? {
-        (colorScheme == .dark ? dark : light).flatMap(UIImage.init(data:))
-    }
 
     var body: some View {
         Group {
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+            if case .loaded(let images) = thumbnail {
+                Image(uiImage: colorScheme == .dark ? images.dark : images.light)
+                    .resizable()
+                    .scaledToFill()
             } else {
                 Color.cyBgTertiary
                     .overlay {

@@ -42,8 +42,28 @@ Branch: `feat/248-ride-history`
   - A test build against a stale `Cyclometer` module reported "extra arguments"; a fresh
     `-derivedDataPath` fixed it.
   - ICU puts U+202F before AM/PM.
-- Not touched: `assets/design/Design.sketch` shows as modified, though it was only read over MCP.
-  Left out of the commit; Brian to decide.
+- Not touched: `assets/design/Design.sketch` showed as modified after MCP reads. Left out of the
+  commit; it's clean again as of the review round.
+
+### `/code-review high` follow-up (Brian chose the fixes)
+- **Findings 1–2, real regressions from my move:** the capture started from inside the list poll, so a
+  delete or reload cancelled it, and the poll's 2 s ceiling fired the capture before a slow finalize.
+  Now `rideFinished` starts a second effect on its own id: it waits for the finalize (1 s reads, up to
+  60 s), then sends `captureMapThumbnails`. Mutation-proved by `deleteBeforeFinalizeKeepsTheCapture`.
+- **#8:** first attempt routed `AppFeature`'s launch backfill through `.rides(.captureMapThumbnails)`.
+  That put a timing-dependent received action into every exhaustive `.task` test (onboarding tests
+  failed). Replaced by `MapThumbnailGate`, a dependency so parallel tests don't share it, which runs
+  backfills one at a time. The first version of its test passed without the gate (50 yields never
+  forced an overlap). The rewrite gives the second call 200 ms of real time and asserts it hasn't
+  read yet: it fails unguarded and passes guarded.
+- **#4/#5:** thumbnails left `RideListSummary`. Rows request theirs on appear through
+  `fetchRideMapThumbnail`, decoded once off-main (`byPreparingForDisplay`) into
+  `RidesFeature.State.thumbnails`. After a capture, rows on screen marked `.missing` read again.
+- **#6/#10:** a cached `DateFormatter` (Mutex) with the locale's relative pattern: "Today at 7:45 AM".
+  Cost: "Yesterday at 2:0…" truncates beside a wide time value.
+- **#9:** the poll sends the last read's failure instead of an empty success.
+- The simulator drive was repeated: placeholder, then the image with no relaunch, then the image again
+  after a relaunch via the per-row read.
 
 ---
 

@@ -86,28 +86,26 @@ struct RidesFeatureTests {
     func rideFinishedPollsUntilRideAppears() async {
         let testClock = TestClock()
         let ride = Self.summary()
-        let callCount = LockIsolated(0)
+        let finalized = LockIsolated(false)
         let store = TestStore(initialState: RidesFeature.State()) {
             RidesFeature()
         } withDependencies: {
             $0.continuousClock = testClock
             var client = PersistenceClient.mock()
-            client.fetchRides = {
-                let count = callCount.withValue { $0 += 1; return $0 }
-                return count >= 2 ? [ride] : []
-            }
+            client.fetchRides = { finalized.value ? [ride] : [] }
             $0.persistenceClient = client
         }
 
         await store.send(.rideFinished(ride.id))
+        finalized.setValue(true)
         await testClock.advance(by: .milliseconds(200))
         await store.receive(\.ridesResponse) {
             $0.hasLoaded = true
             $0.rides = [ride]
         }
+        // The thumbnail's own wait reads once a second.
+        await testClock.advance(by: .seconds(1))
         await store.receive(\.captureMapThumbnails)
-
-        #expect(callCount.value == 2)
     }
 
     /// A write that never lands (or a finalize that genuinely failed) must not poll
@@ -115,17 +113,11 @@ struct RidesFeatureTests {
     @Test("rideFinished gives up after its poll ceiling rather than waiting forever")
     func rideFinishedGivesUpAfterCeiling() async {
         let testClock = TestClock()
-        let callCount = LockIsolated(0)
         let store = TestStore(initialState: RidesFeature.State()) {
             RidesFeature()
         } withDependencies: {
             $0.continuousClock = testClock
-            var client = PersistenceClient.mock()
-            client.fetchRides = {
-                callCount.withValue { $0 += 1 }
-                return []
-            }
-            $0.persistenceClient = client
+            $0.persistenceClient = .mock()
         }
 
         await store.send(.rideFinished(UUID()))
@@ -133,9 +125,35 @@ struct RidesFeatureTests {
         await store.receive(\.ridesResponse) {
             $0.hasLoaded = true
         }
+        // The thumbnail waits longer, then captures anyway: nothing new to find.
+        await testClock.advance(by: .seconds(60))
         await store.receive(\.captureMapThumbnails)
+    }
 
-        #expect(callCount.value == 10)
+    /// Pre-existing until the #248 review: a read failing every time was sent as an empty
+    /// success, which cleared the list and claimed "No Rides Yet" with rides on disk.
+    @Test("rideFinished keeps the list when every read fails, rather than emptying it")
+    func rideFinishedKeepsListWhenReadsFail() async {
+        let testClock = TestClock()
+        let existing = Self.summary()
+        var state = RidesFeature.State()
+        state.rides = [existing]
+        state.hasLoaded = true
+        let store = TestStore(initialState: state) {
+            RidesFeature()
+        } withDependencies: {
+            $0.continuousClock = testClock
+            var client = PersistenceClient.mock()
+            client.fetchRides = { throw PersistenceError.rideNotFound }
+            $0.persistenceClient = client
+        }
+
+        await store.send(.rideFinished(UUID()))
+        await testClock.advance(by: .seconds(2))
+        await store.receive(\.ridesResponse.failure)
+        #expect(store.state.rides == [existing])
+        await testClock.advance(by: .seconds(60))
+        await store.receive(\.captureMapThumbnails)
     }
 
     // MARK: - Map thumbnail (#248)
@@ -152,103 +170,93 @@ struct RidesFeatureTests {
         }
     }
 
-    /// The row is already on screen with the placeholder when the capture lands, so without a
-    /// second read it stays that way until the tab remounts.
-    @Test("rideFinished captures the ride's map thumbnail once it lands, then reloads the list")
-    func rideFinishedCapturesThumbnailAndReloads() async {
+    /// A PNG that decodes, so the row's images are real rather than a stand-in `Data`.
+    private static let png: Data = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { context in
+        UIColor.gray.setFill()
+        context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+    }
+
+    private static func isLoaded(_ thumbnail: RidesFeature.Thumbnail?) -> Bool {
+        if case .loaded = thumbnail { return true }
+        return false
+    }
+
+    @Test("a row's first appearance reads and decodes its thumbnail, once")
+    func rowAppearanceLoadsThumbnail() async {
         let ride = Self.summary()
-        let captured = LockIsolated(false)
+        let reads = LockIsolated(0)
         let store = TestStore(initialState: RidesFeature.State()) {
             RidesFeature()
         } withDependencies: {
-            var client = PersistenceClient.mock(trackPoints: [ride.id: Self.track(ride.id)])
-            client.fetchRides = {
-                captured.value
-                    ? [RideListSummary(id: ride.id, title: ride.title, startedAt: ride.startedAt,
-                                       distanceMeters: ride.distanceMeters,
-                                       durationSeconds: ride.durationSeconds,
-                                       mapThumbnailLight: Data([1]), mapThumbnailDark: Data([2]))]
-                    : [ride]
+            var client = PersistenceClient.mock()
+            client.fetchRideMapThumbnail = { _ in
+                reads.withValue { $0 += 1 }
+                return RideMapThumbnailData(light: Self.png, dark: Self.png)
             }
-            client.fetchRideIdsMissingMapThumbnail = { captured.value ? [] : [ride.id] }
-            client.saveRideMapThumbnail = { _, _, _ in captured.setValue(true) }
             $0.persistenceClient = client
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, style in Data([style == .dark ? 2 : 1]) }
         }
+        store.exhaustivity = .off(showSkippedAssertions: false)
 
-        await store.send(.rideFinished(ride.id))
-        await store.receive(\.ridesResponse) {
-            $0.hasLoaded = true
-            $0.rides = [ride]
+        await store.send(.rowAppeared(ride.id)) {
+            $0.thumbnails[ride.id] = .loading
         }
-        await store.receive(\.captureMapThumbnails)
-        await store.receive(\.reloadRides)
-        await store.receive(\.ridesResponse) {
-            $0.rides[0].mapThumbnailLight = Data([1])
-            $0.rides[0].mapThumbnailDark = Data([2])
-        }
+        await store.receive(\.thumbnailLoaded)
+        #expect(Self.isLoaded(store.state.thumbnails[ride.id]))
+
+        // Scrolled away and back: already loaded, so no second read.
+        await store.send(.rowAppeared(ride.id))
+        #expect(reads.value == 1)
     }
 
-    /// A delete cancels `CancelID.reload` so a late read can't resurrect the row. The capture
-    /// must not sit under that id: deleting an old ride in the seconds after a Finish would
-    /// otherwise throw away the new ride's render and leave it to the next launch.
-    @Test("a delete while the thumbnail renders doesn't cancel the render")
-    func deleteDuringCaptureKeepsTheCapture() async {
+    @Test("a ride with no stored image shows as missing")
+    func rowWithoutImageIsMissing() async {
         let ride = Self.summary()
-        let older = Self.summary(title: "Older", startedAt: Date(timeIntervalSince1970: 1_600_000_000))
-        let captured = LockIsolated(false)
-        let (renderStarted, renderStartedContinuation) = AsyncStream<Void>.makeStream()
-        let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
         let store = TestStore(initialState: RidesFeature.State()) {
             RidesFeature()
         } withDependencies: {
-            var client = PersistenceClient.mock(trackPoints: [ride.id: Self.track(ride.id)])
-            client.fetchRides = {
-                captured.value
-                    ? [RideListSummary(id: ride.id, title: ride.title, startedAt: ride.startedAt,
-                                       distanceMeters: ride.distanceMeters,
-                                       durationSeconds: ride.durationSeconds,
-                                       mapThumbnailLight: Data([1]), mapThumbnailDark: Data([2]))]
-                    : [ride, older]
-            }
-            client.fetchRideIdsMissingMapThumbnail = { captured.value ? [] : [ride.id] }
-            client.saveRideMapThumbnail = { _, _, _ in captured.setValue(true) }
-            $0.persistenceClient = client
-            // Holds the first render until the delete has gone through.
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, style in
-                if style == .light {
-                    renderStartedContinuation.yield()
-                    for await _ in release { break }
-                }
-                try Task.checkCancellation()
-                return Data([style == .dark ? 2 : 1])
-            }
+            $0.persistenceClient = .mock()
         }
 
-        await store.send(.rideFinished(ride.id))
-        await store.receive(\.ridesResponse) {
-            $0.hasLoaded = true
-            $0.rides = [ride, older]
+        await store.send(.rowAppeared(ride.id)) {
+            $0.thumbnails[ride.id] = .loading
         }
-        await store.receive(\.captureMapThumbnails)
-        for await _ in renderStarted { break }
-
-        await store.send(.deleteRecordedRide(older.id)) {
-            $0.rides = [ride]
+        await store.receive(\.thumbnailLoaded) {
+            $0.thumbnails[ride.id] = .missing
         }
-        releaseContinuation.yield()
-
-        await store.receive(\.reloadRides)
-        await store.receive(\.ridesResponse) {
-            $0.rides[0].mapThumbnailLight = Data([1])
-            $0.rides[0].mapThumbnailDark = Data([2])
-        }
-        #expect(captured.value)
     }
 
-    /// A trainer ride, or one already captured: nothing new to show, so no second read.
-    @Test("rideFinished doesn't reload when the backfill stored nothing")
-    func rideFinishedSkipsReloadWhenNothingCaptured() async {
+    /// The row is already on screen with the placeholder when the capture lands, and it
+    /// won't appear again, so the reducer has to go back for it.
+    @Test("after a Finish, a row on screen without an image picks up the capture")
+    func captureRefreshesMissingRows() async {
+        let ride = Self.summary()
+        let captured = LockIsolated(false)
+        var state = RidesFeature.State()
+        state.thumbnails[ride.id] = .missing
+        let store = TestStore(initialState: state) {
+            RidesFeature()
+        } withDependencies: {
+            var client = PersistenceClient.mock(trackPoints: [ride.id: Self.track(ride.id)], rides: [ride])
+            client.fetchRideIdsMissingMapThumbnail = { captured.value ? [] : [ride.id] }
+            client.saveRideMapThumbnail = { _, _, _ in captured.setValue(true) }
+            client.fetchRideMapThumbnail = { _ in
+                captured.value ? RideMapThumbnailData(light: Self.png, dark: Self.png) : nil
+            }
+            $0.persistenceClient = client
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in Self.png }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.rideFinished(ride.id))
+        await store.receive(\.captureMapThumbnails)
+        await store.receive(\.mapThumbnailsCaptured)
+        await store.receive(\.thumbnailLoaded)
+        #expect(Self.isLoaded(store.state.thumbnails[ride.id]))
+    }
+
+    /// A trainer ride, or one already captured: nothing new, so no rows are re-read.
+    @Test("a capture that stores nothing doesn't re-read any rows")
+    func captureOfNothingReadsNothing() async {
         let ride = Self.summary()
         let store = TestStore(initialState: RidesFeature.State()) {
             RidesFeature()
@@ -262,6 +270,115 @@ struct RidesFeatureTests {
             $0.rides = [ride]
         }
         await store.receive(\.captureMapThumbnails)
-        // Exhaustive: a `reloadRides` would fail the test here.
+        // Exhaustive: a `mapThumbnailsCaptured` would fail the test here.
+    }
+
+    /// The #248 review's finding: the capture used to start from inside the list's poll,
+    /// so a delete in the seconds after a Finish, before the finalize had landed, cancelled
+    /// it before it began.
+    @Test("a delete while the ride is still finalizing doesn't stop its thumbnail")
+    func deleteBeforeFinalizeKeepsTheCapture() async {
+        let testClock = TestClock()
+        let ride = Self.summary()
+        let older = Self.summary(title: "Older")
+        let finalized = LockIsolated(false)
+        let captured = LockIsolated(false)
+        var state = RidesFeature.State()
+        state.rides = [older]
+        let store = TestStore(initialState: state) {
+            RidesFeature()
+        } withDependencies: {
+            $0.continuousClock = testClock
+            var client = PersistenceClient.mock(trackPoints: [ride.id: Self.track(ride.id)])
+            client.fetchRides = { finalized.value ? [ride] : [older] }
+            client.fetchRideIdsMissingMapThumbnail = { finalized.value && !captured.value ? [ride.id] : [] }
+            client.saveRideMapThumbnail = { _, _, _ in captured.setValue(true) }
+            $0.persistenceClient = client
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in Self.png }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.rideFinished(ride.id))
+        await store.send(.deleteRecordedRide(older.id))
+        finalized.setValue(true)
+        await testClock.advance(by: .seconds(1))
+        await store.receive(\.captureMapThumbnails)
+        await store.receive(\.mapThumbnailsCaptured)
+        #expect(captured.value)
+    }
+
+    /// Once rendering, the capture must not sit under the list's cancel id either.
+    @Test("a delete while the thumbnail renders doesn't cancel the render")
+    func deleteDuringCaptureKeepsTheCapture() async {
+        let ride = Self.summary()
+        let older = Self.summary(title: "Older", startedAt: Date(timeIntervalSince1970: 1_600_000_000))
+        let captured = LockIsolated(false)
+        let (renderStarted, renderStartedContinuation) = AsyncStream<Void>.makeStream()
+        let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
+        let store = TestStore(initialState: RidesFeature.State()) {
+            RidesFeature()
+        } withDependencies: {
+            var client = PersistenceClient.mock(trackPoints: [ride.id: Self.track(ride.id)], rides: [ride, older])
+            client.fetchRideIdsMissingMapThumbnail = { captured.value ? [] : [ride.id] }
+            client.saveRideMapThumbnail = { _, _, _ in captured.setValue(true) }
+            $0.persistenceClient = client
+            // Holds the first render until the delete has gone through.
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, style in
+                if style == .light {
+                    renderStartedContinuation.yield()
+                    for await _ in release { break }
+                }
+                try Task.checkCancellation()
+                return Self.png
+            }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.rideFinished(ride.id))
+        await store.receive(\.captureMapThumbnails)
+        for await _ in renderStarted { break }
+
+        await store.send(.deleteRecordedRide(older.id))
+        releaseContinuation.yield()
+
+        await store.receive(\.mapThumbnailsCaptured)
+        #expect(captured.value)
+    }
+
+    /// Every capture shares one id and the newest wins, so an offline launch's backfill and
+    /// a Finish don't both render and save the same rides.
+    @Test("a second capture replaces the one in flight rather than running beside it")
+    func captureCancelsTheOneInFlight() async {
+        let ride = Self.summary()
+        let saves = LockIsolated(0)
+        let renders = LockIsolated(0)
+        let (firstStarted, firstStartedContinuation) = AsyncStream<Void>.makeStream()
+        let store = TestStore(initialState: RidesFeature.State()) {
+            RidesFeature()
+        } withDependencies: {
+            var client = PersistenceClient.mock(trackPoints: [ride.id: Self.track(ride.id)])
+            client.fetchRideIdsMissingMapThumbnail = { saves.value > 0 ? [] : [ride.id] }
+            client.saveRideMapThumbnail = { _, _, _ in saves.withValue { $0 += 1 } }
+            $0.persistenceClient = client
+            // The first render hangs until cancelled, like one waiting on a dead network.
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in
+                let render = renders.withValue { $0 += 1; return $0 }
+                if render == 1 {
+                    firstStartedContinuation.yield()
+                    try await Task.never()
+                }
+                return Self.png
+            }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.captureMapThumbnails)
+        for await _ in firstStarted { break }
+        await store.send(.captureMapThumbnails)
+        await store.receive(\.mapThumbnailsCaptured)
+
+        // The first run never saves: it was cancelled with a render still hanging. One
+        // save, from the second run, rather than one from each.
+        #expect(saves.value == 1)
     }
 }

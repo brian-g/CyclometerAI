@@ -40,12 +40,12 @@ final class RidesSnapshotTests: XCTestCase {
 
     /// A stand-in for a stored thumbnail: a trace in `cyMapTravelPath` over `cyBgSecondary`,
     /// each resolved for the appearance it stands in for, like the real capture.
-    private static func thumbnail(_ style: UIUserInterfaceStyle) -> Data {
+    private static func thumbnail(_ style: UIUserInterfaceStyle) -> UIImage {
         let traits = UITraitCollection(userInterfaceStyle: style)
         let size = CGSize(width: Spacing.rideThumbnail, height: Spacing.rideThumbnail)
         let format = UIGraphicsImageRendererFormat()
         format.scale = RideMapThumbnail.scale
-        return UIGraphicsImageRenderer(size: size, format: format).pngData { context in
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
             UIColor(Color.cyBgSecondary).resolvedColor(with: traits).setFill()
             context.fill(CGRect(origin: .zero, size: size))
             let path = UIBezierPath()
@@ -63,17 +63,22 @@ final class RidesSnapshotTests: XCTestCase {
     /// #177, or with no GPS track) and no title yet (#249's rename field hasn't shipped).
     private static let rides: [RideListSummary] = [
         RideListSummary(id: UUID(), title: "All Around the Bush", startedAt: localDate(2026, 9, 23, 7, 45),
-                        distanceMeters: 22_370, durationSeconds: 2_721,
-                        mapThumbnailLight: thumbnail(.light), mapThumbnailDark: thumbnail(.dark)),
+                        distanceMeters: 22_370, durationSeconds: 2_721),
         RideListSummary(id: UUID(), title: "River hill loop", startedAt: localDate(2026, 9, 22, 14, 5),
-                        distanceMeters: 36_050, durationSeconds: 4_712,
-                        mapThumbnailLight: thumbnail(.light), mapThumbnailDark: thumbnail(.dark)),
+                        distanceMeters: 36_050, durationSeconds: 4_712),
         RideListSummary(id: UUID(), title: "", startedAt: localDate(2026, 9, 20, 9, 10),
                         distanceMeters: 8_047, durationSeconds: 1_260),
         RideListSummary(id: UUID(), title: "Door County Century Weekend Ride", startedAt: localDate(2025, 8, 30, 6, 30),
-                        distanceMeters: 161_000, durationSeconds: 21_845,
-                        mapThumbnailLight: thumbnail(.light), mapThumbnailDark: thumbnail(.dark))
+                        distanceMeters: 161_000, durationSeconds: 21_845)
     ]
+
+    /// Every row's image as already loaded, except the third, which has none.
+    private static var thumbnails: [UUID: RidesFeature.Thumbnail] {
+        let images = RideThumbnailImages(light: thumbnail(.light), dark: thumbnail(.dark))
+        return Dictionary(uniqueKeysWithValues: rides.enumerated().map { index, ride in
+            (ride.id, index == 2 ? .missing : .loaded(images))
+        })
+    }
 
     // MARK: Harness
 
@@ -89,6 +94,8 @@ final class RidesSnapshotTests: XCTestCase {
             // state worth pinning is the one after the first read.
             var state = RidesFeature.State()
             state.rides = rides
+            // Seeded like the list: the rows' own reads are effects, never awaited here.
+            state.thumbnails = Self.thumbnails.filter { id, _ in rides.contains { $0.id == id } }
             state.hasLoaded = true
             return Store(initialState: state) {
                 RidesFeature()
