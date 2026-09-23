@@ -211,4 +211,51 @@ struct RideMapThumbnailTests {
         // Light and dark for the first ride at most; the second ride is never tried.
         #expect(renders.value <= 2)
     }
+
+    /// #248 review: a Finish's capture landing while the launch backfill still renders must
+    /// not render and save the same ride a second time.
+    @Test("an overlapping backfill waits for the one running, then finds nothing left to do")
+    func overlappingBackfillsRunOneAtATime() async {
+        let saves = LockIsolated(0)
+        let reads = LockIsolated(0)
+        let renders = LockIsolated(0)
+        let missing = LockIsolated([Self.rideId])
+        let (renderStarted, renderStartedContinuation) = AsyncStream<Void>.makeStream()
+        let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
+
+        await withDependencies {
+            var client = PersistenceClient.mock(trackPoints: [Self.rideId: Self.pausedRide])
+            client.fetchRideIdsMissingMapThumbnail = {
+                reads.withValue { $0 += 1 }
+                return missing.value
+            }
+            client.saveRideMapThumbnail = { _, _, _ in
+                saves.withValue { $0 += 1 }
+                missing.setValue([])
+            }
+            $0.persistenceClient = client
+            // Only the very first render holds, until the second backfill has had its chance.
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in
+                if renders.withValue({ $0 += 1; return $0 }) == 1 {
+                    renderStartedContinuation.yield()
+                    for await _ in release { break }
+                }
+                return Data([1])
+            }
+        } operation: {
+            async let first = RideMapThumbnail.backfill()
+            for await _ in renderStarted { break }
+            async let second = RideMapThumbnail.backfill()
+            // Real time, not yields: the second call runs on its own task. Unguarded, it reads
+            // the missing list within microseconds; one at a time, it can't until the first
+            // is done. A loaded machine can only make this pass wrongly, never fail wrongly.
+            try? await Task.sleep(for: .milliseconds(200))
+            #expect(reads.value == 1, "the second backfill started while the first was rendering")
+            releaseContinuation.yield()
+            let stored = await (first, second)
+            #expect(stored.0 == 1)
+            #expect(stored.1 == 0)
+        }
+        #expect(saves.value == 1)
+    }
 }
