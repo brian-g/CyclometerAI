@@ -11,7 +11,7 @@ Branch: `feat/177-ride-map-thumbnail`
 - [x] 6. Ride end: capture after finalize (no Task shield — mutation test showed ifLet's cancel never reaches this effect)
 - [x] 7. AppFeature recovery paths capture after finalize
 - [x] 8. Docs: DataModel §3.1, UX §S10/§S14, RideListSummary comment
-- [ ] 8b. Issue #177 edits + route-thumbnail follow-up — drafted, awaiting approval to post
+- [x] 8b. Issue #177 edited; route thumbnails filed as #273 (M9)
 - [x] 9. Tests (thumbnail, persistence, migration, ride end, AppFeature teardown + recovery); mutation checks both ways
 - [x] 10. Full local suite green (1193 Swift Testing + 91 XCTest, 0 failures; the 2 known issues are
       NavigationPipelineTests' existing `withKnownIssue`). Real MKMapSnapshotter render on the simulator
