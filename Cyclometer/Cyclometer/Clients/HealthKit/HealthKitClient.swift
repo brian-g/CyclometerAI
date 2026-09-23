@@ -17,6 +17,11 @@ private let restingHeartRateStalenessWindow: TimeInterval = 30 * 24 * 60 * 60
 /// HealthKit hiccup.
 private let heartRateStreamRetryDelay: Duration = .seconds(5)
 
+private enum WorkoutWriteError: LocalizedError {
+    case endsBeforeStart
+    var errorDescription: String? { "the ride ends before it starts (device clock changed mid-ride?)" }
+}
+
 /// The app's single `HKHealthStore`, shared with `PermissionProbes` so authorization
 /// and data reads talk to the same handle rather than two.
 enum HealthKitStore {
@@ -182,8 +187,13 @@ extension HealthKitClient {
     /// failure here can only cost the workout, which is logged rather than surfaced — §S10
     /// leaves notifying the rider open.
     private static func saveWorkout(_ workout: RideWorkout, _ store: HKHealthStore) async throws {
+        var builder: HKWorkoutBuilder?
         do {
-            if let existing = try await overlappingCyclingWorkout(workout, store) {
+            // `HKQuantitySample` raises an Objective-C exception, which Swift can't catch, on an
+            // end before its start. A clock set back mid-ride can produce one.
+            guard workout.endedAt > workout.startedAt else { throw WorkoutWriteError.endsBeforeStart }
+
+            if let existing = await overlappingCyclingWorkout(workout, store) {
                 logger.notice(
                     "workout for ride \(workout.rideId, privacy: .public) skipped — \(existing.sourceRevision.source.name, privacy: .public) already recorded one over the same time"
                 )
@@ -193,26 +203,31 @@ extension HealthKitClient {
             let configuration = HKWorkoutConfiguration()
             configuration.activityType = .cycling
             configuration.locationType = .outdoor
-            let builder = HKWorkoutBuilder(healthStore: store, configuration: configuration, device: .local())
+            let started = HKWorkoutBuilder(healthStore: store, configuration: configuration, device: .local())
+            builder = started
 
-            try await builder.beginCollection(at: workout.startedAt)
-            // A ride that never moved has no distance to record, and a zero-length sample
-            // adds nothing the workout's own start and end don't already say.
-            if workout.distanceMeters > 0 {
-                try await builder.addSamples([HKQuantitySample(
+            try await started.beginCollection(at: workout.startedAt)
+            // A ride that never moved has no distance to record. Share access is per type on
+            // HealthKit's sheet: a rider can allow Workouts and leave Cycling Distance off, and
+            // then the sample would fail the whole workout rather than just go missing.
+            if workout.distanceMeters > 0,
+               store.authorizationStatus(for: PermissionsClient.distanceCyclingType) == .sharingAuthorized {
+                try await started.addSamples([HKQuantitySample(
                     type: PermissionsClient.distanceCyclingType,
                     quantity: HKQuantity(unit: .meter(), doubleValue: workout.distanceMeters),
                     start: workout.startedAt,
-                    end: workout.endedAt
+                    end: workout.endedAt,
+                    // Its own sync identifier: the workout's replaces only the workout, and a
+                    // rewrite would otherwise leave a second sample doubling the ride's distance.
+                    metadata: syncMetadata("\(workout.rideId.uuidString)-distance")
                 )])
             }
-            try await builder.addMetadata([
-                HKMetadataKeySyncIdentifier: workout.rideId.uuidString,
-                HKMetadataKeySyncVersion: 1,
-            ])
-            try await builder.endCollection(at: workout.endedAt)
-            _ = try await builder.finishWorkout()
+            try await started.addMetadata(syncMetadata(workout.rideId.uuidString))
+            try await started.endCollection(at: workout.endedAt)
+            _ = try await started.finishWorkout()
         } catch {
+            // Nothing half-written is left behind: any sample the builder already took goes too.
+            builder?.discardWorkout()
             logger.error(
                 "workout write failed for ride \(workout.rideId, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
@@ -220,7 +235,24 @@ extension HealthKitClient {
         }
     }
 
-    private static func overlappingCyclingWorkout(_ workout: RideWorkout, _ store: HKHealthStore) async throws -> HKWorkout? {
+    private static func syncMetadata(_ identifier: String) -> [String: Any] {
+        [HKMetadataKeySyncIdentifier: identifier, HKMetadataKeySyncVersion: 1]
+    }
+
+    /// Best effort, like a denied read: a query that fails (a locked device's store, say)
+    /// counts as "none found" rather than costing the workout.
+    private static func overlappingCyclingWorkout(_ workout: RideWorkout, _ store: HKHealthStore) async -> HKWorkout? {
+        do {
+            return try await queryOverlappingCyclingWorkout(workout, store)
+        } catch {
+            logger.notice(
+                "overlap check failed for ride \(workout.rideId, privacy: .public), writing anyway: \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+    }
+
+    private static func queryOverlappingCyclingWorkout(_ workout: RideWorkout, _ store: HKHealthStore) async throws -> HKWorkout? {
         let fromOtherSources = NSCompoundPredicate(andPredicateWithSubpredicates: [
             HKQuery.predicateForWorkouts(with: .cycling),
             // No options: any workout that overlaps the ride at all, not only one inside it.

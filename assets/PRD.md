@@ -1223,7 +1223,7 @@ Cyclometer/
 - High contrast: tested with iOS Increase Contrast enabled
 
 ### Privacy
-- HealthKit data: read-only, apart from the `HKWorkout` the app writes back at ride end (UX.md §S10); no data transmitted to any server
+- HealthKit data: read-only, apart from the `HKWorkout` and its cycling-distance sample the app writes back at ride end (UX.md §S10); no data transmitted to any server
 - GPS and ride data: stored locally only
 - Route surface lookup (#252): after a route is imported, its line — the planned route, never a recorded ride — is sent to the public OpenStreetMap Overpass API (`overpass-api.de`) to read the surface of the roads along it. Nothing else is sent, and no account or identifier is attached. A failed or offline lookup leaves the route without a surface; it is retried on the next launch, and the first failure in a batch stops the rest, so a refusing or unreachable server is not asked again and again. Surface data is credited "© OpenStreetMap contributors" wherever it is shown (ODbL)
 - BLE device identifiers: not transmitted externally

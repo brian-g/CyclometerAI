@@ -37,7 +37,8 @@ struct RideEndFailureTests {
         documentsDirectory: URL,
         rideEndIntentClient: RideEndIntentClient,
         mapSnapshotClient: MapSnapshotClient = .testValue,
-        healthKitClient: HealthKitClient = .testValue
+        healthKitClient: HealthKitClient = .testValue,
+        date: DateGenerator = .constant(testDate)
     ) -> TestStoreOf<ActiveRideFeature> {
         let store = TestStore(
             initialState: ActiveRideFeature.State(recordingState: .idle)
@@ -45,7 +46,7 @@ struct RideEndFailureTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
-            $0.date = .constant(testDate)
+            $0.date = date
             $0.uuid = .incrementing
             $0.hapticsClient = .testValue
             $0.audioClient = .testValue
@@ -262,12 +263,19 @@ struct RideEndFailureTests {
         // durably ended at the moment its workout left for Apple Health.
         let endedAtWhenWritten = LockIsolated<Date?>(nil)
 
+        // A clock that moves, one second per read: with a constant one the ride starts and ends
+        // at the same instant, and a workout built from the wrong one of the two still matches.
+        let reads = LockIsolated(0.0)
+        let movingClock = DateGenerator {
+            reads.withValue { $0 += 1; return Self.testDate.addingTimeInterval($0) }
+        }
         let store = Self.makeRideStore(
             persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory(),
             healthKitClient: .mock(onSaveWorkout: { workout in
                 endedAtWhenWritten.setValue(fetchRideIfPresent(workout.rideId, from: swiftDataStack)?.endedAt)
                 written.withValue { $0.append(workout) }
-            })
+            }),
+            date: movingClock
         )
         let rideId = await Self.runRideToEnd(store, speedMPS: 5) { _ in !written.value.isEmpty }
 
@@ -275,12 +283,14 @@ struct RideEndFailureTests {
         // Moving, so the distance comparison below can't pass on two zeros.
         #expect(ride.distanceMeters > 0)
         let workout = try #require(written.value.first)
+        let endedAt = try #require(ride.endedAt)
         #expect(written.value.count == 1)
-        #expect(endedAtWhenWritten.value == Self.testDate)
+        #expect(endedAtWhenWritten.value == endedAt)
+        #expect(ride.startedAt < endedAt)
         #expect(workout == RideWorkout(
             rideId: rideId,
             startedAt: ride.startedAt,
-            endedAt: try #require(ride.endedAt),
+            endedAt: endedAt,
             distanceMeters: ride.distanceMeters
         ))
     }

@@ -1996,6 +1996,25 @@ struct ActiveRideFeatureHeartRateTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    @Test("A ride start asks HealthKit for authorization before reading the profile, and a failed ask still reads it (#250)")
+    func rideStartRequestsHealthAuthorization() async {
+        // S01 is the only other place that asks, so an install onboarded before the workout
+        // write's types were added is prompted here or never.
+        let requests = LockIsolated(0)
+        let store = makeStore(healthKitClient: .mock(restingHeartRate: 48, onRequestAuthorization: {
+            requests.withValue { $0 += 1 }
+            throw CancellationError()
+        }))
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.healthProfileFetched) {
+            $0.healthRestingBPM = 48
+        }
+        #expect(requests.value == 1)
+        await store.skipInFlightEffects(strict: false)
+    }
+
     // MARK: - BLE → HealthKit fallback (#161)
 
     @Test("A live HealthKit BPM reaches the dashboard when nothing is paired")

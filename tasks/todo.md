@@ -30,6 +30,14 @@ Branch: `feat/250-hkworkout`
 - Fitness shows elapsed duration (32.8 s) vs the app's moving time (28 s) — no pause events, as documented.
 - Correction from Brian: a workout with nil `totalEnergyBurned` still counts toward the Exercise ring, just
   not Move. §S10's note and #274 were fixed to say so.
+- `/code-review xhigh` (15 findings). Fixed: distance sample skipped (not fatal) when its share is off; ride
+  start asks for authorization, since only S01 did and pre-#250 installs were never asked for the new types
+  (my plan assumed otherwise); a failed overlap query counts as "none found"; end ≤ start throws instead of
+  crashing; the distance sample gets its own sync id (simulator: a rewrite left the sample count unchanged,
+  where last session's pre-fix rewrite had added one); `discardWorkout()` on failure; the happy-path test
+  runs on a moving clock (mutation: start taken from end is now caught); PRD §14 privacy line. Filed: the
+  retry/backfill as #277 (M9). Left: overlap timing/threshold and multisport, pause events, delete-ride
+  → workout, thumbnail concurrency, `startedAt` in State. Full suite: 1437 passed, 0 failed.
 ---
 
 # #177 — Capture + persist a static map thumbnail at ride end
