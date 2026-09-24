@@ -23,6 +23,13 @@ struct AppPairingTests {
         case csc([UUID: Set<SensorRole>])
         case radar(UUID?)
         case hr(UUID?)
+        /// Every other way a client can be pointed at a peripheral. Nothing on the
+        /// launch, Start-sheet or ride path may make one (#180); recorded so a test
+        /// can prove that rather than assume it.
+        case cscPair(UUID)
+        case cscRoles(UUID, Set<SensorRole>)
+        case radarConnect(UUID)
+        case hrConnect(UUID)
     }
 
     static func makeStore(
@@ -47,10 +54,17 @@ struct AppPairingTests {
 
             var csc = BLECSCClient.testValue
             csc.setPairedSensors = { map in log.withValue { $0.append(.csc(map)) } }
+            csc.pair = { id in log.withValue { $0.append(.cscPair(id)) } }
+            csc.setRoles = { id, roles in log.withValue { $0.append(.cscRoles(id, roles)) } }
+            csc.discoveredDevices = { Self.strangers(.speedCadence) }
             var radar = VariaRadarClient.testValue
             radar.setPairedSensor = { id in log.withValue { $0.append(.radar(id)) } }
+            radar.connect = { id in log.withValue { $0.append(.radarConnect(id)) } }
+            radar.discoveredDevices = { Self.strangers(.radar) }
             var hr = BLEHRClient.testValue
             hr.setPairedSensor = { id in log.withValue { $0.append(.hr(id)) } }
+            hr.connect = { id in log.withValue { $0.append(.hrConnect(id)) } }
+            hr.discoveredDevices = { Self.strangers(.heartRate) }
 
             return TestStore(initialState: AppFeature.State()) {
                 AppFeature()
@@ -59,7 +73,27 @@ struct AppPairingTests {
                 $0.variaRadarClient = radar
                 $0.bleHRClient = hr
                 $0.defaultFileStorage = storage
+                // The ride-start path runs `activeRide(.task)` on its way past, as in
+                // `StartSheetPresentationTests`; these only keep it off unimplemented
+                // dependencies.
+                $0.continuousClock = TestClock()
+                $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+                $0.uuid = .incrementing
+                $0.hapticsClient = .testValue
+                $0.locationClient = .testValue
+                $0.permissionsClient = .testValue
             }
+        }
+    }
+
+    /// Someone else's sensor of `kind`, advertising and unpaired — what a group start
+    /// puts in range by the hundred.
+    nonisolated static func strangers(_ kind: SensorKind) -> AsyncStream<[DiscoveredDevice]> {
+        AsyncStream { continuation in
+            continuation.yield([
+                DiscoveredDevice(id: UUID(), name: "Stranger", kinds: [kind])
+            ])
+            continuation.finish()
         }
     }
 
@@ -120,5 +154,25 @@ struct AppPairingTests {
         await store.send(.task).finish()
 
         #expect(log.value == [.csc([:]), .radar(radarID), .hr(nil)])
+    }
+
+    /// #180: a sensor becomes the rider's only through S02 or S11. With strangers on
+    /// every discovery stream, launching, opening the Start sheet and riding must leave
+    /// nothing paired — the only client calls are the launch push closing each gate.
+    @Test("Launch, the Start sheet and a ride never pair an unknown sensor")
+    func rideFlowNeverPairsAStranger() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = Self.makeStore(pairedSensors: [], into: log)
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task).finish()
+        await store.send(.startRideButtonTapped)
+        await store.send(.startSheet(.presented(.task)))
+        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        await store.skipInFlightEffects(strict: false)
+
+        #expect(store.state.activeRide != nil)
+        #expect(log.value == [.csc([:]), .radar(nil), .hr(nil)])
+        #expect(store.state.preferences.pairedSensors.isEmpty)
     }
 }

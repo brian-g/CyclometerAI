@@ -1,5 +1,11 @@
 import ComposableArchitecture
 import Foundation
+import OSLog
+
+/// The rider's pairing decisions, logged at the moment they are made. The clients log
+/// what they were *told* (`paired strap → …`); without this, nothing recorded what told
+/// them, which is what left #180 unattributable from a sysdiagnose.
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "ble")
 
 /// S11 — Device Management. Scans for every supported sensor, lists what was found as
 /// one deduped device list, and pairs, unpairs or reassigns one at a time.
@@ -312,6 +318,7 @@ struct DeviceManagementFeature {
 
 
             case .pairButtonTapped(let id):
+                logger.notice("Pair tapped for \(id, privacy: .public)")
                 // Not while another pairing is in flight — the same rule `rowTapped`
                 // follows below, for the same reason. `pendingPairing` names exactly one
                 // interrogated peripheral and the dismiss path reads it to decide what to
@@ -334,6 +341,7 @@ struct DeviceManagementFeature {
                 return .run { _ in await bleCSCClient.pair(id) }
 
             case .rowTapped(let id):
+                logger.notice("row tapped for \(id, privacy: .public)")
                 // Not while a pairing is in flight. `pendingPairing` names the
                 // interrogated peripheral, and the dismiss path reads it to decide what
                 // to release — so a reassignment prompt raised on top of one would make
@@ -347,6 +355,7 @@ struct DeviceManagementFeature {
                 return .none
 
             case .roleDialog(.presented(.chose(let id, let roles))):
+                logger.notice("role chosen for \(id, privacy: .public): \(roles.map(\.displayName).sorted(), privacy: .public)")
                 // The prompt only ever offers speed and cadence, so a combo that is also
                 // a radar or a strap has to have those folded back in here — otherwise
                 // answering it would silently drop the role the same Pair tap claimed.
@@ -358,6 +367,7 @@ struct DeviceManagementFeature {
                 return commit(roles.union(alsoClaims), to: id, in: &state)
 
             case .collisionAlert(.presented(.replace(let id, let roles))):
+                logger.notice("Replace confirmed for \(id, privacy: .public): \(roles.map(\.displayName).sorted(), privacy: .public)")
                 state.pendingPairing = nil
                 return apply(roles, to: id, in: &state)
 
@@ -374,6 +384,7 @@ struct DeviceManagementFeature {
                 return .run { [bleCSCClient] _ in await bleCSCClient.unpair(id) }
 
             case .unpairButtonTapped(let id):
+                logger.notice("Unpair tapped for \(id, privacy: .public)")
                 // Every record this peripheral holds, across all three kinds. The flat
                 // list gives a device one row and one button (UX.md §S11), so this is
                 // the only thing Unpair can mean — the M6 reading, "CSC records only,
