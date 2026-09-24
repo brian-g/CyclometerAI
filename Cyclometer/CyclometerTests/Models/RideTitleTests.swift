@@ -57,6 +57,14 @@ struct RideTitleTests {
         #expect(RideTitle.shape(Self.line(from: Self.origin, to: (45.01, -93.0)) + back) == .outAndBack)
     }
 
+    /// Code review of #249: the second half of repeated laps runs over the first half, so comparing
+    /// it with *any* outbound point called four laps of a park an out-and-back.
+    @Test("repeated laps of a loop are still a loop")
+    func repeatedLaps() {
+        #expect(RideTitle.shape(Self.loop + Self.loop + Self.loop + Self.loop) == .loop)
+        #expect(RideTitle.shape(Self.loop + Self.loop) == .loop)
+    }
+
     /// Found driving the simulator: 22 s and 0.1 mi from the start was named "Evening Loop".
     @Test("a ride that never left the start's neighbourhood has no shape, though it ends near it")
     func wentNowhere() {

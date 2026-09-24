@@ -25,6 +25,12 @@ enum RideTitle {
     /// the far side of a road plus GPS error.
     static let retraceToleranceMeters = 75.0
 
+    /// How far either side of its mirrored position a point on the way back looks for the way out,
+    /// as a share of the ride. A point `d` from the finish retraces the point `d` from the start,
+    /// give or take the few percent GPS adds to one direction's distance. Kept narrow so repeated
+    /// laps — whose second half runs over their first, but not in mirror order — stay a loop.
+    static let mirrorWindowShare = 0.05
+
     /// Share of the way back that must retrace the way out for an out-and-back. Below one, so a
     /// short detour on the return doesn't make it a loop.
     static let retraceShare = 0.8
@@ -59,14 +65,18 @@ enum RideTitle {
     /// pause splits the track, not the route.
     static func shape(_ track: [RouteCoordinate]) -> Shape {
         guard let start = track.first, let finish = track.last,
-              RouteGeometry.distanceMeters([start, finish]) <= returnedToStartMeters,
-              track.contains(where: { RouteGeometry.distanceMeters([start, $0]) > returnedToStartMeters })
+              RouteGeometry.segmentMeters(from: start, to: finish) <= returnedToStartMeters,
+              track.contains(where: { RouteGeometry.segmentMeters(from: start, to: $0) > returnedToStartMeters })
         else { return .oneWay }
         let samples = RouteGeometry.resampled(track, everyMeters: retraceSampleMeters).map(\.coordinate)
-        let outbound = samples[..<(samples.count / 2)]
-        let inbound = samples[(samples.count / 2)...]
-        let retraced = inbound.filter { point in
-            outbound.contains { RouteGeometry.distanceMeters([point, $0]) <= retraceToleranceMeters }
+        let last = samples.count - 1
+        let window = Int((Double(samples.count) * mirrorWindowShare).rounded(.up))
+        let inbound = (samples.count / 2)...last
+        let retraced = inbound.filter { index in
+            let mirror = last - index
+            return (max(0, mirror - window)...min(last, mirror + window)).contains {
+                RouteGeometry.segmentMeters(from: samples[index], to: samples[$0]) <= retraceToleranceMeters
+            }
         }
         return Double(retraced.count) / Double(inbound.count) >= retraceShare ? .outAndBack : .loop
     }

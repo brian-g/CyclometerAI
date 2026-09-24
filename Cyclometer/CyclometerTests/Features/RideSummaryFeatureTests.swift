@@ -248,9 +248,38 @@ struct RideZoneSecondsTests {
         #expect(RideDetailSeries.zoneSeconds([60: 2, 220: 7], zoneBounds: bounds) == [2, 0, 0, 0, 7])
     }
 
-    @Test("the histogram counts only seconds with a reading")
-    func histogramSkipsGaps() {
+    @Test("a BLE strap's missing second is a dropout and counts for nothing")
+    func histogramSkipsStrapDropouts() {
         let points = RideSummaryFeatureTests.track(count: 4, heartRate: { $0 == 1 ? nil : 150 })
         #expect(RideDetailSeries.secondsByBPM(points) == [150: 3])
+    }
+
+    /// Code review of #249: the recorder stamps an Apple Watch sample only on the second it
+    /// arrives, so counting stamped seconds credited a Watch ride with a fifth of its time.
+    @Test("an Apple Watch sample stands for the seconds after it, until the next one")
+    func watchSamplesHoldForward() {
+        // A sample every 5 s, for 20 s: 140, 150, 160, 170.
+        let points = watchTrack(count: 20) { $0 % 5 == 0 ? 140 + $0 * 2 : nil }
+        #expect(RideDetailSeries.secondsByBPM(points) == [140: 5, 150: 5, 160: 5, 170: 5])
+    }
+
+    @Test("a held Watch sample expires after the hold, and never crosses a pause")
+    func watchHoldLimits() {
+        let hold = Int(RideDetailSeries.appleWatchHoldSeconds)
+        let expired = watchTrack(count: hold + 10) { $0 == 0 ? 150 : nil }
+        #expect(RideDetailSeries.secondsByBPM(expired) == [150: hold + 1])
+
+        let paused = watchTrack(count: 10, segmentBreak: 4) { $0 == 0 ? 150 : nil }
+        #expect(RideDetailSeries.secondsByBPM(paused) == [150: 4])
+    }
+
+    /// One point a second, with Apple Watch heart rate where `heartRate` gives one.
+    private func watchTrack(count: Int, segmentBreak: Int? = nil, heartRate: (Int) -> Int?) -> [TrackPointDTO] {
+        RideSummaryFeatureTests.track(count: count, heartRate: heartRate).enumerated().map { second, point in
+            var point = point
+            if point.heartRateBPM != nil { point.heartRateSource = .appleWatch }
+            if let segmentBreak, second >= segmentBreak { point.segmentIndex = 1 }
+            return point
+        }
     }
 }

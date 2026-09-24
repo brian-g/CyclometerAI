@@ -82,14 +82,16 @@ struct RideSummaryFeature {
         }
     }
 
-    /// Everything the screen reads once the ride is finalized, delivered together so the
-    /// default title — which needs the route, the start time and the track — is set once.
+    /// Everything the screen reads once the ride is finalized, delivered together. The default
+    /// title is worked out in the effect, off the main actor: judging a long ride's shape
+    /// compares thousands of points.
     struct Loaded: Equatable {
         var summary: RideListSummary
         var stats: RideStats?
         var trackSegments: [[RouteCoordinate]]
         var elevationProfileMeters: [Double]?
         var heartRateSecondsByBPM: [Int: Int]
+        var defaultTitle: String
     }
 
     enum Action: Equatable {
@@ -115,7 +117,7 @@ struct RideSummaryFeature {
             case .task:
                 let id = state.rideId
                 return .merge(
-                    .run { [persistenceClient, clock] send in
+                    .run { [persistenceClient, clock, calendar] send in
                         guard let summary = try await RidesFeature.awaitFinalized(
                             id, persistenceClient: persistenceClient, clock: clock
                         ) else {
@@ -125,14 +127,22 @@ struct RideSummaryFeature {
                         async let stats = Self.fetchStats(id, persistenceClient)
                         async let points = Self.fetchTrackPoints(id, persistenceClient)
                         let track = await points
+                        let rideStats = await stats
+                        let segments = RideMapThumbnail.drawableSegments(track)
                         await send(.loaded(Loaded(
                             summary: summary,
-                            stats: await stats,
-                            trackSegments: RideMapThumbnail.drawableSegments(track),
+                            stats: rideStats,
+                            trackSegments: segments,
                             elevationProfileMeters: RideDetailSeries.elevationProfile(
                                 track, sampleCount: RideDetailFeature.chartSampleCount
                             ),
-                            heartRateSecondsByBPM: RideDetailSeries.secondsByBPM(track)
+                            heartRateSecondsByBPM: RideDetailSeries.secondsByBPM(track),
+                            defaultTitle: RideTitle.defaultTitle(
+                                routeName: rideStats?.routeName,
+                                startedAt: summary.startedAt,
+                                segments: segments,
+                                calendar: calendar
+                            )
                         )))
                     },
                     // `RideDetailFeature`'s read, so the zones match S12's table.
@@ -151,12 +161,7 @@ struct RideSummaryFeature {
                 state.trackSegments = loaded.trackSegments
                 state.elevationProfileMeters = loaded.elevationProfileMeters
                 state.heartRateSecondsByBPM = loaded.heartRateSecondsByBPM
-                let defaultTitle = RideTitle.defaultTitle(
-                    routeName: loaded.stats?.routeName,
-                    startedAt: loaded.summary.startedAt,
-                    segments: loaded.trackSegments,
-                    calendar: calendar
-                )
+                let defaultTitle = loaded.defaultTitle
                 state.defaultTitle = defaultTitle
                 state.persistedTitle = loaded.summary.title
                 // Typing before the load lands is kept: the rider's name beats the default.
