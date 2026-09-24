@@ -1,0 +1,13 @@
+{
+  "name": "cyclometer-site",
+  "private": true,
+  "type": "module",
+  "description": "cyclometer.app — coming-soon site and privacy policy",
+  "scripts": {
+    "build": "eleventy",
+    "start": "eleventy --serve"
+  },
+  "devDependencies": {
+    "@11ty/eleventy": "^3.1.6"
+  }
+}

@@ -1,3 +1,23 @@
+# Coming-soon site (11ty) in docs/
+
+Plan: /Users/brian/.claude/plans/luminous-stargazing-lynx.md
+Branch: `site/coming-soon`
+
+- [x] 1. 11ty scaffold in `docs/` (package.json, eleventy.config.js, src/)
+- [x] 2. Shared layout, home hero (coming-soon / App Store CTA switch), privacy policy migrated verbatim
+- [x] 3. site.css on colors.md tokens, light + dark; system-ui → Open Sans → sans-serif
+- [x] 4. Hero photo (Unsplash, Viktor Bystrov) at 1600/2400w; favicon + apple-touch-icon from Cyclometer.icon layers
+- [x] 5. `.github/workflows/pages.yml` (PR build, main build + deploy)
+- [x] 6. Verify: build, privacy text parity, screenshots light/dark × desktop/390px, no horizontal scroll
+
+## Review
+
+- Privacy text: tag-stripped diff vs `main:docs/privacy-policy/index.html` is identical; URL unchanged (`/privacy-policy/`).
+- Screenshots (Playwright Chromium) at 1440 and 390 wide, light + dark: no horizontal scroll; the hero copy is moved above the rider on narrow screens.
+- The hero always uses dark-mode tokens because it sits on a darkened photo. Light-mode links use `primaryDark`, since `primary` on white has too little contrast.
+- The live CTA is a styled text button. Apple's official badge host (tools.applemarketingtools.com) didn't resolve from here, so swap in the official badge at launch.
+- Manual: Settings → Pages → Source "GitHub Actions"; custom domain cyclometer.app + HTTPS; apex DNS → GitHub Pages.
+
 # #251 — S15 Ride Detail on real ride data, via stack navigation
 
 Plan: /Users/brian/.claude/plans/251-streamed-wren.md

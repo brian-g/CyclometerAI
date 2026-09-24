@@ -1,67 +1,11 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cyclometer Privacy Policy</title>
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #ffffff;
-    --fg: #1c1c1e;
-    --muted: #6b6b70;
-    --accent: #60bd10;
-    --rule: #e5e5ea;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f0f10;
-      --fg: #f2f2f2;
-      --muted: #9a9a9f;
-      --rule: #2c2c2e;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    line-height: 1.6;
-  }
-  main {
-    max-width: 640px;
-    margin: 0 auto;
-    padding: 48px 24px 64px;
-  }
-  h1 {
-    font-size: 28px;
-    font-weight: 700;
-    margin: 0 0 4px;
-  }
-  .updated {
-    color: var(--muted);
-    font-size: 14px;
-    margin: 0 0 32px;
-  }
-  p {
-    font-size: 17px;
-    margin: 0 0 20px;
-  }
-  hr {
-    border: none;
-    border-top: 1px solid var(--rule);
-    margin: 40px 0 24px;
-  }
-  footer {
-    color: var(--muted);
-    font-size: 13px;
-  }
-  a { color: var(--accent); }
-</style>
-</head>
-<body>
-<main>
+---
+layout: base.njk
+title: Cyclometer Privacy Policy
+description: How Cyclometer handles your ride, location, health, and sensor data.
+bodyClass: doc
+---
+<main class="doc-main">
+  <p class="back"><a href="/">← {{ site.name }}</a></p>
   <h1>Cyclometer Privacy Policy</h1>
   <p class="updated">Last updated August 21, 2026</p>
 
@@ -78,5 +22,3 @@
   <hr>
   <footer>This page mirrors the Privacy Policy shown in the Cyclometer app (Settings → About → Privacy Policy).</footer>
 </main>
-</body>
-</html>

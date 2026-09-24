@@ -1,0 +1,25 @@
+---
+layout: base.njk
+title: Cyclometer — Coming soon to iPhone
+bodyClass: home
+---
+<main class="hero">
+  <img class="hero-photo"
+       src="/assets/img/hero-1600.jpg"
+       srcset="/assets/img/hero-1600.jpg 1600w, /assets/img/hero-2400.jpg 2400w"
+       sizes="100vw"
+       alt="A cyclist rides a road bike around a bend in a forest road">
+  <div class="hero-content">
+    <h1 class="wordmark">{{ site.name }}</h1>
+    <p class="tagline">{{ site.tagline }}</p>
+    {% if site.appStoreUrl %}
+    <a class="cta" href="{{ site.appStoreUrl }}">Download on the App Store</a>
+    {% else %}
+    <p class="cta cta-soon">Coming soon to the App Store</p>
+    {% endif %}
+  </div>
+</main>
+<footer class="site-footer">
+  <a href="/privacy-policy/">Privacy Policy</a>
+  <span>Photo by <a href="{{ site.photo.url }}">{{ site.photo.credit }}</a> on Unsplash</span>
+</footer>
