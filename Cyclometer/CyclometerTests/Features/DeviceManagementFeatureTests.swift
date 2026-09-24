@@ -535,6 +535,28 @@ struct DeviceManagementFeatureTests {
         #expect(store.state.roleDialog == nil)
     }
 
+    /// #180: only the Pair button pairs. A tap anywhere else on a strap or radar row,
+    /// neither of which has a role to reassign, must reach no client and write nothing.
+    @Test("A row tap on an unpaired strap or radar pairs nothing")
+    func rowTapOnStrapOrRadarPairsNothing() async {
+        let log = LockIsolated<[ClientCall]>([])
+        let store = makeStore(
+            radarDevices: [Self.radar(id: Self.radarID, name: "Varia RTL515")],
+            hrDevices: [Self.strap(id: Self.hrID, name: "PanoBike BLE HRM")],
+            bleCSCClient: Self.recordingClient(into: log),
+            variaRadarClient: Self.recordingRadarClient(into: log),
+            bleHRClient: Self.recordingHRClient(into: log)
+        )
+
+        await store.send(.rowTapped(Self.radarID))
+        await store.send(.rowTapped(Self.hrID))
+        await store.finish()
+
+        #expect(store.state.roleDialog == nil)
+        #expect(store.state.preferences.pairedSensors.isEmpty)
+        #expect(log.value == [])
+    }
+
     @Test("Assigning a role to a second sensor takes it off the first")
     func roleMovesBetweenSensors() async {
         let found = [
