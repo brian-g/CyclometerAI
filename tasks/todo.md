@@ -16,8 +16,24 @@ Branch: `fix/280-thumbnail-zoom`
 - Now `RideMapThumbnail.mapRect(for:)` frames a square `MKMapRect` so the stroke sits 3pt from the edge on the longer axis, with at least 200 m across for rides that barely moved. Stored thumbnails are left as they are (decision): only new renders change.
 - S15 (`RideDetailView`) also used `region(for:)`. It now calls `RoutesMapCamera.region(fitting:)` directly, so its framing is unchanged.
 - Real-tile renders (throwaway test, not committed): the 0.4 mi out-and-back fills the square, the stationary ride shows as a dot, and a long ride fills diagonally.
-- Suite: all thumbnail tests pass. 4 failures unrelated to this change: `RideDateTextTests` today/yesterday/calendarDayBoundary and `RidesSnapshotTests.testPopulatedRideHistory`. `DateFormatter.doesRelativeDateFormatting` uses the wall clock, not the injected `now` (pinned to 2026-09-23), so these only pass on that date. Same 4 fail on a clean `main` worktree. Filed as #291 (PR #292).
+- Suite: all thumbnail tests pass. 4 failures unrelated to this change: `RideDateTextTests` today/yesterday/calendarDayBoundary and `RidesSnapshotTests.testPopulatedRideHistory`. `DateFormatter.doesRelativeDateFormatting` uses the wall clock, not the injected `now` (pinned to 2026-09-23), so these only pass on that date. Same 4 fail on a clean `main` worktree. Filed as #291 (PR #292, merged). After merging `main` in, the full suite passes.
 - Review follow-up (`/code-review high`): the frame is clamped inside `MKMapRect.world` for tracks across ±180°; the track rect comes from `RouteGeometry.boundingBox` corners instead of a hand-rolled union; tests check that `capture` passes `mapRect(for:)` to render and that every stretch of a paused ride fits. Skipped: re-rendering stored thumbnails (decided against), and a named helper for S15's one-line framing.
+
+# #291 — S14 row date follows `now`, not the device clock
+
+Branch: `fix/291-ride-date-now`
+
+- [x] 1. `RideDateText.relativeFormatted` moves the ride's time of day onto the day `daysAgo` before the clock's today
+- [x] 2. Tests: `now` years from the clock; de_DE keeps "Gestern"
+- [x] 3. Verify: full `CyclometerTests`
+
+## Review
+
+- Cause: `DateFormatter.doesRelativeDateFormatting` names the day against the device clock, so the tests pinned to 2026-09-23 passed only on that day.
+- Fix keeps the locale's own relative pattern. Known edge: a ride inside a spring-forward gap, projected onto a DST day, could print a shifted hour.
+- Full suite green on 2026-09-24, including the 4 tests that failed on `main`; the S14 snapshot reference is unchanged.
+- Review follow-ups (two `/code-review high` passes). The shift is now a whole-day move by the offset from `now` to the clock's today, and reports an issue if that can't be computed. A ride after `now` goes to the absolute branch. RideRow re-reads the clock through `TimelineView(.everyMinute)` when `now` isn't pinned, replacing a `now` fixed at build time; an earlier notification-driven `@State` was dropped. The de_DE test uses a far `now`.
+- Known edges: the code and the formatter each read the clock, so a render straddling midnight can name the neighbouring day once. The TimelineView refresh isn't unit-tested; it holds no logic of its own.
 
 # Coming-soon site (11ty) in docs/
 
