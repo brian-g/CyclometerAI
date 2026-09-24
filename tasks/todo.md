@@ -1,3 +1,17 @@
+# #291 — S14 row date follows `now`, not the device clock
+
+Branch: `fix/291-ride-date-now`
+
+- [x] 1. `RideDateText.relativeFormatted` moves the ride's time of day onto the day `daysAgo` before the clock's today
+- [x] 2. Tests: `now` years from the clock; de_DE keeps "Gestern"
+- [x] 3. Verify: full `CyclometerTests`
+
+## Review
+
+- Cause: `DateFormatter.doesRelativeDateFormatting` names the day against the device clock, so the tests pinned to 2026-09-23 passed only on that day.
+- Fix keeps the locale's own relative pattern. Known edge: a ride inside a spring-forward gap, projected onto a DST day, could print a shifted hour.
+- Full suite green on 2026-09-24, including the 4 tests that failed on `main`; the S14 snapshot reference is unchanged.
+
 # Coming-soon site (11ty) in docs/
 
 Plan: /Users/brian/.claude/plans/luminous-stargazing-lynx.md
