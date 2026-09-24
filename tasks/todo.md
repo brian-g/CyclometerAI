@@ -7,7 +7,7 @@ Branch: `site/coming-soon`
 - [x] 2. Shared layout, home hero (coming-soon / App Store CTA switch), privacy policy migrated verbatim
 - [x] 3. site.css on colors.md tokens, light + dark; system-ui → Open Sans → sans-serif
 - [x] 4. Hero photo (Unsplash, Viktor Bystrov) at 1600/2400w; favicon + apple-touch-icon from Cyclometer.icon layers
-- [x] 5. `.github/workflows/pages.yml` (PR build, main build + deploy)
+- [x] 5. Hosting: Cloudflare Pages (project `cyclometer`); the GitHub Pages workflow was dropped
 - [x] 6. App icon in the hero wordmark; two feature sections (Built for the ride, Private by design)
 - [x] 7. Verify: build, privacy text parity, screenshots light/dark × desktop/390px, no horizontal scroll
 
@@ -17,7 +17,7 @@ Branch: `site/coming-soon`
 - Screenshots (Playwright Chromium) at 1440 and 390 wide, light + dark: no horizontal scroll; the hero copy is moved above the rider on narrow screens.
 - The hero always uses dark-mode tokens because it sits on a darkened photo. Light-mode links use `primaryDark`, since `primary` on white has too little contrast.
 - The live CTA is a styled text button. Apple's official badge host (tools.applemarketingtools.com) didn't resolve from here, so swap in the official badge at launch.
-- Manual: Settings → Pages → Source "GitHub Actions"; custom domain cyclometer.app + HTTPS; apex DNS → GitHub Pages.
+- Cloudflare Pages served `docs/` raw (no build): the preview had `/src/index.njk` at 200 and `/` at 404. Before merge, set Root directory `docs`, Build command `npm run build`, and Build output `_site`.
 
 # #251 — S15 Ride Detail on real ride data, via stack navigation
 
