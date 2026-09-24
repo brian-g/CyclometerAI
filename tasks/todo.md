@@ -40,3 +40,39 @@ Branch: `feat/251-ride-detail`
 - The revert-check stale-build trap happened again: the restored source still ran mutated. A fresh
   derived-data build passed, and the default build folder was cleaned.
 - Full suite: 1232 Swift Testing + 95 XCTest, 0 failures.
+
+---
+
+# #249 — S10 Ride Summary, presented at ride end
+
+Branch `feat/249-ride-summary`. Plan: `~/.claude/plans/rosy-riding-forest.md`.
+
+- [x] 1. Persistence: `renameRide`; `RideStats.routeName`
+- [x] 2. `RideTitle.defaultTitle`: route name, otherwise part of day + Loop / Out and Back / Ride
+- [x] 3. `RideSummaryFeature`: waits for finalize (shared `RidesFeature.awaitFinalized`), zones from the track
+- [x] 4. `RideSummaryView`: artboard structure, "Finish Ride" title + glass button
+- [x] 5. AppFeature: `@Presents rideSummary` on confirmFinish; the rename is saved on `.dismiss` (button + swipe)
+- [x] 6. Tests: reducer, presentation, RideTitle, zoneSeconds, persistence, snapshots light/dark
+- [x] 7. UX.md §S10 + inventory → Complete; stale "#249" comments in S14/S15
+- [x] 8. Full local suite green; simulator drive
+
+## Review
+
+- Full local suite: 1518 passed, 0 failed.
+- Simulator drive (throwaway XCUITest, since deleted): Start → ride → Pause → Finish → confirm. S10 opens
+  and shows finalized numbers once the save lands. Tapping the Name *label* opens the keyboard. After the rename
+  and Finish Ride, S14 lists the new name, and it's still there after a relaunch. No new TCA runtime issues (only the known
+  onboarding `ifLet` one).
+- Found by the drive, not the tests: a 0.1 mi ride was named "Evening Loop". `RideTitle.shape` now requires
+  the ride to get more than 250 m from the start before it can be a loop. Test `wentNowhere` added.
+- Snapshot trap: `.glassProminent` blanked the whole offscreen capture to white. The S10 suite snapshots
+  with `drawHierarchyInKeyWindow: true`. There's no loading-state snapshot, because in a real window the spinner animates.
+- `AppFeature` sees S10's state on `.dismiss` (TCA nils it after the parent reduces). The swipe test proves it.
+- Deviations from the issue, settled with Brian: zones/elevation come from track points (`Ride.hrZoneDurations`
+  and `elevationGainMeters` are never written); the default name is offline only; the labels read "Finish Ride";
+  the map is the live `RideMapView`, not the thumbnail.
+- Issue text was stale: `RideSummary` (RidesView.swift:262) no longer exists, so there was no collision.
+- Follow-up candidates (not filed): (1) reverse-geocoded place in the default name; (2) the unwritten
+  `Ride.hrZoneDurations`/`elevationGainMeters`; (3) `ActiveRideFeature.vehiclePassCount` is `Int = 0`, so a
+  ride with no radar stores 0, not nil, and S10/S15 show "Vehicle Passes 0" (seen in the drive).
+- UX gap, not addressed: the Name field starts filled with the default, so renaming means deleting it first.

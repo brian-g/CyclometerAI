@@ -75,7 +75,8 @@ struct RideDetailList<MapRow: View>: View {
                 LabeledContent("Connect Strava") { unavailable("Coming Soon") }
             }
         }
-        // Every ride's `title` is "" until #249's rename field ships — `RideRow`'s fallback.
+        // A ride S10 never named — recorded before #249, or closed out at launch — has a ""
+        // `title`. `RideRow`'s fallback.
         .navigationTitle(store.summary.title.isEmpty ? "Ride" : store.summary.title)
         .navigationBarTitleDisplayMode(.inline)
     }

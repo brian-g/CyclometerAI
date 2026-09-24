@@ -67,7 +67,9 @@ enum RouteGeometry {
         )
     }
 
-    private static func segmentMeters(from start: RouteCoordinate, to end: RouteCoordinate) -> Double {
+    /// Straight-line distance between two points — `distanceMeters` for a pair, without building
+    /// an array for it. `RideTitle.shape` calls it in a loop over the whole ride.
+    static func segmentMeters(from start: RouteCoordinate, to end: RouteCoordinate) -> Double {
         let offset = tangentPlaneOffset(from: start, to: end)
         return (offset.north * offset.north + offset.east * offset.east).squareRoot()
     }

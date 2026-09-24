@@ -100,7 +100,24 @@ struct RidesFeature {
     /// flush and GPX export scale with the ride's length, and waiting costs one cheap read a
     /// second. Past it the capture still runs and finds nothing new; the launch backfill
     /// then picks the ride up.
-    private static let finalizeWaitSeconds = 60
+    static let finalizeWaitSeconds = 60
+
+    /// Waits for a just-finished ride's `finalizeRide` to land, reading once a second for up to
+    /// `finalizeWaitSeconds`. `fetchRides` only returns rides with an `endedAt`, so the ride
+    /// appearing there is the finalize having landed. Nil if it never does. Shared with S10
+    /// (#249), which must not show the checkpoint aggregates the finalize is about to replace.
+    static func awaitFinalized(
+        _ id: UUID,
+        persistenceClient: PersistenceClient,
+        clock: any Clock<Duration>
+    ) async throws -> RideListSummary? {
+        for _ in 0..<finalizeWaitSeconds {
+            let rides = (try? await persistenceClient.fetchRides()) ?? []
+            if let ride = rides.first(where: { $0.id == id }) { return ride }
+            try await clock.sleep(for: .seconds(1))
+        }
+        return nil
+    }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -149,11 +166,7 @@ struct RidesFeature {
                     }
                     .cancellable(id: CancelID.reload, cancelInFlight: true),
                     .run { [persistenceClient, clock] send in
-                        for _ in 0..<Self.finalizeWaitSeconds {
-                            let rides = (try? await persistenceClient.fetchRides()) ?? []
-                            if rides.contains(where: { $0.id == id }) { break }
-                            try await clock.sleep(for: .seconds(1))
-                        }
+                        _ = try await Self.awaitFinalized(id, persistenceClient: persistenceClient, clock: clock)
                         await send(.captureMapThumbnails)
                     }
                     .cancellable(id: CancelID.awaitFinalize, cancelInFlight: true)

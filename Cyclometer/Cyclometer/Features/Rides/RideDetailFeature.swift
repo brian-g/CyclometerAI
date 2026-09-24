@@ -174,4 +174,47 @@ enum RideDetailSeries {
             return Int((Double(bucketReadings.reduce(0, +)) / Double(bucketReadings.count)).rounded())
         }
     }
+
+    /// How long an Apple Watch reading stands for the seconds after it. HealthKit delivers heart
+    /// rate every few seconds to few minutes, and the recorder stamps a sample only on the second
+    /// it arrives (`ActiveRideFeature.State.isHeartRateRecordable`); past this, the rider is
+    /// treated as having no reading rather than an old one.
+    static let appleWatchHoldSeconds: TimeInterval = 300
+
+    /// Seconds spent at each heart rate, for S10's zone breakdown (#249). A histogram rather
+    /// than the readings themselves: the zones it is sorted into resolve after the track loads,
+    /// and a few hundred entries is all a ride of any length needs. Empty when no second had a
+    /// reading.
+    ///
+    /// Each recorded second counts once. A BLE strap reads every second, so a second without one
+    /// is a dropout and counts for nothing. An Apple Watch sample stands for the seconds after it,
+    /// up to `appleWatchHoldSeconds` and never across a pause. Counting only stamped seconds
+    /// would credit a 2 h Watch ride with minutes of zone time.
+    static func secondsByBPM(_ points: [TrackPointDTO]) -> [Int: Int] {
+        var seconds: [Int: Int] = [:]
+        var held: TrackPointDTO?
+        for point in points {
+            if let bpm = point.heartRateBPM {
+                held = point.heartRateSource == .appleWatch ? point : nil
+                seconds[bpm, default: 0] += 1
+            } else if let reading = held, let bpm = reading.heartRateBPM,
+                      reading.segmentIndex == point.segmentIndex,
+                      point.timestamp.timeIntervalSince(reading.timestamp) <= appleWatchHoldSeconds {
+                seconds[bpm, default: 0] += 1
+            }
+        }
+        return seconds
+    }
+
+    /// Seconds in each zone, zone 1 first, against `zoneBounds` (zone 1 first). A reading below
+    /// zone 1 counts as zone 1 and one above zone 5 as zone 5 — `HeartRateProfileView`'s bands.
+    static func zoneSeconds(_ secondsByBPM: [Int: Int], zoneBounds: [ClosedRange<Int>]) -> [Int] {
+        var zones = Array(repeating: 0, count: zoneBounds.count)
+        guard !zones.isEmpty else { return zones }
+        for (bpm, seconds) in secondsByBPM {
+            let zone = zoneBounds.lastIndex { $0.lowerBound <= bpm } ?? 0
+            zones[zone] += seconds
+        }
+        return zones
+    }
 }

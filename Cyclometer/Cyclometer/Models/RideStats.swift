@@ -10,4 +10,7 @@ struct RideStats: Sendable, Equatable {
     var maxCadenceRPM: Int?
     /// Nil when no radar was paired, as on `Ride`.
     var vehiclePassCount: Int?
+    /// The denormalized name of the route the ride followed, nil for a free ride — S10's Route
+    /// row and default title (#249).
+    var routeName: String? = nil
 }

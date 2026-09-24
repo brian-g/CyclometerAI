@@ -483,6 +483,43 @@ struct PersistenceClientTests {
         }
     }
 
+    @Test("fetchRideStats carries the route the ride followed, nil for a free ride")
+    func fetchRideStatsCarriesRouteName() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let onRoute = UUID()
+        try await client.createRide(onRoute, Date(), RouteReference(id: UUID(), name: "SW Fargo"))
+        let free = UUID()
+        try await client.createRide(free, Date(), nil)
+
+        #expect(try await client.fetchRideStats(onRoute).routeName == "SW Fargo")
+        #expect(try await client.fetchRideStats(free).routeName == nil)
+    }
+
+    // MARK: - Rename (#249, for S10)
+
+    @Test("renameRide stores the title, and the Rides list reads it back")
+    func renameRideStoresTitle() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let id = UUID()
+        try await client.createRide(id, Date(), nil)
+        try await client.finalizeRide(id, Date(), RideSummaryUpdate(
+            rideId: id, durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
+        ), nil)
+
+        try await client.renameRide(id, "Morning Loop")
+
+        #expect(try await client.fetchRides().map(\.title) == ["Morning Loop"])
+        #expect(try Self.fetchRide(id, from: swiftDataStack).title == "Morning Loop")
+    }
+
+    @Test("renameRide on an unknown rideId throws rideNotFound")
+    func renameRideUnknownRideThrows() async throws {
+        let (client, _) = Self.makeLiveClient()
+        await #expect(throws: PersistenceError.rideNotFound) {
+            try await client.renameRide(UUID(), "Nowhere")
+        }
+    }
+
     // MARK: - Ride.RecordingState query behavior (#171 follow-up)
 
     // On iOS 26, SwiftData's #Predicate macro compiled a comparison against a captured

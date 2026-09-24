@@ -45,6 +45,13 @@ actor RidePersistenceActor {
         }
     }
 
+    /// S10's rename field (#249). The only write the rider makes to a finished ride.
+    func renameRide(id: UUID, title: String) throws {
+        try savingChanges("renameRide", id: id, context: modelContext) {
+            try fetchRide(id: id).title = title
+        }
+    }
+
     /// S14's map thumbnail, both appearances in one save (#177). A write of its own rather
     /// than part of `finalizeRide`: rendering needs map tiles from the network, and the ride
     /// must not wait on them to be durably over.
@@ -158,7 +165,8 @@ actor RidePersistenceActor {
             maxSpeedMPS: ride.maxSpeedMPS,
             averageCadenceRPM: ride.averageCadenceRPM,
             maxCadenceRPM: ride.maxCadenceRPM,
-            vehiclePassCount: ride.vehiclePassCount
+            vehiclePassCount: ride.vehiclePassCount,
+            routeName: ride.routeName
         )
     }
 

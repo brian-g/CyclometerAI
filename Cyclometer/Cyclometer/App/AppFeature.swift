@@ -33,6 +33,8 @@ struct AppFeature {
         var selectedTab: Tab = .rides
         var activeRide: ActiveRideFeature.State? = nil
         @Presents var startSheet: StartSheetFeature.State? = nil
+        /// S10, for the ride just finished (#249).
+        @Presents var rideSummary: RideSummaryFeature.State? = nil
         var onboarding: OnboardingFeature.State? = nil
         var isDashboardPresented: Bool = false
         var rides: RidesFeature.State = RidesFeature.State()
@@ -69,6 +71,7 @@ struct AppFeature {
         case fileOpened(URL)
         case startRideButtonTapped
         case startSheet(PresentationAction<StartSheetFeature.Action>)
+        case rideSummary(PresentationAction<RideSummaryFeature.Action>)
         case onboarding(OnboardingFeature.Action)
         case dashboardDismissed
         case dashboardOpened
@@ -240,7 +243,29 @@ struct AppFeature {
                 // export → finalizeRide) is a separate effect racing this one, so the
                 // write is very often still in flight at this exact moment.
                 guard let finishedRideId else { return .none }
+                // S10 for the ride just ended (#249). It waits for that finalize itself.
+                state.rideSummary = RideSummaryFeature.State(rideId: finishedRideId)
                 return .send(.rides(.rideFinished(finishedRideId)))
+
+            case .rideSummary(.dismiss):
+                // The Finish Ride button and a swipe-down both land here, with the child's
+                // state still present — TCA runs this reducer before it nils it. The rename is
+                // written from here rather than from the child, whose effects are cancelled as
+                // it is dismissed.
+                guard let summary = state.rideSummary, let title = summary.titleToSave else { return .none }
+                let id = summary.rideId
+                return .run { [persistenceClient] send in
+                    do {
+                        try await persistenceClient.renameRide(id, title)
+                        // S14 read the ride before it had a name.
+                        await send(.rides(.reloadRides))
+                    } catch {
+                        // Logged in RidePersistenceActor. The ride keeps its old title.
+                    }
+                }
+
+            case .rideSummary:
+                return .none
 
             case .resumableRideFetched(let summary):
                 // `.task`'s two effects race: the rider can start a brand-new ride
@@ -363,6 +388,9 @@ struct AppFeature {
         }
         .ifLet(\.$startSheet, action: \.startSheet) {
             StartSheetFeature()
+        }
+        .ifLet(\.$rideSummary, action: \.rideSummary) {
+            RideSummaryFeature()
         }
         .ifLet(\.onboarding, action: \.onboarding) {
             OnboardingFeature()
