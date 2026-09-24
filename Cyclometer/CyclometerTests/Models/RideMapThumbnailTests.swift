@@ -83,18 +83,102 @@ struct RideMapThumbnailTests {
 
     // MARK: - Framing
 
-    @Test("the region is centred on the whole track and contains all of it")
-    func regionContainsTrack() {
-        let segments = RideMapThumbnail.drawableSegments(Self.pausedRide)
-        let region = RideMapThumbnail.region(for: segments)
-        let coordinates = segments.flatMap { $0 }
+    /// Where a coordinate lands in the 56pt image of `mapRect`: the square rect maps linearly
+    /// onto the square image.
+    private static func imagePoint(_ coordinate: RouteCoordinate, in mapRect: MKMapRect) -> CGPoint {
+        let point = MKMapPoint(coordinate.coordinate2D)
+        let side = RideMapThumbnail.pointSize.width
+        return CGPoint(
+            x: (point.x - mapRect.minX) / mapRect.width * side,
+            y: (point.y - mapRect.minY) / mapRect.height * side
+        )
+    }
 
-        let minLatitude = coordinates.map(\.latitude).min()!, maxLatitude = coordinates.map(\.latitude).max()!
-        let minLongitude = coordinates.map(\.longitude).min()!, maxLongitude = coordinates.map(\.longitude).max()!
-        #expect(abs(region.center.latitude - (minLatitude + maxLatitude) / 2) < 1e-9)
-        #expect(abs(region.center.longitude - (minLongitude + maxLongitude) / 2) < 1e-9)
-        #expect(region.span.latitudeDelta >= maxLatitude - minLatitude)
-        #expect(region.span.longitudeDelta >= maxLongitude - minLongitude)
+    /// The track's extent in image points.
+    private static func imageBounds(_ segments: [[RouteCoordinate]], in mapRect: MKMapRect) -> CGRect {
+        let points = segments.joined().map { imagePoint($0, in: mapRect) }
+        let xs = points.map(\.x), ys = points.map(\.y)
+        return CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+    }
+
+    /// About 0.4 mi out and back at 43°N — the ride #280 showed as a blob. The return leg sits
+    /// a little to one side, so the short axis isn't zero.
+    private static let eastWestRide = [[
+        RouteCoordinate(latitude: 43.0700, longitude: -89.4000),
+        RouteCoordinate(latitude: 43.0700, longitude: -89.3960),
+        RouteCoordinate(latitude: 43.0703, longitude: -89.3960),
+        RouteCoordinate(latitude: 43.0703, longitude: -89.4000),
+    ]]
+    private static let northSouthRide = [[
+        RouteCoordinate(latitude: 43.0700, longitude: -89.4000),
+        RouteCoordinate(latitude: 43.0729, longitude: -89.4000),
+        RouteCoordinate(latitude: 43.0729, longitude: -89.4004),
+        RouteCoordinate(latitude: 43.0700, longitude: -89.4004),
+    ]]
+
+    @Test("the frame is square and centred on the track")
+    func mapRectIsSquareAndCentred() {
+        for ride in [Self.eastWestRide, Self.northSouthRide, RideMapThumbnail.drawableSegments(Self.pausedRide)] {
+            let mapRect = RideMapThumbnail.mapRect(for: ride)
+            let bounds = Self.imageBounds(ride, in: mapRect)
+            let side = RideMapThumbnail.pointSize.width
+            #expect(abs(mapRect.width - mapRect.height) < 1e-6)
+            #expect(abs(bounds.midX - side / 2) < 1e-6)
+            #expect(abs(bounds.midY - side / 2) < 1e-6)
+        }
+    }
+
+    @Test("a short ride fills the image on its longer axis, the stroke a margin in from the edge")
+    func shortRideFillsLongAxis() {
+        let side = RideMapThumbnail.pointSize.width
+        let inset = RideMapThumbnail.inset
+
+        let eastWest = Self.imageBounds(Self.eastWestRide, in: RideMapThumbnail.mapRect(for: Self.eastWestRide))
+        #expect(abs(eastWest.minX - inset) < 1e-6)
+        #expect(abs(eastWest.maxX - (side - inset)) < 1e-6)
+        #expect(eastWest.minY > inset && eastWest.maxY < side - inset)
+
+        let northSouth = Self.imageBounds(Self.northSouthRide, in: RideMapThumbnail.mapRect(for: Self.northSouthRide))
+        #expect(abs(northSouth.minY - inset) < 1e-6)
+        #expect(abs(northSouth.maxY - (side - inset)) < 1e-6)
+        #expect(northSouth.minX > inset && northSouth.maxX < side - inset)
+
+        // Every stretch of a paused ride is framed, not just the first.
+        let paused = RideMapThumbnail.drawableSegments(Self.pausedRide)
+        let pausedBounds = Self.imageBounds(paused, in: RideMapThumbnail.mapRect(for: paused))
+        let longAxis = max(pausedBounds.width, pausedBounds.height)
+        #expect(abs(longAxis - (side - 2 * inset)) < 1e-6)
+        #expect(pausedBounds.minX >= inset - 1e-6 && pausedBounds.maxX <= side - inset + 1e-6)
+        #expect(pausedBounds.minY >= inset - 1e-6 && pausedBounds.maxY <= side - inset + 1e-6)
+    }
+
+    @Test("a track across ±180° is framed inside the world, not handed to MapKit out of range")
+    func antimeridianStaysInWorld() {
+        let taveuni = [[
+            RouteCoordinate(latitude: -16.80, longitude: 179.99),
+            RouteCoordinate(latitude: -16.81, longitude: -179.99),
+        ]]
+        let mapRect = RideMapThumbnail.mapRect(for: taveuni)
+        #expect(MKMapRect.world.contains(mapRect))
+        #expect(abs(mapRect.width - mapRect.height) < 1e-6)
+    }
+
+    @Test("a ride that barely moved is framed at the minimum width, not zoomed to its GPS jitter")
+    func stationaryRideIsFloored() {
+        let jitter = [[
+            RouteCoordinate(latitude: 43.07000, longitude: -89.40000),
+            RouteCoordinate(latitude: 43.07003, longitude: -89.40002),
+            RouteCoordinate(latitude: 43.06998, longitude: -89.40004),
+        ]]
+        let mapRect = RideMapThumbnail.mapRect(for: jitter)
+        let side = RideMapThumbnail.pointSize.width
+        let contentPoints = mapRect.width * (side - 2 * RideMapThumbnail.inset) / side
+        let contentMeters = contentPoints / MKMapPointsPerMeterAtLatitude(43.07)
+        #expect(abs(contentMeters - RideMapThumbnail.minimumSideMeters) < 0.01)
+
+        let bounds = Self.imageBounds(jitter, in: mapRect)
+        #expect(abs(bounds.midX - side / 2) < 1e-6)
+        #expect(abs(bounds.midY - side / 2) < 1e-6)
     }
 
     // MARK: - Capture
@@ -109,8 +193,9 @@ struct RideMapThumbnailTests {
                 trackPoints: [Self.rideId: Self.pausedRide],
                 onSaveRideMapThumbnail: { id, light, dark in saved.withValue { $0.append((id, light, dark)) } }
             )
-            $0.mapSnapshotClient = MapSnapshotClient { _, segments, style in
+            $0.mapSnapshotClient = MapSnapshotClient { mapRect, segments, style in
                 #expect(segments == RideMapThumbnail.drawableSegments(Self.pausedRide))
+                #expect(MKMapRectEqualToRect(mapRect, RideMapThumbnail.mapRect(for: segments)))
                 rendered.withValue { $0.append(style) }
                 return Data(style == .dark ? "dark".utf8 : "light".utf8)
             }
