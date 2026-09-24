@@ -30,10 +30,28 @@ enum RideMapThumbnail {
             .map { $0.map { RouteCoordinate(latitude: $0.latitude, longitude: $0.longitude) } }
     }
 
-    /// Framed the way the app fits every other map around its content, padding and minimum
-    /// span included. The snapshotter widens whichever axis the square needs, about the centre.
-    static func region(for segments: [[RouteCoordinate]]) -> MKCoordinateRegion {
-        RoutesMapCamera.region(fitting: RouteGeometry.boundingBox(segments.flatMap { $0 }))
+    /// A ride that barely moved is shown at least this wide, so GPS jitter reads as a dot
+    /// rather than a scribble at street level.
+    static let minimumSideMeters: CLLocationDistance = 200
+
+    /// From the centre of the track's stroke to the image edge: the margin, plus half the stroke.
+    static let inset = Spacing.mapThumbnailMargin + Spacing.strokeMapThumbnail / 2
+
+    /// A square framed so the track fills the image, `Spacing.mapThumbnailMargin` from its edge
+    /// on the longer axis (#280). Unlike the other maps, which pad and floor a region in degrees
+    /// (`RoutesMapCamera.region(fitting:)`), a thumbnail is too small to spare that padding.
+    ///
+    /// In map points, the snapshotter's own projection. A square rect in a square image scales
+    /// uniformly, so a margin in points is the same fraction of the rect.
+    static func mapRect(for segments: [[RouteCoordinate]]) -> MKMapRect {
+        let track = segments.joined().reduce(MKMapRect.null) { rect, coordinate in
+            rect.union(MKMapRect(origin: MKMapPoint(coordinate.coordinate2D), size: MKMapSize()))
+        }
+        let latitude = MKMapPoint(x: track.midX, y: track.midY).coordinate.latitude
+        let minimumSide = minimumSideMeters * MKMapPointsPerMeterAtLatitude(latitude)
+        let contentSide = max(track.width, track.height, minimumSide)
+        let side = contentSide * pointSize.width / (pointSize.width - 2 * inset)
+        return MKMapRect(x: track.midX - side / 2, y: track.midY - side / 2, width: side, height: side)
     }
 
     /// The track in image space, one subpath per segment. In the app `project` is the
@@ -104,9 +122,9 @@ enum RideMapThumbnail {
         @Dependency(\.mapSnapshotClient) var mapSnapshotClient
         let segments = drawableSegments(try await persistenceClient.fetchTrackPoints(rideId))
         guard !segments.isEmpty else { return false }
-        let region = region(for: segments)
-        async let light = mapSnapshotClient.render(region, segments, .light)
-        async let dark = mapSnapshotClient.render(region, segments, .dark)
+        let mapRect = mapRect(for: segments)
+        async let light = mapSnapshotClient.render(mapRect, segments, .light)
+        async let dark = mapSnapshotClient.render(mapRect, segments, .dark)
         try await persistenceClient.saveRideMapThumbnail(rideId, light, dark)
         return true
     }

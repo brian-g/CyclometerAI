@@ -5,9 +5,9 @@ import UIKit
 /// TCA dependency for rendering a static map image — the one part of `RideMapThumbnail`
 /// that needs MapKit's tiles, and so the part kept out of the test suite (#177).
 struct MapSnapshotClient: Sendable {
-    /// A PNG of `segments` stroked over a static map of `region`, at `RideMapThumbnail`'s
+    /// A PNG of `segments` stroked over a static map of `mapRect`, at `RideMapThumbnail`'s
     /// size and scale, rendered for one appearance.
-    var render: @Sendable (MKCoordinateRegion, [[RouteCoordinate]], UIUserInterfaceStyle) async throws -> Data
+    var render: @Sendable (MKMapRect, [[RouteCoordinate]], UIUserInterfaceStyle) async throws -> Data
 }
 
 enum MapSnapshotError: Error, Equatable {
@@ -17,7 +17,7 @@ enum MapSnapshotError: Error, Equatable {
 }
 
 extension MapSnapshotClient: DependencyKey {
-    static let liveValue = MapSnapshotClient { region, segments, style in
+    static let liveValue = MapSnapshotClient { mapRect, segments, style in
         // The base map is rendered for these traits and cannot adapt afterwards, which is why
         // a ride stores one image per appearance.
         let traits = UITraitCollection { traits in
@@ -25,7 +25,7 @@ extension MapSnapshotClient: DependencyKey {
             traits.userInterfaceStyle = style
         }
         let options = MKMapSnapshotter.Options()
-        options.region = region
+        options.mapRect = mapRect
         options.size = RideMapThumbnail.pointSize
         options.traitCollection = traits
         options.preferredConfiguration = thumbnailConfiguration()

@@ -1,3 +1,23 @@
+# #280 — Ride thumbnails framed so the track fills the square
+
+Plan: /Users/brian/.claude/plans/sprightly-gathering-tarjan.md
+Branch: `fix/280-thumbnail-zoom`
+
+- [x] 1. `Spacing.mapThumbnailMargin`
+- [x] 2. `RideMapThumbnail.mapRect(for:)` replaces `region(for:)`; 200 m floor
+- [x] 3. `MapSnapshotClient.render` takes `MKMapRect`
+- [x] 4. UX.md §S14 framing clause
+- [x] 5. Framing tests replace `regionContainsTrack`
+- [x] 6. Verify: full suite, before/after PNGs on real tiles
+
+## Review
+
+- Root cause: the thumbnail reused S19's `RoutesMapCamera.region(fitting:)`. Its 0.015° minimum span (about 1.7 × 1.2 km) swallowed short rides, and its 1.6× padding in degrees left even long rides at about 62% of the square.
+- Now `RideMapThumbnail.mapRect(for:)` frames a square `MKMapRect` so the stroke sits 3pt from the edge on the longer axis, with at least 200 m across for rides that barely moved. Stored thumbnails are left as they are (decision): only new renders change.
+- S15 (`RideDetailView`) also used `region(for:)`. It now calls `RoutesMapCamera.region(fitting:)` directly, so its framing is unchanged.
+- Real-tile renders (throwaway test, not committed): the 0.4 mi out-and-back fills the square, the stationary ride shows as a dot, and a long ride fills diagonally.
+- Suite: all thumbnail tests pass. 4 failures unrelated to this change: `RideDateTextTests` today/yesterday/calendarDayBoundary and `RidesSnapshotTests.testPopulatedRideHistory`. `DateFormatter.doesRelativeDateFormatting` uses the wall clock, not the injected `now` (pinned to 2026-09-23), so these only pass on that date. Same 4 fail on a clean `main` worktree. Needs its own issue.
+
 # Coming-soon site (11ty) in docs/
 
 Plan: /Users/brian/.claude/plans/luminous-stargazing-lynx.md

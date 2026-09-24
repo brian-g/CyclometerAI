@@ -124,7 +124,11 @@ struct RideMapView: View {
                 }
                 .accessibilityHidden(true)
         } else {
-            Map(initialPosition: .region(RideMapThumbnail.region(for: segments))) {
+            // Padded and floored like every other map, not framed tight like the thumbnail
+            // (#280): this one is live, and its markers need room at the edges.
+            Map(initialPosition: .region(RoutesMapCamera.region(
+                fitting: RouteGeometry.boundingBox(segments.flatMap { $0 })
+            ))) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                     MapPolyline(coordinates: segment.map(\.coordinate2D))
                         .stroke(Color.cyPrimary, lineWidth: Spacing.strokeMapTrack)

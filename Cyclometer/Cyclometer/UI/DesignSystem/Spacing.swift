@@ -31,6 +31,7 @@ enum Spacing {
     static let strokeMapTrack: CGFloat = 5         //  5 — live map: the track ridden so far
     static let strokeMapRoute: CGFloat = 8         //  8 — live map: the planned route, wider so the track sits inside it
     static let strokeMapThumbnail: CGFloat = 3     //  3 — ride thumbnail: the recorded track at 56pt
+    static let mapThumbnailMargin: CGFloat = 3     //  3 — ride thumbnail: gap from the track's stroke to the image edge (#280)
 
     // Corner radii
     static let cornerSm: CGFloat = unit      //  4
