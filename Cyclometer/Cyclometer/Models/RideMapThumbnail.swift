@@ -44,14 +44,25 @@ enum RideMapThumbnail {
     /// In map points, the snapshotter's own projection. A square rect in a square image scales
     /// uniformly, so a margin in points is the same fraction of the rect.
     static func mapRect(for segments: [[RouteCoordinate]]) -> MKMapRect {
-        let track = segments.joined().reduce(MKMapRect.null) { rect, coordinate in
-            rect.union(MKMapRect(origin: MKMapPoint(coordinate.coordinate2D), size: MKMapSize()))
-        }
-        let latitude = MKMapPoint(x: track.midX, y: track.midY).coordinate.latitude
+        let bounds = RouteGeometry.boundingBox(segments.flatMap { $0 })
+        // Mercator keeps north up and east right, so the box's corners bound the projected track.
+        let topLeft = MKMapPoint(CLLocationCoordinate2D(latitude: bounds.maxLatitude, longitude: bounds.minLongitude))
+        let bottomRight = MKMapPoint(CLLocationCoordinate2D(latitude: bounds.minLatitude, longitude: bounds.maxLongitude))
+        let track = MKMapRect(x: topLeft.x, y: topLeft.y, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y)
+
+        let latitude = (bounds.minLatitude + bounds.maxLatitude) / 2
         let minimumSide = minimumSideMeters * MKMapPointsPerMeterAtLatitude(latitude)
         let contentSide = max(track.width, track.height, minimumSide)
-        let side = contentSide * pointSize.width / (pointSize.width - 2 * inset)
-        return MKMapRect(x: track.midX - side / 2, y: track.midY - side / 2, width: side, height: side)
+        // Kept inside the world: a track across ±180°, which `RouteBounds` leaves unhandled, spans
+        // nearly all of it, and MapKit answers a rect outside the world with an arbitrary camera
+        // (`RoutesMapCamera.span(_:limit:)` guards the same).
+        let world = MKMapRect.world
+        let side = min(contentSide * pointSize.width / (pointSize.width - 2 * inset), world.width, world.height)
+        return MKMapRect(
+            x: min(max(track.midX - side / 2, world.minX), world.maxX - side),
+            y: min(max(track.midY - side / 2, world.minY), world.maxY - side),
+            width: side, height: side
+        )
     }
 
     /// The track in image space, one subpath per segment. In the app `project` is the

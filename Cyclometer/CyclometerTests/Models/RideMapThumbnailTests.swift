@@ -142,6 +142,25 @@ struct RideMapThumbnailTests {
         #expect(abs(northSouth.minY - inset) < 1e-6)
         #expect(abs(northSouth.maxY - (side - inset)) < 1e-6)
         #expect(northSouth.minX > inset && northSouth.maxX < side - inset)
+
+        // Every stretch of a paused ride is framed, not just the first.
+        let paused = RideMapThumbnail.drawableSegments(Self.pausedRide)
+        let pausedBounds = Self.imageBounds(paused, in: RideMapThumbnail.mapRect(for: paused))
+        let longAxis = max(pausedBounds.width, pausedBounds.height)
+        #expect(abs(longAxis - (side - 2 * inset)) < 1e-6)
+        #expect(pausedBounds.minX >= inset - 1e-6 && pausedBounds.maxX <= side - inset + 1e-6)
+        #expect(pausedBounds.minY >= inset - 1e-6 && pausedBounds.maxY <= side - inset + 1e-6)
+    }
+
+    @Test("a track across ±180° is framed inside the world, not handed to MapKit out of range")
+    func antimeridianStaysInWorld() {
+        let taveuni = [[
+            RouteCoordinate(latitude: -16.80, longitude: 179.99),
+            RouteCoordinate(latitude: -16.81, longitude: -179.99),
+        ]]
+        let mapRect = RideMapThumbnail.mapRect(for: taveuni)
+        #expect(MKMapRect.world.contains(mapRect))
+        #expect(abs(mapRect.width - mapRect.height) < 1e-6)
     }
 
     @Test("a ride that barely moved is framed at the minimum width, not zoomed to its GPS jitter")
@@ -174,8 +193,9 @@ struct RideMapThumbnailTests {
                 trackPoints: [Self.rideId: Self.pausedRide],
                 onSaveRideMapThumbnail: { id, light, dark in saved.withValue { $0.append((id, light, dark)) } }
             )
-            $0.mapSnapshotClient = MapSnapshotClient { _, segments, style in
+            $0.mapSnapshotClient = MapSnapshotClient { mapRect, segments, style in
                 #expect(segments == RideMapThumbnail.drawableSegments(Self.pausedRide))
+                #expect(MKMapRectEqualToRect(mapRect, RideMapThumbnail.mapRect(for: segments)))
                 rendered.withValue { $0.append(style) }
                 return Data(style == .dark ? "dark".utf8 : "light".utf8)
             }
