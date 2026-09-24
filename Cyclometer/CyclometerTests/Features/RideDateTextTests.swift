@@ -63,4 +63,29 @@ struct RideDateTextTests {
         #expect(text(Self.date(2026, 9, 22, 23, 0), now: justAfterMidnight) == "Yesterday at 11:00\u{202F}PM")
         #expect(text(Self.date(2026, 9, 21, 23, 30), now: justAfterMidnight) == "Monday 11:30\u{202F}PM")
     }
+
+    /// #291: the day word once came from the device clock, so these tests passed only on the
+    /// day they were written. A `now` years from the clock's date proves it follows `now`.
+    @Test("\"Today\" and \"Yesterday\" follow now, not the device clock")
+    func relativeDayFollowsNow() {
+        let farNow = Self.date(2031, 3, 12, 18, 0)
+        #expect(text(Self.date(2031, 3, 12, 9, 15), now: farNow) == "Today at 9:15\u{202F}AM")
+        #expect(text(Self.date(2031, 3, 11, 21, 40), now: farNow) == "Yesterday at 9:40\u{202F}PM")
+    }
+
+    @Test("Another locale keeps its own relative wording, and it too follows now")
+    func relativeDayLocalized() {
+        let farNow = Self.date(2031, 3, 12, 18, 0)
+        let german = RideDateText.text(
+            for: Self.date(2031, 3, 11, 14, 5), now: farNow,
+            calendar: Self.calendar, locale: Locale(identifier: "de_DE")
+        )
+        #expect(german == "Gestern, 14:05")
+    }
+
+    @Test("A ride after now is dated in full, however far ahead")
+    func rideAfterNowIsAbsolute() {
+        #expect(text(Self.date(2026, 9, 24, 0, 15)) == "Sep 24 at 12:15\u{202F}AM")
+        #expect(text(Self.date(2026, 10, 23, 9, 15)) == "Oct 23 at 9:15\u{202F}AM")
+    }
 }

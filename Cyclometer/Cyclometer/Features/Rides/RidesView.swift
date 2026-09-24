@@ -6,9 +6,9 @@ import ComposableArchitecture
 struct RidesView: View {
     let store: StoreOf<RidesFeature>
     let onStartRide: () -> Void
-    /// What the row dates are relative to. A parameter so snapshots can pin it; the app
-    /// takes the time of the render.
-    var now: Date = .now
+    /// What the row dates are relative to. Snapshots pin it; the app leaves it nil and each
+    /// row follows the clock (#291).
+    var now: Date?
 
     var body: some View {
         List {
@@ -71,7 +71,7 @@ struct RidesNavigationStack: View {
     var isStartRideHidden: Bool = false
     var onStartRide: () -> Void = {}
     /// See `RidesView.now`.
-    var now: Date = .now
+    var now: Date?
 
     var body: some View {
         NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
@@ -96,7 +96,8 @@ struct RideRow: View {
     let ride: RideListSummary
     let thumbnail: RidesFeature.Thumbnail?
     let unitSystem: UnitSystem
-    let now: Date
+    /// See `RidesView.now`.
+    let now: Date?
 
     /// Hours and minutes, no seconds ("0:45", "1:18") — a list reads at a glance, and the
     /// narrower value leaves the name room. Truncated like a ride clock, not rounded, so a
@@ -104,6 +105,13 @@ struct RideRow: View {
     private var elapsed: String {
         Duration.seconds(ride.durationSeconds)
             .formatted(.time(pattern: .hourMinute(padHourToLength: 1, roundSeconds: .down)))
+    }
+
+    private func dateText(now: Date) -> some View {
+        Text(RideDateText.text(for: ride.startedAt, now: now))
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 
     var body: some View {
@@ -115,10 +123,16 @@ struct RideRow: View {
                 Text(ride.title.isEmpty ? "Ride" : ride.title)
                     .font(.headline)
                     .lineLimit(1)
-                Text(RideDateText.text(for: ride.startedAt, now: now))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if let now {
+                    dateText(now: now)
+                } else {
+                    // A `now` taken when the view was built would keep a list left open past
+                    // midnight on the day before (#291). The timeline re-reads the clock each
+                    // minute while the row is on screen, and again when it comes back.
+                    TimelineView(.everyMinute) { context in
+                        dateText(now: context.date)
+                    }
+                }
             }
             Spacer(minLength: Spacing.sm)
             // Fixed-size so the name and date truncate first — a clipped "1:1…" is no reading
