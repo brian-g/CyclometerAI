@@ -3,14 +3,14 @@ layout: base.njk
 title: Cyclometer — Coming soon to iPhone
 bodyClass: home
 ---
-<main class="hero">
+<header class="hero">
   <img class="hero-photo"
        src="/assets/img/hero-1600.jpg"
        srcset="/assets/img/hero-1600.jpg 1600w, /assets/img/hero-2400.jpg 2400w"
        sizes="100vw"
        alt="A cyclist rides a road bike around a bend in a forest road">
   <div class="hero-content">
-    <h1 class="wordmark">{{ site.name }}</h1>
+    <h1 class="wordmark"><img class="app-icon" src="/favicon.svg" alt="">{{ site.name }}</h1>
     <p class="tagline">{{ site.tagline }}</p>
     {% if site.appStoreUrl %}
     <a class="cta" href="{{ site.appStoreUrl }}">Download on the App Store</a>
@@ -18,6 +18,52 @@ bodyClass: home
     <p class="cta cta-soon">Coming soon to the App Store</p>
     {% endif %}
   </div>
+</header>
+<main>
+  <section class="section">
+    <div class="section-inner">
+      <p class="eyebrow">Built for the ride</p>
+      <h2>Everything you need at a glance. Nothing you don't.</h2>
+      <ul class="features">
+        <li>
+          <h3>Readable in full sun</h3>
+          <p>Big, high-contrast numbers you can read with one glance, even with the screen dimmed.</p>
+        </li>
+        <li>
+          <h3>Radar alerts</h3>
+          <p>Pair a Garmin Varia and see vehicles approaching from behind before you hear them.</p>
+        </li>
+        <li>
+          <h3>Your sensors, your zones</h3>
+          <p>Connects to Bluetooth heart rate, speed, and cadence sensors. HR zones are set from your Apple Health data.</p>
+        </li>
+        <li>
+          <h3>Automatic wheel sizing</h3>
+          <p>GPS calibrates your wheel so speed and distance from your sensor stay accurate.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+  <section class="section section-alt">
+    <div class="section-inner">
+      <p class="eyebrow">Private by design</p>
+      <h2>Your rides stay on your iPhone.</h2>
+      <ul class="features">
+        <li>
+          <h3>No account</h3>
+          <p>No sign-up, no login, no backend. Open the app and ride.</p>
+        </li>
+        <li>
+          <h3>On-device history</h3>
+          <p>Routes, heart rate, and ride history are stored only on your phone, and nothing is sold or shared for advertising.</p>
+        </li>
+        <li>
+          <h3>Share on your terms</h3>
+          <p>Completed rides can be saved to Apple Health, and you can export any ride as a GPX file.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
 </main>
 <footer class="site-footer">
   <a href="/privacy-policy/">Privacy Policy</a>

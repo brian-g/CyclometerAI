@@ -8,7 +8,8 @@ Branch: `site/coming-soon`
 - [x] 3. site.css on colors.md tokens, light + dark; system-ui → Open Sans → sans-serif
 - [x] 4. Hero photo (Unsplash, Viktor Bystrov) at 1600/2400w; favicon + apple-touch-icon from Cyclometer.icon layers
 - [x] 5. `.github/workflows/pages.yml` (PR build, main build + deploy)
-- [x] 6. Verify: build, privacy text parity, screenshots light/dark × desktop/390px, no horizontal scroll
+- [x] 6. App icon in the hero wordmark; two feature sections (Built for the ride, Private by design)
+- [x] 7. Verify: build, privacy text parity, screenshots light/dark × desktop/390px, no horizontal scroll
 
 ## Review
 
