@@ -110,8 +110,8 @@ struct RideRow: View {
         HStack(spacing: Spacing.sm) {
             RideThumbnail(thumbnail: thumbnail)
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                // Every ride's `title` is "" until #249's rename field ships — a blank row
-                // would read as broken, so this falls back rather than showing empty text.
+                // S10 names every ride it shows (#249), but one recorded before it, or closed
+                // out at launch, has a "" `title` — a blank row would read as broken.
                 Text(ride.title.isEmpty ? "Ride" : ride.title)
                     .font(.headline)
                     .lineLimit(1)

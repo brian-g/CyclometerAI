@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-09-23 — S10 built (#249): presented as a sheet when Finish is confirmed, after the ride's save lands; titled and closed by **Finish Ride** as in the Sketch frame; the HR zone pie is derived from the saved track against the rider's current zones; unnamed rides get a default name (route, else time of day + loop / out and back); the frame's Description, Bike and Sync To rows are not built.  
 **Updated:** 2026-09-22 — HKWorkout write (#250): §S10 writes it after the ride is saved, not before the summary presents, skips overlapping workouts from other sources, and carries no energy yet, so no Move credit (#274); Apple Health is a future row in the Phase 2 Service Sync sheet. §S01's HealthKit list adds the workout read and distance write.  
 **Updated:** 2026-09-17 — M8 spec reconciliation (#202): the "Coming Soon" placeholder sentence in §S04 is gone — the Routes tab is built; S19's purpose no longer reads as though the service imports are MVP sources.  
 **Updated:** 2026-09-06 — M8 scope pass: Add Routes View and Route Detail to M8 work.  
@@ -63,7 +64,7 @@ All design artifacts are in `assets/design/`. These files are the source of trut
 | [S07](#s07-dashboard-customization) | Dashboard Customization | Phase 2 | Stub |
 | [S08](#s08-add-widget) | Add Widget | Phase 2 | Stub |
 | [S09](#s09-ride-paused) | Ride Paused | MVP | Stub |
-| [S10](#s10-ride-summary) | Ride Summary | MVP | Stub |
+| [S10](#s10-ride-summary) | Ride Summary | MVP | Complete |
 | [S11](#s11-device-management) | Device Management | MVP | Complete |
 | [S12](#s12-app-settings) | App Settings | MVP | Stub |
 | [S13](#s13-hr-zone-configuration) | HR Zone Configuration | Deprecated | Stub |
@@ -783,16 +784,16 @@ The visual dashboard is otherwise unchanged — all metric widgets continue disp
 ### Layout
 > *Refer to `assets/design/Design.sketch` — S10.*
 
+A full-height sheet titled **Finish Ride**, presented when the rider confirms Finish (#249). The ride is already saved by then; the sheet waits for that save to land before showing numbers, and shows a progress row until it does. Its Description, Bike and Sync To rows are not built — there is no bike model, and sync is Phase 2.
+
 ### Key Components
-- Map thumbnail (full route trace in `brPrimary`; placeholder in Design.sketch). A live map, not S14's cached image (#177)
-- Primary metrics: total distance, total time, avg speed
+- Map (full route trace in `brPrimary`; placeholder in Design.sketch). A live map, not S14's cached image (#177)
+- Name row: tapping it focuses the field and opens the keyboard. An unnamed ride's default is its route's name; otherwise the time of day and the ride's shape — "Morning Loop", "Evening Out and Back", "Afternoon Ride" (one way). A place name from reverse geocoding is a follow-up. The name is saved when the sheet closes, by button or swipe; a field cleared to nothing saves the default
+- Ride stats: total distance, total time, avg speed, average cadence (only if a cadence sensor reported), vehicle pass count (only with radar paired), route
 - Elevation profile
-- HR zone breakdown (pie chart)
-- Average cadence (if cadence sensor was active during the ride)
-- Radar events count / vehicle pass count
-- Rename field: tapping the ride title focuses the field and opens the keyboard; defaults to route name
-- **Sync button** — taps present the Service Sync sheet (see below)
-- Done navigation
+- HR zone breakdown (pie chart), derived from the saved track against the rider's current zones (S12), like S15's HR chart; "No heart rate recorded" when there is none
+- **Sync button** — Phase 2; taps present the Service Sync sheet (see below)
+- **Finish Ride** — a floating button that closes the sheet to the tabs, where the ride is in S14
 
 > **Note:** The GPX file is written automatically at ride end and is available via the iOS Files app in the app's `Documents/Rides/` directory. No explicit export action is shown on this screen.
 

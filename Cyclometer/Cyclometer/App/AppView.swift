@@ -79,6 +79,12 @@ struct AppView: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
+
+            // ── Ride Summary (S10) ───────────────────────────────────────────────
+            .sheet(item: $store.scope(state: \.rideSummary, action: \.rideSummary)) { summaryStore in
+                RideSummaryView(store: summaryStore)
+                    .presentationDragIndicator(.visible)
+            }
             
             // ── Active Ride Dashboard ───────────────────────────
             if store.isDashboardPresented {

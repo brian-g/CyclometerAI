@@ -174,4 +174,26 @@ enum RideDetailSeries {
             return Int((Double(bucketReadings.reduce(0, +)) / Double(bucketReadings.count)).rounded())
         }
     }
+
+    /// Seconds spent at each heart rate, for S10's zone breakdown (#249). A histogram rather
+    /// than the readings themselves: the zones it is sorted into resolve after the track loads,
+    /// and a few hundred entries is all a ride of any length needs. Empty when no second had a
+    /// reading.
+    static func secondsByBPM(_ points: [TrackPointDTO]) -> [Int: Int] {
+        points.reduce(into: [:]) { seconds, point in
+            if let bpm = point.heartRateBPM { seconds[bpm, default: 0] += 1 }
+        }
+    }
+
+    /// Seconds in each zone, zone 1 first, against `zoneBounds` (zone 1 first). A reading below
+    /// zone 1 counts as zone 1 and one above zone 5 as zone 5 — `HeartRateProfileView`'s bands.
+    static func zoneSeconds(_ secondsByBPM: [Int: Int], zoneBounds: [ClosedRange<Int>]) -> [Int] {
+        var zones = Array(repeating: 0, count: zoneBounds.count)
+        guard !zones.isEmpty else { return zones }
+        for (bpm, seconds) in secondsByBPM {
+            let zone = zoneBounds.lastIndex { $0.lowerBound <= bpm } ?? 0
+            zones[zone] += seconds
+        }
+        return zones
+    }
 }

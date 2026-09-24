@@ -33,6 +33,8 @@ struct PersistenceClient: Sendable {
     /// Writes final aggregates, endedAt, recordingState .ended, and the exported
     /// GPX file's URL (nil if export failed) in one call.
     var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate, URL?) async throws -> Void
+    /// Sets a finished ride's title — S10's rename field (#249).
+    var renameRide: @Sendable (UUID, String) async throws -> Void
     /// Stores S14's map thumbnail, light then dark, rendered after the ride ended (#177).
     var saveRideMapThumbnail: @Sendable (UUID, Data, Data) async throws -> Void
     /// Finished rides with no map thumbnail yet, newest first — what `RideMapThumbnail.backfill`
@@ -100,6 +102,7 @@ extension PersistenceClient: DependencyKey {
             createRide: { try await rideActor.createRide(id: $0, startedAt: $1, route: $2) },
             updateRideSummary: { try await rideActor.updateRideSummary($0) },
             finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
+            renameRide: { try await rideActor.renameRide(id: $0, title: $1) },
             saveRideMapThumbnail: { try await rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
             fetchRideIdsMissingMapThumbnail: { try await rideActor.rideIdsMissingMapThumbnail() },
             fetchRideMapThumbnail: { try await rideActor.fetchMapThumbnail(id: $0) },
@@ -131,6 +134,7 @@ extension PersistenceClient: DependencyKey {
         createRide: { _, _, _ in },
         updateRideSummary: { _ in },
         finalizeRide: { _, _, _, _ in },
+        renameRide: { _, _ in },
         saveRideMapThumbnail: { _, _, _ in },
         fetchRideIdsMissingMapThumbnail: { [] },
         fetchRideMapThumbnail: { _ in nil },
