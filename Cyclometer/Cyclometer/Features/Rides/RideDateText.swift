@@ -4,8 +4,10 @@ import Synchronization
 /// S14's row date: relative within the previous week, absolute beyond it (UX.md §S14).
 ///
 /// Counted in calendar days, not 24-hour spans — a ride at 11 PM is "Yesterday" at 1 AM.
-/// Pure, with `now`, calendar and locale passed in, so the boundaries can be asserted without
-/// depending on when or where the tests run.
+/// `now`, calendar and locale are passed in, so the boundaries can be asserted without
+/// depending on when or where the tests run. Not pure: "Today" and "Yesterday" come from a
+/// formatter that only knows the device clock, so that branch reads the clock to shift the
+/// ride onto it (#291).
 enum RideDateText {
     static func text(
         for date: Date,
@@ -13,12 +15,13 @@ enum RideDateText {
         calendar: Calendar = .current,
         locale: Locale = .current
     ) -> String {
-        let daysAgo = calendar.dateComponents(
+        // A ride after `now` (the device clock set back, say) reads as today, not "Tomorrow".
+        let daysAgo = max(calendar.dateComponents(
             [.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)
-        ).day ?? 0
+        ).day ?? 0, 0)
 
         switch daysAgo {
-        case ...1:
+        case 0...1:
             // The locale's own relative pattern, day word and time together: "Today at
             // 3:45 PM" in English, and whatever order and joiner another language uses.
             return relativeFormatted(date, daysAgo: daysAgo, calendar: calendar, locale: locale)

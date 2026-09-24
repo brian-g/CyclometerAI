@@ -73,13 +73,18 @@ struct RideDateTextTests {
         #expect(text(Self.date(2031, 3, 11, 21, 40), now: farNow) == "Yesterday at 9:40\u{202F}PM")
     }
 
-    @Test("Another locale keeps its own relative wording")
+    @Test("Another locale keeps its own relative wording, and it too follows now")
     func relativeDayLocalized() {
+        let farNow = Self.date(2031, 3, 12, 18, 0)
         let german = RideDateText.text(
-            for: Self.date(2026, 9, 22, 14, 5), now: Self.now,
+            for: Self.date(2031, 3, 11, 14, 5), now: farNow,
             calendar: Self.calendar, locale: Locale(identifier: "de_DE")
         )
-        #expect(german.hasPrefix("Gestern"))
-        #expect(german.contains("14:05"))
+        #expect(german == "Gestern, 14:05")
+    }
+
+    @Test("A ride after now reads as today, not tomorrow")
+    func rideAfterNowIsToday() {
+        #expect(text(Self.date(2026, 9, 24, 0, 15)) == "Today at 12:15\u{202F}AM")
     }
 }

@@ -6,9 +6,13 @@ import ComposableArchitecture
 struct RidesView: View {
     let store: StoreOf<RidesFeature>
     let onStartRide: () -> Void
-    /// What the row dates are relative to. A parameter so snapshots can pin it; the app
-    /// takes the time of the render.
-    var now: Date = .now
+    /// What the row dates are relative to. Snapshots pin it; the app leaves it nil and
+    /// follows the clock.
+    var now: Date?
+    /// Only the day matters to a row date, so this is refreshed when the day turns, not on a
+    /// timer. A value from when the view was built would keep a list left open past midnight
+    /// on the day before (#291).
+    @State private var clockNow = Date.now
 
     var body: some View {
         List {
@@ -26,7 +30,7 @@ struct RidesView: View {
                 ForEach(store.rides) { ride in
                     NavigationLink(state: RidesFeature.Path.State.detail(RideDetailFeature.State(summary: ride))) {
                         RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
-                                unitSystem: store.unitSystem, now: now)
+                                unitSystem: store.unitSystem, now: now ?? clockNow)
                     }
                     .onAppear { store.send(.rowAppeared(ride.id)) }
                     // Trailing Delete only. §S14's leading Sync and Make Route wait on
@@ -48,6 +52,11 @@ struct RidesView: View {
         .listStyle(.plain)
         .navigationTitle("Rides")
         .task { store.send(.task) }
+        // Posted at midnight and on a time zone or clock change, and held until the app
+        // returns to the foreground if it was suspended when the day turned.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            clockNow = .now
+        }
     }
 
     /// Goes through the reducer, which used to call `modelContext.delete(ride)` straight
@@ -71,7 +80,7 @@ struct RidesNavigationStack: View {
     var isStartRideHidden: Bool = false
     var onStartRide: () -> Void = {}
     /// See `RidesView.now`.
-    var now: Date = .now
+    var now: Date?
 
     var body: some View {
         NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
