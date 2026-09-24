@@ -62,3 +62,7 @@ fastlane/screenshots/**/*.png
 fastlane/test_output
 .DS_Store
 system_logs.logarchive
+
+# Site (docs/)
+docs/node_modules/
+docs/_site/

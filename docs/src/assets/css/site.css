@@ -1,0 +1,238 @@
+/* Tokens mirror assets/design/colors.md (cy* in Swift). Only tokens the site uses are declared. */
+:root {
+  color-scheme: light dark;
+
+  --cy-primary: #60BD10;
+  --cy-primary-dark: #4A9A08;
+  --cy-bg-primary: #FFFFFF;
+  --cy-bg-secondary: #F5F5F5;
+  --cy-text-primary: #000000;
+  --cy-text-secondary: #555555;
+  --cy-border-subtle: #E5E5E5;
+
+  /* The hero sits on a darkened photo in both appearances, so it always uses the dark-mode values. */
+  --cy-dark-primary: #6FD11E;
+  --cy-dark-text-primary: #FFFFFF;
+  --cy-dark-text-on-primary: #000000;
+  --cy-dark-overlay: rgba(0, 0, 0, 0.6);
+
+  /* Light mode links: primaryDark reads better than primary on white. */
+  --link: var(--cy-primary-dark);
+
+  --gutter: 16px;
+  --font: system-ui, "Open Sans", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cy-primary: #6FD11E;
+    --cy-primary-dark: #60BD10;
+    --cy-bg-primary: #0F0F0F;
+    --cy-bg-secondary: #1A1A1A;
+    --cy-text-primary: #FFFFFF;
+    --cy-text-secondary: #A0A0A0;
+    --cy-border-subtle: #2A2A2A;
+
+    --link: var(--cy-primary);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--cy-bg-primary);
+  color: var(--cy-text-primary);
+  font-family: var(--font);
+  line-height: 1.6;
+}
+
+a { color: var(--link); }
+
+/* ---- Home ---- */
+
+.hero {
+  position: relative;
+  /* Just short of the viewport, so the features below peek in. */
+  min-height: 88vh;
+  min-height: 88svh;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  color: var(--cy-dark-text-primary);
+}
+
+.hero-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Keep the rider (right third) in frame on narrow screens. */
+  object-position: 70% 50%;
+}
+
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--cy-dark-overlay), transparent 80%);
+}
+
+.hero-content {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  /* Same content edge as .section-inner, which pads outside its 1120px. */
+  max-width: calc(1120px + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 48px var(--gutter);
+}
+
+/* Portrait crops put the rider mid-screen; keep the copy above them. */
+@media (max-width: 600px) {
+  .hero { align-items: flex-start; }
+  .hero-content { padding-top: 96px; }
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
+  margin: 0;
+  font-size: clamp(44px, 9vw, 88px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  max-width: 30ch;
+  margin: 16px 0 32px;
+  font-size: clamp(18px, 2.4vw, 24px);
+  line-height: 1.35;
+}
+
+.cta {
+  display: inline-block;
+  margin: 0;
+  padding: 12px 24px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  background: var(--cy-dark-primary);
+  color: var(--cy-dark-text-on-primary);
+}
+
+.app-icon {
+  width: 0.9em;
+  height: 0.9em;
+}
+
+/* Not actionable yet: outlined, so it doesn't read as a button. */
+.cta-soon {
+  background: transparent;
+  color: var(--cy-dark-text-primary);
+  box-shadow: inset 0 0 0 2px var(--cy-dark-primary);
+}
+
+.site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding: 16px var(--gutter);
+  font-size: 14px;
+  color: var(--cy-text-secondary);
+}
+
+.site-footer a { color: inherit; }
+
+/* ---- Home: feature sections ---- */
+
+.section {
+  padding: 64px var(--gutter);
+}
+
+.section-alt { background: var(--cy-bg-secondary); }
+
+.section-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--link);
+}
+
+.section h2 {
+  max-width: 24ch;
+  margin: 0 0 40px;
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.15;
+}
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 32px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.features li {
+  padding-top: 16px;
+  border-top: 3px solid var(--cy-primary);
+}
+
+.features h3 {
+  margin: 0 0 8px;
+  font-size: 19px;
+}
+
+.features p {
+  margin: 0;
+  color: var(--cy-text-secondary);
+}
+
+/* ---- Privacy policy ---- */
+
+.doc-main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px var(--gutter) 64px;
+}
+
+.back a { text-decoration: none; }
+
+.doc-main h1 {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0 0 4px;
+}
+
+.updated { color: var(--cy-text-secondary); }
+
+.doc-main p { font-size: 17px; margin: 0 0 20px; }
+.doc-main .back, .doc-main .updated { font-size: 14px; margin-bottom: 32px; }
+
+.doc-main hr {
+  border: none;
+  border-top: 1px solid var(--cy-border-subtle);
+  margin: 40px 0 24px;
+}
+
+.doc-main footer {
+  color: var(--cy-text-secondary);
+  font-size: 13px;
+}
