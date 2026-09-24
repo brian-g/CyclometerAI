@@ -83,8 +83,9 @@ struct RideDateTextTests {
         #expect(german == "Gestern, 14:05")
     }
 
-    @Test("A ride after now reads as today, not tomorrow")
-    func rideAfterNowIsToday() {
-        #expect(text(Self.date(2026, 9, 24, 0, 15)) == "Today at 12:15\u{202F}AM")
+    @Test("A ride after now is dated in full, however far ahead")
+    func rideAfterNowIsAbsolute() {
+        #expect(text(Self.date(2026, 9, 24, 0, 15)) == "Sep 24 at 12:15\u{202F}AM")
+        #expect(text(Self.date(2026, 10, 23, 9, 15)) == "Oct 23 at 9:15\u{202F}AM")
     }
 }

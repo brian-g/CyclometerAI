@@ -1,4 +1,5 @@
 import Foundation
+import IssueReporting
 import Synchronization
 
 /// S14's row date: relative within the previous week, absolute beyond it (UX.md §S14).
@@ -7,7 +8,7 @@ import Synchronization
 /// `now`, calendar and locale are passed in, so the boundaries can be asserted without
 /// depending on when or where the tests run. Not pure: "Today" and "Yesterday" come from a
 /// formatter that only knows the device clock, so that branch reads the clock to shift the
-/// ride onto it (#291).
+/// ride onto it (#291). A ride after `now` is dated in full rather than called "Tomorrow".
 enum RideDateText {
     static func text(
         for date: Date,
@@ -15,16 +16,15 @@ enum RideDateText {
         calendar: Calendar = .current,
         locale: Locale = .current
     ) -> String {
-        // A ride after `now` (the device clock set back, say) reads as today, not "Tomorrow".
-        let daysAgo = max(calendar.dateComponents(
+        let daysAgo = calendar.dateComponents(
             [.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)
-        ).day ?? 0, 0)
+        ).day ?? 0
 
         switch daysAgo {
         case 0...1:
             // The locale's own relative pattern, day word and time together: "Today at
             // 3:45 PM" in English, and whatever order and joiner another language uses.
-            return relativeFormatted(date, daysAgo: daysAgo, calendar: calendar, locale: locale)
+            return relativeFormatted(date, now: now, calendar: calendar, locale: locale)
         case 2...6:
             return date.formatted(style(.dateTime.weekday(.wide).hour().minute(), calendar, locale))
         default:
@@ -40,16 +40,23 @@ enum RideDateText {
     /// `DateFormatter` isn't `Sendable`, so it never leaves it.
     private static let relativeFormatters = Mutex<[String: DateFormatter]>([:])
 
-    /// The formatter picks its day word against the device clock, not `now` (#291). So the ride's
-    /// time of day is moved onto the day `daysAgo` before the clock's today, and the formatter
-    /// names the day `now` meant. A spring-forward gap on that day could shift the printed hour
-    /// for a ride inside it, the one case the move can't carry over.
-    private static func relativeFormatted(_ date: Date, daysAgo: Int, calendar: Calendar, locale: Locale) -> String {
-        let time = calendar.dateComponents([.hour, .minute, .second], from: date)
-        let clockToday = calendar.startOfDay(for: Date())
-        let shifted = calendar.date(byAdding: .day, value: -daysAgo, to: clockToday).flatMap {
-            calendar.date(bySettingHour: time.hour ?? 0, minute: time.minute ?? 0, second: time.second ?? 0, of: $0)
-        } ?? date
+    /// The formatter picks its day word against the device clock, not `now` (#291). So the ride
+    /// is moved by as many days as `now` is from the clock's today, and the formatter names the
+    /// day `now` meant. In the app the two are the same day and the move is zero.
+    ///
+    /// The clock is read here and again inside the formatter; a render straddling midnight
+    /// can name the neighbouring day, once.
+    private static func relativeFormatted(_ date: Date, now: Date, calendar: Calendar, locale: Locale) -> String {
+        let offset = calendar.dateComponents(
+            [.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: Date())
+        ).day ?? 0
+        let shifted: Date
+        if let moved = calendar.date(byAdding: .day, value: offset, to: date) {
+            shifted = moved
+        } else {
+            reportIssue("Couldn't move \(date) by \(offset) days; its day word follows the device clock")
+            shifted = date
+        }
         let key = "\(locale.identifier)|\(calendar.identifier)|\(calendar.timeZone.identifier)"
         return relativeFormatters.withLock { formatters in
             if let formatter = formatters[key] { return formatter.string(from: shifted) }

@@ -6,13 +6,9 @@ import ComposableArchitecture
 struct RidesView: View {
     let store: StoreOf<RidesFeature>
     let onStartRide: () -> Void
-    /// What the row dates are relative to. Snapshots pin it; the app leaves it nil and
-    /// follows the clock.
+    /// What the row dates are relative to. Snapshots pin it; the app leaves it nil and each
+    /// row follows the clock (#291).
     var now: Date?
-    /// Only the day matters to a row date, so this is refreshed when the day turns, not on a
-    /// timer. A value from when the view was built would keep a list left open past midnight
-    /// on the day before (#291).
-    @State private var clockNow = Date.now
 
     var body: some View {
         List {
@@ -30,7 +26,7 @@ struct RidesView: View {
                 ForEach(store.rides) { ride in
                     NavigationLink(state: RidesFeature.Path.State.detail(RideDetailFeature.State(summary: ride))) {
                         RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
-                                unitSystem: store.unitSystem, now: now ?? clockNow)
+                                unitSystem: store.unitSystem, now: now)
                     }
                     .onAppear { store.send(.rowAppeared(ride.id)) }
                     // Trailing Delete only. §S14's leading Sync and Make Route wait on
@@ -52,11 +48,6 @@ struct RidesView: View {
         .listStyle(.plain)
         .navigationTitle("Rides")
         .task { store.send(.task) }
-        // Posted at midnight and on a time zone or clock change, and held until the app
-        // returns to the foreground if it was suspended when the day turned.
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
-            clockNow = .now
-        }
     }
 
     /// Goes through the reducer, which used to call `modelContext.delete(ride)` straight
@@ -105,7 +96,8 @@ struct RideRow: View {
     let ride: RideListSummary
     let thumbnail: RidesFeature.Thumbnail?
     let unitSystem: UnitSystem
-    let now: Date
+    /// See `RidesView.now`.
+    let now: Date?
 
     /// Hours and minutes, no seconds ("0:45", "1:18") — a list reads at a glance, and the
     /// narrower value leaves the name room. Truncated like a ride clock, not rounded, so a
@@ -113,6 +105,13 @@ struct RideRow: View {
     private var elapsed: String {
         Duration.seconds(ride.durationSeconds)
             .formatted(.time(pattern: .hourMinute(padHourToLength: 1, roundSeconds: .down)))
+    }
+
+    private func dateText(now: Date) -> some View {
+        Text(RideDateText.text(for: ride.startedAt, now: now))
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 
     var body: some View {
@@ -124,10 +123,16 @@ struct RideRow: View {
                 Text(ride.title.isEmpty ? "Ride" : ride.title)
                     .font(.headline)
                     .lineLimit(1)
-                Text(RideDateText.text(for: ride.startedAt, now: now))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if let now {
+                    dateText(now: now)
+                } else {
+                    // A `now` taken when the view was built would keep a list left open past
+                    // midnight on the day before (#291). The timeline re-reads the clock each
+                    // minute while the row is on screen, and again when it comes back.
+                    TimelineView(.everyMinute) { context in
+                        dateText(now: context.date)
+                    }
+                }
             }
             Spacer(minLength: Spacing.sm)
             // Fixed-size so the name and date truncate first — a clipped "1:1…" is no reading
