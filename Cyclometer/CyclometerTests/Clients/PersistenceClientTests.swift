@@ -806,7 +806,7 @@ struct PersistenceClientTests {
         #expect(events.isEmpty)
     }
 
-    // MARK: - vehiclePassCount survives a kill (#298)
+    // MARK: - Resume reconciles vehiclePassCount with its events (#298)
 
     private static func passEvent(_ rideId: UUID) -> VehiclePassEventDTO {
         VehiclePassEventDTO(
@@ -815,48 +815,55 @@ struct PersistenceClientTests {
         )
     }
 
-    @Test("appendVehiclePassEvents raises the ride's count in the same save, so a resume before any checkpoint sees it")
-    func appendVehiclePassEventsRaisesResumableCount() async throws {
+    private static func checkpoint(_ rideId: UUID, vehiclePassCount: Int?) -> RideSummaryUpdate {
+        RideSummaryUpdate(
+            rideId: rideId, durationSeconds: 30, distanceMeters: 100,
+            averageSpeedMPS: 3, maxSpeedMPS: 5, vehiclePassCount: vehiclePassCount
+        )
+    }
+
+    @Test("A ride killed after a pass and before its next checkpoint resumes with the pass counted")
+    func resumeCountsPassesSavedAfterLastCheckpoint() async throws {
         let (client, _) = Self.makeLiveClient()
         let rideId = UUID()
         try await client.createRide(rideId, Date(), nil)
+        try await client.updateRideSummary(Self.checkpoint(rideId, vehiclePassCount: 1))
 
-        // No updateRideSummary at all: the app is killed before its first checkpoint.
-        try await client.appendVehiclePassEvents([Self.passEvent(rideId), Self.passEvent(rideId)])
+        // Two more passes land after the checkpoint, then the app is killed.
         try await client.appendVehiclePassEvents([Self.passEvent(rideId)])
+        try await client.appendVehiclePassEvents([Self.passEvent(rideId), Self.passEvent(rideId)])
 
         let resumed = try #require(try await client.fetchResumableRide())
         #expect(resumed.vehiclePassCount == 3)
-        #expect(try await client.fetchVehiclePassEvents(rideId).count == 3)
     }
 
-    @Test("A checkpoint built before the reducer heard about a pass doesn't take the count back down")
-    func staleCheckpointDoesNotLowerVehiclePassCount() async throws {
-        let (client, swiftDataStack) = Self.makeLiveClient()
+    @Test("A ride with passes but no checkpoint yet resumes counted, not as \"no radar\"")
+    func resumeCountsPassesBeforeFirstCheckpoint() async throws {
+        let (client, _) = Self.makeLiveClient()
         let rideId = UUID()
         try await client.createRide(rideId, Date(), nil)
-
         try await client.appendVehiclePassEvents([Self.passEvent(rideId)])
-        try await client.updateRideSummary(RideSummaryUpdate(
-            rideId: rideId, durationSeconds: 30, distanceMeters: 100,
-            averageSpeedMPS: 3, maxSpeedMPS: 5, vehiclePassCount: 0
-        ))
 
-        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
-        #expect(ride.vehiclePassCount == 1)
-        #expect(ride.distanceMeters == 100)
+        let resumed = try #require(try await client.fetchResumableRide())
+        #expect(resumed.vehiclePassCount == 1)
     }
 
-    @Test("appendVehiclePassEvents for a ride that doesn't exist throws and stores nothing")
-    func appendVehiclePassEventsWithoutRideThrows() async throws {
-        let (client, swiftDataStack) = Self.makeLiveClient()
+    @Test("Resume keeps a checkpointed 0 as 0, and a ride with no count and no events as nil")
+    func resumeKeepsZeroAndNil() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let radarRide = UUID()
+        try await client.createRide(radarRide, Date(timeIntervalSince1970: 0), nil)
+        try await client.updateRideSummary(Self.checkpoint(radarRide, vehiclePassCount: 0))
+        #expect(try await client.fetchResumableRide()?.vehiclePassCount == 0)
 
-        await #expect(throws: (any Error).self) {
-            try await client.appendVehiclePassEvents([Self.passEvent(UUID())])
-        }
-
-        let context = ModelContext(swiftDataStack.container)
-        #expect(try context.fetch(FetchDescriptor<VehiclePassEvent>()).isEmpty)
+        // Newer by startedAt, so it's the one fetchResumableRide returns. Another ride's
+        // events don't count toward it.
+        try await client.appendVehiclePassEvents([Self.passEvent(radarRide)])
+        let noRadarRide = UUID()
+        try await client.createRide(noRadarRide, Date(timeIntervalSince1970: 60), nil)
+        let resumed = try #require(try await client.fetchResumableRide())
+        #expect(resumed.rideId == noRadarRide)
+        #expect(resumed.vehiclePassCount == nil)
     }
 
     @Test("fetchVehiclePassEvents returns only the given ride's events, ascending by timestamp")
@@ -865,8 +872,6 @@ struct PersistenceClientTests {
         let rideId = UUID()
         let otherRideId = UUID()
         let base = Date()
-        try await client.createRide(rideId, base, nil)
-        try await client.createRide(otherRideId, base, nil)
 
         let dtos = (0..<3).reversed().map { offset in
             VehiclePassEventDTO(
@@ -884,9 +889,6 @@ struct PersistenceClientTests {
         let fetched = try await client.fetchVehiclePassEvents(rideId)
         #expect(fetched.map(\.rideId) == Array(repeating: rideId, count: 3))
         #expect(fetched.map(\.timestamp) == dtos.map(\.timestamp).sorted())
-        // A mixed batch raises each ride's count by its own events (#298).
-        #expect(try await client.fetchRideStats(rideId).vehiclePassCount == 3)
-        #expect(try await client.fetchRideStats(otherRideId).vehiclePassCount == 1)
     }
 
     @Test("fetchVehiclePassEvents for an unknown rideId returns empty, not an error")

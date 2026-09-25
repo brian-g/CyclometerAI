@@ -102,12 +102,6 @@ actor RidePersistenceActor {
     func appendVehiclePassEvents(_ dtos: [VehiclePassEventDTO]) throws {
         guard let firstRideId = dtos.first?.rideId else { return }
         try savingChanges("appendVehiclePassEvents", id: firstRideId, context: modelContext) {
-            // Each ride's count moves in the same save as its events, so a kill between a
-            // pass and the next checkpoint can't leave the two disagreeing (#298).
-            for (rideId, events) in Dictionary(grouping: dtos, by: \.rideId) {
-                let ride = try fetchRide(id: rideId)
-                ride.vehiclePassCount = (ride.vehiclePassCount ?? 0) + events.count
-            }
             for dto in dtos {
                 modelContext.insert(VehiclePassEvent(
                     rideId: dto.rideId,
@@ -222,7 +216,20 @@ actor RidePersistenceActor {
                 sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
             )
             descriptor.fetchLimit = 1
-            return try modelContext.fetch(descriptor).first?.summarySnapshot
+            guard let ride = try modelContext.fetch(descriptor).first else { return nil }
+            var summary = ride.summarySnapshot
+            // A pass's `VehiclePassEvent` is saved the moment it's confirmed, but the ride's
+            // count only at the next checkpoint, so a kill in between leaves the stored count
+            // behind its events (#298). The events are the record; resume from whichever is
+            // higher, keeping nil for a ride with neither — "no radar" (#285).
+            let rideId = ride.id
+            let eventCount = try modelContext.fetchCount(
+                FetchDescriptor<VehiclePassEvent>(predicate: #Predicate { $0.rideId == rideId })
+            )
+            if summary.vehiclePassCount != nil || eventCount > 0 {
+                summary.vehiclePassCount = max(summary.vehiclePassCount ?? 0, eventCount)
+            }
+            return summary
         } catch {
             logger.error("fetchResumableRide failed: \(error.localizedDescription, privacy: .public)")
             throw error
@@ -325,13 +332,10 @@ actor RidePersistenceActor {
         return ride
     }
 
-    /// Only raises `vehiclePassCount`, and only when the update carries a value. Nil from
+    /// Only overwrites `vehiclePassCount` when the update carries a value. Nil from
     /// `ActiveRideFeature` means no radar has been active this ride (#285), and its
     /// count never goes from a number back to nil, so skipping nil can't hide a
-    /// clear — it only keeps a checkpoint from stomping a stored count (#172). The
-    /// count is a ride's running total, so it never shrinks: `appendVehiclePassEvents`
-    /// raises it first, and a checkpoint built before the reducer heard about that
-    /// write must not take it back down (#298).
+    /// clear — it only keeps a checkpoint from stomping a stored count (#172).
     private func apply(_ update: RideSummaryUpdate, to ride: Ride) {
         ride.recordingState = update.recordingState
         ride.durationSeconds = update.durationSeconds
@@ -343,7 +347,7 @@ actor RidePersistenceActor {
         ride.averageCadenceRPM = update.averageCadenceRPM
         ride.maxCadenceRPM = update.maxCadenceRPM
         if let vehiclePassCount = update.vehiclePassCount {
-            ride.vehiclePassCount = max(ride.vehiclePassCount ?? 0, vehiclePassCount)
+            ride.vehiclePassCount = vehiclePassCount
         }
         ride.isAutoPaused = update.isAutoPaused
         ride.zeroSpeedSeconds = update.zeroSpeedSeconds

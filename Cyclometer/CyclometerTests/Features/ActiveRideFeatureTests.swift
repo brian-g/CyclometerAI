@@ -3173,24 +3173,6 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
         #expect(finalized.value?.vehiclePassCount == 0)
     }
 
-    @Test("A ride's first radar is written straight away, not at the next checkpoint (#298)")
-    func firstRadarWritesSummaryImmediately() async {
-        let updates = LockIsolated<[RideSummaryUpdate]>([])
-        let store = makeStore(persistenceClient: .mock(onUpdateRideSummary: { update in
-            updates.withValue { $0.append(update) }
-        }))
-
-        await store.send(.radarConnectionChanged(.active))
-        await expectEventually { !updates.value.isEmpty }
-        #expect(updates.value.map(\.vehiclePassCount) == [0])
-
-        // Dropping and regaining the same radar isn't a new "first radar".
-        await store.send(.radarConnectionChanged(.disconnected))
-        await store.send(.radarConnectionChanged(.active))
-        await store.finish()
-        #expect(updates.value.count == 1)
-    }
-
     @Test("Resuming keeps a nil vehiclePassCount nil and a real count intact")
     func resumeKeepsNilAndCount() async {
         func resumed(_ vehiclePassCount: Int?) -> ActiveRideFeature.State {

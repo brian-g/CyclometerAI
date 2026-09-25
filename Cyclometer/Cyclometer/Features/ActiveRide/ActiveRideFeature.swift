@@ -834,24 +834,8 @@ struct ActiveRideFeature {
                 case .active:
                     state.isRadarPaired = true
                     state.wasRadarEverPaired = true
-                    let cancelLossTimer = Effect<Action>.cancel(id: CancelID.radarLossTimer)
-                    guard state.vehiclePassCount == nil else { return cancelLossTimer }
-                    state.vehiclePassCount = 0
-                    guard state.recordingState == .active || state.recordingState == .paused else {
-                        return cancelLossTimer
-                    }
-                    // The ride's first radar is written now rather than at the next 30s
-                    // checkpoint, so a kill before then can't resume it as a ride that
-                    // never had one (#298). Under the checkpoint's ID so ride-end cancels
-                    // it like any other checkpoint.
-                    let update = makeRideSummaryUpdate(from: state)
-                    return .merge(
-                        cancelLossTimer,
-                        .run { [persistenceClient] _ in
-                            try? await persistenceClient.updateRideSummary(update)
-                        }
-                        .cancellable(id: CancelID.rideCheckpoint, cancelInFlight: true)
-                    )
+                    state.vehiclePassCount = state.vehiclePassCount ?? 0
+                    return .cancel(id: CancelID.radarLossTimer)
                 case .reconnecting:
                     // Badge stays paired during the 10s grace window (PRD §9.1);
                     // only arm the timer while paired so the haptic fires once.
