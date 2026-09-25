@@ -93,6 +93,11 @@ struct NavigationPipelineTests {
                 container,
                 PersistenceClient.live(coreDataContainer: coreData.container, modelContainer: container)
             ))
+            // Map thumbnails (#273) aren't this pipeline's subject, and their backfill reads each
+            // route back at launch and after import, on its own schedule — which would make
+            // `routeFetches` count something other than navigation. With none missing, it never
+            // reads.
+            client.fetchRouteIdsMissingMapThumbnail = { [] }
             let fetchRoute = client.fetchRoute
             client.fetchRoute = { [routeFetches] id in
                 routeFetches.withValue { $0 += 1 }
@@ -350,11 +355,9 @@ struct NavigationPipelineTests {
                 let store = try await harness.launch()
                 // A route exists — it just isn't the ride's.
                 let summary = try await importFixture(on: store)
-                // The import reads its route back twice: for #252's surface lookup, and for #273's
-                // map thumbnail (whose render then fails on the inert snapshot client, ending the
-                // batch). Both reads are the Routes tab's, not the ride's, so they are the
-                // baseline the ride is measured from.
-                await expectEventually { harness.routeFetches.value == 2 }
+                // The import reads its route back once, for #252's surface lookup. That read is the
+                // Routes tab's, not the ride's, so it is the baseline the ride is measured from.
+                await expectEventually { harness.routeFetches.value == 1 }
                 fetchesBeforeRide = harness.routeFetches.value
                 let polyline = try #require(try await harness.reader.fetchRoute(summary.id)).coordinates
                 let untouched = withDependencies { $0 = store.dependencies } operation: { NavigationFeature.State() }

@@ -179,8 +179,6 @@ struct RoutesFeature {
     @Dependency(\.locationClient) var locationClient
     @Dependency(\.permissionsClient) var permissionsClient
 
-    private enum CancelID { case capture }
-
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
@@ -510,16 +508,17 @@ struct RoutesFeature {
     }
 
     /// Renders the map thumbnail of every route without one (#273), after each import and on
-    /// each visit to the tab. A later capture replaces an earlier one: each re-reads every route
-    /// missing an image, so the newer covers everything the older would have — the same rule as
-    /// `RidesFeature.captureMapThumbnails`.
+    /// each visit to the tab. Never cancelled: a batch cancelled between its save and its
+    /// `mapThumbnailsCaptured` would leave rows on screen showing the placeholder, since the
+    /// batch that replaced it finds nothing left to render and reports nothing. Overlap costs
+    /// little instead — `RouteMapThumbnail.backfill` runs one at a time, and a batch queued
+    /// behind another re-reads the missing list and finds only what the first didn't do.
     private func captureMapThumbnails() -> Effect<Action> {
         .run { send in
             if await RouteMapThumbnail.backfill() > 0 {
                 await send(.mapThumbnailsCaptured)
             }
         }
-        .cancellable(id: CancelID.capture, cancelInFlight: true)
     }
 
     /// Reads one route's stored image off the main thread; a failed read shows as missing.

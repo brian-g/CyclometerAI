@@ -164,6 +164,16 @@ struct AppFeature {
                             // race over the same ride.
                             await Self.backfillMapThumbnails(send: send)
                         }
+                    },
+                    // Route thumbnails (#273): routes imported before them, and any render
+                    // that failed. At launch rather than only on the Routes tab, because S05.2's
+                    // picker shows them too and only reads. No race to guard, unlike rides: a
+                    // route is complete once imported. The shared gate queues this behind the
+                    // ride backfill.
+                    .run { send in
+                        if await RouteMapThumbnail.backfill() > 0 {
+                            await send(.routes(.mapThumbnailsCaptured))
+                        }
                     }
                 )
 

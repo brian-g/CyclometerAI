@@ -721,6 +721,41 @@ struct RoutesFeatureTests {
         #expect(saved.value == [imported.id])
     }
 
+    /// #273 review: a capture cancelled after its save but before it reported would leave rows
+    /// on placeholders, because the capture that replaced it finds nothing left and reports
+    /// nothing. So a second visit to the tab queues behind the first rather than cancelling it.
+    @Test("a second visit to the tab mid-capture doesn't cancel the capture already running")
+    func revisitDoesNotCancelCapture() async {
+        let route = Self.summary()
+        let clock = TestClock()
+        let saved = LockIsolated<[UUID]>([])
+        var client = PersistenceClient.mock(
+            routes: [route],
+            routeDetails: [route.id: RouteDetail(summary: route, coordinates: Self.surveyedPath, cuePoints: [])]
+        )
+        client.fetchRouteIdsMissingMapThumbnail = { saved.value.contains(route.id) ? [] : [route.id] }
+        // The image is stored at once, but the save takes a while to return, and throws if it
+        // is cancelled meanwhile — the window between storing and reporting.
+        client.saveRouteMapThumbnail = { id, _, _ in
+            saved.withValue { $0.append(id) }
+            try await clock.sleep(for: .seconds(1))
+        }
+        let store = makeStore(
+            persistenceClient: client,
+            mapSnapshotClient: MapSnapshotClient { _, _, _, _ in Self.png }
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await clock.advance(by: .milliseconds(500))
+        await store.send(.task)
+        await clock.advance(by: .seconds(1))
+
+        await store.receive(\.mapThumbnailsCaptured)
+        await store.finish()
+        #expect(saved.value == [route.id])
+    }
+
     @Test("after a capture, a row on screen without an image reads it again")
     func captureReloadsMissingRows() async {
         let route = Self.summary()

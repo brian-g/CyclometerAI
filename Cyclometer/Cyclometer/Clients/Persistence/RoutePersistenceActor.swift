@@ -70,7 +70,8 @@ actor RoutePersistenceActor {
         }
     }
 
-    /// Stores a route's OpenStreetMap surface (#252), the one attribute written after import.
+    /// Stores a route's OpenStreetMap surface (#252), written after import like the map
+    /// thumbnail (`saveMapThumbnail`).
     /// No-op when the route was deleted while the lookup was in flight.
     func saveRouteSurface(id: UUID, surface: RouteSurfaceBreakdown) throws {
         guard let route = try routeRow(id: id) else { return }

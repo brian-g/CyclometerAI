@@ -26,8 +26,9 @@ enum RouteMapThumbnail {
     }
 
     /// Renders the thumbnail of every route that lacks one, newest first, and returns how many
-    /// it stored. Runs after an import, where the newest route is the one just imported, and
-    /// on each visit to S19, which catches routes imported before #273 and any failed render.
+    /// it stored. Runs after an import, where the newest route is the one just imported, and at
+    /// launch and on each visit to S19, which catch routes imported before #273 and any failed
+    /// render.
     ///
     /// The first failed render ends the batch, and a route with nothing to draw is skipped and
     /// looked at again next time — both for the reasons `RideMapThumbnail.backfill` gives.
