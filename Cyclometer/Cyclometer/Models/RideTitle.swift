@@ -2,10 +2,10 @@ import Foundation
 
 /// S10's default ride name (#249), for a ride the rider hasn't named: the route it followed, or
 /// else when it was ridden and what shape it took — "Morning Loop", "Evening Out and Back",
-/// "Afternoon Ride".
+/// "Afternoon Ride" — led by the place it started in when that is known: "Fargo Morning Loop" (#283).
 ///
-/// Offline and deterministic by design. A place name ("Fargo Morning Loop") needs a reverse
-/// geocode, a network call, and is left to a follow-up.
+/// Offline and deterministic by design. The place name comes from a reverse geocode, a network
+/// call, so it is looked up by the caller and passed in; without it the name is still whole.
 enum RideTitle {
 
     enum Shape: Equatable {
@@ -37,16 +37,19 @@ enum RideTitle {
 
     static func defaultTitle(
         routeName: String?,
+        placeName: String? = nil,
         startedAt: Date,
         segments: [[RouteCoordinate]],
         calendar: Calendar
     ) -> String {
         if let routeName, !routeName.isEmpty { return routeName }
-        let partOfDay = partOfDay(startedAt, calendar: calendar)
+        let place = placeName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let when = partOfDay(startedAt, calendar: calendar)
+        let lead = place.isEmpty ? when : "\(place) \(when)"
         switch shape(segments.flatMap { $0 }) {
-        case .loop:       return "\(partOfDay) Loop"
-        case .outAndBack: return "\(partOfDay) Out and Back"
-        case .oneWay:     return "\(partOfDay) Ride"
+        case .loop:       return "\(lead) Loop"
+        case .outAndBack: return "\(lead) Out and Back"
+        case .oneWay:     return "\(lead) Ride"
         }
     }
 

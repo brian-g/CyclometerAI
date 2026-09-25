@@ -12,6 +12,11 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persi
 /// before reading anything — before it, the row holds the last checkpoint's aggregates, up to
 /// 30 s stale, and the track is missing its final buffer.
 ///
+/// An unnamed free ride's default name gains the place it started in once a reverse geocode
+/// answers (#283). The screen never waits on it: the offline name shows first and is swapped only
+/// if the rider hasn't touched the field. A failed lookup, or one still out when the sheet closes,
+/// leaves the offline name the ride was given at ride end.
+///
 /// The rename is saved by `AppFeature` on dismissal, not here: a child's effects are cancelled
 /// as it is dismissed, and a swipe-down is a dismissal like the Finish Ride button.
 @Reducer
@@ -99,12 +104,15 @@ struct RideSummaryFeature {
         case loaded(Loaded)
         case finalizeTimedOut
         case healthProfileFetched(restingBPM: Int?, maxBPM: Int?)
+        /// The default name with the start's place name in it, once the geocoder has answered.
+        case placedTitleResolved(String)
         case titleChanged(String)
         case finishTapped
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.healthKitClient) var healthKitClient
+    @Dependency(\.geocodingClient) var geocodingClient
     @Dependency(\.continuousClock) var clock
     @Dependency(\.date) var date
     @Dependency(\.calendar) var calendar
@@ -117,7 +125,7 @@ struct RideSummaryFeature {
             case .task:
                 let id = state.rideId
                 return .merge(
-                    .run { [persistenceClient, clock, calendar] send in
+                    .run { [persistenceClient, geocodingClient, clock, calendar] send in
                         guard let summary = try await RidesFeature.awaitFinalized(
                             id, persistenceClient: persistenceClient, clock: clock
                         ) else {
@@ -129,6 +137,7 @@ struct RideSummaryFeature {
                         let track = await points
                         let rideStats = await stats
                         let segments = RideMapThumbnail.drawableSegments(track)
+                        let routeName = rideStats?.routeName
                         await send(.loaded(Loaded(
                             summary: summary,
                             stats: rideStats,
@@ -138,11 +147,23 @@ struct RideSummaryFeature {
                             ),
                             heartRateSecondsByBPM: RideDetailSeries.secondsByBPM(track),
                             defaultTitle: RideTitle.defaultTitle(
-                                routeName: rideStats?.routeName,
+                                routeName: routeName,
                                 startedAt: summary.startedAt,
                                 segments: segments,
                                 calendar: calendar
                             )
+                        )))
+                        // Only after the screen has its numbers, so it never waits on the network.
+                        // A route ride is named for its route, so nothing is sent for it.
+                        guard routeName?.isEmpty ?? true, let start = segments.first?.first,
+                              let place = try? await geocodingClient.locality(start)
+                        else { return }
+                        await send(.placedTitleResolved(RideTitle.defaultTitle(
+                            routeName: nil,
+                            placeName: place,
+                            startedAt: summary.startedAt,
+                            segments: segments,
+                            calendar: calendar
                         )))
                     },
                     // `RideDetailFeature`'s read, so the zones match S12's table.
@@ -177,6 +198,15 @@ struct RideSummaryFeature {
             case let .healthProfileFetched(restingBPM, maxBPM):
                 state.healthRestingBPM = restingBPM
                 state.healthMaxBPM = maxBPM
+                return .none
+
+            case .placedTitleResolved(let placedTitle):
+                // A field still showing the offline default is untouched; anything else is the
+                // rider's. The default moves either way, so a field cleared later saves this one.
+                if state.title == state.defaultTitle {
+                    state.title = placedTitle
+                }
+                state.defaultTitle = placedTitle
                 return .none
 
             case .titleChanged(let title):
