@@ -276,8 +276,10 @@ struct ActiveRideFeature {
         /// `VehiclePassDetector.processTick` each radar update (#172).
         var vehiclePassTracking: [UUID: VehicleTrackingRecord] = [:]
         /// Running count of confirmed passes this ride, folded into
-        /// `RideSummaryUpdate.vehiclePassCount` at each checkpoint/finalize.
-        var vehiclePassCount: Int = 0
+        /// `RideSummaryUpdate.vehiclePassCount` at each checkpoint/finalize. Nil until a
+        /// radar first goes `.active`, so a ride that never had one stores nil — "no
+        /// radar" — rather than a 0 that claims a measurement nobody made (#285).
+        var vehiclePassCount: Int? = nil
         var coordinate: Coordinate? = nil
         /// The recorded track, one sub-array per continuous stretch of riding (#263).
         /// A pause ends the current segment and a resume opens the next, so the map draws
@@ -824,7 +826,7 @@ struct ActiveRideFeature {
                 }
                 return effects.isEmpty ? .none : .merge(effects)
             case .vehiclePassEventsPersisted(let count):
-                state.vehiclePassCount += count
+                state.vehiclePassCount = (state.vehiclePassCount ?? 0) + count
                 return .none
             case .radarConnectionChanged(let connectionState):
                 state.radarConnectionState = connectionState
@@ -832,6 +834,7 @@ struct ActiveRideFeature {
                 case .active:
                     state.isRadarPaired = true
                     state.wasRadarEverPaired = true
+                    state.vehiclePassCount = state.vehiclePassCount ?? 0
                     return .cancel(id: CancelID.radarLossTimer)
                 case .reconnecting:
                     // Badge stays paired during the 10s grace window (PRD §9.1);
@@ -1246,7 +1249,8 @@ extension ActiveRideFeature.State {
             cadence.cadenceSum = Double(avgCadence) * Double(summary.cadenceSampleCount)
         }
         cadence.maxCadenceRPM = summary.maxCadenceRPM ?? 0
-        vehiclePassCount = summary.vehiclePassCount ?? 0
+        // Nil stays nil: a ride that had no radar before the kill still has none (#285).
+        vehiclePassCount = summary.vehiclePassCount
         // The route, and how far along it the ride had got (#197): `.task` reloads the route,
         // and the first fix looks for the rider from that far in — so the leg of an
         // out-and-back they were on is the one they come back on.
