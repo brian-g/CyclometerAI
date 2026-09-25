@@ -558,3 +558,17 @@ checking the one thing that would settle it: what Apple documents for a workout 
   it's checked against the framework's documentation. If it can't be checked, it goes in with the hedge.
 - Raise a doubt once, with its evidence. If the user doesn't take it up, it stays in the notes, not in
   every summary.
+
+## Anchor on the rider's invariant, not the issue's proposed fix (#180, 2026-09-24)
+
+I planned #180 around the issue's own "Proposed direction", a confirm dialog on S11's Pair button, without
+first asking what rule was being broken. Brian: no unknown sensor may ever be paired outside onboarding or
+Settings, "even with a dialog". The capture then showed the strap already had a saved pairing from earlier.
+The rides were fine; the problem was a record nobody meant to write.
+
+**Rules.**
+- For a bug report, state the invariant being violated in one sentence and get it confirmed before designing a
+  fix. An issue's "Proposed direction" is a hypothesis, not the requirement.
+- When the user's account of where something happened ("in a ride") conflicts with the logs ("Sensors screen
+  open"), look for the explanation that fits both (a record written earlier, then acted on) before choosing
+  one over the other.
