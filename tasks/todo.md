@@ -134,3 +134,22 @@ Branch `feat/249-ride-summary`. Plan: `~/.claude/plans/rosy-riding-forest.md`.
   `Ride.hrZoneDurations`/`elevationGainMeters`; (3) `ActiveRideFeature.vehiclePassCount` is `Int = 0`, so a
   ride with no radar stores 0, not nil, and S10/S15 show "Vehicle Passes 0" (seen in the drive).
 - UX gap, not addressed: the Name field starts filled with the default, so renaming means deleting it first.
+
+# #286 — Rewrite the ride's GPX track name after a rename
+
+Plan: /Users/brian/.claude/plans/cheerful-purring-thacker.md
+Branch: `286-gpx-rename-rewrite`
+
+- [x] 1. `renameRideLive` in `PersistenceClient`: rename, then rebuild the GPX with `buildXML` and rewrite it at the same URL
+- [x] 2. `GPXExporter.rewrite(xml:at:)`: atomic overwrite in place
+- [x] 3. `RideRenameTests`: name rewritten with everything else byte-identical, second rename, failed write keeps the file, deleted file not recreated
+- [x] 4. Verify: mutation checks + full `CyclometerTests`
+
+## Review
+
+- Rebuilt, not patched: the export's inputs don't change after finalize, so the rewrite matches the original file byte for byte apart from the `<trk><name>` line. The test checks this directly.
+- `titleToSave` falls back to the default title, so nearly every ride goes through this path on S10 dismiss, not only rides the rider named.
+- A rewrite failure is logged and swallowed, so `renameRide` still throws only for the title write. A file the rider deleted from Files is not recreated.
+- Mutation checks: with the rewrite removed, the two name tests fail. With a non-atomic write, the failure-path test fails. Sources restored and rebuilt fresh before the full run.
+- Suite: 1,532 passed, 0 failed.
+- Not addressed: if the rider names and dismisses S10 while it's still waiting for finalize, the rename can land before `gpxFileURL` is set, and that file keeps no name. The window is narrow, and closing it means changing the ride-end chain.

@@ -119,6 +119,13 @@ enum GPXExporter {
         return url
     }
 
+    /// Replaces an existing export in place, keeping its URL — a rename's rewrite (#286).
+    /// `.atomic` writes a temporary file and swaps it in, so a failed write leaves the
+    /// previous file untouched.
+    static func rewrite(xml: String, at url: URL) throws {
+        try Data(xml.utf8).write(to: url, options: .atomic)
+    }
+
     /// The unsuffixed name wins when free, preserving the documented convention for
     /// the common case. First collision gets `-1`, second `-2`, and so on.
     private static func uniqueURL(in directory: URL, stem: String) -> URL {
