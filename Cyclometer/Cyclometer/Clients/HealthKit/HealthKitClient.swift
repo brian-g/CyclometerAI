@@ -1,4 +1,5 @@
 import ComposableArchitecture
+import CoreLocation
 import HealthKit
 import os
 
@@ -224,7 +225,9 @@ extension HealthKitClient {
             }
             try await started.addMetadata(syncMetadata(workout.rideId.uuidString))
             try await started.endCollection(at: workout.endedAt)
-            _ = try await started.finishWorkout()
+            if let saved = try await started.finishWorkout() {
+                await saveRoute(workout, to: saved, store)
+            }
         } catch {
             // Nothing half-written is left behind: any sample the builder already took goes too.
             builder?.discardWorkout()
@@ -232,6 +235,44 @@ extension HealthKitClient {
                 "workout write failed for ride \(workout.rideId, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
             throw error
+        }
+    }
+
+    /// The map Fitness draws for the ride (#295). Attached to the workout once it is saved,
+    /// and never allowed to cost it: share access is per type, so a rider can allow Workouts
+    /// and leave Workout Routes off, and a route that fails is logged and dropped rather than
+    /// taking the workout down with it.
+    private static func saveRoute(_ workout: RideWorkout, to saved: HKWorkout, _ store: HKHealthStore) async {
+        guard !workout.trackPoints.isEmpty,
+              store.authorizationStatus(for: PermissionsClient.workoutRouteType) == .sharingAuthorized
+        else { return }
+        let routeBuilder = HKWorkoutRouteBuilder(healthStore: store, device: .local())
+        do {
+            try await routeBuilder.insertRouteData(routeLocations(workout.trackPoints))
+            // Its own sync identifier, like the distance sample's.
+            try await routeBuilder.finishRoute(with: saved, metadata: syncMetadata("\(workout.rideId.uuidString)-route"))
+        } catch {
+            routeBuilder.discard()
+            logger.error(
+                "workout route write failed for ride \(workout.rideId, privacy: .public), workout kept without a map: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    /// Only what a track point records: course and vertical accuracy never were, so both go
+    /// in as CoreLocation's "invalid" −1 — which also marks the altitude unusable — and a
+    /// second with no speed reading gets the same.
+    static func routeLocations(_ points: [TrackPointDTO]) -> [CLLocation] {
+        points.map { point in
+            CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude),
+                altitude: point.altitudeMeters,
+                horizontalAccuracy: point.horizontalAccuracyMeters,
+                verticalAccuracy: -1,
+                course: -1,
+                speed: point.speedMPS ?? -1,
+                timestamp: point.timestamp
+            )
         }
     }
 

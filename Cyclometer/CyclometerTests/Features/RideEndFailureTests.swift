@@ -282,7 +282,7 @@ struct RideEndFailureTests {
 
     // MARK: - Apple Health workout (#250)
 
-    @Test("a finished ride is written to Apple Health once, after it is finalized, with the persisted ride's start, end and distance")
+    @Test("a finished ride is written to Apple Health once, after it is finalized, with the persisted ride's start, end, distance and track")
     func finishedRideIsWrittenToHealthAfterFinalize() async throws {
         let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         let tempDir = Self.makeTempDirectory()
@@ -316,11 +316,16 @@ struct RideEndFailureTests {
         #expect(written.value.count == 1)
         #expect(endedAtWhenWritten.value == endedAt)
         #expect(ride.startedAt < endedAt)
+        // The persisted track becomes the workout's route (#295) — non-empty, so the
+        // comparison below can't pass on two empty lists.
+        let trackPoints = try await client.fetchTrackPoints(rideId)
+        #expect(!trackPoints.isEmpty)
         #expect(workout == RideWorkout(
             rideId: rideId,
             startedAt: ride.startedAt,
             endedAt: endedAt,
-            distanceMeters: ride.distanceMeters
+            distanceMeters: ride.distanceMeters,
+            trackPoints: trackPoints
         ))
     }
 

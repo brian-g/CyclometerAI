@@ -9,4 +9,7 @@ struct RideWorkout: Sendable, Equatable {
     var startedAt: Date
     var endedAt: Date
     var distanceMeters: Double
+    /// Becomes the workout's route, the map Fitness draws (#295). The persisted track, so
+    /// already filtered of untrustworthy fixes (#210) and of anything recorded while paused.
+    var trackPoints: [TrackPointDTO]
 }
