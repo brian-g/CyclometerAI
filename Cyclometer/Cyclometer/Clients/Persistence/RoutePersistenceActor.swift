@@ -80,6 +80,47 @@ actor RoutePersistenceActor {
         }
     }
 
+    /// S19's map thumbnail, both appearances in one save (#273). A write of its own rather than
+    /// part of `importRoute`, for the reason `RidePersistenceActor.saveMapThumbnail` gives: the
+    /// render needs map tiles, and the import must not wait on them. No-op when the route was
+    /// deleted while it rendered, like `saveRouteSurface`.
+    func saveMapThumbnail(id: UUID, light: Data, dark: Data) throws {
+        guard let route = try routeRow(id: id) else { return }
+        try savingChanges("saveRouteMapThumbnail", id: id, context: modelContext) {
+            route.mapThumbnailLight = light
+            route.mapThumbnailDark = dark
+        }
+    }
+
+    /// Routes still without a map thumbnail, newest first (#273) — what
+    /// `RouteMapThumbnail.backfill` works through.
+    func routeIdsMissingMapThumbnail() throws -> [UUID] {
+        do {
+            let descriptor = FetchDescriptor<Route>(
+                predicate: #Predicate { $0.mapThumbnailLight == nil },
+                sortBy: [SortDescriptor(\.importedAt, order: .reverse)]
+            )
+            return try modelContext.fetch(descriptor).map(\.id)
+        } catch {
+            logger.error("routeIdsMissingMapThumbnail failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
+    /// One route's stored thumbnail (#273). Nil for a route without one, and for an unknown id,
+    /// which a row outliving its route's delete can ask about.
+    func fetchMapThumbnail(id: UUID) throws -> RideMapThumbnailData? {
+        do {
+            guard let route = try routeRow(id: id),
+                  let light = route.mapThumbnailLight, let dark = route.mapThumbnailDark
+            else { return nil }
+            return RideMapThumbnailData(light: light, dark: dark)
+        } catch {
+            logger.error("fetchMapThumbnail(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// Derives terrain for routes imported before #252, whose polylines were stored but never
     /// analysed. Returns how many it filled in, so the caller re-reads only when that is not 0.
     ///
@@ -109,7 +150,7 @@ actor RoutePersistenceActor {
         }
     }
 
-    /// The row itself, for the two callers that need the object rather than a DTO.
+    /// The row itself, for the callers that need the object rather than a DTO.
     /// Named apart from `fetchRoute(id:)` on purpose — overloading on return type alone
     /// would make every call site's meaning depend on inference.
     private func routeRow(id: UUID) throws -> Route? {

@@ -27,6 +27,15 @@ extension PersistenceClient {
 struct RideThumbnailImages: Equatable, Sendable {
     let light: UIImage
     let dark: UIImage
+
+    /// Both appearances decoded and prepared for display, or nil when either doesn't decode.
+    /// Shared by S14, S19 and S05.2's rows (#273).
+    static func decode(_ data: RideMapThumbnailData) async -> RideThumbnailImages? {
+        guard let light = await UIImage(data: data.light)?.byPreparingForDisplay(),
+              let dark = await UIImage(data: data.dark)?.byPreparingForDisplay()
+        else { return nil }
+        return RideThumbnailImages(light: light, dark: dark)
+    }
 }
 
 @Reducer
@@ -237,14 +246,11 @@ struct RidesFeature {
     /// failed read shows as missing; it's logged inside `RidePersistenceActor`.
     private func loadThumbnail(_ id: UUID) -> Effect<Action> {
         .run { [persistenceClient] send in
-            guard let data = try? await persistenceClient.fetchRideMapThumbnail(id),
-                  let light = await UIImage(data: data.light)?.byPreparingForDisplay(),
-                  let dark = await UIImage(data: data.dark)?.byPreparingForDisplay()
-            else {
+            guard let data = try? await persistenceClient.fetchRideMapThumbnail(id) else {
                 await send(.thumbnailLoaded(id, nil))
                 return
             }
-            await send(.thumbnailLoaded(id, RideThumbnailImages(light: light, dark: dark)))
+            await send(.thumbnailLoaded(id, await RideThumbnailImages.decode(data)))
         }
     }
 }

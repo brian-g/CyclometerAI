@@ -32,6 +32,10 @@ struct RoutePickerFeature {
 
         var library: Library = .loading
 
+        /// Map thumbnails of the rows that have been on screen (#273), read as S19 reads them.
+        /// Read only — rendering is S19's, after import.
+        var thumbnails: [UUID: RidesFeature.Thumbnail] = [:]
+
         init(selection: RouteReference? = nil) {
             self.selection = selection
         }
@@ -45,6 +49,8 @@ struct RoutePickerFeature {
         case routesResponse(Result<[RouteSummary], PersistenceFailure>)
         /// Nil is the None row.
         case routeTapped(RouteSummary?)
+        case rowAppeared(UUID)
+        case thumbnailLoaded(UUID, RideThumbnailImages?)
         case delegate(Delegate)
 
         @CasePathable
@@ -82,6 +88,17 @@ struct RoutePickerFeature {
                 // pop animates rather than sitting on the old answer.
                 state.selection = route?.reference
                 return .send(.delegate(.routeSelected(route?.reference)))
+
+            case .rowAppeared(let id):
+                guard state.thumbnails[id] == nil else { return .none }
+                state.thumbnails[id] = .loading
+                return .run { [persistenceClient] send in
+                    await send(.thumbnailLoaded(id, await RouteMapThumbnail.images(id, from: persistenceClient)))
+                }
+
+            case .thumbnailLoaded(let id, let images):
+                state.thumbnails[id] = images.map(RidesFeature.Thumbnail.loaded) ?? .missing
+                return .none
 
             case .delegate:
                 return .none

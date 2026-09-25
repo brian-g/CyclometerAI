@@ -290,7 +290,7 @@ struct AppFeatureTests {
                 }
             }
             $0.persistenceClient = client
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in
                 try Task.checkCancellation()
                 return Data([1])
             }
@@ -352,7 +352,7 @@ struct AppFeatureTests {
                 onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in Data([1]) }
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in Data([1]) }
         }
         store.exhaustivity = .off
 

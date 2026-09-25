@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import ComposableArchitecture
+import UIKit
 @testable import Cyclometer
 
 /// S05.2 — the Route picker's own reducer (#196). How its answer reaches the sheet and the ride is
@@ -92,6 +93,30 @@ struct RoutePickerFeatureTests {
             $0.selection = route.reference
         }
         await store.receive(.delegate(.routeSelected(route.reference)))
+    }
+
+    @Test("A row's first appearance reads its stored map thumbnail, or marks it missing (#273)")
+    func rowAppearanceLoadsThumbnail() async {
+        let withImage = Self.routes[0], without = Self.routes[1]
+        let png = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { context in
+            UIColor.gray.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        let store = makeStore(persistenceClient: .mock(
+            routes: Self.routes,
+            routeMapThumbnails: [withImage.id: RideMapThumbnailData(light: png, dark: png)]
+        ))
+
+        await store.send(.rowAppeared(without.id)) { $0.thumbnails[without.id] = .loading }
+        await store.receive(.thumbnailLoaded(without.id, nil)) { $0.thumbnails[without.id] = .missing }
+
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.rowAppeared(withImage.id)) { $0.thumbnails[withImage.id] = .loading }
+        await store.receive(\.thumbnailLoaded)
+        guard case .loaded = store.state.thumbnails[withImage.id] else {
+            Issue.record("expected a loaded thumbnail")
+            return
+        }
     }
 
     @Test("Tapping None clears the choice and hands back nil")

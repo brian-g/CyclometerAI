@@ -85,7 +85,7 @@ struct RideEndFailureTests {
     /// Stands in for MapKit's tiles (#177): counts renders and answers each appearance with
     /// its own bytes, so a test can tell the two stored images apart.
     private static func countingSnapshots(_ renders: LockIsolated<Int>) -> MapSnapshotClient {
-        MapSnapshotClient { _, _, style in
+        MapSnapshotClient { _, _, _, style in
             renders.withValue { $0 += 1 }
             return Data(style == .dark ? "dark".utf8 : "light".utf8)
         }
@@ -235,7 +235,7 @@ struct RideEndFailureTests {
         }
         await Self.finishOnRidesTab(
             rideId, persistenceClient: client,
-            mapSnapshotClient: MapSnapshotClient { _, _, _ in
+            mapSnapshotClient: MapSnapshotClient { _, _, _, _ in
                 attempts.withValue { $0 += 1 }
                 throw MapSnapshotError.unavailable
             }

@@ -147,8 +147,10 @@ struct RoutesView: View {
                     // Seeded with the summary the row already holds, so S20 has its name,
                     // distance and climb from its first frame and reads only the geometry.
                     NavigationLink(state: RoutesFeature.Path.State.detail(RouteDetailFeature.State(summary: route))) {
-                        RouteRow(route: route, unitSystem: store.unitSystem)
+                        RouteRow(route: route, thumbnail: store.thumbnails[route.id],
+                                 unitSystem: store.unitSystem)
                     }
+                    .onAppear { store.send(.rowAppeared(route.id)) }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
                             store.send(.deleteButtonTapped(route.id))
@@ -495,6 +497,9 @@ struct RouteFilterSheetBody: View {
 /// One saved route. Internal so S05.2's picker (#196) draws a route the way S19 does.
 struct RouteRow: View {
     let route: RouteSummary
+    /// The stored map image (#273), drawn by S14's own thumbnail view so a route and a ride
+    /// share one size and one placeholder.
+    let thumbnail: RidesFeature.Thumbnail?
     let unitSystem: UnitSystem
 
     /// The route's summary line without its distance, which sits on the trailing edge as a
@@ -510,12 +515,7 @@ struct RouteRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.md) {
-            Image(systemName: "map")
-                .font(.headline)
-                .foregroundStyle(.cyPrimary)
-                .frame(width: Spacing.xxl, height: Spacing.xxl)
-                .background(Color.cyPrimary.opacity(Opacity.iconTile),
-                            in: RoundedRectangle(cornerRadius: Spacing.cornerMd, style: .continuous))
+            RideThumbnail(thumbnail: thumbnail)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(route.name).font(.headline)
                 if let subtitle {

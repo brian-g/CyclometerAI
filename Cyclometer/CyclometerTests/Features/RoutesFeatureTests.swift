@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import ComposableArchitecture
+import UIKit
 @testable import Cyclometer
 
 /// S19 — the Routes tab reading its store rather than the demo data the prototype used (#193).
@@ -19,7 +20,8 @@ struct RoutesFeatureTests {
         persistenceClient: PersistenceClient = .mock(),
         overpassClient: OverpassClient = .testValue,
         locationClient: LocationClient = .testValue,
-        locationPermission: PermissionState = .denied
+        locationPermission: PermissionState = .denied,
+        mapSnapshotClient: MapSnapshotClient = .testValue
     ) -> TestStoreOf<RoutesFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -34,6 +36,7 @@ struct RoutesFeatureTests {
                 $0.overpassClient = overpassClient
                 $0.locationClient = locationClient
                 $0.permissionsClient = .mock(initial: [.locationWhenInUse: locationPermission])
+                $0.mapSnapshotClient = mapSnapshotClient
                 $0.defaultFileStorage = storage
             }
         }
@@ -626,6 +629,135 @@ struct RoutesFeatureTests {
 
             #expect(reads.value == expectedReads)
         }
+    }
+
+    // MARK: Map thumbnail (#273)
+
+    /// A PNG that decodes, so a row's images are real rather than a stand-in `Data`.
+    private static let png: Data = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { context in
+        UIColor.gray.setFill()
+        context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+    }
+
+    private static func isLoaded(_ thumbnail: RidesFeature.Thumbnail?) -> Bool {
+        if case .loaded = thumbnail { return true }
+        return false
+    }
+
+    @Test("a row's first appearance reads and decodes its thumbnail, once")
+    func rowAppearanceLoadsThumbnail() async {
+        let route = Self.summary()
+        let reads = LockIsolated(0)
+        var client = PersistenceClient.mock(routes: [route])
+        client.fetchRouteMapThumbnail = { _ in
+            reads.withValue { $0 += 1 }
+            return RideMapThumbnailData(light: Self.png, dark: Self.png)
+        }
+        let store = makeStore(persistenceClient: client)
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.rowAppeared(route.id)) { $0.thumbnails[route.id] = .loading }
+        await store.receive(\.thumbnailLoaded)
+        #expect(Self.isLoaded(store.state.thumbnails[route.id]))
+
+        // Scrolled off and back: already read, so not read again.
+        await store.send(.rowAppeared(route.id))
+        await store.finish()
+        #expect(reads.value == 1)
+    }
+
+    @Test("a route with no stored image shows as missing")
+    func rowWithoutImageIsMissing() async {
+        let route = Self.summary()
+        let store = makeStore(persistenceClient: .mock(routes: [route]))
+
+        await store.send(.rowAppeared(route.id)) { $0.thumbnails[route.id] = .loading }
+        await store.receive(.thumbnailLoaded(route.id, nil)) { $0.thumbnails[route.id] = .missing }
+        await store.finish()
+    }
+
+    @Test("a route imported before #273 is rendered on the tab's first appearance")
+    func taskBackfillsThumbnails() async {
+        let route = Self.summary()
+        let saved = LockIsolated<[UUID]>([])
+        let store = makeStore(
+            persistenceClient: .mock(
+                routes: [route],
+                routeDetails: [route.id: RouteDetail(summary: route, coordinates: Self.surveyedPath, cuePoints: [])],
+                routeIdsMissingMapThumbnail: [route.id],
+                onSaveRouteMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
+            ),
+            mapSnapshotClient: MapSnapshotClient { _, _, _, _ in Self.png }
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await store.receive(\.mapThumbnailsCaptured)
+        await store.finish()
+        #expect(saved.value == [route.id])
+    }
+
+    @Test("an imported route is rendered once it is saved")
+    func importedRouteIsRendered() async throws {
+        let url = try writeGPX(Self.namedGPX, named: "river-loop.gpx")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let imported = Self.summary(name: "River Loop")
+        let saved = LockIsolated<[UUID]>([])
+        let store = makeStore(
+            persistenceClient: .mock(
+                routeDetails: Self.surveyedDetail(imported),
+                importResult: imported,
+                routeIdsMissingMapThumbnail: [imported.id],
+                onSaveRouteMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
+            ),
+            mapSnapshotClient: MapSnapshotClient { _, _, _, _ in Self.png }
+        )
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.fileSelected(url))
+        await store.receive(\.importResponse)
+        await store.receive(\.mapThumbnailsCaptured)
+        await store.finish()
+        #expect(saved.value == [imported.id])
+    }
+
+    @Test("after a capture, a row on screen without an image reads it again")
+    func captureReloadsMissingRows() async {
+        let route = Self.summary()
+        var client = PersistenceClient.mock(routes: [route])
+        client.fetchRouteMapThumbnail = { _ in RideMapThumbnailData(light: Self.png, dark: Self.png) }
+        var state = RoutesFeature.State()
+        state.thumbnails = [route.id: .missing]
+        let store = TestStore(initialState: state) {
+            RoutesFeature()
+        } withDependencies: {
+            $0.persistenceClient = client
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.mapThumbnailsCaptured) { $0.thumbnails[route.id] = .loading }
+        await store.receive(\.thumbnailLoaded)
+        #expect(Self.isLoaded(store.state.thumbnails[route.id]))
+    }
+
+    @Test("deleting a route drops its thumbnail, and a read landing after is ignored")
+    func deleteDropsThumbnail() async {
+        let route = Self.summary()
+        var state = RoutesFeature.State()
+        state.routes = [route]
+        state.thumbnails = [route.id: .missing]
+        let store = TestStore(initialState: state) {
+            RoutesFeature()
+        } withDependencies: {
+            $0.persistenceClient = .mock(routes: [route])
+        }
+
+        await store.send(.deleteButtonTapped(route.id)) {
+            $0.routes = []
+            $0.thumbnails = [:]
+        }
+        await store.send(.thumbnailLoaded(route.id, nil))
+        await store.finish()
     }
 }
 

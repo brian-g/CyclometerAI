@@ -77,6 +77,14 @@ struct PersistenceClient: Sendable {
     var saveRouteSurface: @Sendable (UUID, RouteSurfaceBreakdown) async throws -> Void
     /// Analyses terrain on routes imported before #252; returns how many it filled in.
     var backfillRouteTerrain: @Sendable () async throws -> Int
+    /// Stores S19's map thumbnail, light then dark, rendered after import (#273).
+    var saveRouteMapThumbnail: @Sendable (UUID, Data, Data) async throws -> Void
+    /// Routes with no map thumbnail yet, newest first — what `RouteMapThumbnail.backfill`
+    /// works through: a failed capture, or a route imported before #273.
+    var fetchRouteIdsMissingMapThumbnail: @Sendable () async throws -> [UUID]
+    /// One route's map thumbnail, or nil when it has none yet. Read per row, like
+    /// `fetchRideMapThumbnail`, so `fetchRoutes` never pulls every route's images (#273).
+    var fetchRouteMapThumbnail: @Sendable (UUID) async throws -> RideMapThumbnailData?
 }
 
 enum PersistenceError: Error, Equatable {
@@ -117,7 +125,10 @@ extension PersistenceClient: DependencyKey {
             deleteRoute: { try await routeActor.deleteRoute(id: $0) },
             fetchRouteRides: { try await rideActor.fetchRides(routeId: $0) },
             saveRouteSurface: { try await routeActor.saveRouteSurface(id: $0, surface: $1) },
-            backfillRouteTerrain: { try await routeActor.backfillRouteTerrain() }
+            backfillRouteTerrain: { try await routeActor.backfillRouteTerrain() },
+            saveRouteMapThumbnail: { try await routeActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
+            fetchRouteIdsMissingMapThumbnail: { try await routeActor.routeIdsMissingMapThumbnail() },
+            fetchRouteMapThumbnail: { try await routeActor.fetchMapThumbnail(id: $0) }
         )
     }
 
@@ -149,7 +160,10 @@ extension PersistenceClient: DependencyKey {
         deleteRoute: { _ in },
         fetchRouteRides: { _ in [] },
         saveRouteSurface: { _, _ in },
-        backfillRouteTerrain: { 0 }
+        backfillRouteTerrain: { 0 },
+        saveRouteMapThumbnail: { _, _, _ in },
+        fetchRouteIdsMissingMapThumbnail: { [] },
+        fetchRouteMapThumbnail: { _ in nil }
     )
 }
 

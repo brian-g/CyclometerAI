@@ -350,9 +350,11 @@ struct NavigationPipelineTests {
                 let store = try await harness.launch()
                 // A route exists — it just isn't the ride's.
                 let summary = try await importFixture(on: store)
-                // The import reads its route back once, for #252's surface lookup. That read is the
-                // Routes tab's, not the ride's, so it is the baseline the ride is measured from.
-                await expectEventually { harness.routeFetches.value == 1 }
+                // The import reads its route back twice: for #252's surface lookup, and for #273's
+                // map thumbnail (whose render then fails on the inert snapshot client, ending the
+                // batch). Both reads are the Routes tab's, not the ride's, so they are the
+                // baseline the ride is measured from.
+                await expectEventually { harness.routeFetches.value == 2 }
                 fetchesBeforeRide = harness.routeFetches.value
                 let polyline = try #require(try await harness.reader.fetchRoute(summary.id)).coordinates
                 let untouched = withDependencies { $0 = store.dependencies } operation: { NavigationFeature.State() }
