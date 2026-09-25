@@ -43,7 +43,7 @@ struct RideSummaryFeature {
 
         /// What the name field shows: the stored title, or `defaultTitle` for a ride without one.
         var title = ""
-        /// The title as stored when the screen loaded — "" for every new ride.
+        /// The title as stored when the screen loaded: the default name, given at ride end (#286), or "" if that write failed.
         var persistedTitle = ""
         /// The name the ride gets when the rider doesn't give one. Nil until loaded.
         var defaultTitle: String?

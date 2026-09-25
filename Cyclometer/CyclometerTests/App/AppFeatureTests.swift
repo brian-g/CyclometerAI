@@ -76,6 +76,7 @@ struct AppFeatureTests {
         let store = TestStore(initialState: AppFeature.State()) {
             AppFeature()
         } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
             $0.continuousClock = TestClock()   // timer suspends; cancelled on finish
             $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
             $0.uuid = .incrementing

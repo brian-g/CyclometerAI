@@ -1,11 +1,12 @@
+import ComposableArchitecture
 import Foundation
 import SwiftData
 import Testing
 @testable import Cyclometer
 
-/// #286: the GPX is written at ride end, before S10 names the ride, so its `<trk><name>` was
-/// always empty — a rename reached SwiftData and never the file riders share or upload.
-@Suite("PersistenceClient — renameRide GPX")
+/// #286: the GPX is written at ride end, so a rename on S10 reached SwiftData and never the file
+/// riders share or upload. `GPXExporter.rewrite` rebuilds it, and `replaceRideGPX` swaps it in.
+@Suite("GPXExporter — rewrite after a rename")
 struct RideRenameTests {
 
     private struct Fixture {
@@ -69,6 +70,16 @@ struct RideRenameTests {
         return try #require(try context.fetch(descriptor).first)
     }
 
+    /// A rename, as `AppFeature` does it on S10's dismissal: the title, then the file.
+    private static func rename(_ fixture: Fixture, to title: String) async throws {
+        try await fixture.client.renameRide(fixture.rideId, title)
+        try await withDependencies {
+            $0.persistenceClient = fixture.client
+        } operation: {
+            try await GPXExporter.rewrite(rideId: fixture.rideId)
+        }
+    }
+
     private static func contents(of url: URL) throws -> String {
         try String(contentsOf: url, encoding: .utf8)
     }
@@ -89,7 +100,7 @@ struct RideRenameTests {
         let original = try Self.contents(of: fixture.fileURL)
         #expect(try GPXParsing.parse(original).trackName == nil)
 
-        try await fixture.client.renameRide(fixture.rideId, "Morning Loop")
+        try await Self.rename(fixture, to: "Morning Loop")
 
         let renamed = try Self.contents(of: fixture.fileURL)
         #expect(try GPXParsing.parse(renamed).trackName == "Morning Loop")
@@ -103,8 +114,8 @@ struct RideRenameTests {
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
         let original = try Self.contents(of: fixture.fileURL)
 
-        try await fixture.client.renameRide(fixture.rideId, "Morning Loop")
-        try await fixture.client.renameRide(fixture.rideId, "Hills & Headwind")
+        try await Self.rename(fixture, to: "Morning Loop")
+        try await Self.rename(fixture, to: "Hills & Headwind")
 
         let renamed = try Self.contents(of: fixture.fileURL)
         #expect(try GPXParsing.parse(renamed).trackName == "Hills & Headwind")
@@ -113,7 +124,7 @@ struct RideRenameTests {
         #expect(Self.withoutTrackName(renamed) == original)
     }
 
-    @Test("A failed rewrite keeps the previous file, and the rename still lands")
+    @Test("A failed rewrite throws and keeps the previous file")
     func failedRewriteKeepsFile() async throws {
         let fixture = try await Self.makeRide()
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
@@ -124,10 +135,11 @@ struct RideRenameTests {
             try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fixture.directory.path)
         }
 
-        try await fixture.client.renameRide(fixture.rideId, "Morning Loop")
+        await #expect(throws: (any Error).self) {
+            try await Self.rename(fixture, to: "Morning Loop")
+        }
 
         #expect(try Self.contents(of: fixture.fileURL) == original)
-        #expect(try await fixture.client.fetchRide(fixture.rideId).title == "Morning Loop")
     }
 
     @Test("A rename doesn't bring back a file the rider deleted")
@@ -136,9 +148,24 @@ struct RideRenameTests {
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
         try FileManager.default.removeItem(at: fixture.fileURL)
 
-        try await fixture.client.renameRide(fixture.rideId, "Morning Loop")
+        try await Self.rename(fixture, to: "Morning Loop")
 
         #expect(FileManager.default.fileExists(atPath: fixture.fileURL.path) == false)
         #expect(try await fixture.client.fetchRide(fixture.rideId).title == "Morning Loop")
+    }
+
+    /// The replace and a delete's file removal both run on `RidePersistenceActor`, so whichever
+    /// lands second sees the other's result. Replace first and the delete removes the new file;
+    /// this is the other order. An atomic write creates a missing file, so without the check the
+    /// rewrite would leave an orphan no row points to, the #261 bug.
+    @Test("Replacing the file of a ride deleted meanwhile writes nothing")
+    func replaceAfterDeleteWritesNothing() async throws {
+        let fixture = try await Self.makeRide()
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        try await fixture.client.deleteRide(fixture.rideId)
+        try await fixture.client.replaceRideGPX(fixture.rideId, Data("<gpx/>".utf8))
+
+        #expect(FileManager.default.fileExists(atPath: fixture.fileURL.path) == false)
     }
 }

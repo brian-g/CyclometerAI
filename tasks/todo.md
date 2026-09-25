@@ -137,19 +137,21 @@ Branch `feat/249-ride-summary`. Plan: `~/.claude/plans/rosy-riding-forest.md`.
 
 # #286 — Rewrite the ride's GPX track name after a rename
 
-Plan: /Users/brian/.claude/plans/cheerful-purring-thacker.md
+Plan: /Users/brian/.claude/plans/cheerful-purring-thacker.md, revised after `/code-review high` (option b)
 Branch: `286-gpx-rename-rewrite`
 
-- [x] 1. `renameRideLive` in `PersistenceClient`: rename, then rebuild the GPX with `buildXML` and rewrite it at the same URL
-- [x] 2. `GPXExporter.rewrite(xml:at:)`: atomic overwrite in place
-- [x] 3. `RideRenameTests`: name rewritten with everything else byte-identical, second rename, failed write keeps the file, deleted file not recreated
-- [x] 4. Verify: mutation checks + full `CyclometerTests`
+- [x] 1. Ride end names an untitled ride with `RideTitle.defaultTitle` before the export, so the first file already carries the name
+- [x] 2. `GPXExporter.fetchInputs` / `generate(_:)` / `rewrite(rideId:)`: one fetch path shared by export and rewrite
+- [x] 3. `RidePersistenceActor.replaceGPXFile` + `removeGPXFile`: check and write on the actor, so a rename can't recreate a file a delete just removed
+- [x] 4. `AppFeature` dismiss: rename → reload S14 → rewrite (failure logged with the ride id)
+- [x] 5. Tests + mutation checks + fresh full suite
 
 ## Review
 
-- Rebuilt, not patched: the export's inputs don't change after finalize, so the rewrite matches the original file byte for byte apart from the `<trk><name>` line. The test checks this directly.
-- `titleToSave` falls back to the default title, so nearly every ride goes through this path on S10 dismiss, not only rides the rider named.
-- A rewrite failure is logged and swallowed, so `renameRide` still throws only for the title write. A file the rider deleted from Files is not recreated.
-- Mutation checks: with the rewrite removed, the two name tests fail. With a non-atomic write, the failure-path test fails. Sources restored and rebuilt fresh before the full run.
-- Suite: 1,532 passed, 0 failed.
-- Not addressed: if the rider names and dismisses S10 while it's still waiting for finalize, the rename can land before `gpxFileURL` is set, and that file keeps no name. The window is narrow, and closing it means changing the ride-end chain.
+- First version rewrote inside `renameRide`. Review findings: S10 renamed nearly every ride to its default on dismiss, so every ride exported twice; S14 waited behind the rewrite; the fetch pipeline was duplicated; and a rename could recreate a file a concurrent delete had just removed (#261).
+- Now the default name is stored before the export, so S10 only renames when the rider actually types a name. The calendar is resolved inside `titleForExport`, so it's read only when a name is made. Twelve ride-end tests that use a live client now pin `$0.calendar`.
+- `replaceItemAt` was tested and ruled out for the race: it creates a missing original, just like an atomic write does.
+- Mutation checks: dropping the ride-end naming fails the lifecycle test (row + file name); dropping the rewrite fails the dismiss test.
+- Suite: 1,535 passed, 0 failed (fresh DerivedData).
+- Remaining gap: if the rider types a name and dismisses S10 before finalize lands, the replace finds no URL. That file keeps the default name, not the typed one.
+- Declined: patching the file instead of rebuilding it (review finding 6), and a shared test fixture (finding 9).

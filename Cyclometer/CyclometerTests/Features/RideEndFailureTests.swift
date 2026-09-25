@@ -44,6 +44,7 @@ struct RideEndFailureTests {
         ) {
             ActiveRideFeature()
         } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
             $0.continuousClock = TestClock()
             $0.date = date
             $0.uuid = .incrementing
@@ -73,6 +74,7 @@ struct RideEndFailureTests {
         let store = TestStore(initialState: RidesFeature.State()) {
             RidesFeature()
         } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
             $0.continuousClock = TestClock()
             $0.persistenceClient = persistenceClient
             $0.mapSnapshotClient = mapSnapshotClient
@@ -254,6 +256,7 @@ struct RideEndFailureTests {
         let appStore = TestStore(initialState: AppFeature.State()) {
             AppFeature()
         } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
             $0.continuousClock = TestClock()
             $0.date = .constant(Self.testDate.addingTimeInterval(600))
             $0.uuid = .incrementing
@@ -399,6 +402,7 @@ struct RideEndFailureTests {
         let appStore = TestStore(initialState: AppFeature.State()) {
             AppFeature()
         } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
             $0.continuousClock = TestClock()
             $0.date = .constant(Self.testDate.addingTimeInterval(600))
             $0.uuid = .incrementing
@@ -458,6 +462,7 @@ struct RideEndFailureTests {
         let appStore = TestStore(initialState: AppFeature.State()) {
             AppFeature()
         } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
             $0.continuousClock = TestClock()
             $0.date = .constant(Self.testDate)
             $0.uuid = .incrementing

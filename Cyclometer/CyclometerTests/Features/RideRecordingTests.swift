@@ -41,6 +41,7 @@ struct RideRecordingTests {
             $0.locationClient = .testValue
             $0.persistenceClient = persistenceClient
             $0.gpxDocumentsDirectory = tempDir
+            $0.calendar = Self.calendar
         }
         // Long-lived `.task` effects (1 Hz timer, HR, radar, location) never complete
         // on their own — same non-exhaustive shape as
@@ -92,7 +93,20 @@ struct RideRecordingTests {
 
         let parser = XMLParser(data: try Data(contentsOf: gpxURL))
         #expect(parser.parse())
+
+        // Named before the export, so the file carries the name the row does (#286). No track
+        // here, so no shape: "<part of day> Ride".
+        let defaultTitle = "\(RideTitle.partOfDay(Self.testDate, calendar: Self.calendar)) Ride"
+        #expect(ride.title == defaultTitle)
+        #expect(try GPXParsing.parse(contents).trackName == defaultTitle)
     }
+
+    /// Fixed so the default ride name doesn't depend on the machine's time zone.
+    private static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
 
     /// #175: a kill mid-ride, simulated by letting a `TestStore` go out of scope
     /// with no teardown — only its in-memory `RideDataBuffer` (a fresh actor per
@@ -116,6 +130,7 @@ struct RideRecordingTests {
             ) {
                 ActiveRideFeature()
             } withDependencies: {
+                $0.calendar = Calendar(identifier: .gregorian)
                 $0.continuousClock = TestClock()
                 $0.date = .constant(Self.testDate)
                 $0.uuid = .incrementing
@@ -155,6 +170,7 @@ struct RideRecordingTests {
         ) {
             ActiveRideFeature()
         } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
             $0.continuousClock = TestClock()
             $0.date = .constant(Self.testDate.addingTimeInterval(60))
             $0.uuid = .incrementing
@@ -210,6 +226,7 @@ struct RideRecordingTests {
         ) {
             ActiveRideFeature()
         } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
             $0.continuousClock = TestClock()
             $0.date = .constant(Self.testDate)
             $0.uuid = .incrementing
@@ -295,6 +312,7 @@ struct RideRecordingTests {
         ) {
             ActiveRideFeature()
         } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
             $0.continuousClock = TestClock()
             $0.date = .constant(Self.testDate)
             $0.uuid = .incrementing

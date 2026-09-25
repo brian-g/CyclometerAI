@@ -28,17 +28,24 @@ extension DependencyValues {
 /// dependencies, no I/O — so `GPXExporterTests` can exercise the schema/omission
 /// rules directly against fixtures, the same shape as `VehiclePassDetector`.
 enum GPXExporter {
-    /// Fetches persisted Ride/TrackPoint/VehiclePassEvent data by rideId, builds the
-    /// GPX document, and atomically writes it to `Documents/Rides/`.
+    /// Everything a ride's GPX is built from, read back from persistence rather than the
+    /// recorder's memory — a resumed ride's early points only exist on disk.
+    struct Inputs: Sendable {
+        var ride: RideExportMetadata
+        var trackPoints: [TrackPointDTO]
+        var vehiclePassEvents: [VehiclePassEventDTO]
+    }
+
+    /// Reads the ride's `Inputs`. Shared by `generate` and `rewrite`, so both files are
+    /// built from the same data.
     ///
-    /// The two dependencies are resolved here rather than held in `static` properties: a
+    /// The dependency is resolved here rather than held in a `static` property: a
     /// `@Dependency` snapshots the values current when it is initialized, and a `static` one
     /// is initialized once per process and then keeps that snapshot for the process's life.
     /// In tests that means the first client to reach this export is retained forever, holding
     /// its `ModelContainer` open on a store file the test then deletes (#242).
-    static func generate(rideId: UUID) async throws -> URL {
+    static func fetchInputs(rideId: UUID) async throws -> Inputs {
         @Dependency(\.persistenceClient) var persistenceClient
-        @Dependency(\.gpxDocumentsDirectory) var documentsDirectory
         // fetchTrackPoints (CoreData) is independent of the other two, which both
         // route through RidePersistenceActor and so serialize against each other
         // regardless — but letting it overlap still saves latency on a long ride's
@@ -46,8 +53,27 @@ enum GPXExporter {
         async let ride = persistenceClient.fetchRide(rideId)
         async let trackPoints = persistenceClient.fetchTrackPoints(rideId)
         async let vehiclePassEvents = persistenceClient.fetchVehiclePassEvents(rideId)
-        let xml = try await buildXML(ride: ride, trackPoints: trackPoints, vehiclePassEvents: vehiclePassEvents)
-        return try await write(xml: xml, rideStartedAt: ride.startedAt, documentsDirectory: documentsDirectory)
+        return try await Inputs(ride: ride, trackPoints: trackPoints, vehiclePassEvents: vehiclePassEvents)
+    }
+
+    /// Builds the GPX document and atomically writes it as a new file in `Documents/Rides/`.
+    static func generate(_ inputs: Inputs) throws -> URL {
+        @Dependency(\.gpxDocumentsDirectory) var documentsDirectory
+        return try write(xml: buildXML(inputs), rideStartedAt: inputs.ride.startedAt, documentsDirectory: documentsDirectory)
+    }
+
+    /// Rebuilds a ride's GPX and replaces its file at the same URL, after a rename (#286).
+    /// The file is written at ride end, so without this it keeps the name the ride had then.
+    /// The inputs haven't changed since that export, so only the name differs. Replacing the
+    /// file is the persistence actor's job, so it can't race a delete of the same ride.
+    static func rewrite(rideId: UUID) async throws {
+        @Dependency(\.persistenceClient) var persistenceClient
+        let xml = try await buildXML(fetchInputs(rideId: rideId))
+        try await persistenceClient.replaceRideGPX(rideId, Data(xml.utf8))
+    }
+
+    static func buildXML(_ inputs: Inputs) -> String {
+        buildXML(ride: inputs.ride, trackPoints: inputs.trackPoints, vehiclePassEvents: inputs.vehiclePassEvents)
     }
 
     /// Pure — no I/O, no dependencies. Document order is `metadata` → `wpt`* → `trk`,
@@ -117,13 +143,6 @@ enum GPXExporter {
         let url = uniqueURL(in: ridesDirectory, stem: filenameStem(for: rideStartedAt))
         try Data(xml.utf8).write(to: url, options: .atomic)
         return url
-    }
-
-    /// Replaces an existing export in place, keeping its URL — a rename's rewrite (#286).
-    /// `.atomic` writes a temporary file and swaps it in, so a failed write leaves the
-    /// previous file untouched.
-    static func rewrite(xml: String, at url: URL) throws {
-        try Data(xml.utf8).write(to: url, options: .atomic)
     }
 
     /// The unsuffixed name wins when free, preserving the documented convention for

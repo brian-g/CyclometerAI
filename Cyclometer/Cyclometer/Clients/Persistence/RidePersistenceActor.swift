@@ -116,17 +116,42 @@ actor RidePersistenceActor {
         }
     }
 
-    /// Where this ride's export was written, or nil if it has none — a ride whose
-    /// export failed, or one that was never finalized (#261).
+    /// Deletes this ride's exported file, if it has one (#261). A no-op for a ride whose export
+    /// failed, one that was never finalized, and one already gone: a delete can race its own list
+    /// refresh, and a ride that no longer exists owns no file.
     ///
-    /// Read separately from `deleteRide` below, rather than returned by it, so the row
-    /// stays alive until everything it owns is gone. See `PersistenceClient.live`'s
-    /// `deleteRide` for why that ordering is the point.
+    /// Called before `deleteRide` below, not from it, so the row stays alive until everything it
+    /// owns is gone. See `PersistenceClient.live`'s `deleteRide` for why that ordering is the
+    /// point. On this actor, not beside it, so it can't interleave with `replaceGPXFile`.
+    func removeGPXFile(id: UUID) throws {
+        guard let fileURL = try rideRow(id: id)?.gpxFileURL else { return }
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+        } catch CocoaError.fileNoSuchFile {
+            // Already gone — the rider may have deleted it from Files themselves.
+        } catch {
+            logger.error("removeGPXFile(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Replaces this ride's exported file in place, at the URL it already has (#286). A no-op
+    /// when there is nothing to replace: no row, no export, or a file the rider deleted from
+    /// Files, which a rename shouldn't bring back.
     ///
-    /// Nil rather than a thrown `.rideNotFound` when the id no longer resolves: the only
-    /// caller is a delete, and a ride that is already gone owns no file.
-    func gpxFileURL(id: UUID) throws -> URL? {
-        try rideRow(id: id)?.gpxFileURL
+    /// Checked and written in one synchronous step on this actor, so a delete can't remove the
+    /// file between the check and the write — an atomic write creates a missing file, and that
+    /// would leave the orphan #261 removed. `.atomic` writes a temporary file and swaps it in,
+    /// so a failed write leaves the previous file untouched.
+    func replaceGPXFile(id: UUID, contents: Data) throws {
+        guard let fileURL = try rideRow(id: id)?.gpxFileURL,
+              FileManager.default.fileExists(atPath: fileURL.path)
+        else { return }
+        do {
+            try contents.write(to: fileURL, options: .atomic)
+        } catch {
+            logger.error("replaceGPXFile(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
     }
 
     /// Removes a ride and the `VehiclePassEvent` rows keyed to it, in one save (#261).
@@ -154,7 +179,7 @@ actor RidePersistenceActor {
     /// `<metadata>`/`<trk><name>`.
     func fetchRideExportMetadata(id: UUID) throws -> RideExportMetadata {
         let ride = try fetchRide(id: id)
-        return RideExportMetadata(title: ride.title, startedAt: ride.startedAt)
+        return RideExportMetadata(title: ride.title, startedAt: ride.startedAt, routeName: ride.routeName)
     }
 
     /// Read path for S15's Stats section (#251).

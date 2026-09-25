@@ -2,10 +2,6 @@ import ComposableArchitecture
 import CoreData
 import Foundation
 import SwiftData
-import os
-
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persistence")
 
 // MARK: - PersistenceClient
 
@@ -33,10 +29,11 @@ struct PersistenceClient: Sendable {
     /// Writes final aggregates, endedAt, recordingState .ended, and the exported
     /// GPX file's URL (nil if export failed) in one call.
     var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate, URL?) async throws -> Void
-    /// Sets a finished ride's title — S10's rename field (#249) — and rewrites its GPX so
-    /// `<trk><name>` carries it (#286). Throws only for the title write: a failed rewrite is
-    /// logged and leaves the previous file in place.
+    /// Sets a finished ride's title — S10's rename field (#249).
     var renameRide: @Sendable (UUID, String) async throws -> Void
+    /// Replaces a ride's exported GPX with new contents at the same URL — a rename's rewrite
+    /// (#286). A no-op for a ride with no file, including one the rider deleted from Files.
+    var replaceRideGPX: @Sendable (UUID, Data) async throws -> Void
     /// Stores S14's map thumbnail, light then dark, rendered after the ride ended (#177).
     var saveRideMapThumbnail: @Sendable (UUID, Data, Data) async throws -> Void
     /// Finished rides with no map thumbnail yet, newest first — what `RideMapThumbnail.backfill`
@@ -104,7 +101,8 @@ extension PersistenceClient: DependencyKey {
             createRide: { try await rideActor.createRide(id: $0, startedAt: $1, route: $2) },
             updateRideSummary: { try await rideActor.updateRideSummary($0) },
             finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
-            renameRide: { try await renameRideLive(id: $0, title: $1, rideActor: rideActor, container: coreDataContainer) },
+            renameRide: { try await rideActor.renameRide(id: $0, title: $1) },
+            replaceRideGPX: { try await rideActor.replaceGPXFile(id: $0, contents: $1) },
             saveRideMapThumbnail: { try await rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
             fetchRideIdsMissingMapThumbnail: { try await rideActor.rideIdsMissingMapThumbnail() },
             fetchRideMapThumbnail: { try await rideActor.fetchMapThumbnail(id: $0) },
@@ -137,6 +135,7 @@ extension PersistenceClient: DependencyKey {
         updateRideSummary: { _ in },
         finalizeRide: { _, _, _, _ in },
         renameRide: { _, _ in },
+        replaceRideGPX: { _, _ in },
         saveRideMapThumbnail: { _, _, _ in },
         fetchRideIdsMissingMapThumbnail: { [] },
         fetchRideMapThumbnail: { _ in nil },
@@ -214,52 +213,9 @@ private func deleteRideLive(
     rideActor: RidePersistenceActor,
     container: NSPersistentContainer
 ) async throws {
-    if let fileURL = try await rideActor.gpxFileURL(id: id) {
-        do {
-            try FileManager.default.removeItem(at: fileURL)
-        } catch CocoaError.fileNoSuchFile {
-            // Already gone — the rider may have deleted it from Files themselves.
-        } catch {
-            logger.error("deleteRide: removing GPX failed: \(error.localizedDescription, privacy: .public)")
-        }
-    }
+    try await rideActor.removeGPXFile(id: id)
     try await batchDeleteTrackPoints(rideId: id, container: container)
     try await rideActor.deleteRide(id: id)
-}
-
-/// Renames a ride, then rewrites its GPX at the same URL so `<trk><name>` matches (#286).
-///
-/// The file is written at ride end, before S10 gives the ride a name, so without this the
-/// export never carries one. It is rebuilt from the persisted data rather than patched: those
-/// inputs haven't changed since the export, so everything but the name comes out identical.
-///
-/// The rewrite is non-fatal. The title is what the rider sees in the app, and a file that
-/// can't be rewritten still holds the whole ride.
-private func renameRideLive(
-    id: UUID,
-    title: String,
-    rideActor: RidePersistenceActor,
-    container: NSPersistentContainer
-) async throws {
-    try await rideActor.renameRide(id: id, title: title)
-    do {
-        // Nil when the export failed at ride end. A missing file is one the rider deleted
-        // from Files, which a rename shouldn't bring back.
-        guard let fileURL = try await rideActor.gpxFileURL(id: id),
-              FileManager.default.fileExists(atPath: fileURL.path)
-        else { return }
-        // Not `GPXExporter.generate`: it resolves `@Dependency(\.persistenceClient)`, which is
-        // not necessarily this client (#242).
-        async let ride = rideActor.fetchRideExportMetadata(id: id)
-        async let trackPoints = fetchTrackPointsLive(rideId: id, container: container)
-        async let vehiclePassEvents = rideActor.fetchVehiclePassEvents(rideId: id)
-        let xml = try await GPXExporter.buildXML(
-            ride: ride, trackPoints: trackPoints, vehiclePassEvents: vehiclePassEvents
-        )
-        try GPXExporter.rewrite(xml: xml, at: fileURL)
-    } catch {
-        logger.error("renameRide: rewriting GPX failed: \(error.localizedDescription, privacy: .public)")
-    }
 }
 
 /// The CoreData half — a 70-minute ride is roughly 4 200 rows, so this is a batch delete

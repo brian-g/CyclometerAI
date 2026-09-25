@@ -113,6 +113,7 @@ struct NavigationPipelineTests {
                 let store = TestStore(initialState: AppFeature.State()) {
                     AppFeature()
                 } withDependencies: {
+                    $0.calendar = Calendar(identifier: .gregorian)
                     $0.defaultFileStorage = storage
                     $0.persistenceClient = client
                     $0.audioClient = audio
