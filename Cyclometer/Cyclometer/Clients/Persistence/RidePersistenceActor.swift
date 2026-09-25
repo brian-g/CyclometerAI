@@ -102,6 +102,12 @@ actor RidePersistenceActor {
     func appendVehiclePassEvents(_ dtos: [VehiclePassEventDTO]) throws {
         guard let firstRideId = dtos.first?.rideId else { return }
         try savingChanges("appendVehiclePassEvents", id: firstRideId, context: modelContext) {
+            // Each ride's count moves in the same save as its events, so a kill between a
+            // pass and the next checkpoint can't leave the two disagreeing (#298).
+            for (rideId, events) in Dictionary(grouping: dtos, by: \.rideId) {
+                let ride = try fetchRide(id: rideId)
+                ride.vehiclePassCount = (ride.vehiclePassCount ?? 0) + events.count
+            }
             for dto in dtos {
                 modelContext.insert(VehiclePassEvent(
                     rideId: dto.rideId,
@@ -319,10 +325,13 @@ actor RidePersistenceActor {
         return ride
     }
 
-    /// Only overwrites `vehiclePassCount` when the update carries a value. Nil from
+    /// Only raises `vehiclePassCount`, and only when the update carries a value. Nil from
     /// `ActiveRideFeature` means no radar has been active this ride (#285), and its
     /// count never goes from a number back to nil, so skipping nil can't hide a
-    /// clear — it only keeps a checkpoint from stomping a stored count (#172).
+    /// clear — it only keeps a checkpoint from stomping a stored count (#172). The
+    /// count is a ride's running total, so it never shrinks: `appendVehiclePassEvents`
+    /// raises it first, and a checkpoint built before the reducer heard about that
+    /// write must not take it back down (#298).
     private func apply(_ update: RideSummaryUpdate, to ride: Ride) {
         ride.recordingState = update.recordingState
         ride.durationSeconds = update.durationSeconds
@@ -334,7 +343,7 @@ actor RidePersistenceActor {
         ride.averageCadenceRPM = update.averageCadenceRPM
         ride.maxCadenceRPM = update.maxCadenceRPM
         if let vehiclePassCount = update.vehiclePassCount {
-            ride.vehiclePassCount = vehiclePassCount
+            ride.vehiclePassCount = max(ride.vehiclePassCount ?? 0, vehiclePassCount)
         }
         ride.isAutoPaused = update.isAutoPaused
         ride.zeroSpeedSeconds = update.zeroSpeedSeconds
