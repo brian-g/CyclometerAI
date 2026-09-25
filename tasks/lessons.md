@@ -572,3 +572,13 @@ The rides were fine; the problem was a record nobody meant to write.
 - When the user's account of where something happened ("in a ride") conflicts with the logs ("Sensors screen
   open"), look for the explanation that fits both (a record written earlier, then acted on) before choosing
   one over the other.
+
+## Worktrees by default sent /code-review to the wrong commit (#286, 2026-09-24)
+
+I built #286 in a separate worktree (`../CyclometerAI-286`) because of an earlier rule. The user ran
+`/code-review` from the main checkout, which was clean on `main`, so it reviewed #180's merge instead of #286.
+Brian: "stop using worktrees by default."
+
+**Rules.**
+- Work on a feature branch in the main checkout. Create a worktree only when asked.
+- Before switching branches, check `git status`. If there are unexplained changes, ask instead of switching.
