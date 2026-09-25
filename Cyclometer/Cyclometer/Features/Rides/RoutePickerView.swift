@@ -52,8 +52,10 @@ struct RoutePickerList: View {
                             ChoiceRow(isSelected: store.selection?.id == route.id) {
                                 store.send(.routeTapped(route))
                             } label: {
-                                RouteRow(route: route, unitSystem: store.unitSystem)
+                                RouteRow(route: route, thumbnail: store.thumbnails[route.id],
+                                         unitSystem: store.unitSystem)
                             }
+                            .onAppear { store.send(.rowAppeared(route.id)) }
                         }
                     }
                 }

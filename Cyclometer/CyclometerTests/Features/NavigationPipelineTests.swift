@@ -93,6 +93,11 @@ struct NavigationPipelineTests {
                 container,
                 PersistenceClient.live(coreDataContainer: coreData.container, modelContainer: container)
             ))
+            // Map thumbnails (#273) aren't this pipeline's subject, and their backfill reads each
+            // route back at launch and after import, on its own schedule — which would make
+            // `routeFetches` count something other than navigation. With none missing, it never
+            // reads.
+            client.fetchRouteIdsMissingMapThumbnail = { [] }
             let fetchRoute = client.fetchRoute
             client.fetchRoute = { [routeFetches] id in
                 routeFetches.withValue { $0 += 1 }

@@ -140,6 +140,46 @@ struct AppFeatureTests {
         await store.receive(\.activeRide.task)
     }
 
+    /// #273 review: routes imported before thumbnails existed get one at launch, not only once
+    /// the rider opens the Routes tab — S05.2's picker shows them and never renders.
+    @Test("task renders the thumbnail of every route missing one, and tells the Routes tab")
+    func taskBackfillsRouteThumbnails() async {
+        let routeId = UUID()
+        var summary = RouteSummary.empty
+        summary.id = routeId
+        let saved = LockIsolated<[UUID]>([])
+        let store = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.uuid = .incrementing
+            $0.bleCSCClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.screenClient = .testValue
+            $0.hapticsClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(
+                routeDetails: [routeId: RouteDetail(
+                    summary: summary,
+                    coordinates: [RouteCoordinate(latitude: 43.070, longitude: -89.400),
+                                  RouteCoordinate(latitude: 43.071, longitude: -89.401)],
+                    cuePoints: []
+                )],
+                routeIdsMissingMapThumbnail: [routeId],
+                onSaveRouteMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
+            )
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in Data([1]) }
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.routes.mapThumbnailsCaptured)
+        await store.finish(timeout: effectDrainTimeout)
+        #expect(saved.value == [routeId])
+    }
+
     /// #175 review: `.task`'s BLE-pairing push and resumable-ride fetch race —
     /// the rider can start a brand-new ride through the normal start-sheet flow
     /// before the async fetch resolves. The already-started ride must not be
@@ -291,7 +331,7 @@ struct AppFeatureTests {
                 }
             }
             $0.persistenceClient = client
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in
                 try Task.checkCancellation()
                 return Data([1])
             }
@@ -353,7 +393,7 @@ struct AppFeatureTests {
                 onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in Data([1]) }
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in Data([1]) }
         }
         store.exhaustivity = .off
 

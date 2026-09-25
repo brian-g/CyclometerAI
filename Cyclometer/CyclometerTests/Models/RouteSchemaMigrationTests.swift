@@ -93,6 +93,8 @@ struct RouteSchemaMigrationTests {
             let routes = try ModelContext(openStore(at: url)).fetch(FetchDescriptor<Route>())
             #expect(routes.count == 3)
             #expect(routes.allSatisfy { $0.terrainData == nil && $0.surfaceData == nil })
+            // Nor the map thumbnail #273 added, which `RouteMapThumbnail.backfill` renders later.
+            #expect(routes.allSatisfy { $0.mapThumbnailLight == nil && $0.mapThumbnailDark == nil })
             #expect(routes.contains { $0.name == "Pilot Mountain" && $0.coordinates == Self.hilly.coordinates })
         }
     }

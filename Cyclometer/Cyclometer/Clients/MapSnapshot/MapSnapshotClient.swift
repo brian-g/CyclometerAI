@@ -5,9 +5,10 @@ import UIKit
 /// TCA dependency for rendering a static map image — the one part of `RideMapThumbnail`
 /// that needs MapKit's tiles, and so the part kept out of the test suite (#177).
 struct MapSnapshotClient: Sendable {
-    /// A PNG of `segments` stroked over a static map of `mapRect`, at `RideMapThumbnail`'s
-    /// size and scale, rendered for one appearance.
-    var render: @Sendable (MKMapRect, [[RouteCoordinate]], UIUserInterfaceStyle) async throws -> Data
+    /// A PNG of `segments` stroked in `stroke` over a static map of `mapRect`, at
+    /// `RideMapThumbnail`'s size and scale, rendered for one appearance. The stroke is the
+    /// caller's: a ride draws its travelled path, a route its planned one (#273).
+    var render: @Sendable (MKMapRect, [[RouteCoordinate]], ColorResource, UIUserInterfaceStyle) async throws -> Data
 }
 
 enum MapSnapshotError: Error, Equatable {
@@ -17,7 +18,7 @@ enum MapSnapshotError: Error, Equatable {
 }
 
 extension MapSnapshotClient: DependencyKey {
-    static let liveValue = MapSnapshotClient { mapRect, segments, style in
+    static let liveValue = MapSnapshotClient { mapRect, segments, stroke, style in
         // The base map is rendered for these traits and cannot adapt afterwards, which is why
         // a ride stores one image per appearance.
         let traits = UITraitCollection { traits in
@@ -30,10 +31,10 @@ extension MapSnapshotClient: DependencyKey {
         options.traitCollection = traits
         options.preferredConfiguration = thumbnailConfiguration()
         let snapshot = try await MKMapSnapshotter(options: options).start()
-        return try draw(segments, over: snapshot, traits: traits)
+        return try draw(segments, stroke: stroke, over: snapshot, traits: traits)
     }
 
-    static let testValue = MapSnapshotClient { _, _, _ in throw MapSnapshotError.unavailable }
+    static let testValue = MapSnapshotClient { _, _, _, _ in throw MapSnapshotError.unavailable }
     static let previewValue = testValue
 
     /// Muted, with every point of interest hidden — #51 asks for as few labels as possible.
@@ -49,6 +50,7 @@ extension MapSnapshotClient: DependencyKey {
     /// placed by the snapshot's own projection.
     private static func draw(
         _ segments: [[RouteCoordinate]],
+        stroke: ColorResource,
         over snapshot: MKMapSnapshotter.Snapshot,
         traits: UITraitCollection
     ) throws -> Data {
@@ -60,7 +62,7 @@ extension MapSnapshotClient: DependencyKey {
             cgContext.addPath(RideMapThumbnail.path(segments) { snapshot.point(for: $0.coordinate2D) })
             // Resolved against the snapshot's own traits: the dark image needs the dark token,
             // whatever appearance the app happens to be in while this runs.
-            cgContext.setStrokeColor(UIColor(resource: .cyMapTravelPath).resolvedColor(with: traits).cgColor)
+            cgContext.setStrokeColor(UIColor(resource: stroke).resolvedColor(with: traits).cgColor)
             cgContext.setLineWidth(Spacing.strokeMapThumbnail)
             cgContext.setLineCap(.round)
             cgContext.setLineJoin(.round)

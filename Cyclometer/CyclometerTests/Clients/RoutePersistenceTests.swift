@@ -156,6 +156,44 @@ struct RoutePersistenceTests {
         #expect(try await client.fetchRoutes().isEmpty)
     }
 
+    // MARK: Map thumbnail (#273)
+
+    @Test("a saved map thumbnail reads back, both appearances; nil before it and for an unknown id")
+    func mapThumbnailRoundTrips() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let summary = try await client.importRoute(Self.climbingRoute())
+        #expect(try await client.fetchRouteMapThumbnail(summary.id) == nil)
+
+        try await client.saveRouteMapThumbnail(summary.id, Data("light".utf8), Data("dark".utf8))
+
+        #expect(try await client.fetchRouteMapThumbnail(summary.id)
+                == RideMapThumbnailData(light: Data("light".utf8), dark: Data("dark".utf8)))
+        #expect(try await client.fetchRouteMapThumbnail(UUID()) == nil)
+    }
+
+    @Test("routes missing a map thumbnail are listed newest first, and one that has it is not")
+    func routesMissingMapThumbnail() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let first = try await client.importRoute(Self.climbingRoute(name: "First"))
+        let second = try await client.importRoute(Self.climbingRoute(name: "Second"))
+        let third = try await client.importRoute(Self.climbingRoute(name: "Third"))
+        #expect(try await client.fetchRouteIdsMissingMapThumbnail() == [third.id, second.id, first.id])
+
+        try await client.saveRouteMapThumbnail(second.id, Data([1]), Data([2]))
+
+        #expect(try await client.fetchRouteIdsMissingMapThumbnail() == [third.id, first.id])
+    }
+
+    @Test("saving a map thumbnail for a route deleted mid-render is a no-op")
+    func mapThumbnailForADeletedRouteIsANoOp() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let summary = try await client.importRoute(Self.climbingRoute())
+        try await client.deleteRoute(summary.id)
+
+        try await client.saveRouteMapThumbnail(summary.id, Data([1]), Data([2]))
+        #expect(try await client.fetchRoutes().isEmpty)
+    }
+
     @Test("a route the file names nowhere gets the default name")
     func importedRouteWithNoNameGetsTheDefault() async throws {
         let (client, _) = Self.makeLiveClient()

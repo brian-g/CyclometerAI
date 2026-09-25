@@ -70,13 +70,55 @@ actor RoutePersistenceActor {
         }
     }
 
-    /// Stores a route's OpenStreetMap surface (#252), the one attribute written after import.
+    /// Stores a route's OpenStreetMap surface (#252), written after import like the map
+    /// thumbnail (`saveMapThumbnail`).
     /// No-op when the route was deleted while the lookup was in flight.
     func saveRouteSurface(id: UUID, surface: RouteSurfaceBreakdown) throws {
         guard let route = try routeRow(id: id) else { return }
         let data = try JSONEncoder().encode(surface)
         try savingChanges("saveRouteSurface", id: id, context: modelContext) {
             route.surfaceData = data
+        }
+    }
+
+    /// S19's map thumbnail, both appearances in one save (#273). A write of its own rather than
+    /// part of `importRoute`, for the reason `RidePersistenceActor.saveMapThumbnail` gives: the
+    /// render needs map tiles, and the import must not wait on them. No-op when the route was
+    /// deleted while it rendered, like `saveRouteSurface`.
+    func saveMapThumbnail(id: UUID, light: Data, dark: Data) throws {
+        guard let route = try routeRow(id: id) else { return }
+        try savingChanges("saveRouteMapThumbnail", id: id, context: modelContext) {
+            route.mapThumbnailLight = light
+            route.mapThumbnailDark = dark
+        }
+    }
+
+    /// Routes still without a map thumbnail, newest first (#273) — what
+    /// `RouteMapThumbnail.backfill` works through.
+    func routeIdsMissingMapThumbnail() throws -> [UUID] {
+        do {
+            let descriptor = FetchDescriptor<Route>(
+                predicate: #Predicate { $0.mapThumbnailLight == nil },
+                sortBy: [SortDescriptor(\.importedAt, order: .reverse)]
+            )
+            return try modelContext.fetch(descriptor).map(\.id)
+        } catch {
+            logger.error("routeIdsMissingMapThumbnail failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
+    /// One route's stored thumbnail (#273). Nil for a route without one, and for an unknown id,
+    /// which a row outliving its route's delete can ask about.
+    func fetchMapThumbnail(id: UUID) throws -> RideMapThumbnailData? {
+        do {
+            guard let route = try routeRow(id: id),
+                  let light = route.mapThumbnailLight, let dark = route.mapThumbnailDark
+            else { return nil }
+            return RideMapThumbnailData(light: light, dark: dark)
+        } catch {
+            logger.error("fetchMapThumbnail(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+            throw error
         }
     }
 
@@ -109,7 +151,7 @@ actor RoutePersistenceActor {
         }
     }
 
-    /// The row itself, for the two callers that need the object rather than a DTO.
+    /// The row itself, for the callers that need the object rather than a DTO.
     /// Named apart from `fetchRoute(id:)` on purpose — overloading on return type alone
     /// would make every call site's meaning depend on inference.
     private func routeRow(id: UUID) throws -> Route? {

@@ -193,8 +193,10 @@ struct RideMapThumbnailTests {
                 trackPoints: [Self.rideId: Self.pausedRide],
                 onSaveRideMapThumbnail: { id, light, dark in saved.withValue { $0.append((id, light, dark)) } }
             )
-            $0.mapSnapshotClient = MapSnapshotClient { mapRect, segments, style in
+            $0.mapSnapshotClient = MapSnapshotClient { mapRect, segments, stroke, style in
                 #expect(segments == RideMapThumbnail.drawableSegments(Self.pausedRide))
+                // The travelled path, not a route's planned line (#273).
+                #expect(stroke == .cyMapTravelPath)
                 #expect(MKMapRectEqualToRect(mapRect, RideMapThumbnail.mapRect(for: segments)))
                 rendered.withValue { $0.append(style) }
                 return Data(style == .dark ? "dark".utf8 : "light".utf8)
@@ -221,7 +223,7 @@ struct RideMapThumbnailTests {
                 trackPoints: [Self.rideId: [Self.point(43.07, -89.40)]],
                 onSaveRideMapThumbnail: { _, _, _ in saveCount.withValue { $0 += 1 } }
             )
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in
                 renderCount.withValue { $0 += 1 }
                 return Data()
             }
@@ -264,7 +266,7 @@ struct RideMapThumbnailTests {
                 rideIdsMissingMapThumbnail: [newest, trainer, oldest],
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in Data([1]) }
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in Data([1]) }
         } operation: {
             await RideMapThumbnail.backfill()
         }
@@ -284,7 +286,7 @@ struct RideMapThumbnailTests {
                 trackPoints: [first: Self.pausedRide, second: Self.pausedRide],
                 rideIdsMissingMapThumbnail: [first, second]
             )
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in
                 renders.withValue { $0 += 1 }
                 throw MapSnapshotError.unavailable
             }
@@ -320,7 +322,7 @@ struct RideMapThumbnailTests {
             }
             $0.persistenceClient = client
             // Only the very first render holds, until the second backfill has had its chance.
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in
                 if renders.withValue({ $0 += 1; return $0 }) == 1 {
                     renderStartedContinuation.yield()
                     for await _ in release { break }

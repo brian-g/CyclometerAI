@@ -268,7 +268,7 @@ struct RidesFeatureTests {
                 captured.value ? RideMapThumbnailData(light: Self.png, dark: Self.png) : nil
             }
             $0.persistenceClient = client
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in Self.png }
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in Self.png }
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
@@ -319,7 +319,7 @@ struct RidesFeatureTests {
             client.fetchRideIdsMissingMapThumbnail = { finalized.value && !captured.value ? [ride.id] : [] }
             client.saveRideMapThumbnail = { _, _, _ in captured.setValue(true) }
             $0.persistenceClient = client
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in Self.png }
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in Self.png }
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 
@@ -348,7 +348,7 @@ struct RidesFeatureTests {
             client.saveRideMapThumbnail = { _, _, _ in captured.setValue(true) }
             $0.persistenceClient = client
             // Holds the first render until the delete has gone through.
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, style in
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, style in
                 if style == .light {
                     renderStartedContinuation.yield()
                     for await _ in release { break }
@@ -386,7 +386,7 @@ struct RidesFeatureTests {
             client.saveRideMapThumbnail = { _, _, _ in saves.withValue { $0 += 1 } }
             $0.persistenceClient = client
             // The first render hangs until cancelled, like one waiting on a dead network.
-            $0.mapSnapshotClient = MapSnapshotClient { _, _, _ in
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in
                 let render = renders.withValue { $0 += 1; return $0 }
                 if render == 1 {
                     firstStartedContinuation.yield()

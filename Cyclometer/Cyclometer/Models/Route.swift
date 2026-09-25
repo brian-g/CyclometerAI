@@ -90,6 +90,16 @@ final class Route {
         cuePointsData.flatMap { try? JSONDecoder().decode([RouteCuePoint].self, from: $0) } ?? []
     }
 
+    // MARK: - Map Thumbnail (#273)
+    // S19's row image, the route's polyline over a static map, rendered after import by
+    // `RouteMapThumbnail.backfill` (which also catches routes imported before #273). PNG, one
+    // per appearance, for the reason given on `Ride.mapThumbnailLight`. Nil until a capture
+    // succeeds; optional, so an older store migrates lightly.
+    @Attribute(.externalStorage)
+    var mapThumbnailLight: Data?
+    @Attribute(.externalStorage)
+    var mapThumbnailDark: Data?
+
     /// The only way a `Route` is made: from a parsed file, deriving distance, elevation
     /// and bounds once. Everything derived is stored rather than recomputed on read,
     /// because S19 sorts and filters on it.
@@ -121,6 +131,10 @@ final class Route {
         // unavailable until every stored property is initialised.
         self.polylineData = try? JSONEncoder().encode(imported.coordinates)
         self.cuePointsData = try? JSONEncoder().encode(imported.cuePoints)
+
+        // Rendered after the save, from the network (`RouteMapThumbnail`).
+        self.mapThumbnailLight = nil
+        self.mapThumbnailDark = nil
     }
 }
 

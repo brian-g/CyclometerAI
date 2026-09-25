@@ -75,6 +75,10 @@ struct RoutesFeature {
         /// visit to the tab.
         var surfaceLookupsStarted: Set<UUID> = []
 
+        /// Map thumbnails of the rows that have been on screen, by route id (#273) — the same
+        /// lazy, per-row read `RidesFeature.State.thumbnails` does.
+        var thumbnails: [UUID: RidesFeature.Thumbnail] = [:]
+
         /// Nil until a fix arrives, and permanently nil when location is denied — which is
         /// an ordinary state for this screen, not a failure. `RoutesMapCamera` falls back.
         var riderCoordinate: Coordinate?
@@ -118,6 +122,12 @@ struct RoutesFeature {
         /// One route's OpenStreetMap surface, looked up and saved (#252).
         case surfaceResolved(UUID, RouteSurfaceBreakdown)
         case riderCoordinateResponse(Coordinate?)
+
+        /// A thumbnail capture stored at least one image (#273): rows on screen without one
+        /// look again.
+        case mapThumbnailsCaptured
+        case rowAppeared(UUID)
+        case thumbnailLoaded(UUID, RideThumbnailImages?)
 
         case mapToggled
         case mapRegionChanged(RouteBounds?)
@@ -195,7 +205,9 @@ struct RoutesFeature {
                         } catch {
                             logger.error("backfillRouteTerrain failed: \(error.localizedDescription, privacy: .public)")
                         }
-                    }
+                    },
+                    // Routes imported before #273, and any render that failed last time.
+                    captureMapThumbnails()
                 )
 
             // Separate from `.task` so a recovery re-read cannot also re-run the permission
@@ -252,6 +264,22 @@ struct RoutesFeature {
 
             case .riderCoordinateResponse(let coordinate):
                 state.riderCoordinate = coordinate
+                return .none
+
+            case .mapThumbnailsCaptured:
+                let missing = state.thumbnails.filter { $0.value == .missing }.map(\.key)
+                for id in missing { state.thumbnails[id] = .loading }
+                return .merge(missing.map(loadThumbnail))
+
+            case .rowAppeared(let id):
+                guard state.thumbnails[id] == nil else { return .none }
+                state.thumbnails[id] = .loading
+                return loadThumbnail(id)
+
+            case .thumbnailLoaded(let id, let images):
+                // The route may have been deleted while its image was read.
+                guard state.thumbnails[id] != nil else { return .none }
+                state.thumbnails[id] = images.map(RidesFeature.Thumbnail.loaded) ?? .missing
                 return .none
 
             case .mapToggled:
@@ -405,7 +433,8 @@ struct RoutesFeature {
                 // map toggle and on a re-read, and importing from the map does neither.
                 return .merge(
                     state.showsMap ? loadMissingPolylines(state) : .none,
-                    resolveMissingSurfaces(&state)
+                    resolveMissingSurfaces(&state),
+                    captureMapThumbnails()
                 )
 
             case .importResponse(.failure(let failure)):
@@ -418,6 +447,7 @@ struct RoutesFeature {
                 // gesture that didn't take. `.deleteFailed` puts the list back.
                 state.routes.removeAll { $0.id == id }
                 state.polylines[id] = nil
+                state.thumbnails[id] = nil
                 Self.refreshFilters(&state)
                 return .run { send in
                     do {
@@ -474,6 +504,27 @@ struct RoutesFeature {
                 }
             }
             await send(.polylinesResponse(polylines))
+        }
+    }
+
+    /// Renders the map thumbnail of every route without one (#273), after each import and on
+    /// each visit to the tab. Never cancelled: a batch cancelled between its save and its
+    /// `mapThumbnailsCaptured` would leave rows on screen showing the placeholder, since the
+    /// batch that replaced it finds nothing left to render and reports nothing. Overlap costs
+    /// little instead — `RouteMapThumbnail.backfill` runs one at a time, and a batch queued
+    /// behind another re-reads the missing list and finds only what the first didn't do.
+    private func captureMapThumbnails() -> Effect<Action> {
+        .run { send in
+            if await RouteMapThumbnail.backfill() > 0 {
+                await send(.mapThumbnailsCaptured)
+            }
+        }
+    }
+
+    /// Reads one route's stored image off the main thread; a failed read shows as missing.
+    private func loadThumbnail(_ id: UUID) -> Effect<Action> {
+        .run { [persistenceClient] send in
+            await send(.thumbnailLoaded(id, await RouteMapThumbnail.images(id, from: persistenceClient)))
         }
     }
 

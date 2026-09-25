@@ -38,7 +38,8 @@ final class RoutesSnapshotTests: XCTestCase {
         routes: [RouteSummary],
         filter: RouteFilter = RouteFilter(),
         mapFilterBounds: RouteBounds? = nil,
-        mapFilteredRouteIDs: Set<UUID>? = nil
+        mapFilteredRouteIDs: Set<UUID>? = nil,
+        thumbnails: [UUID: RidesFeature.Thumbnail] = [:]
     ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
@@ -53,6 +54,8 @@ final class RoutesSnapshotTests: XCTestCase {
             state.filter = filter
             state.mapFilterBounds = mapFilterBounds
             state.mapFilteredRouteIDs = mapFilteredRouteIDs
+            // Seeded for the same reason as the routes: a row's image is read by an effect.
+            state.thumbnails = thumbnails
             // The screen after its first read, which is the state worth pinning — an
             // unseeded `hasLoaded` would photograph the pre-read blank instead.
             state.hasLoaded = true
@@ -101,6 +104,27 @@ final class RoutesSnapshotTests: XCTestCase {
     /// distance alone rather than leaving a dangling separator.
     func testPopulatedList() {
         assertBothSchemes(screen(routes: RouteSummary.previewRoutes), named: "populated")
+    }
+
+    /// Map thumbnails on the first two rows and the placeholder on the rest (#273), so both
+    /// states of the 56pt frame are pinned side by side. Flat stand-ins in two greys, one per
+    /// appearance, rather than MapKit tiles, which can't be pixel-tested.
+    func testRoutesWithMapThumbnails() {
+        let routes = RouteSummary.previewRoutes
+        let images = RideThumbnailImages(light: Self.flatImage(.systemGray4), dark: Self.flatImage(.systemGray))
+        assertBothSchemes(
+            screen(routes: routes, thumbnails: [routes[0].id: .loaded(images), routes[1].id: .loaded(images)]),
+            named: "thumbnails"
+        )
+    }
+
+    private static func flatImage(_ color: UIColor) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = RideMapThumbnail.scale
+        return UIGraphicsImageRenderer(size: RideMapThumbnail.pointSize, format: format).image { context in
+            color.setFill()
+            context.fill(CGRect(origin: .zero, size: RideMapThumbnail.pointSize))
+        }
     }
 
     /// Nothing imported yet. The `ContentUnavailableView` and its import action are the

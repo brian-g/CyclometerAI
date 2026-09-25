@@ -134,8 +134,8 @@ enum RideMapThumbnail {
         let segments = drawableSegments(try await persistenceClient.fetchTrackPoints(rideId))
         guard !segments.isEmpty else { return false }
         let mapRect = mapRect(for: segments)
-        async let light = mapSnapshotClient.render(mapRect, segments, .light)
-        async let dark = mapSnapshotClient.render(mapRect, segments, .dark)
+        async let light = mapSnapshotClient.render(mapRect, segments, .cyMapTravelPath, .light)
+        async let dark = mapSnapshotClient.render(mapRect, segments, .cyMapTravelPath, .dark)
         try await persistenceClient.saveRideMapThumbnail(rideId, light, dark)
         return true
     }
