@@ -216,7 +216,20 @@ actor RidePersistenceActor {
                 sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
             )
             descriptor.fetchLimit = 1
-            return try modelContext.fetch(descriptor).first?.summarySnapshot
+            guard let ride = try modelContext.fetch(descriptor).first else { return nil }
+            var summary = ride.summarySnapshot
+            // A pass's `VehiclePassEvent` is saved the moment it's confirmed, but the ride's
+            // count only at the next checkpoint, so a kill in between leaves the stored count
+            // behind its events (#298). The events are the record; resume from whichever is
+            // higher, keeping nil for a ride with neither — "no radar" (#285).
+            let rideId = ride.id
+            let eventCount = try modelContext.fetchCount(
+                FetchDescriptor<VehiclePassEvent>(predicate: #Predicate { $0.rideId == rideId })
+            )
+            if summary.vehiclePassCount != nil || eventCount > 0 {
+                summary.vehiclePassCount = max(summary.vehiclePassCount ?? 0, eventCount)
+            }
+            return summary
         } catch {
             logger.error("fetchResumableRide failed: \(error.localizedDescription, privacy: .public)")
             throw error
