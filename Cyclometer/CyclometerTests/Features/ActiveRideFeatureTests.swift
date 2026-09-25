@@ -71,6 +71,7 @@ struct ActiveRideFeatureRadarTests {
             $0.isRadarPaired = true
             $0.radarConnectionState = .active
             $0.wasRadarEverPaired = true
+            $0.vehiclePassCount = 0
         }
     }
 
@@ -84,6 +85,7 @@ struct ActiveRideFeatureRadarTests {
             $0.isRadarPaired = true
             $0.radarConnectionState = .active
             $0.wasRadarEverPaired = true
+            $0.vehiclePassCount = 0
         }
         // Receding (negative velocity) so this test stays focused on the disconnect
         // haptic path rather than also exercising AlertLevel escalation.
@@ -141,6 +143,7 @@ struct ActiveRideFeatureRadarTests {
             $0.isRadarPaired = true
             $0.radarConnectionState = .active
             $0.wasRadarEverPaired = true
+            $0.vehiclePassCount = 0
         }
         await store.send(.radarConnectionChanged(.reconnecting)) {
             $0.radarConnectionState = .reconnecting
@@ -160,6 +163,7 @@ struct ActiveRideFeatureRadarTests {
             $0.isRadarPaired = true
             $0.radarConnectionState = .active
             $0.wasRadarEverPaired = true
+            $0.vehiclePassCount = 0
         }
         await store.send(.radarConnectionChanged(.disconnected)) {
             $0.isRadarPaired = false
@@ -185,6 +189,7 @@ struct ActiveRideFeatureRadarTests {
             $0.isRadarPaired = true
             $0.radarConnectionState = .active
             $0.wasRadarEverPaired = true
+            $0.vehiclePassCount = 0
         }
         let targets = [
             RadarTarget(
@@ -239,6 +244,7 @@ struct ActiveRideFeatureRadarTests {
             $0.isRadarPaired = true
             $0.radarConnectionState = .active
             $0.wasRadarEverPaired = true
+            $0.vehiclePassCount = 0
         }
         await store.send(.radarConnectionChanged(.disconnected)) {
             $0.isRadarPaired = false
@@ -349,6 +355,7 @@ struct ActiveRideFeatureAlertEscalationTests {
             $0.isRadarPaired = true
             $0.radarConnectionState = .active
             $0.wasRadarEverPaired = true
+            $0.vehiclePassCount = 0
         }
         await store.send(.radarConnectionChanged(.reconnecting)) {
             $0.radarConnectionState = .reconnecting
@@ -1175,7 +1182,8 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(state.cadence.pedalingSampleCount == 0)
         #expect(state.cadence.cadenceSum == 0)
         #expect(state.cadence.maxCadenceRPM == 0)
-        #expect(state.vehiclePassCount == 0)
+        // No radar before the kill means still no radar, not a measured 0 (#285).
+        #expect(state.vehiclePassCount == nil)
     }
 
     @Test("State(resuming:) preserves .paused, doesn't force .active")
@@ -3081,6 +3089,7 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
     /// (satisfying the tracked-duration minimum), then a confirmation tick 2s past
     /// the last sighting (satisfying the disappearance grace period).
     private func sendOvertake(on store: TestStoreOf<ActiveRideFeature>) async {
+        await store.send(.radarConnectionChanged(.active))
         await store.send(.radarTargetsUpdated([Self.vehicle(mps: 8)]))
         store.dependencies.date.now = testDate.addingTimeInterval(2)
         await store.send(.radarTargetsUpdated([Self.vehicle(mps: 8)]))
@@ -3125,6 +3134,61 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
 
         await store.send(.pauseTapped)
         #expect(updatedSummary.value?.vehiclePassCount == 1)
+    }
+
+    // MARK: #285 — nil means "no radar"
+
+    private func finish(_ store: TestStoreOf<ActiveRideFeature>) async {
+        await store.send(.pauseTapped)
+        await store.send(.finishTapped)
+        await store.send(.finishAlert(.presented(.confirmFinish)))
+    }
+
+    @Test("A ride that never had a radar paired finalizes with a nil vehiclePassCount")
+    func noRadarFinalizesNil() async {
+        let finalized = LockIsolated<RideSummaryUpdate?>(nil)
+        let store = makeStore(persistenceClient: .mock(onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) }))
+
+        await finish(store)
+
+        #expect(store.state.vehiclePassCount == nil)
+        #expect(finalized.value != nil)
+        #expect(finalized.value?.vehiclePassCount == nil)
+    }
+
+    @Test("A ride with a radar paired and no passes finalizes with 0")
+    func radarWithoutPassesFinalizesZero() async {
+        let finalized = LockIsolated<RideSummaryUpdate?>(nil)
+        let store = makeStore(persistenceClient: .mock(onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) }))
+
+        await store.send(.radarConnectionChanged(.active))
+        // Losing the radar afterwards doesn't un-measure the ride.
+        await store.send(.radarConnectionChanged(.disconnected))
+        await finish(store)
+
+        #expect(finalized.value?.vehiclePassCount == 0)
+    }
+
+    @Test("Resuming keeps a nil vehiclePassCount nil and a real count intact")
+    func resumeKeepsNilAndCount() async {
+        func resumed(_ vehiclePassCount: Int?) -> ActiveRideFeature.State {
+            ActiveRideFeature.State(resuming: RideSummaryUpdate(
+                rideId: UUID(), recordingState: .active, durationSeconds: 60, distanceMeters: 100,
+                averageSpeedMPS: 2, maxSpeedMPS: 3, averageHeartRateBPM: nil, maxHeartRateBPM: nil,
+                averageCadenceRPM: nil, maxCadenceRPM: nil, vehiclePassCount: vehiclePassCount
+            ))
+        }
+        #expect(resumed(nil).vehiclePassCount == nil)
+        #expect(resumed(0).vehiclePassCount == 0)
+
+        // The radar reconnecting after the resume keeps counting from the restored
+        // value rather than resetting it to 0 (no vehiclePassCount change below).
+        let store = TestStore(initialState: resumed(3)) { ActiveRideFeature() }
+        await store.send(.radarConnectionChanged(.active)) {
+            $0.isRadarPaired = true
+            $0.radarConnectionState = .active
+            $0.wasRadarEverPaired = true
+        }
     }
 }
 
