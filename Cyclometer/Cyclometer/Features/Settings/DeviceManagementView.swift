@@ -27,6 +27,7 @@ struct DeviceListView: View {
 
     var body: some View {
         let paired = store.pairedRoles
+        let reassignable = store.reassignableIDs
         List {
             Section {
                 ForEach(store.listedDevices) { device in
@@ -40,9 +41,15 @@ struct DeviceListView: View {
                     }
                     // Tapping a combo sensor re-opens the role prompt —
                     // BLE.md §5.0's "reassignable without re-pairing". Rows
-                    // with nothing to choose stay inert.
+                    // with nothing to choose carry no row gesture at all, so the
+                    // Pair button is their only tap target: a whole-row gesture
+                    // layered over it in a list that re-sorts every sweep is the
+                    // suspected route to the pairing nobody tapped (#180).
                     .contentShape(.rect)
-                    .onTapGesture { store.send(.rowTapped(device.id)) }
+                    .gesture(
+                        TapGesture().onEnded { store.send(.rowTapped(device.id)) },
+                        isEnabled: reassignable.contains(device.id)
+                    )
                 }
 
                 // Always last, and always present: the scan runs for as long as this
