@@ -112,6 +112,7 @@ extension PermissionsClient {
     static let dateOfBirthType = HKCharacteristicType(.dateOfBirth)
     static let workoutType = HKWorkoutType.workoutType()
     static let distanceCyclingType = HKQuantityType(.distanceCycling)
+    static let workoutRouteType = HKSeriesType.workoutRoute()
 
     /// PRD.md §9.4 — resting HR and max HR feed the Karvonen zones, date of birth backs
     /// the age-based max-HR estimate when no measured maximum exists. Workouts are read
@@ -122,11 +123,12 @@ extension PermissionsClient {
 
     /// UX.md §S10 — an `HKWorkout` is written at ride end so the ride lands in the
     /// Fitness app. Its distance reaches the workout as a `distanceCycling` sample, which
-    /// `HKWorkoutBuilder` will only accept with share access to that type too. Requested
-    /// here, with the reads, so the rider answers one sheet in their lifetime rather than
-    /// a second one months later at the end of their first ride.
+    /// `HKWorkoutBuilder` will only accept with share access to that type too, and its map
+    /// as a `workoutRoute` series (#295). Requested here, with the reads, so the rider
+    /// answers one sheet in their lifetime rather than a second one months later at the
+    /// end of their first ride.
     static var healthShareTypes: Set<HKSampleType> {
-        [workoutType, distanceCyclingType]
+        [workoutType, distanceCyclingType, workoutRouteType]
     }
 }
 

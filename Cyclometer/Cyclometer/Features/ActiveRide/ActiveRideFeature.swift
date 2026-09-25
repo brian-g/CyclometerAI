@@ -568,8 +568,11 @@ struct ActiveRideFeature {
                         }
 
                         var gpxURL: URL?
+                        // Kept for the Apple Health route below, so the rows aren't read twice.
+                        var trackPoints: [TrackPointDTO] = []
                         do {
                             var export = try await GPXExporter.fetchInputs(rideId: rideId)
+                            trackPoints = export.trackPoints
                             export.ride.title = await Self.titleForExport(rideId, export, persistenceClient: persistenceClient)
                             gpxURL = try GPXExporter.generate(export)
                             // Recorded before the finalize below, so a file that was
@@ -609,7 +612,8 @@ struct ActiveRideFeature {
                                 startedAt: startedAt,
                                 endedAt: endedAt,
                                 // The same value `finalizeRide` just wrote to `Ride.distanceMeters`.
-                                distanceMeters: finalSummary.distanceMeters
+                                distanceMeters: finalSummary.distanceMeters,
+                                trackPoints: trackPoints
                             ))
                         } catch {
                             logger.error("fetchRide failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — no workout written to Apple Health")
