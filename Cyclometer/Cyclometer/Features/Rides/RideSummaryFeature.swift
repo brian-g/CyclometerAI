@@ -12,6 +12,12 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persi
 /// before reading anything — before it, the row holds the last checkpoint's aggregates, up to
 /// 30 s stale, and the track is missing its final buffer.
 ///
+/// An unnamed free ride's default name gains the place it started in once a reverse geocode
+/// answers (#283), unless the rider has turned place names off in S12. The screen never waits
+/// on it: the offline name shows first and is swapped only if the rider hasn't touched the field.
+/// A failed lookup, or one still out when the sheet closes, leaves the offline name the ride was
+/// given at ride end.
+///
 /// The rename is saved by `AppFeature` on dismissal, not here: a child's effects are cancelled
 /// as it is dismissed, and a swipe-down is a dismissal like the Finish Ride button.
 @Reducer
@@ -47,6 +53,9 @@ struct RideSummaryFeature {
         var persistedTitle = ""
         /// The name the ride gets when the rider doesn't give one. Nil until loaded.
         var defaultTitle: String?
+        /// Whether the rider has focused or typed in the name field. Once they have, a late place
+        /// name (#283) never replaces what the field shows, even when it still reads as the default.
+        var isTitleTouched = false
 
         var summary: RideListSummary?
         /// Nil until loaded, and nil for good if the read fails.
@@ -99,12 +108,16 @@ struct RideSummaryFeature {
         case loaded(Loaded)
         case finalizeTimedOut
         case healthProfileFetched(restingBPM: Int?, maxBPM: Int?)
+        /// The default name with the start's place name in it, once the geocoder has answered.
+        case placedTitleResolved(String)
         case titleChanged(String)
+        case titleFocused
         case finishTapped
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.healthKitClient) var healthKitClient
+    @Dependency(\.geocodingClient) var geocodingClient
     @Dependency(\.continuousClock) var clock
     @Dependency(\.date) var date
     @Dependency(\.calendar) var calendar
@@ -116,8 +129,9 @@ struct RideSummaryFeature {
 
             case .task:
                 let id = state.rideId
+                let isPlaceNameLookupEnabled = state.preferences.isPlaceNameLookupEnabled
                 return .merge(
-                    .run { [persistenceClient, clock, calendar] send in
+                    .run { [persistenceClient, geocodingClient, clock, calendar] send in
                         guard let summary = try await RidesFeature.awaitFinalized(
                             id, persistenceClient: persistenceClient, clock: clock
                         ) else {
@@ -129,6 +143,13 @@ struct RideSummaryFeature {
                         let track = await points
                         let rideStats = await stats
                         let segments = RideMapThumbnail.drawableSegments(track)
+                        let routeName = rideStats?.routeName
+                        let defaultTitle = RideTitle.defaultTitle(
+                            routeName: routeName,
+                            startedAt: summary.startedAt,
+                            segments: segments,
+                            calendar: calendar
+                        )
                         await send(.loaded(Loaded(
                             summary: summary,
                             stats: rideStats,
@@ -137,13 +158,15 @@ struct RideSummaryFeature {
                                 track, sampleCount: RideDetailFeature.chartSampleCount
                             ),
                             heartRateSecondsByBPM: RideDetailSeries.secondsByBPM(track),
-                            defaultTitle: RideTitle.defaultTitle(
-                                routeName: rideStats?.routeName,
-                                startedAt: summary.startedAt,
-                                segments: segments,
-                                calendar: calendar
-                            )
+                            defaultTitle: defaultTitle
                         )))
+                        // Only after the screen has its numbers, so it never waits on the network.
+                        guard isPlaceNameLookupEnabled,
+                              Self.isKnownFreeRide(stats: rideStats, storedTitle: summary.title, defaultTitle: defaultTitle),
+                              let start = segments.first?.first,
+                              let place = try? await geocodingClient.locality(start)
+                        else { return }
+                        await send(.placedTitleResolved(RideTitle.placed(defaultTitle, in: place)))
                     },
                     // `RideDetailFeature`'s read, so the zones match S12's table.
                     .run { [healthKitClient, date] send in
@@ -179,14 +202,37 @@ struct RideSummaryFeature {
                 state.healthMaxBPM = maxBPM
                 return .none
 
+            case .placedTitleResolved(let placedTitle):
+                // The field is the rider's once they have touched it. The default moves either
+                // way, so a field cleared later saves this one.
+                if !state.isTitleTouched {
+                    state.title = placedTitle
+                }
+                state.defaultTitle = placedTitle
+                return .none
+
             case .titleChanged(let title):
                 state.title = title
+                state.isTitleTouched = true
+                return .none
+
+            case .titleFocused:
+                state.isTitleTouched = true
                 return .none
 
             case .finishTapped:
                 return .run { [dismiss] _ in await dismiss() }
             }
         }
+    }
+
+    /// Whether the start may go to the geocoder (PRD §12): only for a ride known not to be on a
+    /// route, and still named by default. Stats that failed to load can't rule out a route, so they
+    /// rule the lookup out — the route's name is in `storedTitle` then, but a failed ride-end rename
+    /// would leave it empty too.
+    static func isKnownFreeRide(stats: RideStats?, storedTitle: String, defaultTitle: String) -> Bool {
+        guard let stats, stats.routeName?.isEmpty ?? true else { return false }
+        return storedTitle.isEmpty || storedTitle == defaultTitle
     }
 
     /// Nil on failure, leaving the stats rows as dashes — logged, as S15 does.

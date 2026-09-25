@@ -39,6 +39,11 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// blanks mid-ride is broken, not configurable.
     var isAutoDimEnabled: Bool = true
 
+    /// Whether S10 looks up the town a free ride started in for its default name (#283) —
+    /// "Fargo Morning Loop" rather than "Morning Loop". On by default; off, the start
+    /// coordinate is never sent to Apple's geocoder (PRD §12, Privacy).
+    var isPlaceNameLookupEnabled: Bool = true
+
     /// Speed and distance display units (DataModel.md §3.6). Defaults to the device
     /// locale's measurement system, so a rider who never opens Settings still gets
     /// the units their phone is configured for.
@@ -140,6 +145,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
         ) ?? []
         isAutoDimEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isAutoDimEnabled
+        ) ?? true
+        isPlaceNameLookupEnabled = try container.decodeIfPresent(
+            Bool.self, forKey: .isPlaceNameLookupEnabled
         ) ?? true
         preferredUnit = try container.decodeIfPresent(
             UnitSystem.self, forKey: .preferredUnit

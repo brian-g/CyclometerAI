@@ -58,6 +58,8 @@ struct SettingsFeature {
         var preferredUnit: UnitSystem { preferences.preferredUnit }
         var isAutoPauseEnabled: Bool { preferences.isAutoPauseEnabled }
         var isAutoDimEnabled: Bool { preferences.isAutoDimEnabled }
+        /// Read by S10 when it names a ride (#283).
+        var isPlaceNameLookupEnabled: Bool { preferences.isPlaceNameLookupEnabled }
 
         /// Deduped by peripheral (`AppPreferences.pairedRoles`), so a combo
         /// speed+cadence sensor counts once rather than twice.
@@ -152,6 +154,7 @@ struct SettingsFeature {
         case customCircumferenceCommitted
         case autoPauseToggled
         case autoDimToggled
+        case placeNameLookupToggled
         case hrZoneBoundaryStepped(zone: HeartRateZone, delta: Int)
         case hrZoneResetTapped
         case restingOverrideChanged(String)
@@ -211,6 +214,9 @@ struct SettingsFeature {
                 return .none
             case .autoDimToggled:
                 state.$preferences.withLock { $0.isAutoDimEnabled.toggle() }
+                return .none
+            case .placeNameLookupToggled:
+                state.$preferences.withLock { $0.isPlaceNameLookupEnabled.toggle() }
                 return .none
             case .hrZoneBoundaryStepped(let zone, let delta):
                 // An out-of-range step is a silent no-op — what makes the Stepper

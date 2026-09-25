@@ -50,6 +50,9 @@ struct RideSummaryList<MapRow: View>: View {
                         .focused($isNameFocused)
                         .foregroundStyle(Color.cyTextSecondary)
                 }
+                .onChange(of: isNameFocused) { _, isFocused in
+                    if isFocused { store.send(.titleFocused) }
+                }
                 .contentShape(Rectangle())
                 .onTapGesture { isNameFocused = true }
             }
