@@ -955,7 +955,7 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
     var averageCadence: Int?           // rpm; nil if no cadence sensor
     var hrZoneDurations: [Int: TimeInterval] // zone (1–5) → seconds in zone
     var radarEventCount: Int
-    var vehiclePassCount: Int          // total vehicle pass events recorded
+    var vehiclePassCount: Int?         // total vehicle pass events recorded; nil if no radar paired
     var gpxFileURL: URL?
     var trackPoints: [TrackPoint]
     var radarEvents: [RadarEvent]

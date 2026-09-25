@@ -319,10 +319,10 @@ actor RidePersistenceActor {
         return ride
     }
 
-    /// Only overwrites `vehiclePassCount` when the caller actually has a value —
-    /// `ActiveRideFeature` passes its running count on every checkpoint/finalize
-    /// (#172), but unconditionally overwriting would silently stomp a real count
-    /// back to nil for any caller that doesn't track one.
+    /// Only overwrites `vehiclePassCount` when the update carries a value. Nil from
+    /// `ActiveRideFeature` means no radar has been active this ride (#285), and its
+    /// count never goes from a number back to nil, so skipping nil can't hide a
+    /// clear — it only keeps a checkpoint from stomping a stored count (#172).
     private func apply(_ update: RideSummaryUpdate, to ride: Ride) {
         ride.recordingState = update.recordingState
         ride.durationSeconds = update.durationSeconds

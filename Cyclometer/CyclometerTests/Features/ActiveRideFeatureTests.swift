@@ -3138,7 +3138,9 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
 
     // MARK: #285 — nil means "no radar"
 
-    private func finish(_ store: TestStoreOf<ActiveRideFeature>) async {
+    /// Pause, Finish, confirm. `finalizeRide` runs at the end of the confirm's effect
+    /// chain, so callers wait for it with `expectEventually` rather than reading it here.
+    private func endRide(_ store: TestStoreOf<ActiveRideFeature>) async {
         await store.send(.pauseTapped)
         await store.send(.finishTapped)
         await store.send(.finishAlert(.presented(.confirmFinish)))
@@ -3149,7 +3151,8 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
         let finalized = LockIsolated<RideSummaryUpdate?>(nil)
         let store = makeStore(persistenceClient: .mock(onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) }))
 
-        await finish(store)
+        await endRide(store)
+        await expectEventually { finalized.value != nil }
 
         #expect(store.state.vehiclePassCount == nil)
         #expect(finalized.value != nil)
@@ -3164,7 +3167,8 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
         await store.send(.radarConnectionChanged(.active))
         // Losing the radar afterwards doesn't un-measure the ride.
         await store.send(.radarConnectionChanged(.disconnected))
-        await finish(store)
+        await endRide(store)
+        await expectEventually { finalized.value != nil }
 
         #expect(finalized.value?.vehiclePassCount == 0)
     }
