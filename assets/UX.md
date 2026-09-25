@@ -2,7 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
-**Updated:** 2026-09-25 — §S10 default ride name gains the start's place name from a reverse geocode (#283), swapped in without waiting and never over a name the rider typed.  
+**Updated:** 2026-09-25 — §S10 default ride name gains the start's place name from a reverse geocode (#283), swapped in without waiting and never over a name the rider typed; §S12 gains a Place Names toggle to turn it off.  
 **Updated:** 2026-09-23 — S10 built (#249): presented as a sheet when Finish is confirmed, after the ride's save lands; titled and closed by **Finish Ride** as in the Sketch frame; the HR zone pie is derived from the saved track against the rider's current zones; unnamed rides get a default name (route, else time of day + loop / out and back); the frame's Description, Bike and Sync To rows are not built.  
 **Updated:** 2026-09-22 — HKWorkout write (#250): §S10 writes it after the ride is saved, not before the summary presents, skips overlapping workouts from other sources, and carries no energy yet, so no Move credit (#274); Apple Health is a future row in the Phase 2 Service Sync sheet. §S01's HealthKit list adds the workout read and distance write.  
 **Updated:** 2026-09-17 — M8 spec reconciliation (#202): the "Coming Soon" placeholder sentence in §S04 is gone — the Routes tab is built; S19's purpose no longer reads as though the service imports are MVP sources.  
@@ -789,7 +789,7 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 
 ### Key Components
 - Map (full route trace in `brPrimary`; placeholder in Design.sketch). A live map, not S14's cached image (#177)
-- Name row: tapping it focuses the field and opens the keyboard. An unnamed ride's default is its route's name; otherwise the time of day and the ride's shape — "Morning Loop", "Evening Out and Back", "Afternoon Ride" (one way) — led by the town the ride started in once a reverse geocode of the start answers: "Fargo Morning Loop" (#283). The sheet never waits on that lookup: the offline name shows first and is replaced only if the rider hasn't edited the field; a failed or offline lookup keeps it silently. The name is saved when the sheet closes, by button or swipe; a field cleared to nothing saves the default
+- Name row: tapping it focuses the field and opens the keyboard. An unnamed ride's default is its route's name; otherwise the time of day and the ride's shape — "Morning Loop", "Evening Out and Back", "Afternoon Ride" (one way) — led by the town the ride started in once a reverse geocode of the start answers: "Fargo Morning Loop" (#283). The sheet never waits on that lookup: the offline name shows first and is replaced only if the rider hasn't edited the field; a failed or offline lookup keeps it silently. The S12 **Place Names** toggle turns the lookup off. The name is saved when the sheet closes, by button or swipe; a field cleared to nothing saves the default
 - Ride stats: total distance, total time, avg speed, average cadence (only if a cadence sensor reported), vehicle pass count (only with radar paired), route
 - Elevation profile
 - HR zone breakdown (pie chart), derived from the saved track against the rider's current zones (S12), like S15's HR chart; "No heart rate recorded" when there is none
@@ -947,6 +947,7 @@ a confirmation:
   controls in place
 - Auto-pause (toggle)
 - Auto-dim (toggle)
+- Place Names (toggle, on) — whether S10 reverse-geocodes a free ride's start for its default name (#283, §S10). Off, nothing is sent and the name is the offline one
 - Sensors — navigates to S11, with the count of paired sensors as the trailing value
 
 **HR Zones**

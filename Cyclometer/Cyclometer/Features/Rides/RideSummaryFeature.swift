@@ -13,9 +13,10 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persi
 /// 30 s stale, and the track is missing its final buffer.
 ///
 /// An unnamed free ride's default name gains the place it started in once a reverse geocode
-/// answers (#283). The screen never waits on it: the offline name shows first and is swapped only
-/// if the rider hasn't touched the field. A failed lookup, or one still out when the sheet closes,
-/// leaves the offline name the ride was given at ride end.
+/// answers (#283), unless the rider has turned place names off in S12. The screen never waits
+/// on it: the offline name shows first and is swapped only if the rider hasn't touched the field.
+/// A failed lookup, or one still out when the sheet closes, leaves the offline name the ride was
+/// given at ride end.
 ///
 /// The rename is saved by `AppFeature` on dismissal, not here: a child's effects are cancelled
 /// as it is dismissed, and a swipe-down is a dismissal like the Finish Ride button.
@@ -124,6 +125,7 @@ struct RideSummaryFeature {
 
             case .task:
                 let id = state.rideId
+                let isPlaceNameLookupEnabled = state.preferences.isPlaceNameLookupEnabled
                 return .merge(
                     .run { [persistenceClient, geocodingClient, clock, calendar] send in
                         guard let summary = try await RidesFeature.awaitFinalized(
@@ -154,8 +156,10 @@ struct RideSummaryFeature {
                             )
                         )))
                         // Only after the screen has its numbers, so it never waits on the network.
-                        // A route ride is named for its route, so nothing is sent for it.
-                        guard routeName?.isEmpty ?? true, let start = segments.first?.first,
+                        // A route ride is named for its route, so nothing is sent for it; nor is
+                        // anything sent when the rider has turned place names off in S12.
+                        guard isPlaceNameLookupEnabled, routeName?.isEmpty ?? true,
+                              let start = segments.first?.first,
                               let place = try? await geocodingClient.locality(start)
                         else { return }
                         await send(.placedTitleResolved(RideTitle.defaultTitle(

@@ -26,7 +26,7 @@
 | 0.6.0 | 2026-09-17 | Brian | Review and update before the M9 milestone. |
 | 0.6.1 | 2026-09-22 | Brian / Claude | Route analysis (#252). §8.6 adds a derived terrain analysis (categorized climbs, max grade, FIETS, route character) and an OpenStreetMap surface lookup at import; §14 records Overpass as the app's first network call, sending a planned route's line and nothing else. `.fit` import stays out of scope (§15), and #252's estimated-power projection is deferred with power (Phase 3). |
 | 0.6.2 | 2026-09-22 | Brian / Claude | HKWorkout write (#250). §9.4 adds `distanceCycling` (write) for the workout's distance and `HKWorkoutType` (read) for skipping a ride another source already recorded. Energy is not written yet (#274). |
-| 0.6.3 | 2026-09-25 | Brian / Claude | Ride place name (#283). §12 Privacy records the reverse geocode of a free ride's start coordinate, sent to Apple for S10's default ride name. |
+| 0.6.3 | 2026-09-25 | Brian / Claude | Ride place name (#283). §12 Privacy records the reverse geocode of a free ride's start coordinate, sent to Apple for S10's default ride name, with an S12 toggle to turn it off. |
 
 ---
 
@@ -1225,9 +1225,9 @@ Cyclometer/
 
 ### Privacy
 - HealthKit data: read-only, apart from the `HKWorkout` and its cycling-distance sample the app writes back at ride end (UX.md §S10); no data transmitted to any server
-- GPS and ride data: stored locally only
+- GPS and ride data: stored locally only, apart from a free ride's start coordinate sent for its place name (below), which the rider can turn off
 - Route surface lookup (#252): after a route is imported, its line — the planned route, never a recorded ride — is sent to the public OpenStreetMap Overpass API (`overpass-api.de`) to read the surface of the roads along it. Nothing else is sent, and no account or identifier is attached. A failed or offline lookup leaves the route without a surface; it is retried on the next launch, and the first failure in a batch stops the rest, so a refusing or unreachable server is not asked again and again. Surface data is credited "© OpenStreetMap contributors" wherever it is shown (ODbL)
-- Ride place name (#283): when a ride that did not follow a route is summarised (S10), its start coordinate — that one point, nothing else — is sent to Apple's reverse geocoder (MapKit `MKReverseGeocodingRequest`) for the name of the town it started in, used in the ride's default name ("Fargo Morning Loop"). A ride on a route is named for the route and sends nothing. A failed or offline lookup keeps the offline name silently
+- Ride place name (#283): when a ride that did not follow a route is summarised (S10), its start coordinate — that one point, nothing else — is sent to Apple's reverse geocoder (MapKit `MKReverseGeocodingRequest`) for the name of the town it started in, used in the ride's default name ("Fargo Morning Loop"). A ride on a route is named for the route and sends nothing. The S12 **Place Names** toggle (on by default) turns the lookup off, and the in-app privacy policy says so. A failed or offline lookup keeps the offline name silently
 - BLE device identifiers: not transmitted externally
 - No analytics or crash reporting without explicit user consent
 

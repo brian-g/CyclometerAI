@@ -341,6 +341,25 @@ struct RideSummaryFeatureTests {
         #expect(store.state.title == "SW Fargo")
     }
 
+    @Test("with place names off in S12, the geocoder is never asked")
+    func placeNamesOffSkipsLookup() async {
+        let calls = LockIsolated(0)
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()],
+            rideStats: [Self.summary.id: Self.stats],
+            rides: [Self.summary]
+        ), geocodingClient: GeocodingClient { _ in
+            calls.withValue { $0 += 1 }
+            return "Fargo"
+        })
+        store.state.$preferences.withLock { $0.isPlaceNameLookupEnabled = false }
+
+        await load(store)
+
+        #expect(calls.value == 0)
+        #expect(store.state.title == "Morning Ride")
+    }
+
     @Test("a cleared or blank field saves the default, never an empty title")
     func blankTitleSavesDefault() {
         var state = RideSummaryFeature.State(rideId: Self.summary.id)

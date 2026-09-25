@@ -163,6 +163,18 @@ struct SettingsFeatureTests {
         #expect(store.state.isAutoDimEnabled)
     }
 
+    /// Read by S10 off the same document when it names a ride (#283).
+    @Test("Place names toggle persists, on by default")
+    func placeNameLookupTogglePersists() async {
+        let store = makeStore()
+        #expect(store.state.isPlaceNameLookupEnabled)
+
+        await store.send(.placeNameLookupToggled) {
+            $0.$preferences.withLock { $0.isPlaceNameLookupEnabled = false }
+        }
+        #expect(store.state.isPlaceNameLookupEnabled == false)
+    }
+
     /// Auto-pause used to be a feature-local `Bool` nobody else could read; #102
     /// moves it through the same document `ActiveRideFeature` consults.
     @Test("Auto-pause toggles persist rather than living in feature state")
