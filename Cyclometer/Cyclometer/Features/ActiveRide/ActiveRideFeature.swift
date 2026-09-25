@@ -607,13 +607,24 @@ struct ActiveRideFeature {
                         // logged in the client.
                         do {
                             let startedAt = try await persistenceClient.fetchRide(rideId).startedAt
+                            // No body mass, no energy (#276): a guessed weight would be written
+                            // to Health as if it were measured.
+                            let riderKilograms = try? await healthKitClient.fetchBodyMass()
                             try? await healthKitClient.saveWorkout(RideWorkout(
                                 rideId: rideId,
                                 startedAt: startedAt,
                                 endedAt: endedAt,
                                 // The same value `finalizeRide` just wrote to `Ride.distanceMeters`.
                                 distanceMeters: finalSummary.distanceMeters,
-                                trackPoints: trackPoints
+                                trackPoints: trackPoints,
+                                activeEnergyKilocalories: riderKilograms.map {
+                                    RideEnergy.activeKilocalories(
+                                        trackPoints: trackPoints,
+                                        movingSeconds: finalSummary.durationSeconds,
+                                        distanceMeters: finalSummary.distanceMeters,
+                                        riderKilograms: $0
+                                    )
+                                }
                             ))
                         } catch {
                             logger.error("fetchRide failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — no workout written to Apple Health")

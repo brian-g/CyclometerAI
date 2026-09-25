@@ -1,3 +1,27 @@
+# #276 — Active energy on the ride's HKWorkout (physics model, MET fallback; supersedes #274)
+
+Plan: /Users/brian/.claude/plans/twinkling-brewing-volcano.md
+Branch: `feat/276-active-energy`
+
+- [x] 1. `RideEnergy` estimator (physics per 1 Hz pair, MET for gaps/no speed/implausible grade/residual time); bike weight a 10 kg constant
+- [x] 2. `RideWorkout.activeEnergyKilocalories`
+- [x] 3. `PermissionsClient`: `bodyMass` read, `activeEnergyBurned` share
+- [x] 4. `HealthKitClient.fetchBodyMass` + energy sample in `saveWorkout`
+- [x] 5. `ActiveRideFeature` ride end: body mass → estimate → workout (nil without body mass)
+- [x] 6. Tests: `RideEnergyTests`, `RideEndFailureTests`, `PermissionsClientTests`
+- [x] 7. Docs: PRD §9.4 + changelog, UX.md §S10, Info.plist share string
+- [x] 8. Verify: full `CyclometerTests`; device Move-ring check is Brian's
+
+## Review
+
+- `RideEnergy` (pure enum) estimates active kcal from the persisted track: per 1 Hz pair, pedal power = (air + rolling + gravity) ÷ (1 − 2.5% drivetrain loss), clamped at 0 so coasting adds nothing, on altitude smoothed over ~31 s. kJ ≈ kcal. MET (2024 Compendium, minus 1 for resting) covers a pair with no speed, a gap > 5 s, or a smoothed grade > 25%, plus recording time the track doesn't cover. Stationary seconds (#262 threshold) add nothing.
+- The ride-end effect reads `HealthKitClient.fetchBodyMass` (latest sample). If there's none, `RideWorkout.activeEnergyKilocalories` is nil and no energy is written. `saveWorkout` adds an `activeEnergyBurned` sample (`<rideId>-energy`) when share access allows, mirroring distance.
+- New types: `bodyMass` read and `activeEnergyBurned` share. PRD §9.4 + 0.6.3 row, UX §S01/§S10, and the Info.plist read string are updated.
+- Bike weight is a 10 kg constant (decision), which departs from #276's Data Model criterion. #274 is superseded.
+- 2024 Compendium 01060 (>20 mph) is 16.8 MET, not the 2011 value of 15.8.
+- Tests: `RideEnergyTests` (flat ≈ 547 kcal/h at 30 km/h, climb = m·g·h/0.975, coasting descent 0, pause, gap/no-speed/implausible-grade/uncovered MET, bands) and `RideEndFailureTests/workoutCarriesEstimatedEnergy`. The existing workout test pins nil energy without body mass. Full `CyclometerTests` passed (** TEST SUCCEEDED **, 1577 cases).
+- Not verified: the Move ring on a device, and how a paired Watch's own Move reading interacts with it.
+
 # #280 — Ride thumbnails framed so the track fills the square
 
 Plan: /Users/brian/.claude/plans/sprightly-gathering-tarjan.md

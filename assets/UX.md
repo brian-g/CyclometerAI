@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-09-25 — Active energy (#276, supersedes #274): §S10's workout carries an energy estimate from the recorded track and the rider's Health body weight, so it earns Move credit; none without a body weight. §S01's HealthKit list adds the body-weight read and energy write.  
 **Updated:** 2026-09-23 — S10 built (#249): presented as a sheet when Finish is confirmed, after the ride's save lands; titled and closed by **Finish Ride** as in the Sketch frame; the HR zone pie is derived from the saved track against the rider's current zones; unnamed rides get a default name (route, else time of day + loop / out and back); the frame's Description, Bike and Sync To rows are not built.  
 **Updated:** 2026-09-22 — HKWorkout write (#250): §S10 writes it after the ride is saved, not before the summary presents, skips overlapping workouts from other sources, and carries no energy yet, so no Move credit (#274); Apple Health is a future row in the Phase 2 Service Sync sheet. §S01's HealthKit list adds the workout read and distance write.  
 **Updated:** 2026-09-17 — M8 spec reconciliation (#202): the "Coming Soon" placeholder sentence in §S04 is gone — the Routes tab is built; S19's purpose no longer reads as though the service imports are MVP sources.  
@@ -158,9 +159,10 @@ This convention matches the frame naming in `Design.sketch`.
 - Location **When In Use** (required for GPS track)
 - Motion and Fitness (required for activity detection, *where the hardware exists* — see the
   availability note below)
-- HealthKit (read: HR, resting HR, max HR, date of birth, and workouts — only to avoid saving a ride
-  twice; write: the `HKWorkout` recorded at ride end per §S10, with its cycling distance — both are
-  requested together so the rider answers one sheet)
+- HealthKit (read: HR, resting HR, max HR, date of birth, body weight — for the workout's energy
+  estimate — and workouts — only to avoid saving a ride twice; write: the `HKWorkout` recorded at ride
+  end per §S10, with its cycling distance and active energy — both are requested together so the rider
+  answers one sheet)
 
 > **Revised 2026-08-14 (M10).** Two corrections to the list this screen used to show.
 >
@@ -814,7 +816,8 @@ An outdoor cycling `HKWorkout` is written to Apple Health automatically once the
 
 - **Consent** is the HealthKit share permission from S01, which the rider can revoke in iOS Settings → Health
 - **Duplicates:** if another source (e.g. an Apple Watch Outdoor Cycle) already recorded a cycling workout overlapping the ride, the write is skipped. A later rewrite of the same ride replaces its workout rather than adding one
-- **Carries** start, end and distance only. Pause intervals are not marked, so Fitness shows elapsed time. With no active energy (`totalEnergyBurned` is nil) it counts toward the Exercise ring but not Move — energy is #274
+- **Carries** start, end, distance, route and estimated active energy. Pause intervals are not marked, so Fitness shows elapsed time
+- **Active energy** (#276) is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), falling back to Compendium MET values by speed where the track has no speed, a dropout or an implausible grade. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. Calories are not shown in the app
 
 ### Open UX Questions
 - [x] Zone breakdown chart type? Pie chart

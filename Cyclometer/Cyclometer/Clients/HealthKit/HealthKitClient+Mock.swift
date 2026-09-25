@@ -9,6 +9,7 @@ extension HealthKitClient {
     static func mock(
         restingHeartRate: Int? = nil,
         dateOfBirth: DateComponents? = nil,
+        bodyMassKilograms: Double? = nil,
         heartRateSamples: [Int] = [],
         onRequestAuthorization: @escaping @Sendable () async throws -> Void = { },
         onSaveWorkout: @escaping @Sendable (RideWorkout) async throws -> Void = { _ in }
@@ -17,6 +18,7 @@ extension HealthKitClient {
             requestAuthorization:  onRequestAuthorization,
             fetchRestingHeartRate: { restingHeartRate },
             fetchDateOfBirth:      { dateOfBirth },
+            fetchBodyMass:         { bodyMassKilograms },
             heartRateStream: {
                 AsyncStream { continuation in
                     for bpm in heartRateSamples { continuation.yield(bpm) }

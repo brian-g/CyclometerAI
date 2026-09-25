@@ -325,8 +325,43 @@ struct RideEndFailureTests {
             startedAt: ride.startedAt,
             endedAt: endedAt,
             distanceMeters: ride.distanceMeters,
-            trackPoints: trackPoints
+            trackPoints: trackPoints,
+            // The mock has no body mass, so no energy rather than a guessed weight (#276).
+            activeEnergyKilocalories: nil
         ))
+    }
+
+    @Test("with body mass in Health, the workout carries the ride's estimated active energy")
+    func workoutCarriesEstimatedEnergy() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let written = LockIsolated<[RideWorkout]>([])
+        let reads = LockIsolated(0.0)
+        let movingClock = DateGenerator {
+            reads.withValue { $0 += 1; return Self.testDate.addingTimeInterval($0) }
+        }
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory(),
+            healthKitClient: .mock(bodyMassKilograms: 75, onSaveWorkout: { workout in
+                written.withValue { $0.append(workout) }
+            }),
+            date: movingClock
+        )
+        let rideId = await Self.runRideToEnd(store, speedMPS: 5) { _ in !written.value.isEmpty }
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        let workout = try #require(written.value.first)
+        let trackPoints = try await client.fetchTrackPoints(rideId)
+        let expected = RideEnergy.activeKilocalories(
+            trackPoints: trackPoints,
+            movingSeconds: ride.durationSeconds,
+            distanceMeters: ride.distanceMeters,
+            riderKilograms: 75
+        )
+        // Moving, so the comparison can't pass on two zeros.
+        #expect(expected > 0)
+        #expect(workout.activeEnergyKilocalories == expected)
     }
 
     @Test("an Apple Health workout write failure at ride end still ends the ride, and the steps after it still run")
