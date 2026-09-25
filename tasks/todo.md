@@ -134,3 +134,24 @@ Branch `feat/249-ride-summary`. Plan: `~/.claude/plans/rosy-riding-forest.md`.
   `Ride.hrZoneDurations`/`elevationGainMeters`; (3) `ActiveRideFeature.vehiclePassCount` is `Int = 0`, so a
   ride with no radar stores 0, not nil, and S10/S15 show "Vehicle Passes 0" (seen in the drive).
 - UX gap, not addressed: the Name field starts filled with the default, so renaming means deleting it first.
+
+# #286 — Rewrite the ride's GPX track name after a rename
+
+Plan: /Users/brian/.claude/plans/cheerful-purring-thacker.md, revised after `/code-review high` (option b)
+Branch: `286-gpx-rename-rewrite`
+
+- [x] 1. Ride end names an untitled ride with `RideTitle.defaultTitle` before the export, so the first file already carries the name
+- [x] 2. `GPXExporter.fetchInputs` / `generate(_:)` / `rewrite(rideId:)`: one fetch path shared by export and rewrite
+- [x] 3. `RidePersistenceActor.replaceGPXFile` + `removeGPXFile`: check and write on the actor, so a rename can't recreate a file a delete just removed
+- [x] 4. `AppFeature` dismiss: rename → reload S14 → rewrite (failure logged with the ride id)
+- [x] 5. Tests + mutation checks + fresh full suite
+
+## Review
+
+- First version rewrote inside `renameRide`. Review findings: S10 renamed nearly every ride to its default on dismiss, so every ride exported twice; S14 waited behind the rewrite; the fetch pipeline was duplicated; and a rename could recreate a file a concurrent delete had just removed (#261).
+- Now the default name is stored before the export, so S10 only renames when the rider actually types a name. The calendar is resolved inside `titleForExport`, so it's read only when a name is made. Twelve ride-end tests that use a live client now pin `$0.calendar`.
+- `replaceItemAt` was tested and ruled out for the race: it creates a missing original, just like an atomic write does.
+- Mutation checks: dropping the ride-end naming fails the lifecycle test (row + file name); dropping the rewrite fails the dismiss test.
+- Suite: 1,535 passed, 0 failed (fresh DerivedData).
+- Remaining gap: if the rider types a name and dismisses S10 before finalize lands, the replace finds no URL. That file keeps the default name, not the typed one.
+- Declined: patching the file instead of rebuilding it (review finding 6), and a shared test fixture (finding 9).

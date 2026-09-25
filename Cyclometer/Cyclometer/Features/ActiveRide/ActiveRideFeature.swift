@@ -567,7 +567,9 @@ struct ActiveRideFeature {
 
                         var gpxURL: URL?
                         do {
-                            gpxURL = try await GPXExporter.generate(rideId: rideId)
+                            var export = try await GPXExporter.fetchInputs(rideId: rideId)
+                            export.ride.title = await Self.titleForExport(rideId, export, persistenceClient: persistenceClient)
+                            gpxURL = try GPXExporter.generate(export)
                             // Recorded before the finalize below, so a file that was
                             // written successfully isn't orphaned on disk if only the
                             // row pointing at it fails to save.
@@ -1138,6 +1140,37 @@ struct ActiveRideFeature {
               date.now.timeIntervalSince(sample.receivedAt) >= Self.healthKitHRStalenessWindow
         else { return }
         state.healthKitHRSample = nil
+    }
+
+    /// The name the ride-end export carries. An untitled ride gets S10's default name first,
+    /// stored before the file is written, so the file carries it (#286). Before this, every
+    /// export went out unnamed, and S10 then renamed nearly every ride to its default on dismiss.
+    ///
+    /// Returns the stored title, so the file and the row always agree. If saving the default
+    /// fails, the ride stays untitled; S10 then names it on dismiss, and that rename rewrites the file.
+    ///
+    /// The calendar is resolved here, not on the reducer, so it is read only when a name is
+    /// actually made.
+    private static func titleForExport(
+        _ rideId: UUID,
+        _ inputs: GPXExporter.Inputs,
+        persistenceClient: PersistenceClient
+    ) async -> String {
+        guard inputs.ride.title.isEmpty else { return inputs.ride.title }
+        @Dependency(\.calendar) var calendar
+        let title = RideTitle.defaultTitle(
+            routeName: inputs.ride.routeName,
+            startedAt: inputs.ride.startedAt,
+            segments: RideMapThumbnail.drawableSegments(inputs.trackPoints),
+            calendar: calendar
+        )
+        do {
+            try await persistenceClient.renameRide(rideId, title)
+            return title
+        } catch {
+            logger.error("Naming ride \(rideId, privacy: .public) at ride end failed: \(error.localizedDescription, privacy: .public) — its GPX goes out unnamed")
+            return ""
+        }
     }
 }
 

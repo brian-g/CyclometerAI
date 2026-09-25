@@ -1,6 +1,10 @@
 import ComposableArchitecture
 import Foundation
 import SwiftData
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persistence")
 
 /// Root feature — owns tab selection and active ride lifecycle.
 /// Navigation follows Apple Music pattern: Rides / Routes / Settings tabs.
@@ -257,10 +261,19 @@ struct AppFeature {
                 return .run { [persistenceClient] send in
                     do {
                         try await persistenceClient.renameRide(id, title)
-                        // S14 read the ride before it had a name.
-                        await send(.rides(.reloadRides))
                     } catch {
                         // Logged in RidePersistenceActor. The ride keeps its old title.
+                        return
+                    }
+                    // S14 read the ride under its old name. Reloaded before the rewrite below,
+                    // which reads the whole track back, so the new name shows at once.
+                    await send(.rides(.reloadRides))
+                    // The GPX was written at ride end, under the old name (#286). A failed
+                    // rewrite leaves that file as it was; the rename stands either way.
+                    do {
+                        try await GPXExporter.rewrite(rideId: id)
+                    } catch {
+                        logger.error("Rewriting the GPX of renamed ride \(id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                     }
                 }
 

@@ -124,9 +124,9 @@ enum RideMapThumbnail {
     /// Renders both appearances from one ride's persisted track and stores them on the ride.
     /// Returns false, having stored nothing, for a ride with no drawable track.
     ///
-    /// Reads the track back from persistence, like `GPXExporter.generate`, so it has to run
+    /// Reads the track back from persistence, like `GPXExporter.fetchInputs`, so it has to run
     /// after the ride-end flush. Dependencies are resolved here rather than held in `static`
-    /// properties for the reason given on `GPXExporter.generate` (#242).
+    /// properties for the reason given on `GPXExporter.fetchInputs` (#242).
     @discardableResult
     static func capture(rideId: UUID) async throws -> Bool {
         @Dependency(\.persistenceClient) var persistenceClient

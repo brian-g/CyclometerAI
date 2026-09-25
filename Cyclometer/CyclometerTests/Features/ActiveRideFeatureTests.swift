@@ -656,6 +656,7 @@ struct ActiveRideFeatureLocationTests {
         ) {
             ActiveRideFeature()
         } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
             $0.continuousClock = TestClock()
             $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
