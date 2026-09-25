@@ -121,6 +121,13 @@ struct RideTitleTests {
                                        segments: [Self.outAndBack], calendar: Self.calendar) == "Fargo Evening Out and Back")
     }
 
+    @Test("a place leads an offline title as it stands", arguments: [
+        ("Fargo", "Fargo Morning Loop"), (nil, "Morning Loop"), ("", "Morning Loop"), (" ", "Morning Loop")
+    ] as [(String?, String)])
+    func placed(place: String?, expected: String) {
+        #expect(RideTitle.placed("Morning Loop", in: place) == expected)
+    }
+
     @Test("the route's name wins over a place name")
     func routeNameBeatsPlace() {
         #expect(RideTitle.defaultTitle(routeName: "SW Fargo", placeName: "Fargo", startedAt: Self.at(hour: 8),

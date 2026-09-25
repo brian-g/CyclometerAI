@@ -43,14 +43,21 @@ enum RideTitle {
         calendar: Calendar
     ) -> String {
         if let routeName, !routeName.isEmpty { return routeName }
-        let place = placeName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let when = partOfDay(startedAt, calendar: calendar)
-        let lead = place.isEmpty ? when : "\(place) \(when)"
-        switch shape(segments.flatMap { $0 }) {
-        case .loop:       return "\(lead) Loop"
-        case .outAndBack: return "\(lead) Out and Back"
-        case .oneWay:     return "\(lead) Ride"
+        let partOfDay = partOfDay(startedAt, calendar: calendar)
+        let title = switch shape(segments.flatMap { $0 }) {
+        case .loop:       "\(partOfDay) Loop"
+        case .outAndBack: "\(partOfDay) Out and Back"
+        case .oneWay:     "\(partOfDay) Ride"
         }
+        return placed(title, in: placeName)
+    }
+
+    /// An offline title led by the place the ride started in: "Morning Loop" in Fargo is
+    /// "Fargo Morning Loop". A nil or blank place leaves it as it is. Lets a caller holding
+    /// the offline title add the place without judging the ride's shape again.
+    static func placed(_ title: String, in placeName: String?) -> String {
+        let place = placeName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return place.isEmpty ? title : "\(place) \(title)"
     }
 
     static func partOfDay(_ date: Date, calendar: Calendar) -> String {

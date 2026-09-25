@@ -53,6 +53,9 @@ struct RideSummaryFeature {
         var persistedTitle = ""
         /// The name the ride gets when the rider doesn't give one. Nil until loaded.
         var defaultTitle: String?
+        /// Whether the rider has focused or typed in the name field. Once they have, a late place
+        /// name (#283) never replaces what the field shows, even when it still reads as the default.
+        var isTitleTouched = false
 
         var summary: RideListSummary?
         /// Nil until loaded, and nil for good if the read fails.
@@ -108,6 +111,7 @@ struct RideSummaryFeature {
         /// The default name with the start's place name in it, once the geocoder has answered.
         case placedTitleResolved(String)
         case titleChanged(String)
+        case titleFocused
         case finishTapped
     }
 
@@ -140,6 +144,12 @@ struct RideSummaryFeature {
                         let rideStats = await stats
                         let segments = RideMapThumbnail.drawableSegments(track)
                         let routeName = rideStats?.routeName
+                        let defaultTitle = RideTitle.defaultTitle(
+                            routeName: routeName,
+                            startedAt: summary.startedAt,
+                            segments: segments,
+                            calendar: calendar
+                        )
                         await send(.loaded(Loaded(
                             summary: summary,
                             stats: rideStats,
@@ -148,27 +158,15 @@ struct RideSummaryFeature {
                                 track, sampleCount: RideDetailFeature.chartSampleCount
                             ),
                             heartRateSecondsByBPM: RideDetailSeries.secondsByBPM(track),
-                            defaultTitle: RideTitle.defaultTitle(
-                                routeName: routeName,
-                                startedAt: summary.startedAt,
-                                segments: segments,
-                                calendar: calendar
-                            )
+                            defaultTitle: defaultTitle
                         )))
                         // Only after the screen has its numbers, so it never waits on the network.
-                        // A route ride is named for its route, so nothing is sent for it; nor is
-                        // anything sent when the rider has turned place names off in S12.
-                        guard isPlaceNameLookupEnabled, routeName?.isEmpty ?? true,
+                        guard isPlaceNameLookupEnabled,
+                              Self.isKnownFreeRide(stats: rideStats, storedTitle: summary.title, defaultTitle: defaultTitle),
                               let start = segments.first?.first,
                               let place = try? await geocodingClient.locality(start)
                         else { return }
-                        await send(.placedTitleResolved(RideTitle.defaultTitle(
-                            routeName: nil,
-                            placeName: place,
-                            startedAt: summary.startedAt,
-                            segments: segments,
-                            calendar: calendar
-                        )))
+                        await send(.placedTitleResolved(RideTitle.placed(defaultTitle, in: place)))
                     },
                     // `RideDetailFeature`'s read, so the zones match S12's table.
                     .run { [healthKitClient, date] send in
@@ -205,9 +203,9 @@ struct RideSummaryFeature {
                 return .none
 
             case .placedTitleResolved(let placedTitle):
-                // A field still showing the offline default is untouched; anything else is the
-                // rider's. The default moves either way, so a field cleared later saves this one.
-                if state.title == state.defaultTitle {
+                // The field is the rider's once they have touched it. The default moves either
+                // way, so a field cleared later saves this one.
+                if !state.isTitleTouched {
                     state.title = placedTitle
                 }
                 state.defaultTitle = placedTitle
@@ -215,12 +213,26 @@ struct RideSummaryFeature {
 
             case .titleChanged(let title):
                 state.title = title
+                state.isTitleTouched = true
+                return .none
+
+            case .titleFocused:
+                state.isTitleTouched = true
                 return .none
 
             case .finishTapped:
                 return .run { [dismiss] _ in await dismiss() }
             }
         }
+    }
+
+    /// Whether the start may go to the geocoder (PRD §12): only for a ride known not to be on a
+    /// route, and still named by default. Stats that failed to load can't rule out a route, so they
+    /// rule the lookup out — the route's name is in `storedTitle` then, but a failed ride-end rename
+    /// would leave it empty too.
+    static func isKnownFreeRide(stats: RideStats?, storedTitle: String, defaultTitle: String) -> Bool {
+        guard let stats, stats.routeName?.isEmpty ?? true else { return false }
+        return storedTitle.isEmpty || storedTitle == defaultTitle
     }
 
     /// Nil on failure, leaving the stats rows as dashes — logged, as S15 does.
