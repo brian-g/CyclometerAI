@@ -23,6 +23,9 @@ import Foundation
 /// boundaries follow a Health value the moment it changes, with no local copy to
 /// re-sync. M5 supplies the middle term; until then it is always absent.
 ///
+/// Zone boundaries resolve the same way, with Health's preferred zones (#238) as the
+/// middle term ahead of Karvonen: `boundaryOverride ?? health ?? karvonen`.
+///
 /// Stored as a JSON document rather than a SwiftData `@Model` for the reason §3.6
 /// records for `AppPreferences`: exactly one record exists, so there is nothing to
 /// `@Query`, and a `@Model` would put an async load in front of the Settings screen.
@@ -170,12 +173,17 @@ extension RiderProfile {
     /// boundary is `resting + ⌈p × HRR⌉ − 1`, and for a whole bpm, being at or below
     /// it is the same as being under `p` of the reserve. Readings below resting fall
     /// in zone 1 and above max in zone 5, as before.
-    func zone(forBPM bpm: Int, healthResting: Int? = nil, healthMax: Int? = nil) -> HeartRateZone {
+    func zone(
+        forBPM bpm: Int,
+        healthResting: Int? = nil,
+        healthMax: Int? = nil,
+        healthZoneCeilings: [Int]? = nil
+    ) -> HeartRateZone {
         // §8's guard: with no reserve there are no zones to tell apart.
         guard hrReserve(healthResting: healthResting, healthMax: healthMax) > 0 else { return .zone1 }
         return HeartRateZone.allCases.first { zone in
             guard let ceiling = resolvedBoundaryBPM(afterZone: zone, healthResting: healthResting,
-                                                    healthMax: healthMax)
+                                                    healthMax: healthMax, healthZoneCeilings: healthZoneCeilings)
             else { return true }
             return bpm <= ceiling
         } ?? .zone5
@@ -207,14 +215,15 @@ extension RiderProfile {
     }
 
     /// The resolved bpm of the boundary between `zone` and the next one —
-    /// `override ?? karvonenDefault`, the same precedence as resting/max, so a
-    /// boundary the rider has never touched keeps tracking a Health-driven resting
-    /// or max HR the instant either changes. `nil` for `.zone5`, which has no
-    /// boundary after it inside the table.
+    /// `override ?? health ?? karvonenDefault`, the same precedence as resting/max, so a
+    /// boundary the rider has never touched keeps tracking Health's zones, or a
+    /// Health-driven resting or max HR, the instant either changes. `nil` for `.zone5`,
+    /// which has no boundary after it inside the table.
     func resolvedBoundaryBPM(
         afterZone zone: HeartRateZone,
         healthResting: Int? = nil,
-        healthMax: Int? = nil
+        healthMax: Int? = nil,
+        healthZoneCeilings: [Int]? = nil
     ) -> Int? {
         guard let next = HeartRateZone(rawValue: zone.rawValue + 1) else { return nil }
         let karvonenDefault = HeartRateZone.lowerBoundBPM(
@@ -222,24 +231,78 @@ extension RiderProfile {
             maxHR: resolvedMaxBPM(healthMax: healthMax),
             restingHR: resolvedRestingBPM(healthResting: healthResting)
         ) - 1
-        return boundaryOverride(afterZone: zone) ?? karvonenDefault
+        let health = usableHealthZoneCeilings(healthZoneCeilings, healthResting: healthResting, healthMax: healthMax)
+        return boundaryOverride(afterZone: zone) ?? health?[zone.rawValue - 1] ?? karvonenDefault
     }
 
-    /// The bpm range `zone` displays in the S12 HR Zones table — Karvonen by
-    /// default, clamped around any boundary the rider has manually stepped.
+    /// Health's preferred zones (#238), when they can stand in for Karvonen's. Not with a
+    /// resting or max override: either says the rider disagrees with Health, so zones built
+    /// from their own numbers apply. And only in a shape the table can hold — four ceilings,
+    /// each strictly above resting and the one before, so every zone keeps at least 1 bpm as
+    /// #103 requires. Anything else falls back to Karvonen whole rather than mixing the two.
+    ///
+    /// Not bounded by max: that is the app's 220 − age estimate or a default, and zones the
+    /// rider set in Health are better evidence of their real max than either. `tableMaxBPM`
+    /// rises to meet them instead.
+    private func usableHealthZoneCeilings(_ ceilings: [Int]?, healthResting: Int?, healthMax: Int?) -> [Int]? {
+        guard let ceilings, restingOverrideBPM == nil, maxOverrideBPM == nil,
+              ceilings.count == HeartRateZone.allCases.count - 1
+        else { return nil }
+        let edges = [resolvedRestingBPM(healthResting: healthResting)] + ceilings
+        guard zip(edges, edges.dropFirst()).allSatisfy({ $0 < $1 }) else { return nil }
+        return ceilings
+    }
+
+    /// The top of the zone table: the resolved max, raised to at least zone 5's first bpm
+    /// while Health's zones are in effect, so zone 5 is never empty and zone 4's boundary can
+    /// still be stepped down from where Health put it.
+    private func tableMaxBPM(healthResting: Int?, healthMax: Int?, healthZoneCeilings: [Int]?) -> Int {
+        let max = resolvedMaxBPM(healthMax: healthMax)
+        guard let zone4Ceiling = usableHealthZoneCeilings(healthZoneCeilings, healthResting: healthResting,
+                                                          healthMax: healthMax)?.last
+        else { return max }
+        return Swift.max(max, zone4Ceiling + 1)
+    }
+
+    /// Whether the rider has disagreed with Health anywhere in S12 — a resting, max or zone
+    /// boundary override. Only then does the ride's workout carry the app's zones (#238):
+    /// without one, the app's zones are Health's or a fallback for their absence, and the
+    /// workout keeps whatever Health prefers.
+    var hasZoneOverride: Bool {
+        restingOverrideBPM != nil || maxOverrideBPM != nil
+            || HeartRateZone.allCases.contains { boundaryOverride(afterZone: $0) != nil }
+    }
+
+    /// The resolved ceilings of zones 1–4, in order — what the ride's workout carries (#238).
+    func resolvedZoneCeilings(healthResting: Int? = nil, healthMax: Int? = nil, healthZoneCeilings: [Int]? = nil) -> [Int] {
+        HeartRateZone.allCases.compactMap {
+            resolvedBoundaryBPM(afterZone: $0, healthResting: healthResting, healthMax: healthMax,
+                                healthZoneCeilings: healthZoneCeilings)
+        }
+    }
+
+    /// The bpm range `zone` displays in the S12 HR Zones table — Health's zones, else
+    /// Karvonen, clamped around any boundary the rider has manually stepped.
     ///
     /// Distinct from `HeartRateZone.bounds(for:maxHR:restingHR:)`, which has no
     /// concept of an override and keeps serving any other live-zone display in the
     /// app exactly as before.
-    func bounds(for zone: HeartRateZone, healthResting: Int? = nil, healthMax: Int? = nil) -> ClosedRange<Int> {
+    func bounds(
+        for zone: HeartRateZone,
+        healthResting: Int? = nil,
+        healthMax: Int? = nil,
+        healthZoneCeilings: [Int]? = nil
+    ) -> ClosedRange<Int> {
         let lower: Int
         if let previous = HeartRateZone(rawValue: zone.rawValue - 1) {
-            lower = resolvedBoundaryBPM(afterZone: previous, healthResting: healthResting, healthMax: healthMax)! + 1
+            lower = resolvedBoundaryBPM(afterZone: previous, healthResting: healthResting, healthMax: healthMax,
+                                        healthZoneCeilings: healthZoneCeilings)! + 1
         } else {
             lower = resolvedRestingBPM(healthResting: healthResting)
         }
-        let upper = resolvedBoundaryBPM(afterZone: zone, healthResting: healthResting, healthMax: healthMax)
-            ?? resolvedMaxBPM(healthMax: healthMax)
+        let upper = resolvedBoundaryBPM(afterZone: zone, healthResting: healthResting, healthMax: healthMax,
+                                        healthZoneCeilings: healthZoneCeilings)
+            ?? tableMaxBPM(healthResting: healthResting, healthMax: healthMax, healthZoneCeilings: healthZoneCeilings)
         // `max` only bites when a boundary pinned before a resting/max change no
         // longer clears its neighbour — `settingRestingOverride`/`settingMaxOverride`
         // don't know about these overrides, so nothing rejects that combination
@@ -258,7 +321,8 @@ extension RiderProfile {
         _ bpm: Int?,
         afterZone zone: HeartRateZone,
         healthResting: Int? = nil,
-        healthMax: Int? = nil
+        healthMax: Int? = nil,
+        healthZoneCeilings: [Int]? = nil
     ) throws(ValidationError) -> RiderProfile {
         var copy = self
         guard let bpm else {
@@ -272,16 +336,19 @@ extension RiderProfile {
         guard zone != .zone5 else { throw .boundaryOutOfOrder }
         let lowerNeighbor: Int
         if let previous = HeartRateZone(rawValue: zone.rawValue - 1) {
-            lowerNeighbor = resolvedBoundaryBPM(afterZone: previous, healthResting: healthResting, healthMax: healthMax)!
+            lowerNeighbor = resolvedBoundaryBPM(afterZone: previous, healthResting: healthResting, healthMax: healthMax,
+                                                healthZoneCeilings: healthZoneCeilings)!
         } else {
             lowerNeighbor = resolvedRestingBPM(healthResting: healthResting)
         }
         let upperNeighbor: Int
         if zone == .zone4 {
-            upperNeighbor = resolvedMaxBPM(healthMax: healthMax)
+            upperNeighbor = tableMaxBPM(healthResting: healthResting, healthMax: healthMax,
+                                        healthZoneCeilings: healthZoneCeilings)
         } else {
             let next = HeartRateZone(rawValue: zone.rawValue + 1)!
-            upperNeighbor = resolvedBoundaryBPM(afterZone: next, healthResting: healthResting, healthMax: healthMax)!
+            upperNeighbor = resolvedBoundaryBPM(afterZone: next, healthResting: healthResting, healthMax: healthMax,
+                                                healthZoneCeilings: healthZoneCeilings)!
         }
         guard bpm > lowerNeighbor, bpm < upperNeighbor else { throw .boundaryOutOfOrder }
         copy.setBoundaryOverride(bpm, afterZone: zone)
@@ -289,8 +356,8 @@ extension RiderProfile {
     }
 
     /// Clears all 4 boundary overrides — the S12 "Reset HR Zones to Defaults" row.
-    /// Leaves `restingOverrideBPM`/`maxOverrideBPM` untouched; those are a separate
-    /// concern with no S12 entry point yet.
+    /// Leaves `restingOverrideBPM`/`maxOverrideBPM` untouched; S12 edits those in
+    /// their own fields (#162).
     func resettingZoneBoundaries() -> RiderProfile {
         var copy = self
         for zone in [HeartRateZone.zone1, .zone2, .zone3, .zone4] {

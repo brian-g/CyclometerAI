@@ -105,9 +105,31 @@ enum RideHealthWorkout {
             endedAt: ride.endedAt,
             distanceMeters: ride.distanceMeters,
             trackPoints: trackPoints,
-            activeEnergyKilocalories: energy?.kilocalories
+            activeEnergyKilocalories: energy?.kilocalories,
+            heartRateZoneStartsBPM: await zoneStarts(for: ride, dateOfBirth: await dateOfBirth)
         ))
         try await settle(ride.rideId)
+    }
+
+    /// Where zones 2–5 start, for the workout to carry (#238) — only when the rider overrode
+    /// Health in S12. Otherwise nil, and the workout keeps Health's preferred zones: stamping
+    /// Karvonen because a Health read failed would put the app's guess over zones the rider
+    /// set in Health.
+    ///
+    /// Resolved when the workout is written, as S10 and S15 resolve them when they show the
+    /// ride, rather than stored with it: the override lives in the rider's profile, and a
+    /// retry at the next launch has no ride state to read them from (#277).
+    private static func zoneStarts(for ride: OwedHealthWorkout, dateOfBirth: DateComponents?) async -> [Int]? {
+        @SharedReader(.riderProfile) var riderProfile
+        @Dependency(\.healthKitClient) var healthKitClient
+        guard riderProfile.hasZoneOverride else { return nil }
+        async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
+        async let zoneCeilings = try? healthKitClient.fetchHeartRateZoneCeilings()
+        return riderProfile.resolvedZoneCeilings(
+            healthResting: await restingBPM,
+            healthMax: RiderProfile.estimatedMaxBPM(fromDateOfBirth: dateOfBirth, on: ride.startedAt),
+            healthZoneCeilings: await zoneCeilings
+        ).map { $0 + 1 }
     }
 
     /// A ride deleted since the owed list was read has nothing left to owe, so its missing row

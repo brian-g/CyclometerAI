@@ -54,6 +54,10 @@ struct HealthKitClient {
     /// The rider's latest weight in kilograms, for the ride's energy estimate (#276). `nil`
     /// when Health has none or read access is denied, and then no energy is written.
     var fetchBodyMass:         @Sendable () async throws -> Double?
+    /// The rider's preferred heart-rate zones in Health (#238) — ones they set, or Apple's
+    /// own from their health data — as the inclusive top bpm of zones 1–4. `nil` when Health
+    /// has none, or none in the five-zone shape the app's zones take.
+    var fetchHeartRateZoneCeilings: @Sendable () async throws -> [Int]?
     var heartRateStream:       @Sendable () -> AsyncStream<Int>     // live BPM from Watch / HR strap
     /// UX.md §S10 — the finished ride as an outdoor cycling `HKWorkout`. Skipped, not
     /// thrown, when another source already recorded a cycling workout over the same
@@ -79,6 +83,7 @@ extension HealthKitClient: DependencyKey {
             fetchDateOfBirth:      { fetchDateOfBirth(store) },
             fetchBiologicalSex:    { fetchBiologicalSex(store) },
             fetchBodyMass:         { try await fetchBodyMass(store) },
+            fetchHeartRateZoneCeilings: { try await fetchHeartRateZoneCeilings(store) },
             heartRateStream:       { makeHeartRateStream(store) },
             saveWorkout:           { try await saveWorkout($0, store) },
             isWorkoutSharingAllowed: { store.authorizationStatus(for: PermissionsClient.workoutType) == .sharingAuthorized }
@@ -95,6 +100,7 @@ extension HealthKitClient: DependencyKey {
         fetchDateOfBirth:      { nil },
         fetchBiologicalSex:    { nil },
         fetchBodyMass:         { nil },
+        fetchHeartRateZoneCeilings: { nil },
         heartRateStream:       { AsyncStream { $0.finish() } },
         saveWorkout:           { _ in },
         // Matches `saveWorkout`'s no-op succeeding.
@@ -165,6 +171,44 @@ extension HealthKitClient {
             return nil
         }
         return sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
+    }
+
+    /// No read type to authorize: there is no zone `HKObjectType`, and a rider with no zones
+    /// in Health gets `nil`, the same as one Health can't say anything about.
+    private static func fetchHeartRateZoneCeilings(_ store: HKHealthStore) async throws -> [Int]? {
+        let preferred: HKWorkoutZoneConfiguration?
+        do {
+            preferred = try await store.preferredWorkoutZoneConfiguration(for: PermissionsClient.heartRateType)
+        } catch {
+            // Logged here because every caller's `try?` can't be: from the dashboard, a failed
+            // read looks exactly like a rider with no zones in Health.
+            logger.error("Health heart rate zones read failed; zones fall back to Karvonen: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+        guard let configuration = preferred else {
+            logger.notice("no heart rate zones in Health; zones fall back to Karvonen")
+            return nil
+        }
+        let ceilings = zoneCeilings(from: configuration)
+        logger.notice(
+            "Health heart rate zones (\(String(describing: configuration.source), privacy: .public), \(configuration.zones.count) zones): ceilings \(ceilings.map { "\($0)" } ?? "unusable, so Karvonen", privacy: .private)"
+        )
+        return ceilings
+    }
+
+    /// Each zone runs `[minimum, maximum)` and starts where the one below it ends, so zone
+    /// *n*'s inclusive top whole bpm is one below where zone *n + 1* starts, rounded up — the
+    /// same `lowerBound(next) − 1` Karvonen's ceilings are. `nil` for any shape other than
+    /// five zones: every zone the app draws, from the dashboard tint to the S10 pie, has five.
+    static func zoneCeilings(from configuration: HKWorkoutZoneConfiguration) -> [Int]? {
+        let zones = configuration.zones.sorted { $0.index < $1.index }
+        guard zones.count == HeartRateZone.allCases.count else { return nil }
+        var ceilings: [Int] = []
+        for zone in zones.dropFirst() {
+            guard let start = zone.minimum?.doubleValue(for: bpmUnit) else { return nil }
+            ceilings.append(Int(start.rounded(.up)) - 1)
+        }
+        return ceilings
     }
 
     /// `dateOfBirthComponents()` throws both when the rider has never set a birthdate
@@ -292,6 +336,9 @@ extension HealthKitClient {
                     metadata: syncMetadata("\(workout.rideId.uuidString)-energy")
                 )])
             }
+            if let starts = workout.heartRateZoneStartsBPM {
+                await stampZones(starts, on: started, rideId: workout.rideId)
+            }
             try await started.addMetadata(syncMetadata(workout.rideId.uuidString))
             try await started.endCollection(at: workout.endedAt)
             if let saved = try await started.finishWorkout() {
@@ -304,6 +351,30 @@ extension HealthKitClient {
                 "workout write failed for ride \(workout.rideId, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
             throw error
+        }
+    }
+
+    /// The rider's zones on the workout, so Fitness breaks the ride down by the zones the app
+    /// showed (#238). Never allowed to cost the workout, like the route: a failure is logged and
+    /// the workout keeps Health's preferred zones.
+    private static func stampZones(_ starts: [Int], on builder: HKWorkoutBuilder, rideId: UUID) async {
+        // `HKWorkoutZoneConfiguration` raises an Objective-C exception, which Swift can't catch,
+        // on boundaries that don't rise. A boundary pinned in S12 before Health's zones moved
+        // can leave the resolved ones out of order.
+        guard zip(starts, starts.dropFirst()).allSatisfy({ $0 < $1 }) else {
+            logger.error("zones for ride \(rideId, privacy: .public) not stamped — boundaries \(starts, privacy: .private) don't rise")
+            return
+        }
+        do {
+            let configuration = try HKWorkoutZoneConfiguration(
+                quantityType: PermissionsClient.heartRateType,
+                zoneBoundaries: starts.map { HKQuantity(unit: bpmUnit, doubleValue: Double($0)) }
+            )
+            try await builder.setCustomZoneConfiguration(configuration, for: PermissionsClient.heartRateType)
+        } catch {
+            logger.error(
+                "zones for ride \(rideId, privacy: .public) not stamped, workout kept with Health's: \(error.localizedDescription, privacy: .public)"
+            )
         }
     }
 

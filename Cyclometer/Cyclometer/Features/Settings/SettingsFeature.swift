@@ -50,6 +50,8 @@ struct SettingsFeature {
         /// into `hrZoneRows` and the boundary stepper instead of the defaulted `nil`.
         var healthRestingBPM: Int? = nil
         var healthMaxBPM: Int? = nil
+        /// Health's preferred zones as ceilings (#238), the middle term of every zone boundary.
+        var healthZoneCeilingsBPM: [Int]? = nil
 
         /// Read through to storage rather than mirrored in feature state: both have
         /// to survive a relaunch, and `preferredUnit` also has to agree with whatever
@@ -71,7 +73,8 @@ struct SettingsFeature {
                 HRZoneRow(
                     zone: zone,
                     displayName: zone.s12DisplayName,
-                    range: riderProfile.bounds(for: zone, healthResting: healthRestingBPM, healthMax: healthMaxBPM),
+                    range: riderProfile.bounds(for: zone, healthResting: healthRestingBPM, healthMax: healthMaxBPM,
+                                               healthZoneCeilings: healthZoneCeilingsBPM),
                     isSteppable: zone != .zone5
                 )
             }
@@ -147,7 +150,7 @@ struct SettingsFeature {
     }
     enum Action: Equatable {
         case task
-        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?)
+        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?, zoneCeilingsBPM: [Int]?)
         case unitSelected(UnitSystem)
         case wheelSelectionChanged(WheelSelection)
         case customCircumferenceChanged(String)
@@ -174,12 +177,14 @@ struct SettingsFeature {
                 return .run { [healthKitClient, date] send in
                     async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
                     async let dob = try? healthKitClient.fetchDateOfBirth()
+                    async let zoneCeilings = try? healthKitClient.fetchHeartRateZoneCeilings()
                     let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
-                    await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM))
+                    await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM, zoneCeilingsBPM: await zoneCeilings))
                 }
-            case .healthProfileFetched(let restingBPM, let maxBPM):
+            case .healthProfileFetched(let restingBPM, let maxBPM, let zoneCeilingsBPM):
                 state.healthRestingBPM = restingBPM
                 state.healthMaxBPM = maxBPM
+                state.healthZoneCeilingsBPM = zoneCeilingsBPM
                 return .none
             case .unitSelected(let unit):
                 state.$preferences.withLock { $0.preferredUnit = unit }
@@ -224,12 +229,14 @@ struct SettingsFeature {
                 guard let current = state.riderProfile.resolvedBoundaryBPM(
                     afterZone: zone,
                     healthResting: state.healthRestingBPM,
-                    healthMax: state.healthMaxBPM
+                    healthMax: state.healthMaxBPM,
+                    healthZoneCeilings: state.healthZoneCeilingsBPM
                 ), let updated = try? state.riderProfile.settingBoundaryOverride(
                     current + delta,
                     afterZone: zone,
                     healthResting: state.healthRestingBPM,
-                    healthMax: state.healthMaxBPM
+                    healthMax: state.healthMaxBPM,
+                    healthZoneCeilings: state.healthZoneCeilingsBPM
                 )
                 else { return .none }
                 state.$riderProfile.withLock { $0 = updated }

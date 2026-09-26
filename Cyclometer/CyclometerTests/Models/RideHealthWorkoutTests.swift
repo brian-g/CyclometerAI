@@ -96,6 +96,38 @@ struct RideHealthWorkoutTests {
         #expect(workout.activeEnergyKilocalories == expected.kilocalories)
     }
 
+    /// #238's zones resolve when the workout is written, from the rider's profile and Health,
+    /// so a retry long after the ride's state is gone still carries them.
+    @Test("with an S12 override the workout carries the resolved zones, and without one it carries none")
+    func zonesResolveAtWriteTime() async throws {
+        for (profile, expected) in [
+            (RiderProfile(zone1CeilingOverrideBPM: 130), [131, 141, 161, 176] as [Int]?),
+            (RiderProfile(), nil),
+        ] {
+            let ride = Self.owed()
+            let written = LockIsolated<[RideWorkout]>([])
+            let storage = FileStorage.inMemory
+            await withDependencies {
+                $0.defaultFileStorage = storage
+            } operation: {
+                @Shared(.riderProfile) var stored
+                $stored.withLock { $0 = profile }
+                await withDependencies {
+                    $0.persistenceClient = Self.persistence(LockIsolated([ride]))
+                    $0.healthKitClient = .mock(
+                        heartRateZoneCeilings: [120, 140, 160, 175],
+                        onSaveWorkout: { workout in written.withValue { $0.append(workout) } }
+                    )
+                } operation: {
+                    await RideHealthWorkout.backfill()
+                }
+            }
+            let workout = try #require(written.value.first)
+            // The pinned 130, then Health's 140/160/175, each zone starting a bpm above the one below.
+            #expect(workout.heartRateZoneStartsBPM == expected)
+        }
+    }
+
     @Test("backfill stops at the first failed write, leaving that ride and the rest owed")
     func backfillStopsAtFirstFailure() async {
         let first = Self.owed(), second = Self.owed()

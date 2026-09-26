@@ -146,6 +146,8 @@ struct ActiveRideFeature {
         /// every `riderProfile` resolver call below instead of the defaulted `nil`.
         var healthRestingBPM: Int? = nil
         var healthMaxBPM: Int? = nil
+        /// Health's preferred zones as ceilings (#238), the middle term of every zone boundary.
+        var healthZoneCeilingsBPM: [Int]? = nil
         /// Live HR shadow value from HealthKit (#161), kept fresh even while BLE is
         /// the displayed source — mirrors `SpeedFeature.State.latestGPSSpeedMPS` — so a
         /// BLE disconnect has something to promote to immediately. `nil` both when
@@ -340,7 +342,7 @@ struct ActiveRideFeature {
         case autoPauseTriggered
         case heartRateUpdated(Int)
         case hrPairingChanged(Bool)
-        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?)
+        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?, zoneCeilingsBPM: [Int]?)
         case healthKitHeartRateUpdated(Int)
         case cadence(CadenceFeature.Action)
         case elapsedTick
@@ -449,8 +451,9 @@ struct ActiveRideFeature {
                     .run { [healthKitClient, date] send in
                         async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
                         async let dob = try? healthKitClient.fetchDateOfBirth()
+                        async let zoneCeilings = try? healthKitClient.fetchHeartRateZoneCeilings()
                         let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
-                        await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM))
+                        await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM, zoneCeilingsBPM: await zoneCeilings))
                     },
                     .run { [healthKitClient] send in
                         for await bpm in healthKitClient.heartRateStream() {
@@ -671,9 +674,10 @@ struct ActiveRideFeature {
                     state.heartRateProvenance = .none
                 }
                 return .none
-            case .healthProfileFetched(let restingBPM, let maxBPM):
+            case .healthProfileFetched(let restingBPM, let maxBPM, let zoneCeilingsBPM):
                 state.healthRestingBPM = restingBPM
                 state.healthMaxBPM = maxBPM
+                state.healthZoneCeilingsBPM = zoneCeilingsBPM
                 return .none
             case .healthKitHeartRateUpdated(let bpm):
                 // A HealthKit sample can never legitimately be ≤0 bpm; guarding at
@@ -975,7 +979,8 @@ struct ActiveRideFeature {
             ? state.riderProfile.zone(
                 forBPM: bpm,
                 healthResting: state.healthRestingBPM,
-                healthMax: state.healthMaxBPM
+                healthMax: state.healthMaxBPM,
+                healthZoneCeilings: state.healthZoneCeilingsBPM
               ).rawValue
             : 0
         if bpm > 0 {

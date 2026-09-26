@@ -582,3 +582,16 @@ Brian: "stop using worktrees by default."
 **Rules.**
 - Work on a feature branch in the main checkout. Create a worktree only when asked.
 - Before switching branches, check `git status`. If there are unexplained changes, ask instead of switching.
+
+
+## Don't write a fallback into a framework as if the user chose it (2026-09-26, #238 review)
+
+**What happened.** I stamped the app's zones on the HealthKit workout "whenever they differ from Health's". When the
+Health read failed, was denied, or hadn't landed yet, the app's zones were only a Karvonen guess, and that guess went
+into Fitness over zones the rider had set in Health. The same review found I'd capped Health's zones at the app's
+220 − age max. I'd seen that risk during planning and called it rare. It hits exactly the riders who set their own zones.
+
+**Rule.** Write to a framework the user also controls only when the user has said something (here, an S12
+override). A fallback's job is to fill our own UI, not to overwrite theirs. And don't validate framework data against
+our own estimate of the same quantity: when the framework's data and our estimate disagree, the estimate is the one to adjust.
+
