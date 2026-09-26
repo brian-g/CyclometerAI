@@ -11,7 +11,7 @@ Branch: `feat/238-healthkit-zones`
 - [x] 5. Tests (RiderProfile, HealthKitClient, 4 features, RideEndFailure) + mutation check
 - [ ] 6. Docs: PRD §8.5/§9.4 + 0.6.5, UX §S12, DataModel §3.5
 - [x] 6. Docs: PRD §8.5/§9.4/OQ9 + 0.6.6 (0.6.5 was taken by #276), UX §S10/§S12, DataModel §3.5
-- [ ] 7. Housekeeping: new issues (live session, HeroNumber digits), #238 comment, close #167, PR
+- [x] 7. Housekeeping: filed #318 (live session, M9) and #319 (HeroNumber digits, M10.5); closed #167 as superseded; PR #320. No #238 comment (declined)
 
 ## Review
 
