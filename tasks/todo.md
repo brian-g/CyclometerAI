@@ -1,3 +1,32 @@
+# #277 — Retry the ride's HKWorkout write until it lands
+
+Plan: /Users/brian/.claude/plans/buzzing-doodling-piglet.md
+Branch: `feat/277-retry-hkworkout`
+
+- [x] 0. Spike: a same-version re-save (sim, iOS 27) returns and *replaces* — new workout UUID, count 1, one distance sample. Keep version 1
+- [x] 1. `Ride.isHealthWorkoutOwed` (default false → legacy rides done)
+- [x] 2. Persistence: finalize sets owed; owed list; settle; `OwedHealthWorkout`; client + mock
+- [x] 3. `RideHealthWorkout.backfill()` (energy block moved from ActiveRideFeature)
+- [x] 4. `BackfillGate` + `healthWorkoutGate`
+- [x] 5. Finish path calls the backfill
+- [x] 6. AppFeature launch + close-outs run it
+- [x] 7. UX.md §S10
+- [x] 8. Tests: migration, persistence, backfill, RideEndFailure relaunch/close-out, AppFeature orphan
+- [x] 9. Verify: full `CyclometerTests`, sim ride → one workout
+
+## Review
+
+- The workout write moved out of the Finish effect into `RideHealthWorkout.backfill()`, the only writer, modelled on `RideMapThumbnail.backfill()`. It runs after Finish's finalize, at launch and after both AppFeature close-outs. It goes newest first and stops at the first failure.
+- `Ride.isHealthWorkoutOwed` (default false) is set by `finalizeRide` and cleared when a write returns, including a skipped duplicate. Rides that ended before this change are not owed (decision: mark as done).
+- A ride that ends before it starts is settled without a write, so it can't block the queue forever.
+- `MapThumbnailGate` became `BackfillGate`, with a second `healthWorkoutGate` key so workouts never wait behind map tiles.
+- Spike (sim, iOS 27): re-saving at the same sync version *replaces* the workout (new UUID, count 1). Apple only documents replacement for a higher version.
+- Full `CyclometerTests`: ** TEST SUCCEEDED **, 1617 cases. All 17 new or extended tests confirmed by name in the log.
+- Sim drive: an earlier ride opened as not owed with its one workout intact. A new ride's workout was written once and settled, and relaunches left it (same UUID).
+- Harness finding: a pending launch Health sheet (types #276 added) silently blocks the Start sheet in a drive. Grant it first.
+- Not handled: the #175 orphan close-out's `endedAt = now` gives that rare ride a workout spanning up to the relaunch.
+
+
 # #276 follow-up — heart-rate energy model (Keytel), physics as the fallback
 
 Plan: /Users/brian/.claude/plans/twinkling-brewing-volcano.md

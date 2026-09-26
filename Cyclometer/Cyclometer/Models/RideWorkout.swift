@@ -16,3 +16,14 @@ struct RideWorkout: Sendable, Equatable {
     /// Move credit (#276). Nil when Health has no body mass: no energy rather than a guessed weight.
     var activeEnergyKilocalories: Double?
 }
+
+/// A finished ride still owed its Apple Health workout (#277): everything `RideWorkout` is
+/// built from apart from the track, which is read separately.
+struct OwedHealthWorkout: Sendable, Equatable {
+    var rideId: UUID
+    var startedAt: Date
+    var endedAt: Date
+    var distanceMeters: Double
+    /// `Ride.durationSeconds`, which excludes paused time — the energy estimate's moving time.
+    var movingSeconds: TimeInterval
+}

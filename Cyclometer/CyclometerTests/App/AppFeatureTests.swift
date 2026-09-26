@@ -364,8 +364,8 @@ struct AppFeatureTests {
 
     /// #175 review's orphan: a resumable ride found after the rider already started a new
     /// one is closed out rather than resumed. It never reached a Finish, so it gets its
-    /// thumbnail here.
-    @Test("an orphaned ride closed out at launch gets its map thumbnail")
+    /// thumbnail and its Apple Health workout (#277) here.
+    @Test("an orphaned ride closed out at launch gets its map thumbnail and its Apple Health workout")
     func orphanedRideCloseOutCapturesThumbnail() async {
         let orphan = RideSummaryUpdate(
             rideId: UUID(), recordingState: .active,
@@ -381,6 +381,7 @@ struct AppFeatureTests {
         }
         let finalized = LockIsolated<[UUID]>([])
         let saved = LockIsolated<[UUID]>([])
+        let workouts = LockIsolated<[UUID]>([])
         let store = TestStore(
             initialState: AppFeature.State(activeRide: ActiveRideFeature.State(recordingState: .active))
         ) {
@@ -390,9 +391,17 @@ struct AppFeatureTests {
             $0.persistenceClient = .mock(
                 trackPoints: [orphan.rideId: track],
                 rideIdsMissingMapThumbnail: [orphan.rideId],
+                ridesOwedHealthWorkout: [OwedHealthWorkout(
+                    rideId: orphan.rideId,
+                    startedAt: Date(timeIntervalSince1970: 1_000_000 - 600),
+                    endedAt: Date(timeIntervalSince1970: 1_000_000),
+                    distanceMeters: orphan.distanceMeters,
+                    movingSeconds: orphan.durationSeconds
+                )],
                 onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
+            $0.healthKitClient = .mock(onSaveWorkout: { workout in workouts.withValue { $0.append(workout.rideId) } })
             $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in Data([1]) }
         }
         store.exhaustivity = .off
@@ -406,5 +415,6 @@ struct AppFeatureTests {
 
         #expect(finalized.value == [orphan.rideId])
         #expect(saved.value == [orphan.rideId])
+        #expect(workouts.value == [orphan.rideId])
     }
 }

@@ -546,7 +546,7 @@ struct ActiveRideFeature {
                     // write includes whatever URL export produced, so it must come
                     // last. A failed export degrades to a nil gpxFileURL rather than
                     // leaving the ride stuck out of `.ended`.
-                    .run { [rideDataBuffer, persistenceClient, rideEndIntentClient, healthKitClient] _ in
+                    .run { [rideDataBuffer, persistenceClient, rideEndIntentClient] _ in
                         // Recorded before any of the writes below, in storage a SwiftData
                         // failure cannot reach: if `finalizeRide` fails, this is the only
                         // durable trace that the rider ended this ride (#188).
@@ -568,11 +568,8 @@ struct ActiveRideFeature {
                         }
 
                         var gpxURL: URL?
-                        // Kept for the Apple Health route below, so the rows aren't read twice.
-                        var trackPoints: [TrackPointDTO] = []
                         do {
                             var export = try await GPXExporter.fetchInputs(rideId: rideId)
-                            trackPoints = export.trackPoints
                             export.ride.title = await Self.titleForExport(rideId, export, persistenceClient: persistenceClient)
                             gpxURL = try GPXExporter.generate(export)
                             // Recorded before the finalize below, so a file that was
@@ -601,47 +598,13 @@ struct ActiveRideFeature {
                         }
 
                         // After finalize, so only a durably ended ride reaches Apple Health
-                        // (UX.md §S10, #250). Nothing waits on it: a revoked permission costs
-                        // the workout, never the ride. `startedAt` is read back because a
-                        // resumed ride's start only exists in persistence. Write failures are
-                        // logged in the client.
-                        do {
-                            async let riderKilograms = try? healthKitClient.fetchBodyMass()
-                            async let dateOfBirth = try? healthKitClient.fetchDateOfBirth()
-                            async let sex = try? healthKitClient.fetchBiologicalSex()
-                            let startedAt = try await persistenceClient.fetchRide(rideId).startedAt
-                            // No body mass, no energy (#276): a guessed weight would be written
-                            // to Health as if it were measured.
-                            var energy: RideEnergy.Estimate?
-                            if let kilograms = await riderKilograms {
-                                let rider = RideEnergy.Rider(
-                                    kilograms: kilograms,
-                                    age: RiderProfile.age(fromDateOfBirth: await dateOfBirth, on: startedAt),
-                                    sex: await sex
-                                )
-                                let estimate = RideEnergy.activeKilocalories(
-                                    trackPoints: trackPoints,
-                                    movingSeconds: finalSummary.durationSeconds,
-                                    distanceMeters: finalSummary.distanceMeters,
-                                    rider: rider
-                                )
-                                energy = estimate
-                                logger.notice("energy for ride \(rideId, privacy: .public): \(Int(estimate.kilocalories.rounded()), privacy: .public) kcal from \(estimate.method.rawValue, privacy: .public)")
-                            }
-                            try? await healthKitClient.saveWorkout(RideWorkout(
-                                rideId: rideId,
-                                startedAt: startedAt,
-                                endedAt: endedAt,
-                                // The same value `finalizeRide` just wrote to `Ride.distanceMeters`.
-                                distanceMeters: finalSummary.distanceMeters,
-                                trackPoints: trackPoints,
-                                activeEnergyKilocalories: energy?.kilocalories
-                            ))
-                        } catch {
-                            logger.error("fetchRide failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — no workout written to Apple Health")
-                        }
+                        // (UX.md §S10, #250): the finalize is what makes it owed a workout.
+                        // Nothing waits on it: a failed write never costs the ride, and is
+                        // retried at the next launch (#277).
+                        await RideHealthWorkout.backfill()
                         // The map thumbnail (#177) is captured by `RidesFeature.rideFinished`,
-                        // which waits for this write to land and refreshes the list after it (#248).
+                        // which waits for the finalize above to land and refreshes the list after
+                        // it (#248).
                     },
                     .run { [bleHRClient, variaRadarClient, locationClient] _ in
                         async let hr: Void = bleHRClient.disconnect()

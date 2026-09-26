@@ -86,6 +86,44 @@ struct RideEndFailureTests {
 
     /// Stands in for MapKit's tiles (#177): counts renders and answers each appearance with
     /// its own bytes, so a test can tell the two stored images apart.
+    /// One second later on every read. With a constant clock a ride starts and ends at the same
+    /// instant, and a zero-length ride is settled without a workout (#277).
+    private static func movingClock() -> DateGenerator {
+        let reads = LockIsolated(0.0)
+        return DateGenerator { reads.withValue { $0 += 1; return testDate.addingTimeInterval($0) } }
+    }
+
+    /// A cold launch against the same persistence: `AppFeature`'s `.task`, drained.
+    private static func relaunch(
+        persistenceClient: PersistenceClient,
+        documentsDirectory: URL,
+        rideEndIntentClient: RideEndIntentClient,
+        healthKitClient: HealthKitClient
+    ) async {
+        let appStore = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
+            $0.continuousClock = TestClock()
+            $0.date = .constant(Self.testDate.addingTimeInterval(600))
+            $0.uuid = .incrementing
+            $0.bleCSCClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.locationClient = .testValue
+            $0.hapticsClient = .testValue
+            $0.screenClient = .testValue
+            $0.persistenceClient = persistenceClient
+            $0.gpxDocumentsDirectory = documentsDirectory
+            $0.rideEndIntentClient = rideEndIntentClient
+            $0.healthKitClient = healthKitClient
+            $0.mapSnapshotClient = Self.countingSnapshots(LockIsolated(0))
+        }
+        appStore.exhaustivity = .off
+        await appStore.send(.task)
+        await appStore.finish(timeout: effectDrainTimeout)
+    }
+
     private static func countingSnapshots(_ renders: LockIsolated<Int>) -> MapSnapshotClient {
         MapSnapshotClient { _, _, _, style in
             renders.withValue { $0 += 1 }
@@ -433,7 +471,8 @@ struct RideEndFailureTests {
             healthKitClient: .mock(onSaveWorkout: { _ in
                 attempts.withValue { $0 += 1 }
                 throw WriteFailed()
-            })
+            }),
+            date: Self.movingClock()
         )
         // The workout is the finish effect's last step.
         let rideId = await Self.runRideToEnd(store) { _ in attempts.value > 0 }
@@ -450,6 +489,56 @@ struct RideEndFailureTests {
         #expect(ride.gpxFileURL != nil)
         #expect(ride.mapThumbnailDark == Data("dark".utf8))
         #expect(rideEndIntent.load() == nil)
+        // The workout is still owed (#277)...
+        #expect(ride.isHealthWorkoutOwed)
+
+        // ...and the next launch writes it, once, from the persisted ride.
+        let written = LockIsolated<[RideWorkout]>([])
+        let working = HealthKitClient.mock(onSaveWorkout: { workout in written.withValue { $0.append(workout) } })
+        await Self.relaunch(
+            persistenceClient: client, documentsDirectory: tempDir,
+            rideEndIntentClient: rideEndIntent, healthKitClient: working
+        )
+        let workout = try #require(written.value.first)
+        #expect(written.value.count == 1)
+        #expect(workout.rideId == rideId)
+        #expect(workout.startedAt == ride.startedAt)
+        #expect(workout.endedAt == ride.endedAt)
+        #expect(workout.distanceMeters == ride.distanceMeters)
+        #expect(try Self.fetchRide(rideId, from: swiftDataStack).isHealthWorkoutOwed == false)
+
+        // Settled, so the launch after that leaves it alone.
+        await Self.relaunch(
+            persistenceClient: client, documentsDirectory: tempDir,
+            rideEndIntentClient: rideEndIntent, healthKitClient: working
+        )
+        #expect(written.value.count == 1)
+    }
+
+    @Test("a finished ride's workout is settled once written, so no later launch writes it again")
+    func writtenWorkoutIsSettled() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let rideEndIntent = RideEndIntentClient.inMemory()
+        let writes = LockIsolated(0)
+        let healthKit = HealthKitClient.mock(onSaveWorkout: { _ in writes.withValue { $0 += 1 } })
+
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
+            healthKitClient: healthKit, date: Self.movingClock()
+        )
+        let rideId = await Self.runRideToEnd(store) {
+            fetchRideIfPresent($0, from: swiftDataStack)?.isHealthWorkoutOwed == false && writes.value > 0
+        }
+        #expect(writes.value == 1)
+        #expect(try Self.fetchRide(rideId, from: swiftDataStack).isHealthWorkoutOwed == false)
+
+        await Self.relaunch(
+            persistenceClient: client, documentsDirectory: tempDir,
+            rideEndIntentClient: rideEndIntent, healthKitClient: healthKit
+        )
+        #expect(writes.value == 1)
     }
 
     // MARK: - The path that did not degrade acceptably
@@ -469,7 +558,9 @@ struct RideEndFailureTests {
         let store = Self.makeRideStore(
             persistenceClient: failingClient, documentsDirectory: tempDir,
             rideEndIntentClient: rideEndIntent,
-            healthKitClient: .mock(onSaveWorkout: { _ in workoutWrites.withValue { $0 += 1 } })
+            healthKitClient: .mock(onSaveWorkout: { _ in workoutWrites.withValue { $0 += 1 } }),
+            // Moving, so the closed-out ride has a span for its workout to cover (#277).
+            date: Self.movingClock()
         )
         // finalizeRide is the thing failing here, so the ride never reaches `.ended`.
         // The recorded intent, carrying the GPX written before the failure, is the
@@ -489,7 +580,9 @@ struct RideEndFailureTests {
         // reach — including the URL of the GPX that was written before the failure.
         let pending = try #require(rideEndIntent.load())
         #expect(pending.rideId == rideId)
-        #expect(pending.endedAt == Self.testDate)
+        // The Finish's own time: after the ride started, and before the relaunch below.
+        #expect(pending.endedAt > strandedRide.startedAt)
+        #expect(pending.endedAt < Self.testDate.addingTimeInterval(600))
         #expect(pending.gpxFileURL != nil)
 
         // Relaunch: same persistence, same storage, a working finalize.
@@ -510,6 +603,10 @@ struct RideEndFailureTests {
             $0.gpxDocumentsDirectory = tempDir
             $0.rideEndIntentClient = rideEndIntent
             $0.mapSnapshotClient = Self.countingSnapshots(renders)
+            $0.healthKitClient = .mock(onSaveWorkout: { workout in
+                #expect(workout.rideId == rideId)
+                workoutWrites.withValue { $0 += 1 }
+            })
         }
         appStore.exhaustivity = .off
 
@@ -523,7 +620,7 @@ struct RideEndFailureTests {
         // It is closed out instead, keeping the export that had already been written.
         let recovered = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(recovered.recordingState == .ended)
-        #expect(recovered.endedAt == Self.testDate)
+        #expect(recovered.endedAt == pending.endedAt)
         #expect(recovered.gpxFileURL == pending.gpxFileURL)
         // And the thumbnail the failed finish never got to is captured now (#177) — only
         // now: one light and one dark in total. Counted at the end rather than checked for
@@ -531,6 +628,9 @@ struct RideEndFailureTests {
         #expect(recovered.mapThumbnailLight == Data("light".utf8))
         #expect(recovered.mapThumbnailDark == Data("dark".utf8))
         #expect(renders.value == 2)
+        // So is the Apple Health workout the failed finish never wrote (#277): once, then settled.
+        #expect(workoutWrites.value == 1)
+        #expect(recovered.isHealthWorkoutOwed == false)
 
         // Intent discharged, and no longer resumable.
         #expect(rideEndIntent.load() == nil)

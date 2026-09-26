@@ -80,6 +80,13 @@ final class Ride {
     @Attribute(.externalStorage)
     var mapThumbnailDark: Data?
 
+    // MARK: - Apple Health (#277)
+    // Set by `finalizeRide`, cleared once the ride's `HKWorkout` is written or skipped as a
+    // duplicate; `RideHealthWorkout.backfill` writes every ride still owed one. The declaration
+    // default is what migration gives rides that ended before this existed, so they are not
+    // owed: the ones since #250 already have their workout.
+    var isHealthWorkoutOwed: Bool = false
+
     // MARK: - Sync Status
     // Per-service sync tracking. Written by RideSyncSheetFeature after upload.
     @Attribute(.externalStorage)

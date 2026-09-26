@@ -162,11 +162,12 @@ struct AppFeature {
                         if let summary = try? await persistenceClient.fetchResumableRide() {
                             await send(.resumableRideFetched(summary))
                         } else {
-                            // Retries any thumbnail a past Finish failed to capture (#177).
-                            // Only here: a ride closed out by `resumableRideFetched` runs
-                            // the backfill itself once its finalize lands, so the two never
-                            // race over the same ride.
-                            await Self.backfillMapThumbnails(send: send)
+                            // Retries any thumbnail a past Finish failed to capture (#177), and
+                            // any Apple Health workout that didn't land (#277). Only here: a
+                            // ride closed out by `resumableRideFetched` runs the backfills
+                            // itself once its finalize lands, so the two never race over the
+                            // same ride.
+                            await Self.backfillFinishedRides(send: send)
                         }
                     },
                     // Route thumbnails (#273): routes imported before them, and any render
@@ -300,7 +301,7 @@ struct AppFeature {
                     return .run { [persistenceClient, date] send in
                         try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
                         await send(.rides(.reloadRides))
-                        await Self.backfillMapThumbnails(send: send)
+                        await Self.backfillFinishedRides(send: send)
                     }
                 }
 
@@ -316,7 +317,7 @@ struct AppFeature {
                             )
                             rideEndIntentClient.clear()
                             await send(.rides(.reloadRides))
-                            await Self.backfillMapThumbnails(send: send)
+                            await Self.backfillFinishedRides(send: send)
                         } catch {
                             // Logged in RidePersistenceActor. The marker stays so the
                             // next launch tries again rather than resuming the ride.
@@ -493,13 +494,18 @@ struct AppFeature {
         }
     }
 
-    /// Thumbnails for rides that don't have one yet (#177): rides closed out here, which never
-    /// reached `ActiveRideFeature`'s Finish, and any capture that failed. Tells the Rides tab
-    /// when any landed, so rows already on screen go back for their image (#248).
-    private static func backfillMapThumbnails(send: Send<Action>) async {
+    /// What a finished ride is owed after its finalize: its thumbnail (#177) and its Apple
+    /// Health workout (#277). Covers rides closed out here, which never reached
+    /// `ActiveRideFeature`'s Finish, and anything a past attempt failed to do. Tells the Rides
+    /// tab when a thumbnail landed, so rows already on screen go back for their image (#248).
+    ///
+    /// Side by side: offline, the thumbnails wait on map tiles, and the workout needs none.
+    private static func backfillFinishedRides(send: Send<Action>) async {
+        async let workouts = RideHealthWorkout.backfill()
         if await RideMapThumbnail.backfill() > 0 {
             await send(.rides(.mapThumbnailsCaptured))
         }
+        _ = await workouts
     }
 
     /// Restores the rider's own brightness and clears the dim. A no-op when not

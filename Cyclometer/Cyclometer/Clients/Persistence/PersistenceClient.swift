@@ -43,6 +43,11 @@ struct PersistenceClient: Sendable {
     /// per row as S14 shows it rather than with `fetchRides`, so a reload of the list never
     /// pulls every ride's images off disk.
     var fetchRideMapThumbnail: @Sendable (UUID) async throws -> RideMapThumbnailData?
+    /// Finished rides whose Apple Health workout hasn't landed yet, newest first — what
+    /// `RideHealthWorkout.backfill` works through (#277).
+    var fetchRidesOwedHealthWorkout: @Sendable () async throws -> [OwedHealthWorkout]
+    /// Marks a ride's workout as done with: written, or skipped as another source's duplicate.
+    var settleRideHealthWorkout: @Sendable (UUID) async throws -> Void
     /// Inserts confirmed vehicle-pass events in one batch — `VehiclePassDetector`
     /// can legitimately confirm more than one on the same tick (#172, DataModel.md §3.4).
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
@@ -114,6 +119,8 @@ extension PersistenceClient: DependencyKey {
             saveRideMapThumbnail: { try await rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
             fetchRideIdsMissingMapThumbnail: { try await rideActor.rideIdsMissingMapThumbnail() },
             fetchRideMapThumbnail: { try await rideActor.fetchMapThumbnail(id: $0) },
+            fetchRidesOwedHealthWorkout: { try await rideActor.ridesOwedHealthWorkout() },
+            settleRideHealthWorkout: { try await rideActor.settleHealthWorkout(id: $0) },
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
             deleteRide: { try await deleteRideLive(id: $0, rideActor: rideActor, container: coreDataContainer) },
@@ -150,6 +157,8 @@ extension PersistenceClient: DependencyKey {
         saveRideMapThumbnail: { _, _, _ in },
         fetchRideIdsMissingMapThumbnail: { [] },
         fetchRideMapThumbnail: { _ in nil },
+        fetchRidesOwedHealthWorkout: { [] },
+        settleRideHealthWorkout: { _ in },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
         deleteRide: { _ in },
