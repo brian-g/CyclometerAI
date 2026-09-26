@@ -27,6 +27,7 @@
 | 0.6.1 | 2026-09-22 | Brian / Claude | Route analysis (#252). §8.6 adds a derived terrain analysis (categorized climbs, max grade, FIETS, route character) and an OpenStreetMap surface lookup at import; §12 Privacy records Overpass as the app's first network call, sending a planned route's line and nothing else. `.fit` import stays out of scope (§15), and #252's estimated-power projection is deferred with power (Phase 3). |
 | 0.6.2 | 2026-09-22 | Brian / Claude | HKWorkout write (#250). §9.4 adds `distanceCycling` (write) for the workout's distance and `HKWorkoutType` (read) for skipping a ride another source already recorded. Energy is not written yet (#274). |
 | 0.6.3 | 2026-09-25 | Brian / Claude | Ride place name (#283). §12 Privacy records the reverse geocode of a free ride's start coordinate, sent to Apple for S10's default ride name, with an S12 toggle to turn it off. |
+| 0.6.4 | 2026-09-26 | Brian / Claude | Ride Live Activity. New §8.10: Lock Screen and Dynamic Island Live Activity moves from Phase 2 to MVP under M10.5; visual only, with radar sound left to the audio client; CarPlay, Mac and Watch presentations excluded; next-turn cue included when a route is active. §6, §13 and Resolved Decisions updated. Resolved Decisions now gives the iOS 27 minimum's reason: HealthKit's cycling-specific HR, cadence and power zone tracking. |
 
 ---
 
@@ -172,6 +173,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - BLE device pairing and management screen
 - Wheel circumference with preset sizes, manual entry, and GPS auto-calibration
 - Settings screen
+- Ride Live Activity on the Lock Screen and Dynamic Island, with next-turn cue (§8.10, M10.5)
 - Open TestFlight beta
 
 ### Phase 2
@@ -182,7 +184,6 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Heart rate zone training graphs
 - Customizable metric tiles on dashboard (S07, S08)
 - **Multi-bike management:** a rider owns several bikes; each bike owns its speed/cadence/radar sensors and maps to a Strava gear id for export. Wheel circumference lives on the speed sensor (§8.9.1). Heart rate stays rider-scoped. Includes the bike picker in the Start Sheet (S05.1) and ride history that names the bike ridden. Data model in DataModel.md §3.9
-- Lock screen / Dynamic Island integration
 - Apple Watch standalone companion app and complication (S17)
 - Cadence + HR data visualization on ride detail screen
 - Strava / Garmin Connect export
@@ -193,7 +194,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - Segment detection
 
 ### Resolved Decisions (cumulative)
-- **Persistence:** SwiftData (iOS 27+ minimum target; raised from iOS 26 on 2026-09-15 with the Xcode 27 upgrade)
+- **Persistence:** SwiftData (iOS 27+ minimum target; raised from iOS 26 on 2026-09-15 for HealthKit's cycling-specific HR, cadence and power zone tracking)
 - **Platform:** iPhone only; no iPad support
 - **Audio alerts:** Three tones — All Clear, Warning, Danger. Full spec in `Audio.md`.
 - **Silent Mode:** Danger tone overrides with user opt-in; Warning and All Clear always respect Silent Mode
@@ -204,6 +205,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - **Navigation (OQ12):** GPX file import only for MVP; no `MKDirections` routing
 - **Wheel sizing (OQ13):** Preset common sizes + manual entry + GPS auto-calibration (see §8.9). One app-wide value for MVP; Phase 2 moves it onto the speed sensor, which is bound to one wheel (see §8.9.1 and DataModel.md §3.9)
 - **Radar visualization (OQ14):** Option F — right-side sidebar strip (see §8.2)
+- **Live Activity (§8.10):** MVP in M10.5; visual only (sound stays with the audio client); phone only (no CarPlay, Mac or Watch); includes the next-turn cue
 
 ---
 
@@ -793,6 +795,108 @@ cycling-calculator sites, **not** instrumented measurement — treat them as ord
 noise-floor and boundary figures are calculated from the implementation and simulated, not measured
 on hardware; no ride has yet exercised a commit at any threshold.
 
+### 8.10 Ride Live Activity (Lock Screen + Dynamic Island)
+
+**Milestone:** M10.5. **Added:** v0.6.4.
+
+A pocketed or bar-mounted phone with a locked screen hides ride state. Unlocking mid-ride to check speed, time or radar is unsafe (P1, P7). The Live Activity shows live ride metrics, radar threat status and the next turn on the Lock Screen and, on iPhones that have one, the Dynamic Island.
+
+#### Scope decisions
+
+| Decision | Detail |
+|---|---|
+| Visual only | The Live Activity never plays sound, fires a haptic or wakes the screen. No `AlertConfiguration` is passed on any update. Radar sound and haptics remain the audio client's job (§8.3, `Audio.md`) |
+| Phone only | CarPlay, Mac and Apple Watch Smart Stack presentations are out of scope. No `.supplementalActivityFamilies` are declared; the absence of a default rendering on those surfaces is verified on device |
+| Next-turn cue | In scope whenever an M8 route is active; no turn row otherwise |
+| Local updates only | Updates come from the running app. No APNs push tokens |
+
+Live Activity rendering is scheduled by the system and carries no latency guarantee, so it is never the primary radar alert channel.
+
+#### Lifecycle
+
+| Event | Action |
+|---|---|
+| Ride starts | `Activity.request(...)` when `ActivityAuthorizationInfo().areActivitiesEnabled` and the S12 toggle is on |
+| Metrics change | `activity.update(...)`, coalesced to at most 1 Hz |
+| Radar threat level increases | Immediate update, bypassing the throttle |
+| Next turn changes, or its distance crosses 500 m, 100 m or 0 m | Immediate update, bypassing the throttle |
+| Pause / resume | Update `status`; the elapsed timer freezes and resumes |
+| Ride ends | `activity.end(finalContent, dismissalPolicy: .after(now + 15 min))`, showing a summary |
+| App terminated | Each update sets `staleDate` about 30 s ahead, so a dead app's activity shows as stale |
+
+System limits: an activity stays active for at most 8 hours and remains on the Lock Screen for up to 4 more; `ContentState` must stay under 4 KB.
+
+#### Data model
+
+```swift
+struct RideActivityAttributes: ActivityAttributes {
+    struct ContentState: Codable, Hashable {
+        var status: RideStatus            // .riding, .paused, .ended
+        var startDate: Date               // drives Text(timerInterval:)
+        var pausedElapsed: TimeInterval?  // frozen value while paused
+        var speedKPH: Double
+        var distanceMeters: Double
+        var heartRate: Int?
+        var hrZone: Int?
+        var radar: RadarSnapshot?         // nil = no radar paired
+        var nextTurn: TurnCue?            // nil = no route active
+    }
+    var rideName: String
+    var units: UnitSystem
+}
+
+struct RadarSnapshot: Codable, Hashable {
+    var threatCount: Int
+    var closestMeters: Int?
+    var level: ThreatLevel                // .none, .approaching, .fast
+    var isConnected: Bool
+}
+
+struct TurnCue: Codable, Hashable {
+    var maneuver: Maneuver                // .left, .right, .slightLeft, .slightRight, .uTurn, .straight, .arrive
+    var distanceMeters: Int
+    var streetName: String?               // truncated to 40 characters
+    var isOffRoute: Bool
+}
+```
+
+State values are canonical (metric); unit conversion happens in the view.
+
+#### Presentations
+
+- **Lock Screen (primary).** Elapsed timer large in D-DIN. Metric row: speed, distance, HR tinted by `hrZone(_:)`. Radar strip on the trailing edge in the §8.2 sidebar language, `brRatingOkay` / `brRatingBad` by level, grey when disconnected. With a route active, a turn row above the metrics: maneuver symbol, distance, street name in `brTextSecondary`; "Off route" in `brRatingOkay` replaces it when off route. Pause/Resume button in `brPrimary`.
+- **Dynamic Island** (iPhones with one; others show the Lock Screen presentation only). Compact leading: elapsed time. Compact trailing and minimal follow a priority: radar threat, then a turn within 100 m, then speed. Expanded: speed, time, HR, radar count and distance, turn row, Pause button.
+- **Reduced luminance.** Read `isLuminanceReduced`; drop tinted backgrounds, keep text white, keep radar colour.
+- **Stale.** Metrics dim to `brTextSecondary` with a "Reconnecting…" caption.
+
+Design frames in `Design.sketch`: Lock Screen light and dark × radar none / approaching / fast, paused, ended, stale, turn far / near / arrive / off-route, threat and turn together; Dynamic Island compact, minimal and expanded.
+
+#### Interactivity
+
+`PauseRideIntent` and `ResumeRideIntent` conform to `LiveActivityIntent` and run in the app process, reaching the ride store through a shared command bus. Buttons keep a 44 pt hit target.
+
+#### Architecture
+
+- `CyclometerWidgets` widget extension with `ActivityConfiguration(for: RideActivityAttributes.self)`.
+- `RideActivityKit` Swift package shared by app and extension: attributes, snapshots, formatters and colour tokens. Colour assets and D-DIN are bundled into the extension.
+- `LiveActivityClient` dependency (`start`, `update`, `end`, `isEnabled`); `liveValue` wraps ActivityKit, `testValue` records calls. `update` takes no alert parameter.
+- `LiveActivityFeature` reducer scoped into the active ride feature. It observes ride, sensor, radar and `NavigationFeature` state, owns the 1 Hz throttle on an injected clock, and applies the threat and turn bypasses. Turn cues are derived by navigation; the Live Activity mirrors them.
+- `Info.plist`: `NSSupportsLiveActivities = YES`. Background updates rely on the ride's location background mode.
+- S12 gains **Show Live Activity** (default on). When the system setting is off, S12 explains and links to iOS Settings.
+
+#### Acceptance criteria
+
+- [ ] Activity appears within 1 s of ride start and ends with ride end, its summary retained 15 minutes
+- [ ] Elapsed time ticks without per-second updates
+- [ ] Radar escalation and turn-threshold crossings appear within one update cycle, never held by the throttle
+- [ ] No sound, haptic or screen wake from the Live Activity in any state
+- [ ] No rendering on Apple Watch or CarPlay (device-verified)
+- [ ] Turn row appears only with an active route; radar wins Dynamic Island priority over the turn cue
+- [ ] Pause/Resume from the Lock Screen changes ride state and the dashboard
+- [ ] Text/background pairs pass WCAG AA in light, dark and reduced luminance
+- [ ] `ContentState` encodes under 4 KB at worst case
+- [ ] "CyclometerAI" appears nowhere in the extension
+
 ---
 
 ## 9. Hardware Integrations
@@ -1262,11 +1366,12 @@ Cyclometer/
 | M8 | Navigation: live map; GPX route import; turn alerts; off-route banner; Routes tab (S19, S20) and the S05.2 route picker (tribos.studio and the other route services move to Phase 2 with Accounts) |
 | M9 | Ride summary; ride history persistence; vehicle pass event count in summary |
 | M10 | Settings (S12, less Accounts); full device management (S11 flat list, extending the M6 pairing sheet); replace-or-cancel on role collision; radar and HR pairing brought under the paired-record gate; `RiderProfile` + HR zones; onboarding (S01, S02) |
+| M10.5 | Fit & finish, widgets and dashboard personalization; Ride Live Activity on the Lock Screen and Dynamic Island (§8.10) |
 | M11 | QA; TestFlight open beta; bug fixes |
 | M12 | App Store submission |
 
 ### Phase 2 — Companion & History (Target: +2 months post-launch)
-Route service integrations (tribos.studio, Strava, Ride with GPS) with the Settings → Accounts section that authenticates them, plus S20's current weather and Strava segments — the Routes tab itself shipped in M8. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). Dynamic Island. HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Multi-bike management — bikes own their sensors, circumference lives on the speed sensor (DataModel.md §3.9) — plus the S05.1 bike picker.
+Route service integrations (tribos.studio, Strava, Ride with GPS) with the Settings → Accounts section that authenticates them, plus S20's current weather and Strava segments — the Routes tab itself shipped in M8. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Multi-bike management — bikes own their sensors, circumference lives on the speed sensor (DataModel.md §3.9) — plus the S05.1 bike picker.
 
 ### Phase 3 — AR, Power & Platform (Target: +4 months post-Phase 2)
 Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detection.
