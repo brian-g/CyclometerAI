@@ -60,6 +60,10 @@ struct SettingsView: View {
                     get: { store.isAutoDimEnabled },
                     set: { _ in store.send(.autoDimToggled) }
                 ))
+                Toggle("Place Names", isOn: Binding(
+                    get: { store.isPlaceNameLookupEnabled },
+                    set: { _ in store.send(.placeNameLookupToggled) }
+                ))
                 NavigationLink {
                     DeviceManagementView(
                         store: store.scope(state: \.deviceManagement, action: \.deviceManagement)

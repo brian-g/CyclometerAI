@@ -6,8 +6,8 @@ import os
 private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "network")
 
 /// TCA dependency for the OpenStreetMap Overpass API, which is where a route's surface comes
-/// from (#252). The app's only network call: it sends a *planned route's* line — never a
-/// recorded ride — to the public Overpass instance and gets back the ways along it (PRD §14).
+/// from (#252). It sends a *planned route's* line — never a recorded ride — to the public
+/// Overpass instance and gets back the ways along it (PRD §12, Privacy).
 struct OverpassClient: Sendable {
     /// Every highway within `RouteSurface.matchRadiusMeters` of the route, deduplicated.
     var ways: @Sendable ([RouteCoordinate]) async throws -> [OSMWay]

@@ -93,6 +93,8 @@ struct AppPreferencesTests {
         preferences.isTurnByTurnEnabled = false
         // Added by #199.
         preferences.mapOrientation = .northUp
+        // Added by #283.
+        preferences.isPlaceNameLookupEnabled = false
 
         let data = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
@@ -123,6 +125,8 @@ struct AppPreferencesTests {
         #expect(decoded.turnLeadDistanceMeters == AppPreferences.defaultTurnLeadDistanceMeters)
         // Added by #197's review; turn-by-turn starts on.
         #expect(decoded.isTurnByTurnEnabled)
+        // Added by #283; place names start on.
+        #expect(decoded.isPlaceNameLookupEnabled)
         // Added by #199; the map sheet starts heading-up.
         #expect(decoded.mapOrientation == .headingUp)
     }

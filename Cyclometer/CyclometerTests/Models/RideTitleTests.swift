@@ -113,6 +113,33 @@ struct RideTitleTests {
                                        segments: split, calendar: Self.calendar) == "Morning Loop")
     }
 
+    @Test("a place name leads the time of day and shape")
+    func placeNameLeads() {
+        #expect(RideTitle.defaultTitle(routeName: nil, placeName: "Fargo", startedAt: Self.at(hour: 8),
+                                       segments: [Self.loop], calendar: Self.calendar) == "Fargo Morning Loop")
+        #expect(RideTitle.defaultTitle(routeName: nil, placeName: "Fargo", startedAt: Self.at(hour: 18),
+                                       segments: [Self.outAndBack], calendar: Self.calendar) == "Fargo Evening Out and Back")
+    }
+
+    @Test("a place leads an offline title as it stands", arguments: [
+        ("Fargo", "Fargo Morning Loop"), (nil, "Morning Loop"), ("", "Morning Loop"), (" ", "Morning Loop")
+    ] as [(String?, String)])
+    func placed(place: String?, expected: String) {
+        #expect(RideTitle.placed("Morning Loop", in: place) == expected)
+    }
+
+    @Test("the route's name wins over a place name")
+    func routeNameBeatsPlace() {
+        #expect(RideTitle.defaultTitle(routeName: "SW Fargo", placeName: "Fargo", startedAt: Self.at(hour: 8),
+                                       segments: [Self.loop], calendar: Self.calendar) == "SW Fargo")
+    }
+
+    @Test("no place name, or a blank one, gives the offline name", arguments: [nil, "", "  "] as [String?])
+    func missingPlaceName(place: String?) {
+        #expect(RideTitle.defaultTitle(routeName: nil, placeName: place, startedAt: Self.at(hour: 8),
+                                       segments: [Self.loop], calendar: Self.calendar) == "Morning Loop")
+    }
+
     @Test("part-of-day boundaries", arguments: [
         (4, "Night"), (5, "Morning"), (11, "Morning"), (12, "Afternoon"),
         (16, "Afternoon"), (17, "Evening"), (20, "Evening"), (21, "Night")

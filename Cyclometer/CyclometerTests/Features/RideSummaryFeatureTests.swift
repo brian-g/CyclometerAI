@@ -30,6 +30,7 @@ struct RideSummaryFeatureTests {
 
     private func makeStore(
         persistenceClient: PersistenceClient,
+        geocodingClient: GeocodingClient = .testValue,
         clock: TestClock<Duration> = TestClock()
     ) -> TestStoreOf<RideSummaryFeature> {
         let storage = FileStorage.inMemory
@@ -41,6 +42,7 @@ struct RideSummaryFeatureTests {
             } withDependencies: {
                 $0.persistenceClient = persistenceClient
                 $0.healthKitClient = .testValue
+                $0.geocodingClient = geocodingClient
                 $0.continuousClock = clock
                 $0.calendar = Self.calendar
                 $0.date = .constant(Date(timeIntervalSince1970: 1_750_000_000))
@@ -218,6 +220,211 @@ struct RideSummaryFeatureTests {
 
         #expect(store.state.title == "Hill Repeats")
         #expect(store.state.titleToSave == "Hill Repeats")
+    }
+
+    // MARK: Place name (#283)
+
+    private static let fargo = GeocodingClient { _ in "Fargo" }
+
+    @Test("the start's place name joins an untouched default once the lookup answers")
+    func placeNameJoinsDefault() async {
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()],
+            rideStats: [Self.summary.id: Self.stats],
+            rides: [Self.summary]
+        ), geocodingClient: Self.fargo)
+
+        await load(store)
+
+        #expect(store.state.title == "Fargo Morning Ride")
+        #expect(store.state.defaultTitle == "Fargo Morning Ride")
+        #expect(store.state.titleToSave == "Fargo Morning Ride")
+    }
+
+    @Test("the ride-end default is swapped for the placed one, and saved on dismiss")
+    func placeNameReplacesPersistedDefault() async {
+        var named = Self.summary
+        named.title = "Morning Ride"
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()],
+            rideStats: [Self.summary.id: Self.stats],
+            rides: [named]
+        ), geocodingClient: Self.fargo)
+
+        await load(store)
+
+        #expect(store.state.title == "Fargo Morning Ride")
+        #expect(store.state.titleToSave == "Fargo Morning Ride")
+    }
+
+    @Test("a name the rider typed before the lookup answers is kept")
+    func typedTitleSurvivesPlaceName() async {
+        let clock = TestClock()
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()],
+            rideStats: [Self.summary.id: Self.stats],
+            rides: [Self.summary]
+        ), geocodingClient: GeocodingClient { _ in
+            try await clock.sleep(for: .seconds(1))
+            return "Fargo"
+        })
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.loaded)
+        await store.send(.titleChanged("Hill Repeats"))
+        await clock.advance(by: .seconds(1))
+        await store.receive(\.placedTitleResolved)
+
+        #expect(store.state.title == "Hill Repeats")
+        #expect(store.state.defaultTitle == "Fargo Morning Ride")
+        await store.finish()
+    }
+
+    @Test("the offline default shows without waiting on the lookup")
+    func loadDoesNotWaitOnLookup() async {
+        let clock = TestClock()
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()],
+            rideStats: [Self.summary.id: Self.stats],
+            rides: [Self.summary]
+        ), geocodingClient: GeocodingClient { _ in
+            try await clock.sleep(for: .seconds(60))
+            return "Fargo"
+        })
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.loaded)
+
+        #expect(store.state.load == .loaded)
+        #expect(store.state.title == "Morning Ride")
+        await store.skipInFlightEffects()
+    }
+
+    @Test("a failed lookup keeps the offline default")
+    func failedLookupKeepsDefault() async {
+        let calls = LockIsolated(0)
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()],
+            rideStats: [Self.summary.id: Self.stats],
+            rides: [Self.summary]
+        ), geocodingClient: GeocodingClient { _ in
+            calls.withValue { $0 += 1 }
+            throw URLError(.notConnectedToInternet)
+        })
+
+        await load(store)
+
+        #expect(calls.value == 1)
+        #expect(store.state.title == "Morning Ride")
+        #expect(store.state.defaultTitle == "Morning Ride")
+    }
+
+    @Test("a ride on a route never asks the geocoder")
+    func routeRideSkipsLookup() async {
+        var stats = Self.stats
+        stats.routeName = "SW Fargo"
+        let calls = LockIsolated(0)
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()],
+            rideStats: [Self.summary.id: stats],
+            rides: [Self.summary]
+        ), geocodingClient: GeocodingClient { _ in
+            calls.withValue { $0 += 1 }
+            return "Fargo"
+        })
+
+        await load(store)
+
+        #expect(calls.value == 0)
+        #expect(store.state.title == "SW Fargo")
+    }
+
+    /// Counts its calls and answers "Fargo".
+    private static func countingGeocoder(_ calls: LockIsolated<Int>) -> GeocodingClient {
+        GeocodingClient { _ in
+            calls.withValue { $0 += 1 }
+            return "Fargo"
+        }
+    }
+
+    @Test("a route ride whose stats fail to load never asks the geocoder")
+    func routeRideWithFailedStatsSkipsLookup() async {
+        var named = Self.summary
+        named.title = "SW Fargo"
+        let calls = LockIsolated(0)
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()],
+            rides: [named]
+        ), geocodingClient: Self.countingGeocoder(calls))
+
+        await load(store)
+
+        #expect(calls.value == 0)
+        #expect(store.state.title == "SW Fargo")
+    }
+
+    @Test("a ride stored under a name other than its default never asks the geocoder")
+    func namedRideSkipsLookup() async {
+        var named = Self.summary
+        named.title = "Coffee Run"
+        let calls = LockIsolated(0)
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()],
+            rideStats: [Self.summary.id: Self.stats],
+            rides: [named]
+        ), geocodingClient: Self.countingGeocoder(calls))
+
+        await load(store)
+
+        #expect(calls.value == 0)
+        #expect(store.state.title == "Coffee Run")
+    }
+
+    @Test("focusing the field, or typing the default back in, keeps a late place name out")
+    func touchedFieldKeepsDefault() async {
+        for touch in [RideSummaryFeature.Action.titleFocused, .titleChanged("Morning Ride")] {
+            let clock = TestClock()
+            let store = makeStore(persistenceClient: .mock(
+                trackPoints: [Self.summary.id: Self.track()],
+                rideStats: [Self.summary.id: Self.stats],
+                rides: [Self.summary]
+            ), geocodingClient: GeocodingClient { _ in
+                try await clock.sleep(for: .seconds(1))
+                return "Fargo"
+            })
+            store.exhaustivity = .off
+
+            await store.send(.task)
+            await store.receive(\.loaded)
+            await store.send(touch)
+            await clock.advance(by: .seconds(1))
+            await store.receive(\.placedTitleResolved)
+
+            #expect(store.state.title == "Morning Ride")
+            #expect(store.state.defaultTitle == "Fargo Morning Ride")
+            await store.finish()
+        }
+    }
+
+    @Test("with place names off in S12, the geocoder is never asked")
+    func placeNamesOffSkipsLookup() async {
+        let calls = LockIsolated(0)
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()],
+            rideStats: [Self.summary.id: Self.stats],
+            rides: [Self.summary]
+        ), geocodingClient: GeocodingClient { _ in
+            calls.withValue { $0 += 1 }
+            return "Fargo"
+        })
+        store.state.$preferences.withLock { $0.isPlaceNameLookupEnabled = false }
+
+        await load(store)
+
+        #expect(calls.value == 0)
+        #expect(store.state.title == "Morning Ride")
     }
 
     @Test("a cleared or blank field saves the default, never an empty title")
