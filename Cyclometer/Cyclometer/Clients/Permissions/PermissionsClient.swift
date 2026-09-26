@@ -114,14 +114,15 @@ extension PermissionsClient {
     static let distanceCyclingType = HKQuantityType(.distanceCycling)
     static let workoutRouteType = HKSeriesType.workoutRoute()
     static let bodyMassType = HKQuantityType(.bodyMass)
+    static let biologicalSexType = HKCharacteristicType(.biologicalSex)
     static let activeEnergyBurnedType = HKQuantityType(.activeEnergyBurned)
 
     /// PRD.md §9.4 — resting HR and max HR feed the Karvonen zones, date of birth backs
     /// the age-based max-HR estimate when no measured maximum exists. Workouts are read
-    /// only to skip writing a ride another source already recorded (#250). Body mass feeds
-    /// the workout's energy estimate (#276).
+    /// only to skip writing a ride another source already recorded (#250). Body mass, and for
+    /// the heart-rate model date of birth and biological sex, feed the workout's energy (#276).
     static var healthReadTypes: Set<HKObjectType> {
-        [heartRateType, restingHeartRateType, dateOfBirthType, workoutType, bodyMassType]
+        [heartRateType, restingHeartRateType, dateOfBirthType, workoutType, bodyMassType, biologicalSexType]
     }
 
     /// UX.md §S10 — an `HKWorkout` is written at ride end so the ride lands in the

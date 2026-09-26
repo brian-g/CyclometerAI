@@ -1,3 +1,24 @@
+# #276 follow-up — heart-rate energy model (Keytel), physics as the fallback
+
+Plan: /Users/brian/.claude/plans/twinkling-brewing-volcano.md
+Branch: `feat/276-active-energy`
+
+- [x] 1. `RideEnergy`: `Rider`, `Sex`, `Estimate { kilocalories, method }`, and Keytel at the mean HR over recording time, less 1 MET, clamped ≥ 0
+- [x] 2. `RiderProfile.age(fromDateOfBirth:on:)` extracted from `estimatedMaxBPM`
+- [x] 3. `HealthKitClient.fetchBiologicalSex` + mock; `biologicalSex` read type
+- [x] 4. Ride end: weight, date of birth and sex read in parallel; log which model ran
+- [x] 5. Tests: Keytel male/female, 50% coverage threshold (mutation-checked), mean costing, clamp, sex/age fallback, ride-end HR integration
+- [x] 6. Docs: PRD §9.4 + 0.6.3, UX §S01/§S10, Info.plist
+
+## Review
+
+- Why: a real 14:52 ride gave 15 kcal from physics. Counting 1 kJ of work as 1 kcal leaves out the cost of moving your legs at all, which dominates at easy power.
+- The HR model runs only with strap-level coverage (≥ 50% of recording seconds) plus weight, date of birth and a Male/Female sex. Anything less uses physics (decision: no averaged equation for Not Set or Other). No weight still means no energy.
+- Harness finding: an unpaired strap's reading is blanked by the tick (#161), and pairing opens a 10 s warm-up (#221). `runRideToEnd(heartRateBPM:)` pairs first and resends until a reading lands.
+- Build finding: a stale module after the earlier mutation revert made the tests compile against the old API. Fresh `-derivedDataPath` + `COMPILATION_CACHE_ENABLE_CACHING=NO` fixed it (as the memory note says).
+- Full `CyclometerTests` passed (** TEST SUCCEEDED **, 1586 cases).
+- Pending on a device: an easy strap ride should now read tens of kcal, not 15. Compare it with the Watch's Active Energy for the same window.
+
 # #276 — Active energy on the ride's HKWorkout (physics model, MET fallback; supersedes #274)
 
 Plan: /Users/brian/.claude/plans/twinkling-brewing-volcano.md

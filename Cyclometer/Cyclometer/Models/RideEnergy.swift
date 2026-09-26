@@ -4,7 +4,13 @@ import Foundation
 /// track because the app has no power meter. With it the workout earns Move credit, not just
 /// Exercise (UX.md §S10).
 ///
-/// **Physics first.** Each 1 Hz interval's pedal power is the sum of the forces the rider works
+/// **Heart rate first.** With a strap's worth of readings and the rider's weight, age and sex, the
+/// Keytel equation turns heart rate into energy. It measures the effort the rider actually made —
+/// wind, drafting, the bike, riding slowly — none of which the physics below can see. On a 15-minute
+/// easy ride the physics gave 15 kcal, because at 20 W of pedalling most of what a body spends goes
+/// on moving the legs at all, and work-to-calories one-for-one has none of that.
+///
+/// **Physics without it.** Each 1 Hz interval's pedal power is the sum of the forces the rider works
 /// against — air, rolling resistance, gravity — over the drivetrain's efficiency, clamped at zero
 /// so a coasting descent adds nothing rather than paying back the climb. Mechanical work converts
 /// to metabolic energy one-for-one in kilojoules to kilocalories: a rider is about 24% efficient,
@@ -49,7 +55,29 @@ enum RideEnergy {
     /// credit a flat ride with climbing. A centred average over ~31 s at 1 Hz takes that out.
     static let altitudeSmoothingHalfWindow = 15
 
-    /// Active kilocalories for a ride.
+    /// What Health knows about the rider. Weight is required — without it there is no estimate at
+    /// all (#276) — and age and sex only by the heart-rate model.
+    struct Rider: Equatable, Sendable {
+        var kilograms: Double
+        var age: Int?
+        var sex: Sex?
+    }
+
+    /// Keytel's two equations. Health's Not Set and Other have no equation, and fall to physics.
+    enum Sex: Equatable, Sendable { case male, female }
+
+    struct Estimate: Equatable, Sendable {
+        enum Method: String, Sendable { case heartRate = "heart rate", physics, met = "MET" }
+        var kilocalories: Double
+        var method: Method
+    }
+
+    /// Readings on fewer than this share of recording seconds are a Watch's occasional samples,
+    /// not a strap — too few to stand for the whole ride.
+    static let minimumHeartRateCoverage = 0.5
+    static let kilojoulesPerKilocalorie = 4.184
+
+    /// Active kilocalories for a ride, and which model produced them.
     ///
     /// - Parameters:
     ///   - trackPoints: The persisted track, ascending by time. Pauses are segment boundaries,
@@ -60,8 +88,47 @@ enum RideEnergy {
         trackPoints: [TrackPointDTO],
         movingSeconds: TimeInterval,
         distanceMeters: Double,
+        rider: Rider
+    ) -> Estimate {
+        if let kilocalories = heartRateKilocalories(trackPoints: trackPoints, movingSeconds: movingSeconds, rider: rider) {
+            return Estimate(kilocalories: kilocalories, method: .heartRate)
+        }
+        return trackKilocalories(
+            trackPoints: trackPoints, movingSeconds: movingSeconds,
+            distanceMeters: distanceMeters, riderKilograms: rider.kilograms
+        )
+    }
+
+    /// Keytel et al. 2005 (J Sports Sci 23:3, the equations without VO2max) at the mean of the
+    /// ride's readings, over all its recording time. The equation is linear in heart rate, so the
+    /// mean gives exactly the per-second sum, and a second without a reading is costed at the mean
+    /// rather than at nothing. Nil — physics instead — without strap-level coverage, an age, or a sex.
+    static func heartRateKilocalories(trackPoints: [TrackPointDTO], movingSeconds: TimeInterval, rider: Rider) -> Double? {
+        guard movingSeconds > 0, let age = rider.age, let sex = rider.sex else { return nil }
+        // One point a second, so readings count seconds.
+        let readings = trackPoints.compactMap(\.heartRateBPM)
+        guard !readings.isEmpty,
+              Double(readings.count) / movingSeconds >= minimumHeartRateCoverage
+        else { return nil }
+        let heartRate = Double(readings.reduce(0, +)) / Double(readings.count)
+        let kilojoulesPerMinute = switch sex {
+        case .male:   -55.0969 + 0.6309 * heartRate + 0.1988 * rider.kilograms + 0.2017 * Double(age)
+        case .female: -20.4022 + 0.4472 * heartRate - 0.1263 * rider.kilograms + 0.074 * Double(age)
+        }
+        // Keytel's is gross expenditure; HealthKit's active energy excludes the resting 1 MET, as
+        // `metKilocalories` does. Clamped: at a resting heart rate the equation can dip below it.
+        let restingKilocaloriesPerMinute = rider.kilograms / 60
+        let activePerMinute = max(0, kilojoulesPerMinute / kilojoulesPerKilocalorie - restingKilocaloriesPerMinute)
+        return activePerMinute * movingSeconds / 60
+    }
+
+    /// Physics along the track, or MET for a ride with no usable track.
+    static func trackKilocalories(
+        trackPoints: [TrackPointDTO],
+        movingSeconds: TimeInterval,
+        distanceMeters: Double,
         riderKilograms: Double
-    ) -> Double {
+    ) -> Estimate {
         let mass = riderKilograms + bikeKilograms
         var workJoules = 0.0
         var coveredSeconds = 0.0
@@ -106,12 +173,18 @@ enum RideEnergy {
         }
 
         let uncoveredSeconds = movingSeconds - coveredSeconds
-        guard uncoveredSeconds > 0, movingSeconds > 0 else { return workJoules / 1000 }
+        guard uncoveredSeconds > 0, movingSeconds > 0 else {
+            return Estimate(kilocalories: workJoules / 1000, method: .physics)
+        }
         let averageSpeed = distanceMeters / movingSeconds
         if coveredSeconds == 0 {
-            return metKilocalories(speed: averageSpeed, seconds: uncoveredSeconds, riderKilograms: riderKilograms)
+            return Estimate(
+                kilocalories: metKilocalories(speed: averageSpeed, seconds: uncoveredSeconds, riderKilograms: riderKilograms),
+                method: .met
+            )
         }
-        return (workJoules + flatJoules(speed: averageSpeed, seconds: uncoveredSeconds, mass: mass)) / 1000
+        let joules = workJoules + flatJoules(speed: averageSpeed, seconds: uncoveredSeconds, mass: mass)
+        return Estimate(kilocalories: joules / 1000, method: .physics)
     }
 
     /// Splits a segment wherever consecutive points are more than `maxPhysicsGapSeconds` apart.

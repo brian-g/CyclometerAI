@@ -143,11 +143,16 @@ extension RiderProfile {
     /// calendar locale. `referenceDate` is required rather than defaulted to `Date()`
     /// so callers supply it from `@Dependency(\.date)`, keeping this testable.
     static func estimatedMaxBPM(fromDateOfBirth dateOfBirth: DateComponents?, on referenceDate: Date) -> Int? {
+        age(fromDateOfBirth: dateOfBirth, on: referenceDate).map { 220 - $0 }
+    }
+
+    /// Whole years on `referenceDate`, or `nil` with no date of birth. Shared with the
+    /// ride's heart-rate energy model (#276); see `estimatedMaxBPM` for the calendar.
+    static func age(fromDateOfBirth dateOfBirth: DateComponents?, on referenceDate: Date) -> Int? {
         guard let dateOfBirth,
-              let birthDate = Calendar(identifier: .gregorian).date(from: dateOfBirth),
-              let age = Calendar(identifier: .gregorian).dateComponents([.year], from: birthDate, to: referenceDate).year
+              let birthDate = Calendar(identifier: .gregorian).date(from: dateOfBirth)
         else { return nil }
-        return 220 - age
+        return Calendar(identifier: .gregorian).dateComponents([.year], from: birthDate, to: referenceDate).year
     }
 
     /// The rider's heart-rate reserve — the denominator of the Karvonen formula

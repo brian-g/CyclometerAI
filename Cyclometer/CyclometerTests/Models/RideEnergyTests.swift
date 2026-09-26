@@ -22,7 +22,8 @@ struct RideEnergyTests {
         climbRate: Double = 0,
         segmentIndex: Int = 0,
         startingAt start: Date = start,
-        stepSeconds: Double = 1
+        stepSeconds: Double = 1,
+        heartRate: Int? = nil
     ) -> [TrackPointDTO] {
         (0...seconds).map { second in
             let elapsed = Double(second) * stepSeconds
@@ -35,8 +36,8 @@ struct RideEnergyTests {
                 horizontalAccuracyMeters: 5,
                 speedMPS: reportedSpeed ?? speed,
                 speedSource: .gps,
-                heartRateBPM: nil,
-                heartRateSource: .none,
+                heartRateBPM: heartRate,
+                heartRateSource: heartRate == nil ? .none : .bleHR,
                 cadenceRPM: nil,
                 powerWatts: nil,
                 segmentIndex: segmentIndex
@@ -44,14 +45,22 @@ struct RideEnergyTests {
         }
     }
 
-    private func energy(_ points: [TrackPointDTO], movingSeconds: TimeInterval? = nil, distance: Double = 0) -> Double {
+    /// Physics unless a test says otherwise: a rider with no age or sex has no heart-rate model.
+    private func estimate(
+        _ points: [TrackPointDTO], movingSeconds: TimeInterval? = nil, distance: Double = 0,
+        rider: RideEnergy.Rider = RideEnergy.Rider(kilograms: RideEnergyTests.rider)
+    ) -> RideEnergy.Estimate {
         let covered = zip(points, points.dropFirst())
             .filter { $0.segmentIndex == $1.segmentIndex }
             .reduce(0) { $0 + $1.1.timestamp.timeIntervalSince($1.0.timestamp) }
         return RideEnergy.activeKilocalories(
             trackPoints: points, movingSeconds: movingSeconds ?? covered,
-            distanceMeters: distance, riderKilograms: Self.rider
+            distanceMeters: distance, rider: rider
         )
+    }
+
+    private func energy(_ points: [TrackPointDTO], movingSeconds: TimeInterval? = nil, distance: Double = 0) -> Double {
+        estimate(points, movingSeconds: movingSeconds, distance: distance).kilocalories
     }
 
     /// kcal a MET value gives a 75 kg rider over `seconds`, resting metabolism excluded.
@@ -101,7 +110,7 @@ struct RideEnergyTests {
     func stationaryIsZero() {
         #expect(energy(track(seconds: 60, speed: 0)) == 0)
         #expect(energy([]) == 0)
-        #expect(RideEnergy.activeKilocalories(trackPoints: [], movingSeconds: 0, distanceMeters: 0, riderKilograms: Self.rider) == 0)
+        #expect(energy([], movingSeconds: 0) == 0)
     }
 
     @Test("time between two segments is a pause and is never counted")
@@ -174,8 +183,72 @@ struct RideEnergyTests {
     @Test("a ride with no track at all gets MET at its average speed")
     func noTrackUsesMET() {
         // Location denied, speed from a wheel sensor. 5.5 m/s is 12.3 mph: 8.0 MET.
-        let result = energy([], movingSeconds: 3_600, distance: 5.5 * 3_600)
-        #expect(abs(result - metKilocalories(8.0, seconds: 3_600)) < 1e-9)   // 525 kcal
+        let result = estimate([], movingSeconds: 3_600, distance: 5.5 * 3_600)
+        #expect(abs(result.kilocalories - metKilocalories(8.0, seconds: 3_600)) < 1e-9)   // 525 kcal
+        #expect(result.method == .met)
+    }
+
+    // MARK: - Heart rate (Keytel 2005)
+
+    private static let man = RideEnergy.Rider(kilograms: 80, age: 45, sex: .male)
+    private static let woman = RideEnergy.Rider(kilograms: 60, age: 35, sex: .female)
+
+    @Test("a man at 120 bpm: Keytel's 45.59 kJ/min gross is 10.90 kcal/min, 9.56 active")
+    func keytelMale() {
+        let ride = estimate(track(seconds: 900, speed: 5, heartRate: 120), movingSeconds: 900, rider: Self.man)
+        let gross = (-55.0969 + 0.6309 * 120 + 0.1988 * 80 + 0.2017 * 45) / 4.184
+        #expect(ride.method == .heartRate)
+        #expect(abs(ride.kilocalories - (gross - 80.0 / 60) * 15) < 1e-9)
+        #expect(abs(ride.kilocalories - 143.4) < 0.1)
+    }
+
+    @Test("a woman at 130 bpm: Keytel's 32.75 kJ/min gross is 7.83 kcal/min, 6.83 active")
+    func keytelFemale() {
+        let ride = estimate(track(seconds: 900, speed: 5, heartRate: 130), movingSeconds: 900, rider: Self.woman)
+        let gross = (-20.4022 + 0.4472 * 130 - 0.1263 * 60 + 0.074 * 35) / 4.184
+        #expect(ride.method == .heartRate)
+        #expect(abs(ride.kilocalories - (gross - 60.0 / 60) * 15) < 1e-9)
+    }
+
+    @Test("a resting heart rate is no activity, not negative activity")
+    func restingHeartRateClampsToZero() {
+        // 50 bpm: 1.4 kJ/min gross is below the man's own resting 1.33 kcal/min.
+        let ride = estimate(track(seconds: 300, speed: 5, heartRate: 50), movingSeconds: 300, rider: Self.man)
+        #expect(ride == RideEnergy.Estimate(kilocalories: 0, method: .heartRate))
+    }
+
+    /// 100 seconds of recording, the first `withHeartRate` points carrying 120 bpm.
+    private func partlyCovered(withHeartRate readings: Int) -> [TrackPointDTO] {
+        track(seconds: 99, speed: 5).enumerated().map { index, point in
+            var point = point
+            if index < readings { point.heartRateBPM = 120; point.heartRateSource = .bleHR }
+            return point
+        }
+    }
+
+    @Test("readings on half the ride are a strap: the heart-rate model; fewer are a Watch's samples: physics")
+    func coverageThreshold() {
+        #expect(estimate(partlyCovered(withHeartRate: 50), movingSeconds: 100, rider: Self.man).method == .heartRate)
+        #expect(estimate(partlyCovered(withHeartRate: 49), movingSeconds: 100, rider: Self.man).method == .physics)
+    }
+
+    @Test("a second without a reading is costed at the ride's mean, not at nothing")
+    func missingReadingsCostedAtMean() {
+        let partly = estimate(partlyCovered(withHeartRate: 60), movingSeconds: 100, rider: Self.man)
+        let fully = estimate(partlyCovered(withHeartRate: 100), movingSeconds: 100, rider: Self.man)
+        #expect(partly.method == .heartRate)
+        #expect(abs(partly.kilocalories - fully.kilocalories) < 1e-9)
+    }
+
+    @Test("without a sex or an age there is no equation to use, and the ride falls back to physics")
+    func missingSexOrAgeFallsBackToPhysics() {
+        let points = track(seconds: 300, speed: 5, heartRate: 140)
+        let physics = estimate(points, movingSeconds: 300)
+        #expect(physics.method == .physics)
+        for rider in [RideEnergy.Rider(kilograms: 75, age: 45, sex: nil),
+                      RideEnergy.Rider(kilograms: 75, age: nil, sex: .female)] {
+            #expect(estimate(points, movingSeconds: 300, rider: rider) == physics)
+        }
     }
 
     @Test("MET follows the Compendium's speed bands, and is nil at a standstill",

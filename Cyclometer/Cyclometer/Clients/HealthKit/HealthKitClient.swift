@@ -48,6 +48,9 @@ struct HealthKitClient {
     var fetchRestingHeartRate: @Sendable () async throws -> Int?
     /// For the 220 − age max estimate. `nil` when the rider has not set one.
     var fetchDateOfBirth:      @Sendable () async throws -> DateComponents?
+    /// For the heart-rate energy model's choice of equation (#276). `nil` for Not Set and
+    /// Other, which have none, and when the rider hasn't allowed the read.
+    var fetchBiologicalSex:    @Sendable () async throws -> RideEnergy.Sex?
     /// The rider's latest weight in kilograms, for the ride's energy estimate (#276). `nil`
     /// when Health has none or read access is denied, and then no energy is written.
     var fetchBodyMass:         @Sendable () async throws -> Double?
@@ -70,6 +73,7 @@ extension HealthKitClient: DependencyKey {
             requestAuthorization:  { try await requestAuthorization(store) },
             fetchRestingHeartRate: { try await fetchRestingHeartRate(store) },
             fetchDateOfBirth:      { fetchDateOfBirth(store) },
+            fetchBiologicalSex:    { fetchBiologicalSex(store) },
             fetchBodyMass:         { try await fetchBodyMass(store) },
             heartRateStream:       { makeHeartRateStream(store) },
             saveWorkout:           { try await saveWorkout($0, store) }
@@ -84,6 +88,7 @@ extension HealthKitClient: DependencyKey {
         requestAuthorization:  { },
         fetchRestingHeartRate: { nil },
         fetchDateOfBirth:      { nil },
+        fetchBiologicalSex:    { nil },
         fetchBodyMass:         { nil },
         heartRateStream:       { AsyncStream { $0.finish() } },
         saveWorkout:           { _ in }
@@ -161,6 +166,16 @@ extension HealthKitClient {
     /// does for the quantity reads above.
     private static func fetchDateOfBirth(_ store: HKHealthStore) -> DateComponents? {
         try? store.dateOfBirthComponents()
+    }
+
+    /// Throws for a denied read the same way `dateOfBirthComponents()` does, and collapses to
+    /// `nil` the same way.
+    private static func fetchBiologicalSex(_ store: HKHealthStore) -> RideEnergy.Sex? {
+        switch (try? store.biologicalSex())?.biologicalSex {
+        case .male:   .male
+        case .female: .female
+        default:      nil
+        }
     }
 
     /// A live-only feed: the predicate bounds every query to samples starting at or

@@ -26,7 +26,7 @@
 | 0.6.0 | 2026-09-17 | Brian | Review and update before the M9 milestone. |
 | 0.6.1 | 2026-09-22 | Brian / Claude | Route analysis (#252). §8.6 adds a derived terrain analysis (categorized climbs, max grade, FIETS, route character) and an OpenStreetMap surface lookup at import; §14 records Overpass as the app's first network call, sending a planned route's line and nothing else. `.fit` import stays out of scope (§15), and #252's estimated-power projection is deferred with power (Phase 3). |
 | 0.6.2 | 2026-09-22 | Brian / Claude | HKWorkout write (#250). §9.4 adds `distanceCycling` (write) for the workout's distance and `HKWorkoutType` (read) for skipping a ride another source already recorded. Energy is not written yet (#274). |
-| 0.6.3 | 2026-09-25 | Brian / Claude | Workout active energy (#276, supersedes #274). §9.4 adds `bodyMass` (read) and `activeEnergyBurned` (write): the ride's energy is estimated from the track (physics, with dropouts and implausible grades costed flat; Compendium MET only for a ride with no usable track) and the rider's Health body weight, with none written when Health has no weight. Bike weight is a 10 kg constant, not a setting. |
+| 0.6.3 | 2026-09-25 | Brian / Claude | Workout active energy (#276, supersedes #274). §9.4 adds `bodyMass` (read) and `activeEnergyBurned` (write): `biologicalSex` (read) too. The ride's energy comes from heart rate (Keytel 2005) when a strap covered half the ride and Health has weight, date of birth and a Male or Female sex; otherwise from the track (physics, with dropouts and implausible grades costed flat; Compendium MET only for a ride with no usable track). None is written when Health has no weight. Bike weight is a 10 kg constant, not a setting. |
 
 ---
 
@@ -887,7 +887,8 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 **HealthKit Entitlements Required:**
 - `HKQuantityTypeIdentifierHeartRate` (read)
 - `HKQuantityTypeIdentifierRestingHeartRate` (read)
-- `HKCharacteristicTypeIdentifierDateOfBirth` (read — for max HR estimation if not available)
+- `HKCharacteristicTypeIdentifierDateOfBirth` (read — for max HR estimation if not available, and the
+  rider's age in the workout's heart-rate energy estimate)
 - `HKWorkoutType` (write — MVP; the ride is written back at ride end per UX.md §S10, and the share
   authorization is requested alongside the reads at S01 so the rider answers one sheet, not two)
 - `HKQuantityTypeIdentifierDistanceCycling` (write — the workout's distance reaches it as a sample,
@@ -896,6 +897,8 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
   time, UX.md §S10)
 - `HKQuantityTypeIdentifierBodyMass` (read — the rider's weight for the workout's energy estimate; with
   none, no energy is written rather than an assumed weight)
+- `HKCharacteristicTypeIdentifierBiologicalSex` (read — with date of birth, selects the workout's
+  heart-rate energy equation; Not Set or Other falls back to the physics estimate)
 - `HKQuantityTypeIdentifierActiveEnergyBurned` (write — the workout's estimated energy, which is what
   earns Move ring credit, UX.md §S10)
 

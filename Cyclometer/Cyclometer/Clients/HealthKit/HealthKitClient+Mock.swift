@@ -10,6 +10,7 @@ extension HealthKitClient {
         restingHeartRate: Int? = nil,
         dateOfBirth: DateComponents? = nil,
         bodyMassKilograms: Double? = nil,
+        biologicalSex: RideEnergy.Sex? = nil,
         heartRateSamples: [Int] = [],
         onRequestAuthorization: @escaping @Sendable () async throws -> Void = { },
         onSaveWorkout: @escaping @Sendable (RideWorkout) async throws -> Void = { _ in }
@@ -18,6 +19,7 @@ extension HealthKitClient {
             requestAuthorization:  onRequestAuthorization,
             fetchRestingHeartRate: { restingHeartRate },
             fetchDateOfBirth:      { dateOfBirth },
+            fetchBiologicalSex:    { biologicalSex },
             fetchBodyMass:         { bodyMassKilograms },
             heartRateStream: {
                 AsyncStream { continuation in

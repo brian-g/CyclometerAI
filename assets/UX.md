@@ -159,8 +159,8 @@ This convention matches the frame naming in `Design.sketch`.
 - Location **When In Use** (required for GPS track)
 - Motion and Fitness (required for activity detection, *where the hardware exists* — see the
   availability note below)
-- HealthKit (read: HR, resting HR, max HR, date of birth, body weight — for the workout's energy
-  estimate — and workouts — only to avoid saving a ride twice; write: the `HKWorkout` recorded at ride
+- HealthKit (read: HR, resting HR, max HR, date of birth, body weight and biological sex — the last
+  three for the workout's energy estimate — and workouts — only to avoid saving a ride twice; write: the `HKWorkout` recorded at ride
   end per §S10, with its cycling distance and active energy — both are requested together so the rider
   answers one sheet)
 
@@ -817,7 +817,7 @@ An outdoor cycling `HKWorkout` is written to Apple Health automatically once the
 - **Consent** is the HealthKit share permission from S01, which the rider can revoke in iOS Settings → Health
 - **Duplicates:** if another source (e.g. an Apple Watch Outdoor Cycle) already recorded a cycling workout overlapping the ride, the write is skipped. A later rewrite of the same ride replaces its workout rather than adding one
 - **Carries** start, end, distance, route and estimated active energy. Pause intervals are not marked, so Fitness shows elapsed time
-- **Active energy** (#276) is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. Calories are not shown in the app
+- **Active energy** (#276) comes from heart rate when a strap recorded at least half the ride and Health has the rider's weight, date of birth and sex (Male or Female): the Keytel (2005) equation at the ride's mean heart rate, less resting metabolism. Otherwise it is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. Calories are not shown in the app
 
 ### Open UX Questions
 - [x] Zone breakdown chart type? Pie chart
