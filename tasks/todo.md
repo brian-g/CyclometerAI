@@ -25,6 +25,13 @@ Branch: `feat/238-healthkit-zones`
 - Mutation checks:
   - (1) Health term dropped → 9 new tests fail.
   - (2) Override and order guards dropped → the override test (×2), the edge test and 4 of the 6 shape cases fail. The count guard kept by that mutation covers the other 2; with it removed, the suite crashes on an out-of-range index.
+- **Code review fixes:**
+  - The workout stamp now happens only with an S12 override (`RiderProfile.hasZoneOverride`). Before, a failed, late or denied Health read stamped Karvonen over the rider's Health zones.
+  - Health's ceilings are no longer capped at the app's max. `tableMaxBPM` raises zone 5's top to meet them instead, so zones set by a rider older than the 220 − age formula assumes aren't dropped.
+  - A failed zone read is now logged, and the ceilings are logged `.private`.
+  - Full suite: 1634 passed, 0 failed.
+  - Mutation checks: always-stamp fails 2 tests, and an unraised top fails 1.
+- Declined review points: speed (4 numbers, 1 Hz), a HealthTerms refactor (separate issue if wanted), the duplicated rising check, and the #162 doc fix, which was in the plan.
 - Pending on device: S12 matches iOS Health → Heart Rate Zones; after a strap ride, Fitness shows those zones; with an S12 override set, Fitness shows the overridden ones.
 
 # #276 follow-up — heart-rate energy model (Keytel), physics as the fallback

@@ -16,7 +16,7 @@ struct RideWorkout: Sendable, Equatable {
     /// Move credit (#276). Nil when Health has no body mass: no energy rather than a guessed weight.
     var activeEnergyKilocalories: Double?
     /// Where zones 2–5 start, in bpm — the rider's zones, stamped on the workout so Fitness
-    /// breaks the ride down by them (#238). Nil when they are Health's own preferred zones,
-    /// which the workout takes by default.
+    /// breaks the ride down by them (#238). Nil unless the rider overrode Health in S12, so
+    /// the workout keeps Health's own preferred zones.
     var heartRateZoneStartsBPM: [Int]? = nil
 }

@@ -169,14 +169,22 @@ extension HealthKitClient {
     /// No read type to authorize: there is no zone `HKObjectType`, and a rider with no zones
     /// in Health gets `nil`, the same as one Health can't say anything about.
     private static func fetchHeartRateZoneCeilings(_ store: HKHealthStore) async throws -> [Int]? {
-        guard let configuration = try await store.preferredWorkoutZoneConfiguration(for: PermissionsClient.heartRateType)
-        else {
+        let preferred: HKWorkoutZoneConfiguration?
+        do {
+            preferred = try await store.preferredWorkoutZoneConfiguration(for: PermissionsClient.heartRateType)
+        } catch {
+            // Logged here because every caller's `try?` can't be: from the dashboard, a failed
+            // read looks exactly like a rider with no zones in Health.
+            logger.error("Health heart rate zones read failed; zones fall back to Karvonen: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+        guard let configuration = preferred else {
             logger.notice("no heart rate zones in Health; zones fall back to Karvonen")
             return nil
         }
         let ceilings = zoneCeilings(from: configuration)
         logger.notice(
-            "Health heart rate zones (\(String(describing: configuration.source), privacy: .public), \(configuration.zones.count) zones): ceilings \(ceilings.map { "\($0)" } ?? "unusable, so Karvonen", privacy: .public)"
+            "Health heart rate zones (\(String(describing: configuration.source), privacy: .public), \(configuration.zones.count) zones): ceilings \(ceilings.map { "\($0)" } ?? "unusable, so Karvonen", privacy: .private)"
         )
         return ceilings
     }
@@ -347,7 +355,7 @@ extension HealthKitClient {
         // on boundaries that don't rise. A boundary pinned in S12 before Health's zones moved
         // can leave the resolved ones out of order.
         guard zip(starts, starts.dropFirst()).allSatisfy({ $0 < $1 }) else {
-            logger.error("zones for ride \(rideId, privacy: .public) not stamped — boundaries \(starts, privacy: .public) don't rise")
+            logger.error("zones for ride \(rideId, privacy: .public) not stamped — boundaries \(starts, privacy: .private) don't rise")
             return
         }
         do {

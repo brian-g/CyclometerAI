@@ -238,16 +238,39 @@ extension RiderProfile {
     /// Health's preferred zones (#238), when they can stand in for Karvonen's. Not with a
     /// resting or max override: either says the rider disagrees with Health, so zones built
     /// from their own numbers apply. And only in a shape the table can hold — four ceilings,
-    /// each strictly above the one before and strictly inside resting…max, so every zone
-    /// keeps at least 1 bpm as #103 requires. Anything else falls back to Karvonen whole
-    /// rather than mixing the two.
+    /// each strictly above resting and the one before, so every zone keeps at least 1 bpm as
+    /// #103 requires. Anything else falls back to Karvonen whole rather than mixing the two.
+    ///
+    /// Not bounded by max: that is the app's 220 − age estimate or a default, and zones the
+    /// rider set in Health are better evidence of their real max than either. `tableMaxBPM`
+    /// rises to meet them instead.
     private func usableHealthZoneCeilings(_ ceilings: [Int]?, healthResting: Int?, healthMax: Int?) -> [Int]? {
         guard let ceilings, restingOverrideBPM == nil, maxOverrideBPM == nil,
               ceilings.count == HeartRateZone.allCases.count - 1
         else { return nil }
-        let edges = [resolvedRestingBPM(healthResting: healthResting)] + ceilings + [resolvedMaxBPM(healthMax: healthMax)]
+        let edges = [resolvedRestingBPM(healthResting: healthResting)] + ceilings
         guard zip(edges, edges.dropFirst()).allSatisfy({ $0 < $1 }) else { return nil }
         return ceilings
+    }
+
+    /// The top of the zone table: the resolved max, raised to at least zone 5's first bpm
+    /// while Health's zones are in effect, so zone 5 is never empty and zone 4's boundary can
+    /// still be stepped down from where Health put it.
+    private func tableMaxBPM(healthResting: Int?, healthMax: Int?, healthZoneCeilings: [Int]?) -> Int {
+        let max = resolvedMaxBPM(healthMax: healthMax)
+        guard let zone4Ceiling = usableHealthZoneCeilings(healthZoneCeilings, healthResting: healthResting,
+                                                          healthMax: healthMax)?.last
+        else { return max }
+        return Swift.max(max, zone4Ceiling + 1)
+    }
+
+    /// Whether the rider has disagreed with Health anywhere in S12 — a resting, max or zone
+    /// boundary override. Only then does the ride's workout carry the app's zones (#238):
+    /// without one, the app's zones are Health's or a fallback for their absence, and the
+    /// workout keeps whatever Health prefers.
+    var hasZoneOverride: Bool {
+        restingOverrideBPM != nil || maxOverrideBPM != nil
+            || HeartRateZone.allCases.contains { boundaryOverride(afterZone: $0) != nil }
     }
 
     /// The resolved ceilings of zones 1–4, in order — what the ride's workout carries (#238).
@@ -279,7 +302,7 @@ extension RiderProfile {
         }
         let upper = resolvedBoundaryBPM(afterZone: zone, healthResting: healthResting, healthMax: healthMax,
                                         healthZoneCeilings: healthZoneCeilings)
-            ?? resolvedMaxBPM(healthMax: healthMax)
+            ?? tableMaxBPM(healthResting: healthResting, healthMax: healthMax, healthZoneCeilings: healthZoneCeilings)
         // `max` only bites when a boundary pinned before a resting/max change no
         // longer clears its neighbour — `settingRestingOverride`/`settingMaxOverride`
         // don't know about these overrides, so nothing rejects that combination
@@ -320,7 +343,8 @@ extension RiderProfile {
         }
         let upperNeighbor: Int
         if zone == .zone4 {
-            upperNeighbor = resolvedMaxBPM(healthMax: healthMax)
+            upperNeighbor = tableMaxBPM(healthResting: healthResting, healthMax: healthMax,
+                                        healthZoneCeilings: healthZoneCeilings)
         } else {
             let next = HeartRateZone(rawValue: zone.rawValue + 1)!
             upperNeighbor = resolvedBoundaryBPM(afterZone: next, healthResting: healthResting, healthMax: healthMax,

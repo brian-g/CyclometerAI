@@ -2,7 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
-**Updated:** 2026-09-26 — Health's preferred HR zones (#238): §S12's zones, and with them the dashboard, S10 and S15, come from the rider's zones in Apple Health unless overridden in S12. §S10's workout carries the rider's zones when they differ from Health's.  
+**Updated:** 2026-09-26 — Health's preferred HR zones (#238): §S12's zones, and with them the dashboard, S10 and S15, come from the rider's zones in Apple Health unless overridden in S12. §S10's workout carries the app's zones only when the rider has an S12 override.  
 **Updated:** 2026-09-25 — Active energy (#276, supersedes #274): §S10's workout carries an energy estimate from the recorded track and the rider's Health body weight, so it earns Move credit; none without a body weight. §S01's HealthKit list adds the body-weight read and energy write.  
 **Updated:** 2026-09-25 — §S10 default ride name gains the start's place name from a reverse geocode (#283), swapped in without waiting and never over a name the rider typed; §S12 gains a Place Names toggle to turn it off.  
 **Updated:** 2026-09-23 — S10 built (#249): presented as a sheet when Finish is confirmed, after the ride's save lands; titled and closed by **Finish Ride** as in the Sketch frame; the HR zone pie is derived from the saved track against the rider's current zones; unnamed rides get a default name (route, else time of day + loop / out and back); the frame's Description, Bike and Sync To rows are not built.  
@@ -818,7 +818,7 @@ An outdoor cycling `HKWorkout` is written to Apple Health automatically once the
 
 - **Consent** is the HealthKit share permission from S01, which the rider can revoke in iOS Settings → Health
 - **Duplicates:** if another source (e.g. an Apple Watch Outdoor Cycle) already recorded a cycling workout overlapping the ride, the write is skipped. A later rewrite of the same ride replaces its workout rather than adding one
-- **Carries** start, end, distance, route, estimated active energy and, when they differ from Health's own, the rider's HR zones (#238). Pause intervals are not marked, so Fitness shows elapsed time
+- **Carries** start, end, distance, route, estimated active energy and, when the rider has overridden Health in S12, the app's HR zones (#238). Otherwise the workout keeps Health's preferred zones Pause intervals are not marked, so Fitness shows elapsed time
 - **Active energy** (#276) comes from heart rate when a strap recorded at least half the ride and Health has the rider's weight, date of birth and sex (Male or Female): the Keytel (2005) equation at the ride's mean heart rate, less resting metabolism. Otherwise it is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. Calories are not shown in the app
 
 ### Open UX Questions

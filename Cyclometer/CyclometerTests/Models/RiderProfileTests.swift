@@ -532,7 +532,6 @@ struct RiderProfileTests {
             [120, 160, 140, 175],       // not rising
             [120, 140, 140, 175],       // an empty zone
             [60, 140, 160, 175],        // at resting
-            [120, 140, 160, 190],       // at max
         ]
     )
     func unusableHealthZonesFallBack(_ ceilings: [Int]) {
@@ -541,11 +540,48 @@ struct RiderProfileTests {
         #expect(profile.resolvedZoneCeilings(healthZoneCeilings: ceilings) == profile.resolvedZoneCeilings())
     }
 
-    @Test("Health's zones are judged against the resting and max in effect")
-    func healthZonesJudgedAgainstResolvedEdges() {
-        // Fine against the default 60…190, but a Health max of 170 puts 175 past it.
-        #expect(RiderProfile().resolvedZoneCeilings(healthMax: 170, healthZoneCeilings: Self.healthCeilings)
-                == RiderProfile().resolvedZoneCeilings(healthMax: 170))
+    @Test("Health's zones are judged against the resting HR in effect")
+    func healthZonesJudgedAgainstResolvedResting() {
+        // Fine against the default resting 60, but not against a Health resting HR of 125.
+        #expect(RiderProfile().resolvedZoneCeilings(healthResting: 125, healthZoneCeilings: Self.healthCeilings)
+                == RiderProfile().resolvedZoneCeilings(healthResting: 125))
+    }
+
+    /// A 50-year-old's 220 − age estimate is 170, but zones they set in Health with zone 5
+    /// from 176 say their real max is higher. The zones stand; the table's top rises to them.
+    @Test("Health's zones above the app's max are kept, and zone 5's top rises to meet them")
+    func healthZonesAboveMaxAreKept() throws {
+        let profile = RiderProfile()
+
+        #expect(profile.resolvedZoneCeilings(healthMax: 170, healthZoneCeilings: Self.healthCeilings) == Self.healthCeilings)
+        #expect(profile.bounds(for: .zone4, healthMax: 170, healthZoneCeilings: Self.healthCeilings) == 161...175)
+        #expect(profile.bounds(for: .zone5, healthMax: 170, healthZoneCeilings: Self.healthCeilings) == 176...176)
+        #expect(profile.zone(forBPM: 176, healthMax: 170, healthZoneCeilings: Self.healthCeilings) == .zone5)
+        // Zone 4's boundary still steps down from where Health put it, and not up into zone 5.
+        #expect((try? profile.settingBoundaryOverride(
+            174, afterZone: .zone4, healthMax: 170, healthZoneCeilings: Self.healthCeilings
+        )) != nil)
+        #expect(throws: RiderProfile.ValidationError.boundaryOutOfOrder) {
+            try profile.settingBoundaryOverride(176, afterZone: .zone4, healthMax: 170, healthZoneCeilings: Self.healthCeilings)
+        }
+    }
+
+    @Test("No override means nothing to stamp on the workout")
+    func emptyProfileHasNoZoneOverride() {
+        #expect(!RiderProfile().hasZoneOverride)
+    }
+
+    @Test(
+        "Any resting, max or boundary override counts as disagreeing with Health",
+        arguments: [
+            RiderProfile(restingOverrideBPM: 50),
+            RiderProfile(maxOverrideBPM: 200),
+            RiderProfile(zone1CeilingOverrideBPM: 130),
+            RiderProfile(zone4CeilingOverrideBPM: 180),
+        ]
+    )
+    func anyOverrideIsAZoneOverride(_ profile: RiderProfile) {
+        #expect(profile.hasZoneOverride)
     }
 
     // MARK: - Persistence

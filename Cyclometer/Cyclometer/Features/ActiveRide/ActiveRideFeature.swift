@@ -530,14 +530,17 @@ struct ActiveRideFeature {
                 let rideId = state.rideId
                 let endedAt = date.now
                 let finalSummary = makeRideSummaryUpdate(from: state)
-                // The zones the dashboard classified by, for the workout (#238). Nil when they
-                // are Health's own preferred zones, which the workout takes without being told.
-                let zoneCeilings = state.riderProfile.resolvedZoneCeilings(
-                    healthResting: state.healthRestingBPM,
-                    healthMax: state.healthMaxBPM,
-                    healthZoneCeilings: state.healthZoneCeilingsBPM
-                )
-                let heartRateZoneStarts = zoneCeilings == state.healthZoneCeilingsBPM ? nil : zoneCeilings.map { $0 + 1 }
+                // The zones the dashboard classified by, for the workout (#238) — only when the
+                // rider overrode Health in S12. Otherwise nil, and the workout keeps Health's
+                // preferred zones: stamping Karvonen because a Health read failed, or hadn't
+                // landed yet, would put the app's guess over zones the rider set in Health.
+                let heartRateZoneStarts = state.riderProfile.hasZoneOverride
+                    ? state.riderProfile.resolvedZoneCeilings(
+                        healthResting: state.healthRestingBPM,
+                        healthMax: state.healthMaxBPM,
+                        healthZoneCeilings: state.healthZoneCeilingsBPM
+                    ).map { $0 + 1 }
+                    : nil
                 // Not routed through `.send(.trackRecorder(.stopRecording))`: AppFeature
                 // nils `activeRide` on this exact same action (AppFeature.swift:195), and
                 // a `.send`-effect resolves in a later action-processing cycle — by then

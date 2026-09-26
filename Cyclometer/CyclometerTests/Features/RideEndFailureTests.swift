@@ -37,26 +37,36 @@ struct RideEndFailureTests {
         documentsDirectory: URL,
         rideEndIntentClient: RideEndIntentClient,
         healthKitClient: HealthKitClient = .testValue,
+        profile: RiderProfile = RiderProfile(),
         date: DateGenerator = .constant(testDate)
     ) -> TestStoreOf<ActiveRideFeature> {
-        let store = TestStore(
-            initialState: ActiveRideFeature.State(recordingState: .idle)
-        ) {
-            ActiveRideFeature()
-        } withDependencies: {
-            $0.calendar = Calendar(identifier: .gregorian)
-            $0.continuousClock = TestClock()
-            $0.date = date
-            $0.uuid = .incrementing
-            $0.hapticsClient = .testValue
-            $0.audioClient = .testValue
-            $0.variaRadarClient = .testValue
-            $0.bleHRClient = .testValue
-            $0.locationClient = .testValue
-            $0.persistenceClient = persistenceClient
-            $0.gpxDocumentsDirectory = documentsDirectory
-            $0.rideEndIntentClient = rideEndIntentClient
-            $0.healthKitClient = healthKitClient
+        // Seeded in the scope the state is built in: `@SharedReader` resolves on construction.
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.riderProfile) var stored
+            $stored.withLock { $0 = profile }
+            return TestStore(
+                initialState: ActiveRideFeature.State(recordingState: .idle)
+            ) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.defaultFileStorage = storage
+                $0.calendar = Calendar(identifier: .gregorian)
+                $0.continuousClock = TestClock()
+                $0.date = date
+                $0.uuid = .incrementing
+                $0.hapticsClient = .testValue
+                $0.audioClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.locationClient = .testValue
+                $0.persistenceClient = persistenceClient
+                $0.gpxDocumentsDirectory = documentsDirectory
+                $0.rideEndIntentClient = rideEndIntentClient
+                $0.healthKitClient = healthKitClient
+            }
         }
         store.exhaustivity = .off
         return store
@@ -338,9 +348,9 @@ struct RideEndFailureTests {
             trackPoints: trackPoints,
             // The mock has no body mass, so no energy rather than a guessed weight (#276).
             activeEnergyKilocalories: nil,
-            // Nor any zones, so the workout is stamped with the Karvonen ones the dashboard
-            // used — 60/190 defaults, each zone starting a bpm above the last one's ceiling (#238).
-            heartRateZoneStartsBPM: [138, 151, 164, 177]
+            // No zones in Health either, but no S12 override, so no stamp: the app's Karvonen
+            // guess never goes over zones the rider may have in Health (#238).
+            heartRateZoneStartsBPM: nil
         ))
     }
 
@@ -367,6 +377,32 @@ struct RideEndFailureTests {
         #expect(store.state.healthZoneCeilingsBPM == [120, 140, 160, 175])
         let workout = try #require(written.value.first)
         #expect(workout.heartRateZoneStartsBPM == nil)
+    }
+
+    @Test("with a boundary overridden in S12, the workout carries the zones the dashboard used (#238)")
+    func overriddenZonesAreStamped() async throws {
+        let (client, _) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let written = LockIsolated<[RideWorkout]>([])
+        let reads = LockIsolated(0.0)
+        let movingClock = DateGenerator {
+            reads.withValue { $0 += 1; return Self.testDate.addingTimeInterval($0) }
+        }
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory(),
+            healthKitClient: .mock(heartRateZoneCeilings: [120, 140, 160, 175], onSaveWorkout: { workout in
+                written.withValue { $0.append(workout) }
+            }),
+            profile: RiderProfile(zone1CeilingOverrideBPM: 130),
+            date: movingClock
+        )
+        _ = await Self.runRideToEnd(store, speedMPS: 5) { _ in !written.value.isEmpty }
+
+        #expect(store.state.healthZoneCeilingsBPM == [120, 140, 160, 175])
+        let workout = try #require(written.value.first)
+        // The pinned 130, then Health's 140/160/175 — each zone starting a bpm above the ceiling below it.
+        #expect(workout.heartRateZoneStartsBPM == [131, 141, 161, 176])
     }
 
     @Test("with body mass in Health, the workout carries the ride's estimated active energy")

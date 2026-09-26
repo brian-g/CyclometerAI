@@ -439,7 +439,8 @@ rider's own zones from Health, read into the resolvers as a `healthZoneCeilings:
 bpm of zones 1–4, from `HealthKitClient.zoneCeilings(from:)`). A boundary then resolves
 `override ?? health ?? karvonenDefault`. The Health term is dropped when a resting or max override is set,
 because the rider has said they disagree with Health. It is also dropped unless it is four ceilings rising
-strictly inside resting…max, so the #103 guarantees hold. Nothing new is stored.
+strictly above resting, so the #103 guarantees hold. They are not capped at the resolved max, which is only an
+estimate; zone 5's top rises to at least its first bpm instead. Nothing new is stored.
 
 **Resolution happens at read time** — `override ?? healthKit ?? default` — so zone boundaries follow a
 Health value the moment it changes, with no local copy to re-sync. The HealthKit terms are
