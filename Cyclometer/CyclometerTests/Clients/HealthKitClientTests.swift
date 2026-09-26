@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import HealthKit
 import Testing
 @testable import Cyclometer
 
@@ -11,6 +12,7 @@ struct HealthKitClientTests {
         let client = HealthKitClient.testValue
         #expect(try await client.fetchRestingHeartRate() == nil)
         #expect(try await client.fetchDateOfBirth() == nil)
+        #expect(try await client.fetchHeartRateZoneCeilings() == nil)
 
         var samples: [Int] = []
         for await bpm in client.heartRateStream() { samples.append(bpm) }
@@ -23,11 +25,13 @@ struct HealthKitClientTests {
         let client = HealthKitClient.mock(
             restingHeartRate: 58,
             dateOfBirth: dob,
+            heartRateZoneCeilings: [120, 140, 160, 175],
             heartRateSamples: [90, 92, 95]
         )
 
         #expect(try await client.fetchRestingHeartRate() == 58)
         #expect(try await client.fetchDateOfBirth() == dob)
+        #expect(try await client.fetchHeartRateZoneCeilings() == [120, 140, 160, 175])
 
         var samples: [Int] = []
         for await bpm in client.heartRateStream() { samples.append(bpm) }
@@ -77,5 +81,35 @@ struct HealthKitClientTests {
         }
         #expect(locations[0].speed == 6.5)
         #expect(locations[1].speed == -1)
+    }
+
+    // MARK: - Health's preferred zones (#238)
+
+    private static func configuration(startingAt starts: [Double]) throws -> HKWorkoutZoneConfiguration {
+        try HKWorkoutZoneConfiguration(
+            quantityType: HKQuantityType(.heartRate),
+            zoneBoundaries: starts.map { HKQuantity(unit: .count().unitDivided(by: .minute()), doubleValue: $0) }
+        )
+    }
+
+    /// A zone runs `[minimum, maximum)`, so the one below a zone starting at 121 bpm tops out at 120.
+    @Test("each zone's ceiling is one bpm below where the next zone starts")
+    func zoneCeilingsAreOneBelowTheNextStart() throws {
+        let configuration = try Self.configuration(startingAt: [121, 141, 161, 176])
+
+        #expect(HealthKitClient.zoneCeilings(from: configuration) == [120, 140, 160, 175])
+    }
+
+    /// 120.5 isn't a whole bpm: 120 is still below it, in the zone underneath, and 121 is above.
+    @Test("a fractional start rounds up before the ceiling is taken")
+    func fractionalStartRoundsUp() throws {
+        let configuration = try Self.configuration(startingAt: [120.5, 140, 160, 175])
+
+        #expect(HealthKitClient.zoneCeilings(from: configuration)?.first == 120)
+    }
+
+    @Test("anything but five zones has no ceilings", arguments: [[120.0, 140, 160], [120.0, 140, 160, 175, 185]])
+    func otherZoneCountsHaveNoCeilings(_ starts: [Double]) throws {
+        #expect(HealthKitClient.zoneCeilings(from: try Self.configuration(startingAt: starts)) == nil)
     }
 }

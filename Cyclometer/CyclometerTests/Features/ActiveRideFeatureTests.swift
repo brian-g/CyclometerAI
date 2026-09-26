@@ -2005,6 +2005,23 @@ struct ActiveRideFeatureHeartRateTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    @Test("Health's preferred zones classify the dashboard's zone (#238)")
+    func healthZonesClassifyTheDashboardZone() async {
+        let store = makeStore(healthKitClient: .mock(heartRateZoneCeilings: [120, 140, 160, 175]))
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.healthProfileFetched) {
+            $0.healthZoneCeilingsBPM = [120, 140, 160, 175]
+        }
+        // Zone 1 under the 60/190 Karvonen defaults (its ceiling is 137); zone 2 under Health's.
+        await store.send(.heartRateUpdated(130)) {
+            $0.heartRateBPM = 130
+            $0.hrZone = 2
+        }
+        await store.skipInFlightEffects(strict: false)
+    }
+
     // MARK: - BLE → HealthKit fallback (#161)
 
     @Test("A live HealthKit BPM reaches the dashboard when nothing is paired")

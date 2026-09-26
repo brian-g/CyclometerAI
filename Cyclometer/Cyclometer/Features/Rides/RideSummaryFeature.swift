@@ -35,6 +35,8 @@ struct RideSummaryFeature {
         /// `RideDetailFeature`'s Health terms. Nil until fetched, and nil when Health has nothing.
         var healthRestingBPM: Int?
         var healthMaxBPM: Int?
+        /// Health's preferred zones as ceilings (#238), the middle term of every zone boundary.
+        var healthZoneCeilingsBPM: [Int]?
 
         let rideId: UUID
 
@@ -77,7 +79,8 @@ struct RideSummaryFeature {
         var heartRateZoneSeconds: [Int] {
             guard !heartRateSecondsByBPM.isEmpty else { return [] }
             let bounds = HeartRateZone.allCases.map {
-                riderProfile.bounds(for: $0, healthResting: healthRestingBPM, healthMax: healthMaxBPM)
+                riderProfile.bounds(for: $0, healthResting: healthRestingBPM, healthMax: healthMaxBPM,
+                                    healthZoneCeilings: healthZoneCeilingsBPM)
             }
             return RideDetailSeries.zoneSeconds(heartRateSecondsByBPM, zoneBounds: bounds)
         }
@@ -107,7 +110,7 @@ struct RideSummaryFeature {
         case task
         case loaded(Loaded)
         case finalizeTimedOut
-        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?)
+        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?, zoneCeilingsBPM: [Int]?)
         /// The default name with the start's place name in it, once the geocoder has answered.
         case placedTitleResolved(String)
         case titleChanged(String)
@@ -172,8 +175,9 @@ struct RideSummaryFeature {
                     .run { [healthKitClient, date] send in
                         async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
                         async let dob = try? healthKitClient.fetchDateOfBirth()
+                        async let zoneCeilings = try? healthKitClient.fetchHeartRateZoneCeilings()
                         let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
-                        await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM))
+                        await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM, zoneCeilingsBPM: await zoneCeilings))
                     }
                 )
 
@@ -197,9 +201,10 @@ struct RideSummaryFeature {
                 state.load = .unavailable
                 return .none
 
-            case let .healthProfileFetched(restingBPM, maxBPM):
+            case let .healthProfileFetched(restingBPM, maxBPM, zoneCeilingsBPM):
                 state.healthRestingBPM = restingBPM
                 state.healthMaxBPM = maxBPM
+                state.healthZoneCeilingsBPM = zoneCeilingsBPM
                 return .none
 
             case .placedTitleResolved(let placedTitle):
