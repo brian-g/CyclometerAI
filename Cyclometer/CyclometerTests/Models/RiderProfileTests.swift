@@ -468,6 +468,86 @@ struct RiderProfileTests {
         #expect(try JSONDecoder().decode(RiderProfile.self, from: data) == profile)
     }
 
+    // MARK: - Health's preferred zones (#238)
+
+    /// Inside the default 60…190, and nowhere near Karvonen's 137/150/163/176.
+    static let healthCeilings = [120, 140, 160, 175]
+
+    @Test("Health's zones replace Karvonen's when the rider has no override")
+    func healthZonesReplaceKarvonen() {
+        let profile = RiderProfile()
+
+        #expect(profile.resolvedZoneCeilings(healthZoneCeilings: Self.healthCeilings) == Self.healthCeilings)
+        #expect(profile.bounds(for: .zone1, healthZoneCeilings: Self.healthCeilings) == 60...120)
+        #expect(profile.bounds(for: .zone2, healthZoneCeilings: Self.healthCeilings) == 121...140)
+        #expect(profile.bounds(for: .zone5, healthZoneCeilings: Self.healthCeilings) == 176...190)
+    }
+
+    @Test("The live zone classifies against Health's zones, a ceiling inclusive")
+    func liveZoneFollowsHealthZones() {
+        let profile = RiderProfile()
+
+        #expect(profile.zone(forBPM: 120, healthZoneCeilings: Self.healthCeilings) == .zone1)
+        #expect(profile.zone(forBPM: 121, healthZoneCeilings: Self.healthCeilings) == .zone2)
+        #expect(profile.zone(forBPM: 175, healthZoneCeilings: Self.healthCeilings) == .zone4)
+        #expect(profile.zone(forBPM: 176, healthZoneCeilings: Self.healthCeilings) == .zone5)
+    }
+
+    @Test("A boundary pinned in S12 beats Health's; the others stay Health's")
+    func pinnedBoundaryBeatsHealth() throws {
+        let profile = try RiderProfile().settingBoundaryOverride(
+            130, afterZone: .zone1, healthZoneCeilings: Self.healthCeilings
+        )
+
+        #expect(profile.resolvedZoneCeilings(healthZoneCeilings: Self.healthCeilings) == [130, 140, 160, 175])
+    }
+
+    /// A resting or max override says the rider disagrees with Health, whose zones are built on
+    /// its own idea of both, so zones from the rider's numbers apply instead.
+    @Test("A resting or max override sets Health's zones aside for Karvonen's",
+          arguments: [RiderProfile(restingOverrideBPM: 50), RiderProfile(maxOverrideBPM: 200)])
+    func restingOrMaxOverrideSetsHealthAside(_ profile: RiderProfile) {
+        #expect(profile.resolvedZoneCeilings(healthZoneCeilings: Self.healthCeilings)
+                == profile.resolvedZoneCeilings())
+    }
+
+    @Test("Stepping a boundary is clamped by Health's neighbours, not Karvonen's")
+    func steppingIsClampedByHealthNeighbours() {
+        // Karvonen's zone 1/2 edge is 137, so 139 would be fine there; Health's is 140.
+        #expect(throws: RiderProfile.ValidationError.boundaryOutOfOrder) {
+            try RiderProfile().settingBoundaryOverride(140, afterZone: .zone1, healthZoneCeilings: Self.healthCeilings)
+        }
+        #expect((try? RiderProfile().settingBoundaryOverride(
+            139, afterZone: .zone1, healthZoneCeilings: Self.healthCeilings
+        )) != nil)
+    }
+
+    /// Mixing a partly usable set with Karvonen could put the boundaries out of order, so
+    /// anything the table can't hold whole is ignored whole.
+    @Test(
+        "Health zones the table can't hold fall back to Karvonen",
+        arguments: [
+            [120, 140, 160],            // four zones, not five
+            [120, 140, 160, 175, 185],  // six
+            [120, 160, 140, 175],       // not rising
+            [120, 140, 140, 175],       // an empty zone
+            [60, 140, 160, 175],        // at resting
+            [120, 140, 160, 190],       // at max
+        ]
+    )
+    func unusableHealthZonesFallBack(_ ceilings: [Int]) {
+        let profile = RiderProfile()
+
+        #expect(profile.resolvedZoneCeilings(healthZoneCeilings: ceilings) == profile.resolvedZoneCeilings())
+    }
+
+    @Test("Health's zones are judged against the resting and max in effect")
+    func healthZonesJudgedAgainstResolvedEdges() {
+        // Fine against the default 60…190, but a Health max of 170 puts 175 past it.
+        #expect(RiderProfile().resolvedZoneCeilings(healthMax: 170, healthZoneCeilings: Self.healthCeilings)
+                == RiderProfile().resolvedZoneCeilings(healthMax: 170))
+    }
+
     // MARK: - Persistence
 
     /// Storage is quarantined per test with `FileStorage.inMemory`, the idiom

@@ -434,6 +434,13 @@ by construction" guarantee no longer applies on its own (see §8). `RiderProfile
 clears all four at once — the S12 "Reset HR Zones to Defaults" row — without touching
 `restingOverrideBPM`/`maxOverrideBPM`, which have no S12 entry point.
 
+**#238 — Health's preferred zones.** iOS 27's `preferredWorkoutZoneConfiguration(for: .heartRate)` gives the
+rider's own zones from Health, read into the resolvers as a `healthZoneCeilings: [Int]?` term (the inclusive top
+bpm of zones 1–4, from `HealthKitClient.zoneCeilings(from:)`). A boundary then resolves
+`override ?? health ?? karvonenDefault`. The Health term is dropped when a resting or max override is set,
+because the rider has said they disagree with Health. It is also dropped unless it is four ceilings rising
+strictly inside resting…max, so the #103 guarantees hold. Nothing new is stored.
+
 **Resolution happens at read time** — `override ?? healthKit ?? default` — so zone boundaries follow a
 Health value the moment it changes, with no local copy to re-sync. The HealthKit terms are
 defaulted-`nil` parameters, so M5 supplies them without the resolver changing shape:

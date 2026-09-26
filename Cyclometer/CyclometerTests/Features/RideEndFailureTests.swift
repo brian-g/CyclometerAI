@@ -337,8 +337,36 @@ struct RideEndFailureTests {
             distanceMeters: ride.distanceMeters,
             trackPoints: trackPoints,
             // The mock has no body mass, so no energy rather than a guessed weight (#276).
-            activeEnergyKilocalories: nil
+            activeEnergyKilocalories: nil,
+            // Nor any zones, so the workout is stamped with the Karvonen ones the dashboard
+            // used — 60/190 defaults, each zone starting a bpm above the last one's ceiling (#238).
+            heartRateZoneStartsBPM: [138, 151, 164, 177]
         ))
+    }
+
+    @Test("with Health's own preferred zones in effect, the workout isn't stamped with zones (#238)")
+    func healthZonesAreNotStamped() async throws {
+        let (client, _) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let written = LockIsolated<[RideWorkout]>([])
+        let reads = LockIsolated(0.0)
+        let movingClock = DateGenerator {
+            reads.withValue { $0 += 1; return Self.testDate.addingTimeInterval($0) }
+        }
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory(),
+            healthKitClient: .mock(heartRateZoneCeilings: [120, 140, 160, 175], onSaveWorkout: { workout in
+                written.withValue { $0.append(workout) }
+            }),
+            date: movingClock
+        )
+        _ = await Self.runRideToEnd(store, speedMPS: 5) { _ in !written.value.isEmpty }
+
+        // The ride did see Health's zones — otherwise nil here would prove nothing.
+        #expect(store.state.healthZoneCeilingsBPM == [120, 140, 160, 175])
+        let workout = try #require(written.value.first)
+        #expect(workout.heartRateZoneStartsBPM == nil)
     }
 
     @Test("with body mass in Health, the workout carries the ride's estimated active energy")

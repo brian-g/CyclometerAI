@@ -31,6 +31,7 @@ struct RideSummaryFeatureTests {
     private func makeStore(
         persistenceClient: PersistenceClient,
         geocodingClient: GeocodingClient = .testValue,
+        healthKitClient: HealthKitClient = .testValue,
         clock: TestClock<Duration> = TestClock()
     ) -> TestStoreOf<RideSummaryFeature> {
         let storage = FileStorage.inMemory
@@ -41,7 +42,7 @@ struct RideSummaryFeatureTests {
                 RideSummaryFeature()
             } withDependencies: {
                 $0.persistenceClient = persistenceClient
-                $0.healthKitClient = .testValue
+                $0.healthKitClient = healthKitClient
                 $0.geocodingClient = geocodingClient
                 $0.continuousClock = clock
                 $0.calendar = Self.calendar
@@ -141,6 +142,23 @@ struct RideSummaryFeatureTests {
         // Every recorded second with a reading lands in exactly one zone.
         #expect(store.state.heartRateZoneSeconds.count == HeartRateZone.allCases.count)
         #expect(store.state.heartRateZoneSeconds.reduce(0, +) == points.count)
+    }
+
+    @Test("the zone pie buckets by Health's preferred zones (#238)")
+    func zonesFollowHealth() async {
+        let store = makeStore(
+            persistenceClient: .mock(
+                trackPoints: [Self.summary.id: Self.track(count: 10, heartRate: { _ in 130 })],
+                rideStats: [Self.summary.id: Self.stats],
+                rides: [Self.summary]
+            ),
+            healthKitClient: .mock(heartRateZoneCeilings: [120, 140, 160, 175])
+        )
+
+        await load(store)
+
+        // Zone 1 under the 60/190 Karvonen defaults (its ceiling is 137); zone 2 under Health's.
+        #expect(store.state.heartRateZoneSeconds == [0, 10, 0, 0, 0])
     }
 
     @Test("with no HR or cadence sensor, the zones are empty and cadence is nil — never zeros")

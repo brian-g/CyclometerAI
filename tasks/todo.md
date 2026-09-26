@@ -1,3 +1,32 @@
+# #238 — Health's preferred HR zones as a zone source
+
+Plan: /Users/brian/.claude/plans/elegant-drifting-harp.md
+Branch: `feat/238-healthkit-zones`
+
+- [x] 0. Spike: N boundaries → N+1 zones (index 0-based, first min / last max nil), `[min, max)`; non-increasing input raises an ObjC exception (crash, not a throw); sim `preferred` → nil
+- [x] 1. `HealthKitClient.fetchHeartRateZoneCeilings` + pure `zoneCeilings(from:)` + mock
+- [x] 2. `RiderProfile`: `healthZoneCeilings` term — `boundaryOverride ?? (no resting/max override ? health : nil) ?? karvonen`, validity check
+- [x] 3. Thread ceilings through ActiveRide, Settings, RideSummary, RideDetail
+- [x] 4. `RideWorkout.heartRateZoneBoundariesBPM` + `setCustomZoneConfiguration` in `saveWorkout`
+- [x] 5. Tests (RiderProfile, HealthKitClient, 4 features, RideEndFailure) + mutation check
+- [ ] 6. Docs: PRD §8.5/§9.4 + 0.6.5, UX §S12, DataModel §3.5
+- [x] 6. Docs: PRD §8.5/§9.4/OQ9 + 0.6.6 (0.6.5 was taken by #276), UX §S10/§S12, DataModel §3.5
+- [ ] 7. Housekeeping: new issues (live session, HeroNumber digits), #238 comment, close #167, PR
+
+## Review
+
+- Spike findings the design rests on: `HKWorkoutZoneConfiguration(zoneBoundaries:)` takes the N inner boundaries → N+1 zones, each `[min, max)`. A non-rising list raises an Objective-C exception (a crash, not a Swift throw), so `stampZones` checks order first. On the sim, `preferredWorkoutZoneConfiguration` returns nil.
+- Ceiling = `ceil(next zone's minimum) − 1`, matching Karvonen's `lowerBound(next) − 1`. The workout stamp adds the 1 back.
+- The fallback is logged once, at fetch (source, zone count, ceilings). It is not logged in `RiderProfile`, which runs at 1 Hz on the dashboard. This departs from the plan.
+- The stamp is nil when the resolved ceilings equal Health's, and otherwise holds the resolved ones. That includes Karvonen when Health has no zones, so the existing #250 workout test now expects `[138, 151, 164, 177]`.
+- Not unit-testable: `stampZones` (live HealthKit). A stamp failure is `try?` + a log, the same as the route.
+- Harness: `-only-testing:CyclometerTests/ActiveRideFeatureTests` matches nothing, because the file's suites are `ActiveRideFeature<Area>Tests`. The full run confirmed the new dashboard test by name.
+- Full `CyclometerTests`: ** TEST SUCCEEDED **, 1627 passed, 0 failed.
+- Mutation checks:
+  - (1) Health term dropped → 9 new tests fail.
+  - (2) Override and order guards dropped → the override test (×2), the edge test and 4 of the 6 shape cases fail. The count guard kept by that mutation covers the other 2; with it removed, the suite crashes on an out-of-range index.
+- Pending on device: S12 matches iOS Health → Heart Rate Zones; after a strap ride, Fitness shows those zones; with an S12 override set, Fitness shows the overridden ones.
+
 # #276 follow-up — heart-rate energy model (Keytel), physics as the fallback
 
 Plan: /Users/brian/.claude/plans/twinkling-brewing-volcano.md

@@ -157,6 +157,18 @@ struct RideDetailFeatureTests {
         })
     }
 
+    @Test("the HR zone bands are Health's preferred zones when it has them (#238)")
+    func zoneBoundsFollowHealthZones() async {
+        let store = makeStore(
+            persistenceClient: .mock(rideStats: [Self.summary.id: Self.stats]),
+            healthKitClient: .mock(heartRateZoneCeilings: [120, 140, 160, 175])
+        )
+
+        await load(store)
+
+        #expect(store.state.heartRateZoneBounds == [60...120, 121...140, 141...160, 161...175, 176...190])
+    }
+
     @Test("a stats read that fails leaves stats nil and the rest of the screen loaded")
     func failedStatsReadLeavesStatsNil() async {
         let points = Self.track()
