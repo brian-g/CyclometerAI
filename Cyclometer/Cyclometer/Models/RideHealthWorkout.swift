@@ -12,13 +12,15 @@ enum RideHealthWorkout {
     ///
     /// The one way workouts get written, whichever way a ride ended, like
     /// `RideMapThumbnail.backfill`. It runs right after a Finish's `finalizeRide`, where the
-    /// newest ride is the one just finished. It runs again at launch and after AppFeature's
-    /// close-outs, which catches a ride whose finalize failed (#188), an app killed before the
-    /// write, and any write that threw. A ride's workout is then late rather than never.
+    /// newest ride is the one just finished. It runs again at launch (unless the launch resumes
+    /// a ride) and after AppFeature's close-outs, which catches a ride whose finalize failed
+    /// (#188), an app killed before the write, and any write that threw. A ride's workout is
+    /// then late rather than never.
     ///
-    /// The first failed write ends the batch: a revoked permission or a locked store fails
-    /// every ride the same way. The ride stays owed and is tried again next time, so a rider
-    /// who allows Health later still gets the rides recorded before they did.
+    /// Without Workouts share access it does nothing, not even the reads: every write would
+    /// fail. The rides stay owed, so a rider who allows Health later still gets the rides
+    /// recorded before they did. Otherwise the first failed write ends the batch, since a
+    /// locked store fails every ride the same way.
     ///
     /// One at a time: a Finish can land while the launch backfill is still writing, and both
     /// would write the same rides. The later one waits, then reads the owed list afresh.
@@ -30,6 +32,11 @@ enum RideHealthWorkout {
 
     private static func backfillNow() async -> Int {
         @Dependency(\.persistenceClient) var persistenceClient
+        @Dependency(\.healthKitClient) var healthKitClient
+        guard healthKitClient.isWorkoutSharingAllowed() else {
+            logger.notice("workout backfill skipped: Workouts share not allowed in Health — owed rides wait")
+            return 0
+        }
         let owed: [OwedHealthWorkout]
         do {
             owed = try await persistenceClient.fetchRidesOwedHealthWorkout()
@@ -63,7 +70,7 @@ enum RideHealthWorkout {
         // hold back every ride queued behind it. A device clock set back mid-ride produces it.
         guard ride.endedAt > ride.startedAt else {
             logger.error("workout for ride \(ride.rideId, privacy: .public) never written: it ends before it starts (device clock changed mid-ride?)")
-            try await persistenceClient.settleRideHealthWorkout(ride.rideId)
+            try await settle(ride.rideId)
             return
         }
 
@@ -100,6 +107,18 @@ enum RideHealthWorkout {
             trackPoints: trackPoints,
             activeEnergyKilocalories: energy?.kilocalories
         ))
-        try await persistenceClient.settleRideHealthWorkout(ride.rideId)
+        try await settle(ride.rideId)
+    }
+
+    /// A ride deleted since the owed list was read has nothing left to owe, so its missing row
+    /// is not a failure that should end the batch. Removing its workout from Health is the
+    /// deletion's decision, not this one's (#277).
+    private static func settle(_ rideId: UUID) async throws {
+        @Dependency(\.persistenceClient) var persistenceClient
+        do {
+            try await persistenceClient.settleRideHealthWorkout(rideId)
+        } catch PersistenceError.rideNotFound {
+            logger.notice("ride \(rideId, privacy: .public) was deleted during its workout write")
+        }
     }
 }

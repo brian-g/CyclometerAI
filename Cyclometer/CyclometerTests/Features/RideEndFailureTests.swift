@@ -84,8 +84,6 @@ struct RideEndFailureTests {
         await store.finish(timeout: effectDrainTimeout)
     }
 
-    /// Stands in for MapKit's tiles (#177): counts renders and answers each appearance with
-    /// its own bytes, so a test can tell the two stored images apart.
     /// One second later on every read. With a constant clock a ride starts and ends at the same
     /// instant, and a zero-length ride is settled without a workout (#277).
     private static func movingClock() -> DateGenerator {
@@ -124,6 +122,8 @@ struct RideEndFailureTests {
         await appStore.finish(timeout: effectDrainTimeout)
     }
 
+    /// Stands in for MapKit's tiles (#177): counts renders and answers each appearance with
+    /// its own bytes, so a test can tell the two stored images apart.
     private static func countingSnapshots(_ renders: LockIsolated<Int>) -> MapSnapshotClient {
         MapSnapshotClient { _, _, _, style in
             renders.withValue { $0 += 1 }
@@ -467,7 +467,7 @@ struct RideEndFailureTests {
 
         let store = Self.makeRideStore(
             persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
-            // What a revoked permission looks like from here.
+            // Sharing allowed, and the write throws anyway: a locked store, say.
             healthKitClient: .mock(onSaveWorkout: { _ in
                 attempts.withValue { $0 += 1 }
                 throw WriteFailed()

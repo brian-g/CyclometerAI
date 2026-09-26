@@ -104,7 +104,7 @@ struct RideHealthWorkoutTests {
 
         let settled = await withDependencies {
             $0.persistenceClient = Self.persistence(owed)
-            // What a revoked permission looks like from here: every ride would fail the same way.
+            // Sharing allowed, and the write throws anyway: a locked store fails every ride alike.
             $0.healthKitClient = .mock(onSaveWorkout: { workout in
                 attempts.withValue { $0.append(workout.rideId) }
                 throw WriteFailed()
@@ -116,6 +116,59 @@ struct RideHealthWorkoutTests {
         #expect(settled == 0)
         #expect(attempts.value == [first.rideId])
         #expect(owed.value == [first, second])
+    }
+
+    @Test("without Workouts share access the backfill reads nothing and writes nothing, and the rides stay owed")
+    func noShareAccessSkipsEverything() async {
+        let ride = Self.owed()
+        let owed = LockIsolated([ride])
+        let reads = LockIsolated(0)
+        let attempts = LockIsolated(0)
+
+        let settled = await withDependencies {
+            var client = Self.persistence(owed)
+            client.fetchRidesOwedHealthWorkout = {
+                reads.withValue { $0 += 1 }
+                return owed.value
+            }
+            $0.persistenceClient = client
+            $0.healthKitClient = .mock(
+                onSaveWorkout: { _ in attempts.withValue { $0 += 1 } },
+                isWorkoutSharingAllowed: false
+            )
+        } operation: {
+            await RideHealthWorkout.backfill()
+        }
+
+        #expect(settled == 0)
+        #expect(reads.value == 0)
+        #expect(attempts.value == 0)
+        #expect(owed.value == [ride])
+    }
+
+    @Test("a ride deleted while its workout was being written doesn't end the batch")
+    func deletedRideDoesNotEndBatch() async {
+        let deleted = Self.owed(), next = Self.owed()
+        let owed = LockIsolated([deleted, next])
+        let written = LockIsolated<[UUID]>([])
+
+        let settled = await withDependencies {
+            var client = Self.persistence(owed)
+            let settle = client.settleRideHealthWorkout
+            // The live actor's answer for a row that's gone.
+            client.settleRideHealthWorkout = { id in
+                guard id != deleted.rideId else { throw PersistenceError.rideNotFound }
+                try await settle(id)
+            }
+            $0.persistenceClient = client
+            $0.healthKitClient = .mock(onSaveWorkout: { workout in written.withValue { $0.append(workout.rideId) } })
+        } operation: {
+            await RideHealthWorkout.backfill()
+        }
+
+        #expect(written.value == [deleted.rideId, next.rideId])
+        #expect(settled == 2)
+        #expect(owed.value == [deleted])
     }
 
     /// `saveWorkout` returns normally when it skips a ride another source already recorded

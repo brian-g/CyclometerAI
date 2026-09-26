@@ -600,7 +600,7 @@ struct ActiveRideFeature {
                         // After finalize, so only a durably ended ride reaches Apple Health
                         // (UX.md §S10, #250): the finalize is what makes it owed a workout.
                         // Nothing waits on it: a failed write never costs the ride, and is
-                        // retried at the next launch (#277).
+                        // retried later (#277).
                         await RideHealthWorkout.backfill()
                         // The map thumbnail (#177) is captured by `RidesFeature.rideFinished`,
                         // which waits for the finalize above to land and refreshes the list after

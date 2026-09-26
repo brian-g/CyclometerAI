@@ -364,8 +364,9 @@ struct AppFeatureTests {
 
     /// #175 review's orphan: a resumable ride found after the rider already started a new
     /// one is closed out rather than resumed. It never reached a Finish, so it gets its
-    /// thumbnail and its Apple Health workout (#277) here.
-    @Test("an orphaned ride closed out at launch gets its map thumbnail and its Apple Health workout")
+    /// thumbnail here. Not an Apple Health workout (#277): it ends at the relaunch, so one
+    /// would span every hour since the kill. Other rides still owed one are written.
+    @Test("an orphaned ride closed out at launch gets its map thumbnail, and is settled without a workout")
     func orphanedRideCloseOutCapturesThumbnail() async {
         let orphan = RideSummaryUpdate(
             rideId: UUID(), recordingState: .active,
@@ -382,25 +383,41 @@ struct AppFeatureTests {
         let finalized = LockIsolated<[UUID]>([])
         let saved = LockIsolated<[UUID]>([])
         let workouts = LockIsolated<[UUID]>([])
+        let earlier = OwedHealthWorkout(
+            rideId: UUID(),
+            startedAt: Date(timeIntervalSince1970: 900_000),
+            endedAt: Date(timeIntervalSince1970: 903_600),
+            distanceMeters: 20_000,
+            movingSeconds: 3_400
+        )
+        // What the live actor does: finalize makes the orphan owed, and settling removes it.
+        let owed = LockIsolated([earlier])
         let store = TestStore(
             initialState: AppFeature.State(activeRide: ActiveRideFeature.State(recordingState: .active))
         ) {
             AppFeature()
         } withDependencies: {
             $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
-            $0.persistenceClient = .mock(
+            var client = PersistenceClient.mock(
                 trackPoints: [orphan.rideId: track],
                 rideIdsMissingMapThumbnail: [orphan.rideId],
-                ridesOwedHealthWorkout: [OwedHealthWorkout(
-                    rideId: orphan.rideId,
-                    startedAt: Date(timeIntervalSince1970: 1_000_000 - 600),
-                    endedAt: Date(timeIntervalSince1970: 1_000_000),
-                    distanceMeters: orphan.distanceMeters,
-                    movingSeconds: orphan.durationSeconds
-                )],
-                onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
+                onFinalizeRide: { id, endedAt, summary, _ in
+                    finalized.withValue { $0.append(id) }
+                    owed.withValue {
+                        $0.insert(OwedHealthWorkout(
+                            rideId: id,
+                            startedAt: Date(timeIntervalSince1970: 1_000_000 - 36_000),
+                            endedAt: endedAt,
+                            distanceMeters: summary.distanceMeters,
+                            movingSeconds: summary.durationSeconds
+                        ), at: 0)
+                    }
+                },
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
+            client.fetchRidesOwedHealthWorkout = { owed.value }
+            client.settleRideHealthWorkout = { id in owed.withValue { $0.removeAll { $0.rideId == id } } }
+            $0.persistenceClient = client
             $0.healthKitClient = .mock(onSaveWorkout: { workout in workouts.withValue { $0.append(workout.rideId) } })
             $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in Data([1]) }
         }
@@ -415,6 +432,7 @@ struct AppFeatureTests {
 
         #expect(finalized.value == [orphan.rideId])
         #expect(saved.value == [orphan.rideId])
-        #expect(workouts.value == [orphan.rideId])
+        #expect(workouts.value == [earlier.rideId])
+        #expect(owed.value.isEmpty)
     }
 }

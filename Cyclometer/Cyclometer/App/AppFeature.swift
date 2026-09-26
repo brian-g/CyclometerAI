@@ -300,6 +300,10 @@ struct AppFeature {
                 guard state.activeRide == nil else {
                     return .run { [persistenceClient, date] send in
                         try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
+                        // No Apple Health workout (#277): its end is the relaunch, not when the
+                        // rider stopped, so a workout would span every hour between the two.
+                        // Settled before the backfill below, the only one that could see it.
+                        try? await persistenceClient.settleRideHealthWorkout(summary.rideId)
                         await send(.rides(.reloadRides))
                         await Self.backfillFinishedRides(send: send)
                     }

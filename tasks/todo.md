@@ -24,7 +24,12 @@ Branch: `feat/277-retry-hkworkout`
 - Full `CyclometerTests`: ** TEST SUCCEEDED **, 1617 cases. All 17 new or extended tests confirmed by name in the log.
 - Sim drive: an earlier ride opened as not owed with its one workout intact. A new ride's workout was written once and settled, and relaunches left it (same UUID).
 - Harness finding: a pending launch Health sheet (types #276 added) silently blocks the Start sheet in a drive. Grant it first.
-- Not handled: the #175 orphan close-out's `endedAt = now` gives that rare ride a workout spanning up to the relaunch.
+- Review follow-ups (/code-review high):
+  - The #175 orphan close-out settles its ride without a workout, since its `endedAt` is the relaunch. Mutation-checked.
+  - `rideNotFound` on settle (ride deleted mid-write) no longer ends the batch.
+  - New `HealthKitClient.isWorkoutSharingAllowed`: without Workouts share access the backfill does no reads.
+  - UX.md §S10: a launch that resumes a ride doesn't retry. Header order fixed, and a test doc comment moved back.
+- Full `CyclometerTests` after the follow-ups, on a fresh derived data path: ** TEST SUCCEEDED **, the three new or changed tests confirmed by name.
 
 
 # #276 follow-up — heart-rate energy model (Keytel), physics as the fallback
