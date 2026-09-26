@@ -48,6 +48,12 @@ struct HealthKitClient {
     var fetchRestingHeartRate: @Sendable () async throws -> Int?
     /// For the 220 − age max estimate. `nil` when the rider has not set one.
     var fetchDateOfBirth:      @Sendable () async throws -> DateComponents?
+    /// For the heart-rate energy model's choice of equation (#276). `nil` for Not Set and
+    /// Other, which have none, and when the rider hasn't allowed the read.
+    var fetchBiologicalSex:    @Sendable () async throws -> RideEnergy.Sex?
+    /// The rider's latest weight in kilograms, for the ride's energy estimate (#276). `nil`
+    /// when Health has none or read access is denied, and then no energy is written.
+    var fetchBodyMass:         @Sendable () async throws -> Double?
     var heartRateStream:       @Sendable () -> AsyncStream<Int>     // live BPM from Watch / HR strap
     /// UX.md §S10 — the finished ride as an outdoor cycling `HKWorkout`. Skipped, not
     /// thrown, when another source already recorded a cycling workout over the same
@@ -67,6 +73,8 @@ extension HealthKitClient: DependencyKey {
             requestAuthorization:  { try await requestAuthorization(store) },
             fetchRestingHeartRate: { try await fetchRestingHeartRate(store) },
             fetchDateOfBirth:      { fetchDateOfBirth(store) },
+            fetchBiologicalSex:    { fetchBiologicalSex(store) },
+            fetchBodyMass:         { try await fetchBodyMass(store) },
             heartRateStream:       { makeHeartRateStream(store) },
             saveWorkout:           { try await saveWorkout($0, store) }
         )
@@ -80,6 +88,8 @@ extension HealthKitClient: DependencyKey {
         requestAuthorization:  { },
         fetchRestingHeartRate: { nil },
         fetchDateOfBirth:      { nil },
+        fetchBiologicalSex:    { nil },
+        fetchBodyMass:         { nil },
         heartRateStream:       { AsyncStream { $0.finish() } },
         saveWorkout:           { _ in }
     )
@@ -124,12 +134,48 @@ extension HealthKitClient {
         return Int(sample.quantity.doubleValue(for: bpmUnit).rounded())
     }
 
+    /// The latest sample however old: unlike resting heart rate, weight drifts slowly, and a
+    /// months-old reading still estimates energy better than none. A denied read returns no
+    /// samples rather than throwing, so it lands on `nil` like an empty history.
+    private static func fetchBodyMass(_ store: HKHealthStore) async throws -> Double? {
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: PermissionsClient.bodyMassType)],
+            sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
+            limit: 1
+        )
+        let samples: [HKQuantitySample]
+        do {
+            samples = try await descriptor.result(for: store)
+        } catch {
+            // Logged here because the caller's `try?` can't be: without this line, the workout's
+            // own log would blame a missing body mass for what was a failed read.
+            logger.error("body mass read failed, so the workout gets no energy: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+        guard let sample = samples.first else {
+            // HealthKit can't say which: an empty history and a denied read look the same.
+            logger.notice("no body mass readable — none in Health, or Weight read not allowed; the workout gets no energy")
+            return nil
+        }
+        return sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
+    }
+
     /// `dateOfBirthComponents()` throws both when the rider has never set a birthdate
     /// in Health and when access hasn't been granted — HealthKit gives no way to tell
     /// those apart, so both collapse to `nil` here the same way an empty query result
     /// does for the quantity reads above.
     private static func fetchDateOfBirth(_ store: HKHealthStore) -> DateComponents? {
         try? store.dateOfBirthComponents()
+    }
+
+    /// Throws for a denied read the same way `dateOfBirthComponents()` does, and collapses to
+    /// `nil` the same way.
+    private static func fetchBiologicalSex(_ store: HKHealthStore) -> RideEnergy.Sex? {
+        switch (try? store.biologicalSex())?.biologicalSex {
+        case .male:   .male
+        case .female: .female
+        default:      nil
+        }
     }
 
     /// A live-only feed: the predicate bounds every query to samples starting at or
@@ -221,6 +267,22 @@ extension HealthKitClient {
                     // Its own sync identifier: the workout's replaces only the workout, and a
                     // rewrite would otherwise leave a second sample doubling the ride's distance.
                     metadata: syncMetadata("\(workout.rideId.uuidString)-distance")
+                )])
+            }
+            // Nil without body mass (#276). Per-type share access, as for distance. Each way the
+            // energy can go missing is logged: from Fitness, all of them look like 0 calories.
+            let energyStatus = store.authorizationStatus(for: PermissionsClient.activeEnergyBurnedType)
+            logger.notice(
+                "workout for ride \(workout.rideId, privacy: .public): active energy \(workout.activeEnergyKilocalories.map { "\(Int($0.rounded())) kcal" } ?? "none (no body mass read)", privacy: .public), share \(energyStatus == .sharingAuthorized ? "allowed" : "not allowed", privacy: .public)"
+            )
+            if let kilocalories = workout.activeEnergyKilocalories, kilocalories > 0,
+               energyStatus == .sharingAuthorized {
+                try await started.addSamples([HKQuantitySample(
+                    type: PermissionsClient.activeEnergyBurnedType,
+                    quantity: HKQuantity(unit: .kilocalorie(), doubleValue: kilocalories),
+                    start: workout.startedAt,
+                    end: workout.endedAt,
+                    metadata: syncMetadata("\(workout.rideId.uuidString)-energy")
                 )])
             }
             try await started.addMetadata(syncMetadata(workout.rideId.uuidString))

@@ -28,6 +28,7 @@
 | 0.6.2 | 2026-09-22 | Brian / Claude | HKWorkout write (#250). §9.4 adds `distanceCycling` (write) for the workout's distance and `HKWorkoutType` (read) for skipping a ride another source already recorded. Energy is not written yet (#274). |
 | 0.6.3 | 2026-09-25 | Brian / Claude | Ride place name (#283). §12 Privacy records the reverse geocode of a free ride's start coordinate, sent to Apple for S10's default ride name, with an S12 toggle to turn it off. |
 | 0.6.4 | 2026-09-26 | Brian / Claude | Ride Live Activity. New §8.10: Lock Screen and Dynamic Island Live Activity moves from Phase 2 to MVP under M10.5; visual only, with radar sound left to the audio client; CarPlay, Mac and Watch presentations excluded; next-turn cue included when a route is active. §6, §13 and Resolved Decisions updated. Resolved Decisions now gives the iOS 27 minimum's reason: HealthKit's cycling-specific HR, cadence and power zone tracking. |
+| 0.6.5 | 2026-09-25 | Brian / Claude | Workout active energy (#276, supersedes #274). §9.4 adds `bodyMass` (read) and `activeEnergyBurned` (write): `biologicalSex` (read) too. The ride's energy comes from heart rate (Keytel 2005) when a strap covered half the ride and Health has weight, date of birth and a Male or Female sex; otherwise from the track (physics, with dropouts and implausible grades costed flat; Compendium MET only for a ride with no usable track). None is written when Health has no weight. Bike weight is a 10 kg constant, not a setting. |
 
 ---
 
@@ -991,13 +992,20 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 **HealthKit Entitlements Required:**
 - `HKQuantityTypeIdentifierHeartRate` (read)
 - `HKQuantityTypeIdentifierRestingHeartRate` (read)
-- `HKCharacteristicTypeIdentifierDateOfBirth` (read — for max HR estimation if not available)
+- `HKCharacteristicTypeIdentifierDateOfBirth` (read — for max HR estimation if not available, and the
+  rider's age in the workout's heart-rate energy estimate)
 - `HKWorkoutType` (write — MVP; the ride is written back at ride end per UX.md §S10, and the share
   authorization is requested alongside the reads at S01 so the rider answers one sheet, not two)
 - `HKQuantityTypeIdentifierDistanceCycling` (write — the workout's distance reaches it as a sample,
   which `HKWorkoutBuilder` only accepts with share access to that type)
 - `HKWorkoutType` (read — only to skip writing a ride another source already recorded over the same
   time, UX.md §S10)
+- `HKQuantityTypeIdentifierBodyMass` (read — the rider's weight for the workout's energy estimate; with
+  none, no energy is written rather than an assumed weight)
+- `HKCharacteristicTypeIdentifierBiologicalSex` (read — with date of birth, selects the workout's
+  heart-rate energy equation; Not Set or Other falls back to the physics estimate)
+- `HKQuantityTypeIdentifierActiveEnergyBurned` (write — the workout's estimated energy, which is what
+  earns Move ring credit, UX.md §S10)
 
 **Profile Data Read at Onboarding and Ride Start:**
 - `restingHeartRate` → `HKQuantityTypeIdentifierRestingHeartRate`

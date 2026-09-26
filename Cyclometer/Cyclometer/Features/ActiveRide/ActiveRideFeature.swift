@@ -606,14 +606,36 @@ struct ActiveRideFeature {
                         // resumed ride's start only exists in persistence. Write failures are
                         // logged in the client.
                         do {
+                            async let riderKilograms = try? healthKitClient.fetchBodyMass()
+                            async let dateOfBirth = try? healthKitClient.fetchDateOfBirth()
+                            async let sex = try? healthKitClient.fetchBiologicalSex()
                             let startedAt = try await persistenceClient.fetchRide(rideId).startedAt
+                            // No body mass, no energy (#276): a guessed weight would be written
+                            // to Health as if it were measured.
+                            var energy: RideEnergy.Estimate?
+                            if let kilograms = await riderKilograms {
+                                let rider = RideEnergy.Rider(
+                                    kilograms: kilograms,
+                                    age: RiderProfile.age(fromDateOfBirth: await dateOfBirth, on: startedAt),
+                                    sex: await sex
+                                )
+                                let estimate = RideEnergy.activeKilocalories(
+                                    trackPoints: trackPoints,
+                                    movingSeconds: finalSummary.durationSeconds,
+                                    distanceMeters: finalSummary.distanceMeters,
+                                    rider: rider
+                                )
+                                energy = estimate
+                                logger.notice("energy for ride \(rideId, privacy: .public): \(Int(estimate.kilocalories.rounded()), privacy: .public) kcal from \(estimate.method.rawValue, privacy: .public)")
+                            }
                             try? await healthKitClient.saveWorkout(RideWorkout(
                                 rideId: rideId,
                                 startedAt: startedAt,
                                 endedAt: endedAt,
                                 // The same value `finalizeRide` just wrote to `Ride.distanceMeters`.
                                 distanceMeters: finalSummary.distanceMeters,
-                                trackPoints: trackPoints
+                                trackPoints: trackPoints,
+                                activeEnergyKilocalories: energy?.kilocalories
                             ))
                         } catch {
                             logger.error("fetchRide failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — no workout written to Apple Health")

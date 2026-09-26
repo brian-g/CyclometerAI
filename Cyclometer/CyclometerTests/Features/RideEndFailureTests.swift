@@ -107,6 +107,7 @@ struct RideEndFailureTests {
     private static func runRideToEnd(
         _ store: TestStoreOf<ActiveRideFeature>,
         speedMPS: Double? = nil,
+        heartRateBPM: Int? = nil,
         until pipelineFinished: @escaping @Sendable (UUID) -> Bool
     ) async -> UUID {
         await store.send(.task)
@@ -118,6 +119,15 @@ struct RideEndFailureTests {
         )))
         if let speedMPS {
             await store.send(.speed(.gpsSpeedReceived(speedMPS)))
+        }
+        if let heartRateBPM {
+            // A strap, not a stray reading: unpaired, the tick blanks heart rate with no source
+            // behind it (#161). Pairing opens the 10 s warm-up that drops readings (#221), so
+            // resend until one lands — a store with a moving clock gets there in a few sends.
+            await store.send(.hrPairingChanged(true))
+            for _ in 1...20 where store.state.heartRateBPM != heartRateBPM {
+                await store.send(.heartRateUpdated(heartRateBPM))
+            }
         }
         for _ in 1...3 {
             await store.send(.elapsedTick)
@@ -325,8 +335,87 @@ struct RideEndFailureTests {
             startedAt: ride.startedAt,
             endedAt: endedAt,
             distanceMeters: ride.distanceMeters,
-            trackPoints: trackPoints
+            trackPoints: trackPoints,
+            // The mock has no body mass, so no energy rather than a guessed weight (#276).
+            activeEnergyKilocalories: nil
         ))
+    }
+
+    @Test("with body mass in Health, the workout carries the ride's estimated active energy")
+    func workoutCarriesEstimatedEnergy() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let written = LockIsolated<[RideWorkout]>([])
+        let reads = LockIsolated(0.0)
+        let movingClock = DateGenerator {
+            reads.withValue { $0 += 1; return Self.testDate.addingTimeInterval($0) }
+        }
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory(),
+            healthKitClient: .mock(bodyMassKilograms: 75, onSaveWorkout: { workout in
+                written.withValue { $0.append(workout) }
+            }),
+            date: movingClock
+        )
+        let rideId = await Self.runRideToEnd(store, speedMPS: 5) { _ in !written.value.isEmpty }
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        let workout = try #require(written.value.first)
+        let trackPoints = try await client.fetchTrackPoints(rideId)
+        let expected = RideEnergy.activeKilocalories(
+            trackPoints: trackPoints,
+            movingSeconds: ride.durationSeconds,
+            distanceMeters: ride.distanceMeters,
+            rider: RideEnergy.Rider(kilograms: 75)
+        )
+        // Moving, so the comparison can't pass on two zeros. No heart rate, so physics.
+        #expect(expected.kilocalories > 0)
+        #expect(expected.method == .physics)
+        #expect(workout.activeEnergyKilocalories == expected.kilocalories)
+    }
+
+    @Test("with a strap's heart rate and the rider's weight, age and sex in Health, the workout's energy comes from heart rate")
+    func workoutEnergyFromHeartRate() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let written = LockIsolated<[RideWorkout]>([])
+        let reads = LockIsolated(0.0)
+        let movingClock = DateGenerator {
+            reads.withValue { $0 += 1; return Self.testDate.addingTimeInterval($0) }
+        }
+        let dateOfBirth = DateComponents(year: 1940, month: 6, day: 1)   // 29 on the 1970 test date
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory(),
+            healthKitClient: .mock(
+                dateOfBirth: dateOfBirth, bodyMassKilograms: 80, biologicalSex: .male,
+                onSaveWorkout: { workout in written.withValue { $0.append(workout) } }
+            ),
+            date: movingClock
+        )
+        let rideId = await Self.runRideToEnd(store, speedMPS: 5, heartRateBPM: 140) { _ in !written.value.isEmpty }
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        let workout = try #require(written.value.first)
+        let trackPoints = try await client.fetchTrackPoints(rideId)
+        let rider = RideEnergy.Rider(
+            kilograms: 80,
+            age: RiderProfile.age(fromDateOfBirth: dateOfBirth, on: ride.startedAt),
+            sex: .male
+        )
+        let expected = RideEnergy.activeKilocalories(
+            trackPoints: trackPoints, movingSeconds: ride.durationSeconds,
+            distanceMeters: ride.distanceMeters, rider: rider
+        )
+        #expect(expected.method == .heartRate)
+        #expect(workout.activeEnergyKilocalories == expected.kilocalories)
+        // Proves the age and sex reached the estimate: without them, the same ride is physics.
+        let physics = RideEnergy.activeKilocalories(
+            trackPoints: trackPoints, movingSeconds: ride.durationSeconds,
+            distanceMeters: ride.distanceMeters, rider: RideEnergy.Rider(kilograms: 80)
+        )
+        #expect(physics.kilocalories != expected.kilocalories)
     }
 
     @Test("an Apple Health workout write failure at ride end still ends the ride, and the steps after it still run")

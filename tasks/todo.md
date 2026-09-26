@@ -1,3 +1,50 @@
+# #276 follow-up — heart-rate energy model (Keytel), physics as the fallback
+
+Plan: /Users/brian/.claude/plans/twinkling-brewing-volcano.md
+Branch: `feat/276-active-energy`
+
+- [x] 1. `RideEnergy`: `Rider`, `Sex`, `Estimate { kilocalories, method }`, and Keytel at the mean HR over recording time, less 1 MET, clamped ≥ 0
+- [x] 2. `RiderProfile.age(fromDateOfBirth:on:)` extracted from `estimatedMaxBPM`
+- [x] 3. `HealthKitClient.fetchBiologicalSex` + mock; `biologicalSex` read type
+- [x] 4. Ride end: weight, date of birth and sex read in parallel; log which model ran
+- [x] 5. Tests: Keytel male/female, 50% coverage threshold (mutation-checked), mean costing, clamp, sex/age fallback, ride-end HR integration
+- [x] 6. Docs: PRD §9.4 + 0.6.3, UX §S01/§S10, Info.plist
+
+## Review
+
+- Why: a real 14:52 ride gave 15 kcal from physics. Counting 1 kJ of work as 1 kcal leaves out the cost of moving your legs at all, which dominates at easy power.
+- The HR model runs only with strap-level coverage (≥ 50% of recording seconds) plus weight, date of birth and a Male/Female sex. Anything less uses physics (decision: no averaged equation for Not Set or Other). No weight still means no energy.
+- Harness finding: an unpaired strap's reading is blanked by the tick (#161), and pairing opens a 10 s warm-up (#221). `runRideToEnd(heartRateBPM:)` pairs first and resends until a reading lands.
+- Build finding: a stale module after the earlier mutation revert made the tests compile against the old API. Fresh `-derivedDataPath` + `COMPILATION_CACHE_ENABLE_CACHING=NO` fixed it (as the memory note says).
+- Full `CyclometerTests` passed (** TEST SUCCEEDED **, 1586 cases).
+- Pending on a device: an easy strap ride should now read tens of kcal, not 15. Compare it with the Watch's Active Energy for the same window.
+
+# #276 — Active energy on the ride's HKWorkout (physics model, MET fallback; supersedes #274)
+
+Plan: /Users/brian/.claude/plans/twinkling-brewing-volcano.md
+Branch: `feat/276-active-energy`
+
+- [x] 1. `RideEnergy` estimator (physics per 1 Hz pair, MET for gaps/no speed/implausible grade/residual time); bike weight a 10 kg constant
+- [x] 2. `RideWorkout.activeEnergyKilocalories`
+- [x] 3. `PermissionsClient`: `bodyMass` read, `activeEnergyBurned` share
+- [x] 4. `HealthKitClient.fetchBodyMass` + energy sample in `saveWorkout`
+- [x] 5. `ActiveRideFeature` ride end: body mass → estimate → workout (nil without body mass)
+- [x] 6. Tests: `RideEnergyTests`, `RideEndFailureTests`, `PermissionsClientTests`
+- [x] 7. Docs: PRD §9.4 + changelog, UX.md §S10, Info.plist share string
+- [x] 8. Verify: full `CyclometerTests`; device Move-ring check is Brian's
+
+## Review
+
+- `RideEnergy` (pure enum) estimates active kcal from the persisted track: per 1 Hz pair, pedal power = (air + rolling + gravity) ÷ (1 − 2.5% drivetrain loss), clamped at 0 so coasting adds nothing, on altitude smoothed over ~31 s. kJ ≈ kcal. MET (2024 Compendium, minus 1 for resting) covers a pair with no speed, a gap > 5 s, or a smoothed grade > 25%, plus recording time the track doesn't cover. Stationary seconds (#262 threshold) add nothing.
+- The ride-end effect reads `HealthKitClient.fetchBodyMass` (latest sample). If there's none, `RideWorkout.activeEnergyKilocalories` is nil and no energy is written. `saveWorkout` adds an `activeEnergyBurned` sample (`<rideId>-energy`) when share access allows, mirroring distance.
+- New types: `bodyMass` read and `activeEnergyBurned` share. PRD §9.4 + 0.6.3 row, UX §S01/§S10, and the Info.plist read string are updated.
+- Bike weight is a 10 kg constant (decision), which departs from #276's Data Model criterion. #274 is superseded.
+- 2024 Compendium 01060 (>20 mph) is 16.8 MET, not the 2011 value of 15.8.
+- Tests: `RideEnergyTests` (flat ≈ 547 kcal/h at 30 km/h, climb = m·g·h/0.975, coasting descent 0, pause, gap/no-speed/implausible-grade/uncovered MET, bands) and `RideEndFailureTests/workoutCarriesEstimatedEnergy`. The existing workout test pins nil energy without body mass. Full `CyclometerTests` passed (** TEST SUCCEEDED **, 1577 cases).
+- Not verified: the Move ring on a device, and how a paired Watch's own Move reading interacts with it.
+- Device test (2026-09-26, walking pace, 1.24 m/s mean): Health stored 3.63 kcal, which matches a replay of the GPS fixes through the formula. The write path works. Added logging for each way the energy can go missing.
+- `/code-review high` follow-up. Fixed: a no-speed second counts as stationary (was GPS wander costed at MET), and altitude is smoothed per run, never across a > 5 s gap (mutation-checked). Inside the track, gaps and implausible grades are costed as flat physics instead of MET, because MET ran 1.5–2.6× the physics rate. MET is only used for a ride with no usable track. A failed body-mass read is logged as itself. `RouteGeometry.segmentMeters` replaces a two-element array. Filed #303 (altitude ignores `verticalAccuracy`). Skipped: kJ ≈ kcal gross vs active (the issue specifies it, and it's the power-app convention), Watch double counting (device check), and serializing the ride-end reads (negligible). Full suite passed, 1579 cases.
+
 # #280 — Ride thumbnails framed so the track fills the square
 
 Plan: /Users/brian/.claude/plans/sprightly-gathering-tarjan.md
