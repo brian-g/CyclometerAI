@@ -10,10 +10,17 @@ import Foundation
 /// to metabolic energy one-for-one in kilojoules to kilocalories: a rider is about 24% efficient,
 /// and 1 kcal is 4.184 kJ, so the two factors cancel.
 ///
-/// **MET where physics can't be trusted.** An interval with no speed, a gap in the track longer
-/// than `maxPhysicsGapSeconds` (a tunnel), or a grade too steep to be real altitude uses the
-/// Compendium's speed-banded MET instead; so does recording time the track doesn't cover at all
-/// (a ride recorded on a CSC sensor with location denied).
+/// **Flat physics where the track can't say more.** A gap longer than `maxPhysicsGapSeconds` (a
+/// tunnel) is costed on the flat at the straight-line speed across it, a grade too steep to be real
+/// altitude as flat at the recorded speed, and recording time the track doesn't reach at all as
+/// flat at the ride's average speed. Staying on one model keeps a ride's total from depending on
+/// how much of it fell back: MET costs the same riding at 1.5–2.6× the physics rate.
+///
+/// **MET only without a track.** A ride with no usable track (location denied, speed from a wheel
+/// sensor) has nothing to run physics on, so it gets the Compendium's speed-banded MET instead.
+///
+/// A second with no speed reading adds nothing: the ride's own odometer counts it as stationary
+/// (#262), and the straight line between two fixes a second apart is GPS wander, not riding.
 ///
 /// Pure, so every constant below is pinned by `RideEnergyTests`.
 enum RideEnergy {
@@ -57,46 +64,73 @@ enum RideEnergy {
     ) -> Double {
         let mass = riderKilograms + bikeKilograms
         var workJoules = 0.0
-        var fallbackKilocalories = 0.0
         var coveredSeconds = 0.0
 
         for segment in TrackPointDTO.segments(of: trackPoints) where segment.count > 1 {
-            let altitude = RouteTerrain.movingAverage(
-                segment.map(\.altitudeMeters), halfWindow: altitudeSmoothingHalfWindow
-            )
-            for index in segment.indices.dropFirst() {
-                let start = segment[index - 1], end = segment[index]
+            for (index, end) in segment.enumerated().dropFirst() {
+                let start = segment[index - 1]
                 let seconds = end.timestamp.timeIntervalSince(start.timestamp)
-                guard seconds > 0 else { continue }
+                // A gap: the runs either side are smoothed apart below, and the gap itself is
+                // costed flat at the straight-line speed across it.
+                guard seconds > maxPhysicsGapSeconds else { continue }
                 coveredSeconds += seconds
+                let straightLine = RouteGeometry.segmentMeters(
+                    from: RouteCoordinate(latitude: start.latitude, longitude: start.longitude),
+                    to: RouteCoordinate(latitude: end.latitude, longitude: end.longitude)
+                )
+                workJoules += flatJoules(speed: straightLine / seconds, seconds: seconds, mass: mass)
+            }
 
-                if seconds <= maxPhysicsGapSeconds,
-                   let startSpeed = start.speedMPS, let endSpeed = end.speedMPS {
-                    let speed = (startSpeed + endSpeed) / 2
+            for run in runs(of: segment) where run.count > 1 {
+                // Smoothed per run, not per segment: a window reaching across a gap would blend
+                // altitudes from either side of it into a grade on the seconds next to it.
+                let altitude = RouteTerrain.movingAverage(
+                    run.map(\.altitudeMeters), halfWindow: altitudeSmoothingHalfWindow
+                )
+                for index in run.indices.dropFirst() {
+                    let start = run[index - 1], end = run[index]
+                    let seconds = end.timestamp.timeIntervalSince(start.timestamp)
+                    guard seconds > 0 else { continue }
+                    coveredSeconds += seconds
+
+                    let speeds = [start.speedMPS, end.speedMPS].compactMap { $0 }
+                    guard !speeds.isEmpty else { continue }
+                    let speed = speeds.reduce(0, +) / Double(speeds.count)
                     // A stationary second is not riding (#262), and has no run to take a grade over.
                     guard speed > ActiveRideFeature.stationarySpeedMPS else { continue }
                     let rise = altitude[index] - altitude[index - 1]
-                    if abs(rise / (speed * seconds)) <= maxPlausibleGrade {
-                        workJoules += pedalWatts(speed: speed, climbRate: rise / seconds, mass: mass) * seconds
-                        continue
-                    }
+                    let climbRate = abs(rise / (speed * seconds)) <= maxPlausibleGrade ? rise / seconds : 0
+                    workJoules += pedalWatts(speed: speed, climbRate: climbRate, mass: mass) * seconds
                 }
-                let straightLine = RouteGeometry.distanceMeters([
-                    RouteCoordinate(latitude: start.latitude, longitude: start.longitude),
-                    RouteCoordinate(latitude: end.latitude, longitude: end.longitude),
-                ])
-                fallbackKilocalories += metKilocalories(speed: straightLine / seconds, seconds: seconds, riderKilograms: riderKilograms)
             }
         }
 
         let uncoveredSeconds = movingSeconds - coveredSeconds
-        if uncoveredSeconds > 0, movingSeconds > 0 {
-            fallbackKilocalories += metKilocalories(
-                speed: distanceMeters / movingSeconds, seconds: uncoveredSeconds, riderKilograms: riderKilograms
-            )
+        guard uncoveredSeconds > 0, movingSeconds > 0 else { return workJoules / 1000 }
+        let averageSpeed = distanceMeters / movingSeconds
+        if coveredSeconds == 0 {
+            return metKilocalories(speed: averageSpeed, seconds: uncoveredSeconds, riderKilograms: riderKilograms)
         }
+        return (workJoules + flatJoules(speed: averageSpeed, seconds: uncoveredSeconds, mass: mass)) / 1000
+    }
 
-        return workJoules / 1000 + fallbackKilocalories
+    /// Splits a segment wherever consecutive points are more than `maxPhysicsGapSeconds` apart.
+    static func runs(of segment: [TrackPointDTO]) -> [[TrackPointDTO]] {
+        var runs: [[TrackPointDTO]] = [[]]
+        for point in segment {
+            if let previous = runs[runs.count - 1].last,
+               point.timestamp.timeIntervalSince(previous.timestamp) > maxPhysicsGapSeconds {
+                runs.append([])
+            }
+            runs[runs.count - 1].append(point)
+        }
+        return runs
+    }
+
+    /// Work on the flat at `speed` for `seconds`, or none at a standstill (#262).
+    static func flatJoules(speed: Double, seconds: TimeInterval, mass: Double) -> Double {
+        guard speed > ActiveRideFeature.stationarySpeedMPS else { return 0 }
+        return pedalWatts(speed: speed, climbRate: 0, mass: mass) * seconds
     }
 
     /// Power at the pedals to hold `speed` while rising at `climbRate` m/s, never negative.

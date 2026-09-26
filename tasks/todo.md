@@ -21,6 +21,8 @@ Branch: `feat/276-active-energy`
 - 2024 Compendium 01060 (>20 mph) is 16.8 MET, not the 2011 value of 15.8.
 - Tests: `RideEnergyTests` (flat ≈ 547 kcal/h at 30 km/h, climb = m·g·h/0.975, coasting descent 0, pause, gap/no-speed/implausible-grade/uncovered MET, bands) and `RideEndFailureTests/workoutCarriesEstimatedEnergy`. The existing workout test pins nil energy without body mass. Full `CyclometerTests` passed (** TEST SUCCEEDED **, 1577 cases).
 - Not verified: the Move ring on a device, and how a paired Watch's own Move reading interacts with it.
+- Device test (2026-09-26, walking pace, 1.24 m/s mean): Health stored 3.63 kcal, which matches a replay of the GPS fixes through the formula. The write path works. Added logging for each way the energy can go missing.
+- `/code-review high` follow-up. Fixed: a no-speed second counts as stationary (was GPS wander costed at MET), and altitude is smoothed per run, never across a > 5 s gap (mutation-checked). Inside the track, gaps and implausible grades are costed as flat physics instead of MET, because MET ran 1.5–2.6× the physics rate. MET is only used for a ride with no usable track. A failed body-mass read is logged as itself. `RouteGeometry.segmentMeters` replaces a two-element array. Filed #303 (altitude ignores `verticalAccuracy`). Skipped: kJ ≈ kcal gross vs active (the issue specifies it, and it's the power-app convention), Watch double counting (device check), and serializing the ride-end reads (negligible). Full suite passed, 1579 cases.
 
 # #280 — Ride thumbnails framed so the track fills the square
 

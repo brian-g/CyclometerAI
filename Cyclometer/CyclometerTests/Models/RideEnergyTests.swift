@@ -113,31 +113,67 @@ struct RideEnergyTests {
         #expect(abs(energy(first + second) - 2 * one) < 1e-9)
     }
 
-    // MARK: - MET fallback
+    // MARK: - Where the track can't say more
 
-    @Test("a gap longer than five seconds is a dropout, estimated from the straight line across it")
-    func gapUsesMET() {
-        // Two fixes 10 s and 50 m apart: 5 m/s, 11.2 mph, 6.8 MET (01020).
+    /// Joules on the flat at `speed` for `seconds`: the same formula as the flat-road test.
+    private func flatKilocalories(speed: Double, seconds: Double) -> Double {
+        (0.5 * 1.225 * 0.32 * pow(speed, 3) + 0.005 * Self.mass * 9.806_65 * speed) / 0.975 * seconds / 1_000
+    }
+
+    @Test("a gap longer than five seconds is costed on the flat at the straight-line speed across it")
+    func gapIsCostedFlat() {
+        // Two fixes 10 s and 50 m apart: 5 m/s. Loose only because the fixture's metres per degree is.
         let gap = track(seconds: 1, speed: 5, stepSeconds: 10)
-        #expect(abs(energy(gap) - metKilocalories(6.8, seconds: 10)) < 0.01)
+        let expected = flatKilocalories(speed: 5, seconds: 10)
+        #expect(abs(energy(gap) - expected) < expected * 0.01)
     }
 
-    @Test("an interval with no speed reading is estimated from how far the rider moved")
-    func missingSpeedUsesMET() {
+    @Test("smoothing never reaches across a gap: altitude either side of it isn't climbing next to it")
+    func gapDoesNotBlendAltitude() {
+        // 60 s, a 30 s dropout, then 60 s more. The only difference between the two rides is that
+        // the second stretch of one is 30 m higher — which the dropout hides, and a window reaching
+        // across it would turn into a grade on the seconds either side.
+        func ride(secondStretchRise: Double) -> [TrackPointDTO] {
+            let before = track(seconds: 60, speed: 5)
+            let after = track(seconds: 60, speed: 5, startingAt: Self.start.addingTimeInterval(90))
+                .map { point in
+                    var point = point
+                    point.latitude += 450 / Self.metersPerDegree
+                    point.altitudeMeters += secondStretchRise
+                    return point
+                }
+            return before + after
+        }
+        let level = energy(ride(secondStretchRise: 0), movingSeconds: 150)
+        #expect(level > 0)
+        #expect(abs(energy(ride(secondStretchRise: 30), movingSeconds: 150) - level) < 1e-9)
+    }
+
+    @Test("a second with no speed reading is stationary, as the ride's own odometer counts it (#262)")
+    func missingSpeedIsStationary() {
+        // The fixes still move 5 m a second: GPS wander at a stop looks exactly like this.
         let points = track(seconds: 60, speed: 5, reportedSpeed: .some(nil))
-        #expect(abs(energy(points) - metKilocalories(6.8, seconds: 60)) < 0.01)
+        #expect(energy(points) == 0)
     }
 
-    @Test("a grade too steep to be road is GPS altitude noise, and falls back to MET")
-    func implausibleGradeUsesMET() {
+    @Test("a grade too steep to be road is GPS altitude noise, and is costed as flat")
+    func implausibleGradeIsCostedFlat() {
         // 60%: even the smoothed ends of the track, which see half the slope, are past 25%.
         let wall = track(seconds: 300, speed: 5, climbRate: 3)
-        #expect(abs(energy(wall) - metKilocalories(6.8, seconds: 300)) < 0.05)
+        #expect(abs(energy(wall) - energy(track(seconds: 300, speed: 5))) < 1e-9)
     }
 
-    @Test("recording time the track doesn't cover is estimated at the ride's average speed")
-    func uncoveredTimeUsesMET() {
-        // No track at all — location denied, speed from a wheel sensor. 5.5 m/s is 12.3 mph: 8.0 MET.
+    @Test("recording time the track doesn't reach is costed flat at the ride's average speed")
+    func uncoveredTimeIsCostedFlat() {
+        // 60 s of track in 120 s of recording, 600 m in all: the missing minute at 5 m/s.
+        let points = track(seconds: 60, speed: 5)
+        let result = energy(points, movingSeconds: 120, distance: 600)
+        #expect(abs(result - 2 * energy(points)) < 1e-9)
+    }
+
+    @Test("a ride with no track at all gets MET at its average speed")
+    func noTrackUsesMET() {
+        // Location denied, speed from a wheel sensor. 5.5 m/s is 12.3 mph: 8.0 MET.
         let result = energy([], movingSeconds: 3_600, distance: 5.5 * 3_600)
         #expect(abs(result - metKilocalories(8.0, seconds: 3_600)) < 1e-9)   // 525 kcal
     }

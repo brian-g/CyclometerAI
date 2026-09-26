@@ -138,7 +138,15 @@ extension HealthKitClient {
             sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
             limit: 1
         )
-        let samples = try await descriptor.result(for: store)
+        let samples: [HKQuantitySample]
+        do {
+            samples = try await descriptor.result(for: store)
+        } catch {
+            // Logged here because the caller's `try?` can't be: without this line, the workout's
+            // own log would blame a missing body mass for what was a failed read.
+            logger.error("body mass read failed, so the workout gets no energy: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
         guard let sample = samples.first else {
             // HealthKit can't say which: an empty history and a denied read look the same.
             logger.notice("no body mass readable — none in Health, or Weight read not allowed; the workout gets no energy")
@@ -250,7 +258,7 @@ extension HealthKitClient {
             // energy can go missing is logged: from Fitness, all of them look like 0 calories.
             let energyStatus = store.authorizationStatus(for: PermissionsClient.activeEnergyBurnedType)
             logger.notice(
-                "workout for ride \(workout.rideId, privacy: .public): active energy \(workout.activeEnergyKilocalories.map { "\(Int($0.rounded())) kcal" } ?? "none (no body mass)", privacy: .public), share \(energyStatus == .sharingAuthorized ? "allowed" : "not allowed", privacy: .public)"
+                "workout for ride \(workout.rideId, privacy: .public): active energy \(workout.activeEnergyKilocalories.map { "\(Int($0.rounded())) kcal" } ?? "none (no body mass read)", privacy: .public), share \(energyStatus == .sharingAuthorized ? "allowed" : "not allowed", privacy: .public)"
             )
             if let kilocalories = workout.activeEnergyKilocalories, kilocalories > 0,
                energyStatus == .sharingAuthorized {

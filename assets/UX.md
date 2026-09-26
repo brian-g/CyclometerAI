@@ -817,7 +817,7 @@ An outdoor cycling `HKWorkout` is written to Apple Health automatically once the
 - **Consent** is the HealthKit share permission from S01, which the rider can revoke in iOS Settings → Health
 - **Duplicates:** if another source (e.g. an Apple Watch Outdoor Cycle) already recorded a cycling workout overlapping the ride, the write is skipped. A later rewrite of the same ride replaces its workout rather than adding one
 - **Carries** start, end, distance, route and estimated active energy. Pause intervals are not marked, so Fitness shows elapsed time
-- **Active energy** (#276) is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), falling back to Compendium MET values by speed where the track has no speed, a dropout or an implausible grade. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. Calories are not shown in the app
+- **Active energy** (#276) is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. Calories are not shown in the app
 
 ### Open UX Questions
 - [x] Zone breakdown chart type? Pie chart
