@@ -139,7 +139,12 @@ extension HealthKitClient {
             limit: 1
         )
         let samples = try await descriptor.result(for: store)
-        return samples.first?.quantity.doubleValue(for: .gramUnit(with: .kilo))
+        guard let sample = samples.first else {
+            // HealthKit can't say which: an empty history and a denied read look the same.
+            logger.notice("no body mass readable — none in Health, or Weight read not allowed; the workout gets no energy")
+            return nil
+        }
+        return sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
     }
 
     /// `dateOfBirthComponents()` throws both when the rider has never set a birthdate
@@ -241,9 +246,14 @@ extension HealthKitClient {
                     metadata: syncMetadata("\(workout.rideId.uuidString)-distance")
                 )])
             }
-            // Nil without body mass (#276). Per-type share access, as for distance.
+            // Nil without body mass (#276). Per-type share access, as for distance. Each way the
+            // energy can go missing is logged: from Fitness, all of them look like 0 calories.
+            let energyStatus = store.authorizationStatus(for: PermissionsClient.activeEnergyBurnedType)
+            logger.notice(
+                "workout for ride \(workout.rideId, privacy: .public): active energy \(workout.activeEnergyKilocalories.map { "\(Int($0.rounded())) kcal" } ?? "none (no body mass)", privacy: .public), share \(energyStatus == .sharingAuthorized ? "allowed" : "not allowed", privacy: .public)"
+            )
             if let kilocalories = workout.activeEnergyKilocalories, kilocalories > 0,
-               store.authorizationStatus(for: PermissionsClient.activeEnergyBurnedType) == .sharingAuthorized {
+               energyStatus == .sharingAuthorized {
                 try await started.addSamples([HKQuantitySample(
                     type: PermissionsClient.activeEnergyBurnedType,
                     quantity: HKQuantity(unit: .kilocalorie(), doubleValue: kilocalories),
