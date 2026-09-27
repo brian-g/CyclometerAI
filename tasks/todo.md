@@ -272,3 +272,26 @@ Branch: `286-gpx-rename-rewrite`
 - Suite: 1,535 passed, 0 failed (fresh DerivedData).
 - Remaining gap: if the rider types a name and dismisses S10 before finalize lands, the replace finds no URL. That file keeps the default name, not the typed one.
 - Declined: patching the file instead of rebuilding it (review finding 6), and a shared test fixture (finding 9).
+
+# #284 — Remove Ride's never-written zone and elevation fields
+
+Plan: /Users/brian/.claude/plans/deep-tinkering-hartmanis.md (decision: remove all three)
+Branch: `284-remove-dead-ride-fields`
+
+- [x] 1. `Ride`: drop `elevationGainMeters`, `elevationDropMeters`, `hrZoneDurations` and their `init` assignments
+- [x] 2. `RideSchemaMigrationTests`: legacy store carries real values in the dropped columns; new test proves it opens
+- [x] 3. DataModel.md §3.1 sketch, §9 migration row, header
+- [x] 4. Verify: grep, targeted tests, full suite (fresh DerivedData), main→branch install over an existing store
+
+## Review
+
+- Removed all three (decided with Brian): nothing read them. S10/S15 derive the elevation profile and zone
+  seconds from the track, and a stored breakdown would go stale once Health's zones change (#238).
+- No migration code. Inferred lightweight migration drops the columns. The legacy fixture now writes real values into all
+  three (the transformable dictionary included), and `opensStoreWithRemovedAttributes` proves the store opens.
+- Suite: 1,649 passed, 0 failed (fresh DerivedData). Migration suite 5/5, and the new test ran by name.
+- Real store: the sim's `default.store` had main's schema (#277 column present) with 2 rides and the three columns.
+  After installing the branch build over it, the app launched to S14 with no fatal in the log stream. The columns are gone,
+  and both rides keep the same titles and distances. Backup is in the session scratchpad.
+- Left alone: PRD.md §10 and TCA.md still sketch `hrZoneDurations`. Both sketches are stale throughout, and the
+  issue names only DataModel.md.

@@ -27,13 +27,12 @@ final class Ride {
     var durationSeconds: TimeInterval          // Excludes paused intervals
     var averageSpeedMPS: Double
     var maxSpeedMPS: Double
-    var elevationGainMeters: Double
-    var elevationDropMeters: Double
+    // No stored elevation gain/drop or HR zone seconds (#284): S10 and S15 derive both from the
+    // saved track, and zones resolve at read time, so a stored breakdown would go stale.
 
     // MARK: - Heart Rate
     var averageHeartRateBPM: Int?
     var maxHeartRateBPM: Int?
-    var hrZoneDurations: [Int: TimeInterval]   // zone (1-5) to seconds in zone
 
     // MARK: - Cadence
     var averageCadenceRPM: Int?
@@ -140,10 +139,7 @@ final class Ride {
         self.durationSeconds = 0
         self.averageSpeedMPS = 0
         self.maxSpeedMPS = 0
-        self.elevationGainMeters = 0
-        self.elevationDropMeters = 0
         self.recordingState = .active
-        self.hrZoneDurations = [:]
         self.isAutoPaused = false
         self.zeroSpeedSeconds = 0
         self.speedSampleCount = 0

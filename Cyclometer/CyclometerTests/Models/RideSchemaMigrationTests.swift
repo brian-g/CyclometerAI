@@ -99,6 +99,11 @@ struct RideSchemaMigrationTests {
         ride.averageSpeedMPS = 7.64
         ride.averageHeartRateBPM = 148
         ride.recordingState = .ended
+        // Attributes #284 removed from `Ride`. Real values, not the defaults, so the
+        // migration has to drop columns that carry data — the dictionary included.
+        ride.elevationGainMeters = 412
+        ride.elevationDropMeters = 398
+        ride.hrZoneDurations = [2: 1_800, 3: 2_400]
         context.insert(ride)
         try context.save()
     }
@@ -140,6 +145,25 @@ struct RideSchemaMigrationTests {
             // placeholder rather than a decode failure.
             #expect(ride.mapThumbnailLight == nil)
             #expect(ride.mapThumbnailDark == nil)
+        }
+    }
+
+    /// #284 is the first change to *remove* `Ride` attributes rather than add them. The legacy
+    /// store holds data in all three, and lightweight migration has to drop those columns.
+    @Test("a store carrying the attributes #284 removed still opens")
+    func opensStoreWithRemovedAttributes() throws {
+        let rideId = UUID()
+        let startedAt = Date(timeIntervalSince1970: 1_757_155_800)
+
+        try withTemporaryStoreURL(prefix: "RideMigration") { url in
+            try writeLegacyStore(at: url, rideId: rideId, startedAt: startedAt)
+
+            let rides = try ModelContext(openStore(at: url)).fetch(FetchDescriptor<Ride>())
+            let ride = try #require(rides.first, "the ride should survive losing three columns")
+            #expect(rides.count == 1)
+            #expect(ride.id == rideId)
+            #expect(ride.distanceMeters == 32_186)
+            #expect(ride.averageHeartRateBPM == 148)
         }
     }
 
