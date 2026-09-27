@@ -14,7 +14,8 @@ extension HealthKitClient {
         heartRateZoneCeilings: [Int]? = nil,
         heartRateSamples: [Int] = [],
         onRequestAuthorization: @escaping @Sendable () async throws -> Void = { },
-        onSaveWorkout: @escaping @Sendable (RideWorkout) async throws -> Void = { _ in }
+        onSaveWorkout: @escaping @Sendable (RideWorkout) async throws -> Void = { _ in },
+        isWorkoutSharingAllowed: Bool = true
     ) -> HealthKitClient {
         HealthKitClient(
             requestAuthorization:  onRequestAuthorization,
@@ -29,7 +30,8 @@ extension HealthKitClient {
                     continuation.finish()
                 }
             },
-            saveWorkout: onSaveWorkout
+            saveWorkout: onSaveWorkout,
+            isWorkoutSharingAllowed: { isWorkoutSharingAllowed }
         )
     }
 }

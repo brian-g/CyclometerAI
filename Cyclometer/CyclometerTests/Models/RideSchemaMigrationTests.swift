@@ -179,6 +179,28 @@ struct RideSchemaMigrationTests {
         }
     }
 
+    /// #277, AC4: rides that ended before the flag existed count as done. Those since #250
+    /// already have their workout, and the rest were never going to get one, so a first launch
+    /// must not write them all.
+    @Test("a ride that ended before #277 migrates as not owed a workout, and the backfill leaves it alone")
+    func legacyRideIsNotOwedWorkout() async throws {
+        try await withTemporaryStoreURL(prefix: "RideMigration") { url in
+            let rideId = UUID()
+            try writeLegacyStore(at: url, rideId: rideId, startedAt: .now)
+            // The legacy shape has no `endedAt` set; give it one, so the owed-list predicate's
+            // `endedAt != nil` can't be what excludes it.
+            let container = try openStore(at: url)
+            let context = ModelContext(container)
+            let legacyRide = try #require(context.fetch(FetchDescriptor<Ride>()).first)
+            #expect(legacyRide.isHealthWorkoutOwed == false)
+            legacyRide.endedAt = legacyRide.startedAt.addingTimeInterval(4_212)
+            try context.save()
+
+            let actor = RidePersistenceActor(modelContainer: container)
+            #expect(try await actor.ridesOwedHealthWorkout().isEmpty)
+        }
+    }
+
     @Test("a migrated store is writable, not just readable")
     func migratedStoreAcceptsWrites() throws {
         try withTemporaryStoreURL(prefix: "RideMigration") { url in

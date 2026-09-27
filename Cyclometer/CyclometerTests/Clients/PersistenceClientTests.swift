@@ -419,6 +419,56 @@ struct PersistenceClientTests {
         #expect(try await client.fetchRideIdsMissingMapThumbnail() == [newer, older])
     }
 
+    // MARK: - Apple Health workout (#277)
+
+    @Test("finalizeRide makes a ride owed its workout, carrying its span, distance and moving time; an in-progress ride is not owed")
+    func finalizeMakesRideOwedWorkout() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let startedAt = Date(timeIntervalSince1970: 1_000_000)
+        let endedAt = startedAt.addingTimeInterval(3_600)
+        let finished = UUID(), inProgress = UUID()
+        try await client.createRide(finished, startedAt, nil)
+        try await client.createRide(inProgress, startedAt.addingTimeInterval(7_200), nil)
+        #expect(try await client.fetchRidesOwedHealthWorkout().isEmpty)
+
+        try await client.finalizeRide(finished, endedAt, RideSummaryUpdate(
+            rideId: finished, recordingState: .ended,
+            durationSeconds: 3_300, distanceMeters: 21_000, averageSpeedMPS: 6.4, maxSpeedMPS: 11
+        ), nil)
+
+        #expect(try await client.fetchRidesOwedHealthWorkout() == [OwedHealthWorkout(
+            rideId: finished, startedAt: startedAt, endedAt: endedAt,
+            distanceMeters: 21_000, movingSeconds: 3_300
+        )])
+    }
+
+    @Test("fetchRidesOwedHealthWorkout is newest first, and a settled ride leaves it")
+    func settledRideLeavesOwedList() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        let older = UUID(), newer = UUID(), settled = UUID()
+        for (offset, id) in [older, newer, settled].enumerated() {
+            try await client.createRide(id, base.addingTimeInterval(TimeInterval(offset) * 3_600), nil)
+            try await client.finalizeRide(id, base.addingTimeInterval(86_400), RideSummaryUpdate(
+                rideId: id, recordingState: .ended,
+                durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 2, maxSpeedMPS: 3
+            ), nil)
+        }
+
+        try await client.settleRideHealthWorkout(settled)
+
+        #expect(try await client.fetchRidesOwedHealthWorkout().map(\.rideId) == [newer, older])
+        #expect(try Self.fetchRide(settled, from: swiftDataStack).isHealthWorkoutOwed == false)
+    }
+
+    @Test("settleRideHealthWorkout on an unknown rideId throws rideNotFound")
+    func settleUnknownRideThrows() async throws {
+        let (client, _) = Self.makeLiveClient()
+        await #expect(throws: PersistenceError.rideNotFound) {
+            try await client.settleRideHealthWorkout(UUID())
+        }
+    }
+
     // MARK: - Ride read path (#173, for GPXExporter)
 
     @Test("fetchRide returns the ride's title and startedAt")

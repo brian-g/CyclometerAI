@@ -20,3 +20,14 @@ struct RideWorkout: Sendable, Equatable {
     /// the workout keeps Health's own preferred zones.
     var heartRateZoneStartsBPM: [Int]? = nil
 }
+
+/// A finished ride still owed its Apple Health workout (#277): everything `RideWorkout` is
+/// built from apart from the track, which is read separately.
+struct OwedHealthWorkout: Sendable, Equatable {
+    var rideId: UUID
+    var startedAt: Date
+    var endedAt: Date
+    var distanceMeters: Double
+    /// `Ride.durationSeconds`, which excludes paused time — the energy estimate's moving time.
+    var movingSeconds: TimeInterval
+}

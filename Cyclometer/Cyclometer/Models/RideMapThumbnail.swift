@@ -140,36 +140,3 @@ enum RideMapThumbnail {
         return true
     }
 }
-
-/// Lets one `RideMapThumbnail.backfill` run at a time; later callers queue in order (#248
-/// review). A dependency rather than a `static` so tests running in parallel each get their
-/// own and never wait on one another's renders.
-actor MapThumbnailGate {
-    private var isBusy = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    func run<T: Sendable>(_ operation: @Sendable () async -> T) async -> T {
-        if isBusy {
-            await withCheckedContinuation { waiters.append($0) }
-        } else {
-            isBusy = true
-        }
-        // Handed straight to the next waiter, so the gate never reads free while one waits.
-        defer {
-            if waiters.isEmpty { isBusy = false } else { waiters.removeFirst().resume() }
-        }
-        return await operation()
-    }
-}
-
-extension MapThumbnailGate: DependencyKey {
-    static let liveValue = MapThumbnailGate()
-    static var testValue: MapThumbnailGate { MapThumbnailGate() }
-}
-
-extension DependencyValues {
-    var mapThumbnailGate: MapThumbnailGate {
-        get { self[MapThumbnailGate.self] }
-        set { self[MapThumbnailGate.self] = newValue }
-    }
-}

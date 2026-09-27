@@ -42,6 +42,9 @@ actor RidePersistenceActor {
             ride.endedAt = endedAt
             ride.recordingState = .ended
             ride.gpxFileURL = gpxFileURL
+            // Durably over, so now owed its Apple Health workout (#277) — on every path that
+            // ends a ride, since all of them come through here.
+            ride.isHealthWorkoutOwed = true
         }
     }
 
@@ -75,6 +78,38 @@ actor RidePersistenceActor {
         } catch {
             logger.error("rideIdsMissingMapThumbnail failed: \(error.localizedDescription, privacy: .public)")
             throw error
+        }
+    }
+
+    /// Finished rides whose Apple Health workout hasn't landed, newest first (#277). Filters on
+    /// `endedAt != nil` for the enum-predicate reason given on `fetchResumableRide`.
+    func ridesOwedHealthWorkout() throws -> [OwedHealthWorkout] {
+        do {
+            let descriptor = FetchDescriptor<Ride>(
+                predicate: #Predicate { $0.endedAt != nil && $0.isHealthWorkoutOwed },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+            )
+            return try modelContext.fetch(descriptor).compactMap { ride in
+                ride.endedAt.map { endedAt in
+                    OwedHealthWorkout(
+                        rideId: ride.id,
+                        startedAt: ride.startedAt,
+                        endedAt: endedAt,
+                        distanceMeters: ride.distanceMeters,
+                        movingSeconds: ride.durationSeconds
+                    )
+                }
+            }
+        } catch {
+            logger.error("ridesOwedHealthWorkout failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
+    /// The ride's workout is done with, written or skipped as a duplicate (#277).
+    func settleHealthWorkout(id: UUID) throws {
+        try savingChanges("settleHealthWorkout", id: id, context: modelContext) {
+            try fetchRide(id: id).isHealthWorkoutOwed = false
         }
     }
 

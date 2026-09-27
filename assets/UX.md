@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-09-26 — HKWorkout retry (#277): §S10's workout is retried until it lands — after the next Finish, and at the next launch unless that launch resumes an unfinished ride — including for a ride closed out at launch after a failed save. Rides that ended before this change are not written retroactively, nor is a ride closed out as an orphan at launch, whose end time is the relaunch rather than the ride's.  
 **Updated:** 2026-09-26 — Health's preferred HR zones (#238): §S12's zones, and with them the dashboard, S10 and S15, come from the rider's zones in Apple Health unless overridden in S12. §S10's workout carries the app's zones only when the rider has an S12 override.  
 **Updated:** 2026-09-25 — Active energy (#276, supersedes #274): §S10's workout carries an energy estimate from the recorded track and the rider's Health body weight, so it earns Move credit; none without a body weight. §S01's HealthKit list adds the body-weight read and energy write.  
 **Updated:** 2026-09-25 — §S10 default ride name gains the start's place name from a reverse geocode (#283), swapped in without waiting and never over a name the rider typed; §S12 gains a Place Names toggle to turn it off.  
@@ -814,7 +815,9 @@ Presented as a `.sheet` when the rider taps Sync. Lists all enabled `ConnectedSe
 
 ### HKWorkout (automatic)
 
-An outdoor cycling `HKWorkout` is written to Apple Health automatically once the ride is saved at ride end. No user action required, and the summary screen never waits on it — a failed write costs the workout, never the ride or the summary. The ride appears in the iOS Fitness app.
+An outdoor cycling `HKWorkout` is written to Apple Health automatically once the ride is saved at ride end. No user action required, and the summary screen never waits on it — a failed write never costs the ride or the summary. The ride appears in the iOS Fitness app.
+
+- **Retried until it lands** (#277): a write that fails, or never ran because the app was killed or the ride was closed out at the next launch, is retried after the next Finish, and at the next launch unless that launch resumes an unfinished ride. A skipped duplicate counts as done. Without Workouts share access, nothing is attempted: rides wait and are written once it is allowed. A ride closed out as an orphan (a new ride was started before the unfinished one was found) gets no workout, since its end time is the relaunch
 
 - **Consent** is the HealthKit share permission from S01, which the rider can revoke in iOS Settings → Health
 - **Duplicates:** if another source (e.g. an Apple Watch Outdoor Cycle) already recorded a cycling workout overlapping the ride, the write is skipped. A later rewrite of the same ride replaces its workout rather than adding one

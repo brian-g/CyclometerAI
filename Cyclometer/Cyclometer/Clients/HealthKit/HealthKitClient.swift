@@ -63,6 +63,10 @@ struct HealthKitClient {
     /// thrown, when another source already recorded a cycling workout over the same
     /// time; logs its own failures before rethrowing them.
     var saveWorkout:           @Sendable (RideWorkout) async throws -> Void
+    /// Whether the rider has allowed Workouts to be shared, so `RideHealthWorkout.backfill`
+    /// can skip its reads when a write is sure to fail (#277). Share status, unlike read
+    /// status, is one HealthKit reports.
+    var isWorkoutSharingAllowed: @Sendable () -> Bool
 }
 
 extension HealthKitClient: DependencyKey {
@@ -81,7 +85,8 @@ extension HealthKitClient: DependencyKey {
             fetchBodyMass:         { try await fetchBodyMass(store) },
             fetchHeartRateZoneCeilings: { try await fetchHeartRateZoneCeilings(store) },
             heartRateStream:       { makeHeartRateStream(store) },
-            saveWorkout:           { try await saveWorkout($0, store) }
+            saveWorkout:           { try await saveWorkout($0, store) },
+            isWorkoutSharingAllowed: { store.authorizationStatus(for: PermissionsClient.workoutType) == .sharingAuthorized }
         )
     }()
 
@@ -97,7 +102,9 @@ extension HealthKitClient: DependencyKey {
         fetchBodyMass:         { nil },
         fetchHeartRateZoneCeilings: { nil },
         heartRateStream:       { AsyncStream { $0.finish() } },
-        saveWorkout:           { _ in }
+        saveWorkout:           { _ in },
+        // Matches `saveWorkout`'s no-op succeeding.
+        isWorkoutSharingAllowed: { true }
     )
 }
 
