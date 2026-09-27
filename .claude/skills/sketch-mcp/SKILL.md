@@ -1,6 +1,6 @@
 ---
 name: sketch-mcp
-description: This skill should be used when the user asks to check, inspect, or compare against the Sketch design file — phrases like "check the Sketch file", "what does Design.sketch say about S07", "compare this screen to the design", "pull the real colors from Sketch", "does the layer tree match what we built", or "get a screenshot of the artboard for W7". Connects to Sketch's official local MCP server so Claude can query assets/design/Design.sketch directly instead of relying on colors.md or CLAUDE.md's typography table, which are hand-maintained snapshots of it.
+description: This skill should be used when the user asks to check, inspect, or compare against the Sketch design file — phrases like "check the Sketch file", "what does Design.sketch say about S07", "compare this screen to the design", "pull the real colors from Sketch", "does the layer tree match what we built", or "get a screenshot of the artboard for W7". Connects to Sketch's official local MCP server so Claude can query assets/design/Design.sketch directly instead of relying on colors.md, a hand-maintained snapshot of it.
 ---
 
 # Sketch MCP
@@ -40,7 +40,9 @@ Use `-s local` (not `project` or `user`) — the endpoint is `localhost`-only, s
 
 ## Reconciling Sketch against the repo's own spec docs
 
-`assets/design/colors.md` is `CLAUDE.md`'s declared canonical source for hex values, and the typography ramp table in `CLAUDE.md` is a hand-maintained snapshot of the D-DIN/GillSans sizes actually in the Sketch file. Both can drift from the live document — someone tweaks a color in Sketch and forgets to update `colors.md`, or vice versa. When `get_design_assets` or a screenshot disagrees with what `colors.md`/`CLAUDE.md` state:
+Typography is the exception: Sketch's text styles are stale, and `HeroNumber` (`UI/Components/HeroNumber/HeroNumber.swift`) is canonical for number sizes and tracking — don't flag or "fix" code to match Sketch type.
+
+`assets/design/colors.md` is `CLAUDE.md`'s declared canonical source for hex values. It can drift from the live document — someone tweaks a color in Sketch and forgets to update `colors.md`, or vice versa. When `get_design_assets` or a screenshot disagrees with what `colors.md` states:
 
 - Don't silently trust either side. Surface the discrepancy the same way the `spec-first` skill does for PRD/UX vs. code — name both values and let Brian decide which one is stale.
 - If Sketch is confirmed as the more current source, update `assets/design/colors.md` to match (it's the file `CLAUDE.md` tells implementers to reference) rather than leaving two disagreeing sources of truth in the repo.

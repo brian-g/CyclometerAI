@@ -42,15 +42,7 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 
 ## Design System
 
-**Typography ramp:**
-| Role | Font | Size | Notes |
-|------|------|------|-------|
-| Hero | D-DIN Condensed | 138pt | Letter spacing: −6.47 |
-| Major | D-DIN | 56pt | |
-| Values | D-DIN | 34pt | |
-| Minor | D-DIN | 14pt | |
-| Units | GillSans-Light | 17pt | Baseline-aligned with value |
-| Caption | GillSans-Light | 14pt | |
+**Typography:** render numbers through `HeroNumber` (`UI/Components/HeroNumber/`) with `.heroNumberSize(_:)` — never hand-set D-DIN sizes or tracking. `HeroNumber` is canonical for type sizes; Sketch's text styles are stale.
 
 Labels: **ALL CAPS** · Units: *lowercase* · Units: baseline-aligned to their corresponding value
 
@@ -65,16 +57,6 @@ xcodebuild build -project Cyclometer.xcodeproj -scheme Cyclometer \
 xcodebuild test  -project Cyclometer.xcodeproj -scheme Cyclometer \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:CyclometerTests
 ```
-
-**Testing conventions** (target `CyclometerTests`):
-- Reducer logic — Swift Testing (`@Suite`/`@Test`/`#expect`) + TCA `TestStore` with `withDependencies` for mocks (e.g. `SpeedFeatureTests.swift`).
-- UI — `pointfreeco/swift-snapshot-testing` via XCTest, fixed-size canvases, light + dark variants (e.g. `SpeedWidgetSnapshotTests.swift`).
-- Snapshot references are recorded against a local simulator (iPhone 17 Pro, iOS 27.0), so the snapshot suites are skipped in CI (see `.github/workflows/tests.yml`). The full local suite passes.
-- Don't snapshot against ambient environment values (`.accentColor`, `.primary` where the token matters) — pass an explicit `cy*` token, or the reference silently encodes whatever the host bundle resolved at record time.
-
-## Business Model
-
-$10 one-time purchase, 30-day free trial, via native Apple In-App Purchases (StoreKit 2).
 
 ## General Claude Rules
 
