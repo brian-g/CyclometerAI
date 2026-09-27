@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-09-26 — No iPhone workout session (#318, PRD §9.4): §W12's time in zone, when built, accumulates locally from the dashboard's HR readings, not from HealthKit's live zone updates.  
 **Updated:** 2026-09-26 — HKWorkout retry (#277): §S10's workout is retried until it lands — after the next Finish, and at the next launch unless that launch resumes an unfinished ride — including for a ride closed out at launch after a failed save. Rides that ended before this change are not written retroactively, nor is a ride closed out as an orphan at launch, whose end time is the relaunch rather than the ride's.  
 **Updated:** 2026-09-26 — Health's preferred HR zones (#238): §S12's zones, and with them the dashboard, S10 and S15, come from the rider's zones in Apple Health unless overridden in S12. §S10's workout carries the app's zones only when the rider has an S12 override.  
 **Updated:** 2026-09-25 — Active energy (#276, supersedes #274): §S10's workout carries an energy estimate from the recorded track and the rider's Health body weight, so it earns Move credit; none without a body weight. §S01's HealthKit list adds the body-weight read and energy write.  
@@ -668,6 +669,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 **Sizes:** 2x2, 2x1, 1x1
 
 - HR zone distribution chart: time spent in each zone for the current ride
+- Time in zone accumulates locally from the HR readings the dashboard already classifies, not from HealthKit's `HKLiveWorkoutZoneUpdate`, since the app runs no iPhone workout session (PRD §9.4, #318)
 - Zone colors: `brHRZone1`–`brHRZone5`
 - Empty state when no HR source active: "--"
 - Sheet: Heart rate

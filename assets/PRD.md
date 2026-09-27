@@ -30,6 +30,7 @@
 | 0.6.4 | 2026-09-26 | Brian / Claude | Ride Live Activity. New §8.10: Lock Screen and Dynamic Island Live Activity moves from Phase 2 to MVP under M10.5; visual only, with radar sound left to the audio client; CarPlay, Mac and Watch presentations excluded; next-turn cue included when a route is active. §6, §13 and Resolved Decisions updated. Resolved Decisions now gives the iOS 27 minimum's reason: HealthKit's cycling-specific HR, cadence and power zone tracking. |
 | 0.6.5 | 2026-09-25 | Brian / Claude | Workout active energy (#276, supersedes #274). §9.4 adds `bodyMass` (read) and `activeEnergyBurned` (write): `biologicalSex` (read) too. The ride's energy comes from heart rate (Keytel 2005) when a strap covered half the ride and Health has weight, date of birth and a Male or Female sex; otherwise from the track (physics, with dropouts and implausible grades costed flat; Compendium MET only for a ride with no usable track). None is written when Health has no weight. Bike weight is a 10 kg constant, not a setting. |
 | 0.6.6 | 2026-09-26 | Brian / Claude | Health's preferred HR zones (#238, supersedes #167). §8.5 and §9.4: zone boundaries resolve `S12 override ?? Health's preferred zones ?? Karvonen`, read with iOS 27's `preferredWorkoutZoneConfiguration` (no extra permission). A resting or max override sets Health's zones aside. When the rider has an S12 override, the ride's `HKWorkout` carries the app's zones. Otherwise it keeps Health's preferred ones. OQ9's Karvonen becomes the fallback. Live `HKLiveWorkoutZoneUpdate` needs an iPhone workout session and is split to its own issue. |
+| 0.6.7 | 2026-09-26 | Brian / Claude | iPhone workout session declined (#318). §9.4 adds a decision note. No `HKWorkoutSession` / `HKLiveWorkoutBuilder` runs during a ride, so there is no live `HKLiveWorkoutZoneUpdate`. The post-ride `HKWorkoutBuilder` write (#250, #277), its overlap skip and SwiftData crash recovery (#175, #188) stay. The dashboard's zone and any W12 time in zone stay local to the strap's readings. #318 moves to Phase 2 with the S17 Watch companion. |
 
 ---
 
@@ -1020,6 +1021,50 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 **HR Streaming During Ride:**
 - Use `HKAnchoredObjectQuery` with live updates when Apple Watch is the active HR source
 - Fallback: Apple Watch is secondary to BLE HR strap (see §8.4)
+
+> **Decision note — issue #318.** Recorded 2026-09-26. The iPhone app does **not** run an
+> `HKWorkoutSession` / `HKLiveWorkoutBuilder` during a ride. It is revisited with the S17 Watch
+> companion (Phase 2), where #318 stays open.
+>
+> **What a session would buy.** iOS 27's live zone update, `workoutBuilder(_:didUpdateWorkoutZone:)`,
+> which fires only on a live builder. The session would also mean background execution, and a
+> workout that exists while the ride is still in progress.
+>
+> **What it would replace.** Every part of the post-ride write (#250, UX.md §S10):
+> - `RideHealthWorkout` rebuilds a plain `HKWorkoutBuilder` from the saved ride, and sync identifiers
+>   make a rewrite replace the earlier copy.
+> - The owed flag retries the write at Finish and at launch (#277).
+> - The write is skipped when another source recorded an overlapping cycling workout.
+> - Crash recovery (#175, #188) runs from SwiftData alone, and an orphan closed out at relaunch gets no
+>   workout.
+>
+> A live builder's workout exists only inside its session, so `recoverActiveWorkoutSession` would
+> have to agree with the SwiftData recovery and the pending-ride-end marker. That is two recovery
+> systems for one ride.
+>
+> **Why not.**
+> - **Health has nothing to add.** The live builder zones only heart rate that is in HealthKit, and
+>   the strap's readings are held by the app over CoreBluetooth and never reach it. To feed the
+>   builder, the app would write its own strap samples back (a new `heartRate` share permission,
+>   double-counted against a Watch writing HR over the same ride). Health would then sort the same
+>   readings the dashboard already classifies on arrival (§8.5), later, and against a zone
+>   configuration that must be kept in step with the S12 override.
+> - **The background time is already there.** The ride's `location`, `bluetooth-central` and `audio`
+>   modes cover it, and §8.10's Live Activity relies on the location mode.
+> - **The replaced write path works.** It is eventual and idempotent (#277), and a session would
+>   trade that for a live object that has to survive the ride.
+>
+> **What stays.**
+> - The dashboard's zone is classified locally on each reading.
+> - S10's zone breakdown is derived from the saved track.
+> - W12's time in zone (UX.md §W12, not yet built; #145) accumulates locally from the same readings,
+>   not from Health.
+>
+> **Open threads, neither needing a session.**
+> - On iOS 27 a plain `HKWorkoutBuilder` computes zone durations (`HKWorkout.zoneGroupsByType`), but
+>   only from HR samples added to the workout. That is the same HR double-write question as above.
+> - Health's workout duration includes paused time, and pause/resume events could be added after the
+>   ride with `addWorkoutEvents`.
 
 **Acceptance Criteria:**
 - [ ] App correctly reads `restingHeartRate` from HealthKit on ride start
