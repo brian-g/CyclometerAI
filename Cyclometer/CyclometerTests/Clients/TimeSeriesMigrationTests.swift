@@ -48,8 +48,12 @@ struct TimeSeriesMigrationTests {
         return container
     }
 
-    @Test("A store written by the shipped model opens under the model segmentIndex was added to")
-    func aShippedStoreMigrates() throws {
+    /// Every version a rider's device could still be on. v1 predates `segmentIndex` (#263),
+    /// v2 predates the optional `altitudeMeters` (#303).
+    static let shippedVersions = ["CyclometerTimeSeries", "CyclometerTimeSeries 2"]
+
+    @Test("A store written by a shipped model opens under the current one", arguments: shippedVersions)
+    func aShippedStoreMigrates(version: String) throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("TimeSeriesMigration-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -59,7 +63,7 @@ struct TimeSeriesMigrationTests {
         let timestamp = Date(timeIntervalSince1970: 1_772_524_500)
 
         let shipped = try Self.container(
-            model: try Self.model(version: Self.modelName), storeURL: storeURL
+            model: try Self.model(version: version), storeURL: storeURL
         )
         let context = shipped.newBackgroundContext()
         try context.performAndWait {
@@ -95,6 +99,9 @@ struct TimeSeriesMigrationTests {
             let row = try #require(rows.first)
             #expect(row.rideId == rideId)
             #expect(row.cadenceRPM == 85)
+            // Carried over as stored. An invalid fix a shipped model recorded as 0 m can't be
+            // told from sea level, so it stays — the fix only reaches rides recorded after it.
+            #expect(row.altitudeMeters?.doubleValue == 220.1)
             // The ride recorded before the update has no pauses it can prove, so every one
             // of its points belongs to the first segment — the attribute's default, and the
             // one value that keeps its export exactly the single `<trkseg>` it was.

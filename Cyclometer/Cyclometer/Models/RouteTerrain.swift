@@ -233,6 +233,26 @@ enum RouteTerrain {
         }
     }
 
+    /// The same window over samples some of which are missing: each average is over the values
+    /// the window does have, and nil only where it has none. A gap is bridged by its neighbours
+    /// rather than read as a value (#303).
+    static func movingAverage(_ values: [Double?], halfWindow: Int) -> [Double?] {
+        guard halfWindow > 0, values.count > 1 else { return values }
+        var sums = [0.0], counts = [0]
+        sums.reserveCapacity(values.count + 1)
+        counts.reserveCapacity(values.count + 1)
+        for value in values {
+            sums.append(sums[sums.count - 1] + (value ?? 0))
+            counts.append(counts[counts.count - 1] + (value == nil ? 0 : 1))
+        }
+        return values.indices.map { index in
+            let lower = max(0, index - halfWindow)
+            let upper = min(values.count - 1, index + halfWindow)
+            let count = counts[upper + 1] - counts[lower]
+            return count > 0 ? (sums[upper + 1] - sums[lower]) / Double(count) : nil
+        }
+    }
+
     /// Percent grade at each sample, as rise over the `gradeWindowMeters` centred on it. The
     /// window is clamped at the ends, and a route shorter than it gets one grade end to end.
     static func grades(_ elevation: [Double], spacing: Double) -> [Double] {

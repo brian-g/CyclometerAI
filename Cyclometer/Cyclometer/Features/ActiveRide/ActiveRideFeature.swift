@@ -294,7 +294,10 @@ struct ActiveRideFeature {
         /// coordinates are transient and a resumed ride redraws its map from empty, so
         /// after a resume the two deliberately disagree.
         var trackSegmentIndex: Int = 0
-        var altitude: Double = 0
+        /// Nil until a fix with a valid altitude, and after any fix without one (#303): an
+        /// invalid fix is never covered with the altitude before it, since recording that
+        /// would fabricate a measurement.
+        var altitude: Double?
         var heading: Double = -1
         var horizontalAccuracy: Double = 0
         /// Whether the fix behind `coordinate` is good enough to record (#210). Sticky

@@ -148,7 +148,7 @@ struct RideEnergyTests {
                 .map { point in
                     var point = point
                     point.latitude += 450 / Self.metersPerDegree
-                    point.altitudeMeters += secondStretchRise
+                    point.altitudeMeters? += secondStretchRise
                     return point
                 }
             return before + after
@@ -156,6 +156,37 @@ struct RideEnergyTests {
         let level = energy(ride(secondStretchRise: 0), movingSeconds: 150)
         #expect(level > 0)
         #expect(abs(energy(ride(secondStretchRise: 30), movingSeconds: 150) - level) < 1e-9)
+    }
+
+    @Test("a fix CoreLocation gave no valid altitude costs what the ride would without it (#303)")
+    func invalidAltitudeChangesNothing() {
+        // Low and fast on purpose: at 40 m and 8 m/s the 0 m CoreLocation used to report for an
+        // invalid altitude smooths into a 1.3 m step — 16%, under the grade cap, and credited as
+        // climbing on the way back up. Higher, the step is past the cap and was discarded anyway.
+        let level = track(seconds: 300, speed: 8).map { point in
+            var point = point
+            point.altitudeMeters = 40
+            return point
+        }
+        func withFix(at altitude: Double?) -> [TrackPointDTO] {
+            var points = level
+            points[150].altitudeMeters = altitude
+            return points
+        }
+        #expect(energy(withFix(at: nil)) == energy(level))
+        // What the fixture guards against: the same fix recorded as 0 m.
+        #expect(energy(withFix(at: 0)) > energy(level))
+    }
+
+    @Test("a stretch with no valid altitude at all is costed as flat")
+    func noAltitudeIsCostedFlat() {
+        let climb = track(seconds: 300, speed: 5, climbRate: 0.3)
+        let unknown = climb.map { point in
+            var point = point
+            point.altitudeMeters = nil
+            return point
+        }
+        #expect(energy(unknown) == energy(track(seconds: 300, speed: 5)))
     }
 
     @Test("a second with no speed reading is stationary, as the ride's own odometer counts it (#262)")

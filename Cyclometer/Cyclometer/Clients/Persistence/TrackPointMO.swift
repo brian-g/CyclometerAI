@@ -10,7 +10,9 @@ final class TrackPointMO: NSManagedObject {
     @NSManaged var timestamp: Date
     @NSManaged var latitude: Double
     @NSManaged var longitude: Double
-    @NSManaged var altitudeMeters: Double
+    /// Optional, not a sentinel like the sensor fields: altitude is legitimately negative
+    /// below sea level, so no value can mean "invalid" (#303).
+    @NSManaged var altitudeMeters: NSNumber?
     @NSManaged var horizontalAccuracyMeters: Double
     @NSManaged var speedMPS: Double
     @NSManaged var speedSourceRaw: String

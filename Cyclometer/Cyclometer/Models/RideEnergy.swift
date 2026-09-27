@@ -18,7 +18,8 @@ import Foundation
 ///
 /// **Flat physics where the track can't say more.** A gap longer than `maxPhysicsGapSeconds` (a
 /// tunnel) is costed on the flat at the straight-line speed across it, a grade too steep to be real
-/// altitude as flat at the recorded speed, and recording time the track doesn't reach at all as
+/// altitude — or a stretch with no valid altitude to take one from (#303) — as flat at the recorded
+/// speed, and recording time the track doesn't reach at all as
 /// flat at the ride's average speed. Staying on one model keeps a ride's total from depending on
 /// how much of it fell back: MET costs the same riding at 1.5–2.6× the physics rate.
 ///
@@ -150,7 +151,8 @@ enum RideEnergy {
 
             for run in runs(of: segment) where run.count > 1 {
                 // Smoothed per run, not per segment: a window reaching across a gap would blend
-                // altitudes from either side of it into a grade on the seconds next to it.
+                // altitudes from either side of it into a grade on the seconds next to it. A point
+                // CoreLocation gave no valid altitude is bridged by its neighbours (#303).
                 let altitude = RouteTerrain.movingAverage(
                     run.map(\.altitudeMeters), halfWindow: altitudeSmoothingHalfWindow
                 )
@@ -165,8 +167,11 @@ enum RideEnergy {
                     let speed = speeds.reduce(0, +) / Double(speeds.count)
                     // A stationary second is not riding (#262), and has no run to take a grade over.
                     guard speed > ActiveRideFeature.stationarySpeedMPS else { continue }
-                    let rise = altitude[index] - altitude[index - 1]
-                    let climbRate = abs(rise / (speed * seconds)) <= maxPlausibleGrade ? rise / seconds : 0
+                    var climbRate = 0.0
+                    if let top = altitude[index], let bottom = altitude[index - 1] {
+                        let rise = top - bottom
+                        if abs(rise / (speed * seconds)) <= maxPlausibleGrade { climbRate = rise / seconds }
+                    }
                     workJoules += pedalWatts(speed: speed, climbRate: climbRate, mass: mass) * seconds
                 }
             }

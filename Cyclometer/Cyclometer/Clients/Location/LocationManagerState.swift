@@ -235,17 +235,7 @@ final class LocationManagerState: NSObject, @unchecked Sendable, CLLocationManag
         guard !continuations.isEmpty else { return }
 
         for location in locations {
-            let update = LocationUpdate(
-                coordinate: Coordinate(
-                    latitude: location.coordinate.latitude,
-                    longitude: location.coordinate.longitude
-                ),
-                altitude: location.altitude,
-                speed: location.speed,
-                horizontalAccuracy: location.horizontalAccuracy,
-                heading: location.course,
-                timestamp: location.timestamp
-            )
+            let update = LocationUpdate(location)
             for c in continuations { c.yield(update) }
         }
     }

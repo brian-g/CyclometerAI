@@ -198,7 +198,7 @@ private func batchInsertTrackPoints(_ points: [TrackPointDTO], container: NSPers
         mo.timestamp = point.timestamp
         mo.latitude = point.latitude
         mo.longitude = point.longitude
-        mo.altitudeMeters = point.altitudeMeters
+        mo.altitudeMeters = point.altitudeMeters.map(NSNumber.init(value:))
         mo.horizontalAccuracyMeters = point.horizontalAccuracyMeters
         // Every optional sensor field stores "no reading" as a negative sentinel, because
         // the attributes are non-optional scalars. It has to be negative, not 0: a
@@ -273,7 +273,7 @@ private func fetchTrackPointsLive(rideId: UUID, container: NSPersistentContainer
                 timestamp: mo.timestamp,
                 latitude: mo.latitude,
                 longitude: mo.longitude,
-                altitudeMeters: mo.altitudeMeters,
+                altitudeMeters: mo.altitudeMeters?.doubleValue,
                 horizontalAccuracyMeters: mo.horizontalAccuracyMeters,
                 // Negative is the "no reading" sentinel for every optional sensor
                 // field; 0 is a real measurement and round-trips as one (#211).

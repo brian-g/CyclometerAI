@@ -9,7 +9,8 @@ struct TrackPointDTO: Sendable, Equatable {
     var timestamp: Date
     var latitude: Double
     var longitude: Double
-    var altitudeMeters: Double
+    /// Nil when CoreLocation marked the fix's altitude invalid (#303).
+    var altitudeMeters: Double?
     var horizontalAccuracyMeters: Double
     var speedMPS: Double?
     var speedSource: SensorSource
