@@ -3104,10 +3104,11 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
         RadarTarget(id: VariaRadarClient.vehicleSlotIDs[0], relativeVelocityMPS: mps, rangeMetres: 4, threatLevel: .allClear)
     }
 
-    private func makeStore(persistenceClient: PersistenceClient) -> TestStoreOf<ActiveRideFeature> {
-        let store = TestStore(
-            initialState: ActiveRideFeature.State(recordingState: .active, coordinate: Self.coordinate)
-        ) {
+    private func makeStore(
+        initialState: ActiveRideFeature.State = .init(recordingState: .active, coordinate: Self.coordinate),
+        persistenceClient: PersistenceClient
+    ) -> TestStoreOf<ActiveRideFeature> {
+        let store = TestStore(initialState: initialState) {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
@@ -3233,6 +3234,29 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
             $0.radarConnectionState = .active
             $0.wasRadarEverPaired = true
         }
+    }
+
+    /// #298: a ride killed after a pass and before its first checkpoint resumes with the
+    /// count `fetchResumableRide` rebuilt from its saved events. A radar that never
+    /// reconnects after the resume must not finalize that ride as "no radar".
+    @Test("A resumed ride with saved passes finalizes with its count when the radar never reconnects")
+    func resumedPassesFinalizeWithoutRadarReconnect() async {
+        let finalized = LockIsolated<RideSummaryUpdate?>(nil)
+        var resumed = ActiveRideFeature.State(resuming: RideSummaryUpdate(
+            rideId: UUID(), recordingState: .active, durationSeconds: 20, distanceMeters: 100,
+            averageSpeedMPS: 5, maxSpeedMPS: 6, vehiclePassCount: 1
+        ))
+        resumed.coordinate = Self.coordinate
+        let store = makeStore(
+            initialState: resumed,
+            persistenceClient: .mock(onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) })
+        )
+
+        await endRide(store)
+        await expectEventually { finalized.value != nil }
+
+        #expect(store.state.wasRadarEverPaired == false)
+        #expect(finalized.value?.vehiclePassCount == 1)
     }
 }
 
