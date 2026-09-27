@@ -1,3 +1,20 @@
+# #318 — iPhone workout session for live HR zone updates (decision)
+
+Plan: /Users/brian/.claude/plans/staged-churning-yao.md
+Branch: `docs/318-workout-session-decision`
+
+- [x] 0. Move #318 to "Phase 2 — Companion & History" (stays open, with S17)
+- [x] 1. PRD §9.4 decision note
+- [x] 2. PRD revision history 0.6.7
+- [x] 3. UX.md §W12 source line + header Updated line
+- [x] 4. PR #323, comment on #318
+
+## Review
+
+- Decision: no iPhone `HKWorkoutSession` / `HKLiveWorkoutBuilder`. The strap's HR never reaches HealthKit, so a live builder could only re-zone the app's own readings, and that would cost a new HR share permission and a double write against a Watch. The existing background modes already cover the ride. The session would replace #250 and #277's idempotent, retried post-ride write, and add a second crash-recovery system alongside #175 and #188.
+- #318's premise that W12 shows time in zone is not built. W12 shows the current zone only, and #145 holds the open question on time in zone. The decision records that W12's time in zone, once built, is local.
+- Docs only, with no code or test changes.
+
 # #277 — Retry the ride's HKWorkout write until it lands
 
 Plan: /Users/brian/.claude/plans/buzzing-doodling-piglet.md
