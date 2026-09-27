@@ -113,6 +113,16 @@ struct RideDashboardView: View {
                         .frame(height: unit * 2)
                     }
 
+                    GridRow {
+                        CadenceWidget(
+                            cadence: store.cadence.cadenceRPM,
+                            cadenceHistory: store.cadence.watermarkSamples,
+                            averageCadence: store.cadence.averageCadenceRPM,
+                            maxCadence: store.cadence.maxCadenceRPM,
+                            size: .twoByOne
+                        )
+                        .frame(height: unit)
+                    }
                     // W4 HR + W12 HR Zones
                     GridRow {
                         HeartRateWidget(
@@ -128,21 +138,7 @@ struct RideDashboardView: View {
                     // W11 Pace — full width; radar sidebar lives outside the grid
                     GridRow {
                         PaceWidget(speedMPS: store.speed.speedMPS ?? 0, unit: store.unitSystem)
-                            .gridCellColumns(2)
                             .frame(height: unit)
-                    }
-
-                    // W5 Cadence + W9 Directions — always present; on a free ride it reads
-                    // "No Route" (#200). Removing it is S07/S08's job, not this grid's.
-                    GridRow {
-                        CadenceWidget(
-                            cadence: store.cadence.cadenceRPM,
-                            cadenceHistory: store.cadence.watermarkSamples,
-                            averageCadence: store.cadence.averageCadenceRPM,
-                            maxCadence: store.cadence.maxCadenceRPM,
-                            size: .oneByOne
-                        )
-                        .frame(height: unit)
                         directionsWidget(size: .oneByOne)
                             .frame(height: unit)
                     }
