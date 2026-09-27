@@ -29,7 +29,7 @@ struct GPXExporterTests {
     private static let ride = RideExportMetadata(title: "Morning Ride", startedAt: start)
 
     private static func point(
-        lat: Double = 36.0726, lon: Double = -79.7920, ele: Double = 220.1,
+        lat: Double = 36.0726, lon: Double = -79.7920, ele: Double? = 220.1,
         time: Date = start,
         speedMPS: Double? = 7.2, speedSource: SensorSource = .gps,
         hr: Int? = 142, hrSource: SensorSource = .bleHR,
@@ -119,6 +119,17 @@ struct GPXExporterTests {
         #expect(!xml.contains("gpxtpx:cad"))
         #expect(!xml.contains("gpxtpx:speed"))
         #expect(!xml.contains("<extensions>"))
+    }
+
+    // MARK: - Invalid altitude (#303)
+
+    @Test("a point with no valid altitude exports no <ele>, and parses back without one")
+    func trkptOmitsInvalidAltitude() throws {
+        let points = [Self.point(ele: 220.1), Self.point(ele: nil, time: Self.start.addingTimeInterval(1))]
+        let xml = GPXExporter.buildXML(ride: Self.ride, trackPoints: points, vehiclePassEvents: [])
+        #expect(xml.components(separatedBy: "<ele>").count - 1 == 1)
+        let parsed = try GPXParsing.parse(xml)
+        #expect(parsed.trackPoints.map(\.elevation) == [220.1, nil])
     }
 
     // MARK: - Horizontal accuracy (#210)

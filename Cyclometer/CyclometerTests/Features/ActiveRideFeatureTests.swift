@@ -2506,6 +2506,29 @@ struct ActiveRideFeatureHRDropoutTests {
         #expect(store.state.displayHeartRateBPM == 72)
     }
 
+    /// The same rule for position's third axis (#303): a fix CoreLocation gave no valid
+    /// altitude is recorded without one — not as the 0 m it reported, and not as the
+    /// altitude before it, which would fabricate a measurement exactly as a held HR does.
+    @Test("A fix with no valid altitude records absent altitude, not zero or the last one")
+    func invalidAltitudeRecordsAbsentAltitude() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.elapsedTick)
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: Self.goodFix.coordinate, altitude: nil, speed: 8.5,
+            horizontalAccuracy: 5.0, heading: 192.0, timestamp: Self.fixedNow + 1
+        )))
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.map(\.altitudeMeters) == [280.0, nil])
+    }
+
     private static let goodFix = LocationUpdate(
         coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
         altitude: 280.0,

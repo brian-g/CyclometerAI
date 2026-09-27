@@ -34,8 +34,9 @@ final class CoreDataStack {
     /// update is `CyclometerTimeSeries.xcdatamodeld` carrying every shipped model version, so
     /// CoreData can infer the mapping between them — `shouldMigrateStoreAutomatically` and
     /// `shouldInferMappingModelAutomatically` are both on by default, which is why there is
-    /// nothing to configure here. Adding or removing an attribute needs a *new* model version
-    /// (#263's `segmentIndex`); changing a default value does not, since default values are
+    /// nothing to configure here. Adding or removing an attribute, or changing whether one is
+    /// optional, needs a *new* model version (#263's `segmentIndex`, #303's optional
+    /// `altitudeMeters`); changing a default value does not, since default values are
     /// not part of an entity's version hash (#211). `TimeSeriesMigrationTests` covers it.
     private static func load(_ container: NSPersistentContainer) {
         container.loadPersistentStores { _, error in

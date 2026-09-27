@@ -400,13 +400,13 @@ extension HealthKitClient {
     }
 
     /// Only what a track point records: course and vertical accuracy never were, so both go
-    /// in as CoreLocation's "invalid" −1 — which also marks the altitude unusable — and a
-    /// second with no speed reading gets the same.
+    /// in as CoreLocation's "invalid" −1 — which also marks the altitude unusable, so a point
+    /// with none (#303) goes in as 0 — and a second with no speed reading gets the same.
     static func routeLocations(_ points: [TrackPointDTO]) -> [CLLocation] {
         points.map { point in
             CLLocation(
                 coordinate: CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude),
-                altitude: point.altitudeMeters,
+                altitude: point.altitudeMeters ?? 0,
                 horizontalAccuracy: point.horizontalAccuracyMeters,
                 verticalAccuracy: -1,
                 course: -1,

@@ -61,7 +61,7 @@ struct HealthKitClientTests {
             ),
             TrackPointDTO(
                 rideId: rideId, timestamp: start.addingTimeInterval(1), latitude: 43.0732, longitude: -89.4013,
-                altitudeMeters: 271, horizontalAccuracyMeters: 8, speedMPS: nil, speedSource: .none,
+                altitudeMeters: nil, horizontalAccuracyMeters: 8, speedMPS: nil, speedSource: .none,
                 heartRateBPM: nil, heartRateSource: .none, cadenceRPM: nil, powerWatts: nil
             ),
         ]
@@ -72,7 +72,8 @@ struct HealthKitClientTests {
         for (location, point) in zip(locations, points) {
             #expect(location.coordinate.latitude == point.latitude)
             #expect(location.coordinate.longitude == point.longitude)
-            #expect(location.altitude == point.altitudeMeters)
+            // No valid altitude (#303) goes in as 0, which the −1 vertical accuracy below marks unusable.
+            #expect(location.altitude == point.altitudeMeters ?? 0)
             #expect(location.horizontalAccuracy == point.horizontalAccuracyMeters)
             #expect(location.timestamp == point.timestamp)
             // Never recorded, so never invented.

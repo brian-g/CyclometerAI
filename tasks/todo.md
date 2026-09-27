@@ -1,3 +1,26 @@
+# #303 — Recorded altitude ignores verticalAccuracy
+
+Plan: /Users/brian/.claude/plans/goofy-petting-shore.md
+Branch: `fix/303-vertical-accuracy`
+
+- [x] 1. `LocationUpdate.altitude: Double?` + `init(_ location: CLLocation)`; LocationManagerState uses it
+- [x] 2. `ActiveRideFeature.State.altitude: Double?`
+- [x] 3. `TrackPointDTO.altitudeMeters: Double?`
+- [x] 4. CoreData v3 (optional altitude), TrackPointMO NSNumber?, PersistenceClient mapping
+- [x] 5. GPXExporter omits `<ele>` for nil
+- [x] 6. `RouteTerrain.movingAverage([Double?])` + RideEnergy uses it
+- [x] 7. HealthKit routeLocations `?? 0`
+- [x] 8. Tests: LocationClient, recording, RideEnergy, GPX, Persistence, migration (v1+v2), RouteTerrain
+- [x] 9. Full suite green (1660/0), ios-reviewer, PR
+
+## Review
+
+- Altitude is absent, not held: holding couldn't cover the points before the first valid vertical fix (still `<ele>0`), and #221 already rules out recording held values.
+- Deviation from the issue: `LocationUpdate.altitude: Double?` at the client boundary instead of a new `verticalAccuracy` field.
+- The issue's energy figure is wrong. At 300 m, a single 0 m fix smooths into a 9.7 m one-second step, which the 25% grade cap already discards. The energy effect is real only below ≈ 8 × speed metres (≈ 1.1 kcal at 40 m, 8 m/s). The GPX `<ele>0` and the profile dip were the real defects.
+- Rides recorded before the update keep their stored altitudes. A 0 m invalid fix can't be told apart from sea level.
+- Review follow-ups: comment wording (ActiveRideFeature, RideDetailSeries, migration test) and a HealthKit nil → 0 test.
+
 # #318 — iPhone workout session for live HR zone updates (decision)
 
 Plan: /Users/brian/.claude/plans/staged-churning-yao.md

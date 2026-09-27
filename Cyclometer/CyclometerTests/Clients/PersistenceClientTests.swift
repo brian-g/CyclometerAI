@@ -96,6 +96,26 @@ struct PersistenceClientTests {
         #expect(fetched[0].powerWatts == nil)
     }
 
+    @Test("altitude round-trips as nil when invalid, and as itself below sea level (#303)")
+    func altitudeRoundTrips() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        let base = Date()
+        // No sentinel can stand for "invalid": −28 m is Death Valley's road, not a marker.
+        let points = [nil, -28.0, 0].enumerated().map { offset, altitude in
+            TrackPointDTO(
+                rideId: rideId, timestamp: base.addingTimeInterval(TimeInterval(offset)),
+                latitude: 1, longitude: 2, altitudeMeters: altitude, horizontalAccuracyMeters: 4,
+                speedSource: .none, heartRateSource: .none
+            )
+        }
+
+        try await client.flushTrackPoints(points)
+
+        let fetched = try await client.fetchTrackPoints(rideId)
+        #expect(fetched.map(\.altitudeMeters) == [nil, -28.0, 0])
+    }
+
     @Test("a zero sensor reading round-trips as 0, not as nil")
     func zeroSensorReadingsRoundTripAsZero() async throws {
         let (client, _) = Self.makeLiveClient()

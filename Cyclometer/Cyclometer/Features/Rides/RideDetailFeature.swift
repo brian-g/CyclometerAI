@@ -158,7 +158,8 @@ struct RideDetailFeature {
 enum RideDetailSeries {
     /// Elevation at `sampleCount` evenly spaced distances along the ride, the same
     /// distance-spaced profile S20 charts (`RouteGeometry.elevationProfile`). Nil for a ride
-    /// with no drawable track, so the chart and the map agree about whether there is one.
+    /// with no drawable track, so the chart and the map agree about whether there is one —
+    /// and for one with fewer than two valid altitudes to draw a profile from (#303).
     static func elevationProfile(_ points: [TrackPointDTO], sampleCount: Int) -> [Double]? {
         guard !RideMapThumbnail.drawableSegments(points).isEmpty else { return nil }
         let coordinates = points.map {
