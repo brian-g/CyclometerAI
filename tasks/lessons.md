@@ -595,3 +595,23 @@ into Fitness over zones the rider had set in Health. The same review found I'd c
 override). A fallback's job is to fill our own UI, not to overwrite theirs. And don't validate framework data against
 our own estimate of the same quantity: when the framework's data and our estimate disagree, the estimate is the one to adjust.
 
+
+---
+
+## Weigh a system session's effect on the rider's other devices (2026-09-26, #318)
+
+**What happened.** My decision not to adopt an iPhone `HKWorkoutSession` weighed only what the session
+would give the app: live zone data, background time, and the write path it would replace. Brian: "a big
+reason to start an HKWorkoutSession is that the watch will NOT prompt the user to start an already being
+tracked workout."
+
+**Why I missed it.** I built the case from the SDK headers and our own code, and neither mentions
+cross-device behaviour. The Watch's "looks like you're cycling" prompt is behaviour of the whole system,
+not an API, so reading headers could never have surfaced it. It is also the one benefit the rider
+actually notices during a ride.
+
+**Rule.** Before deciding whether to adopt a system session (workout, audio, location, Live Activity),
+ask what the *system* does differently while it runs, both on this device and on paired ones:
+suppressed prompts, the Watch and ring UI, Focus, and Now Playing. If headers can't answer that, say it
+is unverified and ask Brian or test it on a device. Don't let its absence from the docs pass as evidence
+that nothing changes.

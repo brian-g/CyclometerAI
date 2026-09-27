@@ -30,7 +30,7 @@
 | 0.6.4 | 2026-09-26 | Brian / Claude | Ride Live Activity. New §8.10: Lock Screen and Dynamic Island Live Activity moves from Phase 2 to MVP under M10.5; visual only, with radar sound left to the audio client; CarPlay, Mac and Watch presentations excluded; next-turn cue included when a route is active. §6, §13 and Resolved Decisions updated. Resolved Decisions now gives the iOS 27 minimum's reason: HealthKit's cycling-specific HR, cadence and power zone tracking. |
 | 0.6.5 | 2026-09-25 | Brian / Claude | Workout active energy (#276, supersedes #274). §9.4 adds `bodyMass` (read) and `activeEnergyBurned` (write): `biologicalSex` (read) too. The ride's energy comes from heart rate (Keytel 2005) when a strap covered half the ride and Health has weight, date of birth and a Male or Female sex; otherwise from the track (physics, with dropouts and implausible grades costed flat; Compendium MET only for a ride with no usable track). None is written when Health has no weight. Bike weight is a 10 kg constant, not a setting. |
 | 0.6.6 | 2026-09-26 | Brian / Claude | Health's preferred HR zones (#238, supersedes #167). §8.5 and §9.4: zone boundaries resolve `S12 override ?? Health's preferred zones ?? Karvonen`, read with iOS 27's `preferredWorkoutZoneConfiguration` (no extra permission). A resting or max override sets Health's zones aside. When the rider has an S12 override, the ride's `HKWorkout` carries the app's zones. Otherwise it keeps Health's preferred ones. OQ9's Karvonen becomes the fallback. Live `HKLiveWorkoutZoneUpdate` needs an iPhone workout session and is split to its own issue. |
-| 0.6.7 | 2026-09-26 | Brian / Claude | iPhone workout session declined (#318). §9.4 adds a decision note. No `HKWorkoutSession` / `HKLiveWorkoutBuilder` runs during a ride, so there is no live `HKLiveWorkoutZoneUpdate`. The post-ride `HKWorkoutBuilder` write (#250, #277), its overlap skip and SwiftData crash recovery (#175, #188) stay. The dashboard's zone and any W12 time in zone stay local to the strap's readings. #318 moves to Phase 2 with the S17 Watch companion. |
+| 0.6.7 | 2026-09-26 | Brian / Claude | iPhone workout session declined (#318). §9.4 adds a decision note. No `HKWorkoutSession` / `HKLiveWorkoutBuilder` runs during a ride, so there is no live `HKLiveWorkoutZoneUpdate`, and a paired Watch still prompts to start its own workout. The post-ride `HKWorkoutBuilder` write (#250, #277), its overlap skip and SwiftData crash recovery (#175, #188) stay. The dashboard's zone and any W12 time in zone stay local to the strap's readings. #318 moves to Phase 2 with the S17 Watch companion. |
 
 ---
 
@@ -1026,9 +1026,14 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 > `HKWorkoutSession` / `HKLiveWorkoutBuilder` during a ride. It is revisited with the S17 Watch
 > companion (Phase 2), where #318 stays open.
 >
-> **What a session would buy.** iOS 27's live zone update, `workoutBuilder(_:didUpdateWorkoutZone:)`,
-> which fires only on a live builder. The session would also mean background execution, and a
-> workout that exists while the ride is still in progress.
+> **What a session would buy.**
+> - **Mainly, no Watch prompt.** While an iPhone workout session runs, a paired Apple Watch doesn't ask
+>   the rider to start a workout that is already being tracked. Brian has seen this in use; the SDK
+>   doesn't document it. Without a session, the Watch's "looks like you're cycling" prompt arrives a
+>   few minutes into a ride.
+> - iOS 27's live zone update, `workoutBuilder(_:didUpdateWorkoutZone:)`, which fires only on a live
+>   builder.
+> - Background execution, and a workout that exists while the ride is still in progress.
 >
 > **What it would replace.** Every part of the post-ride write (#250, UX.md §S10):
 > - `RideHealthWorkout` rebuilds a plain `HKWorkoutBuilder` from the saved ride, and sync identifiers
@@ -1053,6 +1058,12 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 >   modes cover it, and §8.10's Live Activity relies on the location mode.
 > - **The replaced write path works.** It is eventual and idempotent (#277), and a session would
 >   trade that for a live object that has to survive the ride.
+> - **Removing the prompt has a cost too.** A rider who accepts it gets the Watch's own workout, with
+>   1 Hz heart rate, and the app's write is skipped as a duplicate. Without the prompt, the app's
+>   workout becomes the record, and it carries no heart rate. For a Watch-only rider, the Watch also
+>   drops back to background sampling every few minutes (§8.4). The prompt is a nuisance, but it
+>   doesn't justify the costs above, and for Watch-only riders its absence makes their Health record
+>   worse. S17 settles both, because the Watch runs the session there.
 >
 > **What stays.**
 > - The dashboard's zone is classified locally on each reading.
