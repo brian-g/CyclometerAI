@@ -7,7 +7,7 @@ Branch: `docs/318-workout-session-decision`
 - [x] 1. PRD §9.4 decision note
 - [x] 2. PRD revision history 0.6.7
 - [x] 3. UX.md §W12 source line + header Updated line
-- [ ] 4. PR, then comment on #318 linking it
+- [x] 4. PR #323, comment on #318
 
 ## Review
 
