@@ -189,8 +189,15 @@ struct RoutesView: View {
         } description: {
             Text("Import a route to ride, or connect a service.")
         } actions: {
-            Button("Import Route") { store.send(.importButtonTapped) }
-                .disabled(store.isImporting)
+            Button {
+                store.send(.importButtonTapped)
+            } label: {
+                Label("Import Route", systemImage: "square.and.arrow.down")
+            }
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.borderedProminent)
+            .tint(.cyPrimary)
+            .disabled(store.isImporting)
         }
     }
 

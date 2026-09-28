@@ -13,13 +13,8 @@ struct WelcomeView: View {
             // scroll view proposes the copy's ideal height, so it always wraps in full;
             // at default type on a full-size phone nothing actually scrolls.
             ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.xl) {
-                    HStack() {
-                        Text("Welcome to Cyclometer").font(Font.largeTitle.bold())
-                        Spacer()
-                        Image("cyclometer.rider").resizable().frame(width:75, height: 75).aspectRatio(contentMode: .fill)
-
-                    }
+                VStack(alignment: .leading, spacing: Spacing.lg) {
+                    Text("Cyclometer").font(Font.largeTitle.bold())
                     Text("Ride faster. Arrive safer.")
                         .font(.title2)
                         .foregroundStyle(Color.cyTextPrimary)
@@ -27,14 +22,14 @@ struct WelcomeView: View {
                     Text("""
                     Real-time radar, metrics, and intelligence — built for cyclists who take the road seriously.
 
-                    Let's get started, first we need you to grant some permissions. Tap on each item to grant permission. When completed, tap Next.
+                    Let's get started, first we need to grant some permissions. Tap on each item to grant permission. When completed, tap Next.
                     """)
                         .font(.body)
                         .foregroundStyle(Color.cyTextPrimary)
 
                     VStack(spacing: Spacing.md) {
                         ForEach(PermissionDomain.allCases, id: \.self) { domain in
-                            PermissionRow(title: Self.label(for: domain), state: store.state.state(for: domain))
+                            PermissionRow(title: Self.label(for: domain), subTitle: Self.subLabel(for: domain), state: store.state.state(for: domain))
                                 .contentShape(.rect)
                                 .onTapGesture { store.send(.rowTapped(domain)) }
                         }
@@ -46,13 +41,6 @@ struct WelcomeView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollBounceBehavior(.basedOnSize)
-
-            if !store.state.isNextEnabled {
-                Text("You must give permissions to use Bluetooth, Location, and Motion. HealthKit is optional.")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.cyTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
 
             Button {
                 store.send(.nextButtonTapped)
@@ -71,24 +59,39 @@ struct WelcomeView: View {
 
     private static func label(for domain: PermissionDomain) -> String {
         switch domain {
-        case .bluetooth: "Bluetooth"
         case .locationWhenInUse: "Location"
         case .motion: "Motion and Fitness"
+        case .bluetooth: "Bluetooth"
         case .health: "HealthKit"
         }
     }
+    private static func subLabel(for domain: PermissionDomain) -> String {
+        switch domain {
+        case .locationWhenInUse: "Required"
+        case .motion: "Required"
+        case .bluetooth: "Optional"
+        case .health: "Optional"
+        }
+    }
+
 }
 
 private struct PermissionRow: View {
     let title: String
+    let subTitle: String
     let state: PermissionState
 
     var body: some View {
         HStack(spacing: Spacing.md) {
             PermissionStatusOval(state: state)
-            Text(title)
-                .font(.title3)
-                .foregroundStyle(Color.cyTextPrimary)
+            VStack(alignment: .leading) {
+                Text(title)
+                    .font(.title3)
+                    .foregroundStyle(Color.cyTextPrimary)
+                Text(subTitle)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.secondary)
+            }
             Spacer()
         }
         .frame(minHeight: Spacing.tapTarget)

@@ -9,7 +9,7 @@ struct StartRideButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label("Start ride", systemImage: "play.fill")
+            Label("Start Ride", systemImage: "play.fill")
         }
         .labelStyle(.titleAndIcon)
         .buttonStyle(.bordered)

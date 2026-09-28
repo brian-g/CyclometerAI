@@ -7,9 +7,9 @@ import Foundation
 /// covers every BLE sensor rather than one per profile, because iOS prompts once for
 /// the app, not once per peripheral.
 enum PermissionDomain: String, CaseIterable, Sendable {
-    case bluetooth
     case locationWhenInUse
     case motion
+    case bluetooth
     case health
 }
 

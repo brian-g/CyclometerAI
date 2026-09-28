@@ -26,9 +26,9 @@ struct WelcomeFeatureTests {
         ]))
 
         let task = await store.send(.task)
-        await store.receive(\.permissionChanged) { $0.permissionStates[.bluetooth] = .granted }
         await store.receive(\.permissionChanged) { $0.permissionStates[.locationWhenInUse] = .denied }
         await store.receive(\.permissionChanged) { $0.permissionStates[.motion] = .unavailable }
+        await store.receive(\.permissionChanged) { $0.permissionStates[.bluetooth] = .granted }
         await store.receive(\.permissionChanged) { $0.permissionStates[.health] = .notDetermined }
         await task.cancel()
     }
@@ -91,9 +91,9 @@ struct WelcomeFeatureTests {
         store.dependencies.openURL = OpenURLEffect { url in opened.withValue { $0.append(url) }; return true }
 
         let task = await store.send(.task)
-        await store.receive(\.permissionChanged) { $0.permissionStates[.bluetooth] = .denied }
         await store.receive(\.permissionChanged) { $0.permissionStates[.locationWhenInUse] = .notDetermined }
         await store.receive(\.permissionChanged) { $0.permissionStates[.motion] = .notDetermined }
+        await store.receive(\.permissionChanged) { $0.permissionStates[.bluetooth] = .denied }
         await store.receive(\.permissionChanged) { $0.permissionStates[.health] = .notDetermined }
 
         await store.send(.rowTapped(.bluetooth)) // no permissionChanged follows — request no-ops
