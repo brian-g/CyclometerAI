@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-09-28 — §S19's list / map toggle leaves the toolbar for a floating glass button at the bottom trailing edge, above the tab bar and a minimised ride (#331).  
 **Updated:** 2026-09-26 — No iPhone workout session (#318, PRD §9.4): §W12's time in zone, when built, accumulates locally from the dashboard's HR readings, not from HealthKit's live zone updates.  
 **Updated:** 2026-09-26 — HKWorkout retry (#277): §S10's workout is retried until it lands — after the next Finish, and at the next launch unless that launch resumes an unfinished ride — including for a ride closed out at launch after a failed save. Rides that ended before this change are not written retroactively, nor is a ride closed out as an orphan at launch, whose end time is the relaunch rather than the ride's.  
 **Updated:** 2026-09-26 — Health's preferred HR zones (#238): §S12's zones, and with them the dashboard, S10 and S15, come from the rider's zones in Apple Health unless overridden in S12. §S10's workout carries the app's zones only when the rider has an S12 override.  
@@ -1098,7 +1099,7 @@ ContentUnavailableView {
 > *Refer to `RoutesView` as prototyped in the source..*
 
 ### Key Components
-- Toolbar toggle: list view / map view (`list.bullet` / `map` SF Symbol)
+- List / map toggle (`list.bullet` / `map` SF Symbol): a glass circle floating on the trailing edge at the bottom of the screen, just above the tab bar and clear of a minimised ride's accessory, styled like the map sheet's buttons — not in the toolbar (#331). The toolbar keeps Import, Filter and Start Ride
 - List view: route rows map thumbnail, name, distance, and the route's summary line without its distance (#252) — gain, the hardest climbs, max grade, character and surface, two lines at most. A route with neither elevation nor a surface falls back to the file's own `<desc>`
 - Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls. The map can act as a filter. When switching back to the list will show only those routes displayed on the map. Map will initially zoom to a 50 mile radius around the user's current location. 
 - Tap a route → navigates to S20
