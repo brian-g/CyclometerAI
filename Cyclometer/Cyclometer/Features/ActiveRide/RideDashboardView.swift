@@ -172,14 +172,31 @@ struct RideDashboardView: View {
         }
     }
 
+    /// The map sheet's shared inputs (#199, #200) — W8 and W9 open the same sheet, so both
+    /// widgets must carry it the same orientation and the same toggle action.
+    ///
+    /// Factored out, not just documented as "the same": Xcode's preview canvas instruments
+    /// this file's `#Preview`-target build with a click-to-select wrapper on every
+    /// subexpression, and two initializer calls repeating this exact argument shape
+    /// verbatim (`mapWidget` and `directionsWidget`, both built from `route:`/
+    /// `sheetOrientation:`/`onOrientationToggle:`) made that wrapper unable to tell the
+    /// two apart — "ambiguous use of '__designTimeSelection'", which is what actually made
+    /// the dashboard preview time out. Routing both through one shared getter/action
+    /// removes the duplicate text, not just the duplicate logic.
+    private var mapSheetRoute: [RouteCoordinate] {
+        store.navigation.activeRoute?.coordinates ?? []
+    }
+    private var mapSheetOrientation: MapOrientation { store.preferences.mapOrientation }
+    private func toggleMapOrientation() { store.send(.mapOrientationToggled) }
+
     /// W8, fed the same way on both pages: the track, the route being ridden (#199), and the sheet's
     /// saved orientation with the action that switches it.
     private var mapWidget: MapWidget {
         MapWidget(
             trackSegments: store.trackSegments,
-            route: store.navigation.activeRoute?.coordinates ?? [],
-            sheetOrientation: store.preferences.mapOrientation,
-            onOrientationToggle: { store.send(.mapOrientationToggled) }
+            route: mapSheetRoute,
+            sheetOrientation: mapSheetOrientation,
+            onOrientationToggle: { toggleMapOrientation() }
         )
     }
 
@@ -193,9 +210,9 @@ struct RideDashboardView: View {
             unit: store.unitSystem,
             size: size,
             trackSegments: store.trackSegments,
-            route: store.navigation.activeRoute?.coordinates ?? [],
-            sheetOrientation: store.preferences.mapOrientation,
-            onOrientationToggle: { store.send(.mapOrientationToggled) }
+            route: mapSheetRoute,
+            sheetOrientation: mapSheetOrientation,
+            onOrientationToggle: { toggleMapOrientation() }
         )
     }
 
@@ -285,7 +302,7 @@ struct RideDashboardView: View {
 
             Spacer()
 
-            rideControlButton("Ring Bell", systemImage: "bell.fill", action: ringBell)
+            rideControlButton("Ring Bell", systemImage: "bell.fill") { ringBell() }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.isPaused)
         .padding(.horizontal, Spacing.lg)
@@ -299,7 +316,7 @@ struct RideDashboardView: View {
         systemImage: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        Button { action() } label: {
             Label(title, systemImage: systemImage)
                 .labelStyle(.iconOnly)
                 .font(.title3.weight(.semibold))
@@ -366,7 +383,7 @@ struct RideDashboardView: View {
 private struct NoHRSourceLabel: View {
     var body: some View {
         Text("No HR Source")
-            .font(.cyCaption)
+            .font(.caption)
             .foregroundStyle(.cyTextTertiary)
     }
 }
@@ -451,79 +468,94 @@ struct PaceWidget: View {
 // MARK: - Previews
 
 #Preview("Zone 4 — Radar Active") {
-    RideDashboardView(
-        store: Store(
-            initialState: ActiveRideFeature.State(
-                recordingState: .active,
-                elapsedSeconds: 2340,
-                speedKPH: 28.4,
-                heartRateBPM: 155,
-                hrZone: 4,
-                isHRPaired: true,
-                cadence: CadenceFeature.State(cadenceRPM: 87),
-                distanceMeters: 12300,
-                speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
-                maxSpeedKPH: 34.1,
-                speedSampleCount: 120,
-                speedSampleSum: 3408,
-                isRadarPaired: true,
-                radarTargets: [
-                    RadarTarget(id: UUID(), relativeVelocityMPS: 8.5, rangeMetres: 45, threatLevel: .warning),
-                    RadarTarget(id: UUID(), relativeVelocityMPS: 12.0, rangeMetres: 20, threatLevel: .danger)
-                ],
-                radarConnectionState: .active,
-                wasRadarEverPaired: true
-            )
-        ) {
-            ActiveRideFeature()
-        },
-        onClose: { }
-    )
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
+    } operation: {
+        RideDashboardView(
+            store: Store(
+                initialState: ActiveRideFeature.State(
+                    recordingState: .active,
+                    elapsedSeconds: 2340,
+                    speedKPH: 28.4,
+                    heartRateBPM: 155,
+                    hrZone: 4,
+                    isHRPaired: true,
+                    cadence: CadenceFeature.State(cadenceRPM: 87),
+                    distanceMeters: 12300,
+                    speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
+                    maxSpeedKPH: 34.1,
+                    speedSampleCount: 120,
+                    speedSampleSum: 3408,
+                    isRadarPaired: true,
+                    radarTargets: [
+                        RadarTarget(id: UUID(), relativeVelocityMPS: 8.5, rangeMetres: 45, threatLevel: .warning),
+                        RadarTarget(id: UUID(), relativeVelocityMPS: 12.0, rangeMetres: 20, threatLevel: .danger)
+                    ],
+                    radarConnectionState: .active,
+                    wasRadarEverPaired: true
+                )
+            ) {
+                ActiveRideFeature()
+            },
+            onClose: { }
+        )
+    }
 }
 
 #Preview("No Radar") {
-    RideDashboardView(
-        store: Store(
-            initialState: ActiveRideFeature.State(
-                recordingState: .active,
-                elapsedSeconds: 2340,
-                speedKPH: 28.4,
-                heartRateBPM: 155,
-                hrZone: 4,
-                isHRPaired: true,
-                cadence: CadenceFeature.State(cadenceRPM: 87),
-                distanceMeters: 12300,
-                speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
-                maxSpeedKPH: 34.1,
-                speedSampleCount: 120,
-                speedSampleSum: 3408,
-                isRadarPaired: false,
-                wasRadarEverPaired: false
-            )
-        ) {
-            ActiveRideFeature()
-        },
-        onClose: { }
-    )
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
+    } operation: {
+        RideDashboardView(
+            store: Store(
+                initialState: ActiveRideFeature.State(
+                    recordingState: .active,
+                    elapsedSeconds: 2340,
+                    speedKPH: 28.4,
+                    heartRateBPM: 155,
+                    hrZone: 4,
+                    isHRPaired: true,
+                    cadence: CadenceFeature.State(cadenceRPM: 87),
+                    distanceMeters: 12300,
+                    speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
+                    maxSpeedKPH: 34.1,
+                    speedSampleCount: 120,
+                    speedSampleSum: 3408,
+                    isRadarPaired: false,
+                    wasRadarEverPaired: false
+                )
+            ) {
+                ActiveRideFeature()
+            },
+            onClose: { }
+        )
+    }
 }
 
 #Preview("Paused") {
-    RideDashboardView(
-        store: Store(
-            initialState: ActiveRideFeature.State(
-                recordingState: .paused,
-                elapsedSeconds: 1230,
-                heartRateBPM: 130,
-                hrZone: 3,
-                isHRPaired: true,
-                cadence: CadenceFeature.State(),
-                distanceMeters: 7600,
-                speed: SpeedFeature.State(speedMPS: 0, activeSpeedSource: .gps),
-                maxSpeedKPH: 31.2
-            )
-        ) {
-            ActiveRideFeature()
-        },
-        onClose: { }
-    )
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
+    } operation: {
+        RideDashboardView(
+            store: Store(
+                initialState: ActiveRideFeature.State(
+                    recordingState: .paused,
+                    elapsedSeconds: 1230,
+                    heartRateBPM: 130,
+                    hrZone: 3,
+                    isHRPaired: true,
+                    cadence: CadenceFeature.State(),
+                    distanceMeters: 7600,
+                    speed: SpeedFeature.State(speedMPS: 0, activeSpeedSource: .gps),
+                    maxSpeedKPH: 31.2
+                )
+            ) {
+                ActiveRideFeature()
+            },
+            onClose: { }
+        )
+    }
 }
