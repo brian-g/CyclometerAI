@@ -34,7 +34,8 @@ struct RouteOverviewButton: View {
 /// Sized and shaped like MapKit's own map controls, so it sits in one column with them: a glass circle
 /// of `Spacing.mapControl`, with no button-style padding to make it larger. The icon-only `Label` keeps
 /// the title for VoiceOver, and the glyph takes an explicit token rather than the ambient accent.
-private struct MapSheetButton: View {
+/// Internal so S19's Map/List toggle (#331) floats in the same style.
+struct MapSheetButton: View {
     let title: String
     let systemImage: String
     let action: () -> Void

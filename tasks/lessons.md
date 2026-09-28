@@ -615,3 +615,23 @@ ask what the *system* does differently while it runs, both on this device and on
 suppressed prompts, the Watch and ring UI, Focus, and Now Playing. If headers can't answer that, say it
 is unverified and ask Brian or test it on a device. Don't let its absence from the docs pass as evidence
 that nothing changes.
+
+
+## "It rendered correctly" is not "it looks right" (2026-09-28, #331)
+
+**What happened.** I moved S19's Map/List toggle into a segmented control on a floating glass capsule.
+I recorded snapshots, fixed a light-mode render artefact, and marked the references good because the
+labels were legible and the capsule was centred. Brian: "that segmented control looks like trash".
+
+**Why.** I checked the pixels for *correctness* and never judged the *design*. The problems were plain
+in the first image: a segmented track nested inside a second glass capsule, so two rims; a white thumb
+on pale grey that reads as a `UISwitch`; no brand colour on a screen where every other control is
+`cyPrimary`; and too small for a bottom control on a cycling app. I then spent several runs hardening
+snapshot references for a control nobody had approved the look of.
+
+**Rules.**
+- When a new control first renders, critique it as a designer before treating any reference as done:
+  nesting, contrast, brand tokens, touch size. Compare it to the controls beside it.
+- Don't nest a system control that draws its own chrome (segmented `Picker`, glass buttons) inside
+  more chrome.
+- Get the look approved before investing in test harness work that pins it.

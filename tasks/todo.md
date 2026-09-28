@@ -1,3 +1,21 @@
+# #331 — Routes Map/List toggle moves to the bottom
+
+Plan: /Users/brian/.claude/plans/unified-juggling-tome.md
+Branch: `fix/331-routes-toolbar`
+
+- [x] 1. RoutesView: drop the toolbar toggle; bottom-trailing `safeAreaInset` glass button (reuses `MapSheetButton`)
+- [x] 2. UX.md §S19 + Updated line
+- [x] 3. Re-record RoutesSnapshotTests screen references; inspect every PNG
+- [x] 4. Unit suite green (1660/0, case count checked)
+- [x] 5. Minimised-ride clearance verified (key-window AppView render; the sim drive can't minimise the dashboard)
+- [x] 6. ios-reviewer, PR
+
+## Review
+
+- The approved segmented List | Map capsule was replaced mid-work with a single glass button, at Brian's call. The first version nested a segmented track inside a glass capsule and read as a switch. Lesson recorded.
+- Snapshots stay offscreen, as before. Offscreen capture draws no glass, so the references show a bare glyph (the same as `MapSheetButtonsSnapshotTests`). Key-window capture drew the glass, but it gave two deterministic renders of the light empty state (freshly booted vs. already-run simulator), so it was dropped.
+- Verified: in the real `AppView` with a minimised ride, the button sits above the accessory. Not verified: the accessory inline with a scroll-minimised tab bar. The safe-area mechanism should cover it, but it's untested.
+
 # #303 — Recorded altitude ignores verticalAccuracy
 
 Plan: /Users/brian/.claude/plans/goofy-petting-shore.md
