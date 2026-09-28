@@ -16,9 +16,7 @@ final class TurnInstructionOverlaySnapshotTests: XCTestCase {
     ) -> some View {
         ZStack {
             Color.cyBgSecondary
-            Text("22.4")
-                .font(.cyHeroSpeed)
-                .foregroundStyle(Color.cyTextPrimary)
+            HeroNumber("22.4", unit: "").heroNumberSize(.large)
             TurnInstructionOverlay(maneuver: Maneuver(
                 coordinate: RouteCoordinate(latitude: 0, longitude: 0, elevationMeters: nil),
                 direction: direction,

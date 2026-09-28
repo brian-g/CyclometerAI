@@ -366,7 +366,7 @@ struct RideDashboardView: View {
 private struct NoHRSourceLabel: View {
     var body: some View {
         Text("No HR Source")
-            .font(.cyCaption)
+            .font(.caption)
             .foregroundStyle(.cyTextTertiary)
     }
 }
