@@ -11,43 +11,58 @@ struct RidesView: View {
     var now: Date?
 
     var body: some View {
-        List {
+        Group {
             if store.hasLoaded && store.rides.isEmpty {
-                ContentUnavailableView {
-                    Label("No Rides Yet", systemImage: "figure.outdoor.cycle")
-                } description: {
-                    Text("Start a ride to see it appear here.")
-                } actions: {
-                    Button("Start New Ride", action: onStartRide)
-                }
-                .frame(maxWidth: .infinity, minHeight: 220)
-                .listRowBackground(Color.clear)
+                emptyRides
             } else {
-                ForEach(store.rides) { ride in
-                    NavigationLink(state: RidesFeature.Path.State.detail(RideDetailFeature.State(summary: ride))) {
-                        RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
-                                unitSystem: store.unitSystem, now: now)
+                rideList
+            }
+        }
+        .navigationTitle("Rides")
+        .task { store.send(.task) }
+    }
+
+    private var rideList: some View {
+        List {
+            ForEach(store.rides) { ride in
+                NavigationLink(state: RidesFeature.Path.State.detail(RideDetailFeature.State(summary: ride))) {
+                    RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
+                            unitSystem: store.unitSystem, now: now)
+                }
+                .onAppear { store.send(.rowAppeared(ride.id)) }
+                // Trailing Delete only. §S14's leading Sync and Make Route wait on
+                // service sync (Phase 2) and a route-from-ride model, neither built (#248).
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        deleteRide(ride.id)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
                     }
-                    .onAppear { store.send(.rowAppeared(ride.id)) }
-                    // Trailing Delete only. §S14's leading Sync and Make Route wait on
-                    // service sync (Phase 2) and a route-from-ride model, neither built (#248).
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            deleteRide(ride.id)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                        // `role: .destructive` alone is not enough: the app-wide `.tint` wins
-                        // over the role inside a swipe action, so Delete rendered in the brand
-                        // green.
-                        .tint(Color.cyDestructive)
-                    }
+                    // `role: .destructive` alone is not enough: the app-wide `.tint` wins
+                    // over the role inside a swipe action, so Delete rendered in the brand
+                    // green.
+                    .tint(Color.cyDestructive)
                 }
             }
         }
         .listStyle(.plain)
-        .navigationTitle("Rides")
-        .task { store.send(.task) }
+    }
+
+    private var emptyRides: some View {
+        ContentUnavailableView {
+            Label("No Rides Yet", systemImage: "figure.outdoor.cycle")
+        } description: {
+            Text("Your completed rides will appear here. Tap the Start Ride button below to get started!")
+        } actions: {
+            Button {
+                onStartRide()
+            } label: {
+                Label("Start Ride", systemImage: "play.fill")
+            }
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.borderedProminent)
+            .tint(.cyPrimary)
+        }
     }
 
     /// Goes through the reducer, which used to call `modelContext.delete(ride)` straight

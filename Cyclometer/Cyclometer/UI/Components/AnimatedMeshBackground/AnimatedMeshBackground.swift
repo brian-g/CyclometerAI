@@ -22,10 +22,12 @@ struct AnimatedMeshBackground: View {
         }
     }
 
+    // The tint sits in the lower-trailing corner rather than the center, so it reads
+    // as a corner glow instead of a blob sitting in the middle of the screen.
     private static let colors: [Color] = [
-        .cyBgPrimary, .cyPrimaryLight, .cyBgPrimary,
-        .cyPrimaryLight, .cyPrimaryMuted, .cyBgPrimary,
-        .cyBgPrimary, .cyPrimaryLight, .cyBgPrimary
+        .cyPrimaryLight, .cyBgPrimary, .cyBgPrimary,
+        .cyBgPrimary, .cyBgPrimary, .cyPrimaryLight.opacity(0.3),
+        .cyBgPrimary, .cyPrimaryLight.opacity(0.45), .cyPrimaryMuted.opacity(0.3)
     ]
 
     /// Corners stay pinned; edges and the center drift a few percent of the frame
@@ -49,10 +51,4 @@ struct AnimatedMeshBackground: View {
 
 #Preview("Animated") {
     AnimatedMeshBackground().ignoresSafeArea()
-}
-
-#Preview("Reduce Motion") {
-    AnimatedMeshBackground()
-        .environment(\.accessibilityReduceMotion, true)
-        .ignoresSafeArea()
 }
