@@ -117,6 +117,12 @@ struct ActiveRideFeature {
     @Dependency(\.rideDataBuffer) var rideDataBuffer
     @Dependency(\.rideEndIntentClient) var rideEndIntentClient
 
+    /// Dashboard pages. Factory default is two; rider customisation (S07) will
+    /// drive this from state. Raw value doubles as the paging-dot index.
+    enum DashboardPage: Int, CaseIterable, Equatable {
+        case grid, map
+    }
+
     @ObservableState
     struct State: Equatable {
         /// Placeholder until `.task` overwrites it with a fresh, deterministic id
@@ -330,6 +336,10 @@ struct ActiveRideFeature {
         var unitSystem: UnitSystem { preferences.preferredUnit }
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
+        /// The page the rider is on. Held here, not in the view, because minimising
+        /// the dashboard tears its view down: reopening lands on the page it was left
+        /// on (#333). Per ride, so a new ride opens on the grid.
+        var dashboardPage: DashboardPage = .grid
     }
 
     enum Action: Equatable {
@@ -341,6 +351,7 @@ struct ActiveRideFeature {
         /// The map sheet's orientation button (#199). Flips the saved `mapOrientation`,
         /// which the sheet's camera follows.
         case mapOrientationToggled
+        case dashboardPageChanged(DashboardPage)
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)
@@ -484,6 +495,9 @@ struct ActiveRideFeature {
                         await locationClient.stopUpdates()
                     }
                 )
+            case .dashboardPageChanged(let page):
+                state.dashboardPage = page
+                return .none
             case .mapOrientationToggled:
                 // The preference itself, not a copy: the next ride's sheet, and one reopened
                 // after a relaunch, open the way the rider left it.

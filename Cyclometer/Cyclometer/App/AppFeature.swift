@@ -8,7 +8,7 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persi
 
 /// Root feature — owns tab selection and active ride lifecycle.
 /// Navigation follows Apple Music pattern: Rides / Routes / Settings tabs.
-/// Active ride dashboard is a custom screen over the tab structure.
+/// Active ride dashboard is a full-screen cover that zooms out of the tab accessory (#333).
 @Reducer
 struct AppFeature {
 
@@ -94,7 +94,8 @@ struct AppFeature {
         case scenePhaseChanged(isActive: Bool)
         case screenVisibilityChanged(Bool)
         /// The first finger down and the last one up, anywhere in the app window
-        /// (#333). They pause and restart the countdown; neither wakes a dim.
+        /// (#333). They pause and restart the countdown. While dimmed the blocker
+        /// window keeps them from arriving; one that does anyway wakes the screen.
         case touchBegan
         case touchEnded
         /// The only thing that wakes a dim: a tap on the blocker, which swallows it
@@ -376,13 +377,18 @@ struct AppFeature {
 
             case .touchBegan:
                 state.isTouchDown = true
-                guard state.isDashboardVisible, !state.isDimmed else { return .none }
+                guard state.isDashboardVisible else { return .none }
+                // Cancels a dim at any stage, the backlight read included.
                 return .cancel(id: CancelID.dimTimer)
 
             case .touchEnded:
                 state.isTouchDown = false
-                guard state.isDashboardVisible, !state.isDimmed else { return .none }
-                return armDimTimer(state)
+                guard state.isDashboardVisible else { return .none }
+                // While dimmed, the blocker window keeps touches from reaching the app
+                // window, so a dimmed touch arrives here only if the blocker failed to
+                // appear. Waking then means no dim is ever left that a touch can't end.
+                let restoreAfterTouch = wake(&state)
+                return .merge(restoreAfterTouch, armDimTimer(state))
 
             case .wakeTapped:
                 guard state.isDashboardVisible else { return .none }
@@ -392,20 +398,24 @@ struct AppFeature {
                 return .merge(restore, armDimTimer(state))
 
             case .dimTimerFired:
-                guard state.isDashboardVisible, !state.isDimmed, !state.isTouchDown else { return .none }
+                guard state.isDashboardVisible, !state.isDimmed else { return .none }
                 // Reading the backlight is async, so the dim commits in the *next*
                 // action rather than here. That keeps `isDimmed` and
                 // `preDimBrightness` inseparable — a dim that is on with nothing to
                 // restore to is exactly the state that would strand the rider's phone
                 // at 10% brightness.
+                //
+                // Under the timer's ID, so a touch landing mid-read cancels the dim
+                // outright (#333): a cancelled effect's `send` is dropped.
                 return .run { [screenClient] send in
                     await send(.preDimBrightnessCaptured(screenClient.brightness()))
                 }
+                .cancellable(id: CancelID.dimTimer)
 
             case .preDimBrightnessCaptured(let level):
                 // Re-checked, not assumed: the rider may have backgrounded the app or
-                // minimized the dashboard, or put a finger down, while the read was in flight.
-                guard state.isDashboardVisible, !state.isDimmed, !state.isTouchDown else { return .none }
+                // minimized the dashboard while the read was in flight.
+                guard state.isDashboardVisible, !state.isDimmed else { return .none }
                 state.isDimmed = true
                 state.preDimBrightness = level
                 return .run { [screenClient] _ in

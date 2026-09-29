@@ -416,3 +416,12 @@ Branch: `feat/333-dashboard-zoom`
   - whether a whole-screen drag causes accidental minimises mid-ride (the #333 exclusion's revisit trigger).
 - Added scope: the accessory's Open button is gone, and the whole strip is a plain-style `Button` with a `contentShape` over the Spacer's gap. Its five snapshots were re-recorded; apart from Open, the strip is unchanged (diffed by eye). Sim drive: collapse, then a tap on the strip's empty right side (where Open was) reopened the dashboard.
 - Brian spread the strip's stats with Spacers, and I re-recorded its five snapshots to match. Added a "Collapsed (inline)" preview. Because `tabViewBottomAccessoryPlacement` is get-only, the strip moved into a private `AccessoryStrip(isCollapsed:)`, which the public view feeds from the environment.
+- Review (xhigh) items 1–6 applied:
+  - the backlight read runs under `CancelID.dimTimer`, so a tap mid-read cancels the dim (mutation-checked), and the `!isTouchDown` re-checks on the fire and capture steps are gone;
+  - `touchEnded` while dimmed wakes, as a safety net if the blocker ever fails;
+  - VoiceOver focus moves onto the blocker (`.screenChanged`);
+  - `super` calls added in the recognizer;
+  - stale S05.3, PRD and AppFeature text fixed;
+  - `AccessoryStrip` replaced by `isCollapsedOverride`, plus a collapsed snapshot.
+- PR comment: the dashboard reopens on the page it was left on. `dashboardPage` now lives in `ActiveRideFeature.State` (per ride), tested in `reopeningKeepsThePage`.
+- PR comment: "dimming not working". Not reproduced on the sim: a ride started and left alone dimmed at 30s with Pause showing. The suspect on device is auto-pause (0 GPS speed for 10s), and paused rides never dim (#102). Waiting on Brian: was Pause or Resume showing?

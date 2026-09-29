@@ -88,9 +88,14 @@ struct AutoDimWindowBridge: UIViewRepresentable {
                 blocker.rootViewController = DimBlockerController { [weak self] in self?.onWake() }
                 blocker.isHidden = false
                 self.blocker = blocker
+                // `accessibilityViewIsModal` doesn't reach across windows, so VoiceOver
+                // focus is moved onto the blocker; left on a dashboard control, a
+                // double-tap would activate it through the dim.
+                UIAccessibility.post(notification: .screenChanged, argument: blocker.rootViewController?.view)
             } else if !isDimmed, let blocker {
                 blocker.isHidden = true
                 self.blocker = nil
+                UIAccessibility.post(notification: .screenChanged, argument: nil)
             }
         }
     }
@@ -130,12 +135,20 @@ final class TouchPresenceRecognizer: UIGestureRecognizer, UIGestureRecognizerDel
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
         if fingers == 0 { onBegan() }
         fingers += touches.count
     }
 
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { lift(touches) }
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { lift(touches) }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        lift(touches)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        lift(touches)
+    }
 
     private func lift(_ touches: Set<UITouch>) {
         fingers = max(0, fingers - touches.count)

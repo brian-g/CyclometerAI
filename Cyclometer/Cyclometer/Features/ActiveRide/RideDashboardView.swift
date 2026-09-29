@@ -7,22 +7,17 @@ import AudioToolbox
 /// Matches prototype RideDashboardView with TCA store replacing local @State.
 /// Dashboard uses the 2-col × 7-row widget grid (S05.4 factory default).
 struct RideDashboardView: View {
-    /// Dashboard pages. Factory default is two; rider customisation (S07) will
-    /// drive this from state. Raw value doubles as the paging-dot index.
-    private enum Page: Int, CaseIterable {
-        case grid, map
-    }
+    private typealias Page = ActiveRideFeature.DashboardPage
 
     @Bindable var store: StoreOf<ActiveRideFeature>
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPage: Page = .grid
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         // S05 — Map widget safe-area bleed. The toolbar floats as an overlay
         // (not a safe-area inset) so the grid's map cell can extend behind it
         // all the way to the physical screen bottom.
-        TabView(selection: $selectedPage) {
+        TabView(selection: $store.dashboardPage.sending(\.dashboardPageChanged)) {
             gridPage
                 .tag(Page.grid)
 
@@ -265,12 +260,12 @@ struct RideDashboardView: View {
         HStack(spacing: Spacing.xs) {
             ForEach(Page.allCases, id: \.self) { page in
                 Circle()
-                    .fill(page == selectedPage ? Color.cyPrimary : Color.cyTextTertiary)
+                    .fill(page == store.dashboardPage ? Color.cyPrimary : Color.cyTextTertiary)
                     .frame(width: Spacing.pageIndicatorDot, height: Spacing.pageIndicatorDot)
             }
         }
         .accessibilityElement()
-        .accessibilityLabel("Page \(selectedPage.rawValue + 1) of \(Page.allCases.count)")
+        .accessibilityLabel("Page \(store.dashboardPage.rawValue + 1) of \(Page.allCases.count)")
     }
 
     // ── Ride Controls — floating glass buttons (S05) ───────────────────────────

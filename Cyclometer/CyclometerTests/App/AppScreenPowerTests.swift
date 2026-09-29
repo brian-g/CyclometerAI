@@ -335,10 +335,11 @@ struct AppScreenPowerTests {
         await store.finish()
     }
 
-    /// Only the blocker's tap wakes a dim. The blocker window normally keeps these
-    /// from arriving at all; the reducer holds the rule regardless.
-    @Test("Touches while dimmed neither wake the screen nor restart the countdown")
-    func touchesWhileDimmedDoNothing() async {
+    /// The blocker window keeps touches from reaching the app window while dimmed. If
+    /// it ever failed to appear, a touch that got through must still end the dim,
+    /// rather than leave the rider under a 10% backlight nothing can lift.
+    @Test("A touch that reaches the app while dimmed wakes it, as a safety net for the blocker")
+    func touchPastAMissingBlockerWakes() async {
         let clock = TestClock()
         let calls = LockIsolated<[ScreenCall]>([])
         let store = Self.makeStore(clock: clock, calls: calls)
@@ -351,43 +352,51 @@ struct AppScreenPowerTests {
             $0.isDimmed = true
             $0.preDimBrightness = 0.8
         }
-        let callsWhenDimmed = calls.value
 
         await store.send(.touchBegan) { $0.isTouchDown = true }
-        await store.send(.touchEnded) { $0.isTouchDown = false }
-        await clock.advance(by: .seconds(AppFeature.dimAfterSeconds * 2))
-        #expect(store.state.isDimmed == true)
-        #expect(calls.value == callsWhenDimmed)
-
-        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
-        await store.receive(\.screenVisibilityChanged) {
+        await store.send(.touchEnded) {
+            $0.isTouchDown = false
             $0.isDimmed = false
             $0.preDimBrightness = nil
         }
+        #expect(calls.value.last == .setBrightness(0.8))
+
+        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
+        await store.receive(\.screenVisibilityChanged)
         await store.finish()
     }
 
     /// The dim commits an action after the timer, once the backlight read returns. A
-    /// finger that lands in between must still stop it.
-    @Test("A finger down when the timer fires, or during the backlight read, blocks the dim")
-    func fingerDownBlocksAnInFlightDim() async {
+    /// whole tap landing while that read is in flight must cancel the dim, not just a
+    /// finger that is still down when the result arrives.
+    @Test("A tap during the backlight read cancels the dim")
+    func tapDuringTheBacklightReadCancelsTheDim() async {
         let clock = TestClock()
         let calls = LockIsolated<[ScreenCall]>([])
         let store = Self.makeStore(clock: clock, calls: calls)
+        // The read parks until the test releases it, so the tap lands mid-read.
+        let (reads, release) = AsyncStream.makeStream(of: Double.self)
+        store.dependencies.screenClient.brightness = {
+            for await level in reads { return level }
+            return 0.8
+        }
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
         await store.receive(\.screenVisibilityChanged)
+        await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
+        await store.receive(\.dimTimerFired)
+
         await store.send(.touchBegan) { $0.isTouchDown = true }
-
-        await store.send(.dimTimerFired)
-        await store.send(.preDimBrightnessCaptured(0.8))
-        #expect(store.state.isDimmed == false)
-        #expect(!calls.value.contains { if case .setBrightness = $0 { true } else { false } })
-
         await store.send(.touchEnded) { $0.isTouchDown = false }
+        release.yield(0.8)
+        release.finish()
+
+        // No `preDimBrightnessCaptured`: an exhaustive store fails on one it wasn't told about.
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged)
         await store.finish()
+        #expect(store.state.isDimmed == false)
+        #expect(!calls.value.contains { if case .setBrightness = $0 { true } else { false } })
     }
 
     /// The dashboard can become the visible surface under a finger (a ride resuming

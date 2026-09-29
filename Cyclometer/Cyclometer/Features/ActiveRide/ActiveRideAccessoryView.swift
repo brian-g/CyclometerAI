@@ -14,37 +14,17 @@ struct ActiveRideAccessoryView: View {
     let elapsedSeconds: Int
     let unit: UnitSystem
     let onOpen: () -> Void
+    /// Forces the layout for a preview or snapshot. The placement environment value is
+    /// get-only, so nothing outside a real tab bar can set it.
+    var isCollapsedOverride: Bool? = nil
 
     /// `.inline` when the strip is collapsed into the TabBar (tabs scrolled),
     /// `.expanded` when shown full-width above it. Drives how much we can fit.
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
 
-    var body: some View {
-        AccessoryStrip(
-            progress: progress,
-            distanceMeters: distanceMeters,
-            speedMPS: speedMPS,
-            elapsedSeconds: elapsedSeconds,
-            unit: unit,
-            isCollapsed: placement == .inline,
-            onOpen: onOpen
-        )
-    }
-}
-
-/// The strip itself, with the placement passed in rather than read: the environment
-/// value is get-only, so this is how a preview shows the collapsed layout.
-private struct AccessoryStrip: View {
-    let progress: Double?
-    let distanceMeters: Double
-    let speedMPS: Double
-    let elapsedSeconds: Int
-    let unit: UnitSystem
-    let isCollapsed: Bool
-    let onOpen: () -> Void
-
     private var displayDistance: Double { unit.distance(fromMeters: distanceMeters) }
     private var displaySpeed: Double { unit.speed(fromMPS: speedMPS) }
+    private var isCollapsed: Bool { isCollapsedOverride ?? (placement == .inline) }
 
     var body: some View {
         Button(action: onOpen) {
@@ -137,9 +117,9 @@ private struct OpenRingProgressView: View {
 /// Collapsed into the TabBar (`.inline`), where speed is dropped. The width
 /// approximates the inline slot beside the minimised tab button on iPhone 17 Pro.
 #Preview("Collapsed (inline)") {
-    AccessoryStrip(
+    ActiveRideAccessoryView(
         progress: nil, distanceMeters: 12300, speedMPS: 7.89, elapsedSeconds: 2340, unit: .imperial,
-        isCollapsed: true, onOpen: {}
+        onOpen: {}, isCollapsedOverride: true
     )
     .frame(width: 300)
     .padding()

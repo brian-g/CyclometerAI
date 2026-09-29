@@ -401,7 +401,7 @@ There is no Open button: the whole strip is the tap target, as with Apple Music'
 
 - Visible **only when a ride is active** (state = `.active` or `.paused`).
 - When the ride is paused, stats display the last recorded values and do not update.
-- When the rider taps "Open" (or taps anywhere on the strip in future iteration), the full-screen dashboard is re-presented via `fullScreenCover`.
+- When the rider taps anywhere on the strip, the full-screen dashboard is re-presented via `fullScreenCover`, zooming out of the strip, on the page it was minimised from (#333).
 - The TabBar remains visible and functional beneath the accessory — the rider can navigate to Routes or Settings without losing the active ride.
 - The `tabViewBottomAccessory` API requires iOS 26.
 
