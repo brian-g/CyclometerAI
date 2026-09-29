@@ -46,12 +46,14 @@ struct RideDashboardView: View {
             .allowsHitTesting(false)
         }
         // Grabber floats as a top overlay (not a safe-area inset) so it does not
-        // push page content down. Pages that must stay clear of the island (the
-        // grid) reserve the space themselves; the map page bleeds up behind it.
+        // push page content down. The overlay keeps the safe area, so the grabber
+        // sits just below the Dynamic Island while the pages bleed up behind it.
         .overlay(alignment: .top) {
             VStack(spacing: Spacing.xs) {
                 grabber()
-                    .gesture(dismissDrag)
+                    // Above the banner, so its drag target (which hangs below the
+                    // grabber's footprint) isn't covered while a banner shows.
+                    .zIndex(1)
                 if let banner = activeBanner {
                     RideBanner(text: banner.text, icon: banner.icon)
                         .transition(bannerTransition)
@@ -247,30 +249,39 @@ struct RideDashboardView: View {
     }
 
     // ── Grabber ───────────────────────────────────────────────────────────────
-    // Floats as a top overlay on a view that ignores safe areas, so the capsule
-    // sits flush against the physical top edge (behind the dynamic island).
+    // Sits at the top of the safe area, just below the Dynamic Island.
     private func grabber() -> some View {
         Capsule()
             .fill(Color(.systemGray3))
             .frame(width: Spacing.xxl, height: Spacing.grabberHeight)
-            // Expand the hit area beyond the thin capsule so the whole strip is
-            // draggable; the paging TabView underneath never sees these drags.
-            // Pin the capsule to the top so the enlarged frame grows downward
-            // and doesn't push the visible grabber lower.
             .frame(maxWidth: .infinity, minHeight: Spacing.sm, alignment: .top)
-            .contentShape(Rectangle())
             .padding(.bottom, Spacing.xs)
+            // The drag target is a tap-target-tall band hung below the capsule as
+            // an overlay, so it doesn't grow the footprint and push the banner
+            // down (#330). Centred rather than full width, so taps on the widgets'
+            // top corners (Speed's source badge and avg) still reach them. The
+            // paging TabView underneath never sees these drags.
+            .overlay(alignment: .top) {
+                Color.clear
+                    .frame(width: Spacing.grabberHitWidth, height: Spacing.tapTarget)
+                    .contentShape(Rectangle())
+                    .gesture(dismissDrag)
+            }
     }
 
     /// Pull-down-to-dismiss. Attached to the grabber (not the container) so it
-    /// wins over the paging TabView's internal gesture recognizer.
+    /// wins over the paging TabView's internal gesture recognizer. Judged on where
+    /// the drag was heading, not where the finger let go, so a quick flick
+    /// dismisses too (#330). Measured in screen space: the dashboard moves with
+    /// the finger, and in its own space the predicted end came out short, so
+    /// neither a flick nor a long drag dismissed.
     private var dismissDrag: some Gesture {
-        DragGesture()
+        DragGesture(coordinateSpace: .global)
             .updating($dragOffset) { value, state, _ in
                 state = value.translation.height
             }
             .onEnded { value in
-                if value.translation.height > 120 { onClose() }
+                if value.predictedEndTranslation.height > 120 { onClose() }
             }
     }
 

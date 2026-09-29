@@ -86,6 +86,17 @@ struct ActiveRideMapView: View {
                 // MapScopeRegistryKey tried to update multiple times per frame") as the route loaded.
                 map(scope: mapScope)
                     .ignoresSafeArea()
+                    // The map runs up under the sheet's drag indicator and would take every drag
+                    // there as a pan, leaving no way to pull the sheet down (#330). A band with no
+                    // gesture of its own hands those drags to the sheet's dismiss pan. Declared
+                    // before the controls, so they still draw, and take taps, above it.
+                    .overlay(alignment: .top) {
+                        Color.clear
+                            .frame(height: Spacing.tapTarget)
+                            .contentShape(Rectangle())
+                            // From the sheet's top edge, so it covers the drag indicator itself.
+                            .ignoresSafeArea(edges: .top)
+                    }
                     .overlay(alignment: .topTrailing) { sheetControls }
                     .overlay(alignment: .topLeading) {
                         MapScaleView(scope: mapScope)
