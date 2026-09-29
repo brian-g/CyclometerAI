@@ -129,11 +129,32 @@ There will be a button in a toolbar at the top-right of the screen to start a ri
 
 When a ride is active, the Start ride toolbar item will be hidden. All three tabs are functional in MVP; the Routes tab is S19.
 
+### Dashboard
+
+The dashboard is a custom full-screen popover screen. It can use all of the space on the screen including the safe areas. It is composed of widgets in a 2 (wide) x 7 (tall) grid. The widgets are defined below. Each widget conforms to sizes that relate to how much of the grid they take up denoted in grid units, see below. 
+
+The dashboard is composed of multiple pages that can be swiped between during a ride. Each page is composed of widgets. The map widget in the 2x2 configuration will go under the safe areas of the phone when it is the first or the last widget on a page.
+
+The dashboard is sparse, so an empty grid item will not get auto-filled by if one is removed.
+
+#### Customization
+
+1. Entering customization mode is done by a long press on the dashboard. In customization mode, there are 2 additional buttons added that obscure the time to the left of the dynamic island, and to the right of the dynamic island. On the left is a "+" button that will add widgets and pages, On the right is a "check" button that exits customization mode.
+2. In customization mode, the widgets will display with a small "-" minus icon to remove a widget. They can be dragged to other locations which will shift other items around. They cannot be resized to other variants of the widget.
+3. When a widget is removed from the dashboard page, an empty space will be shown. Tapping that empty space will, or any empty grid space, will open the widget add slider, filtered to only the widgets that will fit in the space. 
+4. When the add button is tapped, a sheet of all of the widgets is shown grouped by type. Each widget in the list will show a preview of what it will look like during a ride or with the sensor available. All widgets will show even those that have no associated sensor. The user must choose a variant and that variants size will be used when added. 
+5. New pages will not be auto-created like in the iOS springboard. A new page is the first special item to add to the dashboard. It will always add at after the page being shown.
+6. If a user removes all of the widgets from a page, the page is removed when the user declares that they are "done".
+
+### Sheet standards
+
+With the exception of the dashboard, all sheets should have a close button in the upper left (or a back button if there is a nested sheet). 
+
 ### Widget Size Convention
 
 Widget sizes are expressed as **WxH** (width × height) in grid units. The dashboard grid is 2 columns × 7 rows. Cell dimensions are approximately 201×96pt on iPhone 17 Pro.
 
-| Size | Grid units | Approximate pt |
+| Size | Grid units | Approximate pt on iPhone 17 Pro |
 |---|---|---|
 | 1x1 | 1 col × 1 row | 201 × 96 |
 | 2x1 | 2 col × 1 row | 402 × 96 |
@@ -540,6 +561,16 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 - 2x2 only: Ride distance (`medium-hero`)
 - Sheet: Ride metrics
 
+
+
+W1 — Speed Alternative
+
+Sizes: 2x2
+
+This version of the speed widget uses a speedometer like dial to visualize the current speed. It has max, average and miles, but does not have duration.
+
+![image-20260927182805675](/Users/brian/Library/Application Support/typora-user-images/image-20260927182805675.png)
+
 ---
 
 #### W2 — Average Speed
@@ -548,7 +579,6 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 
 - Primary value: rolling average speed, excluding stopped time
 - Unit: km/h or mph
-- Watermark speed history graph
 - Sheet: Ride metrics
 
 ---
@@ -568,9 +598,8 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 **Sizes:** 2x1, 1x1
 
 - Value: current BPM
-- Zone color treatment: background or left-border tint in current zone color (`brHRZone1`–`brHRZone5`)
+- A watermark graph of the historical HR for the ride. The horizontal bands in the chart should show the zones (`brHRZone1`–`brHRZone5`)
 - Zone label: "Z1 Recovery", "Z2 Endurance", "Z3 Tempo", "Z4 Threshold", "Z5 VO₂ Max"
-- Empty state: "--" with "Pair Sensor" affordance (navigates to S11)
 - Sheet: Heart rate
 
 ---
@@ -580,7 +609,8 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 **Sizes:** 2x1, 1x1
 
 - Value: current RPM
-- Empty state: "--" with "Pair Sensor" affordance (navigates to S11)
+- Empty state: "--" 
+- 2x1 displays the average
 - Sheet: Ride metrics
 
 ---
