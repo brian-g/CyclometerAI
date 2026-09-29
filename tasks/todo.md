@@ -1,3 +1,28 @@
+# #330 — Larger grab targets: dashboard grabber + map sheet
+
+Plan: /Users/brian/.claude/plans/harmonic-waddling-heron.md
+Branch: `fix/330-grabber-target`
+
+- [x] 0. Lesson (a code comment isn't evidence of render position) + fix the simulator-ui-drive memory
+- [x] 1. Dashboard: 120×52 centred drag target overlaid under the capsule; capsule, footprint and banner unmoved; stale comments fixed
+- [x] 2. Map sheet: gesture-less 52pt band across the top, under the controls, so drags reach the sheet's own dismiss pan
+- [x] 3. `Spacing.grabberHitWidth` + UX.md §S05 Grabber sentence
+- [x] 4. Unit suite green
+- [x] 5. Sim drive (throwaway XCUITest, deleted)
+
+## Review
+
+- The capsule was already below the Dynamic Island (Brian's screenshot). The comment claiming it sat at the physical top was stale. The real defect was an 8pt drag target.
+- Sim-verified: a drag starting 30pt below the capsule minimises the ride. A tap on the Speed widget's top-left, outside the band, still opens its detail.
+- Map sheet: a drag starting on the system grabber itself (100×24) already dismissed without the band. A drag at (100, 95), inside the band but off the grabber, dismisses **with** the band and pans the map **without** it. Both builds were checked, fresh derived data.
+- Not driven: a banner showing at the same time. Its position can't change, because the band is an overlay and the grabber's layout footprint is unchanged. The `zIndex` keeps the band above it.
+- Not verified: finger feel on a device.
+
+### Follow-up: drag feel (Brian's report) — moved to #333
+- The squish, the jump under the island, square corners, a slow finish, and expand/collapse into the capsule are all in #333. Brian chose the system zoom transition with drag-anywhere dismiss.
+- A draw-only offset, then fixed insets fed from `AppView`, were both tried here. The first changed nothing; the second still squished on device and once froze the app. Both reverted. #330 keeps no safe-area changes.
+- Kept in #330: the flick fix. Dismissal uses `predictedEndTranslation`, measured in `.global` space; in local space the moving view made the predicted end come out short, so neither a flick nor a long drag dismissed. Sim drive: a slow 356pt drag minimises, an 80pt flick minimises, a short slow 60pt drag springs back. Unit suite 1661/0.
+
 # #331 — Routes Map/List toggle moves to the bottom
 
 Plan: /Users/brian/.claude/plans/unified-juggling-tome.md
