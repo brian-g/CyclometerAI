@@ -4,7 +4,7 @@ import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
 // Retrieve after an untethered ride: `log collect --device --last 1h` (notice level persists).
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "radar")
+private let logger = Logger.cyclometer(.radar)
 
 // Identifies this client to BLEClient's connection ref-count so disconnecting the
 // radar never severs a peripheral another client shares (see BLEClient.connect).

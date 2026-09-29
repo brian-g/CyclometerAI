@@ -3,7 +3,7 @@ import Foundation
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "network")
+private let logger = Logger.cyclometer(.network)
 
 /// TCA dependency for the OpenStreetMap Overpass API, which is where a route's surface comes
 /// from (#252). It sends a *planned route's* line — never a recorded ride — to the public

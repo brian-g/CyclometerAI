@@ -4,7 +4,7 @@ import os
 import UIKit
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "routes")
+private let logger = Logger.cyclometer(.routes)
 
 /// S19's row thumbnail (#273): the route's polyline in `cyMapRoute` over a static map, the same
 /// image S14 shows for a ride. Framing, path and size are `RideMapThumbnail`'s, so a route and

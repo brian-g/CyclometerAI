@@ -6,7 +6,7 @@ import HealthKit
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "permissions")
+private let logger = Logger.cyclometer(.permissions)
 
 // MARK: - PermissionsClient
 

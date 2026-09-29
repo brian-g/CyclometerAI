@@ -5,7 +5,7 @@ import MapKit
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "recording")
+private let logger = Logger.cyclometer(.recording)
 
 /// S14's row thumbnail (#177): the ride's recorded track over a static map, rendered once
 /// after the ride ends so the list never stands up a live `Map` per row (UX.md §S14).

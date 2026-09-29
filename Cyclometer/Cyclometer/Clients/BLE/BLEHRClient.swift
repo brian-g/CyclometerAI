@@ -4,7 +4,7 @@ import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
 // Retrieve after an untethered ride: `log collect --device --last 1h` (notice level persists).
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "hr")
+private let logger = Logger.cyclometer(.hr)
 
 private let hrServiceUUID     = CBUUID(string: "180D")
 private let hrMeasurementUUID = CBUUID(string: "2A37")

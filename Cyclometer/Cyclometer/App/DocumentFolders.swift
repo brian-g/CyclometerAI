@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persistence")
+private let logger = Logger.cyclometer(.persistence)
 
 /// The `Documents/` layout, which `UIFileSharingEnabled` puts on show as *On My iPhone →
 /// Cyclometer*: what the app creates there, and what it clears out.

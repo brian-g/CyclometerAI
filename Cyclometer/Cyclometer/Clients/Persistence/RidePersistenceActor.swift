@@ -3,7 +3,7 @@ import SwiftData
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persistence")
+private let logger = Logger.cyclometer(.persistence)
 
 /// Serializes every SwiftData Ride write behind one long-lived ModelContext, rather
 /// than standing up a fresh context per call — the checkpoint path alone fires at

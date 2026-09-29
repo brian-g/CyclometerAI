@@ -2,7 +2,7 @@
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "ble")
+private let logger = Logger.cyclometer(.ble)
 
 // MARK: - BatteryService
 

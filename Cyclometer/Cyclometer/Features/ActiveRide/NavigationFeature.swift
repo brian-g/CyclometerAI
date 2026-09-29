@@ -3,7 +3,7 @@ import Foundation
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "navigation")
+private let logger = Logger.cyclometer(.navigation)
 
 /// Follows the route a ride was started on (#197): places the rider on its polyline, tracks how
 /// far along it they are, announces each turn at the rider's lead distance, and says when they

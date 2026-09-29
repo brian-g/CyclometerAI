@@ -4,7 +4,7 @@ import HealthKit
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "healthkit")
+private let logger = Logger.cyclometer(.healthkit)
 
 private let bpmUnit = HKUnit.count().unitDivided(by: .minute())
 

@@ -5,7 +5,7 @@ import HealthKit
 import UIKit
 import os
 
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "permissions")
+private let logger = Logger.cyclometer(.permissions)
 
 // MARK: - PermissionProbes
 

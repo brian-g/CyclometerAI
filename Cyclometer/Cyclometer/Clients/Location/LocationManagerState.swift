@@ -1,7 +1,7 @@
 import CoreLocation
 import os
 
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "location")
+private let logger = Logger.cyclometer(.location)
 
 /// The app's single `CLLocationManager`, shared by the two clients that need it.
 ///
