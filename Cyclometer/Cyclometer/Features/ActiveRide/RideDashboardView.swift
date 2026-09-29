@@ -266,23 +266,51 @@ struct RideDashboardView: View {
                     .frame(width: Spacing.grabberHitWidth, height: Spacing.tapTarget)
                     .contentShape(Rectangle())
                     .gesture(dismissDrag)
+                    // The drag is the only way to minimise, and VoiceOver can't
+                    // perform it.
+                    .accessibilityRepresentation {
+                        Button("Minimize Ride", action: onClose)
+                    }
             }
     }
 
     /// Pull-down-to-dismiss. Attached to the grabber (not the container) so it
-    /// wins over the paging TabView's internal gesture recognizer. Judged on where
-    /// the drag was heading, not where the finger let go, so a quick flick
-    /// dismisses too (#330). Measured in screen space: the dashboard moves with
-    /// the finger, and in its own space the predicted end came out short, so
-    /// neither a flick nor a long drag dismissed.
+    /// wins over the paging TabView's internal gesture recognizer. Measured in
+    /// screen space: the dashboard moves with the finger, and in its own space
+    /// the predicted end came out short, so neither a flick nor a long drag
+    /// dismissed (#330).
     private var dismissDrag: some Gesture {
         DragGesture(coordinateSpace: .global)
             .updating($dragOffset) { value, state, _ in
                 state = value.translation.height
             }
             .onEnded { value in
-                if value.predictedEndTranslation.height > 120 { onClose() }
+                if Self.shouldDismiss(
+                    translation: value.translation,
+                    predictedEndTranslation: value.predictedEndTranslation
+                ) {
+                    onClose()
+                }
             }
+    }
+
+    /// How far down a drag must be heading to minimise the dashboard.
+    static let dismissDistance: CGFloat = 120
+    /// How far the finger must actually travel, so a quick brush (a bump, a wet
+    /// screen) can't be projected into a dismissal.
+    static let dismissMinimumTravel: CGFloat = 40
+
+    /// Whether a drag on the grabber minimises the dashboard (#330). It must be
+    /// mostly downward, so a sideways or diagonal swipe starting on the grabber
+    /// can't. It must have travelled `dismissMinimumTravel`. And it must be heading
+    /// past `dismissDistance`, judged on where it was going rather than where the
+    /// finger let go, so a flick counts and a short slow drag springs back.
+    ///
+    /// Static, like `banner`, so the rule is tested without rendering a dashboard.
+    static func shouldDismiss(translation: CGSize, predictedEndTranslation: CGSize) -> Bool {
+        translation.height > abs(translation.width)
+            && translation.height >= dismissMinimumTravel
+            && predictedEndTranslation.height > dismissDistance
     }
 
     // ── Paging indicator — always visible; factory default shows 2 dots ────────
