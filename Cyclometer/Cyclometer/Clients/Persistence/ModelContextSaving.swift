@@ -3,7 +3,7 @@ import SwiftData
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persistence")
+private let logger = Logger.cyclometer(.persistence)
 
 /// Shared body for every SwiftData write in `RidePersistenceActor` and
 /// `RoutePersistenceActor`: run `changes` (insert/delete/mutate, no save), save the

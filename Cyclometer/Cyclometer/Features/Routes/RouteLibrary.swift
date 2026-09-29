@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "routes")
+private let logger = Logger.cyclometer(.routes)
 
 /// What every screen that shows the saved-route library shares: its symbol, and what a failed read
 /// says. S19 and S05.2 read the same library and fail the same way (#196), so a wording change made

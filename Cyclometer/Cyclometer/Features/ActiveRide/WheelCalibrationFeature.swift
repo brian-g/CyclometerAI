@@ -2,7 +2,7 @@ import ComposableArchitecture
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "ble")
+private let logger = Logger.cyclometer(.ble)
 
 /// Compares BLE wheel distance against GPS distance over rolling 1,500 m windows and
 /// corrects `AppPreferences.wheelCircumferenceMM` when they disagree materially

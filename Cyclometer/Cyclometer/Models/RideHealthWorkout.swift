@@ -3,7 +3,7 @@ import Foundation
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "healthkit")
+private let logger = Logger.cyclometer(.healthkit)
 
 /// The ride's outdoor cycling `HKWorkout` (UX.md §S10, #250), written until it lands (#277).
 enum RideHealthWorkout {

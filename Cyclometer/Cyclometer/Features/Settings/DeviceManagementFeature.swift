@@ -5,7 +5,7 @@ import OSLog
 /// The rider's pairing decisions, logged at the moment they are made. The clients log
 /// what they were *told* (`paired strap → …`); without this, nothing recorded what told
 /// them, which is what left #180 unattributable from a sysdiagnose.
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "ble")
+private let logger = Logger.cyclometer(.ble)
 
 /// S11 — Device Management. Scans for every supported sensor, lists what was found as
 /// one deduped device list, and pairs, unpairs or reassigns one at a time.

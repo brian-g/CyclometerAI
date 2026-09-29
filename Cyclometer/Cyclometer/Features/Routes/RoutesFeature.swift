@@ -3,7 +3,7 @@ import Foundation
 import UniformTypeIdentifiers
 import os
 
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "routes")
+private let logger = Logger.cyclometer(.routes)
 
 /// S19 — the Routes tab: saved routes as a list or a map, plus GPX import from the Files app.
 ///

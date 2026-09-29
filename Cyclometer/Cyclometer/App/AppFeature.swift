@@ -4,7 +4,7 @@ import SwiftData
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persistence")
+private let logger = Logger.cyclometer(.persistence)
 
 /// Root feature — owns tab selection and active ride lifecycle.
 /// Navigation follows Apple Music pattern: Rides / Routes / Settings tabs.

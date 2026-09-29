@@ -2,7 +2,7 @@ import ComposableArchitecture
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "routes")
+private let logger = Logger.cyclometer(.routes)
 
 /// S20 — Route Detail: one saved route's map, elevation, and the rides ridden on it.
 ///

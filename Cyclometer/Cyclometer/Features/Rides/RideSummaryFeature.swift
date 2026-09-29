@@ -3,7 +3,7 @@ import Foundation
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persistence")
+private let logger = Logger.cyclometer(.persistence)
 
 /// S10 — Ride Summary: the ride that just ended, presented by `AppFeature` on Finish (#249).
 ///
