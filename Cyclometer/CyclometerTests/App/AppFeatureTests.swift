@@ -29,7 +29,7 @@ struct AppFeatureTests {
         #expect(store.state.activeRide != nil)
     }
 
-    /// Tapping "Open" on the accessory re-presents the full-screen dashboard.
+    /// Tapping the accessory re-presents the full-screen dashboard.
     @Test("dashboardOpened re-presents the dashboard while a ride is active")
     func dashboardOpenedRepresents() async {
         let store = TestStore(
@@ -53,6 +53,35 @@ struct AppFeatureTests {
         await store.send(.dashboardDismissed) {
             $0.isDashboardPresented = false
         }
+        await store.receive(\.screenVisibilityChanged)
+    }
+
+    /// Minimising tears the dashboard view down, so the page lives in the ride's
+    /// state: reopening lands where the rider left off (#333 PR review).
+    @Test("Reopening the dashboard returns to the page it was minimised from")
+    func reopeningKeepsThePage() async {
+        let store = TestStore(
+            initialState: AppFeature.State(
+                activeRide: ActiveRideFeature.State(recordingState: .active),
+                isDashboardPresented: true
+            )
+        ) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.screenClient = .testValue
+        }
+
+        await store.send(.activeRide(.dashboardPageChanged(.map))) {
+            $0.activeRide?.dashboardPage = .map
+        }
+        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
+        await store.receive(\.screenVisibilityChanged)
+        await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
+        await store.receive(\.screenVisibilityChanged)
+        #expect(store.state.activeRide?.dashboardPage == .map)
+
+        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged)
     }
 

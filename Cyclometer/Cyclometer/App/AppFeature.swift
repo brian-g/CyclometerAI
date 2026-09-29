@@ -8,7 +8,7 @@ private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persi
 
 /// Root feature — owns tab selection and active ride lifecycle.
 /// Navigation follows Apple Music pattern: Rides / Routes / Settings tabs.
-/// Active ride dashboard is a custom screen over the tab structure.
+/// Active ride dashboard is a full-screen cover that zooms out of the tab accessory (#333).
 @Reducer
 struct AppFeature {
 
@@ -51,6 +51,9 @@ struct AppFeature {
         /// The rider's own backlight level, captured when the dim starts so waking
         /// restores what they had rather than some app-chosen constant.
         var preDimBrightness: Double? = nil
+        /// A finger is on the screen. The countdown doesn't run while one is, so the
+        /// dashboard never dims under a drag (#333).
+        var isTouchDown: Bool = false
 
         /// The app owns the display only while the dashboard is the visible surface,
         /// a ride is actively recording, and the app is foregrounded (#110, #102). A
@@ -90,10 +93,14 @@ struct AppFeature {
         // ── Screen power management (#110) ───────────────────────────────────────
         case scenePhaseChanged(isActive: Bool)
         case screenVisibilityChanged(Bool)
-        /// Any touch on the dashboard — including the one that wakes it from a dim.
-        /// The blocker overlay swallows that first touch, but where it came from is a
-        /// view concern; the reducer only needs to know the rider is still there.
-        case userInteracted
+        /// The first finger down and the last one up, anywhere in the app window
+        /// (#333). They pause and restart the countdown. While dimmed the blocker
+        /// window keeps them from arriving; one that does anyway wakes the screen.
+        case touchBegan
+        case touchEnded
+        /// The only thing that wakes a dim: a tap on the blocker, which swallows it
+        /// (#110, #333).
+        case wakeTapped
         case dimTimerFired
         case preDimBrightnessCaptured(Double)
     }
@@ -368,7 +375,22 @@ struct AppFeature {
                     armDimTimer(state)
                 )
 
-            case .userInteracted:
+            case .touchBegan:
+                state.isTouchDown = true
+                guard state.isDashboardVisible else { return .none }
+                // Cancels a dim at any stage, the backlight read included.
+                return .cancel(id: CancelID.dimTimer)
+
+            case .touchEnded:
+                state.isTouchDown = false
+                guard state.isDashboardVisible else { return .none }
+                // While dimmed, the blocker window keeps touches from reaching the app
+                // window, so a dimmed touch arrives here only if the blocker failed to
+                // appear. Waking then means no dim is ever left that a touch can't end.
+                let restoreAfterTouch = wake(&state)
+                return .merge(restoreAfterTouch, armDimTimer(state))
+
+            case .wakeTapped:
                 guard state.isDashboardVisible else { return .none }
                 // Sequenced, not inlined into `.merge`: `wake` takes `state` inout, so
                 // reading it again in the same call would overlap that access.
@@ -382,9 +404,13 @@ struct AppFeature {
                 // `preDimBrightness` inseparable — a dim that is on with nothing to
                 // restore to is exactly the state that would strand the rider's phone
                 // at 10% brightness.
+                //
+                // Under the timer's ID, so a touch landing mid-read cancels the dim
+                // outright (#333): a cancelled effect's `send` is dropped.
                 return .run { [screenClient] send in
                     await send(.preDimBrightnessCaptured(screenClient.brightness()))
                 }
+                .cancellable(id: CancelID.dimTimer)
 
             case .preDimBrightnessCaptured(let level):
                 // Re-checked, not assumed: the rider may have backgrounded the app or
@@ -528,8 +554,10 @@ struct AppFeature {
     /// Gated on the rider's Auto-dim preference (S12). The wake lock deliberately is
     /// not — turning auto-dim off means "stop dimming", not "let the phone sleep
     /// mid-ride".
+    ///
+    /// Not while a finger is down: the lift re-arms it (#333).
     private func armDimTimer(_ state: State) -> Effect<Action> {
-        guard state.preferences.isAutoDimEnabled else { return .none }
+        guard state.preferences.isAutoDimEnabled, !state.isTouchDown else { return .none }
         return .run { [clock] send in
             try await clock.sleep(for: .seconds(Self.dimAfterSeconds))
             await send(.dimTimerFired)

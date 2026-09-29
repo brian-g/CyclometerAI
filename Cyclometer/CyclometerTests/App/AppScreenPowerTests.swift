@@ -110,6 +110,26 @@ struct AppScreenPowerTests {
         #expect(calls.value == [.idleTimerDisabled(true), .idleTimerDisabled(false)])
     }
 
+    /// Auto-pause (0 speed for 10s) must hand the screen back just like a manual
+    /// pause does (#102). A stationary phone reaches this within seconds.
+    @Test("Auto-pause releases the idle timer even though the dashboard stays open")
+    func autoPauseReleasesTheIdleTimer() async {
+        let clock = TestClock()
+        let calls = LockIsolated<[ScreenCall]>([])
+        let store = Self.makeStore(clock: clock, calls: calls)
+        store.exhaustivity = .off
+
+        await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
+        #expect(calls.value == [.idleTimerDisabled(true)])
+
+        await store.send(.activeRide(.autoPauseTriggered))
+        await store.finish()
+
+        #expect(store.state.isDashboardPresented == true)
+        #expect(store.state.activeRide?.recordingState == .paused)
+        #expect(calls.value == [.idleTimerDisabled(true), .idleTimerDisabled(false)])
+    }
+
     // MARK: - Auto-dim
 
     @Test("Dims after the idle timeout, capturing the rider's own brightness")
@@ -152,7 +172,8 @@ struct AppScreenPowerTests {
         await store.receive(\.screenVisibilityChanged)
 
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds - 1))
-        await store.send(.userInteracted)
+        await store.send(.touchBegan) { $0.isTouchDown = true }
+        await store.send(.touchEnded) { $0.isTouchDown = false }
 
         // The original countdown's deadline passes with no dim.
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds - 1))
@@ -174,8 +195,8 @@ struct AppScreenPowerTests {
         await store.finish()
     }
 
-    /// The wake touch is the one that must not leave the rider's phone dark.
-    @Test("A touch while dimmed wakes the screen and re-arms the countdown")
+    /// The wake tap is the one that must not leave the rider's phone dark.
+    @Test("A tap on the blocker wakes the screen and re-arms the countdown")
     func touchWakesTheScreen() async {
         let clock = TestClock()
         let calls = LockIsolated<[ScreenCall]>([])
@@ -190,7 +211,7 @@ struct AppScreenPowerTests {
             $0.preDimBrightness = 0.8
         }
 
-        await store.send(.userInteracted) {
+        await store.send(.wakeTapped) {
             $0.isDimmed = false
             $0.preDimBrightness = nil
         }
@@ -257,7 +278,8 @@ struct AppScreenPowerTests {
 
         // Well past the timeout, with a touch in the middle for good measure.
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds * 2))
-        await store.send(.userInteracted)
+        await store.send(.touchBegan) { $0.isTouchDown = true }
+        await store.send(.touchEnded) { $0.isTouchDown = false }
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds * 2))
         #expect(store.state.isDimmed == false)
         #expect(!calls.value.contains { if case .setBrightness = $0 { true } else { false } })
@@ -288,6 +310,136 @@ struct AppScreenPowerTests {
 
         #expect(calls.value.contains(.setBrightness(0.05)))
         #expect(!calls.value.contains(.setBrightness(AppFeature.dimBrightness)))
+
+        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
+        await store.receive(\.screenVisibilityChanged) {
+            $0.isDimmed = false
+            $0.preDimBrightness = nil
+        }
+        await store.finish()
+    }
+
+    // MARK: - Touch presence (#333)
+
+    /// A drag, including the one that collapses the dashboard, can outlast the
+    /// timeout. The countdown waits for the finger to lift, then runs in full.
+    @Test("A finger held past the timeout never dims; lifting it restarts the countdown")
+    func heldTouchNeverDims() async {
+        let clock = TestClock()
+        let calls = LockIsolated<[ScreenCall]>([])
+        let store = Self.makeStore(clock: clock, calls: calls)
+
+        await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
+        await store.receive(\.screenVisibilityChanged)
+
+        await clock.advance(by: .seconds(AppFeature.dimAfterSeconds - 1))
+        await store.send(.touchBegan) { $0.isTouchDown = true }
+        await clock.advance(by: .seconds(AppFeature.dimAfterSeconds * 3))
+        #expect(store.state.isDimmed == false)
+
+        await store.send(.touchEnded) { $0.isTouchDown = false }
+        await clock.advance(by: .seconds(AppFeature.dimAfterSeconds - 1))
+        #expect(store.state.isDimmed == false)
+        await clock.advance(by: .seconds(1))
+        await store.receive(\.dimTimerFired)
+        await store.receive(\.preDimBrightnessCaptured) {
+            $0.isDimmed = true
+            $0.preDimBrightness = 0.8
+        }
+
+        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
+        await store.receive(\.screenVisibilityChanged) {
+            $0.isDimmed = false
+            $0.preDimBrightness = nil
+        }
+        await store.finish()
+    }
+
+    /// The blocker window keeps touches from reaching the app window while dimmed. If
+    /// it ever failed to appear, a touch that got through must still end the dim,
+    /// rather than leave the rider under a 10% backlight nothing can lift.
+    @Test("A touch that reaches the app while dimmed wakes it, as a safety net for the blocker")
+    func touchPastAMissingBlockerWakes() async {
+        let clock = TestClock()
+        let calls = LockIsolated<[ScreenCall]>([])
+        let store = Self.makeStore(clock: clock, calls: calls)
+
+        await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
+        await store.receive(\.screenVisibilityChanged)
+        await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
+        await store.receive(\.dimTimerFired)
+        await store.receive(\.preDimBrightnessCaptured) {
+            $0.isDimmed = true
+            $0.preDimBrightness = 0.8
+        }
+
+        await store.send(.touchBegan) { $0.isTouchDown = true }
+        await store.send(.touchEnded) {
+            $0.isTouchDown = false
+            $0.isDimmed = false
+            $0.preDimBrightness = nil
+        }
+        #expect(calls.value.last == .setBrightness(0.8))
+
+        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
+        await store.receive(\.screenVisibilityChanged)
+        await store.finish()
+    }
+
+    /// The dim commits an action after the timer, once the backlight read returns. A
+    /// whole tap landing while that read is in flight must cancel the dim, not just a
+    /// finger that is still down when the result arrives.
+    @Test("A tap during the backlight read cancels the dim")
+    func tapDuringTheBacklightReadCancelsTheDim() async {
+        let clock = TestClock()
+        let calls = LockIsolated<[ScreenCall]>([])
+        let store = Self.makeStore(clock: clock, calls: calls)
+        // The read parks until the test releases it, so the tap lands mid-read.
+        let (reads, release) = AsyncStream.makeStream(of: Double.self)
+        store.dependencies.screenClient.brightness = {
+            for await level in reads { return level }
+            return 0.8
+        }
+
+        await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
+        await store.receive(\.screenVisibilityChanged)
+        await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
+        await store.receive(\.dimTimerFired)
+
+        await store.send(.touchBegan) { $0.isTouchDown = true }
+        await store.send(.touchEnded) { $0.isTouchDown = false }
+        release.yield(0.8)
+        release.finish()
+
+        // No `preDimBrightnessCaptured`: an exhaustive store fails on one it wasn't told about.
+        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
+        await store.receive(\.screenVisibilityChanged)
+        await store.finish()
+        #expect(store.state.isDimmed == false)
+        #expect(!calls.value.contains { if case .setBrightness = $0 { true } else { false } })
+    }
+
+    /// The dashboard can become the visible surface under a finger (a ride resuming
+    /// while the rider holds the screen). The countdown starts on the lift, not before.
+    @Test("Becoming visible with a finger down doesn't start the countdown until it lifts")
+    func visibleUnderAFingerWaitsForTheLift() async {
+        let clock = TestClock()
+        let calls = LockIsolated<[ScreenCall]>([])
+        let store = Self.makeStore(clock: clock, calls: calls)
+
+        await store.send(.touchBegan) { $0.isTouchDown = true }
+        await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
+        await store.receive(\.screenVisibilityChanged)
+        await clock.advance(by: .seconds(AppFeature.dimAfterSeconds * 2))
+        #expect(store.state.isDimmed == false)
+
+        await store.send(.touchEnded) { $0.isTouchDown = false }
+        await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
+        await store.receive(\.dimTimerFired)
+        await store.receive(\.preDimBrightnessCaptured) {
+            $0.isDimmed = true
+            $0.preDimBrightness = 0.8
+        }
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged) {

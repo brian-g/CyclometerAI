@@ -14,7 +14,9 @@ final class ActiveRideAccessorySnapshotTests: XCTestCase {
         speedMPS: Double = 7.89,          // ≈ 28.4 km/h
         elapsedSeconds: Int = 2340,       // 39:00
         unit: UnitSystem = .metric,
-        scheme: ColorScheme = .light
+        scheme: ColorScheme = .light,
+        isCollapsed: Bool? = nil,
+        width: CGFloat = 393
     ) -> some View {
         ActiveRideAccessoryView(
             progress: progress,
@@ -22,10 +24,11 @@ final class ActiveRideAccessorySnapshotTests: XCTestCase {
             speedMPS: speedMPS,
             elapsedSeconds: elapsedSeconds,
             unit: unit,
-            onOpen: {}
+            onOpen: {},
+            isCollapsedOverride: isCollapsed
         )
         .padding(.horizontal, 4)
-        .frame(width: 393, height: 120)
+        .frame(width: width, height: 120)
         .tint(.cyPrimary)              // mirrors AppView's global tint on the TabView
         .preferredColorScheme(scheme)
     }
@@ -57,6 +60,17 @@ final class ActiveRideAccessorySnapshotTests: XCTestCase {
         assertSnapshot(
             of: strip(progress: 0.42, scheme: .dark),
             as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+        )
+    }
+
+    // MARK: - Collapsed into the TabBar (`.inline`) → speed dropped
+
+    /// The inline slot is narrower than the full-width strip; 300pt approximates it
+    /// beside the minimised tab button on iPhone 17 Pro.
+    func testCollapsedImperial() {
+        assertSnapshot(
+            of: strip(unit: .imperial, isCollapsed: true, width: 300),
+            as: .image(layout: .fixed(width: 300, height: 120))
         )
     }
 }

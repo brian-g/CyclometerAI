@@ -223,7 +223,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 | S05 | Active Ride Dashboard | MVP | **Primary screen.** Speed, HR zone, radar sidebar (if paired), cadence, elapsed time, distance, live map |
 | S05.1 | Start Ride Sheet | MVP | Sheet to start a ride |
 | S05.2 | Route Picker | MVP | From the Start Sheet, the ability to pick a route for the ride |
-| S05.3 | Active Ride Accessory | MVP | Compact strip above TabBar when the dashboard sheet is minimized; shows live ride stats and an Open button |
+| S05.3 | Active Ride Accessory | MVP | Compact strip above TabBar when the dashboard is minimized; shows live ride stats, and a tap anywhere on it reopens the dashboard |
 | S05.4 | Widget Layout | MVP | Default widget layout for the active ride dashboard |
 | S05.5 | Widget Layout 2 | MVP | Second widget layout page for the active ride dashboard |
 | S06 | Radar Alert | MVP | Sidebar visualization and alert-level state changes |

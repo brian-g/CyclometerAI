@@ -378,3 +378,50 @@ Branch: `284-remove-dead-ride-fields`
   and both rides keep the same titles and distances. Backup is in the session scratchpad.
 - Left alone: PRD.md §10 and TCA.md still sketch `hrZoneDurations`. Both sketches are stale throughout, and the
   issue names only DataModel.md.
+
+# #333 — Dashboard zooms from and into the ride capsule; auto-dim owns the whole window
+
+Plan: /Users/brian/.claude/plans/harmonic-waddling-heron.md (decision: dim rules cover the whole window)
+Branch: `feat/333-dashboard-zoom`
+
+- [x] 1. Spike: zoom cover in AppView; sim drive checks zoom, no squish, sheet→cover and cover→summary, paging
+- [x] 2. Dashboard: drop the hand-built drag, `onClose`, the #330 band, `grabberHitWidth`, `DashboardDismissTests`
+- [x] 3. Auto-dim: window touch recognizer + blocker window; `touchBegan`/`touchEnded`/`wakeTapped`; `isTouchDown` guards
+- [x] 4. Tests: AppScreenPowerTests (touch held, dimmed touches, race), WakeTapTests
+- [x] 5. Docs: UX.md §S05 Grabber, #110 dim rule text
+- [ ] 6. Verify: suite, sim drive (presentation + dim rules), device check by Brian
+
+## Review
+
+- Presentation: the dashboard is a `.fullScreenCover(item:)` with `.navigationTransition(.zoom)`, sourced from the tab accessory. The hand-built drag, the `.move` transition, the #330 band, `grabberHitWidth` and `DashboardDismissTests` are gone. The capsule stays as a cue, and VoiceOver's "Minimize Ride" calls `dismiss()`.
+- Spike on the sim (frames at 0.25s):
+  - the card scales uniformly with display corners and clips to the capsule on the way in; nothing re-lays out;
+  - start sheet → cover lands; Finish → cover out, summary in, lands;
+  - a page swipe pages without dismissing;
+  - a slow drag, and flicks up to 250pt at 1500 px/s, collapse; a 60pt slow drag springs back;
+  - synthesized flicks at ≥2500 px/s never start the system dismiss (no motion in any frame), so real flicks need the device check.
+- Auto-dim: `AutoDimWindowBridge` puts a non-recognizing touch recognizer on the app window and a blocker `UIWindow` above it while dimmed.
+  - Reducer: `touchBegan` cancels the countdown, `touchEnded` re-arms it, and `wakeTapped` (renamed from `userInteracted`) is the only wake.
+  - `isTouchDown` guards arming, the timer firing and the brightness-read commit.
+- Sim drive of the dim rules, with a location feed so the ride stays active. Every assertion passed:
+  - a finger held for 34s plus a small drag: no dim, and it dimmed 30s after the lift;
+  - dimmed: a long drag down, a 1.5s press and a sideways swipe left it dimmed, and after the wake the dashboard was still up on page 1;
+  - a tap on Speed only woke the screen; no detail opened;
+  - dimmed over the open map sheet: a drag neither woke it nor panned the map; a tap woke it and the sheet stayed open;
+  - status bar and home indicator unchanged while the blocker shows.
+- Suite: 1,668 passed, 0 failed. Mutation check: dropping the touch-down rules fails `heldTouchNeverDims`, `fingerDownBlocksAnInFlightDim` and `visibleUnderAFingerWaitsForTheLift`.
+- Open for Brian's device check:
+  - flick feel;
+  - no resize at the island or the controls;
+  - whether a whole-screen drag causes accidental minimises mid-ride (the #333 exclusion's revisit trigger).
+- Added scope: the accessory's Open button is gone, and the whole strip is a plain-style `Button` with a `contentShape` over the Spacer's gap. Its five snapshots were re-recorded; apart from Open, the strip is unchanged (diffed by eye). Sim drive: collapse, then a tap on the strip's empty right side (where Open was) reopened the dashboard.
+- Brian spread the strip's stats with Spacers, and I re-recorded its five snapshots to match. Added a "Collapsed (inline)" preview. Because `tabViewBottomAccessoryPlacement` is get-only, the strip moved into a private `AccessoryStrip(isCollapsed:)`, which the public view feeds from the environment.
+- Review (xhigh) items 1–6 applied:
+  - the backlight read runs under `CancelID.dimTimer`, so a tap mid-read cancels the dim (mutation-checked), and the `!isTouchDown` re-checks on the fire and capture steps are gone;
+  - `touchEnded` while dimmed wakes, as a safety net if the blocker ever fails;
+  - VoiceOver focus moves onto the blocker (`.screenChanged`);
+  - `super` calls added in the recognizer;
+  - stale S05.3, PRD and AppFeature text fixed;
+  - `AccessoryStrip` replaced by `isCollapsedOverride`, plus a collapsed snapshot.
+- PR comment: the dashboard reopens on the page it was left on. `dashboardPage` now lives in `ActiveRideFeature.State` (per ride), tested in `reopeningKeepsThePage`.
+- PR comment: "dimming not working". Not reproduced on the sim: a ride started and left alone dimmed at 30s with Pause showing. The suspect on device is auto-pause (0 GPS speed for 10s), and paused rides never dim (#102). Waiting on Brian: was Pause or Resume showing?

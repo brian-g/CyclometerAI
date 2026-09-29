@@ -394,13 +394,14 @@ The accessory is a full-width horizontal strip. Internal layout (left to right):
 - **Leading progress ring** — `OpenRingProgressView`: a donut-style Swift Charts `SectorMark` showing route completion percentage. The visible arc spans 84% of the circle with a gap at the bottom; the completed segment uses `brPrimary` tint, the remaining segment uses `.secondary` at 22% opacity. The percentage integer is displayed in `.caption2.weight(.semibold)` at the center. When no route is loaded, progress is `0.0` (ring shows empty). Frame: 42×42pt.
 - **Live stats** — two `HeroNumber` views at `.small` size (34pt D-DIN Condensed), `.horizontal` layout, showing current distance and current speed with units from `UserProfile.preferredUnit`. Stats update at 1Hz matching the dashboard.
 - **Spacer**
-- **Open button** — `.borderedProminent` button style, label "Open". Taps re-present the full-screen `RideDashboardView`.
+
+There is no Open button: the whole strip is the tap target, as with Apple Music's mini player. A tap anywhere on it re-presents the full-screen `RideDashboardView`, zooming out of the strip (#333). VoiceOver reads the stats with the hint "Opens the ride dashboard".
 
 ### Behavior
 
 - Visible **only when a ride is active** (state = `.active` or `.paused`).
 - When the ride is paused, stats display the last recorded values and do not update.
-- When the rider taps "Open" (or taps anywhere on the strip in future iteration), the full-screen dashboard is re-presented via `fullScreenCover`.
+- When the rider taps anywhere on the strip, the full-screen dashboard is re-presented via `fullScreenCover`, zooming out of the strip, on the page it was minimised from (#333).
 - The TabBar remains visible and functional beneath the accessory — the rider can navigate to Routes or Settings without losing the active ride.
 - The `tabViewBottomAccessory` API requires iOS 26.
 
@@ -449,7 +450,9 @@ The grid always occupies the full screen height between the Dynamic Island and t
 
 **Empty cells** Any unoccupied cells render as empty space with no content and no interactive behaviour.
 
-**Grabber** A minimal grabber-style strip sits between the Dynamic Island and the top grid row. This allows the user to minimize the ride and look at other aspects of the app while riding (typically while stopped). The capsule is small, but its drag target is not: a 120 × 52 pt band (`grabberHitWidth` × `tapTarget`) centred under it, narrow enough that the top row's corner controls still take taps (#330). A drag there minimises the ride only if it is mostly downward, has travelled at least 40 pt, and is heading past 120 pt, so a flick counts but a sideways swipe or a quick brush doesn't. Taps inside the band go to it, not to the widget beneath. VoiceOver gets a "Minimize Ride" button in its place. The full-screen map sheet reserves a 52 pt band along its top edge for the same reason, so pulling it down never pans the map.
+**Grabber** A minimal grabber-style strip sits between the Dynamic Island and the top grid row. This allows the user to minimize the ride and look at other aspects of the app while riding (typically while stopped). The capsule is only a visual cue. The dashboard is a system zoom presentation, as in Apple Music: a tap on the ride accessory expands it out of the capsule, and a drag down anywhere on the dashboard collapses it back in, following the finger, with display-matched corners (#333). VoiceOver gets a "Minimize Ride" button on the capsule. The full-screen map sheet reserves a 52 pt band along its top edge, so pulling it down never pans the map (#330).
+
+**Auto-dim** After 30 s without a touch, the actively recording dashboard dims (#110). The countdown pauses while any finger is on the screen, a drag included, and restarts when the last one lifts, so the dashboard never dims under a drag or a collapse. While dimmed, the whole app window, including any sheet opened from the dashboard, takes no input: a tap only wakes the screen and reaches nothing beneath it, and a swipe, a drag or a long-press does nothing at all (#333).
 
 **Turn instructions** When turn-by-turn is on and a turn comes within the lead distance, the dashboard shows the instruction centred over everything else, per `Sxx - Route overlay` in Design.sketch (#197 review). It is a card, 136 pt square at its smallest, with a 16 pt continuous corner radius, filled `borderSubtle` with a 1 pt `borderStrong` border, and the whole card at `turnOverlay` opacity. Inside, the turn's arrow sits in `primaryDark` at 64 pt (SF Pro Rounded Semibold), with the instruction under it in `textPrimary` at 34 pt (SF Pro Regular). The instruction is the cue's own words when the route file gave some, and the direction otherwise. The card is solid rather than glass, so the dashboard stays readable through it. It stays up until the rider is within 10 ft of the turn — a flat four seconds took it away with 90 m still to ride at a 100 m lead — and never takes a touch. Transient notices (source switch, calibration) and off-route keep the top banner slot.
 

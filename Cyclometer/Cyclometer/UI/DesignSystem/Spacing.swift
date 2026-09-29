@@ -24,7 +24,6 @@ enum Spacing {
     static let rideThumbnail: CGFloat = unit * 14 // 56 — S14 row's map thumbnail, square (UX.md §S14)
     static let rideMetric: CGFloat    = unit * 16 // 64 — S14 row's time and distance columns, minimum width (Sketch: 65)
     static let grabberHeight: CGFloat = unit       //  4 — sheet grabber bar height
-    static let grabberHitWidth: CGFloat = unit * 30 // 120 — dashboard grabber's drag target, centred on the capsule (#330)
     static let pageIndicatorDot: CGFloat = 7       //  7 — dashboard paging indicator dot
     static let hrBorderWidth: CGFloat = 3          //  3 — HR zone left accent bar
     static let strokeThin: CGFloat    = 1.5        //  1.5 — thin border stroke
