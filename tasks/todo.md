@@ -1,3 +1,156 @@
+# #330 — Larger grab targets: dashboard grabber + map sheet
+
+Plan: /Users/brian/.claude/plans/harmonic-waddling-heron.md
+Branch: `fix/330-grabber-target`
+
+- [x] 0. Lesson (a code comment isn't evidence of render position) + fix the simulator-ui-drive memory
+- [x] 1. Dashboard: 120×52 centred drag target overlaid under the capsule; capsule, footprint and banner unmoved; stale comments fixed
+- [x] 2. Map sheet: gesture-less 52pt band across the top, under the controls, so drags reach the sheet's own dismiss pan
+- [x] 3. `Spacing.grabberHitWidth` + UX.md §S05 Grabber sentence
+- [x] 4. Unit suite green
+- [x] 5. Sim drive (throwaway XCUITest, deleted)
+
+## Review
+
+- The capsule was already below the Dynamic Island (Brian's screenshot). The comment claiming it sat at the physical top was stale. The real defect was an 8pt drag target.
+- Sim-verified: a drag starting 30pt below the capsule minimises the ride. A tap on the Speed widget's top-left, outside the band, still opens its detail.
+- Map sheet: a drag starting on the system grabber itself (100×24) already dismissed without the band. A drag at (100, 95), inside the band but off the grabber, dismisses **with** the band and pans the map **without** it. Both builds were checked, fresh derived data.
+- Not driven: a banner showing at the same time. Its position can't change, because the band is an overlay and the grabber's layout footprint is unchanged. The `zIndex` keeps the band above it.
+- Not verified: finger feel on a device.
+
+### Follow-up: drag feel (Brian's report) — moved to #333
+- The squish, the jump under the island, square corners, a slow finish, and expand/collapse into the capsule are all in #333. Brian chose the system zoom transition with drag-anywhere dismiss.
+- A draw-only offset, then fixed insets fed from `AppView`, were both tried here. The first changed nothing; the second still squished on device and once froze the app. Both reverted. #330 keeps no safe-area changes.
+- Kept in #330: the flick fix. Dismissal uses `predictedEndTranslation`, measured in `.global` space; in local space the moving view made the predicted end come out short, so neither a flick nor a long drag dismissed. Sim drive: a slow 356pt drag minimises, an 80pt flick minimises, a short slow 60pt drag springs back. Unit suite 1661/0.
+
+# #331 — Routes Map/List toggle moves to the bottom
+
+Plan: /Users/brian/.claude/plans/unified-juggling-tome.md
+Branch: `fix/331-routes-toolbar`
+
+- [x] 1. RoutesView: drop the toolbar toggle; bottom-trailing `safeAreaInset` glass button (reuses `MapSheetButton`)
+- [x] 2. UX.md §S19 + Updated line
+- [x] 3. Re-record RoutesSnapshotTests screen references; inspect every PNG
+- [x] 4. Unit suite green (1660/0, case count checked)
+- [x] 5. Minimised-ride clearance verified (key-window AppView render; the sim drive can't minimise the dashboard)
+- [x] 6. ios-reviewer, PR
+
+## Review
+
+- The approved segmented List | Map capsule was replaced mid-work with a single glass button, at Brian's call. The first version nested a segmented track inside a glass capsule and read as a switch. Lesson recorded.
+- Snapshots stay offscreen, as before. Offscreen capture draws no glass, so the references show a bare glyph (the same as `MapSheetButtonsSnapshotTests`). Key-window capture drew the glass, but it gave two deterministic renders of the light empty state (freshly booted vs. already-run simulator), so it was dropped.
+- Verified: in the real `AppView` with a minimised ride, the button sits above the accessory. Not verified: the accessory inline with a scroll-minimised tab bar. The safe-area mechanism should cover it, but it's untested.
+
+# #303 — Recorded altitude ignores verticalAccuracy
+
+Plan: /Users/brian/.claude/plans/goofy-petting-shore.md
+Branch: `fix/303-vertical-accuracy`
+
+- [x] 1. `LocationUpdate.altitude: Double?` + `init(_ location: CLLocation)`; LocationManagerState uses it
+- [x] 2. `ActiveRideFeature.State.altitude: Double?`
+- [x] 3. `TrackPointDTO.altitudeMeters: Double?`
+- [x] 4. CoreData v3 (optional altitude), TrackPointMO NSNumber?, PersistenceClient mapping
+- [x] 5. GPXExporter omits `<ele>` for nil
+- [x] 6. `RouteTerrain.movingAverage([Double?])` + RideEnergy uses it
+- [x] 7. HealthKit routeLocations `?? 0`
+- [x] 8. Tests: LocationClient, recording, RideEnergy, GPX, Persistence, migration (v1+v2), RouteTerrain
+- [x] 9. Full suite green (1660/0), ios-reviewer, PR
+
+## Review
+
+- Altitude is absent, not held: holding couldn't cover the points before the first valid vertical fix (still `<ele>0`), and #221 already rules out recording held values.
+- Deviation from the issue: `LocationUpdate.altitude: Double?` at the client boundary instead of a new `verticalAccuracy` field.
+- The issue's energy figure is wrong. At 300 m, a single 0 m fix smooths into a 9.7 m one-second step, which the 25% grade cap already discards. The energy effect is real only below ≈ 8 × speed metres (≈ 1.1 kcal at 40 m, 8 m/s). The GPX `<ele>0` and the profile dip were the real defects.
+- Rides recorded before the update keep their stored altitudes. A 0 m invalid fix can't be told apart from sea level.
+- Review follow-ups: comment wording (ActiveRideFeature, RideDetailSeries, migration test) and a HealthKit nil → 0 test.
+
+# #318 — iPhone workout session for live HR zone updates (decision)
+
+Plan: /Users/brian/.claude/plans/staged-churning-yao.md
+Branch: `docs/318-workout-session-decision`
+
+- [x] 0. Move #318 to "Phase 2 — Companion & History" (stays open, with S17)
+- [x] 1. PRD §9.4 decision note
+- [x] 2. PRD revision history 0.6.7
+- [x] 3. UX.md §W12 source line + header Updated line
+- [x] 4. PR #323, comment on #318
+
+## Review
+
+- Decision: no iPhone `HKWorkoutSession` / `HKLiveWorkoutBuilder`. The strap's HR never reaches HealthKit, so a live builder could only re-zone the app's own readings, and that would cost a new HR share permission and a double write against a Watch. The existing background modes already cover the ride. The session would replace #250 and #277's idempotent, retried post-ride write, and add a second crash-recovery system alongside #175 and #188.
+- #318's premise that W12 shows time in zone is not built. W12 shows the current zone only, and #145 holds the open question on time in zone. The decision records that W12's time in zone, once built, is local.
+- Docs only, with no code or test changes.
+
+# #277 — Retry the ride's HKWorkout write until it lands
+
+Plan: /Users/brian/.claude/plans/buzzing-doodling-piglet.md
+Branch: `feat/277-retry-hkworkout`
+
+- [x] 0. Spike: a same-version re-save (sim, iOS 27) returns and *replaces* — new workout UUID, count 1, one distance sample. Keep version 1
+- [x] 1. `Ride.isHealthWorkoutOwed` (default false → legacy rides done)
+- [x] 2. Persistence: finalize sets owed; owed list; settle; `OwedHealthWorkout`; client + mock
+- [x] 3. `RideHealthWorkout.backfill()` (energy block moved from ActiveRideFeature)
+- [x] 4. `BackfillGate` + `healthWorkoutGate`
+- [x] 5. Finish path calls the backfill
+- [x] 6. AppFeature launch + close-outs run it
+- [x] 7. UX.md §S10
+- [x] 8. Tests: migration, persistence, backfill, RideEndFailure relaunch/close-out, AppFeature orphan
+- [x] 9. Verify: full `CyclometerTests`, sim ride → one workout
+
+## Review
+
+- The workout write moved out of the Finish effect into `RideHealthWorkout.backfill()`, the only writer, modelled on `RideMapThumbnail.backfill()`. It runs after Finish's finalize, at launch and after both AppFeature close-outs. It goes newest first and stops at the first failure.
+- `Ride.isHealthWorkoutOwed` (default false) is set by `finalizeRide` and cleared when a write returns, including a skipped duplicate. Rides that ended before this change are not owed (decision: mark as done).
+- A ride that ends before it starts is settled without a write, so it can't block the queue forever.
+- `MapThumbnailGate` became `BackfillGate`, with a second `healthWorkoutGate` key so workouts never wait behind map tiles.
+- Spike (sim, iOS 27): re-saving at the same sync version *replaces* the workout (new UUID, count 1). Apple only documents replacement for a higher version.
+- Full `CyclometerTests`: ** TEST SUCCEEDED **, 1617 cases. All 17 new or extended tests confirmed by name in the log.
+- Sim drive: an earlier ride opened as not owed with its one workout intact. A new ride's workout was written once and settled, and relaunches left it (same UUID).
+- Harness finding: a pending launch Health sheet (types #276 added) silently blocks the Start sheet in a drive. Grant it first.
+- Review follow-ups (/code-review high):
+  - The #175 orphan close-out settles its ride without a workout, since its `endedAt` is the relaunch. Mutation-checked.
+  - `rideNotFound` on settle (ride deleted mid-write) no longer ends the batch.
+  - New `HealthKitClient.isWorkoutSharingAllowed`: without Workouts share access the backfill does no reads.
+  - UX.md §S10: a launch that resumes a ride doesn't retry. Header order fixed, and a test doc comment moved back.
+- Full `CyclometerTests` after the follow-ups, on a fresh derived data path: ** TEST SUCCEEDED **, the three new or changed tests confirmed by name.
+- Merge with main (#238): the workout's zone stamp moved from the Finish effect into `RideHealthWorkout`, resolved at write time from the shared `riderProfile` and Health, as S10 and S15 do, so a retried workout carries the zones too.
+
+# #238 — Health's preferred HR zones as a zone source
+
+Plan: /Users/brian/.claude/plans/elegant-drifting-harp.md
+Branch: `feat/238-healthkit-zones`
+
+- [x] 0. Spike: N boundaries → N+1 zones (index 0-based, first min / last max nil), `[min, max)`; non-increasing input raises an ObjC exception (crash, not a throw); sim `preferred` → nil
+- [x] 1. `HealthKitClient.fetchHeartRateZoneCeilings` + pure `zoneCeilings(from:)` + mock
+- [x] 2. `RiderProfile`: `healthZoneCeilings` term — `boundaryOverride ?? (no resting/max override ? health : nil) ?? karvonen`, validity check
+- [x] 3. Thread ceilings through ActiveRide, Settings, RideSummary, RideDetail
+- [x] 4. `RideWorkout.heartRateZoneBoundariesBPM` + `setCustomZoneConfiguration` in `saveWorkout`
+- [x] 5. Tests (RiderProfile, HealthKitClient, 4 features, RideEndFailure) + mutation check
+- [ ] 6. Docs: PRD §8.5/§9.4 + 0.6.5, UX §S12, DataModel §3.5
+- [x] 6. Docs: PRD §8.5/§9.4/OQ9 + 0.6.6 (0.6.5 was taken by #276), UX §S10/§S12, DataModel §3.5
+- [x] 7. Housekeeping: filed #318 (live session, M9) and #319 (HeroNumber digits, M10.5); closed #167 as superseded; PR #320. No #238 comment (declined)
+
+## Review
+
+- Spike findings the design rests on: `HKWorkoutZoneConfiguration(zoneBoundaries:)` takes the N inner boundaries → N+1 zones, each `[min, max)`. A non-rising list raises an Objective-C exception (a crash, not a Swift throw), so `stampZones` checks order first. On the sim, `preferredWorkoutZoneConfiguration` returns nil.
+- Ceiling = `ceil(next zone's minimum) − 1`, matching Karvonen's `lowerBound(next) − 1`. The workout stamp adds the 1 back.
+- The fallback is logged once, at fetch (source, zone count, ceilings). It is not logged in `RiderProfile`, which runs at 1 Hz on the dashboard. This departs from the plan.
+- The stamp is nil when the resolved ceilings equal Health's, and otherwise holds the resolved ones. That includes Karvonen when Health has no zones, so the existing #250 workout test now expects `[138, 151, 164, 177]`.
+- Not unit-testable: `stampZones` (live HealthKit). A stamp failure is `try?` + a log, the same as the route.
+- Harness: `-only-testing:CyclometerTests/ActiveRideFeatureTests` matches nothing, because the file's suites are `ActiveRideFeature<Area>Tests`. The full run confirmed the new dashboard test by name.
+- Full `CyclometerTests`: ** TEST SUCCEEDED **, 1627 passed, 0 failed.
+- Mutation checks:
+  - (1) Health term dropped → 9 new tests fail.
+  - (2) Override and order guards dropped → the override test (×2), the edge test and 4 of the 6 shape cases fail. The count guard kept by that mutation covers the other 2; with it removed, the suite crashes on an out-of-range index.
+- **Code review fixes:**
+  - The workout stamp now happens only with an S12 override (`RiderProfile.hasZoneOverride`). Before, a failed, late or denied Health read stamped Karvonen over the rider's Health zones.
+  - Health's ceilings are no longer capped at the app's max. `tableMaxBPM` raises zone 5's top to meet them instead, so zones set by a rider older than the 220 − age formula assumes aren't dropped.
+  - A failed zone read is now logged, and the ceilings are logged `.private`.
+  - Full suite: 1634 passed, 0 failed.
+  - Mutation checks: always-stamp fails 2 tests, and an unraised top fails 1.
+- Declined review points: speed (4 numbers, 1 Hz), a HealthTerms refactor (separate issue if wanted), the duplicated rising check, and the #162 doc fix, which was in the plan.
+- Pending on device: S12 matches iOS Health → Heart Rate Zones; after a strap ride, Fitness shows those zones; with an S12 override set, Fitness shows the overridden ones.
+
 # #276 follow-up — heart-rate energy model (Keytel), physics as the fallback
 
 Plan: /Users/brian/.claude/plans/twinkling-brewing-volcano.md
@@ -202,3 +355,73 @@ Branch: `286-gpx-rename-rewrite`
 - Suite: 1,535 passed, 0 failed (fresh DerivedData).
 - Remaining gap: if the rider types a name and dismisses S10 before finalize lands, the replace finds no URL. That file keeps the default name, not the typed one.
 - Declined: patching the file instead of rebuilding it (review finding 6), and a shared test fixture (finding 9).
+
+# #284 — Remove Ride's never-written zone and elevation fields
+
+Plan: /Users/brian/.claude/plans/deep-tinkering-hartmanis.md (decision: remove all three)
+Branch: `284-remove-dead-ride-fields`
+
+- [x] 1. `Ride`: drop `elevationGainMeters`, `elevationDropMeters`, `hrZoneDurations` and their `init` assignments
+- [x] 2. `RideSchemaMigrationTests`: legacy store carries real values in the dropped columns; new test proves it opens
+- [x] 3. DataModel.md §3.1 sketch, §9 migration row, header
+- [x] 4. Verify: grep, targeted tests, full suite (fresh DerivedData), main→branch install over an existing store
+
+## Review
+
+- Removed all three (decided with Brian): nothing read them. S10/S15 derive the elevation profile and zone
+  seconds from the track, and a stored breakdown would go stale once Health's zones change (#238).
+- No migration code. Inferred lightweight migration drops the columns. The legacy fixture now writes real values into all
+  three (the transformable dictionary included), and `opensStoreWithRemovedAttributes` proves the store opens.
+- Suite: 1,649 passed, 0 failed (fresh DerivedData). Migration suite 5/5, and the new test ran by name.
+- Real store: the sim's `default.store` had main's schema (#277 column present) with 2 rides and the three columns.
+  After installing the branch build over it, the app launched to S14 with no fatal in the log stream. The columns are gone,
+  and both rides keep the same titles and distances. Backup is in the session scratchpad.
+- Left alone: PRD.md §10 and TCA.md still sketch `hrZoneDurations`. Both sketches are stale throughout, and the
+  issue names only DataModel.md.
+
+# #333 — Dashboard zooms from and into the ride capsule; auto-dim owns the whole window
+
+Plan: /Users/brian/.claude/plans/harmonic-waddling-heron.md (decision: dim rules cover the whole window)
+Branch: `feat/333-dashboard-zoom`
+
+- [x] 1. Spike: zoom cover in AppView; sim drive checks zoom, no squish, sheet→cover and cover→summary, paging
+- [x] 2. Dashboard: drop the hand-built drag, `onClose`, the #330 band, `grabberHitWidth`, `DashboardDismissTests`
+- [x] 3. Auto-dim: window touch recognizer + blocker window; `touchBegan`/`touchEnded`/`wakeTapped`; `isTouchDown` guards
+- [x] 4. Tests: AppScreenPowerTests (touch held, dimmed touches, race), WakeTapTests
+- [x] 5. Docs: UX.md §S05 Grabber, #110 dim rule text
+- [ ] 6. Verify: suite, sim drive (presentation + dim rules), device check by Brian
+
+## Review
+
+- Presentation: the dashboard is a `.fullScreenCover(item:)` with `.navigationTransition(.zoom)`, sourced from the tab accessory. The hand-built drag, the `.move` transition, the #330 band, `grabberHitWidth` and `DashboardDismissTests` are gone. The capsule stays as a cue, and VoiceOver's "Minimize Ride" calls `dismiss()`.
+- Spike on the sim (frames at 0.25s):
+  - the card scales uniformly with display corners and clips to the capsule on the way in; nothing re-lays out;
+  - start sheet → cover lands; Finish → cover out, summary in, lands;
+  - a page swipe pages without dismissing;
+  - a slow drag, and flicks up to 250pt at 1500 px/s, collapse; a 60pt slow drag springs back;
+  - synthesized flicks at ≥2500 px/s never start the system dismiss (no motion in any frame), so real flicks need the device check.
+- Auto-dim: `AutoDimWindowBridge` puts a non-recognizing touch recognizer on the app window and a blocker `UIWindow` above it while dimmed.
+  - Reducer: `touchBegan` cancels the countdown, `touchEnded` re-arms it, and `wakeTapped` (renamed from `userInteracted`) is the only wake.
+  - `isTouchDown` guards arming, the timer firing and the brightness-read commit.
+- Sim drive of the dim rules, with a location feed so the ride stays active. Every assertion passed:
+  - a finger held for 34s plus a small drag: no dim, and it dimmed 30s after the lift;
+  - dimmed: a long drag down, a 1.5s press and a sideways swipe left it dimmed, and after the wake the dashboard was still up on page 1;
+  - a tap on Speed only woke the screen; no detail opened;
+  - dimmed over the open map sheet: a drag neither woke it nor panned the map; a tap woke it and the sheet stayed open;
+  - status bar and home indicator unchanged while the blocker shows.
+- Suite: 1,668 passed, 0 failed. Mutation check: dropping the touch-down rules fails `heldTouchNeverDims`, `fingerDownBlocksAnInFlightDim` and `visibleUnderAFingerWaitsForTheLift`.
+- Open for Brian's device check:
+  - flick feel;
+  - no resize at the island or the controls;
+  - whether a whole-screen drag causes accidental minimises mid-ride (the #333 exclusion's revisit trigger).
+- Added scope: the accessory's Open button is gone, and the whole strip is a plain-style `Button` with a `contentShape` over the Spacer's gap. Its five snapshots were re-recorded; apart from Open, the strip is unchanged (diffed by eye). Sim drive: collapse, then a tap on the strip's empty right side (where Open was) reopened the dashboard.
+- Brian spread the strip's stats with Spacers, and I re-recorded its five snapshots to match. Added a "Collapsed (inline)" preview. Because `tabViewBottomAccessoryPlacement` is get-only, the strip moved into a private `AccessoryStrip(isCollapsed:)`, which the public view feeds from the environment.
+- Review (xhigh) items 1–6 applied:
+  - the backlight read runs under `CancelID.dimTimer`, so a tap mid-read cancels the dim (mutation-checked), and the `!isTouchDown` re-checks on the fire and capture steps are gone;
+  - `touchEnded` while dimmed wakes, as a safety net if the blocker ever fails;
+  - VoiceOver focus moves onto the blocker (`.screenChanged`);
+  - `super` calls added in the recognizer;
+  - stale S05.3, PRD and AppFeature text fixed;
+  - `AccessoryStrip` replaced by `isCollapsedOverride`, plus a collapsed snapshot.
+- PR comment: the dashboard reopens on the page it was left on. `dashboardPage` now lives in `ActiveRideFeature.State` (per ride), tested in `reopeningKeepsThePage`.
+- PR comment: "dimming not working". Not reproduced on the sim: a ride started and left alone dimmed at 30s with Pause showing. The suspect on device is auto-pause (0 GPS speed for 10s), and paused rides never dim (#102). Waiting on Brian: was Pause or Resume showing?

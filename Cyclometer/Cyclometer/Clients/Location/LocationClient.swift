@@ -14,11 +14,31 @@ struct Coordinate: Sendable, Equatable, Hashable {
 
 struct LocationUpdate: Sendable, Equatable {
     let coordinate: Coordinate
-    let altitude: Double              // meters above sea level
+    let altitude: Double?             // meters above sea level; nil when CoreLocation marks it invalid
     let speed: Double                 // m/s; -1 if invalid
     let horizontalAccuracy: Double    // meters; lower is better
     let heading: Double               // degrees from true north (0–360); -1 if unavailable
     let timestamp: Date
+}
+
+extension LocationUpdate {
+    /// A negative `verticalAccuracy` is CoreLocation's mark of an invalid altitude, which it
+    /// often reports as 0 m. Dropped here rather than carried as a sentinel, so no reader can
+    /// record it: one mid-ride 0 m fix used to reach the GPX `<ele>` and credit a phantom
+    /// climb to the ride's energy estimate (#303).
+    init(_ location: CLLocation) {
+        self.init(
+            coordinate: Coordinate(
+                latitude: location.coordinate.latitude,
+                longitude: location.coordinate.longitude
+            ),
+            altitude: location.verticalAccuracy < 0 ? nil : location.altitude,
+            speed: location.speed,
+            horizontalAccuracy: location.horizontalAccuracy,
+            heading: location.course,
+            timestamp: location.timestamp
+        )
+    }
 }
 
 // MARK: - LocationClient

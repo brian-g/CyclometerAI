@@ -84,7 +84,7 @@ struct DirectionsWidget: View {
             HeroNumber("—", unit: "").heroNumberSize(.medium)
         } else {
             Text("No Route")
-                .font(.cyCaption)
+                .font(.caption)
                 .foregroundStyle(.cyTextTertiary)
         }
     }

@@ -5,7 +5,7 @@ import MapKit
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "network")
+private let logger = Logger.cyclometer(.network)
 
 /// TCA dependency for Apple's reverse geocoder, which names the place a ride started in for
 /// S10's default ride name (#283). It sends one coordinate — a free ride's start — and nothing

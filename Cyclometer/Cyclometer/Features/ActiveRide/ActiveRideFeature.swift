@@ -3,7 +3,7 @@ import Foundation
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "recording")
+private let logger = Logger.cyclometer(.recording)
 
 enum RideRecordingState: Equatable, Sendable {
     case idle, active, paused, ended
@@ -117,6 +117,12 @@ struct ActiveRideFeature {
     @Dependency(\.rideDataBuffer) var rideDataBuffer
     @Dependency(\.rideEndIntentClient) var rideEndIntentClient
 
+    /// Dashboard pages. Factory default is two; rider customisation (S07) will
+    /// drive this from state. Raw value doubles as the paging-dot index.
+    enum DashboardPage: Int, CaseIterable, Equatable {
+        case grid, map
+    }
+
     @ObservableState
     struct State: Equatable {
         /// Placeholder until `.task` overwrites it with a fresh, deterministic id
@@ -146,6 +152,8 @@ struct ActiveRideFeature {
         /// every `riderProfile` resolver call below instead of the defaulted `nil`.
         var healthRestingBPM: Int? = nil
         var healthMaxBPM: Int? = nil
+        /// Health's preferred zones as ceilings (#238), the middle term of every zone boundary.
+        var healthZoneCeilingsBPM: [Int]? = nil
         /// Live HR shadow value from HealthKit (#161), kept fresh even while BLE is
         /// the displayed source — mirrors `SpeedFeature.State.latestGPSSpeedMPS` — so a
         /// BLE disconnect has something to promote to immediately. `nil` both when
@@ -292,7 +300,10 @@ struct ActiveRideFeature {
         /// coordinates are transient and a resumed ride redraws its map from empty, so
         /// after a resume the two deliberately disagree.
         var trackSegmentIndex: Int = 0
-        var altitude: Double = 0
+        /// Nil until a fix with a valid altitude, and after any fix without one (#303): an
+        /// invalid fix is never covered with the altitude before it, since recording that
+        /// would fabricate a measurement.
+        var altitude: Double?
         var heading: Double = -1
         var horizontalAccuracy: Double = 0
         /// Whether the fix behind `coordinate` is good enough to record (#210). Sticky
@@ -325,6 +336,10 @@ struct ActiveRideFeature {
         var unitSystem: UnitSystem { preferences.preferredUnit }
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
+        /// The page the rider is on. Held here, not in the view, because minimising
+        /// the dashboard tears its view down: reopening lands on the page it was left
+        /// on (#333). Per ride, so a new ride opens on the grid.
+        var dashboardPage: DashboardPage = .grid
     }
 
     enum Action: Equatable {
@@ -336,11 +351,12 @@ struct ActiveRideFeature {
         /// The map sheet's orientation button (#199). Flips the saved `mapOrientation`,
         /// which the sheet's camera follows.
         case mapOrientationToggled
+        case dashboardPageChanged(DashboardPage)
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)
         case hrPairingChanged(Bool)
-        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?)
+        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?, zoneCeilingsBPM: [Int]?)
         case healthKitHeartRateUpdated(Int)
         case cadence(CadenceFeature.Action)
         case elapsedTick
@@ -449,8 +465,9 @@ struct ActiveRideFeature {
                     .run { [healthKitClient, date] send in
                         async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
                         async let dob = try? healthKitClient.fetchDateOfBirth()
+                        async let zoneCeilings = try? healthKitClient.fetchHeartRateZoneCeilings()
                         let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
-                        await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM))
+                        await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM, zoneCeilingsBPM: await zoneCeilings))
                     },
                     .run { [healthKitClient] send in
                         for await bpm in healthKitClient.heartRateStream() {
@@ -478,6 +495,9 @@ struct ActiveRideFeature {
                         await locationClient.stopUpdates()
                     }
                 )
+            case .dashboardPageChanged(let page):
+                state.dashboardPage = page
+                return .none
             case .mapOrientationToggled:
                 // The preference itself, not a copy: the next ride's sheet, and one reopened
                 // after a relaunch, open the way the rider left it.
@@ -546,7 +566,7 @@ struct ActiveRideFeature {
                     // write includes whatever URL export produced, so it must come
                     // last. A failed export degrades to a nil gpxFileURL rather than
                     // leaving the ride stuck out of `.ended`.
-                    .run { [rideDataBuffer, persistenceClient, rideEndIntentClient, healthKitClient] _ in
+                    .run { [rideDataBuffer, persistenceClient, rideEndIntentClient] _ in
                         // Recorded before any of the writes below, in storage a SwiftData
                         // failure cannot reach: if `finalizeRide` fails, this is the only
                         // durable trace that the rider ended this ride (#188).
@@ -568,11 +588,8 @@ struct ActiveRideFeature {
                         }
 
                         var gpxURL: URL?
-                        // Kept for the Apple Health route below, so the rows aren't read twice.
-                        var trackPoints: [TrackPointDTO] = []
                         do {
                             var export = try await GPXExporter.fetchInputs(rideId: rideId)
-                            trackPoints = export.trackPoints
                             export.ride.title = await Self.titleForExport(rideId, export, persistenceClient: persistenceClient)
                             gpxURL = try GPXExporter.generate(export)
                             // Recorded before the finalize below, so a file that was
@@ -601,47 +618,13 @@ struct ActiveRideFeature {
                         }
 
                         // After finalize, so only a durably ended ride reaches Apple Health
-                        // (UX.md §S10, #250). Nothing waits on it: a revoked permission costs
-                        // the workout, never the ride. `startedAt` is read back because a
-                        // resumed ride's start only exists in persistence. Write failures are
-                        // logged in the client.
-                        do {
-                            async let riderKilograms = try? healthKitClient.fetchBodyMass()
-                            async let dateOfBirth = try? healthKitClient.fetchDateOfBirth()
-                            async let sex = try? healthKitClient.fetchBiologicalSex()
-                            let startedAt = try await persistenceClient.fetchRide(rideId).startedAt
-                            // No body mass, no energy (#276): a guessed weight would be written
-                            // to Health as if it were measured.
-                            var energy: RideEnergy.Estimate?
-                            if let kilograms = await riderKilograms {
-                                let rider = RideEnergy.Rider(
-                                    kilograms: kilograms,
-                                    age: RiderProfile.age(fromDateOfBirth: await dateOfBirth, on: startedAt),
-                                    sex: await sex
-                                )
-                                let estimate = RideEnergy.activeKilocalories(
-                                    trackPoints: trackPoints,
-                                    movingSeconds: finalSummary.durationSeconds,
-                                    distanceMeters: finalSummary.distanceMeters,
-                                    rider: rider
-                                )
-                                energy = estimate
-                                logger.notice("energy for ride \(rideId, privacy: .public): \(Int(estimate.kilocalories.rounded()), privacy: .public) kcal from \(estimate.method.rawValue, privacy: .public)")
-                            }
-                            try? await healthKitClient.saveWorkout(RideWorkout(
-                                rideId: rideId,
-                                startedAt: startedAt,
-                                endedAt: endedAt,
-                                // The same value `finalizeRide` just wrote to `Ride.distanceMeters`.
-                                distanceMeters: finalSummary.distanceMeters,
-                                trackPoints: trackPoints,
-                                activeEnergyKilocalories: energy?.kilocalories
-                            ))
-                        } catch {
-                            logger.error("fetchRide failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — no workout written to Apple Health")
-                        }
+                        // (UX.md §S10, #250): the finalize is what makes it owed a workout.
+                        // Nothing waits on it: a failed write never costs the ride, and is
+                        // retried later (#277).
+                        await RideHealthWorkout.backfill()
                         // The map thumbnail (#177) is captured by `RidesFeature.rideFinished`,
-                        // which waits for this write to land and refreshes the list after it (#248).
+                        // which waits for the finalize above to land and refreshes the list after
+                        // it (#248).
                     },
                     .run { [bleHRClient, variaRadarClient, locationClient] _ in
                         async let hr: Void = bleHRClient.disconnect()
@@ -708,9 +691,10 @@ struct ActiveRideFeature {
                     state.heartRateProvenance = .none
                 }
                 return .none
-            case .healthProfileFetched(let restingBPM, let maxBPM):
+            case .healthProfileFetched(let restingBPM, let maxBPM, let zoneCeilingsBPM):
                 state.healthRestingBPM = restingBPM
                 state.healthMaxBPM = maxBPM
+                state.healthZoneCeilingsBPM = zoneCeilingsBPM
                 return .none
             case .healthKitHeartRateUpdated(let bpm):
                 // A HealthKit sample can never legitimately be ≤0 bpm; guarding at
@@ -1012,7 +996,8 @@ struct ActiveRideFeature {
             ? state.riderProfile.zone(
                 forBPM: bpm,
                 healthResting: state.healthRestingBPM,
-                healthMax: state.healthMaxBPM
+                healthMax: state.healthMaxBPM,
+                healthZoneCeilings: state.healthZoneCeilingsBPM
               ).rawValue
             : 0
         if bpm > 0 {

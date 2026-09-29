@@ -15,4 +15,19 @@ struct RideWorkout: Sendable, Equatable {
     /// `RideEnergy`'s estimate, written as an `activeEnergyBurned` sample so the workout earns
     /// Move credit (#276). Nil when Health has no body mass: no energy rather than a guessed weight.
     var activeEnergyKilocalories: Double?
+    /// Where zones 2–5 start, in bpm — the rider's zones, stamped on the workout so Fitness
+    /// breaks the ride down by them (#238). Nil unless the rider overrode Health in S12, so
+    /// the workout keeps Health's own preferred zones.
+    var heartRateZoneStartsBPM: [Int]? = nil
+}
+
+/// A finished ride still owed its Apple Health workout (#277): everything `RideWorkout` is
+/// built from apart from the track, which is read separately.
+struct OwedHealthWorkout: Sendable, Equatable {
+    var rideId: UUID
+    var startedAt: Date
+    var endedAt: Date
+    var distanceMeters: Double
+    /// `Ride.durationSeconds`, which excludes paused time — the energy estimate's moving time.
+    var movingSeconds: TimeInterval
 }

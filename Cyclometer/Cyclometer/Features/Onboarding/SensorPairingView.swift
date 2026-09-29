@@ -22,7 +22,7 @@ struct SensorPairingView: View {
             .padding(.top, Spacing.lg)
             .padding(.horizontal, Spacing.lg)
 
-            // Onboarding's background is `cyBgPrimary` (white), not the system's
+            // Onboarding's background is `cyBgPrimary` plus its mesh gradient (#328), not the system's
             // grouped-list gray `DeviceListView` paints by default in Settings' own
             // NavigationStack — hidden here so the list sits on the same background as
             // the title and Finish button around it.

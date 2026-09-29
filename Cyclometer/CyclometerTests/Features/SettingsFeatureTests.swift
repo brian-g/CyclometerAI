@@ -281,6 +281,22 @@ struct SettingsFeatureTests {
         #expect(store.state.hrZoneRows.map(\.range) == [48...128, 129...142, 143...155, 156...169, 170...183])
     }
 
+    @Test("The rows show Health's preferred zones, and a step starts from Health's boundary (#238)")
+    func hrZoneRowsFollowHealthZones() async {
+        let store = makeStore(healthKitClient: .mock(heartRateZoneCeilings: [120, 140, 160, 175]))
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.healthProfileFetched) {
+            $0.healthZoneCeilingsBPM = [120, 140, 160, 175]
+        }
+        #expect(store.state.hrZoneRows.map(\.range) == [60...120, 121...140, 141...160, 161...175, 176...190])
+
+        await store.send(.hrZoneBoundaryStepped(zone: .zone1, delta: 1))
+        #expect(store.state.riderProfile.zone1CeilingOverrideBPM == 121)
+        #expect(store.state.hrZoneRows.map(\.range) == [60...121, 122...140, 141...160, 161...175, 176...190])
+    }
+
     @Test(".hrZoneResetTapped clears every manual boundary override")
     func resetClearsManualBoundaries() async {
         var profile = RiderProfile()

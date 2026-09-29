@@ -12,7 +12,7 @@ struct RoutesView: View {
     /// *separate* `.toolbar` modifiers sort by ancestry — the outermost lands leftmost, no
     /// matter where in the chain it is applied — so `.startRideToolbarItem` would always put
     /// it first. Declared inside this screen's own toolbar instead, where written order
-    /// holds, giving Import, Filter, Map/List, Start Ride.
+    /// holds, giving Import, Filter, Start Ride.
     var isStartRideHidden: Bool = false
     var onStartRide: () -> Void = {}
 
@@ -93,19 +93,22 @@ struct RoutesView: View {
                     filterButton
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    store.send(.mapToggled)
-                } label: {
-                    Image(systemName: store.showsMap ? "list.bullet" : "map")
-                }
-                .accessibilityLabel(store.showsMap ? "Show as List" : "Show on Map")
-            }
             if !isStartRideHidden {
                 ToolbarItem(placement: .topBarTrailing) {
                     StartRideButton(action: onStartRide)
                 }
             }
+        }
+        // An inset rather than a `.bottomBar` item or an overlay: the tab bar and a minimised
+        // ride's accessory both belong to this view's bottom safe area, so the control stays
+        // above whichever is showing (#331).
+        .safeAreaInset(edge: .bottom, alignment: .trailing) {
+            MapSheetButton(title: store.showsMap ? "Show as List" : "Show on Map",
+                           systemImage: store.showsMap ? "list.bullet" : "map") {
+                store.send(.mapToggled)
+            }
+            .padding(.trailing, Spacing.lg)
+            .padding(.bottom, Spacing.sm)
         }
         .fileImporter(
             isPresented: $store.isImporterPresented.sending(\.importerPresentationChanged),
@@ -189,8 +192,15 @@ struct RoutesView: View {
         } description: {
             Text("Import a route to ride, or connect a service.")
         } actions: {
-            Button("Import Route") { store.send(.importButtonTapped) }
-                .disabled(store.isImporting)
+            Button {
+                store.send(.importButtonTapped)
+            } label: {
+                Label("Import Route", systemImage: "square.and.arrow.down")
+            }
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.borderedProminent)
+            .tint(.cyPrimary)
+            .disabled(store.isImporting)
         }
     }
 

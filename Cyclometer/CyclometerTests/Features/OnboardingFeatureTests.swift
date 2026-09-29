@@ -38,9 +38,9 @@ struct OnboardingFeatureTests {
         // Welcome's own `.task` populates its permission state — #106's Next button
         // is gated on it, so this subscription is required before Next can fire.
         let task = await store.send(.welcome(.task))
-        await store.receive(\.welcome.permissionChanged) { $0.welcome.permissionStates[.bluetooth] = .granted }
         await store.receive(\.welcome.permissionChanged) { $0.welcome.permissionStates[.locationWhenInUse] = .granted }
         await store.receive(\.welcome.permissionChanged) { $0.welcome.permissionStates[.motion] = .granted }
+        await store.receive(\.welcome.permissionChanged) { $0.welcome.permissionStates[.bluetooth] = .granted }
         await store.receive(\.welcome.permissionChanged) { $0.welcome.permissionStates[.health] = .notDetermined }
 
         // `@Shared` writes become visible to TestStore's exhaustive diffing at the

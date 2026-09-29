@@ -179,7 +179,11 @@ enum GPXExporter {
 
     private static func trkptXML(for point: TrackPointDTO) -> String {
         var xml = "      <trkpt lat=\"\(coordinate(point.latitude))\" lon=\"\(coordinate(point.longitude))\">\n"
-        xml += "        <ele>\(decimal1(point.altitudeMeters))</ele>\n"
+        // Absent rather than a guess when CoreLocation marked the altitude invalid (#303);
+        // GPX makes `<ele>` optional.
+        if let altitude = point.altitudeMeters {
+            xml += "        <ele>\(decimal1(altitude))</ele>\n"
+        }
         xml += "        <time>\(isoString(point.timestamp))</time>\n"
 
         let hasBiometrics =

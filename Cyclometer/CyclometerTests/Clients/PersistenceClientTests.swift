@@ -96,6 +96,26 @@ struct PersistenceClientTests {
         #expect(fetched[0].powerWatts == nil)
     }
 
+    @Test("altitude round-trips as nil when invalid, and as itself below sea level (#303)")
+    func altitudeRoundTrips() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        let base = Date()
+        // No sentinel can stand for "invalid": −28 m is Death Valley's road, not a marker.
+        let points = [nil, -28.0, 0].enumerated().map { offset, altitude in
+            TrackPointDTO(
+                rideId: rideId, timestamp: base.addingTimeInterval(TimeInterval(offset)),
+                latitude: 1, longitude: 2, altitudeMeters: altitude, horizontalAccuracyMeters: 4,
+                speedSource: .none, heartRateSource: .none
+            )
+        }
+
+        try await client.flushTrackPoints(points)
+
+        let fetched = try await client.fetchTrackPoints(rideId)
+        #expect(fetched.map(\.altitudeMeters) == [nil, -28.0, 0])
+    }
+
     @Test("a zero sensor reading round-trips as 0, not as nil")
     func zeroSensorReadingsRoundTripAsZero() async throws {
         let (client, _) = Self.makeLiveClient()
@@ -417,6 +437,56 @@ struct PersistenceClientTests {
 
         // Not the captured one, and not the ride still being recorded.
         #expect(try await client.fetchRideIdsMissingMapThumbnail() == [newer, older])
+    }
+
+    // MARK: - Apple Health workout (#277)
+
+    @Test("finalizeRide makes a ride owed its workout, carrying its span, distance and moving time; an in-progress ride is not owed")
+    func finalizeMakesRideOwedWorkout() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let startedAt = Date(timeIntervalSince1970: 1_000_000)
+        let endedAt = startedAt.addingTimeInterval(3_600)
+        let finished = UUID(), inProgress = UUID()
+        try await client.createRide(finished, startedAt, nil)
+        try await client.createRide(inProgress, startedAt.addingTimeInterval(7_200), nil)
+        #expect(try await client.fetchRidesOwedHealthWorkout().isEmpty)
+
+        try await client.finalizeRide(finished, endedAt, RideSummaryUpdate(
+            rideId: finished, recordingState: .ended,
+            durationSeconds: 3_300, distanceMeters: 21_000, averageSpeedMPS: 6.4, maxSpeedMPS: 11
+        ), nil)
+
+        #expect(try await client.fetchRidesOwedHealthWorkout() == [OwedHealthWorkout(
+            rideId: finished, startedAt: startedAt, endedAt: endedAt,
+            distanceMeters: 21_000, movingSeconds: 3_300
+        )])
+    }
+
+    @Test("fetchRidesOwedHealthWorkout is newest first, and a settled ride leaves it")
+    func settledRideLeavesOwedList() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        let older = UUID(), newer = UUID(), settled = UUID()
+        for (offset, id) in [older, newer, settled].enumerated() {
+            try await client.createRide(id, base.addingTimeInterval(TimeInterval(offset) * 3_600), nil)
+            try await client.finalizeRide(id, base.addingTimeInterval(86_400), RideSummaryUpdate(
+                rideId: id, recordingState: .ended,
+                durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 2, maxSpeedMPS: 3
+            ), nil)
+        }
+
+        try await client.settleRideHealthWorkout(settled)
+
+        #expect(try await client.fetchRidesOwedHealthWorkout().map(\.rideId) == [newer, older])
+        #expect(try Self.fetchRide(settled, from: swiftDataStack).isHealthWorkoutOwed == false)
+    }
+
+    @Test("settleRideHealthWorkout on an unknown rideId throws rideNotFound")
+    func settleUnknownRideThrows() async throws {
+        let (client, _) = Self.makeLiveClient()
+        await #expect(throws: PersistenceError.rideNotFound) {
+            try await client.settleRideHealthWorkout(UUID())
+        }
     }
 
     // MARK: - Ride read path (#173, for GPXExporter)

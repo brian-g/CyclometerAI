@@ -582,3 +582,83 @@ Brian: "stop using worktrees by default."
 **Rules.**
 - Work on a feature branch in the main checkout. Create a worktree only when asked.
 - Before switching branches, check `git status`. If there are unexplained changes, ask instead of switching.
+
+
+## Don't write a fallback into a framework as if the user chose it (2026-09-26, #238 review)
+
+**What happened.** I stamped the app's zones on the HealthKit workout "whenever they differ from Health's". When the
+Health read failed, was denied, or hadn't landed yet, the app's zones were only a Karvonen guess, and that guess went
+into Fitness over zones the rider had set in Health. The same review found I'd capped Health's zones at the app's
+220 − age max. I'd seen that risk during planning and called it rare. It hits exactly the riders who set their own zones.
+
+**Rule.** Write to a framework the user also controls only when the user has said something (here, an S12
+override). A fallback's job is to fill our own UI, not to overwrite theirs. And don't validate framework data against
+our own estimate of the same quantity: when the framework's data and our estimate disagree, the estimate is the one to adjust.
+
+
+---
+
+## Weigh a system session's effect on the rider's other devices (2026-09-26, #318)
+
+**What happened.** My decision not to adopt an iPhone `HKWorkoutSession` weighed only what the session
+would give the app: live zone data, background time, and the write path it would replace. Brian: "a big
+reason to start an HKWorkoutSession is that the watch will NOT prompt the user to start an already being
+tracked workout."
+
+**Why I missed it.** I built the case from the SDK headers and our own code, and neither mentions
+cross-device behaviour. The Watch's "looks like you're cycling" prompt is behaviour of the whole system,
+not an API, so reading headers could never have surfaced it. It is also the one benefit the rider
+actually notices during a ride.
+
+**Rule.** Before deciding whether to adopt a system session (workout, audio, location, Live Activity),
+ask what the *system* does differently while it runs, both on this device and on paired ones:
+suppressed prompts, the Watch and ring UI, Focus, and Now Playing. If headers can't answer that, say it
+is unverified and ask Brian or test it on a device. Don't let its absence from the docs pass as evidence
+that nothing changes.
+
+
+## "It rendered correctly" is not "it looks right" (2026-09-28, #331)
+
+**What happened.** I moved S19's Map/List toggle into a segmented control on a floating glass capsule.
+I recorded snapshots, fixed a light-mode render artefact, and marked the references good because the
+labels were legible and the capsule was centred. Brian: "that segmented control looks like trash".
+
+**Why.** I checked the pixels for *correctness* and never judged the *design*. The problems were plain
+in the first image: a segmented track nested inside a second glass capsule, so two rims; a white thumb
+on pale grey that reads as a `UISwitch`; no brand colour on a screen where every other control is
+`cyPrimary`; and too small for a bottom control on a cycling app. I then spent several runs hardening
+snapshot references for a control nobody had approved the look of.
+
+**Rules.**
+- When a new control first renders, critique it as a designer before treating any reference as done:
+  nesting, contrast, brand tokens, touch size. Compare it to the controls beside it.
+- Don't nest a system control that draws its own chrome (segmented `Picker`, glass buttons) inside
+  more chrome.
+- Get the look approved before investing in test harness work that pins it.
+
+
+## A code comment is not evidence of where a view renders (2026-09-28, #330)
+
+**What happened.** For #330 (the dashboard grabber is hard to grab), I read the comment in
+`RideDashboardView.grabber()`, which says the capsule "sits flush against the physical top edge
+(behind the dynamic island)". I built the whole diagnosis on it: iOS eating drags in the status bar,
+a proposal to move the capsule, and a question about deferring system gestures. Brian sent a
+screenshot showing the capsule was already just below the island, at ~64pt. The real cause was
+plainer: the drag target was only 8pt tall.
+
+**Why.** A comment records what someone believed at the time it was written. Safe-area behaviour in
+this dashboard has already fooled a reading of the code once (see the safe-area memory). I had the
+simulator available and didn't take a screenshot.
+
+**Rule.** Before any claim about where something renders on screen, look at a real render: a
+screenshot, a simulator run, or one Brian supplies. Treat position comments as hypotheses, and fix
+them when they turn out to be stale.
+
+
+## Check every landmark before calling a motion "rigid" (2026-09-28, #330)
+
+**What happened.** After feeding fixed insets to the dashboard, I told Brian it "moves as one rigid piece". I had measured one gap near the top, the AVG value against the grabber, across sim frames. On his phone it was still squishy, and the recording showed the top edge moving ~60px while the ride controls didn't move at all. My own sim frame at 73.62s showed the same thing: the controls stayed put while the top moved.
+
+**Why.** I checked the landmark I was fixing and inferred the rest. A translation moves every point by the same amount, and one pair of points can't show that.
+
+**Rule.** To call a motion rigid, measure at least the top edge, a mid landmark and the bottom (controls) in each frame, and check they all shift by the same amount. Before claiming a feel-related fix, compare a device recording, not just the simulator. And when successive patches to hand-built motion keep failing, stop and look for the system component that already does it (#333's zoom transition).

@@ -2,7 +2,7 @@ import ComposableArchitecture
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persistence")
+private let logger = Logger.cyclometer(.persistence)
 
 /// Records that the rider ended a ride, in storage independent of SwiftData.
 ///

@@ -92,9 +92,10 @@ struct SensorRowButton: View {
     List {
         SensorListRowView(
             icon: "sensor.tag.radiowaves.forward",
-            title: "Wahoo RPM",
+            title: "Wahoo RPM Longer",
             subtitle: "Speed & Cadence"
         ) {
+            SensorBatteryLabel(percent: 34)
             SensorRowButton("Unpair", tint: .cyDestructive) {}
         }
 

@@ -120,6 +120,28 @@ struct RouteTerrainTests {
         #expect(terrain.character == .flat)
     }
 
+    // MARK: - Moving average over missing samples (#303)
+
+    @Test("with nothing missing, the optional moving average is the plain one")
+    func optionalMovingAverageMatchesPlain() {
+        let values = [3.0, 7, 1, 9, 4, 4, 12, 0, 5]
+        let plain = RouteTerrain.movingAverage(values, halfWindow: 2)
+        let optional = RouteTerrain.movingAverage(values.map(Optional.some), halfWindow: 2)
+        #expect(optional.map { $0! } == plain)
+    }
+
+    @Test("a missing sample is bridged by its neighbours, not read as a value")
+    func missingSampleIsBridged() {
+        let averaged = RouteTerrain.movingAverage([300, 300, nil, 300, 300], halfWindow: 1)
+        #expect(averaged == [300, 300, 300, 300, 300])
+    }
+
+    @Test("a window with nothing in it has no average")
+    func emptyWindowIsNil() {
+        #expect(RouteTerrain.movingAverage([nil, nil, nil, nil, 10], halfWindow: 1) == [nil, nil, nil, 10, 10])
+        #expect(RouteTerrain.movingAverage([Double?](repeating: nil, count: 4), halfWindow: 2) == [nil, nil, nil, nil])
+    }
+
     // MARK: - FIETS
 
     @Test("FIETS matches the published figure for Alpe d'Huez")

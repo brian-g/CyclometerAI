@@ -2,6 +2,10 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-09-28 — §S19's list / map toggle leaves the toolbar for a floating glass button at the bottom trailing edge, above the tab bar and a minimised ride (#331).  
+**Updated:** 2026-09-26 — No iPhone workout session (#318, PRD §9.4): §W12's time in zone, when built, accumulates locally from the dashboard's HR readings, not from HealthKit's live zone updates.  
+**Updated:** 2026-09-26 — HKWorkout retry (#277): §S10's workout is retried until it lands — after the next Finish, and at the next launch unless that launch resumes an unfinished ride — including for a ride closed out at launch after a failed save. Rides that ended before this change are not written retroactively, nor is a ride closed out as an orphan at launch, whose end time is the relaunch rather than the ride's.  
+**Updated:** 2026-09-26 — Health's preferred HR zones (#238): §S12's zones, and with them the dashboard, S10 and S15, come from the rider's zones in Apple Health unless overridden in S12. §S10's workout carries the app's zones only when the rider has an S12 override.  
 **Updated:** 2026-09-25 — Active energy (#276, supersedes #274): §S10's workout carries an energy estimate from the recorded track and the rider's Health body weight, so it earns Move credit; none without a body weight. §S01's HealthKit list adds the body-weight read and energy write.  
 **Updated:** 2026-09-25 — §S10 default ride name gains the start's place name from a reverse geocode (#283), swapped in without waiting and never over a name the rider typed; §S12 gains a Place Names toggle to turn it off.  
 **Updated:** 2026-09-23 — S10 built (#249): presented as a sheet when Finish is confirmed, after the ride's save lands; titled and closed by **Finish Ride** as in the Sketch frame; the HR zone pie is derived from the saved track against the rider's current zones; unnamed rides get a default name (route, else time of day + loop / out and back); the frame's Description, Bike and Sync To rows are not built.  
@@ -411,13 +415,14 @@ The accessory is a full-width horizontal strip. Internal layout (left to right):
 - **Leading progress ring** — `OpenRingProgressView`: a donut-style Swift Charts `SectorMark` showing route completion percentage. The visible arc spans 84% of the circle with a gap at the bottom; the completed segment uses `brPrimary` tint, the remaining segment uses `.secondary` at 22% opacity. The percentage integer is displayed in `.caption2.weight(.semibold)` at the center. When no route is loaded, progress is `0.0` (ring shows empty). Frame: 42×42pt.
 - **Live stats** — two `HeroNumber` views at `.small` size (34pt D-DIN Condensed), `.horizontal` layout, showing current distance and current speed with units from `UserProfile.preferredUnit`. Stats update at 1Hz matching the dashboard.
 - **Spacer**
-- **Open button** — `.borderedProminent` button style, label "Open". Taps re-present the full-screen `RideDashboardView`.
+
+There is no Open button: the whole strip is the tap target, as with Apple Music's mini player. A tap anywhere on it re-presents the full-screen `RideDashboardView`, zooming out of the strip (#333). VoiceOver reads the stats with the hint "Opens the ride dashboard".
 
 ### Behavior
 
 - Visible **only when a ride is active** (state = `.active` or `.paused`).
 - When the ride is paused, stats display the last recorded values and do not update.
-- When the rider taps "Open" (or taps anywhere on the strip in future iteration), the full-screen dashboard is re-presented via `fullScreenCover`.
+- When the rider taps anywhere on the strip, the full-screen dashboard is re-presented via `fullScreenCover`, zooming out of the strip, on the page it was minimised from (#333).
 - The TabBar remains visible and functional beneath the accessory — the rider can navigate to Routes or Settings without losing the active ride.
 - The `tabViewBottomAccessory` API requires iOS 26.
 
@@ -466,7 +471,9 @@ The grid always occupies the full screen height between the Dynamic Island and t
 
 **Empty cells** Any unoccupied cells render as empty space with no content and no interactive behaviour.
 
-**Grabber** A minimal grabber-style strip sits between the Dynamic Island and the top grid row. This allows the user to minimize the ride and look at other aspects of the app while riding (typically while stopped).
+**Grabber** A minimal grabber-style strip sits between the Dynamic Island and the top grid row. This allows the user to minimize the ride and look at other aspects of the app while riding (typically while stopped). The capsule is only a visual cue. The dashboard is a system zoom presentation, as in Apple Music: a tap on the ride accessory expands it out of the capsule, and a drag down anywhere on the dashboard collapses it back in, following the finger, with display-matched corners (#333). VoiceOver gets a "Minimize Ride" button on the capsule. The full-screen map sheet reserves a 52 pt band along its top edge, so pulling it down never pans the map (#330).
+
+**Auto-dim** After 30 s without a touch, the actively recording dashboard dims (#110). The countdown pauses while any finger is on the screen, a drag included, and restarts when the last one lifts, so the dashboard never dims under a drag or a collapse. While dimmed, the whole app window, including any sheet opened from the dashboard, takes no input: a tap only wakes the screen and reaches nothing beneath it, and a swipe, a drag or a long-press does nothing at all (#333).
 
 **Turn instructions** When turn-by-turn is on and a turn comes within the lead distance, the dashboard shows the instruction centred over everything else, per `Sxx - Route overlay` in Design.sketch (#197 review). It is a card, 136 pt square at its smallest, with a 16 pt continuous corner radius, filled `borderSubtle` with a 1 pt `borderStrong` border, and the whole card at `turnOverlay` opacity. Inside, the turn's arrow sits in `primaryDark` at 64 pt (SF Pro Rounded Semibold), with the instruction under it in `textPrimary` at 34 pt (SF Pro Regular). The instruction is the cue's own words when the route file gave some, and the direction otherwise. The card is solid rather than glass, so the dashboard stays readable through it. It stays up until the rider is within 10 ft of the turn — a flat four seconds took it away with 90 m still to ride at a 100 m lead — and never takes a touch. Transient notices (source switch, calibration) and off-route keep the top banner slot.
 
@@ -696,6 +703,7 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 **Sizes:** 2x2, 2x1, 1x1
 
 - HR zone distribution chart: time spent in each zone for the current ride
+- Time in zone accumulates locally from the HR readings the dashboard already classifies, not from HealthKit's `HKLiveWorkoutZoneUpdate`, since the app runs no iPhone workout session (PRD §9.4, #318)
 - Zone colors: `brHRZone1`–`brHRZone5`
 - Empty state when no HR source active: "--"
 - Sheet: Heart rate
@@ -843,11 +851,13 @@ Presented as a `.sheet` when the rider taps Sync. Lists all enabled `ConnectedSe
 
 ### HKWorkout (automatic)
 
-An outdoor cycling `HKWorkout` is written to Apple Health automatically once the ride is saved at ride end. No user action required, and the summary screen never waits on it — a failed write costs the workout, never the ride or the summary. The ride appears in the iOS Fitness app.
+An outdoor cycling `HKWorkout` is written to Apple Health automatically once the ride is saved at ride end. No user action required, and the summary screen never waits on it — a failed write never costs the ride or the summary. The ride appears in the iOS Fitness app.
+
+- **Retried until it lands** (#277): a write that fails, or never ran because the app was killed or the ride was closed out at the next launch, is retried after the next Finish, and at the next launch unless that launch resumes an unfinished ride. A skipped duplicate counts as done. Without Workouts share access, nothing is attempted: rides wait and are written once it is allowed. A ride closed out as an orphan (a new ride was started before the unfinished one was found) gets no workout, since its end time is the relaunch
 
 - **Consent** is the HealthKit share permission from S01, which the rider can revoke in iOS Settings → Health
 - **Duplicates:** if another source (e.g. an Apple Watch Outdoor Cycle) already recorded a cycling workout overlapping the ride, the write is skipped. A later rewrite of the same ride replaces its workout rather than adding one
-- **Carries** start, end, distance, route and estimated active energy. Pause intervals are not marked, so Fitness shows elapsed time
+- **Carries** start, end, distance, route, estimated active energy and, when the rider has overridden Health in S12, the app's HR zones (#238). Otherwise the workout keeps Health's preferred zones Pause intervals are not marked, so Fitness shows elapsed time
 - **Active energy** (#276) comes from heart rate when a strap recorded at least half the ride and Health has the rider's weight, date of birth and sex (Male or Female): the Keytel (2005) equation at the ride's mean heart rate, less resting metabolism. Otherwise it is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. Calories are not shown in the app
 
 ### Open UX Questions
@@ -987,6 +997,9 @@ a confirmation:
 - Five rows: Recovery/Light, Endurance, Aerobic, Threshold, Anaerobic
 - Each shows its bpm range and carries a Stepper for adjustment
 - Footer: "HR Zone data is derived from data collected by Apple Health."
+- **Since #238 the zones are Apple Health's** (iOS 27's preferred zone configuration: set by the rider in Health, or
+  Apple's own). Each boundary resolves `stepper override ?? Health ?? Karvonen`, and a Resting or Max HR override
+  switches the table back to Karvonen from the rider's values. The footer is accurate as written.
 - MVP derives the zones from `RiderProfile` (DataModel.md §3.5) using Karvonen. **Since #96 that type
   holds only overrides**, resolving `override ?? healthKit ?? default` at read time — so M5 does not
   replace the entry, it supplies the middle term, and manual entry stays as the fallback when Health
@@ -1119,7 +1132,7 @@ ContentUnavailableView {
 > *Refer to `RoutesView` as prototyped in the source..*
 
 ### Key Components
-- Toolbar toggle: list view / map view (`list.bullet` / `map` SF Symbol)
+- List / map toggle (`list.bullet` / `map` SF Symbol): a glass circle floating on the trailing edge at the bottom of the screen, just above the tab bar and clear of a minimised ride's accessory, styled like the map sheet's buttons — not in the toolbar (#331). The toolbar keeps Import, Filter and Start Ride
 - List view: route rows map thumbnail, name, distance, and the route's summary line without its distance (#252) — gain, the hardest climbs, max grade, character and surface, two lines at most. A route with neither elevation nor a surface falls back to the file's own `<desc>`
 - Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls. The map can act as a filter. When switching back to the list will show only those routes displayed on the map. Map will initially zoom to a 50 mile radius around the user's current location. 
 - Tap a route → navigates to S20

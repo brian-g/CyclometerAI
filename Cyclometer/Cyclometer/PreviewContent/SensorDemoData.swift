@@ -22,7 +22,7 @@ enum DeviceDemoData {
     static let cscSensors: [DiscoveredDevice] = [
         // A combo sensor holding both roles — the case that prompts for a role.
         .init(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C5C1")!,
-              name: "Wahoo RPM", kinds: [.speedCadence], roles: [.speed, .cadence],
+              name: "Wahoo RPM Longer Name", kinds: [.speedCadence], roles: [.speed, .cadence],
               connectionState: .active, batteryPercent: 78,
               capabilities: .init(supportsWheelRevolutions: true, supportsCrankRevolutions: true)),
         // Never connected, so nothing has read its capabilities yet.
@@ -40,6 +40,6 @@ enum DeviceDemoData {
 
     static let hrDevices: [DiscoveredDevice] = [
         .init(id: UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!,
-              name: "Polar H10", kinds: [.heartRate])
+              name: "PanaBike BLE HRM", kinds: [.heartRate])
     ]
 }

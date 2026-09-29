@@ -29,6 +29,8 @@
 | 0.6.3 | 2026-09-25 | Brian / Claude | Ride place name (#283). §12 Privacy records the reverse geocode of a free ride's start coordinate, sent to Apple for S10's default ride name, with an S12 toggle to turn it off. |
 | 0.6.4 | 2026-09-26 | Brian / Claude | Ride Live Activity. New §8.10: Lock Screen and Dynamic Island Live Activity moves from Phase 2 to MVP under M10.5; visual only, with radar sound left to the audio client; CarPlay, Mac and Watch presentations excluded; next-turn cue included when a route is active. §6, §13 and Resolved Decisions updated. Resolved Decisions now gives the iOS 27 minimum's reason: HealthKit's cycling-specific HR, cadence and power zone tracking. |
 | 0.6.5 | 2026-09-25 | Brian / Claude | Workout active energy (#276, supersedes #274). §9.4 adds `bodyMass` (read) and `activeEnergyBurned` (write): `biologicalSex` (read) too. The ride's energy comes from heart rate (Keytel 2005) when a strap covered half the ride and Health has weight, date of birth and a Male or Female sex; otherwise from the track (physics, with dropouts and implausible grades costed flat; Compendium MET only for a ride with no usable track). None is written when Health has no weight. Bike weight is a 10 kg constant, not a setting. |
+| 0.6.6 | 2026-09-26 | Brian / Claude | Health's preferred HR zones (#238, supersedes #167). §8.5 and §9.4: zone boundaries resolve `S12 override ?? Health's preferred zones ?? Karvonen`, read with iOS 27's `preferredWorkoutZoneConfiguration` (no extra permission). A resting or max override sets Health's zones aside. When the rider has an S12 override, the ride's `HKWorkout` carries the app's zones. Otherwise it keeps Health's preferred ones. OQ9's Karvonen becomes the fallback. Live `HKLiveWorkoutZoneUpdate` needs an iPhone workout session and is split to its own issue. |
+| 0.6.7 | 2026-09-26 | Brian / Claude | iPhone workout session declined (#318). §9.4 adds a decision note. No `HKWorkoutSession` / `HKLiveWorkoutBuilder` runs during a ride, so there is no live `HKLiveWorkoutZoneUpdate`, and a paired Watch still prompts to start its own workout. The post-ride `HKWorkoutBuilder` write (#250, #277), its overlap skip and SwiftData crash recovery (#175, #188) stay. The dashboard's zone and any W12 time in zone stay local to the strap's readings. #318 moves to Phase 2 with the S17 Watch companion. |
 
 ---
 
@@ -221,7 +223,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 | S05 | Active Ride Dashboard | MVP | **Primary screen.** Speed, HR zone, radar sidebar (if paired), cadence, elapsed time, distance, live map |
 | S05.1 | Start Ride Sheet | MVP | Sheet to start a ride |
 | S05.2 | Route Picker | MVP | From the Start Sheet, the ability to pick a route for the ride |
-| S05.3 | Active Ride Accessory | MVP | Compact strip above TabBar when the dashboard sheet is minimized; shows live ride stats and an Open button |
+| S05.3 | Active Ride Accessory | MVP | Compact strip above TabBar when the dashboard is minimized; shows live ride stats, and a tap anywhere on it reopens the dashboard |
 | S05.4 | Widget Layout | MVP | Default widget layout for the active ride dashboard |
 | S05.5 | Widget Layout 2 | MVP | Second widget layout page for the active ride dashboard |
 | S06 | Radar Alert | MVP | Sidebar visualization and alert-level state changes |
@@ -448,6 +450,7 @@ Zone boundaries:
 - `restingHeartRate` is read from **Apple Health** at app launch and at the start of each ride
 - **`maxHeartRate` cannot be read from Apple Health — there is no max-heart-rate type.** Only `heartRate`, `restingHeartRate`, `walkingHeartRateAverage`, `heartRateVariabilitySDNN` and `heartRateRecoveryOneMinute` exist. A `.discreteMax` query over historical samples returns *highest ever observed*, which understates any rider who has not gone near their limit wearing a watch, so it is not used. Max HR comes from the 220 − age estimate (§9.4) or manual entry
 - If Apple Health does not have these values, the user is prompted to enter them manually in the HR Zones section of S12 (S03 and S13 are both retired; see UX.md §S12)
+- **Zone boundaries come from Apple Health first (#238).** iOS 27's `HKHealthStore.preferredWorkoutZoneConfiguration(for: .heartRate)` returns the rider's zones: ones they set in Health, or Apple's own from their health data. Each boundary resolves `S12 override ?? Health ?? Karvonen`. A resting or max HR override means the rider disagrees with Health, so Karvonen from their values applies instead. Health's zones are used only in a shape the table can hold: five zones, rising, above resting. Otherwise Karvonen applies whole. They are not capped at the app's max, which is an estimate; zone 5's top rises to meet them instead
 - App-stored values are always considered overrides; Apple Health is the source of truth unless the user has manually overridden. **This is literal since #96**: `RiderProfile` (DataModel.md §3.5) stores *only* overrides, as two optionals, and resolves `override ?? healthKit ?? default` at read time. A rider who never disagrees with Health persists nothing at all. M10 ships the storage and the Karvonen derivation; M5 supplies the Apple Health term
 
 **Color Mapping:**
@@ -462,6 +465,7 @@ Zone boundaries:
 **Acceptance Criteria:**
 - [ ] App reads `maxHeartRate` and `restingHeartRate` from HealthKit on ride start
 - [ ] Falls back to manually entered profile values when HealthKit values are unavailable
+- [x] Zones follow the rider's preferred zones in Apple Health when no S12 override is set (#238)
 - [ ] Zone calculated correctly for all 5 zones given arbitrary Max HR / Resting HR inputs (unit tested)
 - [ ] Zone color updates on dashboard within 2 seconds of new HR reading
 - [ ] App functions normally when HealthKit permission is denied (HR zone tile shows "No HR Source")
@@ -1011,10 +1015,67 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 - `restingHeartRate` → `HKQuantityTypeIdentifierRestingHeartRate`
 - `maxHeartRate` → `HKQuantityTypeIdentifierHeartRate` (historical max, or age-based estimate: 220 − age)
 - These values populate the Karvonen zone calculation and update if Apple Health values change
+- Preferred heart-rate zones → `preferredWorkoutZoneConfiguration(for: .heartRate)` (iOS 27, #238). There is no zone
+  object type, so nothing is added to the authorization request. Ahead of Karvonen, behind an S12 override (§8.5)
 
 **HR Streaming During Ride:**
 - Use `HKAnchoredObjectQuery` with live updates when Apple Watch is the active HR source
 - Fallback: Apple Watch is secondary to BLE HR strap (see §8.4)
+
+> **Decision note — issue #318.** Recorded 2026-09-26. The iPhone app does **not** run an
+> `HKWorkoutSession` / `HKLiveWorkoutBuilder` during a ride. It is revisited with the S17 Watch
+> companion (Phase 2), where #318 stays open.
+>
+> **What a session would buy.**
+> - **Mainly, no Watch prompt.** While an iPhone workout session runs, a paired Apple Watch doesn't ask
+>   the rider to start a workout that is already being tracked. Brian has seen this in use; the SDK
+>   doesn't document it. Without a session, the Watch's "looks like you're cycling" prompt arrives a
+>   few minutes into a ride.
+> - iOS 27's live zone update, `workoutBuilder(_:didUpdateWorkoutZone:)`, which fires only on a live
+>   builder.
+> - Background execution, and a workout that exists while the ride is still in progress.
+>
+> **What it would replace.** Every part of the post-ride write (#250, UX.md §S10):
+> - `RideHealthWorkout` rebuilds a plain `HKWorkoutBuilder` from the saved ride, and sync identifiers
+>   make a rewrite replace the earlier copy.
+> - The owed flag retries the write at Finish and at launch (#277).
+> - The write is skipped when another source recorded an overlapping cycling workout.
+> - Crash recovery (#175, #188) runs from SwiftData alone, and an orphan closed out at relaunch gets no
+>   workout.
+>
+> A live builder's workout exists only inside its session, so `recoverActiveWorkoutSession` would
+> have to agree with the SwiftData recovery and the pending-ride-end marker. That is two recovery
+> systems for one ride.
+>
+> **Why not.**
+> - **Health has nothing to add.** The live builder zones only heart rate that is in HealthKit, and
+>   the strap's readings are held by the app over CoreBluetooth and never reach it. To feed the
+>   builder, the app would write its own strap samples back (a new `heartRate` share permission,
+>   double-counted against a Watch writing HR over the same ride). Health would then sort the same
+>   readings the dashboard already classifies on arrival (§8.5), later, and against a zone
+>   configuration that must be kept in step with the S12 override.
+> - **The background time is already there.** The ride's `location`, `bluetooth-central` and `audio`
+>   modes cover it, and §8.10's Live Activity relies on the location mode.
+> - **The replaced write path works.** It is eventual and idempotent (#277), and a session would
+>   trade that for a live object that has to survive the ride.
+> - **Removing the prompt has a cost too.** A rider who accepts it gets the Watch's own workout, with
+>   1 Hz heart rate, and the app's write is skipped as a duplicate. Without the prompt, the app's
+>   workout becomes the record, and it carries no heart rate. For a Watch-only rider, the Watch also
+>   drops back to background sampling every few minutes (§8.4). The prompt is a nuisance, but it
+>   doesn't justify the costs above, and for Watch-only riders its absence makes their Health record
+>   worse. S17 settles both, because the Watch runs the session there.
+>
+> **What stays.**
+> - The dashboard's zone is classified locally on each reading.
+> - S10's zone breakdown is derived from the saved track.
+> - W12's time in zone (UX.md §W12, not yet built; #145) accumulates locally from the same readings,
+>   not from Health.
+>
+> **Open threads, neither needing a session.**
+> - On iOS 27 a plain `HKWorkoutBuilder` computes zone durations (`HKWorkout.zoneGroupsByType`), but
+>   only from HR samples added to the workout. That is the same HR double-write question as above.
+> - Health's workout duration includes paused time, and pause/resume events could be added after the
+>   ride with `addWorkoutEvents`.
 
 **Acceptance Criteria:**
 - [ ] App correctly reads `restingHeartRate` from HealthKit on ride start
@@ -1398,7 +1459,7 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detec
 | OQ6 | App name for App Store? | Product | Medium | ✅ **Resolved: Cyclometer** |
 | OQ7 | Minimum Varia RTL515 / RCT715 firmware version required for BLE characteristic support? | Engineering | High | ✅ **Resolved: v2.00 or v3.00 depending on the production run** |
 | OQ8 | Include basic Apple Watch complication in Phase 1? | Product | Medium | ✅ **Resolved: Defer to Phase 2** |
-| OQ9 | HR zone formula: Karvonen-only or allow custom percentages in MVP? | Design | Low | ✅ **Resolved: Karvonen-only** |
+| OQ9 | HR zone formula: Karvonen-only or allow custom percentages in MVP? | Design | Low | ✅ **Resolved: Karvonen-only** — since #238 the fallback behind Health's preferred zones (§8.5) |
 | OQ10 | TestFlight beta: open or closed? | Product | Low | ✅ **Resolved: Open beta** |
 | OQ11 | Does Garmin Varia RTL515/RCT715 expose radar return signal amplitude over BLE for vehicle size inference? | Engineering | Medium | ✅ **Resolved: No it does not** |
 | OQ12 | Navigation: `MKDirections` routing or GPX import only? | Design | Medium | ✅ **Resolved: GPX import only. No in-app route creation in MVP.** |

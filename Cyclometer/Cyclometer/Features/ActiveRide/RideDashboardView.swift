@@ -2,27 +2,22 @@ import SwiftUI
 import ComposableArchitecture
 import AudioToolbox
 
-/// Full-screen active ride dashboard — presented as fullScreenCover over the tab bar.
+/// Full-screen active ride dashboard — a fullScreenCover that zooms out of the ride
+/// accessory and collapses back into it on a drag down (#333).
 /// Matches prototype RideDashboardView with TCA store replacing local @State.
 /// Dashboard uses the 2-col × 7-row widget grid (S05.4 factory default).
 struct RideDashboardView: View {
-    /// Dashboard pages. Factory default is two; rider customisation (S07) will
-    /// drive this from state. Raw value doubles as the paging-dot index.
-    private enum Page: Int, CaseIterable {
-        case grid, map
-    }
+    private typealias Page = ActiveRideFeature.DashboardPage
 
     @Bindable var store: StoreOf<ActiveRideFeature>
-    let onClose: () -> Void
-    @GestureState private var dragOffset: CGFloat = 0
-    @State private var selectedPage: Page = .grid
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         // S05 — Map widget safe-area bleed. The toolbar floats as an overlay
         // (not a safe-area inset) so the grid's map cell can extend behind it
         // all the way to the physical screen bottom.
-        TabView(selection: $selectedPage) {
+        TabView(selection: $store.dashboardPage.sending(\.dashboardPageChanged)) {
             gridPage
                 .tag(Page.grid)
 
@@ -46,12 +41,11 @@ struct RideDashboardView: View {
             .allowsHitTesting(false)
         }
         // Grabber floats as a top overlay (not a safe-area inset) so it does not
-        // push page content down. Pages that must stay clear of the island (the
-        // grid) reserve the space themselves; the map page bleeds up behind it.
+        // push page content down. The overlay keeps the safe area, so the grabber
+        // sits just below the Dynamic Island while the pages bleed up behind it.
         .overlay(alignment: .top) {
             VStack(spacing: Spacing.xs) {
                 grabber()
-                    .gesture(dismissDrag)
                 if let banner = activeBanner {
                     RideBanner(text: banner.text, icon: banner.icon)
                         .transition(bannerTransition)
@@ -66,7 +60,6 @@ struct RideDashboardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .offset(y: max(dragOffset, 0))
         // Ride effects (timer/HR/radar/location) are started by AppFeature when
         // the ride begins and live for the whole ride, so they keep running when
         // this dashboard is minimized to the accessory strip. Do NOT start them
@@ -113,6 +106,16 @@ struct RideDashboardView: View {
                         .frame(height: unit * 2)
                     }
 
+                    GridRow {
+                        CadenceWidget(
+                            cadence: store.cadence.cadenceRPM,
+                            cadenceHistory: store.cadence.watermarkSamples,
+                            averageCadence: store.cadence.averageCadenceRPM,
+                            maxCadence: store.cadence.maxCadenceRPM,
+                            size: .twoByOne
+                        )
+                        .frame(height: unit)
+                    }
                     // W4 HR + W12 HR Zones
                     GridRow {
                         HeartRateWidget(
@@ -128,21 +131,7 @@ struct RideDashboardView: View {
                     // W11 Pace — full width; radar sidebar lives outside the grid
                     GridRow {
                         PaceWidget(speedMPS: store.speed.speedMPS ?? 0, unit: store.unitSystem)
-                            .gridCellColumns(2)
                             .frame(height: unit)
-                    }
-
-                    // W5 Cadence + W9 Directions — always present; on a free ride it reads
-                    // "No Route" (#200). Removing it is S07/S08's job, not this grid's.
-                    GridRow {
-                        CadenceWidget(
-                            cadence: store.cadence.cadenceRPM,
-                            cadenceHistory: store.cadence.watermarkSamples,
-                            averageCadence: store.cadence.averageCadenceRPM,
-                            maxCadence: store.cadence.maxCadenceRPM,
-                            size: .oneByOne
-                        )
-                        .frame(height: unit)
                         directionsWidget(size: .oneByOne)
                             .frame(height: unit)
                     }
@@ -176,14 +165,31 @@ struct RideDashboardView: View {
         }
     }
 
+    /// The map sheet's shared inputs (#199, #200) — W8 and W9 open the same sheet, so both
+    /// widgets must carry it the same orientation and the same toggle action.
+    ///
+    /// Factored out, not just documented as "the same": Xcode's preview canvas instruments
+    /// this file's `#Preview`-target build with a click-to-select wrapper on every
+    /// subexpression, and two initializer calls repeating this exact argument shape
+    /// verbatim (`mapWidget` and `directionsWidget`, both built from `route:`/
+    /// `sheetOrientation:`/`onOrientationToggle:`) made that wrapper unable to tell the
+    /// two apart — "ambiguous use of '__designTimeSelection'", which is what actually made
+    /// the dashboard preview time out. Routing both through one shared getter/action
+    /// removes the duplicate text, not just the duplicate logic.
+    private var mapSheetRoute: [RouteCoordinate] {
+        store.navigation.activeRoute?.coordinates ?? []
+    }
+    private var mapSheetOrientation: MapOrientation { store.preferences.mapOrientation }
+    private func toggleMapOrientation() { store.send(.mapOrientationToggled) }
+
     /// W8, fed the same way on both pages: the track, the route being ridden (#199), and the sheet's
     /// saved orientation with the action that switches it.
     private var mapWidget: MapWidget {
         MapWidget(
             trackSegments: store.trackSegments,
-            route: store.navigation.activeRoute?.coordinates ?? [],
-            sheetOrientation: store.preferences.mapOrientation,
-            onOrientationToggle: { store.send(.mapOrientationToggled) }
+            route: mapSheetRoute,
+            sheetOrientation: mapSheetOrientation,
+            onOrientationToggle: { toggleMapOrientation() }
         )
     }
 
@@ -197,9 +203,9 @@ struct RideDashboardView: View {
             unit: store.unitSystem,
             size: size,
             trackSegments: store.trackSegments,
-            route: store.navigation.activeRoute?.coordinates ?? [],
-            sheetOrientation: store.preferences.mapOrientation,
-            onOrientationToggle: { store.send(.mapOrientationToggled) }
+            route: mapSheetRoute,
+            sheetOrientation: mapSheetOrientation,
+            onOrientationToggle: { toggleMapOrientation() }
         )
     }
 
@@ -234,30 +240,18 @@ struct RideDashboardView: View {
     }
 
     // ── Grabber ───────────────────────────────────────────────────────────────
-    // Floats as a top overlay on a view that ignores safe areas, so the capsule
-    // sits flush against the physical top edge (behind the dynamic island).
+    // Sits at the top of the safe area, just below the Dynamic Island. A visual
+    // affordance only: the zoom presentation's own drag, anywhere on the dashboard,
+    // collapses it into the accessory (#333).
     private func grabber() -> some View {
         Capsule()
             .fill(Color(.systemGray3))
             .frame(width: Spacing.xxl, height: Spacing.grabberHeight)
-            // Expand the hit area beyond the thin capsule so the whole strip is
-            // draggable; the paging TabView underneath never sees these drags.
-            // Pin the capsule to the top so the enlarged frame grows downward
-            // and doesn't push the visible grabber lower.
             .frame(maxWidth: .infinity, minHeight: Spacing.sm, alignment: .top)
-            .contentShape(Rectangle())
             .padding(.bottom, Spacing.xs)
-    }
-
-    /// Pull-down-to-dismiss. Attached to the grabber (not the container) so it
-    /// wins over the paging TabView's internal gesture recognizer.
-    private var dismissDrag: some Gesture {
-        DragGesture()
-            .updating($dragOffset) { value, state, _ in
-                state = value.translation.height
-            }
-            .onEnded { value in
-                if value.translation.height > 120 { onClose() }
+            // VoiceOver can't perform the drag.
+            .accessibilityRepresentation {
+                Button("Minimize Ride") { dismiss() }
             }
     }
 
@@ -266,12 +260,12 @@ struct RideDashboardView: View {
         HStack(spacing: Spacing.xs) {
             ForEach(Page.allCases, id: \.self) { page in
                 Circle()
-                    .fill(page == selectedPage ? Color.cyPrimary : Color.cyTextTertiary)
+                    .fill(page == store.dashboardPage ? Color.cyPrimary : Color.cyTextTertiary)
                     .frame(width: Spacing.pageIndicatorDot, height: Spacing.pageIndicatorDot)
             }
         }
         .accessibilityElement()
-        .accessibilityLabel("Page \(selectedPage.rawValue + 1) of \(Page.allCases.count)")
+        .accessibilityLabel("Page \(store.dashboardPage.rawValue + 1) of \(Page.allCases.count)")
     }
 
     // ── Ride Controls — floating glass buttons (S05) ───────────────────────────
@@ -289,7 +283,7 @@ struct RideDashboardView: View {
 
             Spacer()
 
-            rideControlButton("Ring Bell", systemImage: "bell.fill", action: ringBell)
+            rideControlButton("Ring Bell", systemImage: "bell.fill") { ringBell() }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.isPaused)
         .padding(.horizontal, Spacing.lg)
@@ -303,7 +297,7 @@ struct RideDashboardView: View {
         systemImage: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        Button { action() } label: {
             Label(title, systemImage: systemImage)
                 .labelStyle(.iconOnly)
                 .font(.title3.weight(.semibold))
@@ -370,7 +364,7 @@ struct RideDashboardView: View {
 private struct NoHRSourceLabel: View {
     var body: some View {
         Text("No HR Source")
-            .font(.cyCaption)
+            .font(.caption)
             .foregroundStyle(.cyTextTertiary)
     }
 }
@@ -455,79 +449,91 @@ struct PaceWidget: View {
 // MARK: - Previews
 
 #Preview("Zone 4 — Radar Active") {
-    RideDashboardView(
-        store: Store(
-            initialState: ActiveRideFeature.State(
-                recordingState: .active,
-                elapsedSeconds: 2340,
-                speedKPH: 28.4,
-                heartRateBPM: 155,
-                hrZone: 4,
-                isHRPaired: true,
-                cadence: CadenceFeature.State(cadenceRPM: 87),
-                distanceMeters: 12300,
-                speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
-                maxSpeedKPH: 34.1,
-                speedSampleCount: 120,
-                speedSampleSum: 3408,
-                isRadarPaired: true,
-                radarTargets: [
-                    RadarTarget(id: UUID(), relativeVelocityMPS: 8.5, rangeMetres: 45, threatLevel: .warning),
-                    RadarTarget(id: UUID(), relativeVelocityMPS: 12.0, rangeMetres: 20, threatLevel: .danger)
-                ],
-                radarConnectionState: .active,
-                wasRadarEverPaired: true
-            )
-        ) {
-            ActiveRideFeature()
-        },
-        onClose: { }
-    )
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
+    } operation: {
+        RideDashboardView(
+            store: Store(
+                initialState: ActiveRideFeature.State(
+                    recordingState: .active,
+                    elapsedSeconds: 2340,
+                    speedKPH: 28.4,
+                    heartRateBPM: 155,
+                    hrZone: 4,
+                    isHRPaired: true,
+                    cadence: CadenceFeature.State(cadenceRPM: 87),
+                    distanceMeters: 12300,
+                    speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
+                    maxSpeedKPH: 34.1,
+                    speedSampleCount: 120,
+                    speedSampleSum: 3408,
+                    isRadarPaired: true,
+                    radarTargets: [
+                        RadarTarget(id: UUID(), relativeVelocityMPS: 8.5, rangeMetres: 45, threatLevel: .warning),
+                        RadarTarget(id: UUID(), relativeVelocityMPS: 12.0, rangeMetres: 20, threatLevel: .danger)
+                    ],
+                    radarConnectionState: .active,
+                    wasRadarEverPaired: true
+                )
+            ) {
+                ActiveRideFeature()
+            }
+        )
+    }
 }
 
 #Preview("No Radar") {
-    RideDashboardView(
-        store: Store(
-            initialState: ActiveRideFeature.State(
-                recordingState: .active,
-                elapsedSeconds: 2340,
-                speedKPH: 28.4,
-                heartRateBPM: 155,
-                hrZone: 4,
-                isHRPaired: true,
-                cadence: CadenceFeature.State(cadenceRPM: 87),
-                distanceMeters: 12300,
-                speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
-                maxSpeedKPH: 34.1,
-                speedSampleCount: 120,
-                speedSampleSum: 3408,
-                isRadarPaired: false,
-                wasRadarEverPaired: false
-            )
-        ) {
-            ActiveRideFeature()
-        },
-        onClose: { }
-    )
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
+    } operation: {
+        RideDashboardView(
+            store: Store(
+                initialState: ActiveRideFeature.State(
+                    recordingState: .active,
+                    elapsedSeconds: 2340,
+                    speedKPH: 28.4,
+                    heartRateBPM: 155,
+                    hrZone: 4,
+                    isHRPaired: true,
+                    cadence: CadenceFeature.State(cadenceRPM: 87),
+                    distanceMeters: 12300,
+                    speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
+                    maxSpeedKPH: 34.1,
+                    speedSampleCount: 120,
+                    speedSampleSum: 3408,
+                    isRadarPaired: false,
+                    wasRadarEverPaired: false
+                )
+            ) {
+                ActiveRideFeature()
+            }
+        )
+    }
 }
 
 #Preview("Paused") {
-    RideDashboardView(
-        store: Store(
-            initialState: ActiveRideFeature.State(
-                recordingState: .paused,
-                elapsedSeconds: 1230,
-                heartRateBPM: 130,
-                hrZone: 3,
-                isHRPaired: true,
-                cadence: CadenceFeature.State(),
-                distanceMeters: 7600,
-                speed: SpeedFeature.State(speedMPS: 0, activeSpeedSource: .gps),
-                maxSpeedKPH: 31.2
-            )
-        ) {
-            ActiveRideFeature()
-        },
-        onClose: { }
-    )
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
+    } operation: {
+        RideDashboardView(
+            store: Store(
+                initialState: ActiveRideFeature.State(
+                    recordingState: .paused,
+                    elapsedSeconds: 1230,
+                    heartRateBPM: 130,
+                    hrZone: 3,
+                    isHRPaired: true,
+                    cadence: CadenceFeature.State(),
+                    distanceMeters: 7600,
+                    speed: SpeedFeature.State(speedMPS: 0, activeSpeedSource: .gps),
+                    maxSpeedKPH: 31.2
+                )
+            ) {
+                ActiveRideFeature()
+            }
+        )
+    }
 }

@@ -29,7 +29,7 @@ struct AppFeatureTests {
         #expect(store.state.activeRide != nil)
     }
 
-    /// Tapping "Open" on the accessory re-presents the full-screen dashboard.
+    /// Tapping the accessory re-presents the full-screen dashboard.
     @Test("dashboardOpened re-presents the dashboard while a ride is active")
     func dashboardOpenedRepresents() async {
         let store = TestStore(
@@ -53,6 +53,35 @@ struct AppFeatureTests {
         await store.send(.dashboardDismissed) {
             $0.isDashboardPresented = false
         }
+        await store.receive(\.screenVisibilityChanged)
+    }
+
+    /// Minimising tears the dashboard view down, so the page lives in the ride's
+    /// state: reopening lands where the rider left off (#333 PR review).
+    @Test("Reopening the dashboard returns to the page it was minimised from")
+    func reopeningKeepsThePage() async {
+        let store = TestStore(
+            initialState: AppFeature.State(
+                activeRide: ActiveRideFeature.State(recordingState: .active),
+                isDashboardPresented: true
+            )
+        ) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.screenClient = .testValue
+        }
+
+        await store.send(.activeRide(.dashboardPageChanged(.map))) {
+            $0.activeRide?.dashboardPage = .map
+        }
+        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
+        await store.receive(\.screenVisibilityChanged)
+        await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
+        await store.receive(\.screenVisibilityChanged)
+        #expect(store.state.activeRide?.dashboardPage == .map)
+
+        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged)
     }
 
@@ -364,8 +393,9 @@ struct AppFeatureTests {
 
     /// #175 review's orphan: a resumable ride found after the rider already started a new
     /// one is closed out rather than resumed. It never reached a Finish, so it gets its
-    /// thumbnail here.
-    @Test("an orphaned ride closed out at launch gets its map thumbnail")
+    /// thumbnail here. Not an Apple Health workout (#277): it ends at the relaunch, so one
+    /// would span every hour since the kill. Other rides still owed one are written.
+    @Test("an orphaned ride closed out at launch gets its map thumbnail, and is settled without a workout")
     func orphanedRideCloseOutCapturesThumbnail() async {
         let orphan = RideSummaryUpdate(
             rideId: UUID(), recordingState: .active,
@@ -381,18 +411,43 @@ struct AppFeatureTests {
         }
         let finalized = LockIsolated<[UUID]>([])
         let saved = LockIsolated<[UUID]>([])
+        let workouts = LockIsolated<[UUID]>([])
+        let earlier = OwedHealthWorkout(
+            rideId: UUID(),
+            startedAt: Date(timeIntervalSince1970: 900_000),
+            endedAt: Date(timeIntervalSince1970: 903_600),
+            distanceMeters: 20_000,
+            movingSeconds: 3_400
+        )
+        // What the live actor does: finalize makes the orphan owed, and settling removes it.
+        let owed = LockIsolated([earlier])
         let store = TestStore(
             initialState: AppFeature.State(activeRide: ActiveRideFeature.State(recordingState: .active))
         ) {
             AppFeature()
         } withDependencies: {
             $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
-            $0.persistenceClient = .mock(
+            var client = PersistenceClient.mock(
                 trackPoints: [orphan.rideId: track],
                 rideIdsMissingMapThumbnail: [orphan.rideId],
-                onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
+                onFinalizeRide: { id, endedAt, summary, _ in
+                    finalized.withValue { $0.append(id) }
+                    owed.withValue {
+                        $0.insert(OwedHealthWorkout(
+                            rideId: id,
+                            startedAt: Date(timeIntervalSince1970: 1_000_000 - 36_000),
+                            endedAt: endedAt,
+                            distanceMeters: summary.distanceMeters,
+                            movingSeconds: summary.durationSeconds
+                        ), at: 0)
+                    }
+                },
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
+            client.fetchRidesOwedHealthWorkout = { owed.value }
+            client.settleRideHealthWorkout = { id in owed.withValue { $0.removeAll { $0.rideId == id } } }
+            $0.persistenceClient = client
+            $0.healthKitClient = .mock(onSaveWorkout: { workout in workouts.withValue { $0.append(workout.rideId) } })
             $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in Data([1]) }
         }
         store.exhaustivity = .off
@@ -406,5 +461,7 @@ struct AppFeatureTests {
 
         #expect(finalized.value == [orphan.rideId])
         #expect(saved.value == [orphan.rideId])
+        #expect(workouts.value == [earlier.rideId])
+        #expect(owed.value.isEmpty)
     }
 }

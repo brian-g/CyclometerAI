@@ -43,6 +43,11 @@ struct PersistenceClient: Sendable {
     /// per row as S14 shows it rather than with `fetchRides`, so a reload of the list never
     /// pulls every ride's images off disk.
     var fetchRideMapThumbnail: @Sendable (UUID) async throws -> RideMapThumbnailData?
+    /// Finished rides whose Apple Health workout hasn't landed yet, newest first — what
+    /// `RideHealthWorkout.backfill` works through (#277).
+    var fetchRidesOwedHealthWorkout: @Sendable () async throws -> [OwedHealthWorkout]
+    /// Marks a ride's workout as done with: written, or skipped as another source's duplicate.
+    var settleRideHealthWorkout: @Sendable (UUID) async throws -> Void
     /// Inserts confirmed vehicle-pass events in one batch — `VehiclePassDetector`
     /// can legitimately confirm more than one on the same tick (#172, DataModel.md §3.4).
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
@@ -114,6 +119,8 @@ extension PersistenceClient: DependencyKey {
             saveRideMapThumbnail: { try await rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
             fetchRideIdsMissingMapThumbnail: { try await rideActor.rideIdsMissingMapThumbnail() },
             fetchRideMapThumbnail: { try await rideActor.fetchMapThumbnail(id: $0) },
+            fetchRidesOwedHealthWorkout: { try await rideActor.ridesOwedHealthWorkout() },
+            settleRideHealthWorkout: { try await rideActor.settleHealthWorkout(id: $0) },
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
             deleteRide: { try await deleteRideLive(id: $0, rideActor: rideActor, container: coreDataContainer) },
@@ -150,6 +157,8 @@ extension PersistenceClient: DependencyKey {
         saveRideMapThumbnail: { _, _, _ in },
         fetchRideIdsMissingMapThumbnail: { [] },
         fetchRideMapThumbnail: { _ in nil },
+        fetchRidesOwedHealthWorkout: { [] },
+        settleRideHealthWorkout: { _ in },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
         deleteRide: { _ in },
@@ -189,7 +198,7 @@ private func batchInsertTrackPoints(_ points: [TrackPointDTO], container: NSPers
         mo.timestamp = point.timestamp
         mo.latitude = point.latitude
         mo.longitude = point.longitude
-        mo.altitudeMeters = point.altitudeMeters
+        mo.altitudeMeters = point.altitudeMeters.map(NSNumber.init(value:))
         mo.horizontalAccuracyMeters = point.horizontalAccuracyMeters
         // Every optional sensor field stores "no reading" as a negative sentinel, because
         // the attributes are non-optional scalars. It has to be negative, not 0: a
@@ -264,7 +273,7 @@ private func fetchTrackPointsLive(rideId: UUID, container: NSPersistentContainer
                 timestamp: mo.timestamp,
                 latitude: mo.latitude,
                 longitude: mo.longitude,
-                altitudeMeters: mo.altitudeMeters,
+                altitudeMeters: mo.altitudeMeters?.doubleValue,
                 horizontalAccuracyMeters: mo.horizontalAccuracyMeters,
                 // Negative is the "no reading" sentinel for every optional sensor
                 // field; 0 is a real measurement and round-trips as one (#211).

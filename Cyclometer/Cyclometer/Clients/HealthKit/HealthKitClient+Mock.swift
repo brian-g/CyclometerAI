@@ -11,9 +11,11 @@ extension HealthKitClient {
         dateOfBirth: DateComponents? = nil,
         bodyMassKilograms: Double? = nil,
         biologicalSex: RideEnergy.Sex? = nil,
+        heartRateZoneCeilings: [Int]? = nil,
         heartRateSamples: [Int] = [],
         onRequestAuthorization: @escaping @Sendable () async throws -> Void = { },
-        onSaveWorkout: @escaping @Sendable (RideWorkout) async throws -> Void = { _ in }
+        onSaveWorkout: @escaping @Sendable (RideWorkout) async throws -> Void = { _ in },
+        isWorkoutSharingAllowed: Bool = true
     ) -> HealthKitClient {
         HealthKitClient(
             requestAuthorization:  onRequestAuthorization,
@@ -21,13 +23,15 @@ extension HealthKitClient {
             fetchDateOfBirth:      { dateOfBirth },
             fetchBiologicalSex:    { biologicalSex },
             fetchBodyMass:         { bodyMassKilograms },
+            fetchHeartRateZoneCeilings: { heartRateZoneCeilings },
             heartRateStream: {
                 AsyncStream { continuation in
                     for bpm in heartRateSamples { continuation.yield(bpm) }
                     continuation.finish()
                 }
             },
-            saveWorkout: onSaveWorkout
+            saveWorkout: onSaveWorkout,
+            isWorkoutSharingAllowed: { isWorkoutSharingAllowed }
         )
     }
 }

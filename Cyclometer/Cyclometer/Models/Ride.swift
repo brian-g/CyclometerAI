@@ -27,13 +27,12 @@ final class Ride {
     var durationSeconds: TimeInterval          // Excludes paused intervals
     var averageSpeedMPS: Double
     var maxSpeedMPS: Double
-    var elevationGainMeters: Double
-    var elevationDropMeters: Double
+    // No stored elevation gain/drop or HR zone seconds (#284): S10 and S15 derive both from the
+    // saved track, and zones resolve at read time, so a stored breakdown would go stale.
 
     // MARK: - Heart Rate
     var averageHeartRateBPM: Int?
     var maxHeartRateBPM: Int?
-    var hrZoneDurations: [Int: TimeInterval]   // zone (1-5) to seconds in zone
 
     // MARK: - Cadence
     var averageCadenceRPM: Int?
@@ -79,6 +78,13 @@ final class Ride {
     var mapThumbnailLight: Data?
     @Attribute(.externalStorage)
     var mapThumbnailDark: Data?
+
+    // MARK: - Apple Health (#277)
+    // Set by `finalizeRide`, cleared once the ride's `HKWorkout` is written or skipped as a
+    // duplicate; `RideHealthWorkout.backfill` writes every ride still owed one. The declaration
+    // default is what migration gives rides that ended before this existed, so they are not
+    // owed: the ones since #250 already have their workout.
+    var isHealthWorkoutOwed: Bool = false
 
     // MARK: - Sync Status
     // Per-service sync tracking. Written by RideSyncSheetFeature after upload.
@@ -133,10 +139,7 @@ final class Ride {
         self.durationSeconds = 0
         self.averageSpeedMPS = 0
         self.maxSpeedMPS = 0
-        self.elevationGainMeters = 0
-        self.elevationDropMeters = 0
         self.recordingState = .active
-        self.hrZoneDurations = [:]
         self.isAutoPaused = false
         self.zeroSpeedSeconds = 0
         self.speedSampleCount = 0

@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-08-17 (#96) — §3.5 revised: RiderProfile leaves SwiftData for a `@Shared(.fileStorage)` JSON document, and stores HR *overrides* rather than values, since resting HR and date of birth are HealthKit's to own and max HR has no HealthKit type at all. `heartRateSourceIsAppleHealth` becomes derived; `dateOfBirth` is not stored. §8 gains the worked example it was already cited for, plus the zone → bpm inverse and the `minimumHRReserve` floor it requires. SwiftData now lands with M7's Ride
+**Updated:** 2026-09-26 (#284) — §3.1: `Ride` drops `elevationGainMeters`, `elevationDropMeters` and `hrZoneDurations`, which were declared but never written. S10 and S15 derive elevation and zone time from the saved track, and zones resolve at read time. §9 records the migration
+**Previously:** 2026-08-17 (#96) — §3.5 revised: RiderProfile leaves SwiftData for a `@Shared(.fileStorage)` JSON document, and stores HR *overrides* rather than values, since resting HR and date of birth are HealthKit's to own and max HR has no HealthKit type at all. `heartRateSourceIsAppleHealth` becomes derived; `dateOfBirth` is not stored. §8 gains the worked example it was already cited for, plus the zone → bpm inverse and the `minimumHRReserve` floor it requires. SwiftData now lands with M7's Ride
 **Previously:** 2026-08-08 (PR #83 review) — §3.9 revised: no Wheelset entity; wheel circumference moves onto the speed-role PairedSensor; Bike gains stravaGearID; Ride gains a bikeName snapshot. §3.6 records why JSON over plist. Research basis: PRD §8.9.1
 **Previously:** 2026-08-03 (#69) — AppPreferences moved out of SwiftData to a `@Shared(.fileStorage)` JSON document; PairedSensor / ConnectedService ownership reopened for #67; §3.9 added
 **Previously:** 2026-05-22 — UserProfile split into RiderProfile, AppPreferences, PairedSensor, ConnectedService; all OQDMs resolved
@@ -117,13 +118,12 @@ final class Ride {
     var durationSeconds: TimeInterval          // Excludes paused intervals
     var averageSpeedMPS: Double
     var maxSpeedMPS: Double
-    var elevationGainMeters: Double
-    var elevationDropMeters: Double
+    // No stored elevation gain/drop or HR zone seconds (#284): S10 and S15 derive both from the
+    // saved track, and zones resolve at read time (§8), so a stored breakdown would go stale.
 
     // MARK: - Heart Rate
     var averageHeartRateBPM: Int?
     var maxHeartRateBPM: Int?
-    var hrZoneDurations: [Int: TimeInterval]   // zone (1-5) to seconds in zone
 
     // MARK: - Cadence
     var averageCadenceRPM: Int?
@@ -201,10 +201,7 @@ final class Ride {
         self.durationSeconds = 0
         self.averageSpeedMPS = 0
         self.maxSpeedMPS = 0
-        self.elevationGainMeters = 0
-        self.elevationDropMeters = 0
         self.recordingState = .active
-        self.hrZoneDurations = [:]
         self.radarEvents = []
         self.vehiclePassEvents = []
     }
@@ -433,6 +430,14 @@ overlap representable" true for a table with independently-pinnable boundaries, 
 by construction" guarantee no longer applies on its own (see §8). `RiderProfile.resettingZoneBoundaries()`
 clears all four at once — the S12 "Reset HR Zones to Defaults" row — without touching
 `restingOverrideBPM`/`maxOverrideBPM`, which have no S12 entry point.
+
+**#238 — Health's preferred zones.** iOS 27's `preferredWorkoutZoneConfiguration(for: .heartRate)` gives the
+rider's own zones from Health, read into the resolvers as a `healthZoneCeilings: [Int]?` term (the inclusive top
+bpm of zones 1–4, from `HealthKitClient.zoneCeilings(from:)`). A boundary then resolves
+`override ?? health ?? karvonenDefault`. The Health term is dropped when a resting or max override is set,
+because the rider has said they disagree with Health. It is also dropped unless it is four ceilings rising
+strictly above resting, so the #103 guarantees hold. They are not capped at the resolved max, which is only an
+estimate; zone 5's top rises to at least its first bpm instead. Nothing new is stored.
 
 **Resolution happens at read time** — `override ?? healthKit ?? default` — so zone boundaries follow a
 Health value the moment it changes, with no local copy to re-sync. The HealthKit terms are
@@ -1162,6 +1167,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 |---|---|
 | 1.0 (MVP) | All entities as specified above |
 | 1.1 (MVP — Routes, M8) | Add Route @Model (§3.10); #252 later adds its optional `terrainData` and `surfaceData`, backfilling terrain for routes imported before it. Add `Ride.routeId: UUID?` and `Ride.routeProgressMeters: Double?` alongside the existing `Ride.routeName`. All three are optional, so there is no backfill: a pre-M8 store opens with them nil (`RideSchemaMigrationTests`). `Ride.route: Route?` was **not** added — see OQDM1 |
+| 1.1.1 (MVP — #284) | Remove `Ride.elevationGainMeters`, `Ride.elevationDropMeters` and `Ride.hrZoneDurations`. They were never written: elevation comes from the saved track, and zones resolve at read time (§8). Inferred lightweight migration drops the columns, and a store that still carries them opens with its rides intact (`RideSchemaMigrationTests`) |
 | 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 

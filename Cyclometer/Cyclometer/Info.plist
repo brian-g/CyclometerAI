@@ -47,7 +47,7 @@
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Cyclometer records your route in the background during an active ride. Unless you are recording the GPS is not active.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Cyclometer uses your location to record your route. GPS is not active unless your are recording a ride.</string>
+	<string>Cyclometer uses your location to record your route. GPS is not active unless you are recording a ride.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Cyclometer uses motion and fitness activity to tell riding from stopping, so it can pause and resume your ride automatically.</string>
 	<key>UIAppFonts</key>
@@ -65,7 +65,6 @@
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>audio</string>
 		<string>bluetooth-central</string>
 		<string>location</string>
 	</array>

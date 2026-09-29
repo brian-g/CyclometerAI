@@ -4,11 +4,11 @@ import SwiftData
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "persistence")
+private let logger = Logger.cyclometer(.persistence)
 
 /// Root feature — owns tab selection and active ride lifecycle.
 /// Navigation follows Apple Music pattern: Rides / Routes / Settings tabs.
-/// Active ride dashboard is a custom screen over the tab structure.
+/// Active ride dashboard is a full-screen cover that zooms out of the tab accessory (#333).
 @Reducer
 struct AppFeature {
 
@@ -51,6 +51,9 @@ struct AppFeature {
         /// The rider's own backlight level, captured when the dim starts so waking
         /// restores what they had rather than some app-chosen constant.
         var preDimBrightness: Double? = nil
+        /// A finger is on the screen. The countdown doesn't run while one is, so the
+        /// dashboard never dims under a drag (#333).
+        var isTouchDown: Bool = false
 
         /// The app owns the display only while the dashboard is the visible surface,
         /// a ride is actively recording, and the app is foregrounded (#110, #102). A
@@ -90,10 +93,14 @@ struct AppFeature {
         // ── Screen power management (#110) ───────────────────────────────────────
         case scenePhaseChanged(isActive: Bool)
         case screenVisibilityChanged(Bool)
-        /// Any touch on the dashboard — including the one that wakes it from a dim.
-        /// The blocker overlay swallows that first touch, but where it came from is a
-        /// view concern; the reducer only needs to know the rider is still there.
-        case userInteracted
+        /// The first finger down and the last one up, anywhere in the app window
+        /// (#333). They pause and restart the countdown. While dimmed the blocker
+        /// window keeps them from arriving; one that does anyway wakes the screen.
+        case touchBegan
+        case touchEnded
+        /// The only thing that wakes a dim: a tap on the blocker, which swallows it
+        /// (#110, #333).
+        case wakeTapped
         case dimTimerFired
         case preDimBrightnessCaptured(Double)
     }
@@ -162,11 +169,12 @@ struct AppFeature {
                         if let summary = try? await persistenceClient.fetchResumableRide() {
                             await send(.resumableRideFetched(summary))
                         } else {
-                            // Retries any thumbnail a past Finish failed to capture (#177).
-                            // Only here: a ride closed out by `resumableRideFetched` runs
-                            // the backfill itself once its finalize lands, so the two never
-                            // race over the same ride.
-                            await Self.backfillMapThumbnails(send: send)
+                            // Retries any thumbnail a past Finish failed to capture (#177), and
+                            // any Apple Health workout that didn't land (#277). Only here: a
+                            // ride closed out by `resumableRideFetched` runs the backfills
+                            // itself once its finalize lands, so the two never race over the
+                            // same ride.
+                            await Self.backfillFinishedRides(send: send)
                         }
                     },
                     // Route thumbnails (#273): routes imported before them, and any render
@@ -299,8 +307,12 @@ struct AppFeature {
                 guard state.activeRide == nil else {
                     return .run { [persistenceClient, date] send in
                         try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
+                        // No Apple Health workout (#277): its end is the relaunch, not when the
+                        // rider stopped, so a workout would span every hour between the two.
+                        // Settled before the backfill below, the only one that could see it.
+                        try? await persistenceClient.settleRideHealthWorkout(summary.rideId)
                         await send(.rides(.reloadRides))
-                        await Self.backfillMapThumbnails(send: send)
+                        await Self.backfillFinishedRides(send: send)
                     }
                 }
 
@@ -316,7 +328,7 @@ struct AppFeature {
                             )
                             rideEndIntentClient.clear()
                             await send(.rides(.reloadRides))
-                            await Self.backfillMapThumbnails(send: send)
+                            await Self.backfillFinishedRides(send: send)
                         } catch {
                             // Logged in RidePersistenceActor. The marker stays so the
                             // next launch tries again rather than resuming the ride.
@@ -363,7 +375,22 @@ struct AppFeature {
                     armDimTimer(state)
                 )
 
-            case .userInteracted:
+            case .touchBegan:
+                state.isTouchDown = true
+                guard state.isDashboardVisible else { return .none }
+                // Cancels a dim at any stage, the backlight read included.
+                return .cancel(id: CancelID.dimTimer)
+
+            case .touchEnded:
+                state.isTouchDown = false
+                guard state.isDashboardVisible else { return .none }
+                // While dimmed, the blocker window keeps touches from reaching the app
+                // window, so a dimmed touch arrives here only if the blocker failed to
+                // appear. Waking then means no dim is ever left that a touch can't end.
+                let restoreAfterTouch = wake(&state)
+                return .merge(restoreAfterTouch, armDimTimer(state))
+
+            case .wakeTapped:
                 guard state.isDashboardVisible else { return .none }
                 // Sequenced, not inlined into `.merge`: `wake` takes `state` inout, so
                 // reading it again in the same call would overlap that access.
@@ -377,9 +404,13 @@ struct AppFeature {
                 // `preDimBrightness` inseparable — a dim that is on with nothing to
                 // restore to is exactly the state that would strand the rider's phone
                 // at 10% brightness.
+                //
+                // Under the timer's ID, so a touch landing mid-read cancels the dim
+                // outright (#333): a cancelled effect's `send` is dropped.
                 return .run { [screenClient] send in
                     await send(.preDimBrightnessCaptured(screenClient.brightness()))
                 }
+                .cancellable(id: CancelID.dimTimer)
 
             case .preDimBrightnessCaptured(let level):
                 // Re-checked, not assumed: the rider may have backgrounded the app or
@@ -493,13 +524,18 @@ struct AppFeature {
         }
     }
 
-    /// Thumbnails for rides that don't have one yet (#177): rides closed out here, which never
-    /// reached `ActiveRideFeature`'s Finish, and any capture that failed. Tells the Rides tab
-    /// when any landed, so rows already on screen go back for their image (#248).
-    private static func backfillMapThumbnails(send: Send<Action>) async {
+    /// What a finished ride is owed after its finalize: its thumbnail (#177) and its Apple
+    /// Health workout (#277). Covers rides closed out here, which never reached
+    /// `ActiveRideFeature`'s Finish, and anything a past attempt failed to do. Tells the Rides
+    /// tab when a thumbnail landed, so rows already on screen go back for their image (#248).
+    ///
+    /// Side by side: offline, the thumbnails wait on map tiles, and the workout needs none.
+    private static func backfillFinishedRides(send: Send<Action>) async {
+        async let workouts = RideHealthWorkout.backfill()
         if await RideMapThumbnail.backfill() > 0 {
             await send(.rides(.mapThumbnailsCaptured))
         }
+        _ = await workouts
     }
 
     /// Restores the rider's own brightness and clears the dim. A no-op when not
@@ -518,8 +554,10 @@ struct AppFeature {
     /// Gated on the rider's Auto-dim preference (S12). The wake lock deliberately is
     /// not — turning auto-dim off means "stop dimming", not "let the phone sleep
     /// mid-ride".
+    ///
+    /// Not while a finger is down: the lift re-arms it (#333).
     private func armDimTimer(_ state: State) -> Effect<Action> {
-        guard state.preferences.isAutoDimEnabled else { return .none }
+        guard state.preferences.isAutoDimEnabled, !state.isTouchDown else { return .none }
         return .run { [clock] send in
             try await clock.sleep(for: .seconds(Self.dimAfterSeconds))
             await send(.dimTimerFired)

@@ -99,6 +99,11 @@ struct RideSchemaMigrationTests {
         ride.averageSpeedMPS = 7.64
         ride.averageHeartRateBPM = 148
         ride.recordingState = .ended
+        // Attributes #284 removed from `Ride`. Real values, not the defaults, so the
+        // migration has to drop columns that carry data — the dictionary included.
+        ride.elevationGainMeters = 412
+        ride.elevationDropMeters = 398
+        ride.hrZoneDurations = [2: 1_800, 3: 2_400]
         context.insert(ride)
         try context.save()
     }
@@ -143,6 +148,25 @@ struct RideSchemaMigrationTests {
         }
     }
 
+    /// #284 is the first change to *remove* `Ride` attributes rather than add them. The legacy
+    /// store holds data in all three, and lightweight migration has to drop those columns.
+    @Test("a store carrying the attributes #284 removed still opens")
+    func opensStoreWithRemovedAttributes() throws {
+        let rideId = UUID()
+        let startedAt = Date(timeIntervalSince1970: 1_757_155_800)
+
+        try withTemporaryStoreURL(prefix: "RideMigration") { url in
+            try writeLegacyStore(at: url, rideId: rideId, startedAt: startedAt)
+
+            let rides = try ModelContext(openStore(at: url)).fetch(FetchDescriptor<Ride>())
+            let ride = try #require(rides.first, "the ride should survive losing three columns")
+            #expect(rides.count == 1)
+            #expect(ride.id == rideId)
+            #expect(ride.distanceMeters == 32_186)
+            #expect(ride.averageHeartRateBPM == 148)
+        }
+    }
+
     /// `Route` (#191) is the first entity added to the schema since the store shipped, as
     /// opposed to an attribute added to an existing one. A store written before it existed
     /// has no `Route` table at all, so this asserts the additive half of lightweight
@@ -176,6 +200,28 @@ struct RideSchemaMigrationTests {
             #expect(routes.count == 1)
             #expect(routes.first?.name == "Hanging Rock")
             #expect(routes.first?.coordinates.count == 2)
+        }
+    }
+
+    /// #277, AC4: rides that ended before the flag existed count as done. Those since #250
+    /// already have their workout, and the rest were never going to get one, so a first launch
+    /// must not write them all.
+    @Test("a ride that ended before #277 migrates as not owed a workout, and the backfill leaves it alone")
+    func legacyRideIsNotOwedWorkout() async throws {
+        try await withTemporaryStoreURL(prefix: "RideMigration") { url in
+            let rideId = UUID()
+            try writeLegacyStore(at: url, rideId: rideId, startedAt: .now)
+            // The legacy shape has no `endedAt` set; give it one, so the owed-list predicate's
+            // `endedAt != nil` can't be what excludes it.
+            let container = try openStore(at: url)
+            let context = ModelContext(container)
+            let legacyRide = try #require(context.fetch(FetchDescriptor<Ride>()).first)
+            #expect(legacyRide.isHealthWorkoutOwed == false)
+            legacyRide.endedAt = legacyRide.startedAt.addingTimeInterval(4_212)
+            try context.save()
+
+            let actor = RidePersistenceActor(modelContainer: container)
+            #expect(try await actor.ridesOwedHealthWorkout().isEmpty)
         }
     }
 

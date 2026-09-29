@@ -3,7 +3,7 @@ import AVFoundation
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
-private let logger = Logger(subsystem: "com.xavier.cyclometer", category: "audio")
+private let logger = Logger.cyclometer(.audio)
 
 /// TCA dependency for the app's synthesized tones (per Audio.md spec): the three radar safety
 /// alerts, and the turn tones navigation announces (#198).

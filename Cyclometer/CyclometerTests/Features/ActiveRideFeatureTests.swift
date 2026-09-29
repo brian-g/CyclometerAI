@@ -2005,6 +2005,23 @@ struct ActiveRideFeatureHeartRateTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    @Test("Health's preferred zones classify the dashboard's zone (#238)")
+    func healthZonesClassifyTheDashboardZone() async {
+        let store = makeStore(healthKitClient: .mock(heartRateZoneCeilings: [120, 140, 160, 175]))
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.healthProfileFetched) {
+            $0.healthZoneCeilingsBPM = [120, 140, 160, 175]
+        }
+        // Zone 1 under the 60/190 Karvonen defaults (its ceiling is 137); zone 2 under Health's.
+        await store.send(.heartRateUpdated(130)) {
+            $0.heartRateBPM = 130
+            $0.hrZone = 2
+        }
+        await store.skipInFlightEffects(strict: false)
+    }
+
     // MARK: - BLE → HealthKit fallback (#161)
 
     @Test("A live HealthKit BPM reaches the dashboard when nothing is paired")
@@ -2487,6 +2504,29 @@ struct ActiveRideFeatureHRDropoutTests {
         #expect(recorded.dropFirst().allSatisfy { $0.heartRateBPM == nil })
         // It is still the best reading available, so it stays on screen throughout.
         #expect(store.state.displayHeartRateBPM == 72)
+    }
+
+    /// The same rule for position's third axis (#303): a fix CoreLocation gave no valid
+    /// altitude is recorded without one — not as the 0 m it reported, and not as the
+    /// altitude before it, which would fabricate a measurement exactly as a held HR does.
+    @Test("A fix with no valid altitude records absent altitude, not zero or the last one")
+    func invalidAltitudeRecordsAbsentAltitude() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.elapsedTick)
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: Self.goodFix.coordinate, altitude: nil, speed: 8.5,
+            horizontalAccuracy: 5.0, heading: 192.0, timestamp: Self.fixedNow + 1
+        )))
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.map(\.altitudeMeters) == [280.0, nil])
     }
 
     private static let goodFix = LocationUpdate(
@@ -3064,10 +3104,11 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
         RadarTarget(id: VariaRadarClient.vehicleSlotIDs[0], relativeVelocityMPS: mps, rangeMetres: 4, threatLevel: .allClear)
     }
 
-    private func makeStore(persistenceClient: PersistenceClient) -> TestStoreOf<ActiveRideFeature> {
-        let store = TestStore(
-            initialState: ActiveRideFeature.State(recordingState: .active, coordinate: Self.coordinate)
-        ) {
+    private func makeStore(
+        initialState: ActiveRideFeature.State = .init(recordingState: .active, coordinate: Self.coordinate),
+        persistenceClient: PersistenceClient
+    ) -> TestStoreOf<ActiveRideFeature> {
+        let store = TestStore(initialState: initialState) {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
@@ -3193,6 +3234,29 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
             $0.radarConnectionState = .active
             $0.wasRadarEverPaired = true
         }
+    }
+
+    /// #298: a ride killed after a pass and before its first checkpoint resumes with the
+    /// count `fetchResumableRide` rebuilt from its saved events. A radar that never
+    /// reconnects after the resume must not finalize that ride as "no radar".
+    @Test("A resumed ride with saved passes finalizes with its count when the radar never reconnects")
+    func resumedPassesFinalizeWithoutRadarReconnect() async {
+        let finalized = LockIsolated<RideSummaryUpdate?>(nil)
+        var resumed = ActiveRideFeature.State(resuming: RideSummaryUpdate(
+            rideId: UUID(), recordingState: .active, durationSeconds: 20, distanceMeters: 100,
+            averageSpeedMPS: 5, maxSpeedMPS: 6, vehiclePassCount: 1
+        ))
+        resumed.coordinate = Self.coordinate
+        let store = makeStore(
+            initialState: resumed,
+            persistenceClient: .mock(onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) })
+        )
+
+        await endRide(store)
+        await expectEventually { finalized.value != nil }
+
+        #expect(store.state.wasRadarEverPaired == false)
+        #expect(finalized.value?.vehiclePassCount == 1)
     }
 }
 

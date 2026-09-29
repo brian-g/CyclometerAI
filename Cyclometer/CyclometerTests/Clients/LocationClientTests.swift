@@ -64,6 +64,31 @@ struct LocationClientTests {
         #expect(a != c)
     }
 
+    // MARK: - CLLocation mapping (#303)
+
+    private static func clLocation(verticalAccuracy: Double) -> CLLocation {
+        CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 43.0731, longitude: -89.4012),
+            altitude: 0, horizontalAccuracy: 5, verticalAccuracy: verticalAccuracy,
+            course: 90, speed: 8.5, timestamp: Date(timeIntervalSince1970: 1_000_000)
+        )
+    }
+
+    @Test("an altitude CoreLocation marks invalid arrives as nil, never as its 0 m")
+    func invalidAltitudeIsNil() {
+        #expect(LocationUpdate(Self.clLocation(verticalAccuracy: -1)).altitude == nil)
+    }
+
+    @Test("a valid altitude arrives as measured, sea level included")
+    func validAltitudeIsKept() {
+        let update = LocationUpdate(Self.clLocation(verticalAccuracy: 3))
+        #expect(update == LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
+            altitude: 0, speed: 8.5, horizontalAccuracy: 5, heading: 90,
+            timestamp: Date(timeIntervalSince1970: 1_000_000)
+        ))
+    }
+
     // MARK: - testValue behaviour
 
     @Test("testValue startUpdates stream completes immediately")
