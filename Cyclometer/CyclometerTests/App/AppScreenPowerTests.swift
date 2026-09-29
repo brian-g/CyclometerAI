@@ -110,6 +110,26 @@ struct AppScreenPowerTests {
         #expect(calls.value == [.idleTimerDisabled(true), .idleTimerDisabled(false)])
     }
 
+    /// Auto-pause (0 speed for 10s) must hand the screen back just like a manual
+    /// pause does (#102). A stationary phone reaches this within seconds.
+    @Test("Auto-pause releases the idle timer even though the dashboard stays open")
+    func autoPauseReleasesTheIdleTimer() async {
+        let clock = TestClock()
+        let calls = LockIsolated<[ScreenCall]>([])
+        let store = Self.makeStore(clock: clock, calls: calls)
+        store.exhaustivity = .off
+
+        await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
+        #expect(calls.value == [.idleTimerDisabled(true)])
+
+        await store.send(.activeRide(.autoPauseTriggered))
+        await store.finish()
+
+        #expect(store.state.isDashboardPresented == true)
+        #expect(store.state.activeRide?.recordingState == .paused)
+        #expect(calls.value == [.idleTimerDisabled(true), .idleTimerDisabled(false)])
+    }
+
     // MARK: - Auto-dim
 
     @Test("Dims after the idle timeout, capturing the rider's own brightness")
