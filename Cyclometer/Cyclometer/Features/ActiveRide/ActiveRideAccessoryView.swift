@@ -3,8 +3,9 @@ import Charts
 
 /// S05.3 — the compact "mini-player" strip shown above the TabBar via
 /// `tabViewBottomAccessory` while the Active Ride Dashboard is minimized.
-/// Stateless display: it renders values passed by `AppView` and reports taps
-/// on "Open"; the ride lifecycle lives in `AppFeature`/`ActiveRideFeature`.
+/// Stateless display: it renders values passed by `AppView` and reports a tap
+/// anywhere on the strip, which reopens the dashboard (#333, as Apple Music's mini
+/// player does); the ride lifecycle lives in `AppFeature`/`ActiveRideFeature`.
 struct ActiveRideAccessoryView: View {
     /// Route completion 0…1. `nil` when no route is loaded → bicycle glyph.
     let progress: Double?
@@ -18,30 +19,57 @@ struct ActiveRideAccessoryView: View {
     /// `.expanded` when shown full-width above it. Drives how much we can fit.
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
 
+    var body: some View {
+        AccessoryStrip(
+            progress: progress,
+            distanceMeters: distanceMeters,
+            speedMPS: speedMPS,
+            elapsedSeconds: elapsedSeconds,
+            unit: unit,
+            isCollapsed: placement == .inline,
+            onOpen: onOpen
+        )
+    }
+}
+
+/// The strip itself, with the placement passed in rather than read: the environment
+/// value is get-only, so this is how a preview shows the collapsed layout.
+private struct AccessoryStrip: View {
+    let progress: Double?
+    let distanceMeters: Double
+    let speedMPS: Double
+    let elapsedSeconds: Int
+    let unit: UnitSystem
+    let isCollapsed: Bool
+    let onOpen: () -> Void
+
     private var displayDistance: Double { unit.distance(fromMeters: distanceMeters) }
     private var displaySpeed: Double { unit.speed(fromMPS: speedMPS) }
-    private var isCollapsed: Bool { placement == .inline }
 
     var body: some View {
-        HStack(spacing: Spacing.xs) {
-            OpenRingProgressView(progress: progress)
-                .frame(width: Spacing.xxxl, height: Spacing.xxxl) // 40pt ≈ S05.3 42pt
+        Button(action: onOpen) {
+            HStack(spacing: Spacing.xs) {
+                OpenRingProgressView(progress: progress)
+                    .frame(width: Spacing.xxxl, height: Spacing.xxxl) // 40pt ≈ S05.3 42pt
 
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                HeroNumber(elapsedSeconds.formattedElapsed, unit: "").heroNumberSize(.small)
-                HeroNumber(displayDistance, unit: unit.distanceLabel).heroNumberSize(.small)
-                // Speed is dropped when collapsed into the TabBar — there isn't
-                // room, and the overflow reads as clipped/ugly.
-                if !isCollapsed {
-                    HeroNumber(displaySpeed, unit: unit.speedLabel).heroNumberSize(.small)
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                    HeroNumber(elapsedSeconds.formattedElapsed, unit: "").heroNumberSize(.small)
+                    Spacer()
+                    HeroNumber(displayDistance, unit: unit.distanceLabel).heroNumberSize(.small)
+                    // Speed is dropped when collapsed into the TabBar — there isn't
+                    // room, and the overflow reads as clipped/ugly.
+                    if !isCollapsed {
+                        Spacer()
+                        HeroNumber(displaySpeed, unit: unit.speedLabel).heroNumberSize(.small)
+                    }
                 }
+                Spacer()
             }
-            Spacer()
-
-            Button("Open", action: onOpen)
-                .buttonStyle(.borderedProminent)
+            // The Spacer's gap is part of the target too.
+            .contentShape(Rectangle())
         }
-        .padding(0)
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the ride dashboard")
     }
 }
 
@@ -102,6 +130,18 @@ private struct OpenRingProgressView: View {
     ActiveRideAccessoryView(
         progress: 0.42, distanceMeters: 12300, speedMPS: 7.89, elapsedSeconds: 2340, unit: .metric, onOpen: {}
     )
+    .padding()
+    .tint(.cyPrimary)   // AppView applies this globally on the TabView
+}
+
+/// Collapsed into the TabBar (`.inline`), where speed is dropped. The width
+/// approximates the inline slot beside the minimised tab button on iPhone 17 Pro.
+#Preview("Collapsed (inline)") {
+    AccessoryStrip(
+        progress: nil, distanceMeters: 12300, speedMPS: 7.89, elapsedSeconds: 2340, unit: .imperial,
+        isCollapsed: true, onOpen: {}
+    )
+    .frame(width: 300)
     .padding()
     .tint(.cyPrimary)   // AppView applies this globally on the TabView
 }

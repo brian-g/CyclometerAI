@@ -4,6 +4,8 @@ import ComposableArchitecture
 struct AppView: View {
     @Bindable var store: StoreOf<AppFeature>
     @Environment(\.scenePhase) private var scenePhase
+    /// The dashboard zooms out of the ride accessory and collapses back into it (#333).
+    @Namespace private var dashboardZoom
 
     /// The accessory strip shows only while a ride is active or paused (S05.3).
     private var hasVisibleRide: Bool {
@@ -11,6 +13,20 @@ struct AppView: View {
         case .active, .paused: return true
         default: return false
         }
+    }
+
+    /// The dashboard's store while it's presented. `item:` rather than `isPresented:`
+    /// so SwiftUI keeps the last store through the collapse: Finish nils `activeRide`
+    /// in the same action that dismisses, and the scoped store holds its last state.
+    private var dashboardStore: Binding<StoreOf<ActiveRideFeature>?> {
+        Binding(
+            get: {
+                store.isDashboardPresented
+                    ? store.scope(state: \.activeRide, action: \.activeRide)
+                    : nil
+            },
+            set: { if $0 == nil { store.send(.dashboardDismissed) } }
+        )
     }
 
     var body: some View {
@@ -66,6 +82,7 @@ struct AppView: View {
                         onOpen: { store.send(.dashboardOpened) }
                     )
                     .padding(.horizontal, 4)
+                    .matchedTransitionSource(id: DashboardZoom.sourceID, in: dashboardZoom)
                 }
             }
             .tabBarMinimizeBehavior(.onScrollDown)
@@ -85,52 +102,36 @@ struct AppView: View {
                 RideSummaryView(store: summaryStore)
                     .presentationDragIndicator(.visible)
             }
-            
-            // ── Active Ride Dashboard ───────────────────────────
-            if store.isDashboardPresented {
-                if let rideStore = store.scope(state: \.activeRide, action: \.activeRide) {
-                    RideDashboardView(
-                        store: rideStore,
-                        onClose: { store.send(.dashboardDismissed) }
-                    )
-                    .transition(.move(edge: .bottom)) // Animates beautifully when appearing/dismissing
-                    .zIndex(1) // Ensures it sits above the TabView
-                    // Any touch resets the auto-dim countdown (#110). Simultaneous so
-                    // it observes the touch without stealing it from the ride controls
-                    // or the dashboard's page swipe.
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 0)
-                            .onEnded { _ in store.send(.userInteracted) }
-                    )
-                }
-            }
 
-            // ── Auto-Dim Blocker (#110) ─────────────────────────────────────────
-            // Lowering the backlight does not block touches, so this invisible layer
-            // is what makes the dim modal: it swallows the wake touch — taps *and*
-            // swipes — so it can't also trigger whatever sits underneath it.
-            if store.isDimmed {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .ignoresSafeArea()
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onEnded { _ in store.send(.userInteracted) }
-                    )
-                    .accessibilityLabel("Screen dimmed. Tap to wake.")
-                    .zIndex(2)
+            // ── Active Ride Dashboard (#333) ─────────────────────────────────────
+            // A system zoom presentation, as Apple Music's player does it: it expands from
+            // the accessory, and a drag down anywhere collapses it back in. Hand-built
+            // motion can't do this: moving a view re-flows its safe-area extension, so
+            // the old overlay squished as it was dragged (#330).
+            .fullScreenCover(item: dashboardStore) { rideStore in
+                RideDashboardView(store: rideStore)
+                    .navigationTransition(.zoom(sourceID: DashboardZoom.sourceID, in: dashboardZoom))
             }
 
             // ── Onboarding (S01→S02) ──────────────────────────────────────────────
             // Non-dismissible by design (#105) — a manual overlay, not a system
-            // presentation, matching the dashboard/dim-blocker idiom above rather than
-            // introducing `.fullScreenCover`.
+            // presentation.
             if let onboardingStore = store.scope(state: \.onboarding, action: \.onboarding) {
                 OnboardingView(store: onboardingStore)
                     .zIndex(3)
             }
         }
-        .animation(.smooth, value: store.isDashboardPresented)
+        // Auto-dim (#110, #333): the countdown pauses under any finger in the app
+        // window, and while dimmed a blocker window takes every touch.
+        .background {
+            AutoDimWindowBridge(
+                isTracking: store.isDashboardPresented,
+                isDimmed: store.isDimmed,
+                onTouchBegan: { store.send(.touchBegan) },
+                onTouchEnded: { store.send(.touchEnded) },
+                onWake: { store.send(.wakeTapped) }
+            )
+        }
         .onChange(of: scenePhase, initial: true) { _, phase in
             store.send(.scenePhaseChanged(isActive: phase == .active))
         }
@@ -140,6 +141,11 @@ struct AppView: View {
         // "Open in Cyclometer" on a `.gpx` from Files, Mail or Safari.
         .onOpenURL { store.send(.fileOpened($0)) }
     }
+}
+
+/// The dashboard's zoom-transition source, shared by the accessory and the cover.
+private enum DashboardZoom {
+    static let sourceID = "activeRideDashboard"
 }
 
 // MARK: - Previews

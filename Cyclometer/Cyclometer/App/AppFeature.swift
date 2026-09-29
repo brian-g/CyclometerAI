@@ -51,6 +51,9 @@ struct AppFeature {
         /// The rider's own backlight level, captured when the dim starts so waking
         /// restores what they had rather than some app-chosen constant.
         var preDimBrightness: Double? = nil
+        /// A finger is on the screen. The countdown doesn't run while one is, so the
+        /// dashboard never dims under a drag (#333).
+        var isTouchDown: Bool = false
 
         /// The app owns the display only while the dashboard is the visible surface,
         /// a ride is actively recording, and the app is foregrounded (#110, #102). A
@@ -90,10 +93,13 @@ struct AppFeature {
         // ── Screen power management (#110) ───────────────────────────────────────
         case scenePhaseChanged(isActive: Bool)
         case screenVisibilityChanged(Bool)
-        /// Any touch on the dashboard — including the one that wakes it from a dim.
-        /// The blocker overlay swallows that first touch, but where it came from is a
-        /// view concern; the reducer only needs to know the rider is still there.
-        case userInteracted
+        /// The first finger down and the last one up, anywhere in the app window
+        /// (#333). They pause and restart the countdown; neither wakes a dim.
+        case touchBegan
+        case touchEnded
+        /// The only thing that wakes a dim: a tap on the blocker, which swallows it
+        /// (#110, #333).
+        case wakeTapped
         case dimTimerFired
         case preDimBrightnessCaptured(Double)
     }
@@ -368,7 +374,17 @@ struct AppFeature {
                     armDimTimer(state)
                 )
 
-            case .userInteracted:
+            case .touchBegan:
+                state.isTouchDown = true
+                guard state.isDashboardVisible, !state.isDimmed else { return .none }
+                return .cancel(id: CancelID.dimTimer)
+
+            case .touchEnded:
+                state.isTouchDown = false
+                guard state.isDashboardVisible, !state.isDimmed else { return .none }
+                return armDimTimer(state)
+
+            case .wakeTapped:
                 guard state.isDashboardVisible else { return .none }
                 // Sequenced, not inlined into `.merge`: `wake` takes `state` inout, so
                 // reading it again in the same call would overlap that access.
@@ -376,7 +392,7 @@ struct AppFeature {
                 return .merge(restore, armDimTimer(state))
 
             case .dimTimerFired:
-                guard state.isDashboardVisible, !state.isDimmed else { return .none }
+                guard state.isDashboardVisible, !state.isDimmed, !state.isTouchDown else { return .none }
                 // Reading the backlight is async, so the dim commits in the *next*
                 // action rather than here. That keeps `isDimmed` and
                 // `preDimBrightness` inseparable — a dim that is on with nothing to
@@ -388,8 +404,8 @@ struct AppFeature {
 
             case .preDimBrightnessCaptured(let level):
                 // Re-checked, not assumed: the rider may have backgrounded the app or
-                // minimized the dashboard while the read was in flight.
-                guard state.isDashboardVisible, !state.isDimmed else { return .none }
+                // minimized the dashboard, or put a finger down, while the read was in flight.
+                guard state.isDashboardVisible, !state.isDimmed, !state.isTouchDown else { return .none }
                 state.isDimmed = true
                 state.preDimBrightness = level
                 return .run { [screenClient] _ in
@@ -528,8 +544,10 @@ struct AppFeature {
     /// Gated on the rider's Auto-dim preference (S12). The wake lock deliberately is
     /// not — turning auto-dim off means "stop dimming", not "let the phone sleep
     /// mid-ride".
+    ///
+    /// Not while a finger is down: the lift re-arms it (#333).
     private func armDimTimer(_ state: State) -> Effect<Action> {
-        guard state.preferences.isAutoDimEnabled else { return .none }
+        guard state.preferences.isAutoDimEnabled, !state.isTouchDown else { return .none }
         return .run { [clock] send in
             try await clock.sleep(for: .seconds(Self.dimAfterSeconds))
             await send(.dimTimerFired)

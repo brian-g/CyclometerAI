@@ -29,7 +29,7 @@ struct AppFeatureTests {
         #expect(store.state.activeRide != nil)
     }
 
-    /// Tapping "Open" on the accessory re-presents the full-screen dashboard.
+    /// Tapping the accessory re-presents the full-screen dashboard.
     @Test("dashboardOpened re-presents the dashboard while a ride is active")
     func dashboardOpenedRepresents() async {
         let store = TestStore(

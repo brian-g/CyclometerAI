@@ -2,7 +2,8 @@ import SwiftUI
 import ComposableArchitecture
 import AudioToolbox
 
-/// Full-screen active ride dashboard — presented as fullScreenCover over the tab bar.
+/// Full-screen active ride dashboard — a fullScreenCover that zooms out of the ride
+/// accessory and collapses back into it on a drag down (#333).
 /// Matches prototype RideDashboardView with TCA store replacing local @State.
 /// Dashboard uses the 2-col × 7-row widget grid (S05.4 factory default).
 struct RideDashboardView: View {
@@ -13,8 +14,7 @@ struct RideDashboardView: View {
     }
 
     @Bindable var store: StoreOf<ActiveRideFeature>
-    let onClose: () -> Void
-    @GestureState private var dragOffset: CGFloat = 0
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedPage: Page = .grid
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -51,9 +51,6 @@ struct RideDashboardView: View {
         .overlay(alignment: .top) {
             VStack(spacing: Spacing.xs) {
                 grabber()
-                    // Above the banner, so its drag target (which hangs below the
-                    // grabber's footprint) isn't covered while a banner shows.
-                    .zIndex(1)
                 if let banner = activeBanner {
                     RideBanner(text: banner.text, icon: banner.icon)
                         .transition(bannerTransition)
@@ -68,7 +65,6 @@ struct RideDashboardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .offset(y: max(dragOffset, 0))
         // Ride effects (timer/HR/radar/location) are started by AppFeature when
         // the ride begins and live for the whole ride, so they keep running when
         // this dashboard is minimized to the accessory strip. Do NOT start them
@@ -249,68 +245,19 @@ struct RideDashboardView: View {
     }
 
     // ── Grabber ───────────────────────────────────────────────────────────────
-    // Sits at the top of the safe area, just below the Dynamic Island.
+    // Sits at the top of the safe area, just below the Dynamic Island. A visual
+    // affordance only: the zoom presentation's own drag, anywhere on the dashboard,
+    // collapses it into the accessory (#333).
     private func grabber() -> some View {
         Capsule()
             .fill(Color(.systemGray3))
             .frame(width: Spacing.xxl, height: Spacing.grabberHeight)
             .frame(maxWidth: .infinity, minHeight: Spacing.sm, alignment: .top)
             .padding(.bottom, Spacing.xs)
-            // The drag target is a tap-target-tall band hung below the capsule as
-            // an overlay, so it doesn't grow the footprint and push the banner
-            // down (#330). Centred rather than full width, so taps on the widgets'
-            // top corners (Speed's source badge and avg) still reach them. The
-            // paging TabView underneath never sees these drags.
-            .overlay(alignment: .top) {
-                Color.clear
-                    .frame(width: Spacing.grabberHitWidth, height: Spacing.tapTarget)
-                    .contentShape(Rectangle())
-                    .gesture(dismissDrag)
-                    // The drag is the only way to minimise, and VoiceOver can't
-                    // perform it.
-                    .accessibilityRepresentation {
-                        Button("Minimize Ride", action: onClose)
-                    }
+            // VoiceOver can't perform the drag.
+            .accessibilityRepresentation {
+                Button("Minimize Ride") { dismiss() }
             }
-    }
-
-    /// Pull-down-to-dismiss. Attached to the grabber (not the container) so it
-    /// wins over the paging TabView's internal gesture recognizer. Measured in
-    /// screen space: the dashboard moves with the finger, and in its own space
-    /// the predicted end came out short, so neither a flick nor a long drag
-    /// dismissed (#330).
-    private var dismissDrag: some Gesture {
-        DragGesture(coordinateSpace: .global)
-            .updating($dragOffset) { value, state, _ in
-                state = value.translation.height
-            }
-            .onEnded { value in
-                if Self.shouldDismiss(
-                    translation: value.translation,
-                    predictedEndTranslation: value.predictedEndTranslation
-                ) {
-                    onClose()
-                }
-            }
-    }
-
-    /// How far down a drag must be heading to minimise the dashboard.
-    static let dismissDistance: CGFloat = 120
-    /// How far the finger must actually travel, so a quick brush (a bump, a wet
-    /// screen) can't be projected into a dismissal.
-    static let dismissMinimumTravel: CGFloat = 40
-
-    /// Whether a drag on the grabber minimises the dashboard (#330). It must be
-    /// mostly downward, so a sideways or diagonal swipe starting on the grabber
-    /// can't. It must have travelled `dismissMinimumTravel`. And it must be heading
-    /// past `dismissDistance`, judged on where it was going rather than where the
-    /// finger let go, so a flick counts and a short slow drag springs back.
-    ///
-    /// Static, like `banner`, so the rule is tested without rendering a dashboard.
-    static func shouldDismiss(translation: CGSize, predictedEndTranslation: CGSize) -> Bool {
-        translation.height > abs(translation.width)
-            && translation.height >= dismissMinimumTravel
-            && predictedEndTranslation.height > dismissDistance
     }
 
     // ── Paging indicator — always visible; factory default shows 2 dots ────────
@@ -536,8 +483,7 @@ struct PaceWidget: View {
                 )
             ) {
                 ActiveRideFeature()
-            },
-            onClose: { }
+            }
         )
     }
 }
@@ -567,8 +513,7 @@ struct PaceWidget: View {
                 )
             ) {
                 ActiveRideFeature()
-            },
-            onClose: { }
+            }
         )
     }
 }
@@ -593,8 +538,7 @@ struct PaceWidget: View {
                 )
             ) {
                 ActiveRideFeature()
-            },
-            onClose: { }
+            }
         )
     }
 }
