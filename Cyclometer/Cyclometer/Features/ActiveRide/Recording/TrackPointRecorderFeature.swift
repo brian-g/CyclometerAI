@@ -1,5 +1,9 @@
 import ComposableArchitecture
 import Foundation
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+private let logger = Logger.cyclometer(.recording)
 
 /// Buffers one `TrackPointDTO` per elapsed second (fed by `ActiveRideFeature.elapsedTick`)
 /// into `RideDataBuffer` and flushes it to CoreData every 30s and again at ride end (#170).
@@ -57,16 +61,19 @@ struct TrackPointRecorderFeature {
     /// `.cancellable(id: .rideCheckpoint, cancelInFlight: true)`. `drainForFlush()` is
     /// destructive and actor-serialized: whichever call — the periodic `checkpointFired`
     /// or the final `stopRecording` — reaches the actor first drains whatever's currently
-    /// buffered, and the other gets the (possibly empty) remainder. No point is ever lost
-    /// or double-flushed, and `flushTrackPoints` is an append-only batch insert, not an
-    /// overwrite, so ordering between the two doesn't matter — unlike `updateRideSummary`,
-    /// which overwrites aggregate fields non-destructively and genuinely needs cancellation
-    /// to stop a stale write from landing after the final one.
+    /// buffered, and the other gets the (possibly empty) remainder. `flushTrackPoints` is an
+    /// append-only batch insert, not an overwrite, so ordering between the two doesn't matter —
+    /// unlike `updateRideSummary`, which overwrites aggregate fields non-destructively and
+    /// genuinely needs cancellation to stop a stale write from landing after the final one.
+    ///
+    /// A failed write puts its batch back in the buffer, so the next checkpoint retries it (#345).
     private func flushEffect() -> Effect<Action> {
         .run { [rideDataBuffer, persistenceClient] _ in
-            let points = await rideDataBuffer.drainForFlush()
-            guard !points.isEmpty else { return }
-            try? await persistenceClient.flushTrackPoints(points)
+            do {
+                try await rideDataBuffer.flush(to: persistenceClient.flushTrackPoints)
+            } catch {
+                logger.error("flushTrackPoints failed: \(error.localizedDescription, privacy: .public) — the batch is requeued for the next flush")
+            }
         }
     }
 }

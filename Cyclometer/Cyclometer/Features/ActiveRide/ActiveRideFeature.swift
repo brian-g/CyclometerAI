@@ -572,16 +572,21 @@ struct ActiveRideFeature {
                             PendingRideEnd(rideId: rideId, endedAt: endedAt, gpxFileURL: nil)
                         )
 
-                        let points = await rideDataBuffer.drainForFlush()
-                        if !points.isEmpty {
+                        // Retried once: a failed batch goes back into the buffer, so the retry
+                        // also carries any a checkpoint requeued. What still won't write is
+                        // left out of the GPX export below (it re-reads from persistence), and
+                        // S10 tells the rider (#345).
+                        do {
+                            try await rideDataBuffer.flush(to: persistenceClient.flushTrackPoints)
+                        } catch {
                             do {
-                                try await persistenceClient.flushTrackPoints(points)
+                                try await rideDataBuffer.flush(to: persistenceClient.flushTrackPoints)
                             } catch {
-                                // Not retried — GPX export still runs below and will
-                                // simply be missing these points (it re-reads from
-                                // persistence). Logged so a truncated export is at
-                                // least diagnosable after the fact.
-                                logger.error("flushTrackPoints failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — GPX export will be missing \(points.count, privacy: .public) point(s)")
+                                // Dropped, not left for the next ride's buffer.
+                                let unsaved = await rideDataBuffer.drainForFlush().count
+                                logger.error("flushTrackPoints failed twice at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — the ride ends without \(unsaved, privacy: .public) point(s)")
+                                @Shared(.unsavedTrackPoints) var unsavedTrackPoints
+                                $unsavedTrackPoints.withLock { $0[rideId] = unsaved }
                             }
                         }
 

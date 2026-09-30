@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import Foundation
 import Testing
 @testable import Cyclometer
@@ -86,5 +87,25 @@ struct RideDataBufferTests {
         #expect(await buffer.totalPointCount == 200)
         let drained = await buffer.drainForFlush()
         #expect(drained.count == 200)
+    }
+
+    private struct WriteFailed: Error {}
+
+    @Test("A failed flush puts its batch back ahead of newer points, and the next flush writes both in order (#345)")
+    func failedFlushRequeuesInOrder() async throws {
+        let buffer = RideDataBuffer()
+        await buffer.append(Self.point(1))
+        await buffer.append(Self.point(2))
+
+        await #expect(throws: WriteFailed.self) {
+            try await buffer.flush { _ in throw WriteFailed() }
+        }
+        await buffer.append(Self.point(3))
+
+        let written = LockIsolated<[TrackPointDTO]>([])
+        try await buffer.flush { batch in written.withValue { $0 += batch } }
+        #expect(written.value.map(\.speedMPS) == [1, 2, 3])
+        #expect(await buffer.totalPointCount == 3)
+        #expect(await buffer.drainForFlush().isEmpty)
     }
 }

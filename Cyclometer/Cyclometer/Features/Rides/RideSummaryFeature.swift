@@ -68,6 +68,9 @@ struct RideSummaryFeature {
         /// Empty for a ride with no heart-rate readings.
         var heartRateSecondsByBPM: [Int: Int] = [:]
 
+        /// The ride ended without part of its track (#345).
+        @Presents var alert: AlertState<Action.Alert>?
+
         init(rideId: UUID) {
             self.rideId = rideId
         }
@@ -104,6 +107,8 @@ struct RideSummaryFeature {
         var elevationProfileMeters: [Double]?
         var heartRateSecondsByBPM: [Int: Int]
         var defaultTitle: String
+        /// Points the ride ended without, when its final flush failed (#345).
+        var unsavedTrackPoints = 0
     }
 
     enum Action: Equatable {
@@ -116,6 +121,9 @@ struct RideSummaryFeature {
         case titleChanged(String)
         case titleFocused
         case finishTapped
+        case alert(PresentationAction<Alert>)
+
+        enum Alert: Equatable {}
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
@@ -141,6 +149,10 @@ struct RideSummaryFeature {
                             await send(.finalizeTimedOut)
                             return
                         }
+                        // Recorded before the finalize that just landed, so it's already there.
+                        @Shared(.unsavedTrackPoints) var unsavedTrackPoints
+                        let unsaved = unsavedTrackPoints[id] ?? 0
+                        $unsavedTrackPoints.withLock { $0[id] = nil }
                         async let stats = Self.fetchStats(id, persistenceClient)
                         async let points = Self.fetchTrackPoints(id, persistenceClient)
                         let track = await points
@@ -161,7 +173,8 @@ struct RideSummaryFeature {
                                 track, sampleCount: RideDetailFeature.chartSampleCount
                             ),
                             heartRateSecondsByBPM: RideDetailSeries.secondsByBPM(track),
-                            defaultTitle: defaultTitle
+                            defaultTitle: defaultTitle,
+                            unsavedTrackPoints: unsaved
                         )))
                         // Only after the screen has its numbers, so it never waits on the network.
                         guard isPlaceNameLookupEnabled,
@@ -195,6 +208,9 @@ struct RideSummaryFeature {
                 if state.title.isEmpty {
                     state.title = loaded.summary.title.isEmpty ? defaultTitle : loaded.summary.title
                 }
+                if loaded.unsavedTrackPoints > 0 {
+                    state.alert = Self.unsavedTrackAlert(points: loaded.unsavedTrackPoints)
+                }
                 return .none
 
             case .finalizeTimedOut:
@@ -227,7 +243,23 @@ struct RideSummaryFeature {
 
             case .finishTapped:
                 return .run { [dismiss] _ in await dismiss() }
+
+            case .alert:
+                return .none
             }
+        }
+        .ifLet(\.$alert, action: \.alert)
+    }
+
+    /// One point a second, so the count is the seconds of riding missing from the end.
+    static func unsavedTrackAlert(points: Int) -> AlertState<Action.Alert> {
+        let missing = Duration.seconds(points).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide))
+        return AlertState {
+            TextState("Some Track Data Wasn't Saved")
+        } actions: {
+            ButtonState(role: .cancel) { TextState("OK") }
+        } message: {
+            TextState("Your ride was saved, but the last \(missing) of its track couldn't be. Its map and GPX file end early.")
         }
     }
 

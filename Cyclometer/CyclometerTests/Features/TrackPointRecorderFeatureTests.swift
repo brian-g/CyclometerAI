@@ -137,4 +137,37 @@ struct TrackPointRecorderFeatureTests {
 
         #expect(flushed.value.map(\.speedMPS) == [1])
     }
+
+    private struct WriteFailed: Error {}
+
+    @Test("a checkpoint whose write fails keeps its points, and the next checkpoint writes them once, in order (#345)")
+    func failedCheckpointRetriesOnTheNext() async {
+        let attempts = LockIsolated(0)
+        let written = LockIsolated<[TrackPointDTO]>([])
+        var client = PersistenceClient.testValue
+        client.flushTrackPoints = { batch in
+            let attempt = attempts.withValue { $0 += 1; return $0 }
+            if attempt == 1 { throw WriteFailed() }
+            written.withValue { $0 += batch }
+        }
+        let store = makeStore(
+            initialState: TrackPointRecorderFeature.State(isRecording: true),
+            persistenceClient: client
+        )
+
+        await store.send(.timerTick(Self.point(1)))
+        await store.send(.timerTick(Self.point(2)))
+        // Each step's effects drained before the next, so the order is the test's, not the executor's.
+        await store.finish()
+        await store.send(.checkpointFired)
+        await store.finish()
+        #expect(written.value.isEmpty)
+
+        await store.send(.timerTick(Self.point(3)))
+        await store.finish()
+        await store.send(.checkpointFired)
+        await store.finish()
+        #expect(written.value.map(\.speedMPS) == [1, 2, 3])
+        #expect(attempts.value == 2)
+    }
 }
