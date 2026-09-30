@@ -7,14 +7,72 @@ import ComposableArchitecture
 @Suite("StartSheetFeature")
 struct StartSheetFeatureTests {
 
-    @Test("Start Ride button emits the startRide delegate")
+    @Test("Start Ride writes the Ride row, then emits the startRide delegate with its id")
     func startRideEmitsDelegate() async {
+        let created = LockIsolated<[UUID: Date]>([:])
         let store = TestStore(initialState: StartSheetFeature.State()) {
             StartSheetFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.persistenceClient.createRide = { id, startedAt, _ in created.withValue { $0[id] = startedAt } }
         }
 
+        await store.send(.startRideButtonTapped) { $0.isStarting = true }
+        await store.receive(.rideCreated(UUID(0))) { $0.isStarting = false }
+        await store.receive(.delegate(.startRide(rideId: UUID(0), route: nil)))
+        #expect(created.value == [UUID(0): Date(timeIntervalSince1970: 1_000_000)])
+    }
+
+    /// A ride without its `Ride` row has nothing to checkpoint or finalize and never reaches
+    /// Rides (#344). The failure keeps the rider on the sheet, before any sensor records,
+    /// and a second tap is a retry.
+    @Test("A failed Ride write keeps the sheet up with an alert, and starts no ride")
+    func startRideFailureAlerts() async {
+        struct WriteFailed: Error {}
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.persistenceClient.createRide = { _, _, _ in throw WriteFailed() }
+        }
+
+        await store.send(.startRideButtonTapped) { $0.isStarting = true }
+        await store.receive(.rideCreationFailed) {
+            $0.isStarting = false
+            $0.alert = AlertState {
+                TextState("Couldn't Start Ride")
+            } actions: {
+                ButtonState(role: .cancel) { TextState("OK") }
+            } message: {
+                TextState("Your ride couldn't be saved, so it wasn't started. Try again.")
+            }
+        }
+        await store.send(.alert(.dismiss)) { $0.alert = nil }
+    }
+
+    @Test("A second tap while the Ride row is being written starts nothing")
+    func startRideIgnoresSecondTap() async {
+        let gate = AsyncStream.makeStream(of: Void.self)
+        let created = LockIsolated(0)
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.persistenceClient.createRide = { _, _, _ in
+                created.withValue { $0 += 1 }
+                for await _ in gate.stream { break }
+            }
+        }
+
+        await store.send(.startRideButtonTapped) { $0.isStarting = true }
         await store.send(.startRideButtonTapped)
-        await store.receive(.delegate(.startRide(nil)))
+        gate.continuation.yield()
+        await store.receive(.rideCreated(UUID(0))) { $0.isStarting = false }
+        await store.receive(.delegate(.startRide(rideId: UUID(0), route: nil)))
+        #expect(created.value == 1)
     }
 
     @Test("Cancel dismisses the sheet")
@@ -242,12 +300,20 @@ struct StartSheetFeatureTests {
 
     @Test("Start Ride carries the sheet's route")
     func startRideCarriesTheRoute() async {
+        let createdRoute = LockIsolated<RouteReference?>(nil)
         let store = TestStore(initialState: StartSheetFeature.State(route: Self.route.reference)) {
             StartSheetFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.persistenceClient.createRide = { _, _, route in createdRoute.setValue(route) }
         }
 
-        await store.send(.startRideButtonTapped)
-        await store.receive(.delegate(.startRide(Self.route.reference)))
+        await store.send(.startRideButtonTapped) { $0.isStarting = true }
+        await store.receive(.rideCreated(UUID(0))) { $0.isStarting = false }
+        await store.receive(.delegate(.startRide(rideId: UUID(0), route: Self.route.reference)))
+        // Written to the row too, which is what S20's Previous Rides reads back.
+        #expect(createdRoute.value == Self.route.reference)
     }
 
     /// The state the Route row pushes. Held here so that dropping `selection: route` fails a test:

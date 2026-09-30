@@ -214,7 +214,7 @@ struct AppFeature {
                 // state, so the next Start Ride opens on a free ride (#196).
                 return Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
 
-            case .startSheet(.presented(.delegate(.startRide(let route)))):
+            case let .startSheet(.presented(.delegate(.startRide(rideId, route)))):
                 // Never start a second ride over a live one (#231). `resumableRideFetched`
                 // dismisses the sheet, which stops this delegate being *emitted* — it
                 // originates inside the child (`StartSheetFeature.startRideButtonTapped`),
@@ -225,8 +225,8 @@ struct AppFeature {
                 // this from an effect that awaits anything, the unguarded version silently
                 // replaces the resumed ride and double-releases the scan.
                 guard state.activeRide == nil else { return .none }
-                // The sheet's route is what the ride writes to its `Ride` (#196).
-                Self.presentActiveRide(ActiveRideFeature.State(route: route), in: &state)
+                // The sheet has already written the ride's `Ride` row, route included (#196, #344).
+                Self.presentActiveRide(ActiveRideFeature.State(rideId: rideId, route: route), in: &state)
                 state.startSheet = nil
                 // Start the ride's long-running effects (1 Hz timer, HR, radar,
                 // location) here so they live for the whole ride — bound to

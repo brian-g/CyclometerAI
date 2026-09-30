@@ -158,7 +158,7 @@ struct RideEndFailureTests {
         heartRateBPM: Int? = nil,
         until pipelineFinished: @escaping @Sendable (UUID) -> Bool
     ) async -> UUID {
-        await store.send(.task)
+        await store.startFreshRide()
         let rideId = store.state.rideId
 
         await store.send(.locationUpdated(LocationUpdate(

@@ -120,7 +120,7 @@ struct AppFeatureTests {
         // view is ever instantiated in this test — yet the ride still starts its
         // effects, because AppFeature emits `.task` itself.
         await store.send(.startRideButtonTapped)
-        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
         await store.receive(\.activeRide.task)
         #expect(store.state.activeRide?.recordingState == .active)
 
@@ -293,7 +293,7 @@ struct AppFeatureTests {
         // directly-seeded `activeRide` skips `.task`, leaving effects the finish
         // sequence expects to tear down (GPX export, calibration) never started.
         await store.send(.startRideButtonTapped)
-        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
         await store.receive(\.activeRide.task)
 
         await store.send(.activeRide(.pauseTapped))
@@ -368,7 +368,7 @@ struct AppFeatureTests {
         store.exhaustivity = .off
 
         await store.send(.startRideButtonTapped)
-        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
         await store.receive(\.activeRide.task)
         let rideId = try #require(store.state.activeRide?.rideId)
 

@@ -116,7 +116,6 @@ struct ActiveRideFeature {
     @Dependency(\.permissionsClient) var permissionsClient
     @Dependency(\.healthKitClient) var healthKitClient
     @Dependency(\.date) var date
-    @Dependency(\.uuid) var uuid
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.rideDataBuffer) var rideDataBuffer
     @Dependency(\.rideEndIntentClient) var rideEndIntentClient
@@ -129,15 +128,12 @@ struct ActiveRideFeature {
 
     @ObservableState
     struct State: Equatable {
-        /// Placeholder until `.task` overwrites it with a fresh, deterministic id
-        /// (`@Dependency(\.uuid)`) — mirrors how `recordingState` defaults to `.idle`
-        /// pre-start. The persisted Ride record is created with this same id (#171).
-        /// Exception: `State(resuming:)` (#175) sets this to an *existing* Ride's
-        /// id — `.task` knows not to overwrite it because `recordingState` is
-        /// never left `.idle` by that initializer (see `.task`'s `isResuming` check).
+        /// The persisted `Ride`'s id (#171). A fresh ride's row already exists: S05.1 writes it
+        /// before the ride starts (#344) and hands over this id. `State(resuming:)` (#175) sets
+        /// an existing Ride's.
         var rideId: UUID = UUID()
         /// The route this ride follows, nil for a free ride (#196): chosen on S05.1 and written to
-        /// the `Ride` by `.task`'s `createRide`, which is what S20's Previous Rides reads back.
+        /// the `Ride` with its row, which is what S20's Previous Rides reads back.
         /// A resumed ride reads it back from its `Ride` (`State(resuming:)`, #197), so a ride
         /// killed mid-route comes back still navigating.
         var route: RouteReference? = nil
@@ -430,9 +426,7 @@ struct ActiveRideFeature {
                 let isResuming = state.recordingState != .idle
                 if !isResuming {
                     state.recordingState = .active
-                    state.rideId = uuid()
                 }
-                let rideId = state.rideId
                 let startedAt = date.now
                 // Seeds the backstop `GPSFixFilter.maxSuppressedInterval` is measured
                 // against, so a ride that never sees a good fix still starts recording one
@@ -447,9 +441,6 @@ struct ActiveRideFeature {
                     // `trackRecorder.isRecording` from `recordingState`, an
                     // invariant `.elapsedTick`'s guard relies on elsewhere in this file.
                     state.recordingState == .active ? .send(.trackRecorder(.startRecording)) : .none,
-                    isResuming ? .none : .run { [persistenceClient, route = state.route] _ in
-                        try? await persistenceClient.createRide(rideId, startedAt, route)
-                    },
                     // Fresh or resumed alike — a resumed ride's route comes back through
                     // `State(resuming:)` (#197).
                     state.route.map { Effect<Action>.send(.navigation(.loadRoute($0.id))) } ?? .none,

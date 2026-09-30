@@ -168,7 +168,7 @@ struct AppPairingTests {
         await store.send(.task).finish()
         await store.send(.startRideButtonTapped)
         await store.send(.startSheet(.presented(.task)))
-        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
         await store.skipInFlightEffects(strict: false)
 
         #expect(store.state.activeRide != nil)

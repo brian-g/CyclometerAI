@@ -73,6 +73,7 @@ struct StartSheetView: View {
                 RoutePickerView(store: pickerStore)
             }
         }
+        .alert($store.scope(state: \.alert, action: \.alert))
         .task { await store.send(.task).finish() }
     }
 }
