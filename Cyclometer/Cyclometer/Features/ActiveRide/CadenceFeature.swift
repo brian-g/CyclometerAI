@@ -20,6 +20,10 @@ struct CadenceFeature {
     /// ActiveRideFeature's radar-reconnect grace window. No GPS-style fallback exists
     /// for cadence (BLE.md §6.2), so this just avoids flicker on a brief drop.
     static let reconnectGraceDelay: Duration = .seconds(10)
+    /// Longest gap between two readings that is still credited to a zone (or to
+    /// coasting). CSC notifications normally arrive about once a second; a longer
+    /// gap means the sensor dropped out, and crediting it would invent ride time.
+    static let maxCreditedInterval: TimeInterval = 5
 
     @Dependency(\.date.now) var now
     @Dependency(\.bleCSCClient) var bleCSCClient
@@ -38,6 +42,15 @@ struct CadenceFeature {
         /// Running sum of pedalling readings, paired with `pedalingSampleCount`.
         var cadenceSum: Double = 0
         var maxCadenceRPM: Int = 0
+        /// Seconds spent pedalling (rpm > 0) in each zone. Accumulated as time, not
+        /// sample counts, because notifications arrive at irregular intervals.
+        var zoneSeconds: [CadenceZone: TimeInterval] = [:]
+        /// Seconds spent coasting (rpm == 0).
+        var coastingSeconds: TimeInterval = 0
+        /// Whether the ride is actively recording. Driven by `ActiveRideFeature` from its
+        /// `recordingState`: the sensor keeps notifying through a pause or auto-pause, and
+        /// that stopped time must not be tallied as coasting.
+        var isRecording = false
 
         /// Average cadence over pedalling time: mean of non-zero rpm readings.
         var averageCadenceRPM: Int {
@@ -94,6 +107,18 @@ struct CadenceFeature {
                     return .none
                 }
                 state.cadenceRPM = Int(rpm.rounded())
+                // Left-hold: the time since the previous reading belongs to that
+                // reading's state. Read it before appending the new sample.
+                if state.isRecording, let previous = state.cadenceSamples.last {
+                    let elapsed = now.timeIntervalSince(previous.time)
+                    if elapsed > 0, elapsed <= Self.maxCreditedInterval {
+                        if previous.rpm > 0 {
+                            state.zoneSeconds[CadenceZone.zone(forRPM: previous.rpm), default: 0] += elapsed
+                        } else {
+                            state.coastingSeconds += elapsed
+                        }
+                    }
+                }
                 state.cadenceSamples.append(CadenceSample(time: now, rpm: rpm))
                 let cutoff = now.addingTimeInterval(-Self.historyWindow)
                 state.cadenceSamples.removeAll { $0.time < cutoff }

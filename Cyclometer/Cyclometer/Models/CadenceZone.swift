@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Pedalling-efficiency cadence zones with fixed RPM thresholds (unlike
 /// `HeartRateZone`, which is derived from the rider's HR reserve). Drives the
-/// shaded bands behind the W5 cadence watermark and the "Time in Zones" breakdown.
+/// shaded bands behind the W5 cadence watermark and the detail sheet's "Time in Zones" breakdown.
 ///
 /// Thresholds (issue #38): grinding < 70, optimal 85–100, over-spinning > 100.
 /// 70–85 is a neutral transition band between grinding and optimal.

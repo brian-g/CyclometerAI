@@ -410,6 +410,7 @@ struct ActiveRideFeatureLocationTests {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitude = 280.0
+            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
@@ -469,6 +470,7 @@ struct ActiveRideFeatureLocationTests {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitude = 280.0
+            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
@@ -508,6 +510,7 @@ struct ActiveRideFeatureLocationTests {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.horizontalAccuracy = 13.2
             $0.altitude = 280.0
+            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
             $0.speedSampleCount = 1
@@ -527,6 +530,50 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(\.calibration.locationUpdated)
     }
 
+    @Test("Altitude samples older than the history window are pruned")
+    func altitudeSamplesArePruned() async {
+        let stale = AltitudeSample(
+            time: testDate.addingTimeInterval(-ActiveRideFeature.altitudeHistoryWindow - 1),
+            meters: 100
+        )
+        let recent = AltitudeSample(time: testDate.addingTimeInterval(-60), meters: 110)
+        var state = ActiveRideFeature.State(recordingState: .active)
+        state.altitudeSamples = [stale, recent]
+        let store = TestStore(initialState: state) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+        }
+        store.exhaustivity = .off
+
+        await store.send(.locationUpdated(Self.sampleUpdate))
+
+        #expect(store.state.altitudeSamples == [recent, AltitudeSample(time: testDate, meters: 280.0)])
+    }
+
+    @Test("A fix without a valid altitude adds no altitude sample")
+    func invalidAltitudeAddsNoSample() async {
+        let store = makeStore()
+        store.exhaustivity = .off
+        let noAltitude = LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
+            altitude: nil,
+            speed: 8.5,
+            horizontalAccuracy: 5.0,
+            heading: 192.0,
+            timestamp: testDate
+        )
+
+        await store.send(.locationUpdated(noAltitude))
+
+        #expect(store.state.altitudeSamples.isEmpty)
+    }
+
     @Test("Location updates continue while paused")
     func locationContinuesWhilePaused() async {
         let store = makeStore()
@@ -534,6 +581,7 @@ struct ActiveRideFeatureLocationTests {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitude = 280.0
+            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
@@ -618,6 +666,7 @@ struct ActiveRideFeatureLocationTests {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitude = 280.0
+            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
@@ -810,6 +859,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick)
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+            $0.cadence.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1349,6 +1399,7 @@ struct ActiveRideFeatureStateMachineTests {
         let store = makeStore(recordingState: .paused)
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+            $0.cadence.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1380,6 +1431,7 @@ struct ActiveRideFeatureStateMachineTests {
         }
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+            $0.cadence.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1391,6 +1443,18 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(\.calibration.suspensionChanged)
         #expect(updatedSummary.value?.rideId == rideId)
         #expect(updatedSummary.value?.recordingState == .active)
+    }
+
+    @Test("Pause and resume drive the cadence tally's recording flag")
+    func recordingStateDrivesCadenceRecording() async {
+        let store = makeStore(recordingState: .paused)
+        store.exhaustivity = .off
+
+        await store.send(.resumeTapped)
+        #expect(store.state.cadence.isRecording)
+
+        await store.send(.pauseTapped)
+        #expect(!store.state.cadence.isRecording)
     }
 
     @Test("resumeTapped ignored when active")
@@ -1590,6 +1654,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.coordinate = Coordinate(latitude: 43.0, longitude: -89.0)
             $0.trackSegments = [[Coordinate(latitude: 43.0, longitude: -89.0)]]
             $0.altitude = 280.0
+            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
