@@ -165,6 +165,23 @@ struct RideDeletionTests {
         #expect(try await MainActor.run { try mainContext.fetch(descriptor) }.isEmpty)
     }
 
+    /// What the launch sweep keeps (#346): a finalized ride's export, until the ride is deleted.
+    @Test("A ride's export is referenced until the ride is deleted")
+    func exportIsReferencedUntilDeleted() async throws {
+        let fixture = try await Self.makeRide()
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        // A ride whose export failed references nothing.
+        let unexported = try await Self.makeRide(writesFile: false)
+        defer { try? FileManager.default.removeItem(at: unexported.directory) }
+
+        #expect(try await fixture.client.fetchRideGPXFileNames() == [fixture.fileURL.lastPathComponent])
+        #expect(try await unexported.client.fetchRideGPXFileNames().isEmpty)
+
+        try await fixture.client.deleteRide(fixture.rideId)
+
+        #expect(try await fixture.client.fetchRideGPXFileNames().isEmpty)
+    }
+
     @Test("Deleting a ride that is already gone is not an error")
     func deleteUnknownRideIsANoop() async throws {
         let (client, _) = PersistenceClientTests.makeLiveClient()

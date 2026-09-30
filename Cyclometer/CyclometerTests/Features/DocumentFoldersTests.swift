@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import Foundation
 import Testing
 @testable import Cyclometer
@@ -43,6 +44,88 @@ struct DocumentFoldersTests {
         DocumentFolders.create(in: root)
 
         #expect(FileManager.default.fileExists(atPath: marker.path), "re-running wiped existing contents")
+    }
+
+    // MARK: - Ride exports (#346)
+
+    /// Writes an empty file at `path` under `root`, creating folders on the way.
+    private func touch(_ path: String, in root: URL) throws -> URL {
+        let url = root.appending(path: path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try Data().write(to: url)
+        return url
+    }
+
+    private func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
+
+    /// A delete that couldn't remove its file (#261) leaves one no ride points at.
+    @Test("The export sweep removes an orphaned export and keeps a referenced one")
+    func sweepRemovesOrphans() async throws {
+        let root = try makeDocumentsDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let referenced = try touch("Rides/Cyclometer_2026-09-19_11-48.gpx", in: root)
+        let orphan = try touch("Rides/Cyclometer_2026-09-20_07-05-1.gpx", in: root)
+
+        await DocumentFolders.sweepOrphanedRideExports(documentsDirectory: root) {
+            [referenced.lastPathComponent]
+        }
+
+        #expect(exists(referenced), "a ride's own export was removed")
+        #expect(exists(orphan) == false, "the orphan survived")
+    }
+
+    /// `Documents/` is writable through Files, so the sweep only ever removes the app's own
+    /// exports, from `Rides` itself.
+    @Test("The export sweep leaves everything but the app's own exports alone")
+    func sweepIsConfinedToExports() async throws {
+        let root = try makeDocumentsDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let untouched = [
+            try touch("Rides/Morning loop.gpx", in: root),
+            try touch("Rides/Cyclometer_notes.txt", in: root),
+            try touch("Rides/Old/Cyclometer_2026-01-01_08-00.gpx", in: root),
+            try touch("Cyclometer_2026-09-19_11-48.gpx", in: root),
+            try touch("Inbox/Cyclometer_2026-09-19_11-48.gpx", in: root),
+            try touch("pending-ride-end.json", in: root),
+        ]
+
+        await DocumentFolders.sweepOrphanedRideExports(documentsDirectory: root) { [] }
+
+        for url in untouched {
+            #expect(exists(url), "\(url.path) was removed")
+        }
+    }
+
+    /// Without the references, every export looks orphaned.
+    @Test("The export sweep removes nothing when the references can't be read")
+    func sweepStopsWhenReferencesFail() async throws {
+        let root = try makeDocumentsDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let export = try touch("Rides/Cyclometer_2026-09-19_11-48.gpx", in: root)
+
+        await DocumentFolders.sweepOrphanedRideExports(documentsDirectory: root) {
+            throw PersistenceError.rideNotFound
+        }
+
+        #expect(exists(export))
+    }
+
+    /// A first launch has no `Rides` yet when the sweep runs in a test directory, and the
+    /// references aren't worth reading when there is nothing to sweep.
+    @Test("The export sweep is a no-op without a Rides folder")
+    func sweepWithoutRidesFolder() async throws {
+        let root = try makeDocumentsDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let read = LockIsolated(false)
+
+        await DocumentFolders.sweepOrphanedRideExports(documentsDirectory: root) {
+            read.setValue(true)
+            return []
+        }
+
+        #expect(read.value == false)
     }
 
     // MARK: - Inbox

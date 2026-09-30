@@ -174,6 +174,7 @@ struct AppFeature {
                             // ride closed out by `resumableRideFetched` runs the backfills
                             // itself once its finalize lands, so the two never race over the
                             // same ride.
+                            await Self.sweepOrphanedRideExports()
                             await Self.backfillFinishedRides(send: send)
                         }
                     },
@@ -543,6 +544,25 @@ struct AppFeature {
             await send(.rides(.mapThumbnailsCaptured))
         }
         _ = await workouts
+    }
+
+    /// Clears exports no ride references (#346). At launch, and only when no ride is resumable:
+    /// no ride is ending then, so every export is either named by a row or orphaned.
+    ///
+    /// The ride-end marker's file counts as referenced too. It names an export whose finalize
+    /// failed, and next launch's close-out writes that URL into the row (#188). The marker
+    /// normally means a resumable ride, but a failed resumable fetch also lands here.
+    private static func sweepOrphanedRideExports() async {
+        @Dependency(\.persistenceClient) var persistenceClient
+        @Dependency(\.rideEndIntentClient) var rideEndIntentClient
+        @Dependency(\.gpxDocumentsDirectory) var documentsDirectory
+        await DocumentFolders.sweepOrphanedRideExports(documentsDirectory: documentsDirectory) {
+            var names = try await persistenceClient.fetchRideGPXFileNames()
+            if let pending = rideEndIntentClient.load()?.gpxFileURL {
+                names.insert(pending.lastPathComponent)
+            }
+            return names
+        }
     }
 
     /// Restores the rider's own brightness and clears the dim. A no-op when not

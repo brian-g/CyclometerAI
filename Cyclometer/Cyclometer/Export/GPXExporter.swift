@@ -241,8 +241,12 @@ enum GPXExporter {
     private static func isoString(_ date: Date) -> String { isoFormatter.string(from: date) }
 
     private static func filenameStem(for date: Date) -> String {
-        "Cyclometer_\(filenameFormatter.string(from: date))"
+        "\(filenamePrefix)\(filenameFormatter.string(from: date))"
     }
+
+    /// Every export's name starts with this, which is how the launch sweep tells the app's
+    /// own files from ones the rider put in `Rides` through Files (#346).
+    static let filenamePrefix = "Cyclometer_"
 
     /// `&` must be escaped first — escaping it after `<`/`>`/quotes would double-escape
     /// the `&` those replacements just introduced.
