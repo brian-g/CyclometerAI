@@ -112,6 +112,8 @@ struct RideDashboardView: View {
                             cadenceHistory: store.cadence.watermarkSamples,
                             averageCadence: store.cadence.averageCadenceRPM,
                             maxCadence: store.cadence.maxCadenceRPM,
+                            cadenceSamples: store.cadence.cadenceSamples,
+                            altitudeSamples: store.altitudeSamples,
                             zoneSeconds: store.cadence.zoneSeconds,
                             coastingSeconds: store.cadence.coastingSeconds,
                             size: .twoByOne
@@ -229,6 +231,8 @@ struct RideDashboardView: View {
                         cadenceHistory: store.cadence.watermarkSamples,
                         averageCadence: store.cadence.averageCadenceRPM,
                         maxCadence: store.cadence.maxCadenceRPM,
+                        cadenceSamples: store.cadence.cadenceSamples,
+                        altitudeSamples: store.altitudeSamples,
                         zoneSeconds: store.cadence.zoneSeconds,
                         coastingSeconds: store.cadence.coastingSeconds,
                         size: .twoByOne)

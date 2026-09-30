@@ -304,6 +304,9 @@ struct ActiveRideFeature {
         /// invalid fix is never covered with the altitude before it, since recording that
         /// would fabricate a measurement.
         var altitude: Double?
+        /// Valid altitudes from the last `CadenceFeature.historyWindow` while riding, so the
+        /// cadence sheet can draw elevation behind the cadence trace on the same time axis.
+        var altitudeSamples: [AltitudeSample] = []
         var heading: Double = -1
         var horizontalAccuracy: Double = 0
         /// Whether the fix behind `coordinate` is good enough to record (#210). Sticky
@@ -917,6 +920,11 @@ struct ActiveRideFeature {
                     )
                 }
                 state.altitude = update.altitude
+                if state.recordingState == .active, let altitude = update.altitude {
+                    state.altitudeSamples.append(AltitudeSample(time: date.now, meters: altitude))
+                    let cutoff = date.now.addingTimeInterval(-CadenceFeature.historyWindow)
+                    state.altitudeSamples.removeAll { $0.time < cutoff }
+                }
                 state.heading = update.heading
                 let kph = max(update.speed, 0) * 3.6
                 state.speedKPH = kph

@@ -8,6 +8,8 @@ struct CadenceWidget: View {
     let cadenceHistory: [Double] // rpm samples for watermark chart
     let averageCadence: Int      // rpm; 0 → no pedalling recorded yet
     let maxCadence: Int          // rpm
+    var cadenceSamples: [CadenceSample] = []             // full-resolution, for the sheet chart
+    var altitudeSamples: [AltitudeSample] = []           // elevation watermark in the sheet chart
     var zoneSeconds: [CadenceZone: TimeInterval] = [:]   // pedalling time per zone
     var coastingSeconds: TimeInterval = 0
     var size: WidgetSize = .twoByOne   // only .oneByOne / .twoByOne used by W5
@@ -30,7 +32,8 @@ struct CadenceWidget: View {
         .onTapGesture { showDetail = true }
         .sheet(isPresented: $showDetail) {
             CadenceDetailSheet(
-                history: cadenceHistory,
+                cadenceSamples: cadenceSamples,
+                altitudeSamples: altitudeSamples,
                 averageCadence: averageCadence,
                 maxCadence: maxCadence,
                 zoneSeconds: zoneSeconds,
@@ -101,8 +104,6 @@ struct CadenceWidget: View {
 
 private struct CadenceHistoryChart: View {
     let history: [Double]   // rpm
-    /// The watermark hides both axes; the detail sheet shows rpm values on y.
-    var showsYAxis = false
 
     /// Fixed y-domain so the zone bands always map to the same screen positions
     /// regardless of the ride's actual cadence range. 150 covers sprint/over-spin
@@ -132,74 +133,158 @@ private struct CadenceHistoryChart: View {
         }
         .chartYScale(domain: 0...Self.yMax)
         .chartXAxis(.hidden)
-        .chartYAxis(showsYAxis ? .automatic : .hidden)
+        .chartYAxis(.hidden)
         .chartLegend(.hidden)
     }
 }
 
-// MARK: - Cadence Zone Donut
+// MARK: - Donut Chart
 
-/// Share of pedalling time in each cadence zone, coloured to match the watermark bands.
-private struct CadenceZoneDonut: View {
-    let zoneSeconds: [CadenceZone: TimeInterval]
+private struct DonutSlice: Identifiable {
+    let id: String
+    let value: TimeInterval
+    let color: Color
+}
+
+/// Share of time per slice. Purely decorative: the rows beside it carry the values.
+private struct DonutChart: View {
+    let slices: [DonutSlice]
 
     private static let innerRadiusRatio = 0.6
 
-    private var zones: [(zone: CadenceZone, seconds: TimeInterval)] {
-        CadenceZone.allCases.compactMap { zone in
-            let seconds = zoneSeconds[zone] ?? 0
-            return seconds > 0 ? (zone: zone, seconds: seconds) : nil
+    var body: some View {
+        Chart(slices.filter { $0.value > 0 }) { slice in
+            SectorMark(
+                angle: .value("Time", slice.value),
+                innerRadius: .ratio(Self.innerRadiusRatio),
+                angularInset: 1
+            )
+            .foregroundStyle(slice.color)
+        }
+        .chartLegend(.hidden)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Cadence Detail Chart
+
+/// Cadence over time on zone bands, with the ride's elevation as a faint watermark behind.
+private struct CadenceDetailChart: View {
+    let cadenceSamples: [CadenceSample]
+    let altitudeSamples: [AltitudeSample]
+
+    private static let yMax: Double = 150
+    /// Elevation is normalised into the cadence y-domain (a chart has one y-scale), so it
+    /// only fills the lower part of it and never competes with the cadence trace.
+    private static let elevationHeightFraction = 0.6
+    /// Smallest elevation span that is stretched to full watermark height. Below it (GPS
+    /// noise on a flat ride) the profile stays flat rather than amplifying jitter.
+    private static let minElevationSpanMeters = RouteGeometry.elevationNoiseThresholdMeters
+    private static let yAxisValues: [Double] = [0, 50, 100, 150]
+
+    private var timeRange: ClosedRange<Date>? {
+        guard let first = cadenceSamples.first?.time, let last = cadenceSamples.last?.time,
+              first < last else { return nil }
+        return first...last
+    }
+
+    private var elevation: [(time: Date, height: Double)] {
+        guard let range = timeRange else { return [] }
+        let visible = altitudeSamples.filter { range.contains($0.time) }
+        guard let low = visible.map(\.meters).min(), let high = visible.map(\.meters).max() else { return [] }
+        let span = max(high - low, Self.minElevationSpanMeters)
+        return visible.map {
+            (time: $0.time, height: ($0.meters - low) / span * Self.yMax * Self.elevationHeightFraction)
         }
     }
 
     var body: some View {
-        Chart(zones, id: \.zone) { entry in
-            SectorMark(
-                angle: .value("Time", entry.seconds),
-                innerRadius: .ratio(Self.innerRadiusRatio),
-                angularInset: 1
-            )
-            .foregroundStyle(entry.zone.color)
+        Chart {
+            if let range = timeRange {
+                ForEach(Array(CadenceZone.allCases.enumerated()), id: \.offset) { _, zone in
+                    let bounds = zone.rpmRange(ceiling: Self.yMax)
+                    RectangleMark(
+                        xStart: .value("t0", range.lowerBound),
+                        xEnd: .value("t1", range.upperBound),
+                        yStart: .value("rpm0", bounds.lowerBound),
+                        yEnd: .value("rpm1", bounds.upperBound)
+                    )
+                    .foregroundStyle(zone.color.opacity(Opacity.zoneBand))
+                }
+            }
+
+            ForEach(Array(elevation.enumerated()), id: \.offset) { _, point in
+                AreaMark(
+                    x: .value("t", point.time),
+                    yStart: .value("base", 0),
+                    yEnd: .value("elevation", point.height),
+                    series: .value("Series", "elevation")
+                )
+                .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.watermark))
+            }
+
+            ForEach(Array(cadenceSamples.enumerated()), id: \.offset) { _, sample in
+                LineMark(
+                    x: .value("t", sample.time),
+                    y: .value("rpm", sample.rpm),
+                    series: .value("Series", "cadence")
+                )
+                .foregroundStyle(Color.cyTextPrimary)
+            }
+        }
+        .chartYScale(domain: 0...Self.yMax)
+        .chartYAxis {
+            AxisMarks(values: Self.yAxisValues)
+        }
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 3)) {
+                AxisValueLabel(format: .dateTime.hour().minute())
+            }
         }
         .chartLegend(.hidden)
-        .accessibilityHidden(true)   // the zone rows below carry the values
     }
 }
 
 // MARK: - Cadence Detail Sheet
 
-/// W5 "Ride metrics" sheet (UX.md §W5): cadence chart, average and max cadence,
-/// pedalling vs coasting, and time in each cadence zone, all from `CadenceFeature` state. Cadence smoothness
-/// is not shown — no spec defines it.
+/// W5 "Ride metrics" sheet (UX.md §W5): cadence chart over elevation, average and max
+/// cadence, pedalling vs coasting, and time in each cadence zone, all from ride state.
+/// Cadence smoothness is not shown — no spec defines it.
 private struct CadenceDetailSheet: View {
-    let history: [Double]
+    let cadenceSamples: [CadenceSample]
+    let altitudeSamples: [AltitudeSample]
     let averageCadence: Int
     let maxCadence: Int
     let zoneSeconds: [CadenceZone: TimeInterval]
     let coastingSeconds: TimeInterval
 
+    @Environment(\.dismiss) private var dismiss
+
     private static let chartHeight: CGFloat = 140
     private static let donutHeight: CGFloat = 120
+    private static let smallDonutSize: CGFloat = 28
 
     private var pedalingSeconds: TimeInterval { zoneSeconds.values.reduce(0, +) }
 
     var body: some View {
         NavigationStack {
             List {
-                if !history.isEmpty {
+                if cadenceSamples.count > 1 {
                     Section {
-                        CadenceHistoryChart(history: history, showsYAxis: true)
+                        CadenceDetailChart(cadenceSamples: cadenceSamples, altitudeSamples: altitudeSamples)
                             .frame(height: Self.chartHeight)
                     }
                 }
                 metricRow("Avg Cadence", averageCadence > 0 ? "\(averageCadence) rpm" : "—")
                 metricRow("Max Cadence", maxCadence > 0 ? "\(maxCadence) rpm" : "—")
-                metricRow("Pedaling vs Coasting", pedalingVsCoasting)
+                pedalingVsCoastingRow
                 Section("Time in Cadence Zones") {
                     if pedalingSeconds > 0 {
-                        CadenceZoneDonut(zoneSeconds: zoneSeconds)
-                            .frame(height: Self.donutHeight)
-                            .frame(maxWidth: .infinity)
+                        DonutChart(slices: CadenceZone.allCases.map {
+                            DonutSlice(id: $0.label, value: zoneSeconds[$0] ?? 0, color: $0.color)
+                        })
+                        .frame(height: Self.donutHeight)
+                        .frame(maxWidth: .infinity)
                     }
                     ForEach(CadenceZone.allCases, id: \.self) { zone in
                         metricRow("\(zone.label) rpm", Self.duration(zoneSeconds[zone] ?? 0))
@@ -208,8 +293,28 @@ private struct CadenceDetailSheet: View {
             }
             .navigationTitle("Cadence")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }
+                }
+            }
         }
         .presentationDetents([.medium])
+    }
+
+    private var pedalingVsCoastingRow: some View {
+        LabeledContent("Pedaling vs Coasting") {
+            HStack(spacing: Spacing.sm) {
+                Text(pedalingVsCoasting)
+                if pedalingSeconds + coastingSeconds > 0 {
+                    DonutChart(slices: [
+                        DonutSlice(id: "pedaling", value: pedalingSeconds, color: .cyPrimary),
+                        DonutSlice(id: "coasting", value: coastingSeconds, color: .cyTextTertiary)
+                    ])
+                    .frame(width: Self.smallDonutSize, height: Self.smallDonutSize)
+                }
+            }
+        }
     }
 
     private var pedalingVsCoasting: String {
@@ -276,9 +381,23 @@ private let demoHistory: [Double] = stride(from: 60.0, to: 105.0, by: 1.2).map {
     .frame(width: 196, height: 96)
 }
 
+private let demoStart = Date(timeIntervalSince1970: 1_000_000)
+
+/// One reading every 10 s for 30 min: rpm climbs through the zones with a coasting gap.
+private let demoCadenceSamples: [CadenceSample] = (0..<180).map { i in
+    let rpm = (70...74).contains(i / 6 % 30) ? 0 : 60 + 45 * abs(sin(Double(i) / 25))
+    return CadenceSample(time: demoStart.addingTimeInterval(Double(i) * 10), rpm: rpm)
+}
+
+/// A climb then a descent over the same 30 min.
+private let demoAltitudeSamples: [AltitudeSample] = (0..<180).map { i in
+    AltitudeSample(time: demoStart.addingTimeInterval(Double(i) * 10), meters: 120 + 80 * sin(Double(i) / 57))
+}
+
 #Preview("Detail Sheet — Active") {
     CadenceDetailSheet(
-        history: demoHistory,
+        cadenceSamples: demoCadenceSamples,
+        altitudeSamples: demoAltitudeSamples,
         averageCadence: 88,
         maxCadence: 104,
         zoneSeconds: [.grinding: 95, .transition: 210, .optimal: 1_260, .overspin: 42],
@@ -288,7 +407,8 @@ private let demoHistory: [Double] = stride(from: 60.0, to: 105.0, by: 1.2).map {
 
 #Preview("Detail Sheet — No Data") {
     CadenceDetailSheet(
-        history: [],
+        cadenceSamples: [],
+        altitudeSamples: [],
         averageCadence: 0,
         maxCadence: 0,
         zoneSeconds: [:],
