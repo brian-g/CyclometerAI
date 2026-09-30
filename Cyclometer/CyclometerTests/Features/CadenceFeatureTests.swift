@@ -254,8 +254,8 @@ struct CadenceFeatureTests {
     // MARK: - Zone / coasting time (#147)
 
     /// Store whose `now` follows a mutable clock, so intervals between readings can be driven.
-    private func makeTimedStore(_ clock: LockIsolated<Date>) -> TestStoreOf<CadenceFeature> {
-        TestStore(initialState: CadenceFeature.State()) {
+    private func makeTimedStore(_ clock: LockIsolated<Date>, isRecording: Bool = true) -> TestStoreOf<CadenceFeature> {
+        TestStore(initialState: CadenceFeature.State(isRecording: isRecording)) {
             CadenceFeature()
         } withDependencies: {
             $0.date = DateGenerator { clock.value }
@@ -283,6 +283,24 @@ struct CadenceFeatureTests {
 
         #expect(store.state.zoneSeconds == [.grinding: 2, .optimal: 1])
         #expect(store.state.coastingSeconds == 3)
+    }
+
+    @Test("Nothing is credited while the ride is not recording")
+    func pausedRideCreditsNothing() async {
+        let clock = LockIsolated(Self.testDate)
+        let store = makeTimedStore(clock, isRecording: false)
+        store.exhaustivity = .off
+
+        await store.send(.cadenceReceived(90))
+        advance(clock, by: 2)
+        await store.send(.cadenceReceived(0))
+        advance(clock, by: 2)
+        await store.send(.cadenceReceived(0))
+
+        #expect(store.state.zoneSeconds.isEmpty)
+        #expect(store.state.coastingSeconds == 0)
+        // The readings themselves still show and still feed the average/max.
+        #expect(store.state.maxCadenceRPM == 90)
     }
 
     @Test("A gap longer than maxCreditedInterval credits nothing")

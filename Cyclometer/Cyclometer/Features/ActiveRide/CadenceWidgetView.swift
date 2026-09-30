@@ -1,6 +1,34 @@
 import Charts
 import SwiftUI
 
+// MARK: - Cadence Detail Data
+
+/// What the W5 detail sheet shows beyond the widget face.
+struct CadenceDetail: Equatable {
+    var cadenceSamples: [CadenceSample] = []
+    var altitudeSamples: [AltitudeSample] = []
+    /// Pedalling time per zone.
+    var zoneSeconds: [CadenceZone: TimeInterval] = [:]
+    var coastingSeconds: TimeInterval = 0
+
+    init(cadenceSamples: [CadenceSample] = [], altitudeSamples: [AltitudeSample] = [],
+         zoneSeconds: [CadenceZone: TimeInterval] = [:], coastingSeconds: TimeInterval = 0) {
+        self.cadenceSamples = cadenceSamples
+        self.altitudeSamples = altitudeSamples
+        self.zoneSeconds = zoneSeconds
+        self.coastingSeconds = coastingSeconds
+    }
+
+    init(cadence: CadenceFeature.State, altitudeSamples: [AltitudeSample]) {
+        self.init(
+            cadenceSamples: cadence.cadenceSamples,
+            altitudeSamples: altitudeSamples,
+            zoneSeconds: cadence.zoneSeconds,
+            coastingSeconds: cadence.coastingSeconds
+        )
+    }
+}
+
 // MARK: - W5 Cadence Widget
 
 struct CadenceWidget: View {
@@ -8,10 +36,9 @@ struct CadenceWidget: View {
     let cadenceHistory: [Double] // rpm samples for watermark chart
     let averageCadence: Int      // rpm; 0 → no pedalling recorded yet
     let maxCadence: Int          // rpm
-    var cadenceSamples: [CadenceSample] = []             // full-resolution, for the sheet chart
-    var altitudeSamples: [AltitudeSample] = []           // elevation watermark in the sheet chart
-    var zoneSeconds: [CadenceZone: TimeInterval] = [:]   // pedalling time per zone
-    var coastingSeconds: TimeInterval = 0
+    /// Everything only the detail sheet needs. A closure so the dashboard never reads these
+    /// (large, fast-changing) arrays itself — only the presented sheet does.
+    var detail: () -> CadenceDetail = { CadenceDetail() }
     var size: WidgetSize = .twoByOne   // only .oneByOne / .twoByOne used by W5
 
     @State private var showDetail = false
@@ -32,12 +59,9 @@ struct CadenceWidget: View {
         .onTapGesture { showDetail = true }
         .sheet(isPresented: $showDetail) {
             CadenceDetailSheet(
-                cadenceSamples: cadenceSamples,
-                altitudeSamples: altitudeSamples,
                 averageCadence: averageCadence,
                 maxCadence: maxCadence,
-                zoneSeconds: zoneSeconds,
-                coastingSeconds: coastingSeconds
+                detail: detail()
             )
         }
     }
@@ -181,6 +205,8 @@ private struct CadenceDetailChart: View {
     /// noise on a flat ride) the profile stays flat rather than amplifying jitter.
     private static let minElevationSpanMeters = RouteGeometry.elevationNoiseThresholdMeters
     private static let yAxisValues: [Double] = [0, 50, 100, 150]
+    /// Marks plotted per series. A cap, not a target: a short ride has fewer.
+    private static let maxPlottedPoints = 120
 
     private var timeRange: ClosedRange<Date>? {
         guard let first = cadenceSamples.first?.time, let last = cadenceSamples.last?.time,
@@ -188,17 +214,50 @@ private struct CadenceDetailChart: View {
         return first...last
     }
 
-    private var elevation: [(time: Date, height: Double)] {
+    /// A time-stamped value with the time as its identity, so marks keep their identity as
+    /// the series grows instead of being re-diffed by array offset.
+    private struct Point: Identifiable {
+        let time: Date
+        let value: Double
+        var id: Date { time }
+    }
+
+    /// At most `maxPlottedPoints`, by averaging contiguous buckets (time and value) — the
+    /// same strategy as `CadenceFeature.watermarkSamples`, keeping a full hour of 1 Hz
+    /// readings from becoming thousands of marks.
+    private static func downsampled(_ points: [Point]) -> [Point] {
+        guard points.count > maxPlottedPoints else { return points }
+        let bucket = Double(points.count) / Double(maxPlottedPoints)
+        return (0..<maxPlottedPoints).map { i in
+            let start = Int(Double(i) * bucket)
+            let end = min(max(start + 1, Int(Double(i + 1) * bucket)), points.count)
+            let slice = points[start..<end]
+            let meanTime = slice.map(\.time.timeIntervalSinceReferenceDate).reduce(0, +) / Double(slice.count)
+            return Point(
+                time: Date(timeIntervalSinceReferenceDate: meanTime),
+                value: slice.map(\.value).reduce(0, +) / Double(slice.count)
+            )
+        }
+    }
+
+    private var cadencePoints: [Point] {
+        Self.downsampled(cadenceSamples.map { Point(time: $0.time, value: $0.rpm) })
+    }
+
+    /// Elevation as heights within the cadence y-domain, over the cadence time span.
+    private var elevationPoints: [Point] {
         guard let range = timeRange else { return [] }
         let visible = altitudeSamples.filter { range.contains($0.time) }
         guard let low = visible.map(\.meters).min(), let high = visible.map(\.meters).max() else { return [] }
         let span = max(high - low, Self.minElevationSpanMeters)
-        return visible.map {
-            (time: $0.time, height: ($0.meters - low) / span * Self.yMax * Self.elevationHeightFraction)
-        }
+        return Self.downsampled(visible.map {
+            Point(time: $0.time, value: ($0.meters - low) / span * Self.yMax * Self.elevationHeightFraction)
+        })
     }
 
     var body: some View {
+        let cadence = cadencePoints
+        let elevation = elevationPoints
         Chart {
             if let range = timeRange {
                 ForEach(Array(CadenceZone.allCases.enumerated()), id: \.offset) { _, zone in
@@ -213,20 +272,20 @@ private struct CadenceDetailChart: View {
                 }
             }
 
-            ForEach(Array(elevation.enumerated()), id: \.offset) { _, point in
+            ForEach(elevation) { point in
                 AreaMark(
                     x: .value("t", point.time),
                     yStart: .value("base", 0),
-                    yEnd: .value("elevation", point.height),
+                    yEnd: .value("elevation", point.value),
                     series: .value("Series", "elevation")
                 )
                 .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.watermark))
             }
 
-            ForEach(Array(cadenceSamples.enumerated()), id: \.offset) { _, sample in
+            ForEach(cadence) { point in
                 LineMark(
-                    x: .value("t", sample.time),
-                    y: .value("rpm", sample.rpm),
+                    x: .value("t", point.time),
+                    y: .value("rpm", point.value),
                     series: .value("Series", "cadence")
                 )
                 .foregroundStyle(Color.cyTextPrimary)
@@ -251,12 +310,9 @@ private struct CadenceDetailChart: View {
 /// cadence, pedalling vs coasting, and time in each cadence zone, all from ride state.
 /// Cadence smoothness is not shown — no spec defines it.
 private struct CadenceDetailSheet: View {
-    let cadenceSamples: [CadenceSample]
-    let altitudeSamples: [AltitudeSample]
     let averageCadence: Int
     let maxCadence: Int
-    let zoneSeconds: [CadenceZone: TimeInterval]
-    let coastingSeconds: TimeInterval
+    let detail: CadenceDetail
 
     @Environment(\.dismiss) private var dismiss
 
@@ -264,14 +320,19 @@ private struct CadenceDetailSheet: View {
     private static let donutHeight: CGFloat = 120
     private static let smallDonutSize: CGFloat = 28
 
+    private var zoneSeconds: [CadenceZone: TimeInterval] { detail.zoneSeconds }
+    private var coastingSeconds: TimeInterval { detail.coastingSeconds }
     private var pedalingSeconds: TimeInterval { zoneSeconds.values.reduce(0, +) }
 
     var body: some View {
         NavigationStack {
             List {
-                if cadenceSamples.count > 1 {
+                if detail.cadenceSamples.count > 1 {
                     Section {
-                        CadenceDetailChart(cadenceSamples: cadenceSamples, altitudeSamples: altitudeSamples)
+                        CadenceDetailChart(
+                            cadenceSamples: detail.cadenceSamples,
+                            altitudeSamples: detail.altitudeSamples
+                        )
                             .frame(height: Self.chartHeight)
                     }
                 }
@@ -396,22 +457,17 @@ private let demoAltitudeSamples: [AltitudeSample] = (0..<180).map { i in
 
 #Preview("Detail Sheet — Active") {
     CadenceDetailSheet(
-        cadenceSamples: demoCadenceSamples,
-        altitudeSamples: demoAltitudeSamples,
         averageCadence: 88,
         maxCadence: 104,
-        zoneSeconds: [.grinding: 95, .transition: 210, .optimal: 1_260, .overspin: 42],
-        coastingSeconds: 380
+        detail: CadenceDetail(
+            cadenceSamples: demoCadenceSamples,
+            altitudeSamples: demoAltitudeSamples,
+            zoneSeconds: [.grinding: 95, .transition: 210, .optimal: 1_260, .overspin: 42],
+            coastingSeconds: 380
+        )
     )
 }
 
 #Preview("Detail Sheet — No Data") {
-    CadenceDetailSheet(
-        cadenceSamples: [],
-        altitudeSamples: [],
-        averageCadence: 0,
-        maxCadence: 0,
-        zoneSeconds: [:],
-        coastingSeconds: 0
-    )
+    CadenceDetailSheet(averageCadence: 0, maxCadence: 0, detail: CadenceDetail())
 }

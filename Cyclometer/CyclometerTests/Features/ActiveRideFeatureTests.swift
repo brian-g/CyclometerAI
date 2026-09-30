@@ -533,7 +533,7 @@ struct ActiveRideFeatureLocationTests {
     @Test("Altitude samples older than the history window are pruned")
     func altitudeSamplesArePruned() async {
         let stale = AltitudeSample(
-            time: testDate.addingTimeInterval(-CadenceFeature.historyWindow - 1),
+            time: testDate.addingTimeInterval(-ActiveRideFeature.altitudeHistoryWindow - 1),
             meters: 100
         )
         let recent = AltitudeSample(time: testDate.addingTimeInterval(-60), meters: 110)
@@ -859,6 +859,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick)
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+            $0.cadence.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1398,6 +1399,7 @@ struct ActiveRideFeatureStateMachineTests {
         let store = makeStore(recordingState: .paused)
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+            $0.cadence.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1429,6 +1431,7 @@ struct ActiveRideFeatureStateMachineTests {
         }
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+            $0.cadence.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1440,6 +1443,18 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(\.calibration.suspensionChanged)
         #expect(updatedSummary.value?.rideId == rideId)
         #expect(updatedSummary.value?.recordingState == .active)
+    }
+
+    @Test("Pause and resume drive the cadence tally's recording flag")
+    func recordingStateDrivesCadenceRecording() async {
+        let store = makeStore(recordingState: .paused)
+        store.exhaustivity = .off
+
+        await store.send(.resumeTapped)
+        #expect(store.state.cadence.isRecording)
+
+        await store.send(.pauseTapped)
+        #expect(!store.state.cadence.isRecording)
     }
 
     @Test("resumeTapped ignored when active")

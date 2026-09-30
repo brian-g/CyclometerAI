@@ -53,6 +53,10 @@ struct ActiveRideFeature {
     /// `zeroSpeedSeconds`, so auto-end cannot trigger from a stop auto-pause already
     /// caught. No PRD-specified threshold exists; chosen to match a brief stop.
     static let autoPauseZeroSpeedSeconds = 10
+    /// Wall-clock window of altitude samples retained for the cadence sheet's elevation
+    /// watermark. Matches `CadenceFeature.historyWindow` on purpose: the two series share one
+    /// time axis, so elevation must cover the span the cadence trace does.
+    static let altitudeHistoryWindow: TimeInterval = CadenceFeature.historyWindow
 
     /// At or below this speed the rider counts as stopped (#262).
     ///
@@ -922,7 +926,7 @@ struct ActiveRideFeature {
                 state.altitude = update.altitude
                 if state.recordingState == .active, let altitude = update.altitude {
                     state.altitudeSamples.append(AltitudeSample(time: date.now, meters: altitude))
-                    let cutoff = date.now.addingTimeInterval(-CadenceFeature.historyWindow)
+                    let cutoff = date.now.addingTimeInterval(-Self.altitudeHistoryWindow)
                     state.altitudeSamples.removeAll { $0.time < cutoff }
                 }
                 state.heading = update.heading
@@ -978,6 +982,14 @@ struct ActiveRideFeature {
         .onChange(of: \.isCalibrationSuspended) { _, isSuspended in
             Reduce { _, _ in
                 .send(.calibration(.suspensionChanged(isSuspended)))
+            }
+        }
+        // Recording state changes from five places too; the cadence tally only needs to know
+        // whether it is `.active`, so it is forwarded on the transition.
+        .onChange(of: \.recordingState) { _, recordingState in
+            Reduce { state, _ in
+                state.cadence.isRecording = recordingState == .active
+                return .none
             }
         }
         .ifLet(\.$finishAlert, action: \.finishAlert)
@@ -1219,6 +1231,7 @@ extension ActiveRideFeature.State {
         // Faithfully restores active vs. manually paused — "resume recording from
         // it" (#175), not silently un-pausing a ride the rider had stopped.
         recordingState = summary.recordingState == .paused ? .paused : .active
+        cadence.isRecording = recordingState == .active
         // Only meaningful alongside `.paused` (`.pauseTapped`/`.resumeTapped`
         // always clear it) — restoring it lets the `case .speed` auto-resume
         // guard keep working after a resume exactly as it did before the kill,

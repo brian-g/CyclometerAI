@@ -47,6 +47,10 @@ struct CadenceFeature {
         var zoneSeconds: [CadenceZone: TimeInterval] = [:]
         /// Seconds spent coasting (rpm == 0).
         var coastingSeconds: TimeInterval = 0
+        /// Whether the ride is actively recording. Driven by `ActiveRideFeature` from its
+        /// `recordingState`: the sensor keeps notifying through a pause or auto-pause, and
+        /// that stopped time must not be tallied as coasting.
+        var isRecording = false
 
         /// Average cadence over pedalling time: mean of non-zero rpm readings.
         var averageCadenceRPM: Int {
@@ -105,7 +109,7 @@ struct CadenceFeature {
                 state.cadenceRPM = Int(rpm.rounded())
                 // Left-hold: the time since the previous reading belongs to that
                 // reading's state. Read it before appending the new sample.
-                if let previous = state.cadenceSamples.last {
+                if state.isRecording, let previous = state.cadenceSamples.last {
                     let elapsed = now.timeIntervalSince(previous.time)
                     if elapsed > 0, elapsed <= Self.maxCreditedInterval {
                         if previous.rpm > 0 {

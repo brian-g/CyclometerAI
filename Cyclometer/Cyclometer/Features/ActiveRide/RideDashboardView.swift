@@ -112,10 +112,7 @@ struct RideDashboardView: View {
                             cadenceHistory: store.cadence.watermarkSamples,
                             averageCadence: store.cadence.averageCadenceRPM,
                             maxCadence: store.cadence.maxCadenceRPM,
-                            cadenceSamples: store.cadence.cadenceSamples,
-                            altitudeSamples: store.altitudeSamples,
-                            zoneSeconds: store.cadence.zoneSeconds,
-                            coastingSeconds: store.cadence.coastingSeconds,
+                            detail: { CadenceDetail(cadence: store.cadence, altitudeSamples: store.altitudeSamples) },
                             size: .twoByOne
                         )
                         .frame(height: unit)
@@ -231,10 +228,7 @@ struct RideDashboardView: View {
                         cadenceHistory: store.cadence.watermarkSamples,
                         averageCadence: store.cadence.averageCadenceRPM,
                         maxCadence: store.cadence.maxCadenceRPM,
-                        cadenceSamples: store.cadence.cadenceSamples,
-                        altitudeSamples: store.altitudeSamples,
-                        zoneSeconds: store.cadence.zoneSeconds,
-                        coastingSeconds: store.cadence.coastingSeconds,
+                        detail: { CadenceDetail(cadence: store.cadence, altitudeSamples: store.altitudeSamples) },
                         size: .twoByOne)
                 }
                 // W9 — Directions 2×1 (#200 review)
