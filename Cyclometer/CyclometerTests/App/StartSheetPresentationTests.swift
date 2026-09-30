@@ -95,7 +95,7 @@ struct StartSheetPresentationTests {
         await store.send(.startSheet(.presented(.task)))
         #expect(log.value == Self.begun)
 
-        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
         await store.finish()
 
         #expect(log.value == Self.begun + Self.ended)
@@ -183,7 +183,7 @@ struct StartSheetPresentationTests {
 
         await store.send(.startRideButtonTapped)
         await store.send(.startSheet(.presented(.task)))
-        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
         #expect(store.state.activeRide != nil)
         #expect(log.value == Self.begun + Self.ended)
 

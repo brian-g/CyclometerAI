@@ -53,7 +53,7 @@ struct RideSummaryPresentationTests {
         store.exhaustivity = .off
 
         await store.send(.startRideButtonTapped)
-        await store.send(.startSheet(.presented(.delegate(.startRide(nil)))))
+        await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
         await store.receive(\.activeRide.task)
         let rideId = store.state.activeRide?.rideId
 

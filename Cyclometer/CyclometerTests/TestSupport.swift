@@ -208,3 +208,16 @@ func openStore(at url: URL) throws -> ModelContainer {
         configurations: [ModelConfiguration(schema: SwiftDataStack.schema, url: url)]
     )
 }
+
+extension TestStore where State == ActiveRideFeature.State, Action == ActiveRideFeature.Action {
+    /// Starts a fresh ride the way S05.1 does: its `Ride` row first, then `.task` (#344).
+    /// For suites on the real persistence stack, whose writes need that row to exist.
+    func startFreshRide() async {
+        do {
+            try await dependencies.persistenceClient.createRide(state.rideId, dependencies.date.now, state.route)
+        } catch {
+            Issue.record(error, "createRide failed")
+        }
+        await send(.task)
+    }
+}

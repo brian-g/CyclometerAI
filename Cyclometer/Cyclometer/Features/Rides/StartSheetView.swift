@@ -56,6 +56,7 @@ struct StartSheetView: View {
                         Image(systemName: "xmark")
                     }
                     .accessibilityLabel("Cancel")
+                    .disabled(store.isStarting)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -73,6 +74,10 @@ struct StartSheetView: View {
                 RoutePickerView(store: pickerStore)
             }
         }
+        .alert($store.scope(state: \.alert, action: \.alert))
+        // While the `Ride` row is being written: a dismissal then would strand a row with no ride
+        // behind it, which the next launch would resume (#344).
+        .interactiveDismissDisabled(store.isStarting)
         .task { await store.send(.task).finish() }
     }
 }

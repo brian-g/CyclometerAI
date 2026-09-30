@@ -1023,77 +1023,35 @@ struct ActiveRideFeatureStateMachineTests {
         await store.skipInFlightEffects(strict: false)
     }
 
-    @Test("task creates a Ride with a deterministic id via persistenceClient")
-    func taskCreatesRide() async throws {
-        let (created, createdRide) = AsyncStream<(UUID, Date, RouteReference?)>.makeStream()
+    /// #344: S05.1 writes the `Ride` row before the ride starts and hands over its id, so `.task`
+    /// must record under that id and write no row of its own. The creation itself is
+    /// `StartSheetFeatureTests`' (`startRideEmitsDelegate`, `startRideCarriesTheRoute`).
+    @Test("task starts the ride on the id S05.1 wrote, and creates no Ride of its own")
+    func taskKeepsTheHandedRideId() async {
+        let rideId = UUID(7)
+        let creates = LockIsolated(0)
         let store = TestStore(
-            initialState: ActiveRideFeature.State(recordingState: .idle)
+            initialState: ActiveRideFeature.State(rideId: rideId, route: RouteSummary.previewRoutes[1].reference)
         ) {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
             $0.date = .constant(testDate)
-            $0.uuid = .incrementing
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
             $0.locationClient = .testValue
-            $0.persistenceClient = .mock(onCreateRide: { createdRide.yield(($0, $1, $2)) })
+            $0.persistenceClient = .mock(onCreateRide: { _, _, _ in creates.withValue { $0 += 1 } })
         }
         store.exhaustivity = .off
 
         await store.send(.task) {
             $0.recordingState = .active
-            $0.rideId = UUID(0)
         }
-        // Awaited, not read straight after `send`: the write runs in one of `.task`'s merged `.run`
-        // effects, which `TestStore` yields to but never waits for, so on a loaded runner it may not
-        // have happened yet. No deadline — a write that never comes hangs, and the CI job's timeout
-        // bounds that (`tasks/lessons.md`).
-        var rides = created.makeAsyncIterator()
-        let next = await rides.next()
-        let ride = try #require(next)
-        #expect(ride.0 == UUID(0))
-        #expect(ride.1 == testDate)
-        // Started without a route (S05.1's "None"): a free ride.
-        #expect(ride.2 == nil)
+        #expect(store.state.rideId == rideId)
 
         await store.skipInFlightEffects(strict: false)
-    }
-
-    /// #196: the route chosen on S05.1 is what the `Ride` is created with — the write S20's
-    /// Previous Rides reads back. Awaited for the same reason as `taskCreatesRide`.
-    @Test("task creates the Ride with the route the ride was started on")
-    func taskCreatesRideWithItsRoute() async throws {
-        let route = RouteSummary.previewRoutes[1].reference
-        let (created, createdRide) = AsyncStream<(UUID, Date, RouteReference?)>.makeStream()
-        let store = TestStore(
-            initialState: ActiveRideFeature.State(route: route)
-        ) {
-            ActiveRideFeature()
-        } withDependencies: {
-            $0.continuousClock = TestClock()
-            $0.date = .constant(testDate)
-            $0.uuid = .incrementing
-            $0.hapticsClient = .testValue
-            $0.variaRadarClient = .testValue
-            $0.bleHRClient = .testValue
-            $0.locationClient = .testValue
-            $0.persistenceClient = .mock(onCreateRide: { createdRide.yield(($0, $1, $2)) })
-        }
-        store.exhaustivity = .off
-
-        await store.send(.task) {
-            $0.recordingState = .active
-            $0.rideId = UUID(0)
-        }
-        var rides = created.makeAsyncIterator()
-        let next = await rides.next()
-        let ride = try #require(next)
-        #expect(ride.0 == UUID(0))
-        #expect(ride.2 == route)
-
-        await store.skipInFlightEffects(strict: false)
+        #expect(creates.value == 0)
     }
 
     /// #197: the route a ride starts on is loaded into navigation by `.task` — fresh or resumed,

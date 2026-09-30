@@ -6,6 +6,10 @@ import SwiftUI
 /// pushed on the sheet's own stack, changes — the Phase 2 bike placeholder, and a live Sensors
 /// group. Presented by `AppFeature` via `@Presents`; the "Start Ride" CTA bubbles up as
 /// `.delegate(.startRide)`, carrying the route, for the parent to begin the ride.
+///
+/// The CTA writes the ride's `Ride` row before that delegate is sent (#344). A ride without its
+/// row has nothing to checkpoint or finalize and never reaches Rides, so a failed write keeps
+/// the rider here with an alert, before the dashboard opens or any sensor starts recording.
 @Reducer
 struct StartSheetFeature {
 
@@ -13,7 +17,9 @@ struct StartSheetFeature {
     @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.bleCSCClient) var bleCSCClient
     @Dependency(\.dismiss) var dismiss
-
+    @Dependency(\.persistenceClient) var persistenceClient
+    @Dependency(\.uuid) var uuid
+    @Dependency(\.date) var date
 
     @ObservableState
     struct State: Equatable {
@@ -37,6 +43,14 @@ struct StartSheetFeature {
 
         /// The sheet's own navigation stack: S05.2, pushed from the Route row (#196).
         var path = StackState<Path.State>()
+
+        /// The ride whose `Ride` row is being written. A second tap in the meantime would start a
+        /// second ride, and `AppFeature`'s launch-time resume check has to know this row is not
+        /// an orphan (#344).
+        var pendingRideId: UUID?
+        var isStarting: Bool { pendingRideId != nil }
+        /// The row couldn't be written (#344).
+        @Presents var alert: AlertState<Action.Alert>?
 
         /// What the Route row pushes: S05.2, opened on the sheet's current answer so that answer is the
         /// one checked. Built here rather than in the view, so a test holds it to that.
@@ -73,15 +87,22 @@ struct StartSheetFeature {
         case batteryUpdated(SensorRow.Kind, Int?)
         case cancelButtonTapped
         case startRideButtonTapped
+        case rideCreated(rideId: UUID, route: RouteReference?)
+        case rideCreationFailed
         case turnByTurnToggled
+        case alert(PresentationAction<Alert>)
         case path(StackActionOf<Path>)
         case delegate(Delegate)
 
         @CasePathable
         enum Delegate: Equatable {
-            /// The sheet's route, nil for a free ride, for `AppFeature` to hand to the ride (#196).
-            case startRide(RouteReference?)
+            /// The ride's id, whose `Ride` row now exists (#344), and the sheet's route, nil for a
+            /// free ride (#196), for `AppFeature` to hand to the ride.
+            case startRide(rideId: UUID, route: RouteReference?)
         }
+
+        @CasePathable
+        enum Alert: Equatable {}
     }
 
     /// What the sheet can push (#196). `Equatable` in extensions below, as TCA 1.25 asks.
@@ -178,7 +199,35 @@ struct StartSheetFeature {
                 return .run { _ in await dismiss() }
 
             case .startRideButtonTapped:
-                return .send(.delegate(.startRide(state.route)))
+                guard !state.isStarting else { return .none }
+                let rideId = uuid()
+                state.pendingRideId = rideId
+                return .run { [persistenceClient, startedAt = date.now, route = state.route] send in
+                    do {
+                        try await persistenceClient.createRide(rideId, startedAt, route)
+                        // The route as written, not as the sheet has it now: the ride and its
+                        // row must agree on it.
+                        await send(.rideCreated(rideId: rideId, route: route))
+                    } catch {
+                        // Logged in RidePersistenceActor.
+                        await send(.rideCreationFailed)
+                    }
+                }
+
+            case let .rideCreated(rideId, route):
+                state.pendingRideId = nil
+                return .send(.delegate(.startRide(rideId: rideId, route: route)))
+
+            case .rideCreationFailed:
+                state.pendingRideId = nil
+                state.alert = AlertState {
+                    TextState("Couldn't Start Ride")
+                } actions: {
+                    ButtonState(role: .cancel) { TextState("OK") }
+                } message: {
+                    TextState("Your ride couldn't be saved, so it wasn't started. Try again.")
+                }
+                return .none
 
             case .turnByTurnToggled:
                 // The preference itself, not a copy: the ride reads it from there — a ride resumed
@@ -193,10 +242,11 @@ struct StartSheetFeature {
                 state.path.pop(from: id)
                 return .none
 
-            case .path, .delegate:
+            case .path, .delegate, .alert:
                 return .none
             }
         }
+        .ifLet(\.$alert, action: \.alert)
         .forEach(\.path, action: \.path)
     }
 

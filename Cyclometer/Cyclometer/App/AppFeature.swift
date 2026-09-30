@@ -214,7 +214,7 @@ struct AppFeature {
                 // state, so the next Start Ride opens on a free ride (#196).
                 return Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
 
-            case .startSheet(.presented(.delegate(.startRide(let route)))):
+            case let .startSheet(.presented(.delegate(.startRide(rideId, route)))):
                 // Never start a second ride over a live one (#231). `resumableRideFetched`
                 // dismisses the sheet, which stops this delegate being *emitted* — it
                 // originates inside the child (`StartSheetFeature.startRideButtonTapped`),
@@ -225,8 +225,8 @@ struct AppFeature {
                 // this from an effect that awaits anything, the unguarded version silently
                 // replaces the resumed ride and double-releases the scan.
                 guard state.activeRide == nil else { return .none }
-                // The sheet's route is what the ride writes to its `Ride` (#196).
-                Self.presentActiveRide(ActiveRideFeature.State(route: route), in: &state)
+                // The sheet has already written the ride's `Ride` row, route included (#196, #344).
+                Self.presentActiveRide(ActiveRideFeature.State(rideId: rideId, route: route), in: &state)
                 state.startSheet = nil
                 // Start the ride's long-running effects (1 Hz timer, HR, radar,
                 // location) here so they live for the whole ride — bound to
@@ -299,12 +299,19 @@ struct AppFeature {
                 return .none
 
             case .resumableRideFetched(let summary):
+                // S05.1 writes a new ride's row before `activeRide` exists (#344), so a start
+                // can be mid-write when this lands. If the fetch found that very row, it is
+                // the ride being started, not one a kill left behind: leave it to the sheet.
+                let startingRideId = state.startSheet?.pendingRideId
+                if summary.rideId == startingRideId { return .none }
                 // `.task`'s two effects race: the rider can start a brand-new ride
                 // through the normal start-sheet flow before this async fetch
                 // resolves. Don't clobber that ride — but the orphaned one still
                 // needs to be closed out, or it stays a phantom non-`.ended` row
                 // forever (invisible in RidesView, never exported) (#175 review).
-                guard state.activeRide == nil else {
+                // A start still mid-write counts: resuming here would close the sheet and
+                // strand its row (#344).
+                guard state.activeRide == nil, startingRideId == nil else {
                     return .run { [persistenceClient, date] send in
                         try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
                         // No Apple Health workout (#277): its end is the relaunch, not when the

@@ -48,7 +48,7 @@ struct RideRecordingTests {
         // `ActiveRideFeatureStateMachineTests.taskTransitionsIdleToActive`.
         store.exhaustivity = .off
 
-        await store.send(.task)
+        await store.startFreshRide()
         #expect(store.state.recordingState == .active)
         let rideId = store.state.rideId
 
@@ -143,7 +143,7 @@ struct RideRecordingTests {
             }
             firstStore.exhaustivity = .off
 
-            await firstStore.send(.task)
+            await firstStore.startFreshRide()
             rideId = firstStore.state.rideId
 
             await firstStore.send(.locationUpdated(LocationUpdate(
@@ -239,7 +239,7 @@ struct RideRecordingTests {
         }
         store.exhaustivity = .off
 
-        await store.send(.task)
+        await store.startFreshRide()
         await store.send(.pauseTapped)
         await store.send(.finishTapped)
         await store.send(.finishAlert(.presented(.confirmFinish)))
@@ -326,7 +326,7 @@ struct RideRecordingTests {
         }
         store.exhaustivity = .off
 
-        await store.send(.task)
+        await store.startFreshRide()
         let rideId = store.state.rideId
 
         // A rider position must exist before the pass is confirmed — the detector

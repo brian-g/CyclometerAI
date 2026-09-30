@@ -35,7 +35,9 @@ struct AppRouteSelectionTests {
     /// arrives is the one the sheet was holding.
     private func startRide(on store: TestStoreOf<AppFeature>, expecting route: RouteReference?) async {
         await store.send(.startSheet(.presented(.startRideButtonTapped)))
-        await store.receive(\.startSheet.presented.delegate.startRide, route)
+        // The sheet writes the ride's row first (#344), then hands the ride over.
+        await store.receive(\.startSheet.presented.delegate.startRide)
+        #expect(store.state.activeRide?.route == route)
     }
 
     @Test("Use This Route opens the Start sheet on that route, with its pairing scan")
