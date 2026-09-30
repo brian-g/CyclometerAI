@@ -662,3 +662,12 @@ them when they turn out to be stale.
 **Why.** I checked the landmark I was fixing and inferred the rest. A translation moves every point by the same amount, and one pair of points can't show that.
 
 **Rule.** To call a motion rigid, measure at least the top edge, a mid landmark and the bottom (controls) in each frame, and check they all shift by the same amount. Before claiming a feel-related fix, compare a device recording, not just the simulator. And when successive patches to hand-built motion keep failing, stop and look for the system component that already does it (#333's zoom transition).
+
+
+## Fix the stale source, don't annotate around it (2026-09-30, #339/#342)
+
+**What happened.** #342 said `assets/TCA.md`'s feature tree and file layout no longer match the code, and offered two fixes: update it, or mark it as historical. I picked the cheaper one without asking. I added a "design intent, not a map of the code" header to TCA.md and extended the "the repo doesn't follow TCA.md §8" disclaimers in CLAUDE.md and the tca-feature skill. Brian asked why TCA.md wasn't simply updated.
+
+**Why.** Each disclaimer is a note that the doc is wrong. Adding more of them makes every reader reconcile three files, where fixing the doc once would do. §3 (35 lines) and §8 (138 lines) were small enough to fix in the same PR.
+
+**Rule.** When a doc is stale and in scope, fix the doc and delete the disclaimers that point at it. Don't add new ones. If a review offers "update it, or mark it stale", ask Brian rather than silently taking the cheaper option.

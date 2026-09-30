@@ -2,9 +2,8 @@
 **Version:** 1.2  
 **Date:** 2026-05-21  
 **Updated:** 2026-05-22 - HKWorkout write at ride end; SyncClient + RideSummaryFeature spec; service sync from S10  
+**Updated:** 2026-09-30 - §3 and §8 rewritten to match the implemented tree (#339, #342)  
 **Status:** Draft — Ready for Engineering Review  
-
-> **Design intent, not a map of the code.** The feature tree (§3) and file structure (§8) are the original plan; the implemented tree differs. The codebase under `Cyclometer/Cyclometer/Features/` is the source of truth (#342).
 **Author:** Brian (UX Design) + Claude (Specification)  
 **Companion Documents:** `PRD.md §11`, `BLE.md`, `DataModel.md`
 
@@ -142,35 +141,37 @@ struct PersistenceClient: Sendable {
 
 ## 3. Feature Tree
 
+As implemented. `AppFeature` owns the tab shell directly (there is no `TabFeature`), and the ride
+dashboard and post-ride summary both hang off the app root rather than a tab.
+
 ```
-AppFeature
-├── OnboardingFeature
+AppFeature                             (App/ — tab selection, ride lifecycle, presentation)
+├── OnboardingFeature                  (optional; first launch)
 │   ├── WelcomeFeature
 │   └── SensorPairingFeature
-├── TabFeature                         (TabView shell + tab selection)
-│   ├── RidesTabFeature                (Rides tab — ride list + start sheet)
-│   │   ├── RideListFeature            (S14 — Phase 2)
-│   │   ├── StartSheetFeature          (S05.1)
-│   │   │   └── RoutePickerFeature     (S05.2 — pushed on the sheet's own stack)
-│   │   └── ActiveRideAccessoryFeature (S05.3 — accessory strip above TabBar)
-│   ├── RoutesFeature                  (S19 — route list, map-as-filter, import, filter sheet)
-│   │   └── RouteDetailFeature         (S20 — pushed onto RoutesFeature.path)
-│   └── SettingsTabFeature
-│       ├── DeviceManagementFeature    (S11)
-│       ├── HRZoneSettingsFeature      (embedded in S12)
-│       └── AccountsFeature            (embedded in S12)
-└── ActiveRideFeature                  (S05 — full-screen dashboard, above TabView)
-    ├── RadarFeature
-    ├── HeartRateFeature
-    ├── SpeedFeature
-    ├── CadenceFeature
-    ├── LocationFeature
-    ├── TrackPointRecorderFeature
-    ├── WheelCalibrationFeature
-    ├── AlertOrchestratorFeature
-    ├── NavigationFeature              (map, GPX route, turn alerts)
-    └── RideSummaryFeature             (S10 — post-ride)
+│       └── DeviceManagementFeature    (shared with Settings)
+├── RidesFeature                       (Rides tab — S14 list)
+│   └── path: RideDetailFeature        (StackState)
+├── RoutesFeature                      (S19 — list, map-as-filter, import, filter sheet)
+│   └── path: RouteDetailFeature       (S20, StackState)
+├── SettingsFeature                    (S12)
+│   └── DeviceManagementFeature        (S11)
+├── StartSheetFeature                  (@Presents — S05.1)
+│   └── path: RoutePickerFeature       (S05.2, pushed on the sheet's own stack)
+├── ActiveRideFeature                  (optional — S05 dashboard; accessory is a view, not a feature)
+│   ├── SpeedFeature
+│   ├── CadenceFeature
+│   ├── WheelCalibrationFeature
+│   ├── AlertOrchestratorFeature
+│   ├── TrackPointRecorderFeature
+│   └── NavigationFeature              (route, turn alerts)
+└── RideSummaryFeature                 (@Presents — S10, post-ride)
 ```
+
+Heart rate, radar and location are not child features: `ActiveRideFeature` consumes their
+clients (`bleHRClient`/`healthKitClient`, `variaRadarClient`, `locationClient`) directly. The
+per-sensor specs in §4 describe that state and behaviour; where §4 names a `RadarFeature`,
+`HeartRateFeature` or `LocationFeature`, read it as that slice of `ActiveRideFeature`.
 
 ---
 
@@ -977,138 +978,58 @@ This exactly mirrors `ContentView.fullScreenCover(item: $dashboardRide)` from th
 
 ## 8. Project File Structure
 
+As implemented, under `Cyclometer/Cyclometer/`. Features are grouped by area; `ActiveRide/` is
+split one level further by capability, keeping each sub-feature beside its widget (#339). The
+project uses `PBXFileSystemSynchronizedRootGroup`, so new files need no `.xcodeproj` edits.
+
 ```
 Cyclometer/
-├── App/
-│   ├── CyclometerApp.swift                    // @main; AppFeature store; font registration
-│   └── AppFeature.swift
-│
+├── App/                                   // AppFeature, AppView, CyclometerApp (@main),
+│                                          // Logger+Cyclometer, DocumentFolders, AutoDim bridge
 ├── Features/
-│   ├── Tab/
-│   │   ├── TabFeature.swift
-│   │   ├── TabView+Cyclometer.swift
-│   │   └── RidesTab/
-│   │       ├── RidesTabFeature.swift
-│   │       ├── RideListFeature.swift          // Phase 2
-│   │       ├── StartSheetFeature.swift
-│   │       └── ActiveRideAccessoryFeature.swift
-│   │
 │   ├── ActiveRide/
-│   │   ├── ActiveRideFeature.swift
-│   │   ├── ActiveRideDashboardView.swift
-│   │   │
-│   │   ├── Radar/
-│   │   │   ├── RadarFeature.swift
-│   │   │   ├── VehiclePassDetection.swift
-│   │   │   └── RadarSidebarView.swift         // W7 widget
-│   │   │
-│   │   ├── HeartRate/
-│   │   │   ├── HeartRateFeature.swift
-│   │   │   └── HeartRateWidget.swift          // W4 widget
-│   │   │
-│   │   ├── SpeedCadence/
-│   │   │   ├── SpeedCadenceFeature.swift
-│   │   │   ├── CSCCalculator.swift
-│   │   │   └── SpeedWidget.swift              // W1/W2 widgets
-│   │   │
-│   │   ├── Location/
-│   │   │   ├── LocationFeature.swift
-│   │   │   └── MapWidget.swift                // W8 widget
-│   │   │
-│   │   ├── TrackRecorder/
-│   │   │   ├── TrackPointRecorderFeature.swift
-│   │   │   └── RideDataBuffer.swift
-│   │   │
-│   │   ├── WheelCalibration/
-│   │   │   └── WheelCalibrationFeature.swift
-│   │   │
-│   │   ├── AlertOrchestrator/
-│   │   │   └── AlertOrchestratorFeature.swift
-│   │   │
-│   │   └── Navigation/
-│   │       ├── NavigationFeature.swift
-│   │       └── DirectionsWidget.swift         // W9 widget
-│   │
-│   ├── RideSummary/
-│   │   ├── RideSummaryFeature.swift
-│   │   └── RideSummaryView.swift
-│   │
-│   ├── Onboarding/
-│   │   ├── OnboardingFeature.swift
-│   │   ├── WelcomeFeature.swift
-│   │   └── SensorPairingFeature.swift
-│   │
-│   ├── Settings/
-│   │   ├── SettingsTabFeature.swift
-│   │   ├── DeviceManagementFeature.swift
-│   │   ├── HRZoneSettingsFeature.swift
-│   │   └── AccountsFeature.swift
-│   │
-│   └── Routes/
-│       ├── RoutesFeature.swift                 // S19
-│       ├── RoutesView.swift
-│       ├── RouteDetailFeature.swift            // S20
-│       ├── RouteDetailView.swift
-│       ├── RouteFilter.swift                   // distance + elevation filter, pure value
-│       ├── RouteLibrary.swift
-│       └── RoutesMapCamera.swift               // camera logic as a pure enum, so it is testable
+│   │   ├── ActiveRideFeature.swift        // parent reducer for the ride
+│   │   ├── RideDashboardView.swift        // S05 dashboard
+│   │   ├── ActiveRideAccessoryView.swift  // S05.3 accessory
+│   │   ├── Speed/                         // SpeedFeature, SpeedWidgetView (W1/W2)
+│   │   ├── Cadence/                       // CadenceFeature, CadenceWidgetView (W5)
+│   │   ├── Map/                           // MapWidgetView (W8), ActiveRideMapView,
+│   │   │                                  // LiveMapCamera, MapSheetButtons
+│   │   ├── Navigation/                    // NavigationFeature, DirectionsWidgetView (W9),
+│   │   │                                  // TurnInstructionOverlay
+│   │   ├── Recording/                     // TrackPointRecorderFeature, GPSFixFilter
+│   │   ├── Alerts/                        // AlertOrchestratorFeature, VehiclePassDetector,
+│   │   │                                  // RideBanner
+│   │   └── Calibration/                   // WheelCalibrationFeature, WheelCalibration
+│   ├── Rides/                             // RidesFeature/View, RideDetail*, RideSummary*,
+│   │                                      // StartSheet*, RoutePicker*
+│   ├── Routes/                            // RoutesFeature/View, RouteDetail*, RouteFilter,
+│   │                                      // RouteLibrary, RoutesMapCamera
+│   ├── Settings/                          // SettingsFeature/View, DeviceManagement*
+│   └── Onboarding/                        // Onboarding*, Welcome*, SensorPairing*
 │
-├── Clients/
-│   ├── BluetoothClient.swift
-│   ├── BluetoothClient+Live.swift
-│   ├── BluetoothClient+Mock.swift
-│   ├── HealthKitClient.swift
-│   ├── LocationClient.swift
-│   ├── HapticClient.swift
-│   ├── AudioAlertClient.swift
-│   ├── PersistenceClient.swift
-│   ├── NavigationClient.swift
-│   └── WheelCalibrationClient.swift
+├── Clients/                               // one folder per dependency client
+│   ├── Audio/  BLE/  Geocoding/  Haptics/  HealthKit/  Location/
+│   ├── MapSnapshot/  Overpass/  Permissions/  Screen/
+│   ├── Persistence/                       // PersistenceClient, Ride/RoutePersistenceActor,
+│   │                                      // SwiftDataStack, CoreDataStack, RideDataBuffer,
+│   │                                      // TrackPointMO, CyclometerTimeSeries.xcdatamodeld
+│   └── RideEndIntentClient.swift
 │
-├── Models/
-│   ├── AlertLevel.swift
-│   ├── RadarVehicle.swift
-│   ├── SensorSource.swift
-│   ├── TrackPointDTO.swift
-│   ├── UserProfile.swift                      // SwiftData @Model
-│   ├── Ride.swift                             // SwiftData @Model
-│   ├── RadarEvent.swift                       // SwiftData @Model
-│   ├── VehiclePassEvent.swift                 // SwiftData @Model
-│   └── TrackPointMO.swift                     // CoreData NSManagedObject
-│
-├── Persistence/
-│   ├── PersistenceClient+Live.swift
-│   ├── CyclometerSchema.swift                 // SwiftData schema + migration plan
-│   └── TrackPointCoreDataStore.swift
-│
-├── Export/
-│   ├── GPXExporter.swift
-│   └── GPXExporter+VehiclePass.swift
-│
-├── DesignSystem/
-│   ├── Color+Cyclometer.swift
-│   ├── AppFonts.swift                         // D-DIN registration (from prototype)
-│   ├── HeroNumber.swift                       // From prototype; adapted for TCA
-│   └── Components/
-│       ├── DashboardMetricCard.swift
-│       ├── DashboardSpeedCard.swift
-│       └── OpenRingProgressView.swift
-│                                              // The shared sensor row lives at
-│                                              // UI/Components/SensorListRow/; see §9
-│
-└── Tests/
-    ├── RadarFeatureTests.swift
-    ├── VehiclePassDetectionTests.swift
-    ├── AlertOrchestratorTests.swift
-    ├── HeartRateFeatureTests.swift
-    ├── SpeedFeatureTests.swift
-    ├── CadenceFeatureTests.swift
-    ├── WheelCalibrationTests.swift
-    ├── TrackPointRecorderTests.swift
-    ├── GPXExporterTests.swift
-    ├── RideRecordingTests.swift               // Full ride state machine
-    └── PersistenceTests.swift
+├── Models/                                // value types and SwiftData @Models (Ride, Route, …)
+├── Export/                                // GPXExporter, GPXParsing, GPXRouteImporter
+├── UI/
+│   ├── DesignSystem/                      // Color+Cyclometer, AppFonts, Typography,
+│   │                                      // Spacing, Opacity, WidgetSize
+│   └── Components/                        // HeroNumber, WidgetLabel, SensorListRow,
+│                                          // RouteMap, RadarColumn, HRZoneBadge, …
+├── PreviewContent/
+└── Resources/Fonts/                       // D-DIN
 ```
+
+Tests live in `Cyclometer/CyclometerTests/`, mirroring the top level only (`App/`, `Clients/`,
+`DesignSystem/`, `Export/`, `Features/`, `Models/`); within each folder they are flat, and
+snapshot references sit in that folder's `__Snapshots__/`.
 
 ---
 

@@ -38,7 +38,7 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 
 > **Not targeted:** Garmin Varia RVR820 (proprietary secured BLE protocol). ANT+ (no iOS hardware support).
 
-> Note: `assets/TCA.md` §8 describes a more nested target layout (e.g. `Features/Tab/RidesTab/`) that the repo does **not** follow — match the existing `Cyclometer/Cyclometer/Features/<Area>/` grouping when adding files. `Features/ActiveRide/` is split one level further by capability (`Speed/`, `Cadence/`, `Map/`, `Navigation/`, `Recording/`, `Alerts/`, `Calibration/`), keeping each feature beside its widget (#339).
+> File layout: `assets/TCA.md` §8 is the map of the source tree — follow it when adding files.
 
 ## Design System
 
