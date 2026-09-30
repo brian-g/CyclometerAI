@@ -112,6 +112,8 @@ struct RideDashboardView: View {
                             cadenceHistory: store.cadence.watermarkSamples,
                             averageCadence: store.cadence.averageCadenceRPM,
                             maxCadence: store.cadence.maxCadenceRPM,
+                            zoneSeconds: store.cadence.zoneSeconds,
+                            coastingSeconds: store.cadence.coastingSeconds,
                             size: .twoByOne
                         )
                         .frame(height: unit)
@@ -227,6 +229,8 @@ struct RideDashboardView: View {
                         cadenceHistory: store.cadence.watermarkSamples,
                         averageCadence: store.cadence.averageCadenceRPM,
                         maxCadence: store.cadence.maxCadenceRPM,
+                        zoneSeconds: store.cadence.zoneSeconds,
+                        coastingSeconds: store.cadence.coastingSeconds,
                         size: .twoByOne)
                 }
                 // W9 — Directions 2×1 (#200 review)

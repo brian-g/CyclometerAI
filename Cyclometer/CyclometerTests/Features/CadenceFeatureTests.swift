@@ -250,4 +250,65 @@ struct CadenceFeatureTests {
             $0.cadenceRPM = nil
         }
     }
+
+    // MARK: - Zone / coasting time (#147)
+
+    /// Store whose `now` follows a mutable clock, so intervals between readings can be driven.
+    private func makeTimedStore(_ clock: LockIsolated<Date>) -> TestStoreOf<CadenceFeature> {
+        TestStore(initialState: CadenceFeature.State()) {
+            CadenceFeature()
+        } withDependencies: {
+            $0.date = DateGenerator { clock.value }
+            $0.bleCSCClient = .testValue
+        }
+    }
+
+    private func advance(_ clock: LockIsolated<Date>, by seconds: TimeInterval) {
+        clock.withValue { $0 = $0.addingTimeInterval(seconds) }
+    }
+
+    @Test("Elapsed time is credited to the previous reading's zone or to coasting")
+    func creditsElapsedTimeToPreviousReading() async {
+        let clock = LockIsolated(Self.testDate)
+        let store = makeTimedStore(clock)
+        store.exhaustivity = .off
+
+        await store.send(.cadenceReceived(60))    // grinding
+        advance(clock, by: 2)
+        await store.send(.cadenceReceived(90))    // credits 2s to grinding
+        advance(clock, by: 1)
+        await store.send(.cadenceReceived(0))     // credits 1s to optimal
+        advance(clock, by: 3)
+        await store.send(.cadenceReceived(75))    // credits 3s to coasting
+
+        #expect(store.state.zoneSeconds == [.grinding: 2, .optimal: 1])
+        #expect(store.state.coastingSeconds == 3)
+    }
+
+    @Test("A gap longer than maxCreditedInterval credits nothing")
+    func staleGapIsNotCredited() async {
+        let clock = LockIsolated(Self.testDate)
+        let store = makeTimedStore(clock)
+        store.exhaustivity = .off
+
+        await store.send(.cadenceReceived(90))
+        advance(clock, by: CadenceFeature.maxCreditedInterval + 1)
+        await store.send(.cadenceReceived(90))
+
+        #expect(store.state.zoneSeconds.isEmpty)
+        #expect(store.state.coastingSeconds == 0)
+    }
+
+    @Test("A gap of exactly maxCreditedInterval is still credited")
+    func boundaryGapIsCredited() async {
+        let clock = LockIsolated(Self.testDate)
+        let store = makeTimedStore(clock)
+        store.exhaustivity = .off
+
+        await store.send(.cadenceReceived(110))
+        advance(clock, by: CadenceFeature.maxCreditedInterval)
+        await store.send(.cadenceReceived(110))
+
+        #expect(store.state.zoneSeconds == [.overspin: CadenceFeature.maxCreditedInterval])
+    }
 }

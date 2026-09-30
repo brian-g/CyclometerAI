@@ -8,6 +8,8 @@ struct CadenceWidget: View {
     let cadenceHistory: [Double] // rpm samples for watermark chart
     let averageCadence: Int      // rpm; 0 → no pedalling recorded yet
     let maxCadence: Int          // rpm
+    var zoneSeconds: [CadenceZone: TimeInterval] = [:]   // pedalling time per zone
+    var coastingSeconds: TimeInterval = 0
     var size: WidgetSize = .twoByOne   // only .oneByOne / .twoByOne used by W5
 
     @State private var showDetail = false
@@ -27,7 +29,13 @@ struct CadenceWidget: View {
         .contentShape(Rectangle())
         .onTapGesture { showDetail = true }
         .sheet(isPresented: $showDetail) {
-            CadenceDetailSheet(maxCadence: maxCadence)
+            CadenceDetailSheet(
+                history: cadenceHistory,
+                averageCadence: averageCadence,
+                maxCadence: maxCadence,
+                zoneSeconds: zoneSeconds,
+                coastingSeconds: coastingSeconds
+            )
         }
     }
 
@@ -93,6 +101,8 @@ struct CadenceWidget: View {
 
 private struct CadenceHistoryChart: View {
     let history: [Double]   // rpm
+    /// The watermark hides both axes; the detail sheet shows rpm values on y.
+    var showsYAxis = false
 
     /// Fixed y-domain so the zone bands always map to the same screen positions
     /// regardless of the ride's actual cadence range. 150 covers sprint/over-spin
@@ -122,35 +132,60 @@ private struct CadenceHistoryChart: View {
         }
         .chartYScale(domain: 0...Self.yMax)
         .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
+        .chartYAxis(showsYAxis ? .automatic : .hidden)
         .chartLegend(.hidden)
     }
 }
 
-// MARK: - Cadence Detail Sheet (stub)
+// MARK: - Cadence Detail Sheet
 
-/// Stub modal for the W5 "Ride metrics" sheet (UX.md §W5). Lists the planned
-/// cadence breakdowns; values arrive once a BLE cadence/power source is wired
-/// (M2/M6). Mirrors SpeedWidget's placeholder sheet.
+/// W5 "Ride metrics" sheet (UX.md §W5): cadence chart, average and max cadence,
+/// pedalling vs coasting, and time in each cadence zone, all from `CadenceFeature` state. Cadence smoothness
+/// is not shown — no spec defines it.
 private struct CadenceDetailSheet: View {
+    let history: [Double]
+    let averageCadence: Int
     let maxCadence: Int
+    let zoneSeconds: [CadenceZone: TimeInterval]
+    let coastingSeconds: TimeInterval
+
+    private static let chartHeight: CGFloat = 140
+
+    private var pedalingSeconds: TimeInterval { zoneSeconds.values.reduce(0, +) }
 
     var body: some View {
         NavigationStack {
             List {
-                metricRow("Max Cadence", maxCadence > 0 ? "\(maxCadence) rpm" : "—")
-                metricRow("Pedaling vs Coasting", "—")
-                Section("Time in Cadence Zones") {
-                    ForEach(CadenceZone.allCases, id: \.self) { zone in
-                        metricRow("\(zone.label) rpm", "—")
+                if !history.isEmpty {
+                    Section {
+                        CadenceHistoryChart(history: history, showsYAxis: true)
+                            .frame(height: Self.chartHeight)
                     }
                 }
-                metricRow("Cadence Smoothness", "—")
+                metricRow("Avg Cadence", averageCadence > 0 ? "\(averageCadence) rpm" : "—")
+                metricRow("Max Cadence", maxCadence > 0 ? "\(maxCadence) rpm" : "—")
+                metricRow("Pedaling vs Coasting", pedalingVsCoasting)
+                Section("Time in Cadence Zones") {
+                    ForEach(CadenceZone.allCases, id: \.self) { zone in
+                        metricRow("\(zone.label) rpm", Self.duration(zoneSeconds[zone] ?? 0))
+                    }
+                }
             }
             .navigationTitle("Cadence")
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium])
+    }
+
+    private var pedalingVsCoasting: String {
+        let total = pedalingSeconds + coastingSeconds
+        guard total > 0 else { return "—" }
+        let pedalingPercent = Int((pedalingSeconds / total * 100).rounded())
+        return "\(pedalingPercent)% / \(100 - pedalingPercent)%"
+    }
+
+    private static func duration(_ seconds: TimeInterval) -> String {
+        Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1)))
     }
 
     private func metricRow(_ label: String, _ value: String) -> some View {
@@ -204,4 +239,24 @@ private let demoHistory: [Double] = stride(from: 60.0, to: 105.0, by: 1.2).map {
         size: .oneByOne
     )
     .frame(width: 196, height: 96)
+}
+
+#Preview("Detail Sheet — Active") {
+    CadenceDetailSheet(
+        history: demoHistory,
+        averageCadence: 88,
+        maxCadence: 104,
+        zoneSeconds: [.grinding: 95, .transition: 210, .optimal: 1_260, .overspin: 42],
+        coastingSeconds: 380
+    )
+}
+
+#Preview("Detail Sheet — No Data") {
+    CadenceDetailSheet(
+        history: [],
+        averageCadence: 0,
+        maxCadence: 0,
+        zoneSeconds: [:],
+        coastingSeconds: 0
+    )
 }
