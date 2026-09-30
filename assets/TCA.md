@@ -3,6 +3,8 @@
 **Date:** 2026-05-21  
 **Updated:** 2026-05-22 - HKWorkout write at ride end; SyncClient + RideSummaryFeature spec; service sync from S10  
 **Status:** Draft — Ready for Engineering Review  
+
+> **Design intent, not a map of the code.** The feature tree (§3) and file structure (§8) are the original plan; the implemented tree differs. The codebase under `Cyclometer/Cyclometer/Features/` is the source of truth (#342).
 **Author:** Brian (UX Design) + Claude (Specification)  
 **Companion Documents:** `PRD.md §11`, `BLE.md`, `DataModel.md`
 

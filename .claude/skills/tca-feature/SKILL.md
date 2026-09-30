@@ -5,11 +5,11 @@ description: This skill should be used when the user asks to add a new TCA featu
 
 # TCA Feature Scaffold
 
-This skill encodes the real pattern already living in `Features/ActiveRide/CadenceFeature.swift` and its three companion files — the most complete, currently-accurate example in the repo (a BLE-backed sensor feature with a reconnect grace window, a widget view, reducer tests, and snapshot tests). Use it as the template, not `assets/TCA.md` §8, whose nested file layout `CLAUDE.md` explicitly says the repo does not follow.
+This skill encodes the real pattern already living in `Features/ActiveRide/Cadence/CadenceFeature.swift` and its three companion files — the most complete, currently-accurate example in the repo (a BLE-backed sensor feature with a reconnect grace window, a widget view, reducer tests, and snapshot tests). Use it as the template, not `assets/TCA.md` §8, whose nested file layout `CLAUDE.md` explicitly says the repo does not follow.
 
 ## File placement
 
-Flat grouping: `Cyclometer/Cyclometer/Features/<Area>/<Name>Feature.swift` and `<Name>WidgetView.swift` (or `<Name>View.swift` for a non-widget screen) live side by side in the matching area folder (`ActiveRide/`, `Rides/`, `Routes/`, `Settings/`, `Onboarding/`). `PBXFileSystemSynchronizedRootGroup` is already configured in the `.xcodeproj` — any new `.swift` file under `Cyclometer/Cyclometer/` is picked up automatically. Never hand-edit the `.xcodeproj` file to add a source file.
+Flat grouping: `Cyclometer/Cyclometer/Features/<Area>/<Name>Feature.swift` and `<Name>WidgetView.swift` (or `<Name>View.swift` for a non-widget screen) live side by side in the matching area folder (`ActiveRide/`, `Rides/`, `Routes/`, `Settings/`, `Onboarding/`). `ActiveRide/` is the one area with capability subfolders (#339): a feature and its widget go together in `ActiveRide/<Capability>/` (`Speed/`, `Cadence/`, `Map/`, `Navigation/`, `Recording/`, `Alerts/`, `Calibration/`); only the parent `ActiveRideFeature`, `RideDashboardView` and `ActiveRideAccessoryView` sit at its root. `PBXFileSystemSynchronizedRootGroup` is already configured in the `.xcodeproj` — any new `.swift` file under `Cyclometer/Cyclometer/` is picked up automatically. Never hand-edit the `.xcodeproj` file to add a source file.
 
 ## Reducer
 
