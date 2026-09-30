@@ -137,6 +137,35 @@ private struct CadenceHistoryChart: View {
     }
 }
 
+// MARK: - Cadence Zone Donut
+
+/// Share of pedalling time in each cadence zone, coloured to match the watermark bands.
+private struct CadenceZoneDonut: View {
+    let zoneSeconds: [CadenceZone: TimeInterval]
+
+    private static let innerRadiusRatio = 0.6
+
+    private var zones: [(zone: CadenceZone, seconds: TimeInterval)] {
+        CadenceZone.allCases.compactMap { zone in
+            let seconds = zoneSeconds[zone] ?? 0
+            return seconds > 0 ? (zone: zone, seconds: seconds) : nil
+        }
+    }
+
+    var body: some View {
+        Chart(zones, id: \.zone) { entry in
+            SectorMark(
+                angle: .value("Time", entry.seconds),
+                innerRadius: .ratio(Self.innerRadiusRatio),
+                angularInset: 1
+            )
+            .foregroundStyle(entry.zone.color)
+        }
+        .chartLegend(.hidden)
+        .accessibilityHidden(true)   // the zone rows below carry the values
+    }
+}
+
 // MARK: - Cadence Detail Sheet
 
 /// W5 "Ride metrics" sheet (UX.md §W5): cadence chart, average and max cadence,
@@ -150,6 +179,7 @@ private struct CadenceDetailSheet: View {
     let coastingSeconds: TimeInterval
 
     private static let chartHeight: CGFloat = 140
+    private static let donutHeight: CGFloat = 120
 
     private var pedalingSeconds: TimeInterval { zoneSeconds.values.reduce(0, +) }
 
@@ -166,6 +196,11 @@ private struct CadenceDetailSheet: View {
                 metricRow("Max Cadence", maxCadence > 0 ? "\(maxCadence) rpm" : "—")
                 metricRow("Pedaling vs Coasting", pedalingVsCoasting)
                 Section("Time in Cadence Zones") {
+                    if pedalingSeconds > 0 {
+                        CadenceZoneDonut(zoneSeconds: zoneSeconds)
+                            .frame(height: Self.donutHeight)
+                            .frame(maxWidth: .infinity)
+                    }
                     ForEach(CadenceZone.allCases, id: \.self) { zone in
                         metricRow("\(zone.label) rpm", Self.duration(zoneSeconds[zone] ?? 0))
                     }
