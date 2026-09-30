@@ -299,12 +299,19 @@ struct AppFeature {
                 return .none
 
             case .resumableRideFetched(let summary):
+                // S05.1 writes a new ride's row before `activeRide` exists (#344), so a start
+                // can be mid-write when this lands. If the fetch found that very row, it is
+                // the ride being started, not one a kill left behind: leave it to the sheet.
+                let startingRideId = state.startSheet?.pendingRideId
+                if summary.rideId == startingRideId { return .none }
                 // `.task`'s two effects race: the rider can start a brand-new ride
                 // through the normal start-sheet flow before this async fetch
                 // resolves. Don't clobber that ride — but the orphaned one still
                 // needs to be closed out, or it stays a phantom non-`.ended` row
                 // forever (invisible in RidesView, never exported) (#175 review).
-                guard state.activeRide == nil else {
+                // A start still mid-write counts: resuming here would close the sheet and
+                // strand its row (#344).
+                guard state.activeRide == nil, startingRideId == nil else {
                     return .run { [persistenceClient, date] send in
                         try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
                         // No Apple Health workout (#277): its end is the relaunch, not when the

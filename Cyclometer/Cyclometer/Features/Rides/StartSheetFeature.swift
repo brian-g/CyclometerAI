@@ -1,9 +1,6 @@
 import ComposableArchitecture
 import Foundation
 import SwiftUI
-import os
-
-private let logger = Logger.cyclometer(.recording)
 
 /// S05.1 — Start Ride sheet. Global (app-level) setup screen: the ride's route — which S05.2,
 /// pushed on the sheet's own stack, changes — the Phase 2 bike placeholder, and a live Sensors
@@ -47,8 +44,11 @@ struct StartSheetFeature {
         /// The sheet's own navigation stack: S05.2, pushed from the Route row (#196).
         var path = StackState<Path.State>()
 
-        /// The `Ride` row is being written. A second tap in the meantime would start a second ride.
-        var isStarting = false
+        /// The ride whose `Ride` row is being written. A second tap in the meantime would start a
+        /// second ride, and `AppFeature`'s launch-time resume check has to know this row is not
+        /// an orphan (#344).
+        var pendingRideId: UUID?
+        var isStarting: Bool { pendingRideId != nil }
         /// The row couldn't be written (#344).
         @Presents var alert: AlertState<Action.Alert>?
 
@@ -87,7 +87,7 @@ struct StartSheetFeature {
         case batteryUpdated(SensorRow.Kind, Int?)
         case cancelButtonTapped
         case startRideButtonTapped
-        case rideCreated(UUID)
+        case rideCreated(rideId: UUID, route: RouteReference?)
         case rideCreationFailed
         case turnByTurnToggled
         case alert(PresentationAction<Alert>)
@@ -200,24 +200,26 @@ struct StartSheetFeature {
 
             case .startRideButtonTapped:
                 guard !state.isStarting else { return .none }
-                state.isStarting = true
                 let rideId = uuid()
+                state.pendingRideId = rideId
                 return .run { [persistenceClient, startedAt = date.now, route = state.route] send in
                     do {
                         try await persistenceClient.createRide(rideId, startedAt, route)
-                        await send(.rideCreated(rideId))
+                        // The route as written, not as the sheet has it now: the ride and its
+                        // row must agree on it.
+                        await send(.rideCreated(rideId: rideId, route: route))
                     } catch {
-                        logger.error("createRide failed for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                        // Logged in RidePersistenceActor.
                         await send(.rideCreationFailed)
                     }
                 }
 
-            case .rideCreated(let rideId):
-                state.isStarting = false
-                return .send(.delegate(.startRide(rideId: rideId, route: state.route)))
+            case let .rideCreated(rideId, route):
+                state.pendingRideId = nil
+                return .send(.delegate(.startRide(rideId: rideId, route: route)))
 
             case .rideCreationFailed:
-                state.isStarting = false
+                state.pendingRideId = nil
                 state.alert = AlertState {
                     TextState("Couldn't Start Ride")
                 } actions: {

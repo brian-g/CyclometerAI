@@ -249,6 +249,64 @@ struct AppFeatureTests {
         #expect(finalized.value?.3 == nil)
     }
 
+    /// #344: S05.1 writes a new ride's row before `activeRide` exists, so the launch-time fetch can
+    /// land mid-write. Found a row a kill left behind, it closes that one out and leaves the start
+    /// alone. Found the row being written, it does nothing: that is the new ride, not an orphan.
+    /// Either way the ride that starts records under the id the sheet wrote.
+    @Test("A resumable ride fetched while S05.1 is writing a new ride's row", arguments: [false, true])
+    func resumableRideFetchedMidStart(fetchedTheNewRow: Bool) async throws {
+        let gate = AsyncStream.makeStream(of: Void.self)
+        let created = LockIsolated<[UUID]>([])
+        let finalized = LockIsolated<[UUID]>([])
+        let store = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.uuid = .incrementing
+            $0.bleCSCClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.locationClient = .testValue
+            $0.hapticsClient = .testValue
+            $0.permissionsClient = .testValue
+            var client = PersistenceClient.mock(onFinalizeRide: { id, _, _, _ in
+                finalized.withValue { $0.append(id) }
+            })
+            client.createRide = { id, _, _ in
+                created.withValue { $0.append(id) }
+                for await _ in gate.stream { break }
+            }
+            $0.persistenceClient = client
+        }
+        store.exhaustivity = .off
+
+        await store.send(.startRideButtonTapped)
+        await store.send(.startSheet(.presented(.startRideButtonTapped)))
+        let newRideId = try #require(store.state.startSheet?.pendingRideId)
+        let orphanedRideId = UUID()
+        let summary = RideSummaryUpdate(
+            rideId: fetchedTheNewRow ? newRideId : orphanedRideId, recordingState: .active,
+            durationSeconds: 300, distanceMeters: 2_000, averageSpeedMPS: 5, maxSpeedMPS: 9
+        )
+
+        await store.send(.resumableRideFetched(summary))
+        #expect(store.state.activeRide == nil)
+        #expect(store.state.startSheet != nil, "the resume closed the sheet mid-start")
+
+        gate.continuation.yield()
+        await store.receive(\.startSheet.presented.delegate.startRide)
+
+        #expect(created.value == [newRideId])
+        #expect(store.state.activeRide?.rideId == newRideId)
+        if fetchedTheNewRow {
+            #expect(finalized.value.isEmpty)
+        } else {
+            await expectEventually { finalized.value == [orphanedRideId] }
+        }
+        await store.skipInFlightEffects(strict: false)
+    }
+
     /// The Rides tab only loads on its own `.task`, which fires once when it first
     /// mounts — not when a ride finishes underneath an already-mounted tab. Without
     /// this, a just-finished ride stayed invisible until something else (a tab

@@ -15,12 +15,21 @@ actor RidePersistenceActor {
     /// denormalized `routeName` are written together and can never disagree — and so this
     /// actor never has to read the `Route` table, which is what keeps it and
     /// `RoutePersistenceActor` on disjoint tables (#191).
+    ///
+    /// A failed save is rolled back. S05.1 offers a retry (#344), and without the rollback the
+    /// failed insert would still be pending in the context, committed by the retry's save
+    /// alongside the new row, and resumed as an empty ride at the next launch.
     func createRide(id: UUID, startedAt: Date, route: RouteReference?) throws {
-        try savingChanges("createRide", id: id, context: modelContext) {
-            let ride = Ride(id: id, startedAt: startedAt)
-            ride.routeId = route?.id
-            ride.routeName = route?.name
-            modelContext.insert(ride)
+        do {
+            try savingChanges("createRide", id: id, context: modelContext) {
+                let ride = Ride(id: id, startedAt: startedAt)
+                ride.routeId = route?.id
+                ride.routeName = route?.name
+                modelContext.insert(ride)
+            }
+        } catch {
+            modelContext.rollback()
+            throw error
         }
     }
 

@@ -18,8 +18,8 @@ struct StartSheetFeatureTests {
             $0.persistenceClient.createRide = { id, startedAt, _ in created.withValue { $0[id] = startedAt } }
         }
 
-        await store.send(.startRideButtonTapped) { $0.isStarting = true }
-        await store.receive(.rideCreated(UUID(0))) { $0.isStarting = false }
+        await store.send(.startRideButtonTapped) { $0.pendingRideId = UUID(0) }
+        await store.receive(.rideCreated(rideId: UUID(0), route: nil)) { $0.pendingRideId = nil }
         await store.receive(.delegate(.startRide(rideId: UUID(0), route: nil)))
         #expect(created.value == [UUID(0): Date(timeIntervalSince1970: 1_000_000)])
     }
@@ -38,9 +38,9 @@ struct StartSheetFeatureTests {
             $0.persistenceClient.createRide = { _, _, _ in throw WriteFailed() }
         }
 
-        await store.send(.startRideButtonTapped) { $0.isStarting = true }
+        await store.send(.startRideButtonTapped) { $0.pendingRideId = UUID(0) }
         await store.receive(.rideCreationFailed) {
-            $0.isStarting = false
+            $0.pendingRideId = nil
             $0.alert = AlertState {
                 TextState("Couldn't Start Ride")
             } actions: {
@@ -50,6 +50,30 @@ struct StartSheetFeatureTests {
             }
         }
         await store.send(.alert(.dismiss)) { $0.alert = nil }
+    }
+
+    /// The Route row stays usable while the row is written. The ride must follow the route its
+    /// row was written with, or S20's Previous Rides would file it under a route it didn't ride.
+    @Test("A route picked while the Ride row is being written doesn't reach the ride")
+    func startRideKeepsTheWrittenRoute() async {
+        let gate = AsyncStream.makeStream(of: Void.self)
+        let store = TestStore(initialState: StartSheetFeature.State(route: Self.route.reference)) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.uuid = .incrementing
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.persistenceClient.createRide = { _, _, _ in
+                for await _ in gate.stream { break }
+            }
+        }
+        store.exhaustivity = .off
+
+        await store.send(.startRideButtonTapped)
+        await store.send(.path(.push(id: 0, state: store.state.routePicker)))
+        await store.send(.path(.element(id: 0, action: .routePicker(.delegate(.routeSelected(nil))))))
+        #expect(store.state.route == nil)
+        gate.continuation.yield()
+        await store.receive(.delegate(.startRide(rideId: UUID(0), route: Self.route.reference)))
     }
 
     @Test("A second tap while the Ride row is being written starts nothing")
@@ -67,10 +91,10 @@ struct StartSheetFeatureTests {
             }
         }
 
-        await store.send(.startRideButtonTapped) { $0.isStarting = true }
+        await store.send(.startRideButtonTapped) { $0.pendingRideId = UUID(0) }
         await store.send(.startRideButtonTapped)
         gate.continuation.yield()
-        await store.receive(.rideCreated(UUID(0))) { $0.isStarting = false }
+        await store.receive(.rideCreated(rideId: UUID(0), route: nil)) { $0.pendingRideId = nil }
         await store.receive(.delegate(.startRide(rideId: UUID(0), route: nil)))
         #expect(created.value == 1)
     }
@@ -309,8 +333,8 @@ struct StartSheetFeatureTests {
             $0.persistenceClient.createRide = { _, _, route in createdRoute.setValue(route) }
         }
 
-        await store.send(.startRideButtonTapped) { $0.isStarting = true }
-        await store.receive(.rideCreated(UUID(0))) { $0.isStarting = false }
+        await store.send(.startRideButtonTapped) { $0.pendingRideId = UUID(0) }
+        await store.receive(.rideCreated(rideId: UUID(0), route: Self.route.reference)) { $0.pendingRideId = nil }
         await store.receive(.delegate(.startRide(rideId: UUID(0), route: Self.route.reference)))
         // Written to the row too, which is what S20's Previous Rides reads back.
         #expect(createdRoute.value == Self.route.reference)
