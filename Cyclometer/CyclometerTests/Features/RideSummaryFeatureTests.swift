@@ -125,23 +125,19 @@ struct RideSummaryFeatureTests {
         #expect(store.state.load == .unavailable)
     }
 
-    @Test("a ride that ended without part of its track says so once loaded, and only once (#345)", arguments: [0, 90])
-    func unsavedTrackAlert(unsaved: Int) async {
+    @Test("a ride that ended without part of its track says so once loaded, and only once (#345)", arguments: [false, true])
+    func unsavedTrackAlert(isTrackLost: Bool) async {
         let store = makeStore(persistenceClient: .mock(
             trackPoints: [Self.summary.id: Self.track()], rides: [Self.summary]
         ))
-        // As the ride-end effect leaves it, in the store's own in-memory storage.
-        let entries = withDependencies {
-            $0.defaultInMemoryStorage = store.dependencies.defaultInMemoryStorage
-        } operation: {
-            Shared(.unsavedTrackPoints)
-        }
-        if unsaved > 0 { entries.withLock { $0[Self.summary.id] = unsaved } }
+        let lost = Self.startedAt.addingTimeInterval(60)...Self.startedAt.addingTimeInterval(95)
+        let entries = unsavedTrack(in: store.dependencies)
+        if isTrackLost { entries.withLock { $0[Self.summary.id] = lost } }
 
         await load(store)
 
         #expect(store.state.load == .loaded)
-        #expect(store.state.alert == (unsaved > 0 ? RideSummaryFeature.unsavedTrackAlert(points: unsaved) : nil))
+        #expect(store.state.alert == (isTrackLost ? RideSummaryFeature.unsavedTrackAlert(lost, calendar: Self.calendar) : nil))
         #expect(entries.wrappedValue[Self.summary.id] == nil)
     }
 

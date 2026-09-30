@@ -107,8 +107,8 @@ struct RideSummaryFeature {
         var elevationProfileMeters: [Double]?
         var heartRateSecondsByBPM: [Int: Int]
         var defaultTitle: String
-        /// Points the ride ended without, when its final flush failed (#345).
-        var unsavedTrackPoints = 0
+        /// The stretch of track the ride ended without (#345).
+        var unsavedTrack: ClosedRange<Date>?
     }
 
     enum Action: Equatable {
@@ -150,9 +150,9 @@ struct RideSummaryFeature {
                             return
                         }
                         // Recorded before the finalize that just landed, so it's already there.
-                        @Shared(.unsavedTrackPoints) var unsavedTrackPoints
-                        let unsaved = unsavedTrackPoints[id] ?? 0
-                        $unsavedTrackPoints.withLock { $0[id] = nil }
+                        // Cleared only once the alert is up, so a cancelled load keeps it.
+                        @SharedReader(.unsavedTrack) var unsavedTrack
+                        let unsaved = unsavedTrack[id]
                         async let stats = Self.fetchStats(id, persistenceClient)
                         async let points = Self.fetchTrackPoints(id, persistenceClient)
                         let track = await points
@@ -174,7 +174,7 @@ struct RideSummaryFeature {
                             ),
                             heartRateSecondsByBPM: RideDetailSeries.secondsByBPM(track),
                             defaultTitle: defaultTitle,
-                            unsavedTrackPoints: unsaved
+                            unsavedTrack: unsaved
                         )))
                         // Only after the screen has its numbers, so it never waits on the network.
                         guard isPlaceNameLookupEnabled,
@@ -208,13 +208,16 @@ struct RideSummaryFeature {
                 if state.title.isEmpty {
                     state.title = loaded.summary.title.isEmpty ? defaultTitle : loaded.summary.title
                 }
-                if loaded.unsavedTrackPoints > 0 {
-                    state.alert = Self.unsavedTrackAlert(points: loaded.unsavedTrackPoints)
+                if let unsaved = loaded.unsavedTrack {
+                    state.alert = Self.unsavedTrackAlert(unsaved, calendar: calendar)
+                    Self.clearUnsavedTrack(state.rideId)
                 }
                 return .none
 
             case .finalizeTimedOut:
                 state.load = .unavailable
+                // Nothing here to tell the rider on; the entry just goes.
+                Self.clearUnsavedTrack(state.rideId)
                 return .none
 
             case let .healthProfileFetched(restingBPM, maxBPM, zoneCeilingsBPM):
@@ -251,16 +254,22 @@ struct RideSummaryFeature {
         .ifLet(\.$alert, action: \.alert)
     }
 
-    /// One point a second, so the count is the seconds of riding missing from the end.
-    static func unsavedTrackAlert(points: Int) -> AlertState<Action.Alert> {
-        let missing = Duration.seconds(points).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide))
+    /// Times, not a duration: points are recorded only with a usable fix, so their count isn't
+    /// seconds of riding.
+    static func unsavedTrackAlert(_ unsaved: ClosedRange<Date>, calendar: Calendar) -> AlertState<Action.Alert> {
+        let style = Date.FormatStyle(date: .omitted, time: .shortened, calendar: calendar, timeZone: calendar.timeZone)
         return AlertState {
             TextState("Some Track Data Wasn't Saved")
         } actions: {
             ButtonState(role: .cancel) { TextState("OK") }
         } message: {
-            TextState("Your ride was saved, but the last \(missing) of its track couldn't be. Its map and GPX file end early.")
+            TextState("Your ride was saved, but its track from \(unsaved.lowerBound.formatted(style)) to \(unsaved.upperBound.formatted(style)) couldn't be. Its map and GPX file are missing that stretch.")
         }
+    }
+
+    private static func clearUnsavedTrack(_ rideId: UUID) {
+        @Shared(.unsavedTrack) var unsavedTrack
+        $unsavedTrack.withLock { $0[rideId] = nil }
     }
 
     /// Whether the start may go to the geocoder (PRD §12): only for a ride known not to be on a

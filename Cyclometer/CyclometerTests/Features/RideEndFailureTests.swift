@@ -18,7 +18,6 @@ import UIKit
 @MainActor
 @Suite("Ride end — failure paths")
 struct RideEndFailureTests {
-    private struct WriteFailed: Error {}
 
     private static let testDate = Date(timeIntervalSince1970: 1_000_000)
     private static let coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
@@ -202,9 +201,9 @@ struct RideEndFailureTests {
     func flushFailureTruncatesExportButStillEndsRide() async throws {
         let (liveClient, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         var client = liveClient
-        let attempts = LockIsolated<[Int]>([])
+        let attempts = LockIsolated<[[TrackPointDTO]]>([])
         client.flushTrackPoints = { batch in
-            attempts.withValue { $0.append(batch.count) }
+            attempts.withValue { $0.append(batch) }
             throw WriteFailed()
         }
 
@@ -220,9 +219,11 @@ struct RideEndFailureTests {
 
         // Retried once, with the same points, and then recorded for S10 to tell the rider (#345).
         #expect(attempts.value.count == 2)
-        #expect(attempts.value.first ?? 0 > 0)
-        #expect(Set(attempts.value).count == 1)
-        #expect(Self.unsavedTrackPoints(store)[rideId] == attempts.value.first)
+        let batch = try #require(attempts.value.first)
+        #expect(!batch.isEmpty)
+        #expect(attempts.value.last == batch)
+        let timestamps = batch.map(\.timestamp)
+        #expect(unsavedTrack(in: store.dependencies).wrappedValue[rideId] == timestamps.min()!...timestamps.max()!)
 
         // The ride still closes out — a lost flush must not strand it out of `.ended`.
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
@@ -267,17 +268,7 @@ struct RideEndFailureTests {
         let gpxURL = try #require(try Self.fetchRide(rideId, from: swiftDataStack).gpxFileURL)
         let parsed = try GPXParsing.parse(try String(contentsOf: gpxURL, encoding: .utf8))
         #expect(parsed.trackPoints.count == recorded)
-        #expect(Self.unsavedTrackPoints(store)[rideId] == nil)
-    }
-
-    /// What the ride-end effect left for S10, read from the store's own in-memory storage.
-    private static func unsavedTrackPoints(_ store: TestStoreOf<ActiveRideFeature>) -> [UUID: Int] {
-        withDependencies {
-            $0.defaultInMemoryStorage = store.dependencies.defaultInMemoryStorage
-        } operation: {
-            @Shared(.unsavedTrackPoints) var unsaved
-            return unsaved
-        }
+        #expect(unsavedTrack(in: store.dependencies).wrappedValue[rideId] == nil)
     }
 
     @Test("a GPX export failure at ride end still ends the ride, with a nil gpxFileURL")

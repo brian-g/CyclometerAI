@@ -89,7 +89,6 @@ struct RideDataBufferTests {
         #expect(drained.count == 200)
     }
 
-    private struct WriteFailed: Error {}
 
     @Test("A failed flush puts its batch back ahead of newer points, and the next flush writes both in order (#345)")
     func failedFlushRequeuesInOrder() async throws {
@@ -107,5 +106,62 @@ struct RideDataBufferTests {
         #expect(written.value.map(\.speedMPS) == [1, 2, 3])
         #expect(await buffer.totalPointCount == 3)
         #expect(await buffer.drainForFlush().isEmpty)
+    }
+
+    @Test("A flush waits for the one in flight, and writes the batch that one put back ahead of its own (#345)")
+    func overlappingFlushesAreSerialized() async throws {
+        let buffer = RideDataBuffer()
+        await buffer.append(Self.point(1))
+        await buffer.append(Self.point(2))
+
+        let (started, startedContinuation) = AsyncStream<Void>.makeStream()
+        let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
+        let first = Task {
+            try await buffer.flush { _ in
+                startedContinuation.yield()
+                for await _ in release { break }
+                throw WriteFailed()
+            }
+        }
+        for await _ in started { break }
+
+        await buffer.append(Self.point(3))
+        let written = LockIsolated<[[TrackPointDTO]]>([])
+        let second = Task {
+            try await buffer.flush { batch in written.withValue { $0.append(batch) } }
+        }
+        releaseContinuation.yield()
+
+        await #expect(throws: WriteFailed.self) { try await first.value }
+        try await second.value
+        #expect(written.value.map { $0.map(\.speedMPS) } == [[1, 2, 3]])
+    }
+
+    @Test("Points evicted over capacity by a put-back batch are counted lost, as a span of time (#345)")
+    func evictionIsLost() async throws {
+        let buffer = RideDataBuffer()
+        for n in 1...1_800 { await buffer.append(Self.point(n)) }
+        await #expect(throws: WriteFailed.self) { try await buffer.flush { _ in throw WriteFailed() } }
+        #expect(await buffer.takeLost() == nil)
+
+        await buffer.append(Self.point(1_801))
+        await buffer.append(Self.point(1_802))
+        #expect(await buffer.takeLost() == Self.point(1).timestamp...Self.point(2).timestamp)
+        #expect(await buffer.takeLost() == nil)
+    }
+
+    @Test("Discarded points are lost, not flushed (#345)")
+    func discardIsLostNotFlushed() async {
+        let buffer = RideDataBuffer()
+        await buffer.append(Self.point(1))
+        _ = await buffer.drainForFlush()
+        await buffer.append(Self.point(2))
+        await buffer.append(Self.point(3))
+
+        await buffer.discardUnwritten()
+
+        #expect(await buffer.totalPointCount == 1)
+        #expect(await buffer.drainForFlush().isEmpty)
+        #expect(await buffer.takeLost() == Self.point(2).timestamp...Self.point(3).timestamp)
     }
 }

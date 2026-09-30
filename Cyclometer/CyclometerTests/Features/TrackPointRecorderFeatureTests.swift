@@ -138,7 +138,6 @@ struct TrackPointRecorderFeatureTests {
         #expect(flushed.value.map(\.speedMPS) == [1])
     }
 
-    private struct WriteFailed: Error {}
 
     @Test("a checkpoint whose write fails keeps its points, and the next checkpoint writes them once, in order (#345)")
     func failedCheckpointRetriesOnTheNext() async {
