@@ -9,7 +9,7 @@ import SwiftUI
 /// Phase 2, and there is no bike model. This view owns only the loading, which a snapshot must
 /// not run; the screen itself is `RideSummaryList`.
 struct RideSummaryView: View {
-    let store: StoreOf<RideSummaryFeature>
+    @Bindable var store: StoreOf<RideSummaryFeature>
 
     /// The frame's map placeholder height.
     static let mapHeight: CGFloat = 168
@@ -20,6 +20,7 @@ struct RideSummaryView: View {
         NavigationStack {
             RideSummaryList(store: store)
         }
+        .alert($store.scope(state: \.alert, action: \.alert))
         .task { await store.send(.task).finish() }
     }
 }

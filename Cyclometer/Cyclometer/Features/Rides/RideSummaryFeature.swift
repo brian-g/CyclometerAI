@@ -68,6 +68,9 @@ struct RideSummaryFeature {
         /// Empty for a ride with no heart-rate readings.
         var heartRateSecondsByBPM: [Int: Int] = [:]
 
+        /// The ride ended without part of its track (#345).
+        @Presents var alert: AlertState<Action.Alert>?
+
         init(rideId: UUID) {
             self.rideId = rideId
         }
@@ -104,6 +107,8 @@ struct RideSummaryFeature {
         var elevationProfileMeters: [Double]?
         var heartRateSecondsByBPM: [Int: Int]
         var defaultTitle: String
+        /// The stretch of track the ride ended without (#345).
+        var unsavedTrack: ClosedRange<Date>?
     }
 
     enum Action: Equatable {
@@ -116,6 +121,9 @@ struct RideSummaryFeature {
         case titleChanged(String)
         case titleFocused
         case finishTapped
+        case alert(PresentationAction<Alert>)
+
+        enum Alert: Equatable {}
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
@@ -141,6 +149,10 @@ struct RideSummaryFeature {
                             await send(.finalizeTimedOut)
                             return
                         }
+                        // Recorded before the finalize that just landed, so it's already there.
+                        // Cleared only once the alert is up, so a cancelled load keeps it.
+                        @SharedReader(.unsavedTrack) var unsavedTrack
+                        let unsaved = unsavedTrack[id]
                         async let stats = Self.fetchStats(id, persistenceClient)
                         async let points = Self.fetchTrackPoints(id, persistenceClient)
                         let track = await points
@@ -161,7 +173,8 @@ struct RideSummaryFeature {
                                 track, sampleCount: RideDetailFeature.chartSampleCount
                             ),
                             heartRateSecondsByBPM: RideDetailSeries.secondsByBPM(track),
-                            defaultTitle: defaultTitle
+                            defaultTitle: defaultTitle,
+                            unsavedTrack: unsaved
                         )))
                         // Only after the screen has its numbers, so it never waits on the network.
                         guard isPlaceNameLookupEnabled,
@@ -195,10 +208,16 @@ struct RideSummaryFeature {
                 if state.title.isEmpty {
                     state.title = loaded.summary.title.isEmpty ? defaultTitle : loaded.summary.title
                 }
+                if let unsaved = loaded.unsavedTrack {
+                    state.alert = Self.unsavedTrackAlert(unsaved, calendar: calendar)
+                    Self.clearUnsavedTrack(state.rideId)
+                }
                 return .none
 
             case .finalizeTimedOut:
                 state.load = .unavailable
+                // Nothing here to tell the rider on; the entry just goes.
+                Self.clearUnsavedTrack(state.rideId)
                 return .none
 
             case let .healthProfileFetched(restingBPM, maxBPM, zoneCeilingsBPM):
@@ -227,8 +246,30 @@ struct RideSummaryFeature {
 
             case .finishTapped:
                 return .run { [dismiss] _ in await dismiss() }
+
+            case .alert:
+                return .none
             }
         }
+        .ifLet(\.$alert, action: \.alert)
+    }
+
+    /// Times, not a duration: points are recorded only with a usable fix, so their count isn't
+    /// seconds of riding.
+    static func unsavedTrackAlert(_ unsaved: ClosedRange<Date>, calendar: Calendar) -> AlertState<Action.Alert> {
+        let style = Date.FormatStyle(date: .omitted, time: .shortened, calendar: calendar, timeZone: calendar.timeZone)
+        return AlertState {
+            TextState("Some Track Data Wasn't Saved")
+        } actions: {
+            ButtonState(role: .cancel) { TextState("OK") }
+        } message: {
+            TextState("Your ride was saved, but its track from \(unsaved.lowerBound.formatted(style)) to \(unsaved.upperBound.formatted(style)) couldn't be. Its map and GPX file are missing that stretch.")
+        }
+    }
+
+    private static func clearUnsavedTrack(_ rideId: UUID) {
+        @Shared(.unsavedTrack) var unsavedTrack
+        $unsavedTrack.withLock { $0[rideId] = nil }
     }
 
     /// Whether the start may go to the geocoder (PRD §12): only for a ride known not to be on a

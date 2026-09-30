@@ -209,6 +209,19 @@ func openStore(at url: URL) throws -> ModelContainer {
     )
 }
 
+/// A write that fails, for tests that make a persistence endpoint throw.
+struct WriteFailed: Error {}
+
+/// `unsavedTrack` as a store with these dependencies sees it (#345): its own in-memory storage,
+/// not the test's.
+func unsavedTrack(in dependencies: DependencyValues) -> Shared<[UUID: ClosedRange<Date>]> {
+    withDependencies {
+        $0.defaultInMemoryStorage = dependencies.defaultInMemoryStorage
+    } operation: {
+        Shared(.unsavedTrack)
+    }
+}
+
 extension TestStore where State == ActiveRideFeature.State, Action == ActiveRideFeature.Action {
     /// Starts a fresh ride the way S05.1 does: its `Ride` row first, then `.task` (#344).
     /// For suites on the real persistence stack, whose writes need that row to exist.

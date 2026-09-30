@@ -18,7 +18,6 @@ import UIKit
 @MainActor
 @Suite("Ride end — failure paths")
 struct RideEndFailureTests {
-    private struct WriteFailed: Error {}
 
     private static let testDate = Date(timeIntervalSince1970: 1_000_000)
     private static let coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
@@ -66,6 +65,8 @@ struct RideEndFailureTests {
                 $0.gpxDocumentsDirectory = documentsDirectory
                 $0.rideEndIntentClient = rideEndIntentClient
                 $0.healthKitClient = healthKitClient
+                // Its own: rides here share ids, and `unsavedTrackPoints` is keyed by them (#345).
+                $0.defaultInMemoryStorage = InMemoryStorage()
             }
         }
         store.exhaustivity = .off
@@ -200,7 +201,11 @@ struct RideEndFailureTests {
     func flushFailureTruncatesExportButStillEndsRide() async throws {
         let (liveClient, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         var client = liveClient
-        client.flushTrackPoints = { _ in throw WriteFailed() }
+        let attempts = LockIsolated<[[TrackPointDTO]]>([])
+        client.flushTrackPoints = { batch in
+            attempts.withValue { $0.append(batch) }
+            throw WriteFailed()
+        }
 
         let tempDir = Self.makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -211,6 +216,14 @@ struct RideEndFailureTests {
         let rideId = await Self.runRideToEnd(store) {
             fetchRideIfPresent($0, from: swiftDataStack)?.recordingState == .ended
         }
+
+        // Retried once, with the same points, and then recorded for S10 to tell the rider (#345).
+        #expect(attempts.value.count == 2)
+        let batch = try #require(attempts.value.first)
+        #expect(!batch.isEmpty)
+        #expect(attempts.value.last == batch)
+        let timestamps = batch.map(\.timestamp)
+        #expect(unsavedTrack(in: store.dependencies).wrappedValue[rideId] == timestamps.min()!...timestamps.max()!)
 
         // The ride still closes out — a lost flush must not strand it out of `.ended`.
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
@@ -225,6 +238,37 @@ struct RideEndFailureTests {
 
         // finalizeRide succeeded, so the end intent is discharged.
         #expect(rideEndIntent.load() == nil)
+    }
+
+    @Test("a ride-end flush that fails once is retried: every point is written once, and the rider isn't told of a loss (#345)")
+    func flushFailingOnceIsRetried() async throws {
+        let (liveClient, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        var client = liveClient
+        let attempts = LockIsolated<[Int]>([])
+        client.flushTrackPoints = { batch in
+            let isFirst = attempts.withValue { $0.append(batch.count); return $0.count == 1 }
+            if isFirst { throw WriteFailed() }
+            try await liveClient.flushTrackPoints(batch)
+        }
+
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let store = Self.makeRideStore(persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory())
+        let rideId = await Self.runRideToEnd(store) {
+            fetchRideIfPresent($0, from: swiftDataStack)?.recordingState == .ended
+        }
+
+        #expect(attempts.value.count == 2)
+        let recorded = try #require(attempts.value.first)
+        #expect(recorded > 0)
+        let stored = try await client.fetchTrackPoints(rideId)
+        #expect(stored.count == recorded)
+        #expect(Set(stored.map(\.id)).count == recorded)
+
+        let gpxURL = try #require(try Self.fetchRide(rideId, from: swiftDataStack).gpxFileURL)
+        let parsed = try GPXParsing.parse(try String(contentsOf: gpxURL, encoding: .utf8))
+        #expect(parsed.trackPoints.count == recorded)
+        #expect(unsavedTrack(in: store.dependencies).wrappedValue[rideId] == nil)
     }
 
     @Test("a GPX export failure at ride end still ends the ride, with a nil gpxFileURL")

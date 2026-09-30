@@ -572,17 +572,26 @@ struct ActiveRideFeature {
                             PendingRideEnd(rideId: rideId, endedAt: endedAt, gpxFileURL: nil)
                         )
 
-                        let points = await rideDataBuffer.drainForFlush()
-                        if !points.isEmpty {
+                        // Retried once. The flush waits for a checkpoint's still in flight, so a
+                        // batch that one put back is written here too. What still won't write is
+                        // left out of the GPX export below (it re-reads from persistence), and
+                        // S10 tells the rider, as it does for points evicted mid-ride (#345).
+                        for attempt in 1...2 {
                             do {
-                                try await persistenceClient.flushTrackPoints(points)
+                                try await rideDataBuffer.flush(to: persistenceClient.flushTrackPoints)
+                                break
+                            } catch where attempt == 2 {
+                                logger.error("flushTrackPoints failed twice at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                                // Dropped, not left for the next ride's buffer.
+                                await rideDataBuffer.discardUnwritten()
                             } catch {
-                                // Not retried — GPX export still runs below and will
-                                // simply be missing these points (it re-reads from
-                                // persistence). Logged so a truncated export is at
-                                // least diagnosable after the fact.
-                                logger.error("flushTrackPoints failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — GPX export will be missing \(points.count, privacy: .public) point(s)")
+                                continue
                             }
+                        }
+                        if let lost = await rideDataBuffer.takeLost() {
+                            logger.error("Ride \(rideId, privacy: .public) ends without its track from \(lost.lowerBound, privacy: .public) to \(lost.upperBound, privacy: .public)")
+                            @Shared(.unsavedTrack) var unsavedTrack
+                            $unsavedTrack.withLock { $0[rideId] = lost }
                         }
 
                         var gpxURL: URL?

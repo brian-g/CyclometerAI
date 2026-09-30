@@ -48,6 +48,8 @@ struct RideSummaryFeatureTests {
                 $0.calendar = Self.calendar
                 $0.date = .constant(Date(timeIntervalSince1970: 1_750_000_000))
                 $0.defaultFileStorage = storage
+                // Its own, so parallel tests can't read each other's `unsavedTrackPoints` (#345).
+                $0.defaultInMemoryStorage = InMemoryStorage()
             }
         }
     }
@@ -121,6 +123,22 @@ struct RideSummaryFeatureTests {
         await clock.advance(by: .seconds(RidesFeature.finalizeWaitSeconds))
         await store.receive(\.finalizeTimedOut)
         #expect(store.state.load == .unavailable)
+    }
+
+    @Test("a ride that ended without part of its track says so once loaded, and only once (#345)", arguments: [false, true])
+    func unsavedTrackAlert(isTrackLost: Bool) async {
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track()], rides: [Self.summary]
+        ))
+        let lost = Self.startedAt.addingTimeInterval(60)...Self.startedAt.addingTimeInterval(95)
+        let entries = unsavedTrack(in: store.dependencies)
+        if isTrackLost { entries.withLock { $0[Self.summary.id] = lost } }
+
+        await load(store)
+
+        #expect(store.state.load == .loaded)
+        #expect(store.state.alert == (isTrackLost ? RideSummaryFeature.unsavedTrackAlert(lost, calendar: Self.calendar) : nil))
+        #expect(entries.wrappedValue[Self.summary.id] == nil)
     }
 
     // MARK: Content
