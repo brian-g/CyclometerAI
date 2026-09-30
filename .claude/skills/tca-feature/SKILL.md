@@ -1,15 +1,15 @@
 ---
 name: tca-feature
-description: This skill should be used when the user asks to add a new TCA feature, scaffold a reducer, create a "<Name>Feature", wire a new sensor or widget into ActiveRideFeature or another parent feature, or add the accompanying tests for one. Encodes the actual reducer/view/test scaffold this codebase uses — as built in CadenceFeature and its siblings — not the aspirational, partly-stale layout in assets/TCA.md §8. Covers the "how" of building a feature; pair with the spec-first skill for the "what".
+description: This skill should be used when the user asks to add a new TCA feature, scaffold a reducer, create a "<Name>Feature", wire a new sensor or widget into ActiveRideFeature or another parent feature, or add the accompanying tests for one. Encodes the actual reducer/view/test scaffold this codebase uses — as built in CadenceFeature and its siblings. Covers the "how" of building a feature; pair with the spec-first skill for the "what".
 ---
 
 # TCA Feature Scaffold
 
-This skill encodes the real pattern already living in `Features/ActiveRide/CadenceFeature.swift` and its three companion files — the most complete, currently-accurate example in the repo (a BLE-backed sensor feature with a reconnect grace window, a widget view, reducer tests, and snapshot tests). Use it as the template, not `assets/TCA.md` §8, whose nested file layout `CLAUDE.md` explicitly says the repo does not follow.
+This skill encodes the real pattern already living in `Features/ActiveRide/Cadence/CadenceFeature.swift` and its three companion files — the most complete, currently-accurate example in the repo (a BLE-backed sensor feature with a reconnect grace window, a widget view, reducer tests, and snapshot tests). For where files go, `assets/TCA.md` §8 is the map of the source tree.
 
 ## File placement
 
-Flat grouping: `Cyclometer/Cyclometer/Features/<Area>/<Name>Feature.swift` and `<Name>WidgetView.swift` (or `<Name>View.swift` for a non-widget screen) live side by side in the matching area folder (`ActiveRide/`, `Rides/`, `Routes/`, `Settings/`, `Onboarding/`). `PBXFileSystemSynchronizedRootGroup` is already configured in the `.xcodeproj` — any new `.swift` file under `Cyclometer/Cyclometer/` is picked up automatically. Never hand-edit the `.xcodeproj` file to add a source file.
+Flat grouping: `Cyclometer/Cyclometer/Features/<Area>/<Name>Feature.swift` and `<Name>WidgetView.swift` (or `<Name>View.swift` for a non-widget screen) live side by side in the matching area folder (`ActiveRide/`, `Rides/`, `Routes/`, `Settings/`, `Onboarding/`). Inside `ActiveRide/`, a feature and its widget go in a capability subfolder — see `assets/TCA.md` §8. `PBXFileSystemSynchronizedRootGroup` is already configured in the `.xcodeproj` — any new `.swift` file under `Cyclometer/Cyclometer/` is picked up automatically. Never hand-edit the `.xcodeproj` file to add a source file.
 
 ## Reducer
 
