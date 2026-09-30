@@ -678,3 +678,9 @@ them when they turn out to be stale.
 **What happened.** I moved `createRide` out of `ActiveRideFeature.task` and into S05.1. I updated the callers I found by grepping for the delegate, but missed `taskCreatesRide` and `taskCreatesRideWithItsRoute`. By design they await the `createRide` stream with no deadline, so the whole Swift Testing phase hung for 30 minutes. Brian noticed before I did. Separately, I had started a full suite run with the throwaway failing `createRide` still in the live client.
 
 **Rule.** When moving behaviour from A to B, grep the tests for the behaviour's *name* (`createRide`, `CreatesRide`), not just the changed call sites. Tests that await a side effect with no deadline turn into a hang, not a failure. Run long suites with a log-idle watchdog. Remove throwaway hacks before any unit run, and check with `grep THROWAWAY`.
+
+## Don't reset every simulator to fix a launch failure (2026-09-30, #345)
+
+**What happened.** To get past xcodebuild's "failed to launch com.xavier.cyclometer", I ran `xcrun simctl shutdown all` before four test runs. Each shutdown SIGKILLed the simulator processes that were slow to exit, which showed up as crash reports. Brian saw the simulator "crashing". It also closed every simulator he had open. The rest of the reports were Apple's iOS 27 runtime processes (`intelligencetasksd`, `AppIntentsLiveEntityService`) trapping on each boot, and my resets meant more boots.
+
+**Rule.** A launch failure gets a plain rerun first. If a reset is needed, shut down only the test device by UDID and say so. Before calling a crash "not ours", check `~/Library/Logs/DiagnosticReports`: a parent of `launchd_sim` means the simulator runtime, and a `SIGTERM_TIMEOUT` SIGKILL means something was shut down.
