@@ -22,22 +22,19 @@ struct DirectionsWidget: View {
     var sheetOrientation: MapOrientation = .headingUp
     var onOrientationToggle: () -> Void = {}
 
-    @State private var showMapSheet = false
-
     var body: some View {
         content
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color.cyBgSecondary)
-            .contentShape(Rectangle())
-            .onTapGesture { showMapSheet = true }
-            .liveMapSheet(
-                isPresented: $showMapSheet,
-                trackSegments: trackSegments,
-                route: route,
-                orientation: sheetOrientation,
-                onOrientationToggle: onOrientationToggle
-            )
+            .widgetDetail {
+                LiveMapSheet(
+                    trackSegments: trackSegments,
+                    route: route,
+                    orientation: sheetOrientation,
+                    onOrientationToggle: onOrientationToggle
+                )
+            }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityText)
             .accessibilityAddTraits(.isButton)
