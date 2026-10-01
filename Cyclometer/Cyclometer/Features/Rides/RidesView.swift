@@ -236,9 +236,7 @@ struct HeartRateProfileView: View {
         return (low...high, bands)
     }
 
-    private var points: [RideChartPoint] {
-        samples.enumerated().map { RideChartPoint(distance: $0.offset, value: Double($0.element)) }
-    }
+    private var points: [RideChartPoint] { RideChartPoint.points(from: samples) }
 
     var body: some View {
         let layout = Self.layout(samples: samples, zoneBounds: zoneBounds)
@@ -289,9 +287,7 @@ struct ElevationProfileView: View {
     /// The unit `samples` are already in. This view plots and labels; it does not convert. S20
     /// follows the S12 units picker (#195), while ride history's demo data is in feet.
     let unitLabel: String
-    private var points: [ElevationPoint] {
-        samples.enumerated().map { ElevationPoint(distance: $0.offset, elevation: $0.element) }
-    }
+    private var points: [ElevationPoint] { ElevationPoint.points(from: samples) }
     var body: some View {
         Chart(points) { point in
             AreaMark(x: .value("Distance", point.distance), y: .value("Elevation", point.elevation))
@@ -312,11 +308,23 @@ struct ElevationProfileView: View {
 
 // MARK: - Supporting Types
 
-struct RideChartPoint: Identifiable {
-    let id = UUID(); let distance: Int; let value: Double
+// Identified by sample index, so the same samples give Charts the same identities on every
+// rebuild — a fresh `UUID()` per point defeated its diffing (#348).
+struct RideChartPoint: Identifiable, Equatable {
+    let distance: Int; let value: Double
+    var id: Int { distance }
+
+    static func points(from samples: [Int]) -> [RideChartPoint] {
+        samples.enumerated().map { RideChartPoint(distance: $0.offset, value: Double($0.element)) }
+    }
 }
-struct ElevationPoint: Identifiable {
-    let id = UUID(); let distance: Int; let elevation: Double
+struct ElevationPoint: Identifiable, Equatable {
+    let distance: Int; let elevation: Double
+    var id: Int { distance }
+
+    static func points(from samples: [Double]) -> [ElevationPoint] {
+        samples.enumerated().map { ElevationPoint(distance: $0.offset, elevation: $0.element) }
+    }
 }
 
 #Preview("Rides") {
