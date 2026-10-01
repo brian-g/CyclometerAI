@@ -339,6 +339,11 @@ struct ActiveRideFeature {
         /// the view, because minimising the dashboard tears its view down: reopening lands on
         /// the page it was left on (#333). Per ride, so a new ride opens on page 1.
         var dashboardPage = 0
+        /// `dashboardPage` within the layout's pages. S07 (#141) can shrink the layout under the
+        /// rider; this keeps the selection, the dots and VoiceOver on a page that exists.
+        var visibleDashboardPage: Int {
+            min(max(dashboardPage, 0), dashboardLayout.pages.count - 1)
+        }
     }
 
     enum Action: Equatable {

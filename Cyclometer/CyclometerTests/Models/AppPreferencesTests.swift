@@ -143,13 +143,29 @@ struct AppPreferencesTests {
     func unknownWidgetKindFallsBackToFactory() throws {
         let json = Data(#"""
         {"wheelCircumferenceMM":2155,
-         "dashboardLayout":{"pages":[{"placements":[{"kind":"weather","size":"oneByOne","row":0,"column":0}]}]}}
+         "dashboardLayoutOverride":{"pages":[{"placements":[{"kind":"weather","size":"oneByOne","row":0,"column":0}]}]}}
         """#.utf8)
 
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
 
         #expect(decoded.dashboardLayout == .factory)
         #expect(decoded.wheelCircumferenceMM == 2155)
+    }
+
+    /// Only a rider's own layout is stored (#139 review). A copy of `.factory` written on the
+    /// first save would pin every rider to today's factory layout when it later changes.
+    @Test("The factory layout is never written to the preferences file")
+    func factoryLayoutIsNotPersisted() throws {
+        var preferences = AppPreferences()
+        let json = String(decoding: try JSONEncoder().encode(preferences), as: UTF8.self)
+        #expect(!json.contains("dashboardLayout"))
+
+        preferences.dashboardLayout = DashboardLayout(pages: [
+            DashboardPage(placements: [WidgetPlacement(kind: .pace, size: .oneByOne, row: 0, column: 0)])
+        ])
+        #expect(preferences.dashboardLayoutOverride != nil)
+        preferences.dashboardLayout = .factory
+        #expect(preferences.dashboardLayoutOverride == nil)
     }
 
     @Test("An invalid layout falls back to the factory layout")

@@ -15,7 +15,10 @@ struct RideDashboardView: View {
         // S05 — Map widget safe-area bleed. The toolbar floats as an overlay
         // (not a safe-area inset) so the grid's map cell can extend behind it
         // all the way to the physical screen bottom.
-        TabView(selection: $store.dashboardPage.sending(\.dashboardPageChanged)) {
+        TabView(selection: Binding(
+            get: { store.visibleDashboardPage },
+            set: { store.send(.dashboardPageChanged($0)) }
+        )) {
             ForEach(Array(store.dashboardLayout.pages.enumerated()), id: \.offset) { index, page in
                 DashboardPageView(page: page, store: store)
                     .tag(index)
@@ -85,12 +88,12 @@ struct RideDashboardView: View {
         return HStack(spacing: Spacing.xs) {
             ForEach(0..<pageCount, id: \.self) { page in
                 Circle()
-                    .fill(page == store.dashboardPage ? Color.cyPrimary : Color.cyTextTertiary)
+                    .fill(page == store.visibleDashboardPage ? Color.cyPrimary : Color.cyTextTertiary)
                     .frame(width: Spacing.pageIndicatorDot, height: Spacing.pageIndicatorDot)
             }
         }
         .accessibilityElement()
-        .accessibilityLabel("Page \(store.dashboardPage + 1) of \(pageCount)")
+        .accessibilityLabel("Page \(store.visibleDashboardPage + 1) of \(pageCount)")
     }
 
     // ── Ride Controls — floating glass buttons (S05) ───────────────────────────

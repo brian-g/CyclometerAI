@@ -23,23 +23,31 @@ struct DashboardPageView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // W7 — Radar full-height lane (S06), beside the grid, not in it, on every page.
-            //
-            // Per PRD §8.2/UX.md §S06 it represents the road behind the rider and needs the
-            // dashboard's full height to space vehicles readably, which no grid row can give it.
-            // `isRadarSidebarVisible` reserves its width only once radar has paired this ride;
-            // the grid gets the rest.
-            //
-            // `RadarColumnView`'s body is a `GeometryReader`, which has no intrinsic height of
-            // its own — sitting next to the grid in this `HStack`, it collapses toward a tiny
-            // cross-axis size unless told to be greedy. `.frame(maxHeight: .infinity)` makes it
-            // claim the same full height the grid gets, to the physical top and bottom edges.
-            if store.isRadarSidebarVisible {
-                RadarColumnView(targets: store.radarTargets, isOffline: store.isRadarOffline)
-                    .frame(width: Spacing.radarColumnWidth)
-                    .frame(maxHeight: .infinity)
-                    .ignoresSafeArea()
-            }
+            RadarLane(store: store)
+        }
+    }
+}
+
+/// W7 — Radar full-height lane (S06), beside the grid, not in it, on every page.
+///
+/// Per PRD §8.2/UX.md §S06 it represents the road behind the rider and needs the dashboard's full
+/// height to space vehicles readably, which no grid row can give it. `isRadarSidebarVisible`
+/// reserves its width only once radar has paired this ride; the grid gets the rest. Its own view so
+/// radar updates, several a second, redraw only the lane and not every page's grid.
+///
+/// `RadarColumnView`'s body is a `GeometryReader`, which has no intrinsic height of its own —
+/// sitting next to the grid in an `HStack`, it collapses toward a tiny cross-axis size unless told
+/// to be greedy. `.frame(maxHeight: .infinity)` makes it claim the same full height the grid gets,
+/// to the physical top and bottom edges.
+private struct RadarLane: View {
+    let store: StoreOf<ActiveRideFeature>
+
+    var body: some View {
+        if store.isRadarSidebarVisible {
+            RadarColumnView(targets: store.radarTargets, isOffline: store.isRadarOffline)
+                .frame(width: Spacing.radarColumnWidth)
+                .frame(maxHeight: .infinity)
+                .ignoresSafeArea()
         }
     }
 }

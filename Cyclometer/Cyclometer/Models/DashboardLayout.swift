@@ -92,20 +92,23 @@ enum DashboardLayoutValidator {
         var occupied: Set<DashboardGrid.Cell> = []
         var kinds: Set<WidgetKind> = []
         for placement in page.placements {
+            if !kinds.insert(placement.kind).inserted {
+                violations.append(.duplicateKind(placement.kind))
+            }
             if !placement.kind.supportedSizes.contains(placement.size) {
                 violations.append(.unsupportedSize(placement))
             }
+            // Subtracts rather than adds: these come from a decoded file, and `row + rows` with a
+            // corrupt `row` near `Int.max` would trap where `try?` can't catch it.
             let inBounds = placement.row >= 0 && placement.column >= 0
-                && placement.row + placement.size.rows <= DashboardGrid.rows
-                && placement.column + placement.size.columns <= DashboardGrid.columns
-            if !inBounds {
+                && placement.row <= DashboardGrid.rows - placement.size.rows
+                && placement.column <= DashboardGrid.columns - placement.size.columns
+            guard inBounds else {
                 violations.append(.outOfBounds(placement))
+                continue
             }
             for cell in placement.cells where !occupied.insert(cell).inserted {
                 violations.append(.overlap(cell))
-            }
-            if !kinds.insert(placement.kind).inserted {
-                violations.append(.duplicateKind(placement.kind))
             }
         }
         return violations
@@ -117,7 +120,8 @@ enum DashboardLayoutValidator {
 }
 
 extension DashboardLayout {
-    /// What a new rider sees. Page 1 is S05.4. Pages 2–3 are a temporary showcase that puts every
+    /// What a new rider sees. Page 1 is the dashboard as built before #139, which differs from
+    /// UX.md's S05.4 table (no radar cell; Cadence 2×1 on row 3). Pages 2–3 are a temporary showcase that puts every
     /// widget on screen at every size it supports, until the spec settles page 2 (UX.md §S05
     /// "Multiple pages": TBD).
     static let factory = DashboardLayout(pages: [

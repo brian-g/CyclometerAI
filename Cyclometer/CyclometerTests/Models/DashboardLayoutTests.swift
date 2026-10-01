@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import CoreGraphics
 import Testing
 @testable import Cyclometer
@@ -26,9 +27,10 @@ struct DashboardLayoutTests {
         }
     }
 
-    /// Page 1 must land exactly where the hand-built S05.4 grid put each widget: rows of
-    /// height/7, columns of width/2.
-    @Test("Factory page 1 lays out as the S05.4 grid did")
+    /// Page 1 must land where the hand-built grid before #139 put each widget: rows of height/7,
+    /// columns of width/2. One deliberate change: Cadence 2×1 now spans both columns (the old
+    /// `GridRow` lacked `.gridCellColumns(2)`, so it got one).
+    @Test("Factory page 1 lays out as the hand-built grid did")
     func factoryPageOneGeometry() {
         let screen = CGSize(width: 402, height: 874)
         let unit = screen.height / 7
@@ -55,6 +57,16 @@ struct DashboardLayoutTests {
         #expect(DashboardLayoutValidator.violations(in: page(tooLow)) == [.outOfBounds(tooLow)])
         #expect(DashboardLayoutValidator.violations(in: page(tooWide)) == [.outOfBounds(tooWide)])
         #expect(DashboardLayoutValidator.violations(in: page(negative)) == [.outOfBounds(negative)])
+    }
+
+    /// Rows and columns come from a decoded file. Bounds checking must not add to them, or a
+    /// corrupt value near `Int.max` traps inside `AppPreferences.init(from:)` on every launch.
+    @Test("A corrupt row or column near Int.max is out of bounds, not a crash")
+    func hugeRowDoesNotOverflow() {
+        let row = WidgetPlacement(kind: .map, size: .twoByTwo, row: .max, column: 0)
+        let column = WidgetPlacement(kind: .cadence, size: .twoByOne, row: 0, column: .max)
+        #expect(DashboardLayoutValidator.violations(in: page(row)) == [.outOfBounds(row)])
+        #expect(DashboardLayoutValidator.violations(in: page(column)) == [.outOfBounds(column)])
     }
 
     @Test("A size the widget has no layout for is rejected")
@@ -89,5 +101,25 @@ struct DashboardLayoutTests {
     @Test("A layout needs at least one page")
     func emptyLayoutIsInvalid() {
         #expect(!DashboardLayoutValidator.isValid(DashboardLayout(pages: [])))
+    }
+
+    /// S07 (#141) can drop pages while the rider is on one; the selection must stay on a real page.
+    @Test("The visible page stays within the layout's pages")
+    func visiblePageIsClamped() {
+        withDependencies {
+            $0.defaultFileStorage = .inMemory
+        } operation: {
+            var state = ActiveRideFeature.State()
+            state.dashboardPage = 7
+            #expect(state.visibleDashboardPage == DashboardLayout.factory.pages.count - 1)
+
+            state.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [self.page()])
+            }
+            #expect(state.visibleDashboardPage == 0)
+
+            state.dashboardPage = -1
+            #expect(state.visibleDashboardPage == 0)
+        }
     }
 }

@@ -27,7 +27,8 @@ private struct DashboardPlacementKey: LayoutValueKey {
 }
 
 extension View {
-    /// Where `DashboardGridLayout` puts this view. A view without one isn't placed.
+    /// Where `DashboardGridLayout` puts this view. Every child needs one: SwiftUI centres a child
+    /// the layout doesn't place over the whole grid, at the grid's full size.
     func dashboardPlacement(_ placement: WidgetPlacement) -> some View {
         layoutValue(key: DashboardPlacementKey.self, value: placement)
     }
