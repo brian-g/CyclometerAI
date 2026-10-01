@@ -17,45 +17,39 @@ struct MapWidget: View {
     var onOrientationToggle: () -> Void = {}
     var size: WidgetSize = .twoByTwo
 
-    @State private var showMapSheet = false
-
     var body: some View {
         ActiveRideMapView(trackSegments: trackSegments, route: route, surface: .widget)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.cyBgSecondary)
-            .contentShape(Rectangle())
-            .onTapGesture { showMapSheet = true }
-            .liveMapSheet(
-                isPresented: $showMapSheet,
-                trackSegments: trackSegments,
-                route: route,
-                orientation: sheetOrientation,
-                onOrientationToggle: onOrientationToggle
-            )
+            .widgetDetail {
+                LiveMapSheet(
+                    trackSegments: trackSegments,
+                    route: route,
+                    orientation: sheetOrientation,
+                    onOrientationToggle: onOrientationToggle
+                )
+            }
     }
 }
 
-extension View {
-    /// The full-screen map sheet. Shared by every widget whose tap opens the map — W8, and W9's
-    /// "Sheet: Map" (#200) — so they cannot present it differently.
-    func liveMapSheet(
-        isPresented: Binding<Bool>,
-        trackSegments: [[Coordinate]],
-        route: [RouteCoordinate],
-        orientation: MapOrientation,
-        onOrientationToggle: @escaping () -> Void
-    ) -> some View {
-        sheet(isPresented: isPresented) {
-            ActiveRideMapView(
-                trackSegments: trackSegments,
-                route: route,
-                surface: .sheet,
-                orientation: orientation,
-                onOrientationToggle: onOrientationToggle
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-        }
+/// The full-screen map sheet. Shared by every widget whose tap opens the map — W8, and W9's
+/// "Sheet: Map" (#200) — so they cannot present it differently.
+struct LiveMapSheet: View {
+    let trackSegments: [[Coordinate]]
+    let route: [RouteCoordinate]
+    let orientation: MapOrientation
+    let onOrientationToggle: () -> Void
+
+    var body: some View {
+        ActiveRideMapView(
+            trackSegments: trackSegments,
+            route: route,
+            surface: .sheet,
+            orientation: orientation,
+            onOrientationToggle: onOrientationToggle
+        )
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 }
 

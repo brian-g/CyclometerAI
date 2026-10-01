@@ -41,8 +41,6 @@ struct CadenceWidget: View {
     var detail: () -> CadenceDetail = { CadenceDetail() }
     var size: WidgetSize = .twoByOne   // only .oneByOne / .twoByOne used by W5
 
-    @State private var showDetail = false
-
     var body: some View {
         ZStack {
             if !cadenceHistory.isEmpty {
@@ -55,9 +53,7 @@ struct CadenceWidget: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
-        .contentShape(Rectangle())
-        .onTapGesture { showDetail = true }
-        .sheet(isPresented: $showDetail) {
+        .widgetDetail {
             CadenceDetailSheet(
                 averageCadence: averageCadence,
                 maxCadence: maxCadence,

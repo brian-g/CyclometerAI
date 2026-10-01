@@ -14,8 +14,6 @@ struct SpeedWidget: View {
     var unit: UnitSystem = .metric
     var size: WidgetSize = .twoByTwo
 
-    @State private var showDetail = false
-
     // Hero number scales proportionally to slot height: the large-hero spec is
     // `heroNominalFont`pt in a `heroNominalHeight`pt 2×2 slot, floored at
     // `heroMinFont`pt for the compact slots.
@@ -39,8 +37,7 @@ struct SpeedWidget: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
-        .onTapGesture { showDetail = true }
-        .sheet(isPresented: $showDetail) {
+        .widgetDetail {
             Text("Ride Metrics")
                 .font(.headline)
                 .presentationDetents([.medium])

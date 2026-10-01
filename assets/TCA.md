@@ -1025,7 +1025,7 @@ Cyclometer/
 │   ├── DesignSystem/                      // Color+Cyclometer, AppFonts, Typography,
 │   │                                      // Spacing, Opacity, WidgetSize
 │   └── Components/                        // HeroNumber, WidgetLabel, SensorListRow,
-│                                          // RouteMap, RadarColumn, HRZoneBadge, …
+│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, …
 ├── PreviewContent/
 └── Resources/Fonts/                       // D-DIN
 ```
