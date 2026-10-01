@@ -57,6 +57,8 @@ struct PersistenceClient: Sendable {
     /// `VehiclePassEvent` rows, its exported GPX file and the `Ride` itself (#261).
     /// Deleting the row alone is what left three orphaned `.gpx` files on a test device.
     var deleteRide: @Sendable (UUID) async throws -> Void
+    /// The file name of every ride's GPX export — what the launch sweep keeps (#346).
+    var fetchRideGPXFileNames: @Sendable () async throws -> Set<String>
     /// Read path for app-relaunch resume (#175) — the in-progress Ride left behind
     /// by a kill mid-ride, if one exists.
     var fetchResumableRide: @Sendable () async throws -> RideSummaryUpdate?
@@ -124,6 +126,7 @@ extension PersistenceClient: DependencyKey {
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
             deleteRide: { try await deleteRideLive(id: $0, rideActor: rideActor, container: coreDataContainer) },
+            fetchRideGPXFileNames: { try await rideActor.gpxFileNames() },
             fetchResumableRide: { try await rideActor.fetchResumableRide() },
             fetchRides: { try await rideActor.fetchRides() },
             importRoute: { try await routeActor.importRoute($0) },
@@ -162,6 +165,7 @@ extension PersistenceClient: DependencyKey {
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
         deleteRide: { _ in },
+        fetchRideGPXFileNames: { [] },
         fetchResumableRide: { nil },
         fetchRides: { [] },
         importRoute: { _ in RouteSummary.empty },

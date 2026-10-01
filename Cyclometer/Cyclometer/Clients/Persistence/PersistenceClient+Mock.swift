@@ -61,6 +61,7 @@ extension PersistenceClient {
             appendVehiclePassEvents: { onAppendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { vehiclePassEvents[$0] ?? [] },
             deleteRide: { onDeleteRide($0) },
+            fetchRideGPXFileNames: { [] },
             fetchResumableRide: { resumableRide },
             fetchRides: { rides },
             importRoute: {

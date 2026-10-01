@@ -209,6 +209,77 @@ struct AppFeatureTests {
         #expect(saved.value == [routeId])
     }
 
+    /// #346: launch clears an export no ride references, and keeps the one a ride-end marker
+    /// holds for a finalize that hasn't landed yet (#188).
+    @Test("task sweeps orphaned exports, keeping referenced ones and the pending ride end's")
+    func taskSweepsOrphanedExports() async throws {
+        let documents = FileManager.default.temporaryDirectory
+            .appending(component: "AppFeatureTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let rides = documents.appending(component: "Rides", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: rides, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: documents) }
+        let referenced = rides.appending(component: "Cyclometer_2026-09-19_11-48.gpx")
+        let pending = rides.appending(component: "Cyclometer_2026-09-20_07-05.gpx")
+        let orphan = rides.appending(component: "Cyclometer_2026-09-18_17-30.gpx")
+        for url in [referenced, pending, orphan] { try Data().write(to: url) }
+
+        let store = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.bleCSCClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.gpxDocumentsDirectory = documents
+            $0.rideEndIntentClient = .inMemory(initial: PendingRideEnd(
+                rideId: UUID(), endedAt: Date(timeIntervalSince1970: 1_000_000), gpxFileURL: pending
+            ))
+            var client = PersistenceClient.mock()
+            client.fetchRideGPXFileNames = { [referenced.lastPathComponent] }
+            $0.persistenceClient = client
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish(timeout: effectDrainTimeout)
+
+        #expect(FileManager.default.fileExists(atPath: referenced.path))
+        #expect(FileManager.default.fileExists(atPath: pending.path))
+        #expect(FileManager.default.fileExists(atPath: orphan.path) == false)
+    }
+
+    /// #346 review: a failed resumable fetch can't rule out a ride mid-close-out, whose export
+    /// no row names yet, so launch skips the sweep rather than risk deleting it.
+    @Test("task skips the export sweep when the resumable-ride fetch fails")
+    func taskSkipsSweepWhenResumableFetchFails() async throws {
+        let documents = FileManager.default.temporaryDirectory
+            .appending(component: "AppFeatureTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let rides = documents.appending(component: "Rides", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: rides, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: documents) }
+        let unreferenced = rides.appending(component: "Cyclometer_2026-09-20_07-05.gpx")
+        try Data().write(to: unreferenced)
+
+        let store = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.bleCSCClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.gpxDocumentsDirectory = documents
+            var client = PersistenceClient.mock()
+            client.fetchResumableRide = { throw PersistenceError.rideNotFound }
+            $0.persistenceClient = client
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish(timeout: effectDrainTimeout)
+
+        #expect(FileManager.default.fileExists(atPath: unreferenced.path))
+    }
+
     /// #175 review: `.task`'s BLE-pairing push and resumable-ride fetch race —
     /// the rider can start a brand-new ride through the normal start-sheet flow
     /// before the async fetch resolves. The already-started ride must not be

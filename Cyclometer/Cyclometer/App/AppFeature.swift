@@ -166,8 +166,17 @@ struct AppFeature {
                         if hasCompletedOnboarding {
                             try? await healthKitClient.requestAuthorization()
                         }
-                        if let summary = try? await persistenceClient.fetchResumableRide() {
-                            await send(.resumableRideFetched(summary))
+                        let resumable: RideSummaryUpdate?
+                        do {
+                            resumable = try await persistenceClient.fetchResumableRide()
+                            // Only once the fetch has said there is no unfinished ride: one
+                            // mid-close-out has an export its row doesn't name yet (#346).
+                            if resumable == nil { await Self.sweepOrphanedRideExports() }
+                        } catch {
+                            resumable = nil // Logged in RidePersistenceActor.
+                        }
+                        if let resumable {
+                            await send(.resumableRideFetched(resumable))
                         } else {
                             // Retries any thumbnail a past Finish failed to capture (#177), and
                             // any Apple Health workout that didn't land (#277). Only here: a
@@ -543,6 +552,26 @@ struct AppFeature {
             await send(.rides(.mapThumbnailsCaptured))
         }
         _ = await workouts
+    }
+
+    /// Clears exports no ride references (#346). At launch, and only once the fetch has found no
+    /// resumable ride: no ride is ending then, so every export is either named by a row or
+    /// orphaned.
+    ///
+    /// The ride-end marker's file counts as referenced too. It names an export whose finalize
+    /// failed, which next launch's close-out writes into the row (#188). That ride is normally
+    /// resumable and so never reaches here; the marker is kept as a second guard.
+    private static func sweepOrphanedRideExports() async {
+        @Dependency(\.persistenceClient) var persistenceClient
+        @Dependency(\.rideEndIntentClient) var rideEndIntentClient
+        @Dependency(\.gpxDocumentsDirectory) var documentsDirectory
+        await DocumentFolders.sweepOrphanedRideExports(documentsDirectory: documentsDirectory) {
+            var names = try await persistenceClient.fetchRideGPXFileNames()
+            if let pending = rideEndIntentClient.load()?.gpxFileURL {
+                names.insert(pending.lastPathComponent)
+            }
+            return names
+        }
     }
 
     /// Restores the rider's own brightness and clears the dim. A no-op when not

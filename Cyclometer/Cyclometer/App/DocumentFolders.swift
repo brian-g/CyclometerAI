@@ -26,6 +26,61 @@ enum DocumentFolders {
         }
     }
 
+    // MARK: - Ride exports
+
+    /// Deletes the exports in `Rides` that no ride references (#346). Deleting a ride removes
+    /// its file first and carries on if that fails (#261), so a file can outlive its rows; this
+    /// is what eventually clears it.
+    ///
+    /// Only the app's own exports are candidates: files in `Rides` itself whose names match
+    /// `GPXExporter`'s exactly. Anything else there was put in through Files and is the rider's.
+    ///
+    /// The folder is listed *before* `referencedFileNames` is read, so a file written after the
+    /// listing is never a candidate. One written before it is kept once its ride-end marker or
+    /// row names it, which the ride-end sequence does straight after the write.
+    ///
+    /// Failure is logged, not thrown: an orphan left for the next launch costs nothing.
+    static func sweepOrphanedRideExports(
+        documentsDirectory: URL = .documentsDirectory,
+        referencedFileNames: () async throws -> Set<String>
+    ) async {
+        let ridesDirectory = documentsDirectory.appending(component: "Rides", directoryHint: .isDirectory)
+        let exports: [URL]
+        do {
+            exports = try FileManager.default
+                .contentsOfDirectory(at: ridesDirectory, includingPropertiesForKeys: [.isRegularFileKey])
+                .filter { url in
+                    GPXExporter.isExportFileName(url.lastPathComponent)
+                        && (try?url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                }
+        } catch CocoaError.fileReadNoSuchFile {
+            return // Nothing exported yet.
+        } catch {
+            logger.error("export sweep could not list Documents/Rides: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        guard !exports.isEmpty else { return }
+
+        let referenced: Set<String>
+        do {
+            referenced = try await referencedFileNames()
+        } catch {
+            // Without the references every export looks orphaned, so nothing is removed.
+            logger.error("export sweep skipped, references unreadable: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        for url in exports where !referenced.contains(url.lastPathComponent) {
+            do {
+                try FileManager.default.removeItem(at: url)
+                logger.notice("export sweep removed orphan \(url.lastPathComponent, privacy: .public)")
+            } catch CocoaError.fileNoSuchFile {
+                // Already gone — a ride delete or the rider in Files got there first.
+            } catch {
+                logger.error("export sweep could not remove \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     // MARK: - Inbox
 
     /// `LSSupportsOpeningDocumentsInPlace` covers file providers only. A `.gpx` arriving from

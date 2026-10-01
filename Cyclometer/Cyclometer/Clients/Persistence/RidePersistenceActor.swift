@@ -160,6 +160,20 @@ actor RidePersistenceActor {
         }
     }
 
+    /// The file name of every ride's export, in any state (#346). Names rather than URLs: a
+    /// stored URL is absolute, and iOS can move the app's container between launches, so the
+    /// path it recorded need not match the folder listing even when it names the same file.
+    func gpxFileNames() throws -> Set<String> {
+        do {
+            var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.gpxFileURL != nil })
+            descriptor.propertiesToFetch = [\.gpxFileURL]
+            return Set(try modelContext.fetch(descriptor).compactMap { $0.gpxFileURL?.lastPathComponent })
+        } catch {
+            logger.error("gpxFileNames failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// Deletes this ride's exported file, if it has one (#261). A no-op for a ride whose export
     /// failed, one that was never finalized, and one already gone: a delete can race its own list
     /// refresh, and a ride that no longer exists owns no file.
