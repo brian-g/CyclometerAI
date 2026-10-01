@@ -13,12 +13,15 @@ struct DashboardPageView: View {
     var body: some View {
         HStack(spacing: 0) {
             DashboardGridLayout {
-                // A kind appears at most once per page (`DashboardLayoutValidator`), so it is the id.
-                ForEach(page.placements, id: \.kind) { placement in
-                    DashboardWidgetView(kind: placement.kind, size: placement.size, store: store)
-                        // Fills its cells, centred like a `Grid` cell, whatever size it reports.
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .dashboardPlacement(placement)
+                // A widget appears at most once per page (`DashboardLayoutValidator`), so its id is
+                // the identity. A placement the catalog doesn't know is dropped at decode.
+                ForEach(page.placements, id: \.widgetID) { placement in
+                    if let widget = DashboardWidgetCatalog.widget(id: placement.widgetID) {
+                        widget.view(size: placement.size, store: store)
+                            // Fills its cells, centred like a `Grid` cell, whatever size it reports.
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .dashboardPlacement(placement)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

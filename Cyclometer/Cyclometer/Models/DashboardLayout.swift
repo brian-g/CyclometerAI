@@ -1,37 +1,26 @@
 import CoreGraphics
 
-/// A widget the rider can place on the dashboard (UX.md §S05 "Widget Details").
-///
-/// W7 Radar is not one: it is the full-height lane beside the grid on every page (PRD §8.2,
-/// UX.md §S06), so it can't be placed, moved or removed. Widgets not built yet (W2, W3, W6,
-/// W10) join this list when they land (#140, #150).
-enum WidgetKind: String, Codable, CaseIterable, Equatable {
-    case speed
-    case cadence
-    case heartRate
-    case hrZones
-    case pace
-    case directions
-    case map
-
-    /// The sizes this widget has a layout for. The validator rejects any other, and S08 (#142)
-    /// filters its picker by them.
-    var supportedSizes: [WidgetSize] {
-        switch self {
-        case .speed: [.oneByOne, .twoByOne, .twoByTwo]
-        case .cadence, .directions: [.oneByOne, .twoByOne]
-        case .heartRate, .hrZones, .pace: [.oneByOne]
-        case .map: [.twoByTwo]
-        }
-    }
-}
-
 /// One widget at one position. `row` and `column` are its top-left cell, 0-based.
+///
+/// The widget is named by its `DashboardWidget.id`, a string rather than an enum case, so a
+/// saved layout naming a widget this build doesn't have still decodes; that placement is dropped
+/// (`removingUnknownWidgets`) and the rest kept.
 struct WidgetPlacement: Codable, Equatable {
-    var kind: WidgetKind
+    var widgetID: String
     var size: WidgetSize
     var row: Int
     var column: Int
+
+    init(widgetID: String, size: WidgetSize, row: Int, column: Int) {
+        self.widgetID = widgetID
+        self.size = size
+        self.row = row
+        self.column = column
+    }
+
+    init(_ widget: any DashboardWidget.Type, size: WidgetSize, row: Int, column: Int) {
+        self.init(widgetID: widget.id, size: size, row: row, column: column)
+    }
 
     /// Every grid cell this placement covers, as (row, column).
     var cells: [DashboardGrid.Cell] {
@@ -50,6 +39,14 @@ struct DashboardPage: Codable, Equatable {
 /// The rider's dashboard: its pages, in swipe order. Persisted in `AppPreferences`.
 struct DashboardLayout: Codable, Equatable {
     var pages: [DashboardPage]
+
+    /// This layout without placements naming a widget the catalog doesn't have — one from a newer
+    /// build, or one since removed. Losing that widget beats losing the rider's whole layout.
+    func removingUnknownWidgets() -> DashboardLayout {
+        DashboardLayout(pages: pages.map { page in
+            DashboardPage(placements: page.placements.filter { DashboardWidgetCatalog.widget(id: $0.widgetID) != nil })
+        })
+    }
 }
 
 /// The dashboard's fixed 2-column × 7-row canvas (UX.md §S05 "Grid").
@@ -80,23 +77,29 @@ enum DashboardGrid {
 /// against these before applying it.
 enum DashboardLayoutValidator {
     enum Violation: Equatable {
+        case unknownWidget(WidgetPlacement)
         case outOfBounds(WidgetPlacement)
+        /// A size the widget doesn't list in its `supportedSizes`.
         case unsupportedSize(WidgetPlacement)
         case overlap(DashboardGrid.Cell)
-        /// Each kind at most once per page; the same kind may appear on other pages.
-        case duplicateKind(WidgetKind)
+        /// Each widget at most once per page; the same widget may appear on other pages.
+        case duplicateWidget(String)
     }
 
     static func violations(in page: DashboardPage) -> [Violation] {
         var violations: [Violation] = []
         var occupied: Set<DashboardGrid.Cell> = []
-        var kinds: Set<WidgetKind> = []
+        var widgetIDs: Set<String> = []
         for placement in page.placements {
-            if !kinds.insert(placement.kind).inserted {
-                violations.append(.duplicateKind(placement.kind))
+            if !widgetIDs.insert(placement.widgetID).inserted {
+                violations.append(.duplicateWidget(placement.widgetID))
             }
-            if !placement.kind.supportedSizes.contains(placement.size) {
-                violations.append(.unsupportedSize(placement))
+            if let widget = DashboardWidgetCatalog.widget(id: placement.widgetID) {
+                if !widget.supportedSizes.contains(placement.size) {
+                    violations.append(.unsupportedSize(placement))
+                }
+            } else {
+                violations.append(.unknownWidget(placement))
             }
             // Subtracts rather than adds: these come from a decoded file, and `row + rows` with a
             // corrupt `row` near `Int.max` would trap where `try?` can't catch it.
@@ -121,33 +124,33 @@ enum DashboardLayoutValidator {
 
 extension DashboardLayout {
     /// What a new rider sees. Page 1 is the dashboard as built before #139, which differs from
-    /// UX.md's S05.4 table (no radar cell; Cadence 2×1 on row 3). Pages 2–3 are a temporary showcase that puts every
-    /// widget on screen at every size it supports, until the spec settles page 2 (UX.md §S05
-    /// "Multiple pages": TBD).
+    /// UX.md's S05.4 table (no radar cell; Cadence 2×1 on row 3). Pages 2–3 are a
+    /// temporary showcase that puts every widget on screen at every size it supports, until the
+    /// spec settles page 2 (UX.md §S05 "Multiple pages": TBD).
     static let factory = DashboardLayout(pages: [
         DashboardPage(placements: [
-            WidgetPlacement(kind: .speed, size: .twoByTwo, row: 0, column: 0),
-            WidgetPlacement(kind: .cadence, size: .twoByOne, row: 2, column: 0),
-            WidgetPlacement(kind: .heartRate, size: .oneByOne, row: 3, column: 0),
-            WidgetPlacement(kind: .hrZones, size: .oneByOne, row: 3, column: 1),
-            WidgetPlacement(kind: .pace, size: .oneByOne, row: 4, column: 0),
-            WidgetPlacement(kind: .directions, size: .oneByOne, row: 4, column: 1),
+            WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 0, column: 0),
+            WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
+            WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 3, column: 0),
+            WidgetPlacement(HRZonesDashboardWidget.self, size: .oneByOne, row: 3, column: 1),
+            WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 4, column: 0),
+            WidgetPlacement(DirectionsDashboardWidget.self, size: .oneByOne, row: 4, column: 1),
             // Bleeds behind the floating toolbar to the screen bottom.
-            WidgetPlacement(kind: .map, size: .twoByTwo, row: 5, column: 0),
+            WidgetPlacement(MapDashboardWidget.self, size: .twoByTwo, row: 5, column: 0),
         ]),
         DashboardPage(placements: [
             // Bleeds up behind the Dynamic Island.
-            WidgetPlacement(kind: .map, size: .twoByTwo, row: 0, column: 0),
-            WidgetPlacement(kind: .speed, size: .twoByOne, row: 2, column: 0),
-            WidgetPlacement(kind: .directions, size: .twoByOne, row: 3, column: 0),
-            WidgetPlacement(kind: .cadence, size: .oneByOne, row: 4, column: 0),
-            WidgetPlacement(kind: .heartRate, size: .oneByOne, row: 4, column: 1),
-            WidgetPlacement(kind: .hrZones, size: .oneByOne, row: 5, column: 0),
-            WidgetPlacement(kind: .pace, size: .oneByOne, row: 5, column: 1),
+            WidgetPlacement(MapDashboardWidget.self, size: .twoByTwo, row: 0, column: 0),
+            WidgetPlacement(SpeedDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
+            WidgetPlacement(DirectionsDashboardWidget.self, size: .twoByOne, row: 3, column: 0),
+            WidgetPlacement(CadenceDashboardWidget.self, size: .oneByOne, row: 4, column: 0),
+            WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 4, column: 1),
+            WidgetPlacement(HRZonesDashboardWidget.self, size: .oneByOne, row: 5, column: 0),
+            WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 5, column: 1),
             // Row 7 left empty: blank cells, and no widget stretched into them.
         ]),
         DashboardPage(placements: [
-            WidgetPlacement(kind: .speed, size: .oneByOne, row: 0, column: 0),
+            WidgetPlacement(SpeedDashboardWidget.self, size: .oneByOne, row: 0, column: 0),
         ]),
     ])
 }

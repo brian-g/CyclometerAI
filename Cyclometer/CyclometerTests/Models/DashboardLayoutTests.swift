@@ -8,6 +8,16 @@ struct DashboardLayoutTests {
         DashboardPage(placements: placements)
     }
 
+    @Test("Catalog ids are unique and every widget supports at least one size")
+    func catalogIsWellFormed() {
+        let ids = DashboardWidgetCatalog.all.map { $0.id }
+        #expect(Set(ids).count == ids.count)
+        for widget in DashboardWidgetCatalog.all {
+            #expect(!widget.supportedSizes.isEmpty, "\(widget.id) supports no size")
+            #expect(DashboardWidgetCatalog.widget(id: widget.id) != nil)
+        }
+    }
+
     @Test("Every factory page satisfies the layout rules")
     func factoryIsValid() {
         for page in DashboardLayout.factory.pages {
@@ -18,11 +28,11 @@ struct DashboardLayoutTests {
 
     /// The factory's later pages are a showcase (#139): every widget, at every size it supports.
     @Test("The factory layout shows every widget at every supported size")
-    func factoryCoversEveryKindAndSize() {
-        let placed = Set(DashboardLayout.factory.pages.flatMap(\.placements).map { "\($0.kind)-\($0.size)" })
-        for kind in WidgetKind.allCases {
-            for size in kind.supportedSizes {
-                #expect(placed.contains("\(kind)-\(size)"), "\(kind) \(size) is never shown")
+    func factoryCoversEveryWidgetAndSize() {
+        let placed = Set(DashboardLayout.factory.pages.flatMap(\.placements).map { "\($0.widgetID)-\($0.size)" })
+        for widget in DashboardWidgetCatalog.all {
+            for size in widget.supportedSizes {
+                #expect(placed.contains("\(widget.id)-\(size)"), "\(widget.id) \(size) is never shown")
             }
         }
     }
@@ -36,23 +46,23 @@ struct DashboardLayoutTests {
         let unit = screen.height / 7
         let half = screen.width / 2
         let frames = Dictionary(uniqueKeysWithValues: DashboardLayout.factory.pages[0].placements.map {
-            ($0.kind, DashboardGrid.frame(for: $0, in: screen))
+            ($0.widgetID, DashboardGrid.frame(for: $0, in: screen))
         })
 
-        #expect(frames[.speed] == CGRect(x: 0, y: 0, width: screen.width, height: unit * 2))
-        #expect(frames[.cadence] == CGRect(x: 0, y: unit * 2, width: screen.width, height: unit))
-        #expect(frames[.heartRate] == CGRect(x: 0, y: unit * 3, width: half, height: unit))
-        #expect(frames[.hrZones] == CGRect(x: half, y: unit * 3, width: half, height: unit))
-        #expect(frames[.pace] == CGRect(x: 0, y: unit * 4, width: half, height: unit))
-        #expect(frames[.directions] == CGRect(x: half, y: unit * 4, width: half, height: unit))
-        #expect(frames[.map] == CGRect(x: 0, y: unit * 5, width: screen.width, height: unit * 2))
+        #expect(frames[SpeedDashboardWidget.id] == CGRect(x: 0, y: 0, width: screen.width, height: unit * 2))
+        #expect(frames[CadenceDashboardWidget.id] == CGRect(x: 0, y: unit * 2, width: screen.width, height: unit))
+        #expect(frames[HeartRateDashboardWidget.id] == CGRect(x: 0, y: unit * 3, width: half, height: unit))
+        #expect(frames[HRZonesDashboardWidget.id] == CGRect(x: half, y: unit * 3, width: half, height: unit))
+        #expect(frames[PaceDashboardWidget.id] == CGRect(x: 0, y: unit * 4, width: half, height: unit))
+        #expect(frames[DirectionsDashboardWidget.id] == CGRect(x: half, y: unit * 4, width: half, height: unit))
+        #expect(frames[MapDashboardWidget.id] == CGRect(x: 0, y: unit * 5, width: screen.width, height: unit * 2))
     }
 
     @Test("A placement past the grid's edge is out of bounds")
     func outOfBounds() {
-        let tooLow = WidgetPlacement(kind: .map, size: .twoByTwo, row: 6, column: 0)
-        let tooWide = WidgetPlacement(kind: .cadence, size: .twoByOne, row: 0, column: 1)
-        let negative = WidgetPlacement(kind: .pace, size: .oneByOne, row: -1, column: 0)
+        let tooLow = WidgetPlacement(MapDashboardWidget.self, size: .twoByTwo, row: 6, column: 0)
+        let tooWide = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 0, column: 1)
+        let negative = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: -1, column: 0)
 
         #expect(DashboardLayoutValidator.violations(in: page(tooLow)) == [.outOfBounds(tooLow)])
         #expect(DashboardLayoutValidator.violations(in: page(tooWide)) == [.outOfBounds(tooWide)])
@@ -63,37 +73,52 @@ struct DashboardLayoutTests {
     /// corrupt value near `Int.max` traps inside `AppPreferences.init(from:)` on every launch.
     @Test("A corrupt row or column near Int.max is out of bounds, not a crash")
     func hugeRowDoesNotOverflow() {
-        let row = WidgetPlacement(kind: .map, size: .twoByTwo, row: .max, column: 0)
-        let column = WidgetPlacement(kind: .cadence, size: .twoByOne, row: 0, column: .max)
+        let row = WidgetPlacement(MapDashboardWidget.self, size: .twoByTwo, row: .max, column: 0)
+        let column = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 0, column: .max)
         #expect(DashboardLayoutValidator.violations(in: page(row)) == [.outOfBounds(row)])
         #expect(DashboardLayoutValidator.violations(in: page(column)) == [.outOfBounds(column)])
     }
 
-    @Test("A size the widget has no layout for is rejected")
+    @Test("A size the widget doesn't support is rejected")
     func unsupportedSize() {
-        let bigPace = WidgetPlacement(kind: .pace, size: .twoByTwo, row: 0, column: 0)
+        let bigPace = WidgetPlacement(PaceDashboardWidget.self, size: .twoByTwo, row: 0, column: 0)
         #expect(DashboardLayoutValidator.violations(in: page(bigPace)) == [.unsupportedSize(bigPace)])
+    }
+
+    @Test("A widget id the catalog doesn't have is rejected")
+    func unknownWidget() {
+        let weather = WidgetPlacement(widgetID: "weather", size: .oneByOne, row: 0, column: 0)
+        #expect(DashboardLayoutValidator.violations(in: page(weather)) == [.unknownWidget(weather)])
+    }
+
+    @Test("Removing unknown widgets keeps everything else")
+    func removingUnknownWidgets() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let weather = WidgetPlacement(widgetID: "weather", size: .oneByOne, row: 0, column: 1)
+        let layout = DashboardLayout(pages: [page(pace, weather), page(weather)])
+
+        #expect(layout.removingUnknownWidgets() == DashboardLayout(pages: [page(pace), page()]))
     }
 
     @Test("Two widgets sharing a cell overlap")
     func overlap() {
-        let speed = WidgetPlacement(kind: .speed, size: .twoByTwo, row: 0, column: 0)
-        let pace = WidgetPlacement(kind: .pace, size: .oneByOne, row: 1, column: 1)
+        let speed = WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 0, column: 0)
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 1, column: 1)
         #expect(DashboardLayoutValidator.violations(in: page(speed, pace)) == [.overlap(.init(row: 1, column: 1))])
     }
 
-    @Test("A widget kind appears at most once per page")
-    func duplicateKind() {
-        let left = WidgetPlacement(kind: .pace, size: .oneByOne, row: 0, column: 0)
-        let right = WidgetPlacement(kind: .pace, size: .oneByOne, row: 0, column: 1)
-        #expect(DashboardLayoutValidator.violations(in: page(left, right)) == [.duplicateKind(.pace)])
+    @Test("A widget appears at most once per page")
+    func duplicateWidget() {
+        let left = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let right = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 1)
+        #expect(DashboardLayoutValidator.violations(in: page(left, right)) == [.duplicateWidget(PaceDashboardWidget.id)])
     }
 
-    @Test("The same kind on two pages is fine, and empty cells are allowed")
-    func sameKindAcrossPages() {
+    @Test("The same widget on two pages is fine, and empty cells are allowed")
+    func sameWidgetAcrossPages() {
         let layout = DashboardLayout(pages: [
-            page(WidgetPlacement(kind: .pace, size: .oneByOne, row: 0, column: 0)),
-            page(WidgetPlacement(kind: .pace, size: .oneByOne, row: 6, column: 1)),
+            page(WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)),
+            page(WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 6, column: 1)),
         ])
         #expect(DashboardLayoutValidator.isValid(layout))
     }

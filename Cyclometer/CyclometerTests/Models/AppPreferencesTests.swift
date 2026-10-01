@@ -97,7 +97,7 @@ struct AppPreferencesTests {
         preferences.isPlaceNameLookupEnabled = false
         // Added by #139.
         preferences.dashboardLayout = DashboardLayout(pages: [
-            DashboardPage(placements: [WidgetPlacement(kind: .pace, size: .oneByOne, row: 6, column: 1)])
+            DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 6, column: 1)])
         ])
 
         let data = try JSONEncoder().encode(preferences)
@@ -137,14 +137,29 @@ struct AppPreferencesTests {
         #expect(decoded.dashboardLayout == .factory)
     }
 
-    /// A layout naming a widget this build doesn't know — written by a newer version, or
-    /// holding one since removed — must not throw: a throw resets every other preference too.
-    @Test("A layout with an unknown widget falls back to the factory layout")
-    func unknownWidgetKindFallsBackToFactory() throws {
+    /// A layout naming a widget this build doesn't have — written by a newer version, or holding
+    /// one since removed — drops that widget and keeps the rest of the rider's layout.
+    @Test("A layout with an unknown widget keeps its other widgets")
+    func unknownWidgetIsDropped() throws {
         let json = Data(#"""
         {"wheelCircumferenceMM":2155,
-         "dashboardLayoutOverride":{"pages":[{"placements":[{"kind":"weather","size":"oneByOne","row":0,"column":0}]}]}}
+         "dashboardLayoutOverride":{"pages":[{"placements":[
+           {"widgetID":"weather","size":"oneByOne","row":0,"column":0},
+           {"widgetID":"pace","size":"oneByOne","row":0,"column":1}]}]}}
         """#.utf8)
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+
+        #expect(decoded.dashboardLayout == DashboardLayout(pages: [
+            DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 1)])
+        ]))
+        #expect(decoded.wheelCircumferenceMM == 2155)
+    }
+
+    /// A layout that doesn't decode at all must not throw: a throw resets every other preference.
+    @Test("An unreadable layout falls back to the factory layout")
+    func unreadableLayoutFallsBackToFactory() throws {
+        let json = Data(#"{"wheelCircumferenceMM":2155,"dashboardLayoutOverride":{"pages":"nope"}}"#.utf8)
 
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
 
@@ -161,7 +176,7 @@ struct AppPreferencesTests {
         #expect(!json.contains("dashboardLayout"))
 
         preferences.dashboardLayout = DashboardLayout(pages: [
-            DashboardPage(placements: [WidgetPlacement(kind: .pace, size: .oneByOne, row: 0, column: 0)])
+            DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)])
         ])
         #expect(preferences.dashboardLayoutOverride != nil)
         preferences.dashboardLayout = .factory
@@ -175,8 +190,8 @@ struct AppPreferencesTests {
         // Two widgets in the same cell.
         preferences.dashboardLayout = DashboardLayout(pages: [
             DashboardPage(placements: [
-                WidgetPlacement(kind: .pace, size: .oneByOne, row: 0, column: 0),
-                WidgetPlacement(kind: .heartRate, size: .oneByOne, row: 0, column: 0),
+                WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0),
+                WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 0),
             ])
         ])
 

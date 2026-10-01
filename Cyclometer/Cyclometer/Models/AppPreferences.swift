@@ -181,12 +181,15 @@ struct AppPreferences: Codable, Equatable, Sendable {
         mapOrientation = try container.decodeIfPresent(
             MapOrientation.self, forKey: .mapOrientation
         ) ?? .headingUp
-        // `try?`, unlike the fields above: a layout naming a widget this build doesn't know (a
-        // newer version's, or one since removed) would otherwise throw and reset every other
-        // preference with it. An unreadable or invalid layout falls back to the factory one.
+        // `try?`, unlike the fields above: an unreadable layout must not throw and reset every
+        // other preference with it. A placement naming a widget this build doesn't have (a newer
+        // version's, or one since removed) is dropped; a layout still invalid after that falls
+        // back to the factory one.
         dashboardLayoutOverride = (try? container.decodeIfPresent(
             DashboardLayout.self, forKey: .dashboardLayoutOverride
-        )).flatMap { DashboardLayoutValidator.isValid($0) ? $0 : nil }
+        ))
+        .map { $0.removingUnknownWidgets() }
+        .flatMap { DashboardLayoutValidator.isValid($0) ? $0 : nil }
     }
 }
 
