@@ -13,8 +13,8 @@ import SwiftUI
 ///
 /// Visibility:
 ///   • Instantiated only when `ActiveRideFeature.State.isRadarSidebarVisible` is
-///     true (caller: the `HStack` lane in `RideDashboardView.gridPage`, sitting
-///     beside — not inside — the widget `Grid`, so it spans the full dashboard
+///     true (caller: `RadarLane` in `DashboardPageView`, sitting beside — not
+///     inside — the widget grid on every page, so it spans the full dashboard
 ///     height rather than a single grid row)
 ///   • Not instantiated at all when radar has never been paired this ride — the
 ///     caller reclaims the full width with no reflow

@@ -95,6 +95,10 @@ struct AppPreferencesTests {
         preferences.mapOrientation = .northUp
         // Added by #283.
         preferences.isPlaceNameLookupEnabled = false
+        // Added by #139.
+        preferences.dashboardLayout = DashboardLayout(pages: [
+            DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 6, column: 1)])
+        ])
 
         let data = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
@@ -129,6 +133,72 @@ struct AppPreferencesTests {
         #expect(decoded.isPlaceNameLookupEnabled)
         // Added by #199; the map sheet starts heading-up.
         #expect(decoded.mapOrientation == .headingUp)
+        // Added by #139; the dashboard starts on the factory layout.
+        #expect(decoded.dashboardLayout == .factory)
+    }
+
+    /// A layout naming a widget this build doesn't have — written by a newer version, or holding
+    /// one since removed — drops that widget and keeps the rest of the rider's layout.
+    @Test("A layout with an unknown widget keeps its other widgets")
+    func unknownWidgetIsDropped() throws {
+        let json = Data(#"""
+        {"wheelCircumferenceMM":2155,
+         "dashboardLayoutOverride":{"pages":[{"placements":[
+           {"widgetID":"weather","size":"oneByOne","row":0,"column":0},
+           {"widgetID":"pace","size":"oneByOne","row":0,"column":1}]}]}}
+        """#.utf8)
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+
+        #expect(decoded.dashboardLayout == DashboardLayout(pages: [
+            DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 1)])
+        ]))
+        #expect(decoded.wheelCircumferenceMM == 2155)
+    }
+
+    /// A layout that doesn't decode at all must not throw: a throw resets every other preference.
+    @Test("An unreadable layout falls back to the factory layout")
+    func unreadableLayoutFallsBackToFactory() throws {
+        let json = Data(#"{"wheelCircumferenceMM":2155,"dashboardLayoutOverride":{"pages":"nope"}}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+
+        #expect(decoded.dashboardLayout == .factory)
+        #expect(decoded.wheelCircumferenceMM == 2155)
+    }
+
+    /// Only a rider's own layout is stored (#139 review). A copy of `.factory` written on the
+    /// first save would pin every rider to today's factory layout when it later changes.
+    @Test("The factory layout is never written to the preferences file")
+    func factoryLayoutIsNotPersisted() throws {
+        var preferences = AppPreferences()
+        let json = String(decoding: try JSONEncoder().encode(preferences), as: UTF8.self)
+        #expect(!json.contains("dashboardLayout"))
+
+        preferences.dashboardLayout = DashboardLayout(pages: [
+            DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)])
+        ])
+        #expect(preferences.dashboardLayoutOverride != nil)
+        preferences.dashboardLayout = .factory
+        #expect(preferences.dashboardLayoutOverride == nil)
+    }
+
+    @Test("An invalid layout falls back to the factory layout")
+    func invalidLayoutFallsBackToFactory() throws {
+        var preferences = AppPreferences()
+        preferences.wheelCircumferenceMM = 2155
+        // Two widgets in the same cell.
+        preferences.dashboardLayout = DashboardLayout(pages: [
+            DashboardPage(placements: [
+                WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0),
+                WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 0),
+            ])
+        ])
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: JSONEncoder().encode(preferences))
+
+        #expect(decoded.dashboardLayout == .factory)
+        #expect(decoded.wheelCircumferenceMM == 2155)
     }
 
     /// #93 moved `SensorRole` out of `BLECSCClient` and added `.radar` / `.heartRate`.

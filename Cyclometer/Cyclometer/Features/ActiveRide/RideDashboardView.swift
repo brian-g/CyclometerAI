@@ -5,10 +5,8 @@ import AudioToolbox
 /// Full-screen active ride dashboard — a fullScreenCover that zooms out of the ride
 /// accessory and collapses back into it on a drag down (#333).
 /// Matches prototype RideDashboardView with TCA store replacing local @State.
-/// Dashboard uses the 2-col × 7-row widget grid (S05.4 factory default).
+/// Its pages come from the rider's `dashboardLayout` (#139), each a 2-col × 7-row widget grid.
 struct RideDashboardView: View {
-    private typealias Page = ActiveRideFeature.DashboardPage
-
     @Bindable var store: StoreOf<ActiveRideFeature>
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -17,13 +15,14 @@ struct RideDashboardView: View {
         // S05 — Map widget safe-area bleed. The toolbar floats as an overlay
         // (not a safe-area inset) so the grid's map cell can extend behind it
         // all the way to the physical screen bottom.
-        TabView(selection: $store.dashboardPage.sending(\.dashboardPageChanged)) {
-            gridPage
-                .tag(Page.grid)
-
-            // Page 2 — temporarily testing other configs
-            secondPage
-                .tag(Page.map)
+        TabView(selection: Binding(
+            get: { store.visibleDashboardPage },
+            set: { store.send(.dashboardPageChanged($0)) }
+        )) {
+            ForEach(Array(store.dashboardLayout.pages.enumerated()), id: \.offset) { index, page in
+                DashboardPageView(page: page, store: store)
+                    .tag(index)
+            }
         }
         .background(Color.cyBgSecondary)
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -67,180 +66,6 @@ struct RideDashboardView: View {
         .alert($store.scope(state: \.finishAlert, action: \.finishAlert))
     }
 
-    // ── Page 1 — Widget Grid (S05.4 factory default) ──────────────────────────
-    // GeometryReader measures the full screen (safe areas are ignored at the
-    // TabView level), so `unit = height / 7` sizes the 5 widget rows at the
-    // spec'd ≈201×96pt. The floating toolbar is a bottom overlay (not a
-    // safe-area inset), so the grid fills the full height and the map row
-    // (`unit * 2`) bleeds behind the toolbar to the screen bottom.
-    // Rows 1-2: Speed (W1 2×2)
-    // Row 3:    HR (W4 1×1) + HR Zones (W12 1×1)
-    // Row 4:    Pace (W11), full width — Radar (W7) is not a grid cell
-    // Row 5:    Cadence (W5 1×1) + Directions (W9 1×1)
-    // Rows 6-7: Map (W8 2×2) — bleeds behind the floating toolbar
-    //
-    // Radar (W7, S06) is a full-height lane beside the grid, not a grid row —
-    // per PRD §8.2/UX.md §S06 it represents the road behind the rider and needs
-    // the dashboard's full height to space vehicles readably, which no single
-    // grid row can give it. `isRadarSidebarVisible` reserves its 24pt only once
-    // radar has ever paired this ride; the grid gets the remaining width.
-    private var gridPage: some View {
-        GeometryReader { geo in
-            let unit = max(geo.size.height, 1) / 7
-            HStack(spacing: 0) {
-                Grid(horizontalSpacing: 0, verticalSpacing: 0) {
-                    // W1 — Speed 2×2
-                    GridRow {
-                        SpeedWidget(
-                            speed: store.speed.speedMPS,
-                            speedHistory: store.speed.watermarkSamples,
-                            activeSpeedSource: store.speed.activeSpeedSource,
-                            distance: store.distanceMeters,
-                            elapsed: store.elapsedSeconds,
-                            averageSpeed: store.averageSpeedMPS,
-                            maxSpeed: store.maxSpeedMPS,
-                            unit: store.unitSystem,
-                            size: .twoByTwo
-                        )
-                        .gridCellColumns(2)
-                        .frame(height: unit * 2)
-                    }
-
-                    GridRow {
-                        CadenceWidget(
-                            cadence: store.cadence.cadenceRPM,
-                            cadenceHistory: store.cadence.watermarkSamples,
-                            averageCadence: store.cadence.averageCadenceRPM,
-                            maxCadence: store.cadence.maxCadenceRPM,
-                            detail: { CadenceDetail(cadence: store.cadence, altitudeSamples: store.altitudeSamples) },
-                            size: .twoByOne
-                        )
-                        .frame(height: unit)
-                    }
-                    // W4 HR + W12 HR Zones
-                    GridRow {
-                        HeartRateWidget(
-                            bpm: store.displayHeartRateBPM,
-                            zone: store.displayHRZone,
-                            source: store.hrSource
-                        )
-                        .frame(height: unit)
-                        HRZonesWidget(zone: store.displayHRZone, source: store.hrSource)
-                            .frame(height: unit)
-                    }
-
-                    // W11 Pace — full width; radar sidebar lives outside the grid
-                    GridRow {
-                        PaceWidget(speedMPS: store.speed.speedMPS ?? 0, unit: store.unitSystem)
-                            .frame(height: unit)
-                        directionsWidget(size: .oneByOne)
-                            .frame(height: unit)
-                    }
-
-                    // W8 — Map 2×2 (extends behind the floating toolbar)
-                    GridRow {
-                        mapWidget
-                        .gridCellColumns(2)
-                        .frame(height: unit * 2)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-
-                // W7 — Radar full-height sidebar (S06), beside the grid, not in it.
-                //
-                // `RadarColumnView`'s body is a `GeometryReader`, which has no
-                // intrinsic height of its own — sitting next to the `Grid` (whose
-                // rows pin it to a fixed, already-full height) in this `HStack`,
-                // it collapses toward a tiny cross-axis size unless told to be
-                // greedy. `.frame(maxHeight: .infinity)` makes it claim the same
-                // full height the `Grid` gets, all the way to the physical top and
-                // bottom edges (the outer `GeometryReader` already measures the
-                // full screen — see the comment at the top of `gridPage`).
-                if store.isRadarSidebarVisible {
-                    RadarColumnView(targets: store.radarTargets, isOffline: store.isRadarOffline)
-                        .frame(width: Spacing.radarColumnWidth)
-                        .frame(maxHeight: .infinity)
-                        .ignoresSafeArea()
-                }
-            }
-        }
-    }
-
-    /// The map sheet's shared inputs (#199, #200) — W8 and W9 open the same sheet, so both
-    /// widgets must carry it the same orientation and the same toggle action.
-    ///
-    /// Factored out, not just documented as "the same": Xcode's preview canvas instruments
-    /// this file's `#Preview`-target build with a click-to-select wrapper on every
-    /// subexpression, and two initializer calls repeating this exact argument shape
-    /// verbatim (`mapWidget` and `directionsWidget`, both built from `route:`/
-    /// `sheetOrientation:`/`onOrientationToggle:`) made that wrapper unable to tell the
-    /// two apart — "ambiguous use of '__designTimeSelection'", which is what actually made
-    /// the dashboard preview time out. Routing both through one shared getter/action
-    /// removes the duplicate text, not just the duplicate logic.
-    private var mapSheetRoute: [RouteCoordinate] {
-        store.navigation.activeRoute?.coordinates ?? []
-    }
-    private var mapSheetOrientation: MapOrientation { store.preferences.mapOrientation }
-    private func toggleMapOrientation() { store.send(.mapOrientationToggled) }
-
-    /// W8, fed the same way on both pages: the track, the route being ridden (#199), and the sheet's
-    /// saved orientation with the action that switches it.
-    private var mapWidget: MapWidget {
-        MapWidget(
-            trackSegments: store.trackSegments,
-            route: mapSheetRoute,
-            sheetOrientation: mapSheetOrientation,
-            onOrientationToggle: { toggleMapOrientation() }
-        )
-    }
-
-    /// W9 (#200), on both pages. Its tap opens W8's map sheet, so it carries the same sheet inputs as
-    /// `mapWidget`.
-    private func directionsWidget(size: WidgetSize) -> DirectionsWidget {
-        DirectionsWidget(
-            hasRoute: store.navigation.activeRoute != nil,
-            nextTurn: store.navigation.nextManeuver,
-            distanceMeters: store.navigation.distanceToNextTurnMeters,
-            unit: store.unitSystem,
-            size: size,
-            trackSegments: store.trackSegments,
-            route: mapSheetRoute,
-            sheetOrientation: mapSheetOrientation,
-            onOrientationToggle: { toggleMapOrientation() }
-        )
-    }
-
-    // ── Page 2 — Static page to test other configurations
-    
-    private var secondPage: some View {
-        GeometryReader { geo in
-            let unit = max(geo.size.height, 1) / 7
-            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
-                // W1 — Speed 2×2
-                GridRow {
-                    mapWidget
-                        .gridCellColumns(2)
-                        .frame(height: unit * 2)
-                }
-                GridRow {
-                    CadenceWidget(
-                        cadence: store.cadence.cadenceRPM,
-                        cadenceHistory: store.cadence.watermarkSamples,
-                        averageCadence: store.cadence.averageCadenceRPM,
-                        maxCadence: store.cadence.maxCadenceRPM,
-                        detail: { CadenceDetail(cadence: store.cadence, altitudeSamples: store.altitudeSamples) },
-                        size: .twoByOne)
-                }
-                // W9 — Directions 2×1 (#200 review)
-                GridRow {
-                    directionsWidget(size: .twoByOne)
-                        .gridCellColumns(2)
-                        .frame(height: unit)
-                }
-            }
-        }
-    }
-
     // ── Grabber ───────────────────────────────────────────────────────────────
     // Sits at the top of the safe area, just below the Dynamic Island. A visual
     // affordance only: the zoom presentation's own drag, anywhere on the dashboard,
@@ -257,17 +82,18 @@ struct RideDashboardView: View {
             }
     }
 
-    // ── Paging indicator — always visible; factory default shows 2 dots ────────
+    // ── Paging indicator — always visible; one dot per layout page ─────────────
     private var pageIndicator: some View {
-        HStack(spacing: Spacing.xs) {
-            ForEach(Page.allCases, id: \.self) { page in
+        let pageCount = store.dashboardLayout.pages.count
+        return HStack(spacing: Spacing.xs) {
+            ForEach(0..<pageCount, id: \.self) { page in
                 Circle()
-                    .fill(page == store.dashboardPage ? Color.cyPrimary : Color.cyTextTertiary)
+                    .fill(page == store.visibleDashboardPage ? Color.cyPrimary : Color.cyTextTertiary)
                     .frame(width: Spacing.pageIndicatorDot, height: Spacing.pageIndicatorDot)
             }
         }
         .accessibilityElement()
-        .accessibilityLabel("Page \(store.dashboardPage.rawValue + 1) of \(Page.allCases.count)")
+        .accessibilityLabel("Page \(store.visibleDashboardPage + 1) of \(pageCount)")
     }
 
     // ── Ride Controls — floating glass buttons (S05) ───────────────────────────
