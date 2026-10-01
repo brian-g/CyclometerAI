@@ -241,12 +241,16 @@ enum GPXExporter {
     private static func isoString(_ date: Date) -> String { isoFormatter.string(from: date) }
 
     private static func filenameStem(for date: Date) -> String {
-        "\(filenamePrefix)\(filenameFormatter.string(from: date))"
+        "Cyclometer_\(filenameFormatter.string(from: date))"
     }
 
-    /// Every export's name starts with this, which is how the launch sweep tells the app's
-    /// own files from ones the rider put in `Rides` through Files (#346).
-    static let filenamePrefix = "Cyclometer_"
+    /// Whether `name` is one `write` could have produced: the stem, then an optional collision
+    /// suffix. How the launch sweep tells the app's own exports from files the rider put in
+    /// `Rides` through Files (#346). A Files duplicate (`… 2.gpx`) or a rename keeping the
+    /// prefix doesn't match, and so is never swept.
+    static func isExportFileName(_ name: String) -> Bool {
+        name.wholeMatch(of: #/Cyclometer_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}(-\d+)?\.gpx/#) != nil
+    }
 
     /// `&` must be escaped first — escaping it after `<`/`>`/quotes would double-escape
     /// the `&` those replacements just introduced.

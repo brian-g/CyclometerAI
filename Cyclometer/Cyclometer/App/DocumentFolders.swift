@@ -32,8 +32,8 @@ enum DocumentFolders {
     /// its file first and carries on if that fails (#261), so a file can outlive its rows; this
     /// is what eventually clears it.
     ///
-    /// Only the app's own exports are candidates: `.gpx` files in `Rides` itself, named by
-    /// `GPXExporter`. Anything else there was put in through Files and is the rider's.
+    /// Only the app's own exports are candidates: files in `Rides` itself whose names match
+    /// `GPXExporter`'s exactly. Anything else there was put in through Files and is the rider's.
     ///
     /// The folder is listed *before* `referencedFileNames` is read, so a file written after the
     /// listing is never a candidate. One written before it is kept once its ride-end marker or
@@ -50,9 +50,8 @@ enum DocumentFolders {
             exports = try FileManager.default
                 .contentsOfDirectory(at: ridesDirectory, includingPropertiesForKeys: [.isRegularFileKey])
                 .filter { url in
-                    url.pathExtension == "gpx"
-                        && url.lastPathComponent.hasPrefix(GPXExporter.filenamePrefix)
-                        && (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                    GPXExporter.isExportFileName(url.lastPathComponent)
+                        && (try?url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
                 }
         } catch CocoaError.fileReadNoSuchFile {
             return // Nothing exported yet.
@@ -74,6 +73,8 @@ enum DocumentFolders {
             do {
                 try FileManager.default.removeItem(at: url)
                 logger.notice("export sweep removed orphan \(url.lastPathComponent, privacy: .public)")
+            } catch CocoaError.fileNoSuchFile {
+                // Already gone — a ride delete or the rider in Files got there first.
             } catch {
                 logger.error("export sweep could not remove \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }

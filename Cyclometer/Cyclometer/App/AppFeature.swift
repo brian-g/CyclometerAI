@@ -166,15 +166,23 @@ struct AppFeature {
                         if hasCompletedOnboarding {
                             try? await healthKitClient.requestAuthorization()
                         }
-                        if let summary = try? await persistenceClient.fetchResumableRide() {
-                            await send(.resumableRideFetched(summary))
+                        let resumable: RideSummaryUpdate?
+                        do {
+                            resumable = try await persistenceClient.fetchResumableRide()
+                            // Only once the fetch has said there is no unfinished ride: one
+                            // mid-close-out has an export its row doesn't name yet (#346).
+                            if resumable == nil { await Self.sweepOrphanedRideExports() }
+                        } catch {
+                            resumable = nil // Logged in RidePersistenceActor.
+                        }
+                        if let resumable {
+                            await send(.resumableRideFetched(resumable))
                         } else {
                             // Retries any thumbnail a past Finish failed to capture (#177), and
                             // any Apple Health workout that didn't land (#277). Only here: a
                             // ride closed out by `resumableRideFetched` runs the backfills
                             // itself once its finalize lands, so the two never race over the
                             // same ride.
-                            await Self.sweepOrphanedRideExports()
                             await Self.backfillFinishedRides(send: send)
                         }
                     },
@@ -546,12 +554,13 @@ struct AppFeature {
         _ = await workouts
     }
 
-    /// Clears exports no ride references (#346). At launch, and only when no ride is resumable:
-    /// no ride is ending then, so every export is either named by a row or orphaned.
+    /// Clears exports no ride references (#346). At launch, and only once the fetch has found no
+    /// resumable ride: no ride is ending then, so every export is either named by a row or
+    /// orphaned.
     ///
     /// The ride-end marker's file counts as referenced too. It names an export whose finalize
-    /// failed, and next launch's close-out writes that URL into the row (#188). The marker
-    /// normally means a resumable ride, but a failed resumable fetch also lands here.
+    /// failed, which next launch's close-out writes into the row (#188). That ride is normally
+    /// resumable and so never reaches here; the marker is kept as a second guard.
     private static func sweepOrphanedRideExports() async {
         @Dependency(\.persistenceClient) var persistenceClient
         @Dependency(\.rideEndIntentClient) var rideEndIntentClient

@@ -85,6 +85,9 @@ struct DocumentFoldersTests {
         let untouched = [
             try touch("Rides/Morning loop.gpx", in: root),
             try touch("Rides/Cyclometer_notes.txt", in: root),
+            // Files' Duplicate, and a rename that keeps the prefix: the rider's now.
+            try touch("Rides/Cyclometer_2026-09-19_11-48 2.gpx", in: root),
+            try touch("Rides/Cyclometer_2026-09-19 Hill climb.gpx", in: root),
             try touch("Rides/Old/Cyclometer_2026-01-01_08-00.gpx", in: root),
             try touch("Cyclometer_2026-09-19_11-48.gpx", in: root),
             try touch("Inbox/Cyclometer_2026-09-19_11-48.gpx", in: root),

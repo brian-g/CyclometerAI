@@ -248,6 +248,38 @@ struct AppFeatureTests {
         #expect(FileManager.default.fileExists(atPath: orphan.path) == false)
     }
 
+    /// #346 review: a failed resumable fetch can't rule out a ride mid-close-out, whose export
+    /// no row names yet, so launch skips the sweep rather than risk deleting it.
+    @Test("task skips the export sweep when the resumable-ride fetch fails")
+    func taskSkipsSweepWhenResumableFetchFails() async throws {
+        let documents = FileManager.default.temporaryDirectory
+            .appending(component: "AppFeatureTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let rides = documents.appending(component: "Rides", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: rides, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: documents) }
+        let unreferenced = rides.appending(component: "Cyclometer_2026-09-20_07-05.gpx")
+        try Data().write(to: unreferenced)
+
+        let store = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.bleCSCClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.gpxDocumentsDirectory = documents
+            var client = PersistenceClient.mock()
+            client.fetchResumableRide = { throw PersistenceError.rideNotFound }
+            $0.persistenceClient = client
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish(timeout: effectDrainTimeout)
+
+        #expect(FileManager.default.fileExists(atPath: unreferenced.path))
+    }
+
     /// #175 review: `.task`'s BLE-pairing push and resumable-ride fetch race —
     /// the rider can start a brand-new ride through the normal start-sheet flow
     /// before the async fetch resolves. The already-started ride must not be
