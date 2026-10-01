@@ -209,14 +209,6 @@ struct HeartRateProfileView: View {
     let samples: [Int]
     /// Each zone's bpm range, zone 1 first (`RideDetailFeature.State.heartRateZoneBounds`).
     let zoneBounds: [ClosedRange<Int>]
-    /// Built once from `samples`, not on every body evaluation (#348).
-    private let points: [RideChartPoint]
-
-    init(samples: [Int], zoneBounds: [ClosedRange<Int>]) {
-        self.samples = samples
-        self.zoneBounds = zoneBounds
-        self.points = RideChartPoint.points(from: samples)
-    }
 
     /// Headroom above and below the ride's own range, so the line never rides the edge.
     static let paddingBPM = 5
@@ -243,6 +235,8 @@ struct HeartRateProfileView: View {
         }
         return (low...high, bands)
     }
+
+    private var points: [RideChartPoint] { RideChartPoint.points(from: samples) }
 
     var body: some View {
         let layout = Self.layout(samples: samples, zoneBounds: zoneBounds)
@@ -293,15 +287,7 @@ struct ElevationProfileView: View {
     /// The unit `samples` are already in. This view plots and labels; it does not convert. S20
     /// follows the S12 units picker (#195), while ride history's demo data is in feet.
     let unitLabel: String
-    /// Built once from `samples`, not on every body evaluation (#348).
-    private let points: [ElevationPoint]
-
-    init(samples: [Double], unitLabel: String) {
-        self.samples = samples
-        self.unitLabel = unitLabel
-        self.points = ElevationPoint.points(from: samples)
-    }
-
+    private var points: [ElevationPoint] { ElevationPoint.points(from: samples) }
     var body: some View {
         Chart(points) { point in
             AreaMark(x: .value("Distance", point.distance), y: .value("Elevation", point.elevation))
