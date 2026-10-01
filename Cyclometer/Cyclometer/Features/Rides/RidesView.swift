@@ -209,6 +209,14 @@ struct HeartRateProfileView: View {
     let samples: [Int]
     /// Each zone's bpm range, zone 1 first (`RideDetailFeature.State.heartRateZoneBounds`).
     let zoneBounds: [ClosedRange<Int>]
+    /// Built once from `samples`, not on every body evaluation (#348).
+    private let points: [RideChartPoint]
+
+    init(samples: [Int], zoneBounds: [ClosedRange<Int>]) {
+        self.samples = samples
+        self.zoneBounds = zoneBounds
+        self.points = RideChartPoint.points(from: samples)
+    }
 
     /// Headroom above and below the ride's own range, so the line never rides the edge.
     static let paddingBPM = 5
@@ -234,10 +242,6 @@ struct HeartRateProfileView: View {
             return Band(zone: index + 1, bpm: start...end)
         }
         return (low...high, bands)
-    }
-
-    private var points: [RideChartPoint] {
-        samples.enumerated().map { RideChartPoint(distance: $0.offset, value: Double($0.element)) }
     }
 
     var body: some View {
@@ -289,9 +293,15 @@ struct ElevationProfileView: View {
     /// The unit `samples` are already in. This view plots and labels; it does not convert. S20
     /// follows the S12 units picker (#195), while ride history's demo data is in feet.
     let unitLabel: String
-    private var points: [ElevationPoint] {
-        samples.enumerated().map { ElevationPoint(distance: $0.offset, elevation: $0.element) }
+    /// Built once from `samples`, not on every body evaluation (#348).
+    private let points: [ElevationPoint]
+
+    init(samples: [Double], unitLabel: String) {
+        self.samples = samples
+        self.unitLabel = unitLabel
+        self.points = ElevationPoint.points(from: samples)
     }
+
     var body: some View {
         Chart(points) { point in
             AreaMark(x: .value("Distance", point.distance), y: .value("Elevation", point.elevation))
@@ -312,11 +322,23 @@ struct ElevationProfileView: View {
 
 // MARK: - Supporting Types
 
-struct RideChartPoint: Identifiable {
-    let id = UUID(); let distance: Int; let value: Double
+// Identified by sample index, so the same samples give Charts the same identities on every
+// rebuild — a fresh `UUID()` per point defeated its diffing (#348).
+struct RideChartPoint: Identifiable, Equatable {
+    let distance: Int; let value: Double
+    var id: Int { distance }
+
+    static func points(from samples: [Int]) -> [RideChartPoint] {
+        samples.enumerated().map { RideChartPoint(distance: $0.offset, value: Double($0.element)) }
+    }
 }
-struct ElevationPoint: Identifiable {
-    let id = UUID(); let distance: Int; let elevation: Double
+struct ElevationPoint: Identifiable, Equatable {
+    let distance: Int; let elevation: Double
+    var id: Int { distance }
+
+    static func points(from samples: [Double]) -> [ElevationPoint] {
+        samples.enumerated().map { ElevationPoint(distance: $0.offset, elevation: $0.element) }
+    }
 }
 
 #Preview("Rides") {

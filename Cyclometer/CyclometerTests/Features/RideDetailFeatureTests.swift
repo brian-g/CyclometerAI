@@ -241,3 +241,20 @@ struct HeartRateProfileLayoutTests {
         #expect(layout.bands == [.init(zone: 5, bpm: 180...205)])
     }
 }
+
+@Suite("Ride chart point identity")
+struct RideChartPointIdentityTests {
+    @Test("heart-rate points are identified by sample index, so the same samples give the same IDs")
+    func heartRateIDsAreStable() {
+        let samples = [120, 145, 160]
+        #expect(RideChartPoint.points(from: samples).map(\.id) == [0, 1, 2])
+        #expect(RideChartPoint.points(from: samples) == RideChartPoint.points(from: samples))
+    }
+
+    @Test("elevation points are identified by sample index, so the same samples give the same IDs")
+    func elevationIDsAreStable() {
+        let samples = [12.0, 18.5, 9.25]
+        #expect(ElevationPoint.points(from: samples).map(\.id) == [0, 1, 2])
+        #expect(ElevationPoint.points(from: samples) == ElevationPoint.points(from: samples))
+    }
+}
