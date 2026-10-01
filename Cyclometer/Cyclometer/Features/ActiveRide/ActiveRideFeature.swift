@@ -120,12 +120,6 @@ struct ActiveRideFeature {
     @Dependency(\.rideDataBuffer) var rideDataBuffer
     @Dependency(\.rideEndIntentClient) var rideEndIntentClient
 
-    /// Dashboard pages. Factory default is two; rider customisation (S07) will
-    /// drive this from state. Raw value doubles as the paging-dot index.
-    enum DashboardPage: Int, CaseIterable, Equatable {
-        case grid, map
-    }
-
     @ObservableState
     struct State: Equatable {
         /// The persisted `Ride`'s id (#171). A fresh ride's row already exists: S05.1 writes it
@@ -337,12 +331,19 @@ struct ActiveRideFeature {
         /// `SettingsFeature.State.preferredUnit` so a Settings toggle propagates
         /// immediately to every dashboard widget with no lifecycle action needed.
         var unitSystem: UnitSystem { preferences.preferredUnit }
+        /// Reads through to `AppPreferences.dashboardLayout` (#139), so S07's edits show at once.
+        var dashboardLayout: DashboardLayout { preferences.dashboardLayout }
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
-        /// The page the rider is on. Held here, not in the view, because minimising
-        /// the dashboard tears its view down: reopening lands on the page it was left
-        /// on (#333). Per ride, so a new ride opens on the grid.
-        var dashboardPage: DashboardPage = .grid
+        /// The page the rider is on, an index into `dashboardLayout.pages`. Held here, not in
+        /// the view, because minimising the dashboard tears its view down: reopening lands on
+        /// the page it was left on (#333). Per ride, so a new ride opens on page 1.
+        var dashboardPage = 0
+        /// `dashboardPage` within the layout's pages. S07 (#141) can shrink the layout under the
+        /// rider; this keeps the selection, the dots and VoiceOver on a page that exists.
+        var visibleDashboardPage: Int {
+            min(max(dashboardPage, 0), dashboardLayout.pages.count - 1)
+        }
     }
 
     enum Action: Equatable {
@@ -354,7 +355,7 @@ struct ActiveRideFeature {
         /// The map sheet's orientation button (#199). Flips the saved `mapOrientation`,
         /// which the sheet's camera follows.
         case mapOrientationToggled
-        case dashboardPageChanged(DashboardPage)
+        case dashboardPageChanged(Int)
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)

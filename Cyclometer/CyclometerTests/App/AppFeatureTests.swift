@@ -72,14 +72,14 @@ struct AppFeatureTests {
             $0.screenClient = .testValue
         }
 
-        await store.send(.activeRide(.dashboardPageChanged(.map))) {
-            $0.activeRide?.dashboardPage = .map
+        await store.send(.activeRide(.dashboardPageChanged(1))) {
+            $0.activeRide?.dashboardPage = 1
         }
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged)
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
         await store.receive(\.screenVisibilityChanged)
-        #expect(store.state.activeRide?.dashboardPage == .map)
+        #expect(store.state.activeRide?.dashboardPage == 1)
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged)
