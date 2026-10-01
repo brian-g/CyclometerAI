@@ -1,11 +1,11 @@
 import SwiftUI
 
 /// Tap anywhere on a widget to open its detail sheet (UX.md §S05: "Tapping any widget opens a
-/// detail sheet"). The one place a widget's tap is handled, so S07 edit mode (#141) can turn it
-/// off here rather than in every widget.
+/// detail sheet"). The one place a widget's tap is handled, so S07 edit mode (#141) adds its gate
+/// here rather than in every widget.
 ///
-/// The detail closure runs only when the sheet presents, so a widget can hand over large,
-/// fast-changing data (cadence samples, the track) without the dashboard reading it every tick.
+/// The detail closure runs only when the sheet presents. That only keeps data off the dashboard's
+/// hot path if the widget also takes it lazily, as `CadenceWidget`'s `detail:` does.
 /// Detents belong to the detail content, not to this modifier.
 private struct WidgetDetailModifier<Detail: View>: ViewModifier {
     @ViewBuilder let detail: () -> Detail

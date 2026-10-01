@@ -32,8 +32,8 @@ struct MapWidget: View {
     }
 }
 
-/// The full-screen map sheet. Shared by every widget whose tap opens the map — W8, and W9's
-/// "Sheet: Map" (#200) — so they cannot present it differently.
+/// The full-screen map sheet's content, detents included. Every widget whose tap opens the map — W8,
+/// and W9's "Sheet: Map" (#200) — presents this through `.widgetDetail`, so they show the same sheet.
 struct LiveMapSheet: View {
     let trackSegments: [[Coordinate]]
     let route: [RouteCoordinate]
