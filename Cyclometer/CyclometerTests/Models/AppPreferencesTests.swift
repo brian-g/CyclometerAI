@@ -95,6 +95,10 @@ struct AppPreferencesTests {
         preferences.mapOrientation = .northUp
         // Added by #283.
         preferences.isPlaceNameLookupEnabled = false
+        // Added by #139.
+        preferences.dashboardLayout = DashboardLayout(pages: [
+            DashboardPage(placements: [WidgetPlacement(kind: .pace, size: .oneByOne, row: 6, column: 1)])
+        ])
 
         let data = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
@@ -129,6 +133,41 @@ struct AppPreferencesTests {
         #expect(decoded.isPlaceNameLookupEnabled)
         // Added by #199; the map sheet starts heading-up.
         #expect(decoded.mapOrientation == .headingUp)
+        // Added by #139; the dashboard starts on the factory layout.
+        #expect(decoded.dashboardLayout == .factory)
+    }
+
+    /// A layout naming a widget this build doesn't know — written by a newer version, or
+    /// holding one since removed — must not throw: a throw resets every other preference too.
+    @Test("A layout with an unknown widget falls back to the factory layout")
+    func unknownWidgetKindFallsBackToFactory() throws {
+        let json = Data(#"""
+        {"wheelCircumferenceMM":2155,
+         "dashboardLayout":{"pages":[{"placements":[{"kind":"weather","size":"oneByOne","row":0,"column":0}]}]}}
+        """#.utf8)
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+
+        #expect(decoded.dashboardLayout == .factory)
+        #expect(decoded.wheelCircumferenceMM == 2155)
+    }
+
+    @Test("An invalid layout falls back to the factory layout")
+    func invalidLayoutFallsBackToFactory() throws {
+        var preferences = AppPreferences()
+        preferences.wheelCircumferenceMM = 2155
+        // Two widgets in the same cell.
+        preferences.dashboardLayout = DashboardLayout(pages: [
+            DashboardPage(placements: [
+                WidgetPlacement(kind: .pace, size: .oneByOne, row: 0, column: 0),
+                WidgetPlacement(kind: .heartRate, size: .oneByOne, row: 0, column: 0),
+            ])
+        ])
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: JSONEncoder().encode(preferences))
+
+        #expect(decoded.dashboardLayout == .factory)
+        #expect(decoded.wheelCircumferenceMM == 2155)
     }
 
     /// #93 moved `SensorRole` out of `BLECSCClient` and added `.radar` / `.heartRate`.

@@ -79,6 +79,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// The sheet only: the W8 widget is always heading-up and offers no way out of it (#62).
     var mapOrientation: MapOrientation = .headingUp
 
+    /// Which widgets sit where on each dashboard page (#139). S07/S08 (#141, #142) edit it.
+    var dashboardLayout: DashboardLayout = .factory
+
     /// Whether the rider has finished onboarding (S01→S02) at least once (#105). Gates
     /// `AppFeature`'s launch presentation — once true, onboarding never reappears, even
     /// if a permission it once checked is later revoked.
@@ -170,6 +173,13 @@ struct AppPreferences: Codable, Equatable, Sendable {
         mapOrientation = try container.decodeIfPresent(
             MapOrientation.self, forKey: .mapOrientation
         ) ?? .headingUp
+        // `try?`, unlike the fields above: a layout naming a widget this build doesn't know (a
+        // newer version's, or one since removed) would otherwise throw and reset every other
+        // preference with it. An unreadable or invalid layout falls back to the factory one.
+        dashboardLayout = (try? container.decodeIfPresent(DashboardLayout.self, forKey: .dashboardLayout))
+            .flatMap { $0 }
+            .flatMap { DashboardLayoutValidator.isValid($0) ? $0 : nil }
+            ?? .factory
     }
 }
 

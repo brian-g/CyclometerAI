@@ -991,6 +991,8 @@ Cyclometer/
 │   │   ├── ActiveRideFeature.swift        // parent reducer for the ride
 │   │   ├── RideDashboardView.swift        // S05 dashboard
 │   │   ├── ActiveRideAccessoryView.swift  // S05.3 accessory
+│   │   ├── Dashboard/                     // DashboardPageView, DashboardGridLayout,
+│   │   │                                  // DashboardWidgetView (kind → widget) — #139
 │   │   ├── Speed/                         // SpeedFeature, SpeedWidgetView (W1/W2),
 │   │   │                                  // PaceWidgetView (W11)
 │   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12) — HR state lives
