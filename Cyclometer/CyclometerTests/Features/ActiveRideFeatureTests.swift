@@ -3491,6 +3491,7 @@ struct ActiveRideFeatureDashboardEditTests {
         let store = makeStore(layout: DashboardLayout(pages: [DashboardPage(placements: [Self.pace])]))
 
         await store.send(.addWidgetTapped)
+        await store.send(.addWidgetPresentationChanged(true))
         await store.send(.dashboardLongPressed) {
             $0.isEditingDashboard = true
         }
@@ -3571,10 +3572,32 @@ struct ActiveRideFeatureDashboardEditTests {
             $0.dashboardPage = 1
             $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, inserted, second]) }
         }
+        // Back to the page it was inserted from, not on to the page after it (#142 review).
         await store.send(.dashboardEditingDoneTapped) {
             $0.isEditingDashboard = false
             $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second]) }
+            $0.dashboardPage = 0
         }
+    }
+
+    /// SwiftUI won't show the finish alert from a dashboard already showing the picker, and
+    /// auto-end fires only once (#142 review).
+    @Test("Auto-end closes the Add Widget sheet so its finish alert can show")
+    func autoEndClosesPicker() async {
+        let store = makeStore(layout: DashboardLayout(pages: [DashboardPage(placements: [Self.pace])]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.autoEndTriggered)
+        await store.receive(\.finishTapped) {
+            $0.isAddWidgetPresented = false
+        }
+        #expect(store.state.finishAlert != nil)
     }
 
     @Test("Empty page from an empty page adds nothing")

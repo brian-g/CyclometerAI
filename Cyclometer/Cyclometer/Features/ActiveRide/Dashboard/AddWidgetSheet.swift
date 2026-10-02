@@ -5,7 +5,8 @@ import ComposableArchitecture
 /// by category; an entry adds that widget to the page the rider is on, in its first open spot.
 struct AddWidgetSheet: View {
     let store: StoreOf<ActiveRideFeature>
-    /// The dashboard's full-screen size, which sets each preview's proportions.
+    /// The dashboard grid's size — the screen, less the radar lane when it shows — which sets
+    /// each preview's proportions.
     let canvas: CGSize
 
     @Environment(\.dismiss) private var dismiss
@@ -80,6 +81,9 @@ struct AddWidgetCatalog: View {
                 Button(action: onEmptyPage) {
                     Label("Empty page", systemImage: "text.rectangle.page")
                         .foregroundStyle(Color.cyTextPrimary)
+                        // The whole row, a full tap target tall: the label alone is a ~22 pt target.
+                        .frame(maxWidth: .infinity, minHeight: Spacing.tapTarget, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 // From a blank page, another would only be pruned unused.
@@ -144,21 +148,24 @@ private struct AddWidgetPreview: View {
             in: canvas
         ).size
         let card = RoundedRectangle(cornerRadius: Spacing.cornerMd)
-        Color.clear
-            .aspectRatio(native, contentMode: .fit)
-            .overlay {
-                GeometryReader { proxy in
-                    entry.widget.view(size: entry.size, store: store)
-                        .frame(width: native.width, height: native.height)
-                        .scaleEffect(proxy.size.width / native.width, anchor: .topLeading)
+        // Nothing to scale until the dashboard has been measured; a zero size would scale by ∞.
+        if native.width > 0, native.height > 0 {
+            Color.clear
+                .aspectRatio(native, contentMode: .fit)
+                .overlay {
+                    GeometryReader { proxy in
+                        entry.widget.view(size: entry.size, store: store)
+                            .frame(width: native.width, height: native.height)
+                            .scaleEffect(proxy.size.width / native.width, anchor: .topLeading)
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
-            .background(Color.cyBgSecondary)
-            .clipShape(card)
-            .overlay(card.strokeBorder(Color.cyBorderStrong, lineWidth: Spacing.strokeHairline))
-            .contentShape(card)
+                .background(Color.cyBgSecondary)
+                .clipShape(card)
+                .overlay(card.strokeBorder(Color.cyBorderStrong, lineWidth: Spacing.strokeHairline))
+                .contentShape(card)
+        }
     }
 }
 
@@ -190,6 +197,7 @@ extension ActiveRideFeature.State {
             ActiveRideFeature()
         }
         store.send(.dashboardLongPressed)
+        store.send(.addWidgetTapped)
         return AddWidgetSheet(store: store, canvas: CGSize(width: 402, height: 874))
     }
 }

@@ -523,3 +523,15 @@ Branch: `feat/142-add-widget-sheet`
 - Only runtime warning: the known onboarding `ifLet` (`deviceManagement(.onDisappear)`).
 - Not done: UX.md's screen table still says Stub for S08, as it does for the built S07. The status column doesn't track builds.
 - Follow-up (Brian): removed S07's auto-appended blank page. New pages now come only from Empty page (UX.md §S05 item 5). Entering edit mode still saves the layout as shown, so empty pages a ride left behind mid-edit don't come back and shift the page index. `appendingBlankPage` and its test are deleted, and the edit-mode tests are rewritten without the page. The Empty page icon is now `text.rectangle.page`, the mockup's glyph; snapshot re-recorded and checked. Unit suite 1753/0.
+- /code-review xhigh fixes:
+  - The snapshot now uses imperial units, so it no longer depends on the machine's locale.
+  - Finish closes the Add Widget sheet, so auto-end's alert can show.
+  - Done after an unused Empty page returns to the page it was inserted from, not the next one.
+  - Empty page row: full width, 52 pt tall.
+  - Previews subtract the radar lane from their width.
+  - A zero canvas renders nothing instead of scaling by ∞.
+  - `presentationChanged(true)` only opens the picker in edit mode.
+  - `setDashboardLayout` returns Bool, so a refused save doesn't move the rider or close the sheet.
+  - The Xcode preview opens the picker.
+  - Skipped as cleanups: the duplicate grid scan, the sample store being built per render, and sharing the card styling.
+  - Unit suite 1754/0.

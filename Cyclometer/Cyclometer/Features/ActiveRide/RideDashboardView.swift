@@ -86,8 +86,14 @@ struct RideDashboardView: View {
         // from a view `.task` here — that ties them to this view's lifetime.
         .alert($store.scope(state: \.finishAlert, action: \.finishAlert))
         .sheet(isPresented: $store.isAddWidgetPresented.sending(\.addWidgetPresentationChanged)) {
-            AddWidgetSheet(store: store, canvas: canvas)
+            AddWidgetSheet(store: store, canvas: gridSize)
         }
+    }
+
+    /// The widget grid's size: the screen, less the radar lane beside it when it shows
+    /// (`DashboardPageView`).
+    private var gridSize: CGSize {
+        CGSize(width: canvas.width - (store.isRadarSidebarVisible ? Spacing.radarColumnWidth : 0), height: canvas.height)
     }
 
     // ── Grabber ───────────────────────────────────────────────────────────────

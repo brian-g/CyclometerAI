@@ -4,7 +4,7 @@ import SwiftUI
 import ComposableArchitecture
 @testable import Cyclometer
 
-/// S08's picker content (#142): the Page row, then the Ride and Heart Rate sections — widgets at
+/// S08's picker content (#142), in imperial units: the Page row, then the Ride and Heart Rate sections — widgets at
 /// every size, 2×2 first, 1×1s paired, every edge aligned. Pace is already on the page, so its entry
 /// is dimmed. Route is left out: its Map entry is a live `Map`, which doesn't snapshot stably.
 ///
@@ -17,8 +17,11 @@ final class AddWidgetSheetSnapshotTests: XCTestCase {
         withDependencies {
             $0.defaultFileStorage = .inMemory
         } operation: {
+            // Pinned: the sample store reads the rider's units, which otherwise follow the locale.
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.preferredUnit = .imperial }
             // In a scroll view, as in the sheet: a bounded height would shrink the previews.
-            ScrollView {
+            return ScrollView {
                 AddWidgetCatalog(
                     page: DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)]),
                     canvas: CGSize(width: 402, height: 874),
