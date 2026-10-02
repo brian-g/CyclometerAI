@@ -476,3 +476,23 @@ Branch: `feat/141-dashboard-edit-mode`
    - `MapSheetButton` is back to main's version.
 - **Snapshot suite.** It now renders offscreen, because nothing in it is glass any more. In the key window it lost its top padding and clipped the buttons. This also removes the cold-start `prepareView` trap.
 - **Unit suite:** 1735 passed, 0 failed.
+
+### Follow-up: PR #364 review + /code-review xhigh (2026-10-02)
+- [x] PR: map bleed cut by the card clip outside edit mode — clip only while editing
+- [x] PR: scale 1-column 90%, 2-column 95% (card + remove button in step); 2-wide snapshot
+- [x] PR: edit-mode preview, driven through the reducer
+- [x] PR: Add/Done inset `Spacing.xl` (Brian's change, kept)
+- [x] Factory comparison by placements, not page ids (setter + decode)
+- [x] Done always writes a valid `dashboardPage`; prune explicitly, not via the getter's flag
+- [x] Banner never takes touches (covered top-row remove buttons in edit mode)
+- [x] Lossy placement decode: an undecodable placement costs only itself
+- [x] Validator rejects duplicate page ids
+- [x] Enter/leave edit mode animate (send with animation)
+- [x] Long press over the radar lane too; VoiceOver "Edit Dashboard" action
+- [x] Add/Done band never 0 pt tall (no-island devices)
+
+**Review notes**
+- **Map bleed.** The card's `clipShape` clipped every widget, even outside edit mode, at the safe-area-inset frame. W8 draws its bleed past that frame. Now a `mask` clips to the card only while editing, and otherwise ignores the safe area. Sim-verified on page 1 (bottom map) and page 2 (top map), before edit mode and after Done.
+- **Factory matching** uses `DashboardLayout.isFactory` (placements only) in the setter and on decode. The other fix considered was fixed UUID literals on the factory pages. That alone would leave a decoded factory copy pinning the rider until their next edit.
+- **Not changed: one `TimelineView` per widget while editing.** Its closure only applies `visualEffect` rotation to a content placeholder, so widget bodies aren't re-evaluated each frame. Edit mode is also a short, deliberate state. Revisit if a device trace shows a cost.
+- **Unit suite:** 1740 passed, 0 failed. The 5 new tests were confirmed in the log by name. Snapshots re-recorded and looked at; the 2×1 card's sides line up with the 1×1s above it.

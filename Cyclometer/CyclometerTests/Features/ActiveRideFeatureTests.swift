@@ -3406,6 +3406,37 @@ struct ActiveRideFeatureDashboardEditTests {
         }
     }
 
+    /// Done from the blank page prunes the page the rider is on. The index must land on a real
+    /// page, not stay past the end — or the next edit's blank page fills it and the rider is
+    /// thrown onto it (#141 review).
+    @Test("Done from the blank page leaves the rider on the last real page")
+    func doneFromBlankPage() async {
+        let first = DashboardPage(placements: [Self.pace])
+        let second = DashboardPage(placements: [Self.speed])
+        let store = makeStore(layout: DashboardLayout(pages: [first, second]))
+        let blank = DashboardPage(id: blankPageID, placements: [])
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second, blank]) }
+        }
+        await store.send(.dashboardPageChanged(2)) {
+            $0.dashboardPage = 2
+        }
+        await store.send(.dashboardEditingDoneTapped) {
+            $0.isEditingDashboard = false
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second]) }
+            $0.dashboardPage = 1
+        }
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [first, second, DashboardPage(id: UUID(1), placements: [])])
+            }
+        }
+        #expect(store.state.visibleDashboardPage == 1)
+    }
+
     /// Removing every widget leaves one blank page, not a layout with no pages — which would be
     /// refused, and on the next launch replaced with the factory layout.
     @Test("Removing every widget and tapping Done leaves one blank page")

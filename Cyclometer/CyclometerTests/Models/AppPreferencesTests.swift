@@ -183,6 +183,20 @@ struct AppPreferencesTests {
         #expect(preferences.dashboardLayoutOverride == nil)
     }
 
+    /// A copy of the factory layout with other page ids — one saved by an earlier launch, whose
+    /// `.factory` minted different ones — is still the factory layout (#141 review).
+    @Test("Setting or decoding a copy of the factory layout keeps no override")
+    func factoryCopyIsNotAnOverride() throws {
+        let copy = DashboardLayout(pages: DashboardLayout.factory.pages.map { DashboardPage(placements: $0.placements) })
+        var preferences = AppPreferences()
+        preferences.dashboardLayout = copy
+        #expect(preferences.dashboardLayoutOverride == nil)
+
+        let json = Data(#"{"dashboardLayoutOverride":"#.utf8) + (try JSONEncoder().encode(copy)) + Data("}".utf8)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+        #expect(decoded.dashboardLayoutOverride == nil)
+    }
+
     /// Once riders have their own layouts, one bad placement mustn't cost them the rest (#139
     /// review): the overlap drops the later widget only.
     @Test("A layout with an overlapping widget keeps its other widgets")

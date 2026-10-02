@@ -160,6 +160,42 @@ struct DashboardLayoutTests {
         #expect(DashboardLayoutValidator.isValid(pruned))
     }
 
+    /// One placement this build can't decode — a size a newer build added — must not throw the
+    /// page, and with it the rider's whole layout, away (#141 review).
+    @Test("A placement that doesn't decode is dropped, and the rest of the page kept")
+    func undecodablePlacementIsDropped() throws {
+        let json = Data(#"""
+        {"pages":[{"placements":[
+          {"widgetID":"speed","size":"threeByThree","row":0,"column":0},
+          {"widgetID":"pace","size":"oneByOne","row":2,"column":0},
+          {"widgetID":"cadence"}]}]}
+        """#.utf8)
+
+        let decoded = try JSONDecoder().decode(DashboardLayout.self, from: json)
+
+        #expect(decoded.pages.map(\.placements) == [
+            [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 2, column: 0)],
+        ])
+    }
+
+    /// The dashboard's `TabView` is keyed by page id.
+    @Test("Two pages sharing an id make a layout invalid")
+    func duplicatePageIDsAreInvalid() {
+        let first = page(WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0))
+        let copy = DashboardPage(id: first.id, placements: [WidgetPlacement(SpeedDashboardWidget.self, size: .oneByOne, row: 0, column: 0)])
+        #expect(!DashboardLayoutValidator.isValid(DashboardLayout(pages: [first, copy])))
+    }
+
+    /// `.factory` mints page ids per launch, so a saved copy of it differs by `==`; matching it
+    /// must ignore them, or that copy pins the rider to an old factory layout (#141 review).
+    @Test("A layout is the factory one by its placements, whatever its page ids")
+    func factoryMatchIgnoresPageIDs() {
+        let copy = DashboardLayout(pages: DashboardLayout.factory.pages.map { DashboardPage(placements: $0.placements) })
+        #expect(copy != .factory)
+        #expect(copy.isFactory)
+        #expect(!copy.removingWidget(SpeedDashboardWidget.id, fromPage: copy.pages[0].id).isFactory)
+    }
+
     @Test("A page's id survives encoding")
     func pageIDRoundTrips() throws {
         let layout = DashboardLayout(pages: [

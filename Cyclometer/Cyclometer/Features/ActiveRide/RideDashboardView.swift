@@ -54,6 +54,9 @@ struct RideDashboardView: View {
                 if let banner = activeBanner {
                     RideBanner(text: banner.text, icon: banner.icon)
                         .transition(bannerTransition)
+                        // A notice, not a control. In edit mode it sits over the top row's remove
+                        // buttons (#141 review), so touches pass through to them.
+                        .allowsHitTesting(false)
                 }
             }
             .animation(.default, value: activeBanner?.text)
@@ -107,11 +110,14 @@ struct RideDashboardView: View {
                     .disabled(true)
                 Spacer()
                 EditModeButton(title: "Done", systemImage: "checkmark", isProminent: true) {
-                    store.send(.dashboardEditingDoneTapped)
+                    store.send(.dashboardEditingDoneTapped, animation: .default)
                 }
             }
-            .padding(.horizontal, Spacing.lg)
-            .frame(height: proxy.safeAreaInsets.top)
+            .padding(.horizontal, Spacing.xl)
+            // At least a tap target tall: without an island or notch, the hidden status bar
+            // leaves no top inset, and a 0 pt band would put Done — the only way out — half off
+            // screen.
+            .frame(height: max(proxy.safeAreaInsets.top, Spacing.mapControl))
             .frame(maxHeight: .infinity, alignment: .top)
             .ignoresSafeArea(edges: .top)
         }
@@ -130,6 +136,10 @@ struct RideDashboardView: View {
         }
         .accessibilityElement()
         .accessibilityLabel("Page \(store.visibleDashboardPage + 1) of \(pageCount)")
+        // VoiceOver's way into S07 edit mode (#141), which is otherwise only a long press.
+        .accessibilityAction(named: "Edit Dashboard") {
+            store.send(.dashboardLongPressed, animation: .default)
+        }
     }
 
     // ── Ride Controls — floating glass buttons (S05) ───────────────────────────
@@ -320,6 +330,32 @@ private struct EditModeButton: View {
                 ActiveRideFeature()
             }
         )
+    }
+}
+
+#Preview("Edit Mode") {
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
+    } operation: {
+        let store = Store(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                elapsedSeconds: 2340,
+                heartRateBPM: 155,
+                hrZone: 4,
+                isHRPaired: true,
+                cadence: CadenceFeature.State(cadenceRPM: 87),
+                distanceMeters: 12300,
+                speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
+                maxSpeedKPH: 34.1
+            )
+        ) {
+            ActiveRideFeature()
+        }
+        // Through the reducer, as a long press does, so the blank page and its dot appear too.
+        store.send(.dashboardLongPressed)
+        return RideDashboardView(store: store)
     }
 }
 

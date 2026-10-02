@@ -22,9 +22,9 @@ struct DashboardPageView: View {
                         widget.view(size: placement.size, store: store)
                             // Fills its cells, centred like a `Grid` cell, whatever size it reports.
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .dashboardEditCard()
+                            .dashboardEditCard(size: placement.size)
                             .dashboardWiggle(phase: Double(placement.row * DashboardGrid.columns + placement.column) / 3)
-                            .dashboardRemoveButton(title: widget.title) {
+                            .dashboardRemoveButton(title: widget.title, size: placement.size) {
                                 store.send(.removeWidgetTapped(pageID: page.id, widgetID: placement.widgetID))
                             }
                             .dashboardPlacement(placement)
@@ -32,13 +32,15 @@ struct DashboardPageView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // S07 (#141): a long press anywhere on the grid, empty cells included, enters edit
-            // mode. Simultaneous, so it still fires over a widget's own tap.
-            .contentShape(Rectangle())
-            .simultaneousGesture(LongPressGesture().onEnded { _ in store.send(.dashboardLongPressed) })
 
             RadarLane(store: store)
         }
+        // S07 (#141): a long press anywhere on the page — empty cells and the radar lane included
+        // — enters edit mode. Simultaneous, so it still fires over a widget's own tap.
+        .contentShape(Rectangle())
+        .simultaneousGesture(LongPressGesture().onEnded { _ in
+            store.send(.dashboardLongPressed, animation: .default)
+        })
     }
 }
 

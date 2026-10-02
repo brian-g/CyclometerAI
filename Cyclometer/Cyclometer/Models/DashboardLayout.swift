@@ -45,10 +45,21 @@ extension DashboardPage {
     /// By hand, because #139 saved pages without an `id`, and the synthesised decoder throws on a
     /// missing key — which would reset the whole layout. Any field added to these types later must
     /// be optional or decoded the same way.
+    ///
+    /// Each placement decodes on its own, so one this build can't read — a `WidgetSize` a newer
+    /// build added, say — costs that widget, not the page and with it the rider's whole layout.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        placements = try container.decode([WidgetPlacement].self, forKey: .placements)
+        placements = try container.decode([LossyPlacement].self, forKey: .placements).compactMap(\.placement)
+    }
+
+    private struct LossyPlacement: Decodable {
+        let placement: WidgetPlacement?
+
+        init(from decoder: any Decoder) throws {
+            placement = try? WidgetPlacement(from: decoder)
+        }
     }
 }
 
@@ -86,6 +97,13 @@ struct DashboardLayout: Codable, Equatable {
     /// This layout without its empty pages (UX.md §S07: "Empty pages are removed on exit"). Keeps
     /// one when every page is empty, since a layout needs a page; a rider who removed every widget
     /// gets a blank dashboard, not the factory one.
+    /// Whether this is the factory layout: the same widgets in the same places on the same pages.
+    /// Page ids don't count — `.factory` mints new ones each launch, so a saved copy of it never
+    /// matches by `==`, and would pin the rider to it after the factory changes (#141 review).
+    var isFactory: Bool {
+        pages.map(\.placements) == Self.factory.pages.map(\.placements)
+    }
+
     func prunedEmptyPages() -> DashboardLayout {
         let filled = pages.filter { !$0.placements.isEmpty }
         return DashboardLayout(pages: filled.isEmpty ? Array(pages.prefix(1)) : filled)
@@ -168,8 +186,12 @@ enum DashboardLayoutValidator {
         return violations
     }
 
+    /// At least one page, page ids unique — the dashboard's `TabView` is keyed by them — and every
+    /// page free of violations.
     static func isValid(_ layout: DashboardLayout) -> Bool {
-        !layout.pages.isEmpty && layout.pages.allSatisfy { violations(in: $0).isEmpty }
+        !layout.pages.isEmpty
+            && Set(layout.pages.map(\.id)).count == layout.pages.count
+            && layout.pages.allSatisfy { violations(in: $0).isEmpty }
     }
 }
 

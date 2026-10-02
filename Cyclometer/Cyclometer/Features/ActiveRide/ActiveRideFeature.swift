@@ -527,13 +527,13 @@ struct ActiveRideFeature {
                 state.isEditingDashboard = false
                 // Saving the pruned layout, not just hiding empty pages, is what returns a rider
                 // who changed nothing to the factory layout (`AppPreferences.dashboardLayout`).
-                let pruned = state.dashboardLayout
+                let pruned = state.preferences.dashboardLayout.prunedEmptyPages()
                 setDashboardLayout(pruned, in: &state)
                 // Pruning shifts every page after an empty one; stay on the page the rider was
-                // looking at. A pruned page itself falls to the clamp in `visibleDashboardPage`.
-                if let index = pruned.pages.firstIndex(where: { $0.id == visiblePage }) {
-                    state.dashboardPage = index
-                }
+                // looking at. If that page was pruned, take whichever now holds its place, or the
+                // last — never an index past the end, which the next edit's blank page would fill.
+                state.dashboardPage = pruned.pages.firstIndex { $0.id == visiblePage }
+                    ?? min(max(state.dashboardPage, 0), pruned.pages.count - 1)
                 return .none
             case .mapOrientationToggled:
                 // The preference itself, not a copy: the next ride's sheet, and one reopened

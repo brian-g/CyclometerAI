@@ -1,9 +1,12 @@
 import SwiftUI
 
-/// The scale S07 edit mode shrinks a widget to (#141: "scale down by 5 or 10%"), leaving the gap
-/// that separates neighbouring cards. Shared by the card and its remove button, which sits on the
-/// card's corner.
-private let editingScale: CGFloat = 0.9
+extension WidgetSize {
+    /// The scale S07 edit mode shrinks a widget of this size to, leaving the gap that separates
+    /// neighbouring cards (#141 review): 90% for one column, 95% for two, so a full-width card's
+    /// sides inset as far as a 1×1's. Shared by the card and its remove button, which sits on the
+    /// card's corner.
+    fileprivate var editingScale: CGFloat { columns == 1 ? 0.9 : 0.95 }
+}
 
 /// S07 edit mode's card for one dashboard widget (#141): the widget shrinks into a rounded card with
 /// a hairline border. Outside edit mode it adds nothing.
@@ -16,19 +19,29 @@ private let editingScale: CGFloat = 0.9
 /// three are modifiers rather than an `if` around the widget, so entering edit mode keeps each
 /// widget's identity — the live map isn't rebuilt.
 private struct DashboardEditCard: ViewModifier {
+    let size: WidgetSize
+
     @Environment(\.isEditingDashboard) private var isEditing
 
     func body(content: Content) -> some View {
-        let card = RoundedRectangle(cornerRadius: isEditing ? Spacing.cornerMd : 0)
+        let card = RoundedRectangle(cornerRadius: Spacing.cornerMd)
         content
-            .clipShape(card)
+            // Clips to the card only while editing. Otherwise the mask ignores the safe area, as
+            // W8 does, so a map in the top or bottom rows still bleeds under the Dynamic Island or
+            // the home indicator (UX.md §S05) — a plain clip cut it at the safe-area edge.
+            .mask {
+                if isEditing {
+                    card
+                } else {
+                    Rectangle().ignoresSafeArea()
+                }
+            }
             .overlay {
                 if isEditing {
                     card.strokeBorder(Color.cyBorderStrong, lineWidth: Spacing.strokeHairline)
                 }
             }
-            .scaleEffect(isEditing ? editingScale : 1)
-            .animation(.default, value: isEditing)
+            .scaleEffect(isEditing ? size.editingScale : 1)
     }
 }
 
@@ -36,6 +49,7 @@ private struct DashboardEditCard: ViewModifier {
 /// left it. Applied outside the wiggle, so it holds still while the card moves under it.
 private struct DashboardRemoveButton: ViewModifier {
     let title: String
+    let size: WidgetSize
     let onRemove: () -> Void
 
     @Environment(\.isEditingDashboard) private var isEditing
@@ -45,8 +59,8 @@ private struct DashboardRemoveButton: ViewModifier {
             if isEditing {
                 GeometryReader { proxy in
                     button.position(
-                        x: proxy.size.width * (1 - editingScale) / 2,
-                        y: proxy.size.height * (1 - editingScale) / 2
+                        x: proxy.size.width * (1 - size.editingScale) / 2,
+                        y: proxy.size.height * (1 - size.editingScale) / 2
                     )
                 }
             }
@@ -104,9 +118,10 @@ private struct DashboardWiggle: ViewModifier {
 }
 
 extension View {
-    /// S07 edit mode's card (#141), shown while `EnvironmentValues.isEditingDashboard` is set.
-    func dashboardEditCard() -> some View {
-        modifier(DashboardEditCard())
+    /// S07 edit mode's card for a widget placed at `size` (#141), shown while
+    /// `EnvironmentValues.isEditingDashboard` is set.
+    func dashboardEditCard(size: WidgetSize) -> some View {
+        modifier(DashboardEditCard(size: size))
     }
 
     /// S07 edit mode's wiggle (#141), `phase` cycles out of step with its neighbours.
@@ -116,7 +131,7 @@ extension View {
 
     /// S07 edit mode's remove button for the widget `title` (#141). Apply it outside
     /// `dashboardWiggle`, so the button stays still.
-    func dashboardRemoveButton(title: String, onRemove: @escaping () -> Void) -> some View {
-        modifier(DashboardRemoveButton(title: title, onRemove: onRemove))
+    func dashboardRemoveButton(title: String, size: WidgetSize, onRemove: @escaping () -> Void) -> some View {
+        modifier(DashboardRemoveButton(title: title, size: size, onRemove: onRemove))
     }
 }
