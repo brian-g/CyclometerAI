@@ -17,7 +17,7 @@ struct DashboardPageView: View {
                 // empty cell sits above its slot. Only edit mode draws them.
                 ForEach(page.emptyCells, id: \.self) { cell in
                     DashboardEmptySlot(cell: cell) {
-                        store.send(.emptyCellTapped(cell))
+                        store.send(.emptyCellTapped(pageID: page.id, cell: cell))
                     }
                     .dashboardPlacement(at: cell, size: .oneByOne)
                 }

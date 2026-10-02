@@ -545,7 +545,7 @@ Branch: `feat/368-tap-empty-cell`
 - [x] 2. Grid layout key carries cell + size; `dashboardPlacement(at:size:)`
 - [x] 3. Reducer: `addWidgetCell`, `emptyCellTapped`, select/Empty page/close paths + TestStore tests
 - [x] 4. Sheet: catalog `cell` filter, Page section hidden (filter is `page.fits`, tested in the model; `entries(in:)` unchanged)
-- [x] 5. `EmptyCellSlot` (dashed 90% card, VoiceOver) in `DashboardPageView` + snapshot
+- [x] 5. `DashboardEmptySlot` (dashed 90% card, VoiceOver) in `DashboardPageView` + snapshot
 - [x] 6. Docs: UX.md §S05 Empty cells, §S08 as built
 - [x] 7. Unit suite green; sim drive
 
@@ -563,3 +563,14 @@ Branch: `feat/368-tap-empty-cell`
   - Done leaves no slots.
 - Design choice: the grid's layout key now carries cell + size, not a `WidgetPlacement`, so slots and widgets share one frame calculation and no dummy widget id is needed.
 - Not done: no runtime-issue log stream was captured during the drive. No device check.
+- /code-review high --fix: applied 5 fixes. Full unit suite 1762/0 after them.
+  - The cell stays set as the sheet closes, so it doesn't redraw as Add's sheet while sliding away.
+  - `emptyCellTapped` carries `pageID`.
+  - `firstOpenPlacement` reuses `openPlacement(at:)`.
+  - `fits` is derived from `emptyCells`.
+  - Fixed the plan's view name.
+- Skipped from the review:
+  - The single-enum sheet target: it would rework the #142 binding.
+  - Computing the placement twice: the existing #142 pattern.
+  - Gating the slot `ForEach`: at most 14 cells.
+  - The UX.md "contradiction": a misread. A 1×1 gap does show only 1×1s.

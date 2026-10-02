@@ -67,9 +67,8 @@ extension DashboardPage {
     func firstOpenPlacement(widgetID: String, size: WidgetSize) -> WidgetPlacement? {
         for row in 0...(DashboardGrid.rows - size.rows) {
             for column in 0...(DashboardGrid.columns - size.columns) {
-                let candidate = WidgetPlacement(widgetID: widgetID, size: size, row: row, column: column)
-                let page = DashboardPage(placements: placements + [candidate])
-                if DashboardLayoutValidator.violations(in: page).isEmpty { return candidate }
+                let cell = DashboardGrid.Cell(row: row, column: column)
+                if let placement = openPlacement(widgetID: widgetID, size: size, at: cell) { return placement }
             }
         }
         return nil
@@ -88,10 +87,8 @@ extension DashboardPage {
     /// Whether a widget of `size` with its top-left at `cell` stays on the grid and covers only
     /// empty cells, whichever widget it is. S08 opened from `cell` (#368) lists only these sizes.
     func fits(_ size: WidgetSize, at cell: DashboardGrid.Cell) -> Bool {
-        let inBounds = cell.row >= 0 && cell.column >= 0
-            && cell.row <= DashboardGrid.rows - size.rows
-            && cell.column <= DashboardGrid.columns - size.columns
-        return inBounds && Set(placements.flatMap(\.cells)).isDisjoint(with: DashboardGrid.cells(at: cell, size: size))
+        // A cell off the grid is never among `emptyCells`, so this is the bounds check too.
+        Set(emptyCells).isSuperset(of: DashboardGrid.cells(at: cell, size: size))
     }
 
     /// The cells no placement covers, in reading order: S07 edit mode's add-here slots (#368).
