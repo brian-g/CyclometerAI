@@ -119,13 +119,6 @@ struct DashboardLayout: Codable, Equatable {
         return DashboardLayout(pages: pages)
     }
 
-    /// This layout ending in a blank page for S07 edit mode to place widgets on — unless it already
-    /// ends in one, so entering edit mode twice never stacks them.
-    func appendingBlankPage(id: DashboardPage.ID) -> DashboardLayout {
-        guard pages.last?.placements.isEmpty == false else { return self }
-        return DashboardLayout(pages: pages + [DashboardPage(id: id, placements: [])])
-    }
-
     /// This layout without its empty pages (UX.md §S07: "Empty pages are removed on exit"). Keeps
     /// one when every page is empty, since a layout needs a page; a rider who removed every widget
     /// gets a blank dashboard, not the factory one.

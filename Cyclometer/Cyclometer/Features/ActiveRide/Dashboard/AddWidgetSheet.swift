@@ -78,7 +78,7 @@ struct AddWidgetCatalog: View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
             section("Page") {
                 Button(action: onEmptyPage) {
-                    Label("Empty page", systemImage: "plus.rectangle.portrait")
+                    Label("Empty page", systemImage: "text.rectangle.page")
                         .foregroundStyle(Color.cyTextPrimary)
                 }
                 .buttonStyle(.plain)

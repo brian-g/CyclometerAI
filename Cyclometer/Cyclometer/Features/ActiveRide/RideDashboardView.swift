@@ -360,7 +360,7 @@ private struct EditModeButton: View {
         ) {
             ActiveRideFeature()
         }
-        // Through the reducer, as a long press does, so the blank page and its dot appear too.
+        // Through the reducer, as a long press does.
         store.send(.dashboardLongPressed)
         return RideDashboardView(store: store)
     }

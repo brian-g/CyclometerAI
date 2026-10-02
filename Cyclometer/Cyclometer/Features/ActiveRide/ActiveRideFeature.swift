@@ -333,13 +333,15 @@ struct ActiveRideFeature {
         /// immediately to every dashboard widget with no lifecycle action needed.
         var unitSystem: UnitSystem { preferences.preferredUnit }
         /// Reads through to `AppPreferences.dashboardLayout` (#139), so S07's edits show at once.
-        /// Empty pages exist for edit mode and show only there: a ride that ends mid-edit never
-        /// reaches Done's prune, and the next ride must not open on them.
+        /// Empty pages — S08's "Empty page", or one whose widgets were all removed — show only in
+        /// edit mode: a ride that ends mid-edit never reaches Done's prune, and the next ride must
+        /// not open on them.
         var dashboardLayout: DashboardLayout {
             isEditingDashboard ? preferences.dashboardLayout : preferences.dashboardLayout.prunedEmptyPages()
         }
-        /// S07 edit mode (#141): widgets wiggle and can be removed, a blank page waits at the end,
-        /// and the dashboard can't be minimised until Done.
+        /// S07 edit mode (#141): widgets wiggle and can be removed, and the dashboard can't be
+        /// minimised until Done. New pages come only from S08's "Empty page" (UX.md §S05
+        /// "Customization" 5), not by themselves.
         var isEditingDashboard = false
         /// S08's Add Widget sheet (#142), opened from edit mode's Add.
         var isAddWidgetPresented = false
@@ -519,11 +521,10 @@ struct ActiveRideFeature {
                 return .none
             case .dashboardLongPressed:
                 guard !state.isEditingDashboard else { return .none }
-                // Built from the layout as shown, before the flag flips: empty pages a ride left
-                // behind mid-edit stay gone, so the rider's page index means the same page.
-                let editing = state.dashboardLayout.appendingBlankPage(id: uuid())
+                // Saves the layout as shown, before the flag flips: empty pages a ride left behind
+                // mid-edit stay gone, so the rider's page index means the same page.
+                setDashboardLayout(state.dashboardLayout, in: &state)
                 state.isEditingDashboard = true
-                setDashboardLayout(editing, in: &state)
                 return .none
             case .removeWidgetTapped(let pageID, let widgetID):
                 guard state.isEditingDashboard else { return .none }
@@ -563,7 +564,7 @@ struct ActiveRideFeature {
                 setDashboardLayout(pruned, in: &state)
                 // Pruning shifts every page after an empty one; stay on the page the rider was
                 // looking at. If that page was pruned, take whichever now holds its place, or the
-                // last — never an index past the end, which the next edit's blank page would fill.
+                // last — never an index past the end, which a page added later would take over.
                 state.dashboardPage = pruned.pages.firstIndex { $0.id == visiblePage }
                     ?? min(max(state.dashboardPage, 0), pruned.pages.count - 1)
                 return .none

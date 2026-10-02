@@ -183,19 +183,6 @@ struct DashboardLayoutTests {
         #expect(layout.insertingBlankPage(id: blank, after: UUID()) == layout)
     }
 
-    @Test("Edit mode's blank page is appended once, however often it's asked for")
-    func appendingBlankPage() {
-        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
-        let layout = DashboardLayout(pages: [page(pace)])
-
-        let blank = UUID()
-        let once = layout.appendingBlankPage(id: blank)
-        let twice = once.appendingBlankPage(id: UUID())
-
-        #expect(once == DashboardLayout(pages: [layout.pages[0], DashboardPage(id: blank, placements: [])]))
-        #expect(twice == once)
-    }
-
     @Test("Pruning removes empty pages wherever they are, keeping the rest in order")
     func prunedEmptyPages() {
         let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)

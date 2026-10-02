@@ -522,3 +522,4 @@ Branch: `feat/142-add-widget-sheet`
   - Done prunes the trailing blank and stays on page 2.
 - Only runtime warning: the known onboarding `ifLet` (`deviceManagement(.onDisappear)`).
 - Not done: UX.md's screen table still says Stub for S08, as it does for the built S07. The status column doesn't track builds.
+- Follow-up (Brian): removed S07's auto-appended blank page. New pages now come only from Empty page (UX.md §S05 item 5). Entering edit mode still saves the layout as shown, so empty pages a ride left behind mid-edit don't come back and shift the page index. `appendingBlankPage` and its test are deleted, and the edit-mode tests are rewritten without the page. The Empty page icon is now `text.rectangle.page`, the mockup's glyph; snapshot re-recorded and checked. Unit suite 1753/0.
