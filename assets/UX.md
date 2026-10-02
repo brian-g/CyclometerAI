@@ -2,7 +2,8 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
-**Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
+**Updated:** 2026-10-02—  Added interaction for the Add Widget sheet
+****Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
 **Updated:** 2026-09-28 — §S19's list / map toggle leaves the toolbar for a floating glass button at the bottom trailing edge, above the tab bar and a minimised ride (#331).  
 **Updated:** 2026-09-26 — No iPhone workout session (#318, PRD §9.4): §W12's time in zone, when built, accumulates locally from the dashboard's HR readings, not from HealthKit's live zone updates.  
 **Updated:** 2026-09-26 — HKWorkout retry (#277): §S10's workout is retried until it lands — after the next Finish, and at the next launch unless that launch resumes an unfinished ride — including for a ride closed out at launch after a failed save. Rides that ended before this change are not written retroactively, nor is a ride closed out as an orphan at launch, whose end time is the relaunch rather than the ride's.  
@@ -791,7 +792,7 @@ Modeled on SpringBoard widget editing:
 
 ### Interaction
 
-The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart Rate, Weather, Route, and eventually, Force. The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
+The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart Rate, Weather (future), Route, and Force (future). The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
 
 ### Open UX Questions
 
