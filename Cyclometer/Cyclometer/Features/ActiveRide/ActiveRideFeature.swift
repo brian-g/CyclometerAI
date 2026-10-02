@@ -341,6 +341,8 @@ struct ActiveRideFeature {
         /// S07 edit mode (#141): widgets wiggle and can be removed, a blank page waits at the end,
         /// and the dashboard can't be minimised until Done.
         var isEditingDashboard = false
+        /// S08's Add Widget sheet (#142), opened from edit mode's Add.
+        var isAddWidgetPresented = false
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
         /// The page the rider is on, an index into `dashboardLayout.pages`. Held here, not in
@@ -368,6 +370,12 @@ struct ActiveRideFeature {
         case dashboardLongPressed
         case removeWidgetTapped(pageID: DashboardPage.ID, widgetID: String)
         case dashboardEditingDoneTapped
+        /// S08 (#142): Add opens the picker; an entry adds that widget to the page the rider is on.
+        case addWidgetTapped
+        case addWidgetPresentationChanged(Bool)
+        case addWidgetSelected(widgetID: String, size: WidgetSize)
+        /// S08's "Empty page" (#142): a blank page after the one the rider is on.
+        case addEmptyPageTapped
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)
@@ -520,6 +528,30 @@ struct ActiveRideFeature {
             case .removeWidgetTapped(let pageID, let widgetID):
                 guard state.isEditingDashboard else { return .none }
                 setDashboardLayout(state.dashboardLayout.removingWidget(widgetID, fromPage: pageID), in: &state)
+                return .none
+            case .addWidgetTapped:
+                guard state.isEditingDashboard else { return .none }
+                state.isAddWidgetPresented = true
+                return .none
+            case .addWidgetPresentationChanged(let isPresented):
+                state.isAddWidgetPresented = isPresented
+                return .none
+            case .addWidgetSelected(let widgetID, let size):
+                guard state.isEditingDashboard, state.isAddWidgetPresented else { return .none }
+                let page = state.dashboardLayout.pages[state.visibleDashboardPage]
+                // The picker dims an entry with no open spot, so this only refuses a stale tap.
+                guard page.firstOpenPlacement(widgetID: widgetID, size: size) != nil else { return .none }
+                setDashboardLayout(state.dashboardLayout.addingWidget(widgetID, size: size, toPage: page.id), in: &state)
+                state.isAddWidgetPresented = false
+                return .none
+            case .addEmptyPageTapped:
+                guard state.isEditingDashboard, state.isAddWidgetPresented else { return .none }
+                let page = state.dashboardLayout.pages[state.visibleDashboardPage]
+                // The rider is already on a blank page; another beside it would be pruned unused.
+                guard !page.placements.isEmpty else { return .none }
+                setDashboardLayout(state.dashboardLayout.insertingBlankPage(id: uuid(), after: page.id), in: &state)
+                state.dashboardPage = state.visibleDashboardPage + 1
+                state.isAddWidgetPresented = false
                 return .none
             case .dashboardEditingDoneTapped:
                 guard state.isEditingDashboard else { return .none }

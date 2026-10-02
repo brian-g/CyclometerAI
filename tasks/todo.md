@@ -496,3 +496,29 @@ Branch: `feat/141-dashboard-edit-mode`
 - **Factory matching** uses `DashboardLayout.isFactory` (placements only) in the setter and on decode. The other fix considered was fixed UUID literals on the factory pages. That alone would leave a decoded factory copy pinning the rider until their next edit.
 - **Not changed: one `TimelineView` per widget while editing.** Its closure only applies `visualEffect` rotation to a content placeholder, so widget bodies aren't re-evaluated each frame. Edit mode is also a short, deliberate state. Revisit if a device trace shows a cost.
 - **Unit suite:** 1740 passed, 0 failed. The 5 new tests were confirmed in the log by name. Snapshots re-recorded and looked at; the 2×1 card's sides line up with the 1×1s above it.
+
+# #142 — S08 Add Widget sheet
+
+Plan: /Users/brian/.claude/plans/fuzzy-snacking-phoenix.md
+Branch: `feat/142-add-widget-sheet`
+
+- [x] 1. Model: `firstOpenPlacement`, `addingWidget`, `insertingBlankPage` + tests
+- [x] 2. `WidgetCategory` + `category` on each widget
+- [x] 3. Reducer: present / select / empty page + tests
+- [x] 4. `AddWidgetSheet` (sections, scaled previews, sample store) + entry-order test + snapshot
+- [x] 5. Wire Add button + sheet in `RideDashboardView`
+- [x] 6. Docs: UX.md §S08 as built, TCA.md §8
+- [ ] 6b. Follow-up issue for cell-tap (awaiting Brian's OK)
+- [x] 7. Unit suite green; sim drive
+
+## Review
+
+- Unit suite: 1754 passed, 0 failed (the one expected failure is the deliberate `withKnownIssue`). The new cases are in the log by name.
+- Snapshot `testAddWidgetCatalog` light/dark recorded and inspected. The first recording had a 2×2 narrower than the content and uneven row gaps, because a fixed-height frame squeezed `.fit`. The sheet scrolls, so the test now uses a `ScrollView` too. Cadence's sample AVG/MAX were blank, so the sample now sets them.
+- Sim drive (throwaway XCUITest, deleted):
+  - Full factory page 1: every entry dimmed, Empty page live.
+  - Empty page inserts page 2 and moves to it.
+  - HR 1×1 lands at (0,0), Speed 2×2 at rows 1–2.
+  - Done prunes the trailing blank and stays on page 2.
+- Only runtime warning: the known onboarding `ifLet` (`deviceManagement(.onDisappear)`).
+- Not done: UX.md's screen table still says Stub for S08, as it does for the built S07. The status column doesn't track builds.

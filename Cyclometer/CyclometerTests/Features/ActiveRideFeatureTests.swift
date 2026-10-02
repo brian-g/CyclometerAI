@@ -3494,4 +3494,121 @@ struct ActiveRideFeatureDashboardEditTests {
             }
         }
     }
+
+    // ── S08 Add Widget (#142) ──────────────────────────────────────────────────
+
+    @Test("Add opens the picker only in edit mode")
+    func addOpensPickerOnlyWhileEditing() async {
+        let store = makeStore(layout: DashboardLayout(pages: [DashboardPage(placements: [Self.pace])]))
+
+        await store.send(.addWidgetTapped)
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = $0.dashboardLayout.appendingBlankPage(id: self.blankPageID) }
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addWidgetPresentationChanged(false)) {
+            $0.isAddWidgetPresented = false
+        }
+    }
+
+    @Test("Picking a widget adds it to the page the rider is on, saved, and closes the picker")
+    func pickingAddsToVisiblePage() async {
+        let first = DashboardPage(placements: [Self.pace])
+        let second = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [first, second]))
+        let blank = DashboardPage(id: blankPageID, placements: [])
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second, blank]) }
+        }
+        await store.send(.dashboardPageChanged(1)) {
+            $0.dashboardPage = 1
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        let heartRate = WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1)
+        await store.send(.addWidgetSelected(widgetID: HeartRateDashboardWidget.id, size: .oneByOne)) {
+            $0.isAddWidgetPresented = false
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [first, DashboardPage(id: second.id, placements: [Self.pace, heartRate]), blank])
+            }
+        }
+    }
+
+    /// The picker dims these; a tap that lands anyway (a stale view) must not touch the layout.
+    @Test("Picking a widget the page can't take changes nothing")
+    func pickingUnplaceableIsIgnored() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = $0.dashboardLayout.appendingBlankPage(id: self.blankPageID) }
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addWidgetSelected(widgetID: PaceDashboardWidget.id, size: .oneByOne))
+        await store.send(.addWidgetSelected(widgetID: MapDashboardWidget.id, size: .oneByOne))
+    }
+
+    @Test("Without the picker up, a pick or Empty page is ignored")
+    func pickWithoutPickerIsIgnored() async {
+        let store = makeStore(layout: DashboardLayout(pages: [DashboardPage(placements: [Self.pace])]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = $0.dashboardLayout.appendingBlankPage(id: self.blankPageID) }
+        }
+        await store.send(.addWidgetSelected(widgetID: HeartRateDashboardWidget.id, size: .oneByOne))
+        await store.send(.addEmptyPageTapped)
+    }
+
+    @Test("Empty page goes after the page the rider is on, takes them to it, and Done prunes it unused")
+    func emptyPageInsertsAfterVisiblePage() async {
+        let first = DashboardPage(placements: [Self.pace])
+        let second = DashboardPage(placements: [Self.speed])
+        let store = makeStore(layout: DashboardLayout(pages: [first, second]))
+        let blank = DashboardPage(id: blankPageID, placements: [])
+        let inserted = DashboardPage(id: UUID(1), placements: [])
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second, blank]) }
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addEmptyPageTapped) {
+            $0.isAddWidgetPresented = false
+            $0.dashboardPage = 1
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, inserted, second, blank]) }
+        }
+        await store.send(.dashboardEditingDoneTapped) {
+            $0.isEditingDashboard = false
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second]) }
+        }
+    }
+
+    @Test("Empty page from a blank page adds nothing")
+    func emptyPageFromBlankPageIsIgnored() async {
+        let store = makeStore(layout: DashboardLayout(pages: [DashboardPage(placements: [Self.pace])]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = $0.dashboardLayout.appendingBlankPage(id: self.blankPageID) }
+        }
+        await store.send(.dashboardPageChanged(1)) {
+            $0.dashboardPage = 1
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addEmptyPageTapped)
+    }
 }

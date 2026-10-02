@@ -6,6 +6,7 @@ struct HeartRateDashboardWidget: DashboardWidget {
     static let id = "heartRate"
     static let title = "Heart Rate"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
+    static let category = WidgetCategory.heartRate
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>
@@ -20,6 +21,7 @@ struct HRZonesDashboardWidget: DashboardWidget {
     static let id = "hrZones"
     static let title = "HR Zones"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
+    static let category = WidgetCategory.heartRate
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>

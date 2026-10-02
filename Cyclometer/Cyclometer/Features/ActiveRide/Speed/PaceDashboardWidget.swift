@@ -6,6 +6,7 @@ struct PaceDashboardWidget: DashboardWidget {
     static let id = "pace"
     static let title = "Pace"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
+    static let category = WidgetCategory.ride
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>

@@ -126,6 +126,63 @@ struct DashboardLayoutTests {
         #expect(removed.pages.map(\.id) == layout.pages.map(\.id))
     }
 
+    @Test("A new widget goes in the first open spot in reading order")
+    func firstOpenPlacementReadingOrder() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 1, column: 0)
+        let open = page(pace, cadence)
+
+        #expect(open.firstOpenPlacement(widgetID: HeartRateDashboardWidget.id, size: .oneByOne)
+            == WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1))
+        // Row 0 has a 1×1 gap, row 1 is full: a 2×2 needs rows 2–3.
+        #expect(open.firstOpenPlacement(widgetID: SpeedDashboardWidget.id, size: .twoByTwo)
+            == WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 2, column: 0))
+    }
+
+    @Test("A widget already on the page, or a size the page has no room for, has no open spot")
+    func firstOpenPlacementRefuses() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        #expect(page(pace).firstOpenPlacement(widgetID: PaceDashboardWidget.id, size: .oneByOne) == nil)
+        #expect(page(pace).firstOpenPlacement(widgetID: MapDashboardWidget.id, size: .twoByOne) == nil, "Map has no 2×1")
+
+        // Every other row filled leaves only 1×1 and 2×1 gaps: no 2×2 fits, a 1×1 still does.
+        let striped = DashboardPage(placements: [
+            WidgetPlacement(SpeedDashboardWidget.self, size: .twoByOne, row: 0, column: 0),
+            WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
+            WidgetPlacement(DirectionsDashboardWidget.self, size: .twoByOne, row: 4, column: 0),
+            WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 6, column: 0),
+        ])
+        #expect(striped.firstOpenPlacement(widgetID: MapDashboardWidget.id, size: .twoByTwo) == nil)
+        #expect(striped.firstOpenPlacement(widgetID: PaceDashboardWidget.id, size: .oneByOne)
+            == WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 1, column: 0))
+    }
+
+    @Test("Adding a widget touches only its page, and does nothing when there's no room")
+    func addingWidget() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let layout = DashboardLayout(pages: [page(pace), page(pace)])
+
+        let added = layout.addingWidget(HeartRateDashboardWidget.id, size: .oneByOne, toPage: layout.pages[1].id)
+        #expect(added.pages.map(\.placements) == [
+            [pace],
+            [pace, WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1)],
+        ])
+        #expect(added.pages.map(\.id) == layout.pages.map(\.id))
+        #expect(layout.addingWidget(PaceDashboardWidget.id, size: .oneByOne, toPage: layout.pages[0].id) == layout)
+    }
+
+    @Test("An empty page goes right after the page it's added from")
+    func insertingBlankPage() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let layout = DashboardLayout(pages: [page(pace), page(pace)])
+        let blank = UUID()
+
+        let inserted = layout.insertingBlankPage(id: blank, after: layout.pages[0].id)
+        #expect(inserted.pages.map(\.id) == [layout.pages[0].id, blank, layout.pages[1].id])
+        #expect(inserted.pages[1].placements.isEmpty)
+        #expect(layout.insertingBlankPage(id: blank, after: UUID()) == layout)
+    }
+
     @Test("Edit mode's blank page is appended once, however often it's asked for")
     func appendingBlankPage() {
         let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)

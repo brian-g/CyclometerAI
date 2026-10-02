@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-02 — §S08 Add Widget built (#142): Add opens it; a widget goes into the first open spot on the page the rider is on, and an entry that page can't take is dimmed. "Empty page" inserts a blank page after the current one. Tapping an empty cell is not yet built.  
 **Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink into hairline-bordered cards (glass frames bled into each other, so they were dropped at review), and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
 **Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
 **Updated:** 2026-10-02—  Added interaction for the Add Widget sheet
@@ -120,6 +121,7 @@ Units should always be set baseline aligned with their corresponding values.
 - `watermark` (0.2) — background sparkline / watermark behind a dashboard hero number (e.g. W1 speed history).
 - `iconTile` (0.14) — tinted square behind a sensor row's SF Symbol (`SensorListRowView`).
 - `turnOverlay` (0.9) — the centred turn instruction's card (`TurnInstructionOverlay`, Sketch `Sxx - Route overlay`).
+- `unavailable` (0.4) — an §S08 Add Widget entry the current page can't take.
 
 ### Navigation Pattern
 The navigation in the app will follow standard iOS application guidelines patterns. In this case, the application to model is the Apple Music app. The bottom TabView should have the following 3 items:
@@ -798,9 +800,11 @@ As built (#141): Add (`plus`) and Done (`checkmark`) are glass capsules the Dyna
 
 The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart Rate, Weather (future), Route, and Force (future). The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
 
+As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled. Tapping an empty cell to add there is not built yet.
+
 ### Open UX Questions
 
-- [ ] TBD
+- [x] Does the picker exclude widgets already placed on the current page, or allow duplicates? Neither: they are shown dimmed. A widget appears at most once per page, and may appear on other pages (§S05 "Customisation").
 
 ---
 

@@ -7,6 +7,7 @@ struct MapDashboardWidget: DashboardWidget {
     static let id = "map"
     static let title = "Map"
     static let supportedSizes: [WidgetSize] = [.twoByTwo]
+    static let category = WidgetCategory.route
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>
