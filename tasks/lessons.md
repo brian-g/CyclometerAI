@@ -702,3 +702,13 @@ A burst of screenshots, about 75 ms apart, showed the cause of the first two. Th
 - Liquid Glass casts a rim and a shadow past its shape. Don't tile glass shapes edge to edge. Use one glass layer, or a non-glass treatment, for a grid.
 - Size motion by distance, not angle: a fixed corner travel, with the angle derived from the view's size (`visualEffect`).
 - For a visual decision that's Brian's to make, render the options side by side (launch-argument switches, one drive, a contact sheet). Don't pick one and ship it.
+
+---
+
+## A "no-op when off" claim needs the case that relies on what it would remove (2026-10-02, #141 review)
+
+**What happened.** `DashboardEditCard` clipped every widget, using corner radius 0 outside edit mode, and its doc said "outside edit mode it adds nothing". The off-mode snapshot passed against the reference from before the clip, and I took that as proof. But that snapshot held Pace and Heart Rate, which never draw outside their frames. W8 Map does: its bleed under the Dynamic Island and the home indicator is drawn past its laid-out frame. The clip cut it at the safe-area edge, and Brian caught it on the PR.
+
+**Rules.**
+- When a modifier is supposed to be a no-op in one state, test it against the view most likely to notice. For a clip or mask, that's anything that overflows on purpose, such as a map, a shadow or a bleed.
+- `clipShape` is never free, even with radius 0: it clips to the frame. For a conditional clip, mask with a shape that ignores the safe area when off.
