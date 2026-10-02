@@ -11,12 +11,20 @@ private struct WidgetDetailModifier<Detail: View>: ViewModifier {
     @ViewBuilder let detail: () -> Detail
     @State private var isPresented = false
 
+    @Environment(\.isEditingDashboard) private var isEditingDashboard
+
     func body(content: Content) -> some View {
         content
             .contentShape(Rectangle())
-            .onTapGesture { isPresented = true }
+            // S07: in edit mode a tap belongs to the edit controls, never the detail sheet.
+            .onTapGesture { if !isEditingDashboard { isPresented = true } }
             .sheet(isPresented: $isPresented, content: detail)
     }
+}
+
+extension EnvironmentValues {
+    /// Whether the dashboard is in S07 edit mode (#141). Set by `RideDashboardView`.
+    @Entry var isEditingDashboard = false
 }
 
 extension View {

@@ -4,6 +4,7 @@ import ComposableArchitecture
 /// W4 Heart Rate on the dashboard.
 struct HeartRateDashboardWidget: DashboardWidget {
     static let id = "heartRate"
+    static let title = "Heart Rate"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
 
     let size: WidgetSize
@@ -17,6 +18,7 @@ struct HeartRateDashboardWidget: DashboardWidget {
 /// W12 HR Zones on the dashboard.
 struct HRZonesDashboardWidget: DashboardWidget {
     static let id = "hrZones"
+    static let title = "HR Zones"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
 
     let size: WidgetSize

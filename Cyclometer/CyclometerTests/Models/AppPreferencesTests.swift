@@ -150,9 +150,9 @@ struct AppPreferencesTests {
 
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
 
-        #expect(decoded.dashboardLayout == DashboardLayout(pages: [
-            DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 1)])
-        ]))
+        #expect(decoded.dashboardLayout.pages.map(\.placements) == [
+            [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 1)]
+        ])
         #expect(decoded.wheelCircumferenceMM == 2155)
     }
 
@@ -183,19 +183,45 @@ struct AppPreferencesTests {
         #expect(preferences.dashboardLayoutOverride == nil)
     }
 
-    @Test("An invalid layout falls back to the factory layout")
-    func invalidLayoutFallsBackToFactory() throws {
+    /// Once riders have their own layouts, one bad placement mustn't cost them the rest (#139
+    /// review): the overlap drops the later widget only.
+    @Test("A layout with an overlapping widget keeps its other widgets")
+    func overlappingWidgetIsDropped() throws {
         var preferences = AppPreferences()
         preferences.wheelCircumferenceMM = 2155
-        // Two widgets in the same cell.
-        preferences.dashboardLayout = DashboardLayout(pages: [
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let layout = DashboardLayout(pages: [
             DashboardPage(placements: [
-                WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0),
+                pace,
                 WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 0),
             ])
         ])
+        preferences.dashboardLayout = layout
 
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: JSONEncoder().encode(preferences))
+
+        #expect(decoded.dashboardLayout == DashboardLayout(pages: [DashboardPage(id: layout.pages[0].id, placements: [pace])]))
+        #expect(decoded.wheelCircumferenceMM == 2155)
+    }
+
+    /// Empty pages only exist during S07 edit mode (#141). A launch that ended mid-edit — the app
+    /// killed before Done — leaves them in the file; the next launch doesn't show them.
+    @Test("A saved layout's empty pages are pruned on decode")
+    func emptyPagesArePrunedOnDecode() throws {
+        var preferences = AppPreferences()
+        let filled = DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)])
+        preferences.dashboardLayout = DashboardLayout(pages: [DashboardPage(placements: []), filled, DashboardPage(placements: [])])
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: JSONEncoder().encode(preferences))
+
+        #expect(decoded.dashboardLayout == DashboardLayout(pages: [filled]))
+    }
+
+    @Test("A layout with no pages falls back to the factory layout")
+    func pagelessLayoutFallsBackToFactory() throws {
+        let json = Data(#"{"wheelCircumferenceMM":2155,"dashboardLayoutOverride":{"pages":[]}}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
 
         #expect(decoded.dashboardLayout == .factory)
         #expect(decoded.wheelCircumferenceMM == 2155)

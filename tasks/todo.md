@@ -425,3 +425,36 @@ Branch: `feat/333-dashboard-zoom`
   - `AccessoryStrip` replaced by `isCollapsedOverride`, plus a collapsed snapshot.
 - PR comment: the dashboard reopens on the page it was left on. `dashboardPage` now lives in `ActiveRideFeature.State` (per ride), tested in `reopeningKeepsThePage`.
 - PR comment: "dimming not working". Not reproduced on the sim: a ride started and left alone dimmed at 30s with Pause showing. The suspect on device is auto-pause (0 GPS speed for 10s), and paused rides never dim (#102). Waiting on Brian: was Pause or Resume showing?
+
+# #141 — S07 Dashboard customization edit mode
+
+Plan: /Users/brian/.claude/plans/rustling-mapping-pancake.md
+Branch: `feat/141-dashboard-edit-mode`
+
+- [x] 1. Model: `DashboardPage.id` (hand-decoded), `keepingValidPlacements`, `removingWidget`, `appendingBlankPage`, `prunedEmptyPages`; decode prunes
+- [x] 2. Model tests (DashboardLayoutTests, AppPreferencesTests)
+- [x] 3. Reducer: `isEditingDashboard`, long press / remove / Done, one validated write path, pruned getter outside edit mode
+- [x] 4. Reducer tests (TestStore)
+- [x] 5. Views: page ids in TabView, Add (disabled) / Done row, collapse blocked, edit chrome (0.90, glass, minus, wiggle / reduce motion), widgetDetail gate, widget `title`
+- [x] 6. Edit-chrome snapshot (look at the PNG)
+- [x] 7. Unit suite green; new tests confirmed in the log
+- [x] 8. Sim drive: long press (widget, map, empty cell), remove, Done, drag-down blocked
+
+## Review
+
+- **Sketch S07** was read over HTTP (this session's MCP client connected before Sketch started). Add `plus` / Done `checkmark` sit beside the Dynamic Island, and the grid doesn't move. So the controls take the **status bar's band**, and the status bar is hidden while editing. This replaced the plan's "swap the grabber" row: a top-row widget's remove button lands just below the island, exactly where that row would have been.
+- **Buttons:** `MapSheetButton` (exact 44 pt glass circle), not `rideControlButton`. `.buttonStyle(.glass)` pads past its frame to about 66 pt and overfilled the 62 pt band. `MapSheetButton` now reads `isEnabled` so the disabled Add greys out; its other callers are always enabled, so they are unchanged.
+- **Equality includes `DashboardPage.id`.** Tests that compared a decoded layout with freshly built pages now compare `placements`. The blank page's id comes from `@Dependency(\.uuid)`, so TestStore can predict it.
+- **The wiggle is split from the frame** (`dashboardWiggle` / `dashboardEditFrame`). `accessibilityReduceMotion` can't be set from a test, and a time-driven angle can't be snapshotted.
+- **Unit suite:** 1735 passed, 0 failed. The new suites were confirmed in the log by name.
+- **Snapshots** recorded and looked at: frame and button render in light and dark; off mode adds nothing. The first recording run crashed in SnapshotTesting's `prepareView` with no key window yet (a cold clone, with a key-window snapshot as the first test). That is a harness race; reruns were clean.
+- **Sim drive** (three runs, throwaway test deleted):
+  - long press enters edit mode from the Speed widget, the map and an empty cell, and no sheet opens;
+  - a tap in edit mode opens nothing;
+  - a slow drag down doesn't minimise;
+  - Remove Heart Rate works;
+  - the 4th blank page shows and is pruned on Done, leaving "Page 3 of 3";
+  - `app-preferences.json` on the device shows HR gone from page 1 and 3 pages.
+- **Not done:**
+  - Finger feel of the wiggle and the long press on a device.
+  - The minus glyph still overlaps the first letter of a widget's label, SpringBoard style. A tuning call for Brian.

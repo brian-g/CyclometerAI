@@ -182,13 +182,14 @@ struct AppPreferences: Codable, Equatable, Sendable {
             MapOrientation.self, forKey: .mapOrientation
         ) ?? .headingUp
         // `try?`, unlike the fields above: an unreadable layout must not throw and reset every
-        // other preference with it. A placement naming a widget this build doesn't have (a newer
-        // version's, or one since removed) is dropped; a layout still invalid after that falls
-        // back to the factory one.
+        // other preference with it. A placement that breaks a rule — naming a widget this build
+        // doesn't have, or overlapping another — is dropped and the rest kept. Empty pages exist
+        // only during S07 edit mode, so one saved by a launch that ended mid-edit is pruned. A
+        // layout still invalid after that falls back to the factory one.
         dashboardLayoutOverride = (try? container.decodeIfPresent(
             DashboardLayout.self, forKey: .dashboardLayoutOverride
         ))
-        .map { $0.removingUnknownWidgets() }
+        .map { $0.keepingValidPlacements().prunedEmptyPages() }
         .flatMap { DashboardLayoutValidator.isValid($0) ? $0 : nil }
     }
 }

@@ -4,6 +4,7 @@ import ComposableArchitecture
 /// W11 Pace on the dashboard.
 struct PaceDashboardWidget: DashboardWidget {
     static let id = "pace"
+    static let title = "Pace"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
 
     let size: WidgetSize

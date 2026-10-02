@@ -20,11 +20,19 @@ struct DashboardPageView: View {
                         widget.view(size: placement.size, store: store)
                             // Fills its cells, centred like a `Grid` cell, whatever size it reports.
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .dashboardEditFrame(title: widget.title) {
+                                store.send(.removeWidgetTapped(pageID: page.id, widgetID: placement.widgetID))
+                            }
+                            .dashboardWiggle(phase: Double(placement.row * DashboardGrid.columns + placement.column) / 3)
                             .dashboardPlacement(placement)
                     }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // S07 (#141): a long press anywhere on the grid, empty cells included, enters edit
+            // mode. Simultaneous, so it still fires over a widget's own tap.
+            .contentShape(Rectangle())
+            .simultaneousGesture(LongPressGesture().onEnded { _ in store.send(.dashboardLongPressed) })
 
             RadarLane(store: store)
         }

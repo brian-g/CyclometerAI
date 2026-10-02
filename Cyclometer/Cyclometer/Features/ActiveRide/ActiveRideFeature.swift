@@ -116,6 +116,7 @@ struct ActiveRideFeature {
     @Dependency(\.permissionsClient) var permissionsClient
     @Dependency(\.healthKitClient) var healthKitClient
     @Dependency(\.date) var date
+    @Dependency(\.uuid) var uuid
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.rideDataBuffer) var rideDataBuffer
     @Dependency(\.rideEndIntentClient) var rideEndIntentClient
@@ -232,9 +233,9 @@ struct ActiveRideFeature {
         /// has always specified as the resting default.
         @SharedReader(.riderProfile) var riderProfile
         /// Consulted for `isAutoPauseEnabled`. Written only for `mapOrientation`, from
-        /// the map sheet's orientation button (#199); Settings owns every other field
-        /// (#102), and `calibration` writes the wheel circumference through its own
-        /// reference.
+        /// the map sheet's orientation button (#199), and `dashboardLayout`, from S07 edit
+        /// mode (#141); Settings owns every other field (#102), and `calibration` writes the
+        /// wheel circumference through its own reference.
         @Shared(.appPreferences) var preferences
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
@@ -332,7 +333,14 @@ struct ActiveRideFeature {
         /// immediately to every dashboard widget with no lifecycle action needed.
         var unitSystem: UnitSystem { preferences.preferredUnit }
         /// Reads through to `AppPreferences.dashboardLayout` (#139), so S07's edits show at once.
-        var dashboardLayout: DashboardLayout { preferences.dashboardLayout }
+        /// Empty pages exist for edit mode and show only there: a ride that ends mid-edit never
+        /// reaches Done's prune, and the next ride must not open on them.
+        var dashboardLayout: DashboardLayout {
+            isEditingDashboard ? preferences.dashboardLayout : preferences.dashboardLayout.prunedEmptyPages()
+        }
+        /// S07 edit mode (#141): widgets wiggle and can be removed, a blank page waits at the end,
+        /// and the dashboard can't be minimised until Done.
+        var isEditingDashboard = false
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
         /// The page the rider is on, an index into `dashboardLayout.pages`. Held here, not in
@@ -356,6 +364,10 @@ struct ActiveRideFeature {
         /// which the sheet's camera follows.
         case mapOrientationToggled
         case dashboardPageChanged(Int)
+        /// S07 (#141): a long press anywhere on the dashboard enters edit mode.
+        case dashboardLongPressed
+        case removeWidgetTapped(pageID: DashboardPage.ID, widgetID: String)
+        case dashboardEditingDoneTapped
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)
@@ -496,6 +508,32 @@ struct ActiveRideFeature {
                 )
             case .dashboardPageChanged(let page):
                 state.dashboardPage = page
+                return .none
+            case .dashboardLongPressed:
+                guard !state.isEditingDashboard else { return .none }
+                // Built from the layout as shown, before the flag flips: empty pages a ride left
+                // behind mid-edit stay gone, so the rider's page index means the same page.
+                let editing = state.dashboardLayout.appendingBlankPage(id: uuid())
+                state.isEditingDashboard = true
+                setDashboardLayout(editing, in: &state)
+                return .none
+            case .removeWidgetTapped(let pageID, let widgetID):
+                guard state.isEditingDashboard else { return .none }
+                setDashboardLayout(state.dashboardLayout.removingWidget(widgetID, fromPage: pageID), in: &state)
+                return .none
+            case .dashboardEditingDoneTapped:
+                guard state.isEditingDashboard else { return .none }
+                let visiblePage = state.dashboardLayout.pages[state.visibleDashboardPage].id
+                state.isEditingDashboard = false
+                // Saving the pruned layout, not just hiding empty pages, is what returns a rider
+                // who changed nothing to the factory layout (`AppPreferences.dashboardLayout`).
+                let pruned = state.dashboardLayout
+                setDashboardLayout(pruned, in: &state)
+                // Pruning shifts every page after an empty one; stay on the page the rider was
+                // looking at. A pruned page itself falls to the clamp in `visibleDashboardPage`.
+                if let index = pruned.pages.firstIndex(where: { $0.id == visiblePage }) {
+                    state.dashboardPage = index
+                }
                 return .none
             case .mapOrientationToggled:
                 // The preference itself, not a copy: the next ride's sheet, and one reopened
@@ -994,6 +1032,17 @@ struct ActiveRideFeature {
             }
         }
         .ifLet(\.$finishAlert, action: \.finishAlert)
+    }
+
+    /// The only place the dashboard layout is written (#139 review). An edit that breaks a layout
+    /// rule would render at once — duplicate `ForEach` ids, no pages — and then be swapped for the
+    /// factory layout on the next launch, so it is refused rather than saved.
+    private func setDashboardLayout(_ layout: DashboardLayout, in state: inout State) {
+        guard DashboardLayoutValidator.isValid(layout) else {
+            reportIssue("Refused an invalid dashboard layout: \(layout)")
+            return
+        }
+        state.$preferences.withLock { $0.dashboardLayout = layout }
     }
 
     /// Applies a resolved bpm reading — from either source — to the displayed state.

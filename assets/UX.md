@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink to 90% in a glass frame, and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
 **Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
 **Updated:** 2026-09-28 — §S19's list / map toggle leaves the toolbar for a floating glass button at the bottom trailing edge, above the tab bar and a minimised ride (#331).  
 **Updated:** 2026-09-26 — No iPhone workout session (#318, PRD §9.4): §W12's time in zone, when built, accumulates locally from the dashboard's HR readings, not from HealthKit's live zone updates.  
@@ -777,6 +778,8 @@ Modeled on SpringBoard widget editing:
 3. The navigation area shows an "Add" button (upper left) and "Done" (upper right)
 4. A blank page is automatically appended; rider can swipe to it to place widgets. Empty pages are removed on exit.
 5. "Add" opens the Add Widget sheet (S08)
+
+As built (#141): Add (`plus`) and Done (`checkmark`) are 44 pt glass circles flanking the Dynamic Island, where the status bar would be; the status bar is hidden while editing. Each widget shrinks to 90% inside a glass frame that fills its cells, and wiggles unless Reduce Motion is on. A widget's tap does nothing while editing. The dashboard can't be minimised by a drag until Done. Removals save at once. If every widget is removed, Done leaves one blank page.
 
 ### Open UX Questions
 

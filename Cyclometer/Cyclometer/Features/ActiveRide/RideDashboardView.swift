@@ -19,11 +19,14 @@ struct RideDashboardView: View {
             get: { store.visibleDashboardPage },
             set: { store.send(.dashboardPageChanged($0)) }
         )) {
-            ForEach(Array(store.dashboardLayout.pages.enumerated()), id: \.offset) { index, page in
+            // Identified by page, not index: S07 (#141) inserts and prunes pages, and a view keyed
+            // by index would carry one page's widget state onto another.
+            ForEach(Array(store.dashboardLayout.pages.enumerated()), id: \.element.id) { index, page in
                 DashboardPageView(page: page, store: store)
                     .tag(index)
             }
         }
+        .environment(\.isEditingDashboard, store.isEditingDashboard)
         .background(Color.cyBgSecondary)
         .tabViewStyle(.page(indexDisplayMode: .never))
         .ignoresSafeArea(.all)
@@ -44,7 +47,10 @@ struct RideDashboardView: View {
         // sits just below the Dynamic Island while the pages bleed up behind it.
         .overlay(alignment: .top) {
             VStack(spacing: Spacing.xs) {
-                grabber()
+                // Edit mode can't be minimised (#141), so the grabber, a minimise cue, steps aside.
+                if !store.isEditingDashboard {
+                    grabber()
+                }
                 if let banner = activeBanner {
                     RideBanner(text: banner.text, icon: banner.icon)
                         .transition(bannerTransition)
@@ -58,6 +64,15 @@ struct RideDashboardView: View {
                 rideControls
             }
         }
+        .overlay {
+            if store.isEditingDashboard {
+                editControls
+            }
+        }
+        // S07 (#141): Done is the only way out of edit mode — no drag-down minimise — and its
+        // controls take the status bar's place beside the Dynamic Island, as on SpringBoard.
+        .interactiveDismissDisabled(store.isEditingDashboard)
+        .statusBarHidden(store.isEditingDashboard)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Ride effects (timer/HR/radar/location) are started by AppFeature when
         // the ride begins and live for the whole ride, so they keep running when
@@ -80,6 +95,28 @@ struct RideDashboardView: View {
             .accessibilityRepresentation {
                 Button("Minimize Ride") { dismiss() }
             }
+    }
+
+    // ── Edit controls — S07 (#141), Sketch "S07 - Dashboard Customization" ─────
+    // Add and Done flank the Dynamic Island, centred in the band above the safe area, so they
+    // never sit on a top-row widget's remove button. `MapSheetButton`'s exact 44 pt circle, since
+    // the ride controls' padded glass style overfills the band. Add opens S08, which #142 wires up.
+    private var editControls: some View {
+        GeometryReader { proxy in
+            HStack {
+                MapSheetButton(title: "Add Widget", systemImage: "plus") {}
+                    .disabled(true)
+                Spacer()
+                MapSheetButton(title: "Done", systemImage: "checkmark") {
+                    store.send(.dashboardEditingDoneTapped)
+                }
+            }
+            .padding(.horizontal, Spacing.lg)
+            .frame(height: proxy.safeAreaInsets.top)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .ignoresSafeArea(edges: .top)
+        }
+        .transition(.opacity)
     }
 
     // ── Paging indicator — always visible; one dot per layout page ─────────────

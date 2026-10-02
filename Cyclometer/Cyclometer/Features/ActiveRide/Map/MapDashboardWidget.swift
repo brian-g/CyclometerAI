@@ -5,6 +5,7 @@ import ComposableArchitecture
 /// orientation with the action that switches it.
 struct MapDashboardWidget: DashboardWidget {
     static let id = "map"
+    static let title = "Map"
     static let supportedSizes: [WidgetSize] = [.twoByTwo]
 
     let size: WidgetSize

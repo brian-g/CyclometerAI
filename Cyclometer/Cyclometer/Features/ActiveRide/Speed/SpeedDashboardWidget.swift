@@ -4,6 +4,7 @@ import ComposableArchitecture
 /// W1 Speed on the dashboard.
 struct SpeedDashboardWidget: DashboardWidget {
     static let id = "speed"
+    static let title = "Speed"
     static let supportedSizes: [WidgetSize] = [.oneByOne, .twoByOne, .twoByTwo]
 
     let size: WidgetSize
