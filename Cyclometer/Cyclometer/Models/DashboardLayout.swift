@@ -61,6 +61,20 @@ extension DashboardPage {
             placement = try? WidgetPlacement(from: decoder)
         }
     }
+
+    /// Where S08 (#142) would put `widgetID` at `size`: the first spot in reading order that breaks
+    /// no layout rule. `nil` when there's none — the widget is already on this page, or no gap is
+    /// big enough — which is when the picker dims that entry.
+    func firstOpenPlacement(widgetID: String, size: WidgetSize) -> WidgetPlacement? {
+        for row in 0...(DashboardGrid.rows - size.rows) {
+            for column in 0...(DashboardGrid.columns - size.columns) {
+                let candidate = WidgetPlacement(widgetID: widgetID, size: size, row: row, column: column)
+                let page = DashboardPage(placements: placements + [candidate])
+                if DashboardLayoutValidator.violations(in: page).isEmpty { return candidate }
+            }
+        }
+        return nil
+    }
 }
 
 /// The rider's dashboard: its pages, in swipe order. Persisted in `AppPreferences`.
@@ -87,11 +101,22 @@ struct DashboardLayout: Codable, Equatable {
         }
     }
 
-    /// This layout ending in a blank page for S07 edit mode to place widgets on — unless it already
-    /// ends in one, so entering edit mode twice never stacks them.
-    func appendingBlankPage(id: DashboardPage.ID) -> DashboardLayout {
-        guard pages.last?.placements.isEmpty == false else { return self }
-        return DashboardLayout(pages: pages + [DashboardPage(id: id, placements: [])])
+    /// This layout with `widgetID` at `size` in the first open spot on the page `pageID` (S08, #142).
+    /// Unchanged when it has no open spot (`DashboardPage.firstOpenPlacement`).
+    func addingWidget(_ widgetID: String, size: WidgetSize, toPage pageID: DashboardPage.ID) -> DashboardLayout {
+        mapPages { page in
+            guard page.id == pageID, let placement = page.firstOpenPlacement(widgetID: widgetID, size: size) else { return }
+            page.placements.append(placement)
+        }
+    }
+
+    /// This layout with a blank page right after the page `pageID` (S08's "Empty page", #142). Done
+    /// prunes it if the rider leaves it empty.
+    func insertingBlankPage(id: DashboardPage.ID, after pageID: DashboardPage.ID) -> DashboardLayout {
+        guard let index = pages.firstIndex(where: { $0.id == pageID }) else { return self }
+        var pages = pages
+        pages.insert(DashboardPage(id: id, placements: []), at: index + 1)
+        return DashboardLayout(pages: pages)
     }
 
     /// This layout without its empty pages (UX.md §S07: "Empty pages are removed on exit"). Keeps

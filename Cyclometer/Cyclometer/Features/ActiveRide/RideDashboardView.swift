@@ -10,6 +10,8 @@ struct RideDashboardView: View {
     @Bindable var store: StoreOf<ActiveRideFeature>
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The dashboard's full-screen size, which S08's previews take their proportions from (#142).
+    @State private var canvas = CGSize.zero
 
     var body: some View {
         // S05 — Map widget safe-area bleed. The toolbar floats as an overlay
@@ -30,6 +32,7 @@ struct RideDashboardView: View {
         .background(Color.cyBgSecondary)
         .tabViewStyle(.page(indexDisplayMode: .never))
         .ignoresSafeArea(.all)
+        .onGeometryChange(for: CGSize.self, of: \.size) { canvas = $0 }
         // The turn the rider is about to make, centred over the whole dashboard (#197, Sketch
         // "Sxx - Route overlay"). Not hit-testable, so the rider can still page through it.
         .overlay {
@@ -82,6 +85,15 @@ struct RideDashboardView: View {
         // this dashboard is minimized to the accessory strip. Do NOT start them
         // from a view `.task` here — that ties them to this view's lifetime.
         .alert($store.scope(state: \.finishAlert, action: \.finishAlert))
+        .sheet(isPresented: $store.isAddWidgetPresented.sending(\.addWidgetPresentationChanged)) {
+            AddWidgetSheet(store: store, canvas: gridSize)
+        }
+    }
+
+    /// The widget grid's size: the screen, less the radar lane beside it when it shows
+    /// (`DashboardPageView`).
+    private var gridSize: CGSize {
+        CGSize(width: canvas.width - (store.isRadarSidebarVisible ? Spacing.radarColumnWidth : 0), height: canvas.height)
     }
 
     // ── Grabber ───────────────────────────────────────────────────────────────
@@ -102,12 +114,13 @@ struct RideDashboardView: View {
 
     // ── Edit controls — S07 (#141), Sketch "S07 - Dashboard Customization" ─────
     // Add and Done flank the Dynamic Island, centred in the band above the safe area, so they
-    // never sit on a top-row widget's remove button. Add opens S08, which #142 wires up.
+    // never sit on a top-row widget's remove button. Add opens S08 (#142).
     private var editControls: some View {
         GeometryReader { proxy in
             HStack {
-                EditModeButton(title: "Add Widget", systemImage: "plus") {}
-                    .disabled(true)
+                EditModeButton(title: "Add Widget", systemImage: "plus") {
+                    store.send(.addWidgetTapped)
+                }
                 Spacer()
                 EditModeButton(title: "Done", systemImage: "checkmark", isProminent: true) {
                     store.send(.dashboardEditingDoneTapped, animation: .default)
@@ -353,7 +366,7 @@ private struct EditModeButton: View {
         ) {
             ActiveRideFeature()
         }
-        // Through the reducer, as a long press does, so the blank page and its dot appear too.
+        // Through the reducer, as a long press does.
         store.send(.dashboardLongPressed)
         return RideDashboardView(store: store)
     }

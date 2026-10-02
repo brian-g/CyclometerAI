@@ -333,14 +333,18 @@ struct ActiveRideFeature {
         /// immediately to every dashboard widget with no lifecycle action needed.
         var unitSystem: UnitSystem { preferences.preferredUnit }
         /// Reads through to `AppPreferences.dashboardLayout` (#139), so S07's edits show at once.
-        /// Empty pages exist for edit mode and show only there: a ride that ends mid-edit never
-        /// reaches Done's prune, and the next ride must not open on them.
+        /// Empty pages — S08's "Empty page", or one whose widgets were all removed — show only in
+        /// edit mode: a ride that ends mid-edit never reaches Done's prune, and the next ride must
+        /// not open on them.
         var dashboardLayout: DashboardLayout {
             isEditingDashboard ? preferences.dashboardLayout : preferences.dashboardLayout.prunedEmptyPages()
         }
-        /// S07 edit mode (#141): widgets wiggle and can be removed, a blank page waits at the end,
-        /// and the dashboard can't be minimised until Done.
+        /// S07 edit mode (#141): widgets wiggle and can be removed, and the dashboard can't be
+        /// minimised until Done. New pages come only from S08's "Empty page" (UX.md §S05
+        /// "Customization" 5), not by themselves.
         var isEditingDashboard = false
+        /// S08's Add Widget sheet (#142), opened from edit mode's Add.
+        var isAddWidgetPresented = false
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
         /// The page the rider is on, an index into `dashboardLayout.pages`. Held here, not in
@@ -368,6 +372,12 @@ struct ActiveRideFeature {
         case dashboardLongPressed
         case removeWidgetTapped(pageID: DashboardPage.ID, widgetID: String)
         case dashboardEditingDoneTapped
+        /// S08 (#142): Add opens the picker; an entry adds that widget to the page the rider is on.
+        case addWidgetTapped
+        case addWidgetPresentationChanged(Bool)
+        case addWidgetSelected(widgetID: String, size: WidgetSize)
+        /// S08's "Empty page" (#142): a blank page after the one the rider is on.
+        case addEmptyPageTapped
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)
@@ -511,29 +521,57 @@ struct ActiveRideFeature {
                 return .none
             case .dashboardLongPressed:
                 guard !state.isEditingDashboard else { return .none }
-                // Built from the layout as shown, before the flag flips: empty pages a ride left
-                // behind mid-edit stay gone, so the rider's page index means the same page.
-                let editing = state.dashboardLayout.appendingBlankPage(id: uuid())
+                // Saves the layout as shown, before the flag flips: empty pages a ride left behind
+                // mid-edit stay gone, so the rider's page index means the same page.
+                setDashboardLayout(state.dashboardLayout, in: &state)
                 state.isEditingDashboard = true
-                setDashboardLayout(editing, in: &state)
                 return .none
             case .removeWidgetTapped(let pageID, let widgetID):
                 guard state.isEditingDashboard else { return .none }
                 setDashboardLayout(state.dashboardLayout.removingWidget(widgetID, fromPage: pageID), in: &state)
                 return .none
+            case .addWidgetTapped:
+                guard state.isEditingDashboard else { return .none }
+                state.isAddWidgetPresented = true
+                return .none
+            case .addWidgetPresentationChanged(let isPresented):
+                state.isAddWidgetPresented = isPresented && state.isEditingDashboard
+                return .none
+            case .addWidgetSelected(let widgetID, let size):
+                guard state.isEditingDashboard, state.isAddWidgetPresented else { return .none }
+                let page = state.dashboardLayout.pages[state.visibleDashboardPage]
+                // The picker dims an entry with no open spot, so this only refuses a stale tap.
+                guard page.firstOpenPlacement(widgetID: widgetID, size: size) != nil,
+                      setDashboardLayout(state.dashboardLayout.addingWidget(widgetID, size: size, toPage: page.id), in: &state)
+                else { return .none }
+                state.isAddWidgetPresented = false
+                return .none
+            case .addEmptyPageTapped:
+                guard state.isEditingDashboard, state.isAddWidgetPresented else { return .none }
+                let index = state.visibleDashboardPage
+                let page = state.dashboardLayout.pages[index]
+                // The rider is already on a blank page; another beside it would be pruned unused.
+                guard !page.placements.isEmpty,
+                      setDashboardLayout(state.dashboardLayout.insertingBlankPage(id: uuid(), after: page.id), in: &state)
+                else { return .none }
+                state.dashboardPage = index + 1
+                state.isAddWidgetPresented = false
+                return .none
             case .dashboardEditingDoneTapped:
                 guard state.isEditingDashboard else { return .none }
-                let visiblePage = state.dashboardLayout.pages[state.visibleDashboardPage].id
+                // Pruning shifts every page after an empty one; stay on the page the rider was
+                // looking at. If that page is pruned — an Empty page they added nothing to — go
+                // back to the nearest page before it, the one they inserted it from. Counting the
+                // filled pages up to it never lands past the end, which a later page would take over.
+                let filledThroughVisible = state.dashboardLayout.pages
+                    .prefix(state.visibleDashboardPage + 1)
+                    .filter { !$0.placements.isEmpty }
+                    .count
                 state.isEditingDashboard = false
                 // Saving the pruned layout, not just hiding empty pages, is what returns a rider
                 // who changed nothing to the factory layout (`AppPreferences.dashboardLayout`).
-                let pruned = state.preferences.dashboardLayout.prunedEmptyPages()
-                setDashboardLayout(pruned, in: &state)
-                // Pruning shifts every page after an empty one; stay on the page the rider was
-                // looking at. If that page was pruned, take whichever now holds its place, or the
-                // last — never an index past the end, which the next edit's blank page would fill.
-                state.dashboardPage = pruned.pages.firstIndex { $0.id == visiblePage }
-                    ?? min(max(state.dashboardPage, 0), pruned.pages.count - 1)
+                setDashboardLayout(state.preferences.dashboardLayout.prunedEmptyPages(), in: &state)
+                state.dashboardPage = max(filledThroughVisible - 1, 0)
                 return .none
             case .mapOrientationToggled:
                 // The preference itself, not a copy: the next ride's sheet, and one reopened
@@ -568,6 +606,9 @@ struct ActiveRideFeature {
                 )
             case .finishTapped:
                 guard state.recordingState == .paused else { return .none }
+                // Auto-end sends this with no rider at the screen. SwiftUI won't show an alert
+                // from a view already showing a sheet, so the Add Widget sheet steps aside.
+                state.isAddWidgetPresented = false
                 state.finishAlert = AlertState {
                     TextState("Finish Ride")
                 } actions: {
@@ -1037,12 +1078,15 @@ struct ActiveRideFeature {
     /// The only place the dashboard layout is written (#139 review). An edit that breaks a layout
     /// rule would render at once — duplicate `ForEach` ids, no pages — and then be swapped for the
     /// factory layout on the next launch, so it is refused rather than saved.
-    private func setDashboardLayout(_ layout: DashboardLayout, in state: inout State) {
+    /// Returns whether it was saved, so an edit can skip what follows from a refused one.
+    @discardableResult
+    private func setDashboardLayout(_ layout: DashboardLayout, in state: inout State) -> Bool {
         guard DashboardLayoutValidator.isValid(layout) else {
             reportIssue("Refused an invalid dashboard layout: \(layout)")
-            return
+            return false
         }
         state.$preferences.withLock { $0.dashboardLayout = layout }
+        return true
     }
 
     /// Applies a resolved bpm reading — from either source — to the displayed state.

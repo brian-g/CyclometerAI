@@ -496,3 +496,42 @@ Branch: `feat/141-dashboard-edit-mode`
 - **Factory matching** uses `DashboardLayout.isFactory` (placements only) in the setter and on decode. The other fix considered was fixed UUID literals on the factory pages. That alone would leave a decoded factory copy pinning the rider until their next edit.
 - **Not changed: one `TimelineView` per widget while editing.** Its closure only applies `visualEffect` rotation to a content placeholder, so widget bodies aren't re-evaluated each frame. Edit mode is also a short, deliberate state. Revisit if a device trace shows a cost.
 - **Unit suite:** 1740 passed, 0 failed. The 5 new tests were confirmed in the log by name. Snapshots re-recorded and looked at; the 2×1 card's sides line up with the 1×1s above it.
+
+# #142 — S08 Add Widget sheet
+
+Plan: /Users/brian/.claude/plans/fuzzy-snacking-phoenix.md
+Branch: `feat/142-add-widget-sheet`
+
+- [x] 1. Model: `firstOpenPlacement`, `addingWidget`, `insertingBlankPage` + tests
+- [x] 2. `WidgetCategory` + `category` on each widget
+- [x] 3. Reducer: present / select / empty page + tests
+- [x] 4. `AddWidgetSheet` (sections, scaled previews, sample store) + entry-order test + snapshot
+- [x] 5. Wire Add button + sheet in `RideDashboardView`
+- [x] 6. Docs: UX.md §S08 as built, TCA.md §8
+- [x] 6b. Follow-ups filed: #368 (tap an empty cell to add), #367 (rearrange by drag; no issue had picked up UX.md §S05 item 2)
+- [x] 7. Unit suite green; sim drive
+
+## Review
+
+- Unit suite: 1754 passed, 0 failed (the one expected failure is the deliberate `withKnownIssue`). The new cases are in the log by name.
+- Snapshot `testAddWidgetCatalog` light/dark recorded and inspected. The first recording had a 2×2 narrower than the content and uneven row gaps, because a fixed-height frame squeezed `.fit`. The sheet scrolls, so the test now uses a `ScrollView` too. Cadence's sample AVG/MAX were blank, so the sample now sets them.
+- Sim drive (throwaway XCUITest, deleted):
+  - Full factory page 1: every entry dimmed, Empty page live.
+  - Empty page inserts page 2 and moves to it.
+  - HR 1×1 lands at (0,0), Speed 2×2 at rows 1–2.
+  - Done prunes the trailing blank and stays on page 2.
+- Only runtime warning: the known onboarding `ifLet` (`deviceManagement(.onDisappear)`).
+- Not done: UX.md's screen table still says Stub for S08, as it does for the built S07. The status column doesn't track builds.
+- Follow-up (Brian): removed S07's auto-appended blank page. New pages now come only from Empty page (UX.md §S05 item 5). Entering edit mode still saves the layout as shown, so empty pages a ride left behind mid-edit don't come back and shift the page index. `appendingBlankPage` and its test are deleted, and the edit-mode tests are rewritten without the page. The Empty page icon is now `text.rectangle.page`, the mockup's glyph; snapshot re-recorded and checked. Unit suite 1753/0.
+- /code-review xhigh fixes:
+  - The snapshot now uses imperial units, so it no longer depends on the machine's locale.
+  - Finish closes the Add Widget sheet, so auto-end's alert can show.
+  - Done after an unused Empty page returns to the page it was inserted from, not the next one.
+  - Empty page row: full width, 52 pt tall.
+  - Previews subtract the radar lane from their width.
+  - A zero canvas renders nothing instead of scaling by ∞.
+  - `presentationChanged(true)` only opens the picker in edit mode.
+  - `setDashboardLayout` returns Bool, so a refused save doesn't move the rider or close the sheet.
+  - The Xcode preview opens the picker.
+  - Skipped as cleanups: the duplicate grid scan, the sample store being built per render, and sharing the card styling.
+  - Unit suite 1754/0.

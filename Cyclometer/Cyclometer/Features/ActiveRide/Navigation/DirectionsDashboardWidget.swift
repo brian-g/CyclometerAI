@@ -7,6 +7,7 @@ struct DirectionsDashboardWidget: DashboardWidget {
     static let id = "directions"
     static let title = "Directions"
     static let supportedSizes: [WidgetSize] = [.oneByOne, .twoByOne]
+    static let category = WidgetCategory.route
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>
