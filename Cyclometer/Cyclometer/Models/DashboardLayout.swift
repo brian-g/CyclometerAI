@@ -23,12 +23,11 @@ struct WidgetPlacement: Codable, Equatable {
         self.init(widgetID: widget.id, size: size, row: row, column: column)
     }
 
+    /// Its top-left cell.
+    var cell: DashboardGrid.Cell { DashboardGrid.Cell(row: row, column: column) }
+
     /// Every grid cell this placement covers, as (row, column).
-    var cells: [DashboardGrid.Cell] {
-        (row..<row + size.rows).flatMap { r in
-            (column..<column + size.columns).map { DashboardGrid.Cell(row: r, column: $0) }
-        }
-    }
+    var cells: [DashboardGrid.Cell] { DashboardGrid.cells(at: cell, size: size) }
 }
 
 /// One swipeable page of the dashboard. Cells no placement covers stay blank (UX.md §S05
@@ -75,6 +74,34 @@ extension DashboardPage {
         }
         return nil
     }
+
+    /// Where S08 would put `widgetID` at `size`: with its top-left at `cell` when the rider opened
+    /// it from that empty cell (#368), else `firstOpenPlacement`. Anchored, never shifted to fit,
+    /// so the widget lands where the rider tapped. `nil` when that breaks a layout rule.
+    func openPlacement(widgetID: String, size: WidgetSize, at cell: DashboardGrid.Cell?) -> WidgetPlacement? {
+        guard let cell else { return firstOpenPlacement(widgetID: widgetID, size: size) }
+        let candidate = WidgetPlacement(widgetID: widgetID, size: size, row: cell.row, column: cell.column)
+        let page = DashboardPage(placements: placements + [candidate])
+        return DashboardLayoutValidator.violations(in: page).isEmpty ? candidate : nil
+    }
+
+    /// Whether a widget of `size` with its top-left at `cell` stays on the grid and covers only
+    /// empty cells, whichever widget it is. S08 opened from `cell` (#368) lists only these sizes.
+    func fits(_ size: WidgetSize, at cell: DashboardGrid.Cell) -> Bool {
+        let inBounds = cell.row >= 0 && cell.column >= 0
+            && cell.row <= DashboardGrid.rows - size.rows
+            && cell.column <= DashboardGrid.columns - size.columns
+        return inBounds && Set(placements.flatMap(\.cells)).isDisjoint(with: DashboardGrid.cells(at: cell, size: size))
+    }
+
+    /// The cells no placement covers, in reading order: S07 edit mode's add-here slots (#368).
+    var emptyCells: [DashboardGrid.Cell] {
+        let occupied = Set(placements.flatMap(\.cells))
+        return (0..<DashboardGrid.rows).flatMap { row in
+            (0..<DashboardGrid.columns).map { DashboardGrid.Cell(row: row, column: $0) }
+        }
+        .filter { !occupied.contains($0) }
+    }
 }
 
 /// The rider's dashboard: its pages, in swipe order. Persisted in `AppPreferences`.
@@ -101,11 +128,14 @@ struct DashboardLayout: Codable, Equatable {
         }
     }
 
-    /// This layout with `widgetID` at `size` in the first open spot on the page `pageID` (S08, #142).
-    /// Unchanged when it has no open spot (`DashboardPage.firstOpenPlacement`).
-    func addingWidget(_ widgetID: String, size: WidgetSize, toPage pageID: DashboardPage.ID) -> DashboardLayout {
+    /// This layout with `widgetID` at `size` on the page `pageID` (S08, #142): at `cell` when S08 was
+    /// opened from that empty cell (#368), else in the first open spot. Unchanged when it doesn't
+    /// fit there (`DashboardPage.openPlacement`).
+    func addingWidget(
+        _ widgetID: String, size: WidgetSize, toPage pageID: DashboardPage.ID, at cell: DashboardGrid.Cell? = nil
+    ) -> DashboardLayout {
         mapPages { page in
-            guard page.id == pageID, let placement = page.firstOpenPlacement(widgetID: widgetID, size: size) else { return }
+            guard page.id == pageID, let placement = page.openPlacement(widgetID: widgetID, size: size, at: cell) else { return }
             page.placements.append(placement)
         }
     }
@@ -153,16 +183,29 @@ enum DashboardGrid {
         var column: Int
     }
 
+    /// Every cell a `size` widget with its top-left at `cell` covers.
+    static func cells(at cell: Cell, size: WidgetSize) -> [Cell] {
+        (cell.row..<cell.row + size.rows).flatMap { row in
+            (cell.column..<cell.column + size.columns).map { Cell(row: row, column: $0) }
+        }
+    }
+
     /// Where `placement` sits in a grid of `size`. Rows are `height / 7` and columns `width / 2`
     /// whatever else is on the page, so a widget is never stretched into leftover space (#82).
     static func frame(for placement: WidgetPlacement, in size: CGSize) -> CGRect {
+        frame(at: placement.cell, size: placement.size, in: size)
+    }
+
+    /// Where a `widgetSize` view with its top-left at `cell` sits in a grid of `size` — a widget, or
+    /// S07's empty-cell slot (#368), which has no widget to place.
+    static func frame(at cell: Cell, size widgetSize: WidgetSize, in size: CGSize) -> CGRect {
         let columnWidth = size.width / CGFloat(columns)
         let rowHeight = size.height / CGFloat(rows)
         return CGRect(
-            x: CGFloat(placement.column) * columnWidth,
-            y: CGFloat(placement.row) * rowHeight,
-            width: CGFloat(placement.size.columns) * columnWidth,
-            height: CGFloat(placement.size.rows) * rowHeight
+            x: CGFloat(cell.column) * columnWidth,
+            y: CGFloat(cell.row) * rowHeight,
+            width: CGFloat(widgetSize.columns) * columnWidth,
+            height: CGFloat(widgetSize.rows) * rowHeight
         )
     }
 }

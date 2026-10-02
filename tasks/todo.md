@@ -535,3 +535,31 @@ Branch: `feat/142-add-widget-sheet`
   - The Xcode preview opens the picker.
   - Skipped as cleanups: the duplicate grid scan, the sample store being built per render, and sharing the card styling.
   - Unit suite 1754/0.
+
+# #368 — S08: tap an empty cell to add a widget there
+
+Plan: /Users/brian/.claude/plans/twinkly-pondering-graham.md
+Branch: `feat/368-tap-empty-cell`
+
+- [x] 1. Model: `emptyCells`, `fits(_:at:)`, `openPlacement(…at:)`, `addingWidget(…at:)` + tests
+- [x] 2. Grid layout key carries cell + size; `dashboardPlacement(at:size:)`
+- [x] 3. Reducer: `addWidgetCell`, `emptyCellTapped`, select/Empty page/close paths + TestStore tests
+- [x] 4. Sheet: catalog `cell` filter, Page section hidden (filter is `page.fits`, tested in the model; `entries(in:)` unchanged)
+- [x] 5. `EmptyCellSlot` (dashed 90% card, VoiceOver) in `DashboardPageView` + snapshot
+- [x] 6. Docs: UX.md §S05 Empty cells, §S08 as built
+- [x] 7. Unit suite green; sim drive
+
+## Review
+
+- Unit suite: 1762 passed, 0 failed. The 9 new cases are in the log by name: 4 model, 4 `TestStore`, 1 snapshot.
+- Snapshot `testDashboardEditChromeEmptySlot` was recorded in light and dark and checked: the dashed slot matches the 1×1 card's size and inset.
+- Sim drive (throwaway XCUITest, deleted) passed. It covered:
+  - Removing Pace leaves a "row 5, left" slot. The sheet from it lists only 1×1s, with no Page section, and dims widgets already on the page.
+  - Pace lands back at its cell.
+  - A right-column cell offers no 2×1.
+  - Row 1 left, under the Add/Done band, offers a 2×2. Speed 2×1 lands at row 1.
+  - The row 7 right slot opens the sheet even with the ride controls over that row.
+  - Add still shows Empty page, and puts Map 2×2 in the first open spot (rows 6–7).
+  - Done leaves no slots.
+- Design choice: the grid's layout key now carries cell + size, not a `WidgetPlacement`, so slots and widgets share one frame calculation and no dummy widget id is needed.
+- Not done: no runtime-issue log stream was captured during the drive. No device check.

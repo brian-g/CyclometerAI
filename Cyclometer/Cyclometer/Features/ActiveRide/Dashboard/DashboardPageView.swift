@@ -13,6 +13,14 @@ struct DashboardPageView: View {
     var body: some View {
         HStack(spacing: 0) {
             DashboardGridLayout {
+                // S07's add-here slots (#368), drawn first so a remove button that overhangs into an
+                // empty cell sits above its slot. Only edit mode draws them.
+                ForEach(page.emptyCells, id: \.self) { cell in
+                    DashboardEmptySlot(cell: cell) {
+                        store.send(.emptyCellTapped(cell))
+                    }
+                    .dashboardPlacement(at: cell, size: .oneByOne)
+                }
                 // A widget appears at most once per page (`DashboardLayoutValidator`), so its id is
                 // the identity. A placement the catalog doesn't know is dropped at decode. Drawn in
                 // reading order, so S07's remove button, which overhangs its widget up and to the

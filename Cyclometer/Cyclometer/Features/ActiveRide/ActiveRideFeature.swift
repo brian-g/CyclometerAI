@@ -343,8 +343,11 @@ struct ActiveRideFeature {
         /// minimised until Done. New pages come only from S08's "Empty page" (UX.md §S05
         /// "Customization" 5), not by themselves.
         var isEditingDashboard = false
-        /// S08's Add Widget sheet (#142), opened from edit mode's Add.
+        /// S08's Add Widget sheet (#142), opened from edit mode's Add or an empty cell (#368).
         var isAddWidgetPresented = false
+        /// The empty cell S08 was opened from (#368): it lists only what fits there and adds there.
+        /// `nil` from Add, which adds in the first open spot. Read only while the sheet is up.
+        var addWidgetCell: DashboardGrid.Cell?
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
         /// The page the rider is on, an index into `dashboardLayout.pages`. Held here, not in
@@ -374,6 +377,8 @@ struct ActiveRideFeature {
         case dashboardEditingDoneTapped
         /// S08 (#142): Add opens the picker; an entry adds that widget to the page the rider is on.
         case addWidgetTapped
+        /// S08 (#368): an empty cell in edit mode opens the picker aimed at that cell.
+        case emptyCellTapped(DashboardGrid.Cell)
         case addWidgetPresentationChanged(Bool)
         case addWidgetSelected(widgetID: String, size: WidgetSize)
         /// S08's "Empty page" (#142): a blank page after the one the rider is on.
@@ -532,22 +537,34 @@ struct ActiveRideFeature {
                 return .none
             case .addWidgetTapped:
                 guard state.isEditingDashboard else { return .none }
+                state.addWidgetCell = nil
+                state.isAddWidgetPresented = true
+                return .none
+            case .emptyCellTapped(let cell):
+                guard state.isEditingDashboard,
+                      state.dashboardLayout.pages[state.visibleDashboardPage].emptyCells.contains(cell)
+                else { return .none }
+                state.addWidgetCell = cell
                 state.isAddWidgetPresented = true
                 return .none
             case .addWidgetPresentationChanged(let isPresented):
                 state.isAddWidgetPresented = isPresented && state.isEditingDashboard
+                if !state.isAddWidgetPresented { state.addWidgetCell = nil }
                 return .none
             case .addWidgetSelected(let widgetID, let size):
                 guard state.isEditingDashboard, state.isAddWidgetPresented else { return .none }
                 let page = state.dashboardLayout.pages[state.visibleDashboardPage]
-                // The picker dims an entry with no open spot, so this only refuses a stale tap.
-                guard page.firstOpenPlacement(widgetID: widgetID, size: size) != nil,
-                      setDashboardLayout(state.dashboardLayout.addingWidget(widgetID, size: size, toPage: page.id), in: &state)
+                let cell = state.addWidgetCell
+                // The picker dims or hides an entry that doesn't fit, so this only refuses a stale tap.
+                guard page.openPlacement(widgetID: widgetID, size: size, at: cell) != nil,
+                      setDashboardLayout(state.dashboardLayout.addingWidget(widgetID, size: size, toPage: page.id, at: cell), in: &state)
                 else { return .none }
                 state.isAddWidgetPresented = false
+                state.addWidgetCell = nil
                 return .none
             case .addEmptyPageTapped:
-                guard state.isEditingDashboard, state.isAddWidgetPresented else { return .none }
+                // The Page section isn't offered from an empty cell.
+                guard state.isEditingDashboard, state.isAddWidgetPresented, state.addWidgetCell == nil else { return .none }
                 let index = state.visibleDashboardPage
                 let page = state.dashboardLayout.pages[index]
                 // The rider is already on a blank page; another beside it would be pruned unused.
@@ -609,6 +626,7 @@ struct ActiveRideFeature {
                 // Auto-end sends this with no rider at the screen. SwiftUI won't show an alert
                 // from a view already showing a sheet, so the Add Widget sheet steps aside.
                 state.isAddWidgetPresented = false
+                state.addWidgetCell = nil
                 state.finishAlert = AlertState {
                     TextState("Finish Ride")
                 } actions: {
