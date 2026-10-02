@@ -52,6 +52,35 @@ final class DashboardEditChromeSnapshotTests: XCTestCase {
         )
     }
 
+    /// An empty cell's dashed slot (#368) beside a 1×1 card: the same size and inset, no glyph.
+    private func makeEmptySlotRow(scheme: ColorScheme) -> some View {
+        HStack(spacing: 0) {
+            DashboardEmptySlot(cell: DashboardGrid.Cell(row: 0, column: 0)) {}
+            PaceWidget(speedMPS: 3.0, unit: .metric)
+                .dashboardEditCard(size: .oneByOne)
+                .dashboardRemoveButton(title: PaceDashboardWidget.title, size: .oneByOne) {}
+        }
+        .frame(width: 402, height: 96)
+        .padding(Spacing.lg)
+        .background(Color.cyBgSecondary)
+        .environment(\.isEditingDashboard, true)
+        .preferredColorScheme(scheme)
+    }
+
+    func testDashboardEditChromeEmptySlot() {
+        let canvas: SwiftUISnapshotLayout = .fixed(width: 402 + 2 * Spacing.lg, height: 96 + 2 * Spacing.lg)
+        assertSnapshot(
+            of: makeEmptySlotRow(scheme: .light),
+            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light)),
+            named: "light"
+        )
+        assertSnapshot(
+            of: makeEmptySlotRow(scheme: .dark),
+            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark)),
+            named: "dark"
+        )
+    }
+
     /// Outside edit mode the chrome adds nothing: no card, no button, full size.
     func testDashboardEditChromeOff() {
         assertSnapshot(

@@ -3616,4 +3616,85 @@ struct ActiveRideFeatureDashboardEditTests {
         }
         await store.send(.addEmptyPageTapped)
     }
+
+    // ── S08 from an empty cell (#368) ──────────────────────────────────────────
+
+    @Test("An empty cell opens the picker only in edit mode, and only when it's empty")
+    func emptyCellOpensPickerOnlyWhileEditing() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let other = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page, other]))
+
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 3, column: 1)))
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 0, column: 0)))
+        // A tap from a page the rider isn't on: the sheet would add to the wrong page.
+        await store.send(.emptyCellTapped(pageID: other.id, cell: DashboardGrid.Cell(row: 3, column: 1)))
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 3, column: 1))) {
+            $0.addWidgetCell = DashboardGrid.Cell(row: 3, column: 1)
+            $0.isAddWidgetPresented = true
+        }
+        // The cell stays set as the sheet slides away, so it doesn't redraw as Add's sheet.
+        await store.send(.addWidgetPresentationChanged(false)) {
+            $0.isAddWidgetPresented = false
+        }
+    }
+
+    @Test("Picking from an empty cell puts the widget's top-left there, saved, and closes the picker")
+    func pickingFromCellAddsThere() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 4, column: 0))) {
+            $0.addWidgetCell = DashboardGrid.Cell(row: 4, column: 0)
+            $0.isAddWidgetPresented = true
+        }
+        // At the tapped cell, not Add's first open spot, which a 2×1 would find at row 1.
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 4, column: 0)
+        await store.send(.addWidgetSelected(widgetID: CadenceDashboardWidget.id, size: .twoByOne)) {
+            $0.isAddWidgetPresented = false
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [DashboardPage(id: page.id, placements: [Self.pace, cadence])])
+            }
+        }
+    }
+
+    /// The picker hides what doesn't fit at the cell; a tap that lands anyway must not shift it.
+    @Test("From a right-hand cell, a 2×1 is refused rather than shifted left")
+    func pickingFromCellRefusesWhatDoesNotFit() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 2, column: 1))) {
+            $0.addWidgetCell = DashboardGrid.Cell(row: 2, column: 1)
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addWidgetSelected(widgetID: CadenceDashboardWidget.id, size: .twoByOne))
+    }
+
+    @Test("Add after an empty cell goes back to the first open spot, and Empty page isn't offered from a cell")
+    func addAfterCellResetsTarget() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 2, column: 1))) {
+            $0.addWidgetCell = DashboardGrid.Cell(row: 2, column: 1)
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addEmptyPageTapped)
+        await store.send(.addWidgetTapped) {
+            $0.addWidgetCell = nil
+        }
+    }
 }

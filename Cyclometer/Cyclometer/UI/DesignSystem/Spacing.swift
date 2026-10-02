@@ -29,6 +29,7 @@ enum Spacing {
     static let hrBorderWidth: CGFloat = 3          //  3 — HR zone left accent bar
     static let strokeThin: CGFloat    = 1.5        //  1.5 — thin border stroke
     static let strokeHairline: CGFloat = 1         //  1 — hairline border (turn overlay)
+    static let strokeDash: CGFloat = unit          //  4 — dash and gap of a dashed border (S07 empty-cell slot, #368)
     static let strokeMapTrack: CGFloat = 5         //  5 — live map: the track ridden so far
     static let strokeMapRoute: CGFloat = 8         //  8 — live map: the planned route, wider so the track sits inside it
     static let strokeMapThumbnail: CGFloat = 3     //  3 — ride thumbnail: the recorded track at 56pt

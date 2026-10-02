@@ -83,6 +83,34 @@ private struct DashboardRemoveButton: ViewModifier {
     }
 }
 
+/// S07 edit mode's slot for an empty cell (#368): a dashed outline where a 1×1 card would sit, which
+/// opens S08 aimed at that cell. Outside edit mode it draws nothing and takes no taps (UX.md §S05
+/// "Empty cells"). It doesn't wiggle: there's no widget to move.
+struct DashboardEmptySlot: View {
+    let cell: DashboardGrid.Cell
+    let onTap: () -> Void
+
+    @Environment(\.isEditingDashboard) private var isEditing
+
+    var body: some View {
+        if isEditing {
+            Button(action: onTap) {
+                RoundedRectangle(cornerRadius: Spacing.cornerMd)
+                    .strokeBorder(
+                        Color.cyBorderStrong,
+                        style: StrokeStyle(lineWidth: Spacing.strokeHairline, dash: [Spacing.strokeDash])
+                    )
+                    .scaleEffect(WidgetSize.oneByOne.editingScale)
+                    // The whole cell, not just the outline.
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Empty, row \(cell.row + 1), \(cell.column == 0 ? "left" : "right")")
+            .accessibilityHint("Add widget here")
+        }
+    }
+}
+
 /// The SpringBoard wiggle while S07 edit mode is on (#141). None under Reduce Motion.
 private struct DashboardWiggle: ViewModifier {
     /// Offsets this widget's swing, in cycles, so neighbours don't wiggle in step.

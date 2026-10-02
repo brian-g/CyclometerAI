@@ -3,6 +3,8 @@ import ComposableArchitecture
 
 /// S08 — Add Widget (#142), opened from S07 edit mode's Add. Every widget at every size it supports,
 /// by category; an entry adds that widget to the page the rider is on, in its first open spot.
+/// Opened from an empty cell instead (#368), it lists only the sizes that fit with that cell as
+/// their top-left, and adds there.
 struct AddWidgetSheet: View {
     let store: StoreOf<ActiveRideFeature>
     /// The dashboard grid's size — the screen, less the radar lane when it shows — which sets
@@ -16,6 +18,7 @@ struct AddWidgetSheet: View {
             ScrollView {
                 AddWidgetCatalog(
                     page: store.dashboardLayout.pages[store.visibleDashboardPage],
+                    cell: store.addWidgetCell,
                     canvas: canvas,
                     onEmptyPage: { store.send(.addEmptyPageTapped, animation: .default) },
                     onAdd: { store.send(.addWidgetSelected(widgetID: $0.widget.id, size: $0.size), animation: .default) }
@@ -64,6 +67,8 @@ struct AddWidgetEntry: Identifiable {
 struct AddWidgetCatalog: View {
     /// The page an entry would be added to: it dims what that page can't take.
     let page: DashboardPage
+    /// The empty cell the sheet was opened from (#368), or `nil` from Add.
+    var cell: DashboardGrid.Cell? = nil
     let canvas: CGSize
     var categories = WidgetCategory.allCases
     let onEmptyPage: () -> Void
@@ -77,21 +82,27 @@ struct AddWidgetCatalog: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
-            section("Page") {
-                Button(action: onEmptyPage) {
-                    Label("Empty page", systemImage: "text.rectangle.page")
-                        .foregroundStyle(Color.cyTextPrimary)
-                        // The whole row, a full tap target tall: the label alone is a ~22 pt target.
-                        .frame(maxWidth: .infinity, minHeight: Spacing.tapTarget, alignment: .leading)
-                        .contentShape(Rectangle())
+            // A page isn't something a cell can hold.
+            if cell == nil {
+                section("Page") {
+                    Button(action: onEmptyPage) {
+                        Label("Empty page", systemImage: "text.rectangle.page")
+                            .foregroundStyle(Color.cyTextPrimary)
+                            // The whole row, a full tap target tall: the label alone is a ~22 pt target.
+                            .frame(maxWidth: .infinity, minHeight: Spacing.tapTarget, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    // From a blank page, another would only be pruned unused.
+                    .disabled(page.placements.isEmpty)
+                    .opacity(page.placements.isEmpty ? Opacity.unavailable : 1)
                 }
-                .buttonStyle(.plain)
-                // From a blank page, another would only be pruned unused.
-                .disabled(page.placements.isEmpty)
-                .opacity(page.placements.isEmpty ? Opacity.unavailable : 1)
             }
             ForEach(categories, id: \.self) { category in
-                let entries = AddWidgetEntry.entries(in: category)
+                // From a cell, only the sizes that fit with it as their top-left.
+                let entries = AddWidgetEntry.entries(in: category).filter { entry in
+                    cell.map { page.fits(entry.size, at: $0) } ?? true
+                }
                 if !entries.isEmpty {
                     section(category.title) {
                         VStack(spacing: Spacing.md) {
@@ -124,7 +135,7 @@ struct AddWidgetCatalog: View {
     }
 
     private func entryButton(_ entry: AddWidgetEntry) -> some View {
-        let canAdd = page.firstOpenPlacement(widgetID: entry.widget.id, size: entry.size) != nil
+        let canAdd = page.openPlacement(widgetID: entry.widget.id, size: entry.size, at: cell) != nil
         return Button { onAdd(entry) } label: {
             AddWidgetPreview(entry: entry, canvas: canvas, store: sampleStore)
         }
