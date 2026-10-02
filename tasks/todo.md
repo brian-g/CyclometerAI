@@ -508,7 +508,7 @@ Branch: `feat/142-add-widget-sheet`
 - [x] 4. `AddWidgetSheet` (sections, scaled previews, sample store) + entry-order test + snapshot
 - [x] 5. Wire Add button + sheet in `RideDashboardView`
 - [x] 6. Docs: UX.md §S08 as built, TCA.md §8
-- [ ] 6b. Follow-up issue for cell-tap (awaiting Brian's OK)
+- [x] 6b. Follow-ups filed: #368 (tap an empty cell to add), #367 (rearrange by drag; no issue had picked up UX.md §S05 item 2)
 - [x] 7. Unit suite green; sim drive
 
 ## Review
