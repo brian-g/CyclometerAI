@@ -19,11 +19,14 @@ struct RideDashboardView: View {
             get: { store.visibleDashboardPage },
             set: { store.send(.dashboardPageChanged($0)) }
         )) {
-            ForEach(Array(store.dashboardLayout.pages.enumerated()), id: \.offset) { index, page in
+            // Identified by page, not index: S07 (#141) inserts and prunes pages, and a view keyed
+            // by index would carry one page's widget state onto another.
+            ForEach(Array(store.dashboardLayout.pages.enumerated()), id: \.element.id) { index, page in
                 DashboardPageView(page: page, store: store)
                     .tag(index)
             }
         }
+        .environment(\.isEditingDashboard, store.isEditingDashboard)
         .background(Color.cyBgSecondary)
         .tabViewStyle(.page(indexDisplayMode: .never))
         .ignoresSafeArea(.all)
@@ -44,10 +47,16 @@ struct RideDashboardView: View {
         // sits just below the Dynamic Island while the pages bleed up behind it.
         .overlay(alignment: .top) {
             VStack(spacing: Spacing.xs) {
-                grabber()
+                // Edit mode can't be minimised (#141), so the grabber, a minimise cue, steps aside.
+                if !store.isEditingDashboard {
+                    grabber()
+                }
                 if let banner = activeBanner {
                     RideBanner(text: banner.text, icon: banner.icon)
                         .transition(bannerTransition)
+                        // A notice, not a control. In edit mode it sits over the top row's remove
+                        // buttons (#141 review), so touches pass through to them.
+                        .allowsHitTesting(false)
                 }
             }
             .animation(.default, value: activeBanner?.text)
@@ -58,6 +67,15 @@ struct RideDashboardView: View {
                 rideControls
             }
         }
+        .overlay {
+            if store.isEditingDashboard {
+                editControls
+            }
+        }
+        // S07 (#141): Done is the only way out of edit mode — no drag-down minimise — and its
+        // controls take the status bar's place beside the Dynamic Island, as on SpringBoard.
+        .interactiveDismissDisabled(store.isEditingDashboard)
+        .statusBarHidden(store.isEditingDashboard)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Ride effects (timer/HR/radar/location) are started by AppFeature when
         // the ride begins and live for the whole ride, so they keep running when
@@ -82,6 +100,30 @@ struct RideDashboardView: View {
             }
     }
 
+    // ── Edit controls — S07 (#141), Sketch "S07 - Dashboard Customization" ─────
+    // Add and Done flank the Dynamic Island, centred in the band above the safe area, so they
+    // never sit on a top-row widget's remove button. Add opens S08, which #142 wires up.
+    private var editControls: some View {
+        GeometryReader { proxy in
+            HStack {
+                EditModeButton(title: "Add Widget", systemImage: "plus") {}
+                    .disabled(true)
+                Spacer()
+                EditModeButton(title: "Done", systemImage: "checkmark", isProminent: true) {
+                    store.send(.dashboardEditingDoneTapped, animation: .default)
+                }
+            }
+            .padding(.horizontal, Spacing.xl)
+            // At least a tap target tall: without an island or notch, the hidden status bar
+            // leaves no top inset, and a 0 pt band would put Done — the only way out — half off
+            // screen.
+            .frame(height: max(proxy.safeAreaInsets.top, Spacing.mapControl))
+            .frame(maxHeight: .infinity, alignment: .top)
+            .ignoresSafeArea(edges: .top)
+        }
+        .transition(.opacity)
+    }
+
     // ── Paging indicator — always visible; one dot per layout page ─────────────
     private var pageIndicator: some View {
         let pageCount = store.dashboardLayout.pages.count
@@ -94,6 +136,10 @@ struct RideDashboardView: View {
         }
         .accessibilityElement()
         .accessibilityLabel("Page \(store.visibleDashboardPage + 1) of \(pageCount)")
+        // VoiceOver's way into S07 edit mode (#141), which is otherwise only a long press.
+        .accessibilityAction(named: "Edit Dashboard") {
+            store.send(.dashboardLongPressed, animation: .default)
+        }
     }
 
     // ── Ride Controls — floating glass buttons (S05) ───────────────────────────
@@ -186,6 +232,40 @@ struct RideDashboardView: View {
     }
 }
 
+/// S07's Add and Done (#141): a glass capsule exactly the Dynamic Island's height and the golden
+/// ratio as wide, so the pair reads as part of the island's band. Done is tinted, as a confirm is.
+private struct EditModeButton: View {
+    let title: String
+    let systemImage: String
+    var isProminent = false
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    private static let goldenRatio = (1 + sqrt(5.0)) / 2
+
+    var body: some View {
+        Button(action: action) {
+            // The icon-only `Label` keeps its title for VoiceOver.
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(glyphColor)
+                .frame(width: Spacing.dynamicIsland * Self.goldenRatio, height: Spacing.dynamicIsland)
+                .glassEffect(isProminent ? .regular.tint(.cyPrimary).interactive() : .regular.interactive(), in: .capsule)
+                // The capsule is the island's height; the touch area is a full 44 pt.
+                .padding(.vertical, (Spacing.mapControl - Spacing.dynamicIsland) / 2)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var glyphColor: Color {
+        guard isEnabled else { return .cyTextTertiary }
+        return isProminent ? .cyTextOnPrimary : .cyPrimary
+    }
+}
+
 // MARK: - Previews
 
 #Preview("Zone 4 — Radar Active") {
@@ -250,6 +330,32 @@ struct RideDashboardView: View {
                 ActiveRideFeature()
             }
         )
+    }
+}
+
+#Preview("Edit Mode") {
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
+    } operation: {
+        let store = Store(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                elapsedSeconds: 2340,
+                heartRateBPM: 155,
+                hrZone: 4,
+                isHRPaired: true,
+                cadence: CadenceFeature.State(cadenceRPM: 87),
+                distanceMeters: 12300,
+                speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
+                maxSpeedKPH: 34.1
+            )
+        ) {
+            ActiveRideFeature()
+        }
+        // Through the reducer, as a long press does, so the blank page and its dot appear too.
+        store.send(.dashboardLongPressed)
+        return RideDashboardView(store: store)
     }
 }
 

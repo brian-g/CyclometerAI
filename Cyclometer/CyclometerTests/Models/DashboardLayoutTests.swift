@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import CoreGraphics
+import Foundation
 import Testing
 @testable import Cyclometer
 
@@ -91,13 +92,135 @@ struct DashboardLayoutTests {
         #expect(DashboardLayoutValidator.violations(in: page(weather)) == [.unknownWidget(weather)])
     }
 
-    @Test("Removing unknown widgets keeps everything else")
-    func removingUnknownWidgets() {
+    /// One bad placement costs that widget, not the rider's layout (#139 review): every kind of
+    /// violation, each beside a placement that must survive. The earlier placement wins a conflict.
+    @Test("Salvage drops only the placements that break a rule, keeping pages and their ids")
+    func keepingValidPlacements() {
         let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
-        let weather = WidgetPlacement(widgetID: "weather", size: .oneByOne, row: 0, column: 1)
-        let layout = DashboardLayout(pages: [page(pace, weather), page(weather)])
+        let unknown = WidgetPlacement(widgetID: "weather", size: .oneByOne, row: 0, column: 1)
+        let outOfBounds = WidgetPlacement(MapDashboardWidget.self, size: .twoByTwo, row: 6, column: 0)
+        let unsupported = WidgetPlacement(HeartRateDashboardWidget.self, size: .twoByTwo, row: 2, column: 0)
+        let overlapping = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 0, column: 0)
+        let duplicate = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 5, column: 1)
+        let hrZones = WidgetPlacement(HRZonesDashboardWidget.self, size: .oneByOne, row: 6, column: 1)
+        let layout = DashboardLayout(pages: [
+            page(pace, unknown, outOfBounds, unsupported, overlapping, duplicate, hrZones),
+            page(unknown),
+        ])
 
-        #expect(layout.removingUnknownWidgets() == DashboardLayout(pages: [page(pace), page()]))
+        let salvaged = layout.keepingValidPlacements()
+
+        #expect(salvaged.pages.map(\.placements) == [[pace, hrZones], []])
+        #expect(salvaged.pages.map(\.id) == layout.pages.map(\.id))
+    }
+
+    @Test("Removing a widget touches only the page it's on")
+    func removingWidget() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let speed = WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 2, column: 0)
+        let layout = DashboardLayout(pages: [page(pace, speed), page(pace)])
+
+        let removed = layout.removingWidget(PaceDashboardWidget.id, fromPage: layout.pages[0].id)
+
+        #expect(removed.pages.map(\.placements) == [[speed], [pace]])
+        #expect(removed.pages.map(\.id) == layout.pages.map(\.id))
+    }
+
+    @Test("Edit mode's blank page is appended once, however often it's asked for")
+    func appendingBlankPage() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let layout = DashboardLayout(pages: [page(pace)])
+
+        let blank = UUID()
+        let once = layout.appendingBlankPage(id: blank)
+        let twice = once.appendingBlankPage(id: UUID())
+
+        #expect(once == DashboardLayout(pages: [layout.pages[0], DashboardPage(id: blank, placements: [])]))
+        #expect(twice == once)
+    }
+
+    @Test("Pruning removes empty pages wherever they are, keeping the rest in order")
+    func prunedEmptyPages() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let first = page(pace)
+        let last = page(pace)
+        let layout = DashboardLayout(pages: [page(), first, page(), last, page()])
+
+        #expect(layout.prunedEmptyPages() == DashboardLayout(pages: [first, last]))
+    }
+
+    /// A layout needs a page, so removing every widget leaves one blank page — not zero pages,
+    /// which would fail validation and silently restore the factory layout.
+    @Test("Pruning a layout of only empty pages keeps one")
+    func pruningKeepsOnePage() {
+        let only = page()
+        let pruned = DashboardLayout(pages: [only, page()]).prunedEmptyPages()
+
+        #expect(pruned == DashboardLayout(pages: [only]))
+        #expect(DashboardLayoutValidator.isValid(pruned))
+    }
+
+    /// One placement this build can't decode — a size a newer build added — must not throw the
+    /// page, and with it the rider's whole layout, away (#141 review).
+    @Test("A placement that doesn't decode is dropped, and the rest of the page kept")
+    func undecodablePlacementIsDropped() throws {
+        let json = Data(#"""
+        {"pages":[{"placements":[
+          {"widgetID":"speed","size":"threeByThree","row":0,"column":0},
+          {"widgetID":"pace","size":"oneByOne","row":2,"column":0},
+          {"widgetID":"cadence"}]}]}
+        """#.utf8)
+
+        let decoded = try JSONDecoder().decode(DashboardLayout.self, from: json)
+
+        #expect(decoded.pages.map(\.placements) == [
+            [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 2, column: 0)],
+        ])
+    }
+
+    /// The dashboard's `TabView` is keyed by page id.
+    @Test("Two pages sharing an id make a layout invalid")
+    func duplicatePageIDsAreInvalid() {
+        let first = page(WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0))
+        let copy = DashboardPage(id: first.id, placements: [WidgetPlacement(SpeedDashboardWidget.self, size: .oneByOne, row: 0, column: 0)])
+        #expect(!DashboardLayoutValidator.isValid(DashboardLayout(pages: [first, copy])))
+    }
+
+    /// `.factory` mints page ids per launch, so a saved copy of it differs by `==`; matching it
+    /// must ignore them, or that copy pins the rider to an old factory layout (#141 review).
+    @Test("A layout is the factory one by its placements, whatever its page ids")
+    func factoryMatchIgnoresPageIDs() {
+        let copy = DashboardLayout(pages: DashboardLayout.factory.pages.map { DashboardPage(placements: $0.placements) })
+        #expect(copy != .factory)
+        #expect(copy.isFactory)
+        #expect(!copy.removingWidget(SpeedDashboardWidget.id, fromPage: copy.pages[0].id).isFactory)
+    }
+
+    @Test("A page's id survives encoding")
+    func pageIDRoundTrips() throws {
+        let layout = DashboardLayout(pages: [
+            page(WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)),
+        ])
+        let decoded = try JSONDecoder().decode(DashboardLayout.self, from: JSONEncoder().encode(layout))
+        #expect(decoded == layout)
+    }
+
+    /// #139 saved pages without an `id`. A synthesised decoder would throw on the missing key and
+    /// lose the rider's layout.
+    @Test("A page saved before pages had ids still decodes, each getting its own")
+    func pageWithoutIDDecodes() throws {
+        let json = Data(#"""
+        {"pages":[
+          {"placements":[{"widgetID":"pace","size":"oneByOne","row":0,"column":0}]},
+          {"placements":[]}]}
+        """#.utf8)
+
+        let decoded = try JSONDecoder().decode(DashboardLayout.self, from: json)
+
+        #expect(decoded.pages.map(\.placements) == [
+            [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)], [],
+        ])
+        #expect(decoded.pages[0].id != decoded.pages[1].id)
     }
 
     @Test("Two widgets sharing a cell overlap")

@@ -1,10 +1,11 @@
 import CoreGraphics
+import Foundation
 
 /// One widget at one position. `row` and `column` are its top-left cell, 0-based.
 ///
 /// The widget is named by its `DashboardWidget.id`, a string rather than an enum case, so a
 /// saved layout naming a widget this build doesn't have still decodes; that placement is dropped
-/// (`removingUnknownWidgets`) and the rest kept.
+/// (`DashboardLayout.keepingValidPlacements`) and the rest kept.
 struct WidgetPlacement: Codable, Equatable {
     var widgetID: String
     var size: WidgetSize
@@ -32,19 +33,87 @@ struct WidgetPlacement: Codable, Equatable {
 
 /// One swipeable page of the dashboard. Cells no placement covers stay blank (UX.md §S05
 /// "Empty cells"), which is why placements are positional rather than an ordered list.
-struct DashboardPage: Codable, Equatable {
+///
+/// `id` keeps a page's view attached to the page, not to its index, when S07 (#141) appends or
+/// prunes pages around it. It is saved, so it also survives a relaunch.
+struct DashboardPage: Codable, Equatable, Identifiable {
+    var id = UUID()
     var placements: [WidgetPlacement]
+}
+
+extension DashboardPage {
+    /// By hand, because #139 saved pages without an `id`, and the synthesised decoder throws on a
+    /// missing key — which would reset the whole layout. Any field added to these types later must
+    /// be optional or decoded the same way.
+    ///
+    /// Each placement decodes on its own, so one this build can't read — a `WidgetSize` a newer
+    /// build added, say — costs that widget, not the page and with it the rider's whole layout.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        placements = try container.decode([LossyPlacement].self, forKey: .placements).compactMap(\.placement)
+    }
+
+    private struct LossyPlacement: Decodable {
+        let placement: WidgetPlacement?
+
+        init(from decoder: any Decoder) throws {
+            placement = try? WidgetPlacement(from: decoder)
+        }
+    }
 }
 
 /// The rider's dashboard: its pages, in swipe order. Persisted in `AppPreferences`.
 struct DashboardLayout: Codable, Equatable {
     var pages: [DashboardPage]
 
-    /// This layout without placements naming a widget the catalog doesn't have — one from a newer
-    /// build, or one since removed. Losing that widget beats losing the rider's whole layout.
-    func removingUnknownWidgets() -> DashboardLayout {
+    /// This layout with each page keeping only the placements that break no rule
+    /// (`DashboardLayoutValidator`), the earlier one winning a conflict. A widget a newer build
+    /// added, one since removed, or an overlap from a corrupt file costs that widget, not the
+    /// rider's whole layout.
+    func keepingValidPlacements() -> DashboardLayout {
+        mapPages { page in
+            page.placements = page.placements.reduce(into: []) { kept, placement in
+                let candidate = DashboardPage(placements: kept + [placement])
+                if DashboardLayoutValidator.violations(in: candidate).isEmpty { kept.append(placement) }
+            }
+        }
+    }
+
+    /// This layout without `widgetID` on the page `pageID` (S07 remove).
+    func removingWidget(_ widgetID: String, fromPage pageID: DashboardPage.ID) -> DashboardLayout {
+        mapPages { page in
+            if page.id == pageID { page.placements.removeAll { $0.widgetID == widgetID } }
+        }
+    }
+
+    /// This layout ending in a blank page for S07 edit mode to place widgets on — unless it already
+    /// ends in one, so entering edit mode twice never stacks them.
+    func appendingBlankPage(id: DashboardPage.ID) -> DashboardLayout {
+        guard pages.last?.placements.isEmpty == false else { return self }
+        return DashboardLayout(pages: pages + [DashboardPage(id: id, placements: [])])
+    }
+
+    /// This layout without its empty pages (UX.md §S07: "Empty pages are removed on exit"). Keeps
+    /// one when every page is empty, since a layout needs a page; a rider who removed every widget
+    /// gets a blank dashboard, not the factory one.
+    /// Whether this is the factory layout: the same widgets in the same places on the same pages.
+    /// Page ids don't count — `.factory` mints new ones each launch, so a saved copy of it never
+    /// matches by `==`, and would pin the rider to it after the factory changes (#141 review).
+    var isFactory: Bool {
+        pages.map(\.placements) == Self.factory.pages.map(\.placements)
+    }
+
+    func prunedEmptyPages() -> DashboardLayout {
+        let filled = pages.filter { !$0.placements.isEmpty }
+        return DashboardLayout(pages: filled.isEmpty ? Array(pages.prefix(1)) : filled)
+    }
+
+    private func mapPages(_ transform: (inout DashboardPage) -> Void) -> DashboardLayout {
         DashboardLayout(pages: pages.map { page in
-            DashboardPage(placements: page.placements.filter { DashboardWidgetCatalog.widget(id: $0.widgetID) != nil })
+            var page = page
+            transform(&page)
+            return page
         })
     }
 }
@@ -117,8 +186,12 @@ enum DashboardLayoutValidator {
         return violations
     }
 
+    /// At least one page, page ids unique — the dashboard's `TabView` is keyed by them — and every
+    /// page free of violations.
     static func isValid(_ layout: DashboardLayout) -> Bool {
-        !layout.pages.isEmpty && layout.pages.allSatisfy { violations(in: $0).isEmpty }
+        !layout.pages.isEmpty
+            && Set(layout.pages.map(\.id)).count == layout.pages.count
+            && layout.pages.allSatisfy { violations(in: $0).isEmpty }
     }
 }
 

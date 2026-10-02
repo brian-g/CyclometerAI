@@ -4,6 +4,7 @@ import ComposableArchitecture
 /// W5 Cadence on the dashboard.
 struct CadenceDashboardWidget: DashboardWidget {
     static let id = "cadence"
+    static let title = "Cadence"
     static let supportedSizes: [WidgetSize] = [.oneByOne, .twoByOne]
 
     let size: WidgetSize
