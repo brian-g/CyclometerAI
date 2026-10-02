@@ -20,6 +20,7 @@ enum Spacing {
     // Fixed UI affordances (named, not forced onto the grid)
     static let tapTarget: CGFloat     = unit * 13 // 52 — HIG minimum button tap target
     static let mapControl: CGFloat    = unit * 11 // 44 — MapKit's own map-control size; the map sheet's buttons match it
+    static let dynamicIsland: CGFloat = 37         // 37 — Dynamic Island height (iPhone 17 Pro); S07's Add/Done match it
     static let turnOverlay: CGFloat   = unit * 34 // 136 — turn overlay card's minimum side (Sketch "Sxx - Route overlay")
     static let rideThumbnail: CGFloat = unit * 14 // 56 — S14 row's map thumbnail, square (UX.md §S14)
     static let rideMetric: CGFloat    = unit * 16 // 64 — S14 row's time and distance columns, minimum width (Sketch: 65)

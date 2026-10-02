@@ -84,10 +84,10 @@ struct AppPreferences: Codable, Equatable, Sendable {
     var dashboardLayoutOverride: DashboardLayout?
 
     /// Which widgets sit where on each dashboard page. S07/S08 (#141, #142) set it; setting the
-    /// factory layout clears the override.
+    /// factory layout, page ids aside, clears the override.
     var dashboardLayout: DashboardLayout {
         get { dashboardLayoutOverride ?? .factory }
-        set { dashboardLayoutOverride = newValue == .factory ? nil : newValue }
+        set { dashboardLayoutOverride = newValue.isFactory ? nil : newValue }
     }
 
     /// Whether the rider has finished onboarding (S01→S02) at least once (#105). Gates
@@ -182,14 +182,16 @@ struct AppPreferences: Codable, Equatable, Sendable {
             MapOrientation.self, forKey: .mapOrientation
         ) ?? .headingUp
         // `try?`, unlike the fields above: an unreadable layout must not throw and reset every
-        // other preference with it. A placement naming a widget this build doesn't have (a newer
-        // version's, or one since removed) is dropped; a layout still invalid after that falls
-        // back to the factory one.
+        // other preference with it. A placement that breaks a rule — naming a widget this build
+        // doesn't have, or overlapping another — is dropped and the rest kept. Empty pages exist
+        // only during S07 edit mode, so one saved by a launch that ended mid-edit is pruned. A
+        // layout still invalid after that falls back to the factory one, and one that turns out to
+        // be the factory layout is dropped so the rider follows it.
         dashboardLayoutOverride = (try? container.decodeIfPresent(
             DashboardLayout.self, forKey: .dashboardLayoutOverride
         ))
-        .map { $0.removingUnknownWidgets() }
-        .flatMap { DashboardLayoutValidator.isValid($0) ? $0 : nil }
+        .map { $0.keepingValidPlacements().prunedEmptyPages() }
+        .flatMap { DashboardLayoutValidator.isValid($0) && !$0.isFactory ? $0 : nil }
     }
 }
 

@@ -3311,3 +3311,187 @@ struct ActiveRideFeatureMapOrientationTests {
         }
     }
 }
+
+@MainActor
+@Suite("ActiveRideFeature — S07 dashboard edit mode")
+struct ActiveRideFeatureDashboardEditTests {
+    private let storage = FileStorage.inMemory
+    /// `UUIDGenerator.incrementing`'s first id: the blank page edit mode appends.
+    private let blankPageID = UUID(0)
+
+    private func makeStore(layout: DashboardLayout? = nil) -> TestStoreOf<ActiveRideFeature> {
+        withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            if let layout { $preferences.withLock { $0.dashboardLayout = layout } }
+            return TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.defaultFileStorage = storage
+                $0.uuid = .incrementing
+            }
+        }
+    }
+
+    private static let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+    private static let speed = WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 0, column: 0)
+
+    @Test("A long press enters edit mode and appends one blank page, saved")
+    func longPressEntersEditMode() async {
+        let store = makeStore()
+        let factory = DashboardLayout.factory
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: factory.pages + [DashboardPage(id: self.blankPageID, placements: [])])
+            }
+        }
+        #expect(store.state.dashboardLayout.pages.count == factory.pages.count + 1)
+        // A second long press while editing changes nothing.
+        await store.send(.dashboardLongPressed)
+    }
+
+    @Test("Removing a widget saves the layout at once")
+    func removeWidgetPersists() async {
+        let first = DashboardPage(placements: [Self.pace, WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1)])
+        let store = makeStore(layout: DashboardLayout(pages: [first]))
+        let blank = DashboardPage(id: blankPageID, placements: [])
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, blank]) }
+        }
+        await store.send(.removeWidgetTapped(pageID: first.id, widgetID: HeartRateDashboardWidget.id)) {
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [DashboardPage(id: first.id, placements: [Self.pace]), blank])
+            }
+        }
+    }
+
+    @Test("Outside edit mode, a remove is ignored")
+    func removeOutsideEditModeIsIgnored() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.removeWidgetTapped(pageID: page.id, widgetID: PaceDashboardWidget.id))
+    }
+
+    /// Pruning shifts later pages down; the rider stays on the page they were looking at, by id.
+    @Test("Done prunes empty pages and keeps the rider on the same page")
+    func donePrunesAndKeepsPage() async {
+        let first = DashboardPage(placements: [Self.pace])
+        let second = DashboardPage(placements: [Self.pace])
+        let third = DashboardPage(placements: [Self.speed])
+        let store = makeStore(layout: DashboardLayout(pages: [first, second, third]))
+        let blank = DashboardPage(id: blankPageID, placements: [])
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second, third, blank]) }
+        }
+        await store.send(.removeWidgetTapped(pageID: second.id, widgetID: PaceDashboardWidget.id)) {
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [first, DashboardPage(id: second.id, placements: []), third, blank])
+            }
+        }
+        await store.send(.dashboardPageChanged(2)) {
+            $0.dashboardPage = 2
+        }
+        await store.send(.dashboardEditingDoneTapped) {
+            $0.isEditingDashboard = false
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, third]) }
+            $0.dashboardPage = 1
+        }
+    }
+
+    /// Done from the blank page prunes the page the rider is on. The index must land on a real
+    /// page, not stay past the end — or the next edit's blank page fills it and the rider is
+    /// thrown onto it (#141 review).
+    @Test("Done from the blank page leaves the rider on the last real page")
+    func doneFromBlankPage() async {
+        let first = DashboardPage(placements: [Self.pace])
+        let second = DashboardPage(placements: [Self.speed])
+        let store = makeStore(layout: DashboardLayout(pages: [first, second]))
+        let blank = DashboardPage(id: blankPageID, placements: [])
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second, blank]) }
+        }
+        await store.send(.dashboardPageChanged(2)) {
+            $0.dashboardPage = 2
+        }
+        await store.send(.dashboardEditingDoneTapped) {
+            $0.isEditingDashboard = false
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second]) }
+            $0.dashboardPage = 1
+        }
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [first, second, DashboardPage(id: UUID(1), placements: [])])
+            }
+        }
+        #expect(store.state.visibleDashboardPage == 1)
+    }
+
+    /// Removing every widget leaves one blank page, not a layout with no pages — which would be
+    /// refused, and on the next launch replaced with the factory layout.
+    @Test("Removing every widget and tapping Done leaves one blank page")
+    func removeAllLeavesOnePage() async {
+        let only = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [only]))
+        let blank = DashboardPage(id: blankPageID, placements: [])
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [only, blank]) }
+        }
+        let emptied = DashboardPage(id: only.id, placements: [])
+        await store.send(.removeWidgetTapped(pageID: only.id, widgetID: PaceDashboardWidget.id)) {
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [emptied, blank]) }
+        }
+        await store.send(.dashboardEditingDoneTapped) {
+            $0.isEditingDashboard = false
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [emptied]) }
+        }
+    }
+
+    /// Done saves the pruned layout, which equals the factory one again, so the rider keeps
+    /// following `.factory` rather than a saved copy of it (#139 review).
+    @Test("Entering and leaving edit mode without changes keeps the rider on the factory layout")
+    func noChangesKeepsFactory() async {
+        let store = makeStore()
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: DashboardLayout.factory.pages + [DashboardPage(id: self.blankPageID, placements: [])])
+            }
+        }
+        await store.send(.dashboardEditingDoneTapped) {
+            $0.isEditingDashboard = false
+            $0.$preferences.withLock { $0.dashboardLayout = .factory }
+        }
+        #expect(store.state.preferences.dashboardLayoutOverride == nil)
+    }
+
+    /// A ride that ends mid-edit never reaches Done. Its empty pages stay in the saved layout
+    /// until the next Done or launch, but the dashboard doesn't show them, and edit mode starts
+    /// from what the rider sees so the page index still means the same page.
+    @Test("Outside edit mode, empty pages are hidden, and edit mode doesn't bring them back")
+    func emptyPagesHiddenOutsideEditMode() async {
+        let filled = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [DashboardPage(placements: []), filled]))
+
+        #expect(store.state.dashboardLayout == DashboardLayout(pages: [filled]))
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [filled, DashboardPage(id: self.blankPageID, placements: [])])
+            }
+        }
+    }
+}

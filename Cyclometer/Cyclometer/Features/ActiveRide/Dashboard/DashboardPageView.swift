@@ -14,12 +14,19 @@ struct DashboardPageView: View {
         HStack(spacing: 0) {
             DashboardGridLayout {
                 // A widget appears at most once per page (`DashboardLayoutValidator`), so its id is
-                // the identity. A placement the catalog doesn't know is dropped at decode.
-                ForEach(page.placements, id: \.widgetID) { placement in
+                // the identity. A placement the catalog doesn't know is dropped at decode. Drawn in
+                // reading order, so S07's remove button, which overhangs its widget up and to the
+                // left, sits above the widgets there rather than under them.
+                ForEach(page.placements.sorted { ($0.row, $0.column) < ($1.row, $1.column) }, id: \.widgetID) { placement in
                     if let widget = DashboardWidgetCatalog.widget(id: placement.widgetID) {
                         widget.view(size: placement.size, store: store)
                             // Fills its cells, centred like a `Grid` cell, whatever size it reports.
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .dashboardEditCard(size: placement.size)
+                            .dashboardWiggle(phase: Double(placement.row * DashboardGrid.columns + placement.column) / 3)
+                            .dashboardRemoveButton(title: widget.title, size: placement.size) {
+                                store.send(.removeWidgetTapped(pageID: page.id, widgetID: placement.widgetID))
+                            }
                             .dashboardPlacement(placement)
                     }
                 }
@@ -28,6 +35,12 @@ struct DashboardPageView: View {
 
             RadarLane(store: store)
         }
+        // S07 (#141): a long press anywhere on the page — empty cells and the radar lane included
+        // — enters edit mode. Simultaneous, so it still fires over a widget's own tap.
+        .contentShape(Rectangle())
+        .simultaneousGesture(LongPressGesture().onEnded { _ in
+            store.send(.dashboardLongPressed, animation: .default)
+        })
     }
 }
 

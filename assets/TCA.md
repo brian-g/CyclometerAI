@@ -991,7 +991,7 @@ Cyclometer/
 │   │   ├── ActiveRideFeature.swift        // parent reducer for the ride
 │   │   ├── RideDashboardView.swift        // S05 dashboard
 │   │   ├── ActiveRideAccessoryView.swift  // S05.3 accessory
-│   │   ├── Dashboard/                     // DashboardPageView, DashboardGridLayout, DashboardWidget
+│   │   ├── Dashboard/                     // DashboardPageView, DashboardGridLayout, DashboardWidget, DashboardEditChrome (S07)
 │   │   │                                  // (protocol + catalog) — #139; each widget folder has its adapter
 │   │   ├── Speed/                         // SpeedFeature, SpeedWidgetView (W1/W2),
 │   │   │                                  // PaceWidgetView (W11)

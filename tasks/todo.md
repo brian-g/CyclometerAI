@@ -425,3 +425,74 @@ Branch: `feat/333-dashboard-zoom`
   - `AccessoryStrip` replaced by `isCollapsedOverride`, plus a collapsed snapshot.
 - PR comment: the dashboard reopens on the page it was left on. `dashboardPage` now lives in `ActiveRideFeature.State` (per ride), tested in `reopeningKeepsThePage`.
 - PR comment: "dimming not working". Not reproduced on the sim: a ride started and left alone dimmed at 30s with Pause showing. The suspect on device is auto-pause (0 GPS speed for 10s), and paused rides never dim (#102). Waiting on Brian: was Pause or Resume showing?
+
+# #141 — S07 Dashboard customization edit mode
+
+Plan: /Users/brian/.claude/plans/rustling-mapping-pancake.md
+Branch: `feat/141-dashboard-edit-mode`
+
+- [x] 1. Model: `DashboardPage.id` (hand-decoded), `keepingValidPlacements`, `removingWidget`, `appendingBlankPage`, `prunedEmptyPages`; decode prunes
+- [x] 2. Model tests (DashboardLayoutTests, AppPreferencesTests)
+- [x] 3. Reducer: `isEditingDashboard`, long press / remove / Done, one validated write path, pruned getter outside edit mode
+- [x] 4. Reducer tests (TestStore)
+- [x] 5. Views: page ids in TabView, Add (disabled) / Done row, collapse blocked, edit chrome (0.90, glass, minus, wiggle / reduce motion), widgetDetail gate, widget `title`
+- [x] 6. Edit-chrome snapshot (look at the PNG)
+- [x] 7. Unit suite green; new tests confirmed in the log
+- [x] 8. Sim drive: long press (widget, map, empty cell), remove, Done, drag-down blocked
+
+## Review
+
+- **Sketch S07** was read over HTTP (this session's MCP client connected before Sketch started). Add `plus` / Done `checkmark` sit beside the Dynamic Island, and the grid doesn't move. So the controls take the **status bar's band**, and the status bar is hidden while editing. This replaced the plan's "swap the grabber" row: a top-row widget's remove button lands just below the island, exactly where that row would have been.
+- **Buttons:** `MapSheetButton` (exact 44 pt glass circle), not `rideControlButton`. `.buttonStyle(.glass)` pads past its frame to about 66 pt and overfilled the 62 pt band. `MapSheetButton` now reads `isEnabled` so the disabled Add greys out; its other callers are always enabled, so they are unchanged.
+- **Equality includes `DashboardPage.id`.** Tests that compared a decoded layout with freshly built pages now compare `placements`. The blank page's id comes from `@Dependency(\.uuid)`, so TestStore can predict it.
+- **The wiggle is split from the frame** (`dashboardWiggle` / `dashboardEditFrame`). `accessibilityReduceMotion` can't be set from a test, and a time-driven angle can't be snapshotted.
+- **Unit suite:** 1735 passed, 0 failed. The new suites were confirmed in the log by name.
+- **Snapshots** recorded and looked at: frame and button render in light and dark; off mode adds nothing. The first recording run crashed in SnapshotTesting's `prepareView` with no key window yet (a cold clone, with a key-window snapshot as the first test). That is a harness race; reruns were clean.
+- **Sim drive** (three runs, throwaway test deleted):
+  - long press enters edit mode from the Speed widget, the map and an empty cell, and no sheet opens;
+  - a tap in edit mode opens nothing;
+  - a slow drag down doesn't minimise;
+  - Remove Heart Rate works;
+  - the 4th blank page shows and is pruned on Done, leaving "Page 3 of 3";
+  - `app-preferences.json` on the device shows HR gone from page 1 and 3 pages.
+- **Not done:**
+  - Finger feel of the wiggle and the long press on a device.
+  - The minus glyph still overlaps the first letter of a widget's label, SpringBoard style. A tuning call for Brian.
+
+### Follow-up: Brian's review (2026-10-01)
+1. **"Bouncing" in a removed widget's space.** A burst of screenshots showed the removal itself is instant. What moved was the neighbours' glass frames: their rims and shadows spill past their cells, and they swung at a fixed 1°.
+   - Fix: the wiggle now gives every widget the same 1.5 pt corner travel, with the angle derived from its size via `visualEffect`.
+   - Fix: cards replace glass (item 3).
+2. **Minus buttons.**
+   - Red `cyDestructive` with a `cyTextInverted` minus, at `.title2`. The `.title` size was too big.
+   - Centred on the card's top-left corner.
+   - Widgets draw in reading order, so a button that overhangs into its neighbours sits on top of them. Sim-verified by tapping HR Zones' remove button, which overhangs Cadence.
+   - The buttons stay outside the wiggle. Measured across 8 frames: the button centre held at exactly (59.0, 852.8) px while the card edge moved between 816 and 818 px.
+3. **Frame.** Three variants were rendered on the simulator (launch-argument switches, all removed). Brian picked hairline `cyBorderStrong` cards.
+4. **Add/Done.**
+   - Glass capsules `Spacing.dynamicIsland` (37 pt) tall and φ as wide, with the hit area padded to 44 pt.
+   - Done is tinted `cyPrimary`. That style was my pick, since Brian gave only the geometry.
+   - Vertical centre checked against the status-bar clock, which iOS centres on the island: within about 1 pt.
+   - `MapSheetButton` is back to main's version.
+- **Snapshot suite.** It now renders offscreen, because nothing in it is glass any more. In the key window it lost its top padding and clipped the buttons. This also removes the cold-start `prepareView` trap.
+- **Unit suite:** 1735 passed, 0 failed.
+
+### Follow-up: PR #364 review + /code-review xhigh (2026-10-02)
+- [x] PR: map bleed cut by the card clip outside edit mode — clip only while editing
+- [x] PR: scale 1-column 90%, 2-column 95% (card + remove button in step); 2-wide snapshot
+- [x] PR: edit-mode preview, driven through the reducer
+- [x] PR: Add/Done inset `Spacing.xl` (Brian's change, kept)
+- [x] Factory comparison by placements, not page ids (setter + decode)
+- [x] Done always writes a valid `dashboardPage`; prune explicitly, not via the getter's flag
+- [x] Banner never takes touches (covered top-row remove buttons in edit mode)
+- [x] Lossy placement decode: an undecodable placement costs only itself
+- [x] Validator rejects duplicate page ids
+- [x] Enter/leave edit mode animate (send with animation)
+- [x] Long press over the radar lane too; VoiceOver "Edit Dashboard" action
+- [x] Add/Done band never 0 pt tall (no-island devices)
+
+**Review notes**
+- **Map bleed.** The card's `clipShape` clipped every widget, even outside edit mode, at the safe-area-inset frame. W8 draws its bleed past that frame. Now a `mask` clips to the card only while editing, and otherwise ignores the safe area. Sim-verified on page 1 (bottom map) and page 2 (top map), before edit mode and after Done.
+- **Factory matching** uses `DashboardLayout.isFactory` (placements only) in the setter and on decode. The other fix considered was fixed UUID literals on the factory pages. That alone would leave a decoded factory copy pinning the rider until their next edit.
+- **Not changed: one `TimelineView` per widget while editing.** Its closure only applies `visualEffect` rotation to a content placeholder, so widget bodies aren't re-evaluated each frame. Edit mode is also a short, deliberate state. Revisit if a device trace shows a cost.
+- **Unit suite:** 1740 passed, 0 failed. The 5 new tests were confirmed in the log by name. Snapshots re-recorded and looked at; the 2×1 card's sides line up with the 1×1s above it.

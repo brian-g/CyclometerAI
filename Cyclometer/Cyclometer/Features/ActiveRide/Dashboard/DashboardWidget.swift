@@ -12,6 +12,9 @@ protocol DashboardWidget: View {
     /// Saved in the rider's layout. Never rename one: a layout naming an id this build doesn't
     /// have drops that widget.
     static var id: String { get }
+    /// The widget's name as the rider reads it: S07's remove button ("Remove Speed"), and S08's
+    /// picker (#142).
+    static var title: String { get }
     /// The sizes this widget has a layout for. The validator rejects any other, and S08 (#142)
     /// filters its picker by them.
     static var supportedSizes: [WidgetSize] { get }

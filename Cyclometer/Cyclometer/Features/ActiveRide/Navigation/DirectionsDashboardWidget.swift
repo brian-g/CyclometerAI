@@ -5,6 +5,7 @@ import ComposableArchitecture
 /// sheet inputs as `MapDashboardWidget`.
 struct DirectionsDashboardWidget: DashboardWidget {
     static let id = "directions"
+    static let title = "Directions"
     static let supportedSizes: [WidgetSize] = [.oneByOne, .twoByOne]
 
     let size: WidgetSize
