@@ -40,15 +40,12 @@ struct MapSheetButton: View {
     let systemImage: String
     let action: () -> Void
 
-    /// The explicit token would otherwise hide `.disabled`: S07's Add waits on #142 (#141).
-    @Environment(\.isEnabled) private var isEnabled
-
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .labelStyle(.iconOnly)
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(isEnabled ? Color.cyPrimary : Color.cyTextTertiary)
+                .foregroundStyle(Color.cyPrimary)
                 .frame(width: Spacing.mapControl, height: Spacing.mapControl)
                 .glassEffect(.regular.interactive(), in: .circle)
         }

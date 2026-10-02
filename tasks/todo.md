@@ -458,3 +458,21 @@ Branch: `feat/141-dashboard-edit-mode`
 - **Not done:**
   - Finger feel of the wiggle and the long press on a device.
   - The minus glyph still overlaps the first letter of a widget's label, SpringBoard style. A tuning call for Brian.
+
+### Follow-up: Brian's review (2026-10-01)
+1. **"Bouncing" in a removed widget's space.** A burst of screenshots showed the removal itself is instant. What moved was the neighbours' glass frames: their rims and shadows spill past their cells, and they swung at a fixed 1°.
+   - Fix: the wiggle now gives every widget the same 1.5 pt corner travel, with the angle derived from its size via `visualEffect`.
+   - Fix: cards replace glass (item 3).
+2. **Minus buttons.**
+   - Red `cyDestructive` with a `cyTextInverted` minus, at `.title2`. The `.title` size was too big.
+   - Centred on the card's top-left corner.
+   - Widgets draw in reading order, so a button that overhangs into its neighbours sits on top of them. Sim-verified by tapping HR Zones' remove button, which overhangs Cadence.
+   - The buttons stay outside the wiggle. Measured across 8 frames: the button centre held at exactly (59.0, 852.8) px while the card edge moved between 816 and 818 px.
+3. **Frame.** Three variants were rendered on the simulator (launch-argument switches, all removed). Brian picked hairline `cyBorderStrong` cards.
+4. **Add/Done.**
+   - Glass capsules `Spacing.dynamicIsland` (37 pt) tall and φ as wide, with the hit area padded to 44 pt.
+   - Done is tinted `cyPrimary`. That style was my pick, since Brian gave only the geometry.
+   - Vertical centre checked against the status-bar clock, which iOS centres on the island: within about 1 pt.
+   - `MapSheetButton` is back to main's version.
+- **Snapshot suite.** It now renders offscreen, because nothing in it is glass any more. In the key window it lost its top padding and clipped the buttons. This also removes the cold-start `prepareView` trap.
+- **Unit suite:** 1735 passed, 0 failed.

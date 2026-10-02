@@ -99,15 +99,14 @@ struct RideDashboardView: View {
 
     // ── Edit controls — S07 (#141), Sketch "S07 - Dashboard Customization" ─────
     // Add and Done flank the Dynamic Island, centred in the band above the safe area, so they
-    // never sit on a top-row widget's remove button. `MapSheetButton`'s exact 44 pt circle, since
-    // the ride controls' padded glass style overfills the band. Add opens S08, which #142 wires up.
+    // never sit on a top-row widget's remove button. Add opens S08, which #142 wires up.
     private var editControls: some View {
         GeometryReader { proxy in
             HStack {
-                MapSheetButton(title: "Add Widget", systemImage: "plus") {}
+                EditModeButton(title: "Add Widget", systemImage: "plus") {}
                     .disabled(true)
                 Spacer()
-                MapSheetButton(title: "Done", systemImage: "checkmark") {
+                EditModeButton(title: "Done", systemImage: "checkmark", isProminent: true) {
                     store.send(.dashboardEditingDoneTapped)
                 }
             }
@@ -220,6 +219,40 @@ struct RideDashboardView: View {
 
     private func ringBell() {
         AudioServicesPlaySystemSound(1005) // 1005 = system "Tink"; route via AudioClient later
+    }
+}
+
+/// S07's Add and Done (#141): a glass capsule exactly the Dynamic Island's height and the golden
+/// ratio as wide, so the pair reads as part of the island's band. Done is tinted, as a confirm is.
+private struct EditModeButton: View {
+    let title: String
+    let systemImage: String
+    var isProminent = false
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    private static let goldenRatio = (1 + sqrt(5.0)) / 2
+
+    var body: some View {
+        Button(action: action) {
+            // The icon-only `Label` keeps its title for VoiceOver.
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(glyphColor)
+                .frame(width: Spacing.dynamicIsland * Self.goldenRatio, height: Spacing.dynamicIsland)
+                .glassEffect(isProminent ? .regular.tint(.cyPrimary).interactive() : .regular.interactive(), in: .capsule)
+                // The capsule is the island's height; the touch area is a full 44 pt.
+                .padding(.vertical, (Spacing.mapControl - Spacing.dynamicIsland) / 2)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var glyphColor: Color {
+        guard isEnabled else { return .cyTextTertiary }
+        return isProminent ? .cyTextOnPrimary : .cyPrimary
     }
 }
 

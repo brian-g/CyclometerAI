@@ -684,3 +684,21 @@ them when they turn out to be stale.
 **What happened.** To get past xcodebuild's "failed to launch com.xavier.cyclometer", I ran `xcrun simctl shutdown all` before four test runs. Each shutdown SIGKILLed the simulator processes that were slow to exit, which showed up as crash reports. Brian saw the simulator "crashing". It also closed every simulator he had open. The rest of the reports were Apple's iOS 27 runtime processes (`intelligencetasksd`, `AppIntentsLiveEntityService`) trapping on each boot, and my resets meant more boots.
 
 **Rule.** A launch failure gets a plain rerun first. If a reset is needed, shut down only the test device by UDID and say so. Before calling a crash "not ours", check `~/Library/Logs/DiagnosticReports`: a parent of `launchd_sim` means the simulator runtime, and a `SIGTERM_TIMEOUT` SIGKILL means something was shut down.
+
+---
+
+## A still screenshot can't review motion, and glass on neighbours interferes (2026-10-01, #141)
+
+**What happened.** I shipped S07 edit mode after checking single screenshots of it. Brian's review:
+- the space left by a removed widget "bounces all over the place";
+- the glass borders interfere with each other;
+- the minus buttons are too small;
+- Add and Done don't fit.
+
+A burst of screenshots, about 75 ms apart, showed the cause of the first two. The removed widget vanished cleanly. What moved in the hole was the **neighbours' glass frames**: their rims and shadows spill past their own cells, and every frame swung at a fixed 1°. That 1° moves a full-width widget's corners about 3.5 pt, three times as far as a 1×1's.
+
+**Rules.**
+- Anything animated gets reviewed **in motion**: a burst of `XCUIScreen.main.screenshot()`, or frames from `simctl io recordVideo`. One still frame proves the layout and hides the motion.
+- Liquid Glass casts a rim and a shadow past its shape. Don't tile glass shapes edge to edge. Use one glass layer, or a non-glass treatment, for a grid.
+- Size motion by distance, not angle: a fixed corner travel, with the angle derived from the view's size (`visualEffect`).
+- For a visual decision that's Brian's to make, render the options side by side (launch-argument switches, one drive, a contact sheet). Don't pick one and ship it.
