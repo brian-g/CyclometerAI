@@ -37,7 +37,7 @@ struct SpeedWidget: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
-        .widgetDetail {
+        .widgetDetail(label: "Speed", value: accessibilityValue) {
             Text("Ride Metrics")
                 .font(.headline)
                 .presentationDetents([.medium])
@@ -182,6 +182,20 @@ struct SpeedWidget: View {
     private var displayAvg: String { oneDecimal(unit.speed(fromMPS: averageSpeed)) }
     private var displayMax: String { oneDecimal(unit.speed(fromMPS: maxSpeed)) }
     private var displayDistance: String { oneDecimal(unit.distance(fromMeters: distance)) }
+
+    /// What VoiceOver reads after "Speed" (#361): what this size shows, with no "—" read aloud. Time
+    /// is spelled out, since VoiceOver reads "1:02:33" digit by digit.
+    var accessibilityValue: String {
+        var parts = [speed == nil ? "No reading" : "\(displaySpeed) \(unit.speedLabel)"]
+        if size != .oneByOne {
+            parts += ["average \(displayAvg)", "maximum \(displayMax)"]
+        }
+        if size == .twoByTwo {
+            let time = Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide))
+            parts += ["distance \(displayDistance) \(unit.distanceLabel)", "time \(time)"]
+        }
+        return parts.joined(separator: ", ")
+    }
 
     // MARK: - Trend Chevron
 

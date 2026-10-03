@@ -574,3 +574,25 @@ Branch: `feat/368-tap-empty-cell`
   - Computing the placement twice: the existing #142 pattern.
   - Gating the slot `ForEach`: at most 14 cells.
   - The UX.md "contradiction": a misread. A 1×1 gap does show only 1×1s.
+
+# #361 — VoiceOver: every tappable widget is one button
+
+Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md
+Branch: `feat/361-widget-voiceover-buttons`
+
+- [x] 1. `.widgetDetail(label:value:)`: grouping, label/value, `.isButton` (not in edit mode), explicit default action
+- [x] 2. Map, Cadence, Speed pass their summaries; Directions drops its hand-rolled modifiers
+- [x] 3. UX.md §S05 sentence
+- [x] 4. Spoken-text unit tests
+- [x] 5. Tree shape + activation test (in-process, via the automation switch; no XCUITest needed)
+- [x] 6. Full unit suite green, snapshots unchanged
+
+## Review
+
+- The modifier owns grouping, label/value, trait and the default action. `label` is required, so a widget can't adopt the tap without saying what VoiceOver reads.
+- Before this change, **Map had no accessibility element at all**, not just a missing trait. Cadence, Speed and Directions came out as loose texts (revert check).
+- Found by the tests: `accessibilityAddTraits([])` in edit mode still left `.button`. SwiftUI infers the trait from the tap gesture and the action, so edit mode now removes it explicitly.
+- SwiftUI builds no accessibility tree in a unit test. The tests turn on libAccessibility's automation switch (`_AXSSetAutomationEnabled`, private, test target only), and the suite is `.serialized` because the switch is process-wide.
+- Directions' spoken text moved "Directions" into the label: "No turn ahead" replaces "Directions, no turn ahead".
+- Full suite 1780/0. The 28 widget/edit-chrome snapshot tests ran, and no reference changed.
+- Not verified: VoiceOver on a device. In-process `accessibilityActivate()` is the same entry point VoiceOver uses, but nobody has listened to it.

@@ -21,7 +21,7 @@ struct MapWidget: View {
         ActiveRideMapView(trackSegments: trackSegments, route: route, surface: .widget)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.cyBgSecondary)
-            .widgetDetail {
+            .widgetDetail(label: "Map") {
                 LiveMapSheet(
                     trackSegments: trackSegments,
                     route: route,
