@@ -97,7 +97,7 @@ struct VariaRadarBackoffTests {
     }
 }
 
-// MARK: - Integration (controllable BLEClient + TestClock)
+// MARK: - Integration (controllable BLEClient + SteppedClock)
 
 /// Every assertion here awaits a broadcast stream that never finishes, so a client that
 /// fails to emit hangs rather than fails. Individual tests run in ~1s.
@@ -147,7 +147,7 @@ struct VariaRadarIntegrationTests {
         let servicesDiscovered: LockIsolated<[[CBUUID]?]>
         let reads: LockIsolated<[CBUUID]>
         let calls: LockIsolated<[BLECall]>
-        let clock: TestClock<Duration>
+        let clock: SteppedClock
 
         init() {
             let (eventStream, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
@@ -158,7 +158,7 @@ struct VariaRadarIntegrationTests {
             let servicesDiscovered = LockIsolated<[[CBUUID]?]>([])
             let reads = LockIsolated<[CBUUID]>([])
             let calls = LockIsolated<[BLECall]>([])
-            let clock = TestClock()
+            let clock = SteppedClock()
 
             let bleClient = BLEClient(
                 startScanning: { uuids in
@@ -501,21 +501,18 @@ struct VariaRadarIntegrationTests {
         #expect(await targets.next() == [])               // stale vehicles cleared
         #expect(await states.next() == .reconnecting)
 
-        await harness.clock.advance(by: .seconds(1))
+        #expect(await harness.clock.advanceToNextSleep() == .seconds(1))
         #expect(await connects.next() == peripheralID)    // attempt 1 after 1s
-        await harness.clock.advance(by: .seconds(2))
+        #expect(await harness.clock.advanceToNextSleep() == .seconds(2))
         #expect(await connects.next() == peripheralID)    // attempt 2 after 2s
-        await harness.clock.advance(by: .seconds(4))
+        #expect(await harness.clock.advanceToNextSleep() == .seconds(4))
         #expect(await connects.next() == peripheralID)    // attempt 3 after 4s
 
-        // Reconnection succeeds — backoff task is cancelled.
+        // Reconnection succeeds — backoff task is cancelled before `.connected` is
+        // published, so nothing is left sleeping.
         harness.events.yield(.connected(id: peripheralID))
         #expect(await states.next() == .connected)
-
-        let countAfterRecovery = harness.connectCount.value
-        await harness.clock.advance(by: .seconds(120))
-        await Task.yield()
-        #expect(harness.connectCount.value == countAfterRecovery)
+        #expect(harness.clock.isIdle)
     }
 
     @Test("User-initiated disconnect does not trigger reconnection")
