@@ -3697,4 +3697,47 @@ struct ActiveRideFeatureDashboardEditTests {
             $0.addWidgetCell = nil
         }
     }
+
+    // ── S07 move by drag (#367) ────────────────────────────────────────────────
+
+    @Test("A move to an empty spot, and a swap with a same-size widget, save at once")
+    func moveAndSwapSave() async {
+        let heartRate = WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1)
+        let page = DashboardPage(placements: [Self.pace, heartRate])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 4, column: 0))) {
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [DashboardPage(id: page.id, placements: [
+                    WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 4, column: 0), heartRate,
+                ])])
+            }
+        }
+        await store.send(.moveWidget(pageID: page.id, widgetID: HeartRateDashboardWidget.id, to: DashboardGrid.Cell(row: 4, column: 0))) {
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [DashboardPage(id: page.id, placements: [
+                    WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 1),
+                    WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 4, column: 0),
+                ])])
+            }
+        }
+    }
+
+    @Test("A refused drop leaves the layout as it was, and outside edit mode a move is ignored")
+    func refusedOrOutsideEditModeMoveIsIgnored() async {
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 1, column: 0)
+        let page = DashboardPage(placements: [Self.pace, cadence])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 4, column: 0)))
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        // A 1×1 onto a 2×1, and off the grid.
+        await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 1, column: 0)))
+        await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 7, column: 0)))
+    }
 }

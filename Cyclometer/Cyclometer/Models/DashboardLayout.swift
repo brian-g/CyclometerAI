@@ -99,6 +99,40 @@ extension DashboardPage {
         }
         .filter { !occupied.contains($0) }
     }
+
+    /// This page with `widgetID`'s top-left moved to `cell` (S07 drag, #367): into a spot that's
+    /// empty once the widget has left it, or onto a same-size widget whose top-left is `cell`, which
+    /// takes the moved widget's old spot. `nil` for any other drop — a different-size widget in the
+    /// way, a same-size one out of line, off the grid — which the validator catches; nothing shifts
+    /// to make room (reflow is deferred, #367 "Open questions").
+    func moving(_ widgetID: String, to cell: DashboardGrid.Cell) -> DashboardPage? {
+        guard let index = placements.firstIndex(where: { $0.widgetID == widgetID }) else { return nil }
+        let moved = placements[index]
+        guard moved.cell != cell else { return nil }
+        var page = self
+        if let other = placements.firstIndex(where: { $0.cell == cell && $0.size == moved.size }) {
+            page.placements[other].row = moved.row
+            page.placements[other].column = moved.column
+        }
+        page.placements[index].row = cell.row
+        page.placements[index].column = cell.column
+        return DashboardLayoutValidator.violations(in: page).isEmpty ? page : nil
+    }
+
+    /// Where VoiceOver's Move action in `direction` takes `widgetID` (#367): the nearest top-left
+    /// that way that `moving` accepts, so a widget in the way is jumped rather than stranding it.
+    /// `nil` when there's none, and the action isn't offered.
+    func moveTarget(for widgetID: String, _ direction: DashboardGrid.Direction) -> DashboardGrid.Cell? {
+        guard let placement = placements.first(where: { $0.widgetID == widgetID }) else { return nil }
+        var cell = placement.cell
+        while true {
+            cell = DashboardGrid.Cell(row: cell.row + direction.rowStep, column: cell.column + direction.columnStep)
+            guard (0...DashboardGrid.rows - placement.size.rows).contains(cell.row),
+                  (0...DashboardGrid.columns - placement.size.columns).contains(cell.column)
+            else { return nil }
+            if moving(widgetID, to: cell) != nil { return cell }
+        }
+    }
 }
 
 /// The rider's dashboard: its pages, in swipe order. Persisted in `AppPreferences`.
@@ -134,6 +168,15 @@ struct DashboardLayout: Codable, Equatable {
         mapPages { page in
             guard page.id == pageID, let placement = page.openPlacement(widgetID: widgetID, size: size, at: cell) else { return }
             page.placements.append(placement)
+        }
+    }
+
+    /// This layout with `widgetID` on the page `pageID` moved to `cell`, or swapped with the
+    /// same-size widget there (S07 drag, #367). Unchanged when that's refused (`DashboardPage.moving`).
+    func movingWidget(_ widgetID: String, onPage pageID: DashboardPage.ID, to cell: DashboardGrid.Cell) -> DashboardLayout {
+        mapPages { page in
+            guard page.id == pageID, let moved = page.moving(widgetID, to: cell) else { return }
+            page = moved
         }
     }
 
@@ -178,6 +221,47 @@ enum DashboardGrid {
     struct Cell: Hashable {
         var row: Int
         var column: Int
+    }
+
+    /// The ways S07's VoiceOver Move actions move a widget (#367).
+    enum Direction: CaseIterable {
+        case up, down, left, right
+
+        var title: String {
+            switch self {
+            case .up: "Move Up"
+            case .down: "Move Down"
+            case .left: "Move Left"
+            case .right: "Move Right"
+            }
+        }
+
+        fileprivate var rowStep: Int {
+            switch self {
+            case .up: -1
+            case .down: 1
+            case .left, .right: 0
+            }
+        }
+
+        fileprivate var columnStep: Int {
+            switch self {
+            case .left: -1
+            case .right: 1
+            case .up, .down: 0
+            }
+        }
+    }
+
+    /// The cell nearest a widget's top-left at `origin` in a grid of `size`: where an S07 drag drops
+    /// it (#367). Not clamped, so a drop off the grid stays off it and `DashboardPage.moving` refuses
+    /// it. `nil` before the grid has a size, which would divide by zero.
+    static func cell(nearest origin: CGPoint, in size: CGSize) -> Cell? {
+        guard size.width > 0, size.height > 0 else { return nil }
+        return Cell(
+            row: Int((origin.y / (size.height / CGFloat(rows))).rounded()),
+            column: Int((origin.x / (size.width / CGFloat(columns))).rounded())
+        )
     }
 
     /// Every cell a `size` widget with its top-left at `cell` covers.

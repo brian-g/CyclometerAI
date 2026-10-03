@@ -575,6 +575,36 @@ Branch: `feat/368-tap-empty-cell`
   - Gating the slot `ForEach`: at most 14 cells.
   - The UX.md "contradiction": a misread. A 1×1 gap does show only 1×1s.
 
+# #367 — S07 rearrange widgets by drag (move to empty spot, swap same size)
+
+Plan: /Users/brian/.claude/plans/proud-whistling-pearl.md
+Branch: `feat/367-drag-rearrange`
+
+- [x] 1. Model: `DashboardPage.moving`, `DashboardLayout.movingWidget`, `DashboardGrid.Direction`, `moveTarget`, `DashboardGrid.cell(nearest:in:)` + tests
+- [x] 2. Reducer: `moveWidget(pageID:widgetID:to:)` + TestStore tests
+- [x] 3. View: `DashboardWidgetCell` (lift gesture, offset/zIndex, edit-mode a11y element + Move actions); wiggle `isHeld`
+- [x] 4. UX.md §S07 "As built (#367)" + Updated line
+- [x] 5. Unit suite green (new tests confirmed present in log)
+- [x] 6. Sim drive (throwaway XCUITest, deleted): move, swap, refused, page swipe, remove, persistence
+- [x] 7. VoiceOver: card labels found by the sim drive; Move actions covered by `moveTarget` tests only (see Review)
+
+## Review
+
+- **Gesture, changed during the work.** The planned SwiftUI `LongPressGesture.sequenced(before: DragGesture)` blocked paging. A sim probe showed a swipe starting on a widget didn't page in edit mode, though one starting on an empty slot did; with the gesture disabled, the widget swipe paged again. I switched to the plan's contingency, `UILongPressGestureRecognizer` via `UIGestureRecognizerRepresentable` (`DashboardLiftGesture`). The probe then paged from a widget, an empty slot and the centre.
+- **Sim drive** (fresh install, throwaway XCUITest, deleted) passed end to end:
+  - long press enters edit mode;
+  - a horizontal hold-drag swaps Heart Rate and HR Zones, and the page stays 1;
+  - a 1×1 onto Cadence's 2×1 springs back;
+  - Remove Directions removes;
+  - a diagonal drag moves HR Zones into the gap;
+  - a swipe pages;
+  - on page 2, Pace moves into the empty last row;
+  - after Done and a relaunch, all three moves are kept.
+- **Unit suite:** 1770 passed, 0 failed. All 8 new tests are confirmed in the log, and the edit-chrome snapshots are unchanged.
+- **Not verified:**
+  - VoiceOver Move actions weren't performed, because XCUITest can't invoke custom actions. Their targets are covered by `moveTarget` tests; the labels were found on the sim.
+  - Drag feel on a device: the 0.25 s hold, the 5% lift, and the spring.
+
 # #361 — VoiceOver: every tappable widget is one button
 
 Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md

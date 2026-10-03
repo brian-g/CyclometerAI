@@ -4,6 +4,7 @@
 
 **Updated:** 2026-10-02 — §S08 opens from an empty cell (#368): in edit mode each empty cell shows a dashed slot; tapping it lists only the sizes that fit with that cell as their top-left, and adds there.  
 **Updated:** 2026-10-02 — §S08 Add Widget built (#142): Add opens it; a widget goes into the first open spot on the page the rider is on, and an entry that page can't take is dimmed. "Empty page" inserts a blank page after the current one. Tapping an empty cell is not yet built (#368), nor is rearranging by drag (#367).  
+**Updated:** 2026-10-02 — §S07 widgets can be moved by drag (#367): onto an empty spot that fits, or swapped with a widget of the same size; any other drop springs back. Nothing reflows yet, so §S05 "Customization" 2's "shift other items around" waits on the open questions in §S07.  
 **Updated:** 2026-10-02 — §S07 no longer appends a blank page on entering edit mode (#142): new pages come only from §S08's "Empty page", as §S05 "Customization" 5 says.  
 **Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink into hairline-bordered cards (glass frames bled into each other, so they were dropped at review), and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
 **Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
@@ -561,7 +562,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 - Optional label: `.caption`, uppercased, 16pt
 - Each widget exposes a label modifier; the label is hidden on 2x2 widgets
 - Tapping any widget opens a detail sheet for that metric category
-- VoiceOver reads each tappable widget as one button: its title, then what the card shows in words ("Cadence, 92 rpm, average 88, maximum 110"); "—" is read as "No reading". A double-tap opens the same sheet. In S07 edit mode it is not a button, since a tap does nothing there (#361)
+- VoiceOver reads each tappable widget as one button: its title, then what the card shows in words ("Cadence, 92 rpm, average 88, maximum 110"); "—" is read as "No reading". A double-tap opens the same sheet (#361). In S07 edit mode the card's own element, with its Move actions, replaces it (#367)
 
 ---
 
@@ -788,9 +789,14 @@ Modeled on SpringBoard widget editing:
 
 As built (#141): Add (`plus`) and Done (`checkmark`) are glass capsules the Dynamic Island's height (37 pt) and the golden ratio as wide, flanking the island where the status bar would be; the status bar is hidden while editing, and Done is tinted `primary`. Each widget shrinks into a rounded card (90% for one column, 95% for two, so every card insets its sides equally) with a hairline `borderStrong` border, and wiggles unless Reduce Motion is on, its corners swinging the same 1.5 pt whatever its size. A red `destructive` remove button sits centred on each card's top-left corner and holds still while the card wiggles. A widget's tap does nothing while editing. A long press anywhere on the page, radar lane included, enters edit mode, and VoiceOver offers an "Edit Dashboard" action on the page indicator. The dashboard can't be minimised by a drag until Done. Removals save at once. If every widget is removed, Done leaves one blank page.
 
+As built (#367): a press held a quarter of a second on a widget lifts it — it stops wiggling, grows 5% and draws above the rest — and a drag carries it, remove button and all. A swipe that moves before the hold ends still pages. On release the widget's top-left goes to the nearest cell: it moves there if the spot is empty once it has left it, or swaps with a widget of the same size whose top-left is there. Any other drop — onto a different-size widget, half onto a same-size one, off the grid — springs back. The widget keeps its size, it can't be dragged to another page, and nothing shifts to make room. Moves save at once. In edit mode VoiceOver reads each widget as one element, "Speed, row 1, full width", with Move Up, Down, Left and Right actions; each goes to the nearest spot that way a drag could drop it, jumping a widget in the way, and is offered only when there is one.
+
 ### Open UX Questions
 
-- [ ] TBD
+- [ ] Reflow (#367): when a 2×2 is dropped onto a row holding two 1×1s, do the 1×1s move down, swap, or is the drop refused? (Refused today.)
+- [ ] Overflow: if shifting pushes widgets past row 7, do they spill onto the next page, or is the drop refused?
+- [ ] Gaps: do widgets close up into empty cells? §S05 "an empty grid item will not get auto-filled" points to no.
+- [ ] Between pages: can a widget be dragged to another page by holding it at the screen edge, as on SpringBoard?
 
 ---
 
