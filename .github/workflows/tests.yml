@@ -45,11 +45,40 @@ jobs:
           fi
 
       - name: Show toolchain
-        run: xcodebuild -version
+        id: xcode
+        run: |
+          xcodebuild -version
+          echo "build=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_OUTPUT"
+
+      # The dependency build, cached (#372). A clean run compiled ~1,500 package units, mostly
+      # swift-syntax for TCA's macros, against ~330 for the app and tests, and that was about
+      # half the job. A restored DerivedData survives a fresh checkout: the checkout path is
+      # stable, so only the app and tests recompile (measured locally: 326 units, none from
+      # packages).
+      #
+      # No restore-keys, deliberately: a Package.resolved or Xcode change is a cold build,
+      # never a partial reuse of a build made against other sources or another toolchain.
+      # Bump v1 to drop the cache by hand. actions/cache only saves after a green job, and
+      # caches are per ref: a PR's first run restores main's, and a run that misses saves
+      # its own.
+      #
+      # Prebuilt swift-syntax was tried first and doesn't apply. Xcode 27 downloads
+      # prebuilts/swift-syntax/…-MacroSupport by default, yet xcodebuild still compiles
+      # swift-syntax for the macro host, with IDEPackageEnablePrebuilts set or not.
+      - name: Restore the dependency build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/DerivedData
+            !${{ runner.temp }}/DerivedData/Logs
+            !${{ runner.temp }}/DerivedData/Index.noindex
+          key: deriveddata-v1-${{ runner.os }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Cyclometer/Cyclometer.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}-arm64
 
       - name: Resolve SPM dependencies
         working-directory: Cyclometer
-        run: xcodebuild -resolvePackageDependencies -project Cyclometer.xcodeproj -scheme Cyclometer
+        run: |
+          xcodebuild -resolvePackageDependencies -project Cyclometer.xcodeproj -scheme Cyclometer \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData"
 
       # The destination used to be the literal name "iPhone 17 Pro", and twice that
       # device simply wasn't on the runner — 2026-08-30 and 2026-09-07 both died with
@@ -79,6 +108,10 @@ jobs:
       # The speedup was never real: the whole suite is ~8 seconds of execution
       # (715 tests, 69 suites). CI wall-clock is build and simulator boot, not tests.
       #
+      # ARCHS=arm64: the runner and the simulator are both arm64, but the macro host tools
+      # were built for x86_64 too. That was 464 compile units (462 of them swift-syntax) of
+      # a 1,926-unit clean build, with no use (#372).
+      #
       # Snapshot suites are excluded deliberately, not by oversight. Their reference
       # images were recorded against a local simulator and SwiftUI pixel output
       # varies across runner images, so gating merges on them would be flaky from
@@ -96,7 +129,9 @@ jobs:
             -project Cyclometer.xcodeproj \
             -scheme Cyclometer \
             -destination "id=$SIM_UDID" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipMacroValidation \
+            ARCHS=arm64 \
             -parallel-testing-enabled NO \
             -resultBundlePath "$RUNNER_TEMP/TestResults.xcresult" \
             -only-testing:CyclometerTests \
