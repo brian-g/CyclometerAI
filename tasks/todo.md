@@ -651,3 +651,28 @@ Branch: `feat/361-widget-voiceover-buttons`
 - Units are spoken in words through new `UnitSystem.spokenSpeed`, `spokenDistance` and `spokenTurnDistance`. The turn distance shares its rounding with `turnDistance`.
 - Not applied: the Speed badge/trend, the Directions 1×1 wording, the edit-mode trait guard, the formatting cost, localization, locale pinning (see the PR thread).
 - Full suite 1793/0, snapshots unchanged.
+
+# #372 — CI stops rebuilding SPM dependencies on every run
+
+Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md
+Branch: `ci/372-dependency-build`
+
+- [x] 1. Prebuilt swift-syntax: measured, doesn't apply (xcodebuild still compiles it for the macro host)
+- [x] 2. `ARCHS=arm64`: a clean build goes from 1,926 to 1,523 units, 0 x86_64
+- [x] 3. DerivedData cache: survives a fresh checkout locally (326 units, 0 packages)
+- [x] 4. CI cold + warm runs (37156042525 attempts 1–2)
+
+## Review
+
+- The cache works: the warm run compiled 302 units, none from packages. Restore takes ~22 s, ~800 MB.
+- **The wall-clock win is unproven.**
+  - Cold took 16.1 min and warm 19.4 min, but the runners differed 1.7× on identical tests (144 s vs 250 s).
+  - Relative to each machine's own speed, the warm build was ~15% faster.
+  - Package targets compiled in parallel; the app and test modules are the serial path.
+- Brian chose to ship both. The measured numbers are in the `tests.yml` comment.
+- Untouched fixed costs, now about half the build step:
+  - ~2 min of xcodebuild startup;
+  - ~1 min re-resolving packages, which "Resolve SPM dependencies" had already done;
+  - 1–3 min regenerating SDK stat caches every run.
+
+  These are candidates for a follow-up.

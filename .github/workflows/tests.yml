@@ -26,7 +26,8 @@ jobs:
     # on PermissionsClientTests) and removed both times: a deadline inside the run is
     # subject to the same simulator contention it is meant to guard against, so it kills
     # tests that were merely delayed while a real hang on a healthy runner is obvious
-    # anyway. A job timeout has no such coupling. Successful runs take 9–12 minutes.
+    # anyway. A job timeout has no such coupling. Successful runs take 16–20 minutes
+    # (2026-10-03, #372).
     timeout-minutes: 30
 
     steps:
@@ -65,6 +66,14 @@ jobs:
       # Prebuilt swift-syntax was tried first and doesn't apply. Xcode 27 downloads
       # prebuilts/swift-syntax/…-MacroSupport by default, yet xcodebuild still compiles
       # swift-syntax for the macro host, with IDEPackageEnablePrebuilts set or not.
+      #
+      # What it buys, measured 2026-10-03 (run 37156042525, cold then warm):
+      # - Compiling: 1,156 units → 302, none from packages. Restoring takes ~22 s (~800 MB).
+      # - Wall clock: smaller than that suggests. Package targets compile in parallel, while
+      #   the app and test modules are the serial path, and runner speed varies ~1.7× from job
+      #   to job. Relative to each machine's test time, the warm build was ~15% faster.
+      # - SDKStatCaches.noindex is excluded: xcodebuild regenerates it on every run
+      #   ("Base directory status changed") whether it was restored or not.
       - name: Restore the dependency build
         uses: actions/cache@v4
         with:
@@ -72,6 +81,7 @@ jobs:
             ${{ runner.temp }}/DerivedData
             !${{ runner.temp }}/DerivedData/Logs
             !${{ runner.temp }}/DerivedData/Index.noindex
+            !${{ runner.temp }}/DerivedData/SDKStatCaches.noindex
           key: deriveddata-v1-${{ runner.os }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Cyclometer/Cyclometer.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}-arm64
 
       - name: Resolve SPM dependencies
