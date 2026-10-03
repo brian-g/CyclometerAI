@@ -622,3 +622,32 @@ Branch: `fix/373-ble-reconnect-tests`
 - **A check I nearly weakened:** the "+120 s, nothing reconnects" checks relied on `TestClock`'s yields after waking. Without them, removing the client's cancel-on-success still passed. Fix: in the two recovery tests the check is now `clock.isIdle`, which is deterministic because both clients cancel before publishing `.connected`. With the cancel removed they fail 3/3. The three user-disconnect checks assert that a task is *never* spawned, which no clock can make deterministic, so they keep `advance(by:)` + yields as before, at the caller's priority.
 - Revert checks: a wrong ladder value fails at once (`:776`).
 - Results: both suites green over 20 iterations, 1360/0. Full CI-style suite 1488/0 in 37 s.
+# #361 — VoiceOver: every tappable widget is one button
+
+Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md
+Branch: `feat/361-widget-voiceover-buttons`
+
+- [x] 1. `.widgetDetail(label:value:)`: grouping, label/value, `.isButton` (not in edit mode), explicit default action
+- [x] 2. Map, Cadence, Speed pass their summaries; Directions drops its hand-rolled modifiers
+- [x] 3. UX.md §S05 sentence
+- [x] 4. Spoken-text unit tests
+- [x] 5. Tree shape + activation test (in-process, via the automation switch; no XCUITest needed)
+- [x] 6. Full unit suite green, snapshots unchanged
+
+## Review
+
+- The modifier owns grouping, label/value, trait and the default action. `label` is required, so a widget can't adopt the tap without saying what VoiceOver reads.
+- Before this change, **Map had no accessibility element at all**, not just a missing trait. Cadence, Speed and Directions came out as loose texts (revert check).
+- Found by the tests: `accessibilityAddTraits([])` in edit mode still left `.button`. SwiftUI infers the trait from the tap gesture and the action, so edit mode now removes it explicitly.
+- SwiftUI builds no accessibility tree in a unit test. The tests turn on libAccessibility's automation switch (`_AXSSetAutomationEnabled`, private, test target only), and the suite is `.serialized` because the switch is process-wide.
+- Directions' spoken text moved "Directions" into the label: "No turn ahead" replaces "Directions, no turn ahead".
+- Full suite 1780/0. The 28 widget/edit-chrome snapshot tests ran, and no reference changed.
+- Not verified: VoiceOver on a device. In-process `accessibilityActivate()` is the same entry point VoiceOver uses, but nobody has listened to it.
+
+### Follow-up: /code-review high (findings 1–4 applied)
+- The test host's automation switch is counted, not a flag, and its window is shown but never made key, so other suites running during `settle()` don't find it.
+- Labels come from the catalog (`CadenceDashboardWidget.title` and the rest), the same names #367's edit-mode card reads.
+- The element test also checks `accessibilityValue`. Revert check: removing `.accessibilityValue(value)` fails Cadence, Speed and Directions.
+- Units are spoken in words through new `UnitSystem.spokenSpeed`, `spokenDistance` and `spokenTurnDistance`. The turn distance shares its rounding with `turnDistance`.
+- Not applied: the Speed badge/trend, the Directions 1×1 wording, the edit-mode trait guard, the formatting cost, localization, locale pinning (see the PR thread).
+- Full suite 1793/0, snapshots unchanged.
