@@ -84,6 +84,11 @@ jobs:
       # varies across runner images, so gating merges on them would be flaky from
       # day one. Running them in CI needs its own issue — record-on-CI or a
       # per-pixel tolerance. They all pass locally.
+      #
+      # MapWidgetAccessibilityTests is skipped for a different reason: it puts a live
+      # MapKit view in a window, and on the runner that never returned, so the job sat
+      # until its 30-minute timeout (#361, 2026-10-03). It passes locally. The same
+      # checks run here on the pure-SwiftUI widgets in WidgetAccessibilityTests.
       - name: Run unit tests
         working-directory: Cyclometer
         run: |
@@ -113,7 +118,8 @@ jobs:
             -skip-testing:CyclometerTests/PaceWidgetSnapshotTests \
             -skip-testing:CyclometerTests/SensorBatteryLabelSnapshotTests \
             -skip-testing:CyclometerTests/MapSheetButtonsSnapshotTests \
-            -skip-testing:CyclometerTests/DirectionsWidgetSnapshotTests
+            -skip-testing:CyclometerTests/DirectionsWidgetSnapshotTests \
+            -skip-testing:CyclometerTests/MapWidgetAccessibilityTests
 
       # Every failure before this existed as three bare test names in 14k lines of
       # xcodebuild noise. The bundle carries the assertion text and source location;

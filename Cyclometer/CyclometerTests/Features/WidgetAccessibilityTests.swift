@@ -6,7 +6,7 @@ import UIKit
 /// #361 — every widget whose tap opens a detail sheet is one VoiceOver button, reading its title and
 /// what the card shows, and a double-tap opens the sheet a tap does.
 ///
-/// Serialized: each element test owns the key window and the process-wide automation switch, and
+/// Serialized: each element test owns a window and holds the process-wide automation switch, and
 /// `Host.settle()` spins the main run loop, where a parallel test would otherwise run in between.
 @MainActor
 @Suite(.serialized)
@@ -69,9 +69,39 @@ struct WidgetAccessibilityTests {
 
     // MARK: - Element shape and activation
 
-    /// One element per widget, a button, labelled with its title and carrying its spoken value.
-    @Test(arguments: TappableWidget.allCases)
+    /// Map's run in `MapWidgetAccessibilityTests`, which CI skips.
+    @Test(arguments: TappableWidget.withoutMap)
     func widgetIsOneButton(_ widget: TappableWidget) throws {
+        try ElementChecks.isOneButton(widget)
+    }
+
+    @Test(arguments: TappableWidget.withoutMap)
+    func doubleTapOpensTheSheet(_ widget: TappableWidget) throws {
+        try ElementChecks.doubleTapOpensTheSheet(widget)
+    }
+
+    @Test(arguments: TappableWidget.withoutMap)
+    func editModeIsNotAButton(_ widget: TappableWidget) throws {
+        try ElementChecks.editModeIsNotAButton(widget)
+    }
+}
+
+/// The element checks for W8 Map, apart so CI can skip them, as it does every suite that renders a
+/// live map (`.github/workflows/tests.yml`). On the CI runner the first `Host` holding a `MapWidget`
+/// never returned, and the job hit its 30-minute timeout; locally the suite passes.
+@MainActor
+@Suite(.serialized)
+struct MapWidgetAccessibilityTests {
+    @Test func mapIsOneButton() throws { try ElementChecks.isOneButton(.map) }
+    @Test func mapDoubleTapOpensTheSheet() throws { try ElementChecks.doubleTapOpensTheSheet(.map) }
+    @Test func mapInEditModeIsNotAButton() throws { try ElementChecks.editModeIsNotAButton(.map) }
+}
+
+/// One widget's VoiceOver element, checked in a `Host`.
+@MainActor
+private enum ElementChecks {
+    /// One element per widget, a button, labelled with its title and carrying its spoken value.
+    static func isOneButton(_ widget: TappableWidget) throws {
         let host = try Host(widget.view)
         defer { host.tearDown() }
 
@@ -81,8 +111,7 @@ struct WidgetAccessibilityTests {
         #expect(element.isButton == true)
     }
 
-    @Test(arguments: TappableWidget.allCases)
-    func doubleTapOpensTheSheet(_ widget: TappableWidget) throws {
+    static func doubleTapOpensTheSheet(_ widget: TappableWidget) throws {
         let host = try Host(widget.view)
         defer { host.tearDown() }
 
@@ -93,8 +122,7 @@ struct WidgetAccessibilityTests {
     }
 
     /// S07: a tap does nothing while editing, so the widget isn't a button and a double-tap opens nothing.
-    @Test(arguments: TappableWidget.allCases)
-    func editModeIsNotAButton(_ widget: TappableWidget) throws {
+    static func editModeIsNotAButton(_ widget: TappableWidget) throws {
         let host = try Host(widget.view.environment(\.isEditingDashboard, true))
         defer { host.tearDown() }
 
@@ -111,6 +139,9 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
     case map, cadence, speed, directions
 
     var testDescription: String { title }
+
+    /// Every widget but the live map, which CI can't render (see `MapWidgetAccessibilityTests`).
+    static let withoutMap = allCases.filter { $0 != .map }
 
     var title: String {
         switch self {
