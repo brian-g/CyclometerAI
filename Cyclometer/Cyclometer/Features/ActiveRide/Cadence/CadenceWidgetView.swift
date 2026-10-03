@@ -53,7 +53,7 @@ struct CadenceWidget: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
-        .widgetDetail(label: "Cadence", value: accessibilityValue) {
+        .widgetDetail(label: CadenceDashboardWidget.title, value: accessibilityValue) {
             CadenceDetailSheet(
                 averageCadence: averageCadence,
                 maxCadence: maxCadence,

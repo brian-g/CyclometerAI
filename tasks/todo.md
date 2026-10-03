@@ -626,3 +626,11 @@ Branch: `feat/361-widget-voiceover-buttons`
 - Directions' spoken text moved "Directions" into the label: "No turn ahead" replaces "Directions, no turn ahead".
 - Full suite 1780/0. The 28 widget/edit-chrome snapshot tests ran, and no reference changed.
 - Not verified: VoiceOver on a device. In-process `accessibilityActivate()` is the same entry point VoiceOver uses, but nobody has listened to it.
+
+### Follow-up: /code-review high (findings 1–4 applied)
+- The test host's automation switch is counted, not a flag, and its window is shown but never made key, so other suites running during `settle()` don't find it.
+- Labels come from the catalog (`CadenceDashboardWidget.title` and the rest), the same names #367's edit-mode card reads.
+- The element test also checks `accessibilityValue`. Revert check: removing `.accessibilityValue(value)` fails Cadence, Speed and Directions.
+- Units are spoken in words through new `UnitSystem.spokenSpeed`, `spokenDistance` and `spokenTurnDistance`. The turn distance shares its rounding with `turnDistance`.
+- Not applied: the Speed badge/trend, the Directions 1×1 wording, the edit-mode trait guard, the formatting cost, localization, locale pinning (see the PR thread).
+- Full suite 1793/0, snapshots unchanged.

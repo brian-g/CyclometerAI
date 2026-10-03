@@ -37,7 +37,7 @@ struct SpeedWidget: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
-        .widgetDetail(label: "Speed", value: accessibilityValue) {
+        .widgetDetail(label: SpeedDashboardWidget.title, value: accessibilityValue) {
             Text("Ride Metrics")
                 .font(.headline)
                 .presentationDetents([.medium])
@@ -183,16 +183,16 @@ struct SpeedWidget: View {
     private var displayMax: String { oneDecimal(unit.speed(fromMPS: maxSpeed)) }
     private var displayDistance: String { oneDecimal(unit.distance(fromMeters: distance)) }
 
-    /// What VoiceOver reads after "Speed" (#361): what this size shows, with no "—" read aloud. Time
-    /// is spelled out, since VoiceOver reads "1:02:33" digit by digit.
+    /// What VoiceOver reads after "Speed" (#361): what this size shows, with no "—" read aloud. Units
+    /// and time are spelled out: VoiceOver reads "1:02:33" digit by digit, and a symbol is a guess.
     var accessibilityValue: String {
-        var parts = [speed == nil ? "No reading" : "\(displaySpeed) \(unit.speedLabel)"]
+        var parts = [speed.map(unit.spokenSpeed(fromMPS:)) ?? "No reading"]
         if size != .oneByOne {
             parts += ["average \(displayAvg)", "maximum \(displayMax)"]
         }
         if size == .twoByTwo {
             let time = Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide))
-            parts += ["distance \(displayDistance) \(unit.distanceLabel)", "time \(time)"]
+            parts += ["distance \(unit.spokenDistance(fromMeters: distance))", "time \(time)"]
         }
         return parts.joined(separator: ", ")
     }

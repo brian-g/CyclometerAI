@@ -42,11 +42,11 @@ struct WidgetAccessibilityTests {
                 unit: .metric, size: size
             )
         }
-        #expect(live(.oneByOne).accessibilityValue == "36.0 km/h")
-        #expect(live(.twoByOne).accessibilityValue == "36.0 km/h, average 28.8, maximum 43.2")
+        #expect(live(.oneByOne).accessibilityValue == "36.0 kilometers per hour")
+        #expect(live(.twoByOne).accessibilityValue == "36.0 kilometers per hour, average 28.8, maximum 43.2")
         #expect(
             live(.twoByTwo).accessibilityValue
-                == "36.0 km/h, average 28.8, maximum 43.2, distance 12.4 km, time 1 hour, 2 minutes, 33 seconds"
+                == "36.0 kilometers per hour, average 28.8, maximum 43.2, distance 12.4 kilometers, time 1 hour, 2 minutes, 33 seconds"
         )
     }
 
@@ -62,14 +62,14 @@ struct WidgetAccessibilityTests {
         let withTurn = DirectionsWidget(hasRoute: true, nextTurn: turn, distanceMeters: 347, unit: .metric)
         let noTurn = DirectionsWidget(hasRoute: true, nextTurn: nil, distanceMeters: nil, unit: .metric)
         let noRoute = DirectionsWidget(hasRoute: false, nextTurn: nil, distanceMeters: nil, unit: .metric)
-        #expect(withTurn.accessibilityValue == "Turn right onto County Road S in 350 m")
+        #expect(withTurn.accessibilityValue == "Turn right onto County Road S in 350 meters")
         #expect(noTurn.accessibilityValue == "No turn ahead")
         #expect(noRoute.accessibilityValue == "No route")
     }
 
     // MARK: - Element shape and activation
 
-    /// One element per widget, a button, labelled with its title.
+    /// One element per widget, a button, labelled with its title and carrying its spoken value.
     @Test(arguments: TappableWidget.allCases)
     func widgetIsOneButton(_ widget: TappableWidget) throws {
         let host = try Host(widget.view)
@@ -77,6 +77,7 @@ struct WidgetAccessibilityTests {
 
         let element = try host.onlyElement()
         #expect(element.accessibilityLabel == widget.title)
+        #expect((element.accessibilityValue ?? "") == widget.value)
         #expect(element.isButton == true)
     }
 
@@ -120,6 +121,16 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         }
     }
 
+    /// What `view` reads after its title.
+    var value: String {
+        switch self {
+        case .map: ""
+        case .cadence: "92 rpm, average 88, maximum 110"
+        case .speed: "36.0 kilometers per hour, average 28.8, maximum 43.2, distance 12.4 kilometers, time 1 hour, 2 minutes, 33 seconds"
+        case .directions: "No route"
+        }
+    }
+
     @MainActor
     var view: AnyView {
         switch self {
@@ -138,11 +149,14 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
     }
 }
 
-/// A widget in a key window, so its accessibility tree is built and its sheet can present.
+/// A widget in a visible window, so its accessibility tree is built and its sheet can present.
 ///
 /// SwiftUI builds no accessibility tree until an assistive technology asks for one, so in a plain
 /// unit test every widget has zero elements. `AccessibilityAutomation` turns on the switch that
 /// VoiceOver and XCUITest flip, for the life of the host only.
+///
+/// The window is shown but never made key: `settle()` spins the main run loop, where other suites'
+/// tests run, and key-window snapshot tests (`drawHierarchyInKeyWindow`) must not find this one.
 @MainActor
 private final class Host {
     let window: UIWindow
@@ -150,13 +164,13 @@ private final class Host {
 
     init<V: View>(_ view: V) throws {
         try #require(AccessibilityAutomation.isAvailable, AccessibilityAutomation.missingSymbol)
-        AccessibilityAutomation.isEnabled = true
+        AccessibilityAutomation.acquire()
         let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
         window = scene.map(UIWindow.init(windowScene:)) ?? UIWindow()
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 400)
         controller = UIHostingController(rootView: AnyView(view.frame(width: 393, height: 200)))
         window.rootViewController = controller
-        window.makeKeyAndVisible()
+        window.isHidden = false
         settle()
     }
 
@@ -177,7 +191,7 @@ private final class Host {
     func tearDown() {
         controller.presentedViewController?.dismiss(animated: false)
         window.isHidden = true
-        AccessibilityAutomation.isEnabled = false
+        AccessibilityAutomation.release()
     }
 
     private static func elements(in node: NSObject) -> [NSObject] {
@@ -224,8 +238,18 @@ private enum AccessibilityAutomation {
 
     static var isAvailable: Bool { setEnabled != nil }
 
-    static var isEnabled = false {
-        didSet { setEnabled?(isEnabled ? 1 : 0) }
+    /// Hosts alive now. Counted rather than a flag, so one host's teardown can't switch automation
+    /// off under another.
+    private static var holders = 0
+
+    static func acquire() {
+        holders += 1
+        if holders == 1 { setEnabled?(1) }
+    }
+
+    static func release() {
+        holders -= 1
+        if holders == 0 { setEnabled?(0) }
     }
 
     static let missingSymbol: Comment = """

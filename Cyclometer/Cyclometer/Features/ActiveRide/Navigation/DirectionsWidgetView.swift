@@ -27,7 +27,7 @@ struct DirectionsWidget: View {
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color.cyBgSecondary)
-            .widgetDetail(label: "Directions", value: accessibilityValue) {
+            .widgetDetail(label: DirectionsDashboardWidget.title, value: accessibilityValue) {
                 LiveMapSheet(
                     trackSegments: trackSegments,
                     route: route,
@@ -104,10 +104,8 @@ struct DirectionsWidget: View {
 
     /// What VoiceOver reads after "Directions" (#361).
     var accessibilityValue: String {
-        if let turn {
-            return "\(NavigationFeature.instructionText(for: turn.maneuver)) in \(turn.distance.value) \(turn.distance.unit)"
-        }
-        return hasRoute ? "No turn ahead" : "No route"
+        guard let nextTurn, let distanceMeters else { return hasRoute ? "No turn ahead" : "No route" }
+        return "\(NavigationFeature.instructionText(for: nextTurn)) in \(unit.spokenTurnDistance(fromMeters: distanceMeters))"
     }
 }
 

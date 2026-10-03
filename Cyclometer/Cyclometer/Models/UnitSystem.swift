@@ -61,15 +61,47 @@ enum UnitSystem: String, Equatable, Sendable, Codable, CaseIterable {
     /// ridden, and the switch is decided on that rounded value, so 996 m reads "1.0 km", never
     /// "1,000 m". Close in is `elevationUnit` — each system's small unit.
     func turnDistance(fromMeters meters: Double) -> (value: String, unit: String) {
+        let (distance, digits) = turnMeasurement(fromMeters: meters)
+        return (distance.value.formatted(.number.precision(.fractionLength(digits))), distance.unit.symbol)
+    }
+
+    /// `turnDistance(fromMeters:)` in words, for VoiceOver (#361): "350 meters", "1.2 miles".
+    func spokenTurnDistance(fromMeters meters: Double) -> String {
+        let (distance, digits) = turnMeasurement(fromMeters: meters)
+        return Self.spoken(distance, fractionLength: digits)
+    }
+
+    /// The distance W9 shows, already rounded, and how many decimals it shows it with.
+    private func turnMeasurement(fromMeters meters: Double) -> (Measurement<UnitLength>, digits: Int) {
         let distance = Measurement(value: max(meters, 0), unit: UnitLength.meters)
         let near = (distance.converted(to: elevationUnit).value / 10).rounded() * 10
         let switchover = Measurement(value: self == .metric ? 1 : 0.1, unit: lengthUnit)
             .converted(to: elevationUnit).value
         if near < switchover {
-            return (near.formatted(.number.precision(.fractionLength(0))), elevationUnit.symbol)
+            return (Measurement(value: near, unit: elevationUnit), 0)
         }
-        let far = distance.converted(to: lengthUnit).value
-        return (far.formatted(.number.precision(.fractionLength(1))), lengthUnit.symbol)
+        return (distance.converted(to: lengthUnit), 1)
+    }
+
+    // MARK: - Spoken (VoiceOver)
+
+    /// Speed in words, to one decimal as the widgets show it: "36.0 kilometers per hour" (#361).
+    /// Spelled out because a bare symbol leaves VoiceOver to guess how to read it.
+    func spokenSpeed(fromMPS mps: Double) -> String {
+        Self.spoken(Measurement(value: speed(fromMPS: mps), unit: speedUnit), fractionLength: 1)
+    }
+
+    /// Distance in words, to one decimal: "12.4 kilometers" (#361).
+    func spokenDistance(fromMeters meters: Double) -> String {
+        Self.spoken(Measurement(value: distance(fromMeters: meters), unit: lengthUnit), fractionLength: 1)
+    }
+
+    private static func spoken<U: Dimension>(_ measurement: Measurement<U>, fractionLength: Int) -> String {
+        measurement.formatted(.measurement(
+            width: .wide,
+            usage: .asProvided,
+            numberFormatStyle: .number.precision(.fractionLength(fractionLength))
+        ))
     }
 
     /// Seconds required to cover one distance unit (mile or kilometer) at the

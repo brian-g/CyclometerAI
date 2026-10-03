@@ -562,7 +562,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 - Optional label: `.caption`, uppercased, 16pt
 - Each widget exposes a label modifier; the label is hidden on 2x2 widgets
 - Tapping any widget opens a detail sheet for that metric category
-- VoiceOver reads each tappable widget as one button: its title, then what the card shows in words ("Cadence, 92 rpm, average 88, maximum 110"); "—" is read as "No reading". A double-tap opens the same sheet (#361). In S07 edit mode the card's own element, with its Move actions, replaces it (#367)
+- VoiceOver reads each tappable widget as one button: its title, then what the card shows in words ("Cadence, 92 rpm, average 88, maximum 110"); units and time are spelled out ("36.0 kilometers per hour", "1 hour, 2 minutes"), and "—" is read as "No reading". A double-tap opens the same sheet (#361). In S07 edit mode the card's own element, with its Move actions, replaces it (#367)
 
 ---
 
