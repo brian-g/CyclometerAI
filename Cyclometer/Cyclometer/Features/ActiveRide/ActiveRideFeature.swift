@@ -375,6 +375,9 @@ struct ActiveRideFeature {
         /// S07 (#141): a long press anywhere on the dashboard enters edit mode.
         case dashboardLongPressed
         case removeWidgetTapped(pageID: DashboardPage.ID, widgetID: String)
+        /// S07 (#367): a drag's drop, or a VoiceOver Move action. Moves the widget to `cell`, or swaps
+        /// it with the same-size widget there; any other drop leaves the layout as it was.
+        case moveWidget(pageID: DashboardPage.ID, widgetID: String, to: DashboardGrid.Cell)
         case dashboardEditingDoneTapped
         /// S08 (#142): Add opens the picker; an entry adds that widget to the page the rider is on.
         case addWidgetTapped
@@ -535,6 +538,10 @@ struct ActiveRideFeature {
             case .removeWidgetTapped(let pageID, let widgetID):
                 guard state.isEditingDashboard else { return .none }
                 setDashboardLayout(state.dashboardLayout.removingWidget(widgetID, fromPage: pageID), in: &state)
+                return .none
+            case .moveWidget(let pageID, let widgetID, let cell):
+                guard state.isEditingDashboard else { return .none }
+                setDashboardLayout(state.dashboardLayout.movingWidget(widgetID, onPage: pageID, to: cell), in: &state)
                 return .none
             case .addWidgetTapped:
                 guard state.isEditingDashboard else { return .none }
