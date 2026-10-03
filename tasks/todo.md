@@ -605,6 +605,23 @@ Branch: `feat/367-drag-rearrange`
   - VoiceOver Move actions weren't performed, because XCUITest can't invoke custom actions. Their targets are covered by `moveTarget` tests; the labels were found on the sim.
   - Drag feel on a device: the 0.25 s hold, the 5% lift, and the spring.
 
+# #373 — BLE reconnect tests stall on CI
+
+Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md
+Branch: `fix/373-ble-reconnect-tests`
+
+- [x] 1. Find the real cause from CI run 37083342499's log
+- [x] 2. `SteppedClock`: no yields, wakes the sleeper directly, `advanceToNextSleep()` returns the step length
+- [x] 3. Swap both BLE harnesses to it; ladder steps assert their length; recovery checks assert `clock.isIdle`
+- [x] 4. Revert checks, 20 iterations, full suite
+- [ ] 5. CI: the three tests under 2 s, the CSC live suite under 10 s
+
+## Review
+
+- **The issue's cause was wrong.** There was no late-sleeper race; that would hang the test forever, not slow it down. `Task.megaYield()` runs each of its 20 yields as a detached `.background` task and waits for it. `TestClock.advance` does at least 3 megaYields, so the 10-step ladder was about 600 background hops. The CI VM throttles background QoS, so each advance took 10–30 s. Locally, under the same CI-style serial run, the test took 0.008 s. The test, event-loop and reconnect tasks were measured at priority 25, so only megaYield's own tasks were throttled.
+- **A check I nearly weakened:** the "+120 s, nothing reconnects" checks relied on `TestClock`'s yields after waking. Without them, removing the client's cancel-on-success still passed. Fix: in the two recovery tests the check is now `clock.isIdle`, which is deterministic because both clients cancel before publishing `.connected`. With the cancel removed they fail 3/3. The three user-disconnect checks assert that a task is *never* spawned, which no clock can make deterministic, so they keep `advance(by:)` + yields as before, at the caller's priority.
+- Revert checks: a wrong ladder value fails at once (`:776`).
+- Results: both suites green over 20 iterations, 1360/0. Full CI-style suite 1488/0 in 37 s.
 # #361 — VoiceOver: every tappable widget is one button
 
 Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md
