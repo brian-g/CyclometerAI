@@ -676,3 +676,14 @@ Branch: `ci/372-dependency-build`
   - 1–3 min regenerating SDK stat caches every run.
 
   These are candidates for a follow-up.
+
+# #374 — CI boots the simulator during the build; skips docs-only pushes
+
+Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md
+Branch: `ci/374-sim-boot-docs-skip`
+
+- [x] 1. `resolve-simulator.sh` starts the boot in the background (`simctl boot` itself blocked ~2 min)
+- [x] 2. "Resolve a simulator" moved first; test step split into build-for-testing, wait, test-without-building
+- [x] 3. `paths-ignore` for assets/, tasks/, .claude/, **/*.md on both triggers, with the required-check caveat
+- [ ] 4. CI run: simulator step under 15 s, wait step a few seconds, green
+- [ ] 5. First docs-only change after merge starts no Tests run
