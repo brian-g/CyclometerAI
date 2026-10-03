@@ -518,7 +518,9 @@ struct BLEHRIntegrationTests {
 
         harness.events.yield(.disconnected(id: paired, error: nil))
         #expect(await status.next() == false)
-        #expect(harness.calls.value.filter { $0 == .startScanning([hrServiceUUID]) }.count == 2)
+        // The handler publishes `false` before it calls `startScanning`, so the status is
+        // no sync point for the rescan (failed on CI, PR #377 run 37160465778).
+        await expectEventually { harness.calls.value.filter { $0 == .startScanning([hrServiceUUID]) }.count == 2 }
 
         // The rescan redelivers everything in range. Only the paired strap gets back in.
         harness.events.yield(.discovered(id: stranger, name: "Partner", rssi: -40, services: [hrServiceUUID]))

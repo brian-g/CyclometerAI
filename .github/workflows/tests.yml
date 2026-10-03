@@ -167,6 +167,11 @@ jobs:
       # The speedup was never real: the whole suite is ~8 seconds of execution
       # (715 tests, 69 suites). CI wall-clock is build and simulator boot, not tests.
       #
+      # -collect-test-diagnostics never: after any failure xcodebuild otherwise spends ~10 min
+      # gathering a sysdiagnose. In run 37160465778 the tests finished at 23:21:33 and the step
+      # at 23:31:42, two minutes short of the job timeout. The result bundle still carries
+      # every failure, and "Summarize test failures" reads it from there.
+      #
       # Snapshot suites are excluded deliberately, not by oversight. Their reference
       # images were recorded against a local simulator and SwiftUI pixel output
       # varies across runner images, so gating merges on them would be flaky from
@@ -186,6 +191,7 @@ jobs:
             -destination "id=$SIM_UDID" \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -parallel-testing-enabled NO \
+            -collect-test-diagnostics never \
             -resultBundlePath "$RUNNER_TEMP/TestResults.xcresult" \
             -only-testing:CyclometerTests \
             -skip-testing:CyclometerTests/HeroNumberSnapshotTests \

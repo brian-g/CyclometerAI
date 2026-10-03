@@ -687,3 +687,6 @@ Branch: `ci/374-sim-boot-docs-skip`
 - [x] 3. `paths-ignore` for assets/, tasks/, .claude/, **/*.md on both triggers, with the required-check caveat
 - [ ] 4. CI run: simulator step under 15 s, wait step a few seconds, green
 - [ ] 5. First docs-only change after merge starts no Tests run
+- [x] 6. First CI run (37160465778): simulator step 3 s, wait 1 s, but red on a flaky HR test
+- [x] 7. HR flake fixed: `unexpectedDropReadmitsOnlyThePairedStrap` checked the rescan straight after the status flip, but the client publishes `false` before calling `startScanning`. Now `expectEventually`, the repo's helper for exactly this; 20 iterations green
+- [x] 8. `-collect-test-diagnostics never` in CI: the failing run spent 10 min gathering diagnostics after the tests ended, two minutes short of the timeout
