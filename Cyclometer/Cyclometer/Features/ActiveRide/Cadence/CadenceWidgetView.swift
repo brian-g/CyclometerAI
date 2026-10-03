@@ -53,7 +53,7 @@ struct CadenceWidget: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
-        .widgetDetail {
+        .widgetDetail(label: CadenceDashboardWidget.title, value: accessibilityValue) {
             CadenceDetailSheet(
                 averageCadence: averageCadence,
                 maxCadence: maxCadence,
@@ -118,6 +118,16 @@ struct CadenceWidget: View {
     /// is meaningless — it would mean the rider never pedalled).
     private var displayAvg: String { averageCadence > 0 ? "\(averageCadence)" : "—" }
     private var displayMax: String { maxCadence > 0 ? "\(maxCadence)" : "—" }
+
+    /// What VoiceOver reads after "Cadence" (#361): what this size shows, with no "—" read aloud.
+    var accessibilityValue: String {
+        var parts = [cadence.map { "\($0) rpm" } ?? "No reading"]
+        if size == .twoByOne {
+            if averageCadence > 0 { parts.append("average \(averageCadence)") }
+            if maxCadence > 0 { parts.append("maximum \(maxCadence)") }
+        }
+        return parts.joined(separator: ", ")
+    }
 }
 
 // MARK: - Cadence History Watermark Chart

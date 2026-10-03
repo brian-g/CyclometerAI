@@ -106,4 +106,23 @@ struct UnitSystemTests {
     func turnDistanceClampsAtZero(unit: UnitSystem) {
         #expect(unit.turnDistance(fromMeters: -5).value == "0")
     }
+
+    // MARK: - Spoken (#361)
+
+    @Test("A spoken turn distance is the shown one, units in words", arguments: [
+        (UnitSystem.metric, 347.0, "350 meters"),
+        (UnitSystem.metric, 996.0, "1.0 kilometers"),
+        (UnitSystem.imperial, 100.0, "330 feet"),
+        (UnitSystem.imperial, 1_000.0, "0.6 miles")
+    ])
+    func spokenTurnDistanceMatchesShown(unit: UnitSystem, meters: Double, spoken: String) {
+        #expect(unit.spokenTurnDistance(fromMeters: meters) == spoken)
+    }
+
+    @Test func spokenSpeedAndDistanceSpellOutUnits() {
+        #expect(UnitSystem.metric.spokenSpeed(fromMPS: 10) == "36.0 kilometers per hour")
+        #expect(UnitSystem.imperial.spokenSpeed(fromMPS: 10) == "22.4 miles per hour")
+        #expect(UnitSystem.metric.spokenDistance(fromMeters: 12_400) == "12.4 kilometers")
+        #expect(UnitSystem.imperial.spokenDistance(fromMeters: 12_400) == "7.7 miles")
+    }
 }
