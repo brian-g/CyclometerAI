@@ -72,20 +72,20 @@ struct WidgetAccessibilityTests {
     /// One element per widget, a button, labelled with its title.
     @Test(arguments: TappableWidget.allCases)
     func widgetIsOneButton(_ widget: TappableWidget) throws {
-        let host = Host(widget.view)
+        let host = try Host(widget.view)
         defer { host.tearDown() }
 
-        let element = try #require(host.elements.only)
+        let element = try host.onlyElement()
         #expect(element.accessibilityLabel == widget.title)
         #expect(element.isButton == true)
     }
 
     @Test(arguments: TappableWidget.allCases)
     func doubleTapOpensTheSheet(_ widget: TappableWidget) throws {
-        let host = Host(widget.view)
+        let host = try Host(widget.view)
         defer { host.tearDown() }
 
-        let element = try #require(host.elements.only)
+        let element = try host.onlyElement()
         #expect(element.accessibilityActivate())
         host.settle()
         #expect(host.controller.presentedViewController != nil)
@@ -94,10 +94,10 @@ struct WidgetAccessibilityTests {
     /// S07: a tap does nothing while editing, so the widget isn't a button and a double-tap opens nothing.
     @Test(arguments: TappableWidget.allCases)
     func editModeIsNotAButton(_ widget: TappableWidget) throws {
-        let host = Host(widget.view.environment(\.isEditingDashboard, true))
+        let host = try Host(widget.view.environment(\.isEditingDashboard, true))
         defer { host.tearDown() }
 
-        let element = try #require(host.elements.only)
+        let element = try host.onlyElement()
         #expect(element.isButton == false)
         _ = element.accessibilityActivate()
         host.settle()
@@ -148,7 +148,8 @@ private final class Host {
     let window: UIWindow
     let controller: UIHostingController<AnyView>
 
-    init<V: View>(_ view: V) {
+    init<V: View>(_ view: V) throws {
+        try #require(AccessibilityAutomation.isAvailable, AccessibilityAutomation.missingSymbol)
         AccessibilityAutomation.isEnabled = true
         let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
         window = scene.map(UIWindow.init(windowScene:)) ?? UIWindow()
@@ -159,8 +160,14 @@ private final class Host {
         settle()
     }
 
-    /// Every accessibility element under the hosting view.
-    var elements: [NSObject] { Self.elements(in: controller.view) }
+    /// The widget's one accessibility element. No elements at all is the signature of the automation
+    /// switch no longer working, so that failure names it rather than reading as a widget bug.
+    func onlyElement() throws -> NSObject {
+        let elements = Self.elements(in: controller.view)
+        try #require(!elements.isEmpty, AccessibilityAutomation.emptyTree)
+        try #require(elements.count == 1, "\(elements.count) accessibility elements; a tappable widget must be one")
+        return elements[0]
+    }
 
     /// Lets layout, the accessibility tree and any presentation catch up.
     func settle() {
@@ -188,31 +195,53 @@ private final class Host {
     }
 }
 
-/// libAccessibility's automation switch, private API, used by tests only. If a future iOS drops the
-/// symbol, setting it does nothing, the tree stays empty, and every element test fails at
-/// `#require(host.elements.only)`. That is loud, not silently green.
+/// libAccessibility's automation switch, `_AXSSetAutomationEnabled(Int32)`. **Private Apple API,
+/// test target only, never linked into the app.** It is the switch VoiceOver and XCUITest turn on;
+/// with it on, SwiftUI builds its accessibility tree in-process, and `accessibilityActivate()` runs a
+/// view's default action exactly as a VoiceOver double-tap does. Added in #361 (iOS 27, Xcode 27) and
+/// kept deliberately over an XCUITest, which can't perform a VoiceOver activation.
+///
+/// When an iOS release breaks it, the element tests fail in one of two ways, each naming this type:
+/// - The symbol is gone: `Host.init` fails with `missingSymbol`.
+/// - The symbol is there but no longer builds SwiftUI's tree: every widget has zero elements, and
+///   `Host.onlyElement()` fails with `emptyTree`.
+///
+/// Then: look for a renamed symbol (`nm -gU` on the simulator runtime's `libAccessibility.dylib`),
+/// or move the element checks to `CyclometerUITests` (`app.buttons["Cadence"]` and its `value`). That
+/// keeps label/value/trait coverage but loses activation, which then needs a VoiceOver check on a device.
+/// The spoken-text tests above don't use the switch and keep running either way.
 @MainActor
 private enum AccessibilityAutomation {
     private typealias SetEnabled = @convention(c) (Int32) -> Void
 
+    private static let symbolName = "_AXSSetAutomationEnabled"
+
     private static let setEnabled: SetEnabled? = {
         guard let library = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW),
-              let symbol = dlsym(library, "_AXSSetAutomationEnabled") else { return nil }
+              let symbol = dlsym(library, symbolName) else { return nil }
         return unsafeBitCast(symbol, to: SetEnabled.self)
     }()
+
+    static var isAvailable: Bool { setEnabled != nil }
 
     static var isEnabled = false {
         didSet { setEnabled?(isEnabled ? 1 : 0) }
     }
+
+    static let missingSymbol: Comment = """
+        Private API \(symbolName) not found in libAccessibility.dylib. This iOS dropped or renamed it; \
+        see AccessibilityAutomation in WidgetAccessibilityTests.swift.
+        """
+
+    static let emptyTree: Comment = """
+        No accessibility elements at all. Either the widget exposes none, or the private \
+        \(symbolName) switch no longer makes SwiftUI build its tree on this iOS; see \
+        AccessibilityAutomation in WidgetAccessibilityTests.swift.
+        """
 }
 
 private extension NSObject {
     /// Through a plain `Bool`: `#expect(!element.accessibilityTraits.contains(.button))` failed while
     /// its own expansion showed `contains → false`, so the macro's reading of the traits can't be trusted.
     var isButton: Bool { accessibilityTraits.contains(.button) }
-}
-
-private extension Array {
-    /// The sole element, or nil when there are none or several.
-    var only: Element? { count == 1 ? first : nil }
 }
