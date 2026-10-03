@@ -295,7 +295,7 @@ struct BLECSCBackoffTests {
     }
 }
 
-// MARK: - Integration (controllable BLEClient + TestClock)
+// MARK: - Integration (controllable BLEClient + SteppedClock)
 
 @Suite("BLECSCClient — live state machine")
 struct BLECSCIntegrationTests {
@@ -323,7 +323,7 @@ struct BLECSCIntegrationTests {
         /// (peripheral, service, characteristic) triples passed to `readValue`. The
         /// service is retained so a read can be pinned to the service it belongs to.
         let reads: LockIsolated<[(UUID, CBUUID, CBUUID)]>
-        let clock: TestClock<Duration>
+        let clock: SteppedClock
 
         init() {
             let (eventStream, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
@@ -336,7 +336,7 @@ struct BLECSCIntegrationTests {
             let servicesDiscovered = LockIsolated<[[CBUUID]?]>([])
             let characteristicsDiscovered = LockIsolated<[[CBUUID]?]>([])
             let reads = LockIsolated<[(UUID, CBUUID, CBUUID)]>([])
-            let clock = TestClock()
+            let clock = SteppedClock()
 
             let bleClient = BLEClient(
                 startScanning: { uuids in scanned.withValue { $0.append(uuids) } },
@@ -663,9 +663,9 @@ struct BLECSCIntegrationTests {
         harness.events.yield(.disconnected(id: speedID, error: nil))
         #expect(await speedStates.next() == .reconnecting)
 
-        await harness.clock.advance(by: .seconds(1))
+        #expect(await harness.clock.advanceToNextSleep() == .seconds(1))
         #expect(await connects.next() == speedID)          // attempt 1 after 1s
-        await harness.clock.advance(by: .seconds(2))
+        #expect(await harness.clock.advanceToNextSleep() == .seconds(2))
         #expect(await connects.next() == speedID)          // attempt 2 after 2s
 
         // Cadence peripheral was untouched: it still emits.
@@ -680,13 +680,11 @@ struct BLECSCIntegrationTests {
         var cadences = harness.client.cadence().makeAsyncIterator()
         #expect(await cadences.next() == 60.0)
 
-        // Reconnection succeeds — backoff stops.
+        // Reconnection succeeds — backoff stops: the client cancels it before publishing
+        // `.connected`, so nothing is left sleeping.
         harness.events.yield(.connected(id: speedID))
         #expect(await speedStates.next() == .connected)
-        let countAfter = harness.connectCount.value
-        await harness.clock.advance(by: .seconds(120))
-        await Task.yield()
-        #expect(harness.connectCount.value == countAfter)
+        #expect(harness.clock.isIdle)
     }
 
     @Test("Calculator resets across an unexpected disconnect")
@@ -771,9 +769,9 @@ struct BLECSCIntegrationTests {
         harness.events.yield(.disconnected(id: id, error: nil))
         #expect(await speedStates.next() == .reconnecting)
 
-        // Walk the full backoff ladder; each advance releases one reconnect attempt.
+        // Walk the full backoff ladder; each sleep releases one reconnect attempt.
         for delay in [1, 2, 4, 8, 16, 30, 30, 30, 30, 30] {
-            await harness.clock.advance(by: .seconds(delay))
+            #expect(await harness.clock.advanceToNextSleep() == .seconds(delay))
             #expect(await connects.next() == id)
         }
         // Ladder exhausted → sensor considered lost, role released to disconnected.
