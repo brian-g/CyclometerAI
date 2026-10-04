@@ -1141,19 +1141,14 @@ struct ActiveRideFeature {
                 healthZoneCeilings: state.healthZoneCeilingsBPM
               ).rawValue
             : 0
-        if bpm > 0 {
-            state.heldHR = HeldHeartRate(bpm: bpm, zone: state.hrZone, heldSince: date.now)
-        }
+        guard bpm > 0 else { return }
+        state.heldHR = HeldHeartRate(bpm: bpm, zone: state.hrZone, heldSince: date.now)
         // Only recorded time feeds the ride's average and max (#379): a café stop with the
         // strap still on shows the rider's heart rate, but must not pull Avg HR toward resting.
         guard state.recordingState == .active else { return }
-        if bpm > 0 {
-            state.hrSampleCount += 1
-            state.hrSampleSum += Double(bpm)
-        }
-        if bpm > state.maxHeartRateBPM {
-            state.maxHeartRateBPM = bpm
-        }
+        state.hrSampleCount += 1
+        state.hrSampleSum += Double(bpm)
+        state.maxHeartRateBPM = max(state.maxHeartRateBPM, bpm)
     }
 
     /// Drops the held reading once it has aged past `hrHoldWindow` (#221), so the

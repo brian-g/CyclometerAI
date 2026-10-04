@@ -297,7 +297,8 @@ struct CadenceFeatureTests {
         advance(clock, by: 2)
         await store.send(.cadenceReceived(0))
         advance(clock, by: 2)
-        await store.send(.cadenceReceived(0))
+        // Non-zero, unlike the default, so the live-value check below can fail.
+        await store.send(.cadenceReceived(75))
 
         #expect(store.state.zoneSeconds.isEmpty)
         #expect(store.state.coastingSeconds == 0)
@@ -306,7 +307,7 @@ struct CadenceFeatureTests {
         #expect(store.state.pedalingSampleCount == 0)
         #expect(store.state.cadenceSum == 0)
         #expect(store.state.maxCadenceRPM == 0)
-        #expect(store.state.cadenceRPM == 0)
+        #expect(store.state.cadenceRPM == 75)
         #expect(store.state.cadenceSamples.count == 3)
     }
 

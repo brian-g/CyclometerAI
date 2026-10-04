@@ -1468,6 +1468,36 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(updatedSummary.value?.recordingState == .active)
     }
 
+    /// #379: cadence Avg/Max count only while `cadence.isRecording`, a mirror of
+    /// `recordingState` that is synced on transition. A fresh ride must reach it through
+    /// its own `.idle` → `.active`; a store built straight at `.active` never does.
+    @Test("A fresh ride's start counts its cadence readings toward the average")
+    func freshRideCountsCadence() async {
+        let store = TestStore(initialState: ActiveRideFeature.State(recordingState: .idle)) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock()
+        }
+        store.exhaustivity = .off
+
+        await store.startFreshRide()
+        #expect(store.state.recordingState == .active)
+        #expect(store.state.cadence.isRecording)
+
+        await store.send(.cadence(.cadenceReceived(88)))
+        #expect(store.state.cadence.pedalingSampleCount == 1)
+        #expect(store.state.cadence.maxCadenceRPM == 88)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
     @Test("Pause and resume drive the cadence tally's recording flag")
     func recordingStateDrivesCadenceRecording() async {
         let store = makeStore(recordingState: .paused)

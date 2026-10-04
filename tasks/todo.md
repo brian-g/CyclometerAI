@@ -740,3 +740,11 @@ Branch: `fix/379-paused-aggregates`
 - Suite: 1796 passed, 0 failed. Changed tests found by name; the auto-pause suite (7) is green.
 - Revert check (fresh derivedData, all three gates removed): the speed, HR and cadence paused tests all fail. Files restored.
 - Side effect: readings in `.idle`/`.ended` no longer count either, and the one fix that triggers an auto-resume (it arrives while `.paused`) isn't counted.
+
+### Review fixes (/code-review high)
+- `applyHeartRateReading`: `guard bpm > 0`, then `heldHR`, then the `.active` guard and the counters. One check instead of two. Same behaviour.
+- `pausedRideCreditsNothing` ends on 75, not 0, so the live-value check can fail.
+- `freshRideCountsCadence` (new): `startFreshRide()`'s `.idle` → `.active` sets `cadence.isRecording`, and a reading counts. Cadence Avg/Max now depend on that mirrored flag, and nothing pinned the fresh-ride path.
+- Filed #381: stopped GPS noise still counts toward Avg Speed (`kph > 0` vs `stationarySpeedMPS`), and Avg/Max speed come only from GPS even when a wheel sensor is the displayed source.
+- Left as is: a Watch sample taken during a pause can be counted once after resume via the silent-strap fallback (≤5 min old, the fallback working as designed). The fix that triggers auto-resume is dropped (one sample per stop).
+- Suite green. 1607 unique test names, versus 1606 before: only the new test was added, nothing missing. The raw "passed" line count varies with how much the parallel log repeats.
