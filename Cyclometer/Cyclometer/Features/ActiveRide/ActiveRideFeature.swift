@@ -1401,8 +1401,8 @@ extension ActiveRideFeature.State {
         }
         cadence.maxCadenceRPM = summary.maxCadenceRPM ?? 0
         // W5's detail sheet (#340): without these its zone and coasting times would cover
-        // only the post-resume stretch while Avg/Max beside them cover the whole ride. The
-        // live tally keeps adding to them from here.
+        // only the post-resume stretch, while the Avg/Max restored above reach back past the
+        // kill. The live tally keeps adding to them from here.
         cadence.zoneSeconds = summary.cadenceZoneSeconds
         cadence.coastingSeconds = summary.cadenceCoastingSeconds
         // Nil stays nil: a ride that had no radar before the kill still has none (#285).

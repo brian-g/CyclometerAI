@@ -713,3 +713,10 @@ Branch: `feat/340-cadence-tallies-resume`
 - Unit suite: 1794 passed, 0 failed. Each new or changed test was found by name in the log.
 - Revert check (fresh derivedData, restore lines removed): both resume tests fail on the tally expectations; the checkpoint test passes, as expected, since it covers the write side. File restored.
 - Not verified: a real kill and relaunch on device. `RideRecordingTests.killAndRelaunchResumesRide` doesn't drive cadence.
+
+### Review fixes (/code-review)
+- `Ride.column(for:)`: an exhaustive switch from `CadenceZone` to its column, used by both accessors, so a new zone fails to compile instead of resetting to 0 on resume.
+- DataModel.md §3.1 and the `Ride` doc comment: the values are written at every checkpoint *and* at ride end, not "for a resumed ride only".
+- The `State(resuming:)` comment no longer claims Avg/Max cover exactly the whole ride. They keep counting while paused, but the zone tally doesn't; that predates this change and is filed as #379.
+- Skipped: test-setup duplication (copying setup is the suite's norm).
+- Suite: two full runs stalled or lost their test host. The first stalled at the same minute a sim `AppIntentsLiveEntityService` crashed; the second failed every remaining test at 0.000s with no assertion. No Cyclometer crash report either time. The focused suites passed (89/0), then a full `test-without-building` rerun passed 1795/0.

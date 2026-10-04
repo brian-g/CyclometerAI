@@ -121,8 +121,9 @@ final class Ride {
     var maxSpeedMPS: Double
     // No stored elevation gain/drop or HR zone seconds (#284): S10 and S15 derive both from the
     // saved track, and zones resolve at read time (§8), so a stored breakdown would go stale.
-    // W5's cadence zone and coasting seconds *are* stored (#340), for a resumed ride only:
-    // cadence zones are fixed rpm thresholds, so they have nothing to go stale against.
+    // W5's cadence zone and coasting seconds *are* stored (#340): written at every checkpoint
+    // and at ride end, read back on resume. Cadence zones are fixed rpm thresholds, so they
+    // have nothing to go stale against.
 
     // MARK: - Heart Rate
     var averageHeartRateBPM: Int?

@@ -120,9 +120,10 @@ final class Ride {
     var hrSampleCount: Int = 0
     var cadenceSampleCount: Int = 0
     /// W5's time in each cadence zone and time coasting, mirroring `CadenceFeature.State`
-    /// (#340) — persisted so a resumed ride's detail sheet still covers the whole ride, next to
-    /// the ride-wide Avg/Max beside it. Bounded to the same one-checkpoint-window staleness as
-    /// every other resumed aggregate. Unlike the HR zone seconds #284 declined to store, these
+    /// (#340) — persisted so a resumed ride's detail sheet still covers the time before the
+    /// kill. Written at every checkpoint and at ride end, so a finished ride keeps its final
+    /// values. Bounded to the same one-checkpoint-window staleness as every other resumed
+    /// aggregate. Unlike the HR zone seconds #284 declined to store, these
     /// can't go stale: cadence zones are fixed rpm thresholds, not resolved at read time.
     /// Read and written as one dictionary through `cadenceZoneSeconds`.
     var cadenceGrindingSeconds: TimeInterval = 0
@@ -169,19 +170,28 @@ final class Ride {
     /// that never pedalled reads back exactly as a fresh one.
     var cadenceZoneSeconds: [CadenceZone: TimeInterval] {
         get {
-            let columns: [CadenceZone: TimeInterval] = [
-                .grinding: cadenceGrindingSeconds,
-                .transition: cadenceTransitionSeconds,
-                .optimal: cadenceOptimalSeconds,
-                .overspin: cadenceOverspinSeconds,
-            ]
-            return columns.filter { $0.value > 0 }
+            var seconds: [CadenceZone: TimeInterval] = [:]
+            for zone in CadenceZone.allCases {
+                let value = self[keyPath: Self.column(for: zone)]
+                if value > 0 { seconds[zone] = value }
+            }
+            return seconds
         }
         set {
-            cadenceGrindingSeconds = newValue[.grinding] ?? 0
-            cadenceTransitionSeconds = newValue[.transition] ?? 0
-            cadenceOptimalSeconds = newValue[.optimal] ?? 0
-            cadenceOverspinSeconds = newValue[.overspin] ?? 0
+            for zone in CadenceZone.allCases {
+                self[keyPath: Self.column(for: zone)] = newValue[zone] ?? 0
+            }
+        }
+    }
+
+    /// The column holding `zone`'s seconds. A switch rather than a lookup table, so a new
+    /// `CadenceZone` case fails to compile here instead of silently resetting to 0 on resume.
+    private static func column(for zone: CadenceZone) -> ReferenceWritableKeyPath<Ride, TimeInterval> {
+        switch zone {
+        case .grinding:   \.cadenceGrindingSeconds
+        case .transition: \.cadenceTransitionSeconds
+        case .optimal:    \.cadenceOptimalSeconds
+        case .overspin:   \.cadenceOverspinSeconds
         }
     }
 
