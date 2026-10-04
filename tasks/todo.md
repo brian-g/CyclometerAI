@@ -689,4 +689,5 @@ Branch: `ci/374-sim-boot-docs-skip`
 - [ ] 5. First docs-only change after merge starts no Tests run
 - [x] 6. First CI run (37160465778): simulator step 3 s, wait 1 s, but red on a flaky HR test
 - [x] 7. HR flake fixed: `unexpectedDropReadmitsOnlyThePairedStrap` checked the rescan straight after the status flip, but the client publishes `false` before calling `startScanning`. Now `expectEventually`, the repo's helper for exactly this; 20 iterations green
+- [x] 9. Second run (37162293875) green with a cache hit, but the boot started before the restore slowed it: restore 5 min 40 s (22 s before), package resolution 2 min 42 s. The boot now starts just before the build
 - [x] 8. `-collect-test-diagnostics never` in CI: the failing run spent 10 min gathering diagnostics after the tests ended, two minutes short of the timeout
