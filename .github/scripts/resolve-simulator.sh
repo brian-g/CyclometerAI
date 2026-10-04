@@ -110,8 +110,13 @@ print(max(types, key=rank)["identifier"])
   udid="$(xcrun simctl create "cyclometer-ci" "$device_type" "$runtime")"
 fi
 
-xcrun simctl boot "$udid" 2>/dev/null || true
-xcrun simctl bootstatus "$udid" -b || true
+# Boot in the background and return. `simctl boot` itself blocks until the device is up:
+# ~2 min on the runner (run 37156042525: "Using existing simulator" at 21:43:25, then nothing
+# until 21:45:29). The workflow starts this before the build and waits with
+# `simctl bootstatus -b` only once the build is done, so the boot overlaps it (#374).
+boot_log="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/simulator-boot.log"
+nohup xcrun simctl boot "$udid" > "$boot_log" 2>&1 &
+echo "Booting in the background; log: $boot_log"
 
 echo "SIM_UDID=$udid"
 [ -n "${GITHUB_ENV:-}" ] && echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
