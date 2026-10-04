@@ -412,6 +412,8 @@ actor RidePersistenceActor {
         ride.speedSampleCount = update.speedSampleCount
         ride.hrSampleCount = update.hrSampleCount
         ride.cadenceSampleCount = update.cadenceSampleCount
+        ride.cadenceZoneSeconds = update.cadenceZoneSeconds
+        ride.cadenceCoastingSeconds = update.cadenceCoastingSeconds
         ride.trackSegmentIndex = update.trackSegmentIndex
         // `update.route` is deliberately not written: the route is `createRide`'s alone.
         ride.routeProgressMeters = update.routeProgressMeters

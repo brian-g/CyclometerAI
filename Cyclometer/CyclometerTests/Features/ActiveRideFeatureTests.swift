@@ -1117,6 +1117,37 @@ struct ActiveRideFeatureStateMachineTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    /// #340: what a relaunch reads back into W5's detail sheet. Same write path as the
+    /// 30-tick checkpoint (`makeRideSummaryUpdate`), reached through a pause as above.
+    @Test("a checkpoint carries the cadence zone and coasting tallies")
+    func checkpointCarriesCadenceTallies() async throws {
+        let (written, write) = AsyncStream<RideSummaryUpdate>.makeStream()
+        var state = ActiveRideFeature.State(recordingState: .active)
+        state.cadence.zoneSeconds = [.transition: 18, .optimal: 240]
+        state.cadence.coastingSeconds = 33
+        let store = TestStore(initialState: state) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(onUpdateRideSummary: { write.yield($0) })
+        }
+        store.exhaustivity = .off
+
+        await store.send(.pauseTapped)
+        var updates = written.makeAsyncIterator()
+        let next = await updates.next()
+        let update = try #require(next)
+        #expect(update.cadenceZoneSeconds == [.transition: 18, .optimal: 240])
+        #expect(update.cadenceCoastingSeconds == 33)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
     // MARK: - State(resuming:) (#175)
 
     @Test("State(resuming:) seeds cumulative aggregates from a persisted snapshot, weighted by the real sample counts")
@@ -1140,7 +1171,9 @@ struct ActiveRideFeatureStateMachineTests {
             vehiclePassCount: 2,
             speedSampleCount: 120,
             hrSampleCount: 90,
-            cadenceSampleCount: 60
+            cadenceSampleCount: 60,
+            cadenceZoneSeconds: [.grinding: 12, .optimal: 40, .overspin: 3],
+            cadenceCoastingSeconds: 25
         )
 
         let state = ActiveRideFeature.State(resuming: summary)
@@ -1160,6 +1193,9 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(state.cadence.pedalingSampleCount == 60)
         #expect(state.cadence.cadenceSum == 78 * 60)
         #expect(state.cadence.averageCadenceRPM == 78)
+        // W5's zone and coasting tallies (#340), so the detail sheet still covers the whole ride.
+        #expect(state.cadence.zoneSeconds == [.grinding: 12, .optimal: 40, .overspin: 3])
+        #expect(state.cadence.coastingSeconds == 25)
         #expect(state.vehiclePassCount == 2)
     }
 
@@ -1190,8 +1226,38 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(state.cadence.pedalingSampleCount == 0)
         #expect(state.cadence.cadenceSum == 0)
         #expect(state.cadence.maxCadenceRPM == 0)
+        #expect(state.cadence.zoneSeconds.isEmpty)
+        #expect(state.cadence.coastingSeconds == 0)
         // No radar before the kill means still no radar, not a measured 0 (#285).
         #expect(state.vehiclePassCount == nil)
+    }
+
+    @Test("a resumed ride keeps adding to its restored cadence zone and coasting tallies (#340)")
+    func resumedRideAddsToRestoredCadenceTallies() async {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .active,
+            durationSeconds: 600, distanceMeters: 4_000, averageSpeedMPS: 6.5, maxSpeedMPS: 11,
+            averageCadenceRPM: 88, maxCadenceRPM: 104, cadenceSampleCount: 500,
+            cadenceZoneSeconds: [.grinding: 30, .optimal: 400], cadenceCoastingSeconds: 70
+        )
+        let clock = LockIsolated(testDate)
+        let store = TestStore(initialState: ActiveRideFeature.State(resuming: summary)) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.date = DateGenerator { clock.value }
+            $0.bleCSCClient = .testValue
+        }
+        store.exhaustivity = .off
+
+        await store.send(.cadence(.cadenceReceived(90)))    // optimal
+        clock.withValue { $0 = $0.addingTimeInterval(2) }
+        await store.send(.cadence(.cadenceReceived(0)))     // credits 2s to optimal
+        clock.withValue { $0 = $0.addingTimeInterval(3) }
+        await store.send(.cadence(.cadenceReceived(60)))    // credits 3s to coasting
+
+        // Added to the restored totals, not counted from zero beside them.
+        #expect(store.state.cadence.zoneSeconds == [.grinding: 30, .optimal: 402])
+        #expect(store.state.cadence.coastingSeconds == 73)
     }
 
     @Test("State(resuming:) preserves .paused, doesn't force .active")
