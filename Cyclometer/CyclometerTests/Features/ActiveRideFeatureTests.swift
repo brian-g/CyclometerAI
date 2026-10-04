@@ -416,9 +416,6 @@ struct ActiveRideFeatureLocationTests {
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
-            $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.5 * 3.6
-            $0.maxSpeedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
@@ -476,9 +473,6 @@ struct ActiveRideFeatureLocationTests {
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
-            $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.5 * 3.6
-            $0.maxSpeedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
@@ -513,9 +507,6 @@ struct ActiveRideFeatureLocationTests {
             $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
-            $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.5 * 3.6
-            $0.maxSpeedKPH = 8.5 * 3.6
         }
         #expect(store.state.trackSegments.flatMap { $0 }.isEmpty)
         #expect(!store.state.isFixRecordable)
@@ -587,9 +578,6 @@ struct ActiveRideFeatureLocationTests {
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
-            $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.5 * 3.6
-            $0.maxSpeedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.speed.speedMPS = 8.5
@@ -773,6 +761,7 @@ struct ActiveRideFeatureTimerTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -811,10 +800,16 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
+            $0.speedSampleCount = 1
+            $0.speedSampleSum = 36.0
+            $0.maxSpeedKPH = 36
         }
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
+            $0.speedSampleCount = 2
+            $0.speedSampleSum = 72.0
+            $0.maxSpeedKPH = 36
         }
     }
 
@@ -847,6 +842,9 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
+            $0.speedSampleCount = 1
+            $0.speedSampleSum = 36.0
+            $0.maxSpeedKPH = 36
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
@@ -873,6 +871,9 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
+            $0.speedSampleCount = 2
+            $0.speedSampleSum = 72.0
+            $0.maxSpeedKPH = 36
         }
     }
 
@@ -889,6 +890,9 @@ struct ActiveRideFeatureTimerTests {
             await store.send(.elapsedTick) {
                 $0.elapsedSeconds = tick
                 $0.distanceMeters = Double(tick) * 10.0
+                $0.speedSampleCount = tick
+                $0.speedSampleSum = Double(tick) * 36
+                $0.maxSpeedKPH = 36
             }
         }
         #expect(checkpointCount.value == 0)
@@ -896,6 +900,9 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 30
             $0.distanceMeters = 300.0
+            $0.speedSampleCount = 30
+            $0.speedSampleSum = 1080.0
+            $0.maxSpeedKPH = 36
         }
         await store.receive(\.trackRecorder.checkpointFired)
         #expect(checkpointCount.value == 1)
@@ -904,6 +911,9 @@ struct ActiveRideFeatureTimerTests {
             await store.send(.elapsedTick) {
                 $0.elapsedSeconds = tick
                 $0.distanceMeters = Double(tick) * 10.0
+                $0.speedSampleCount = tick
+                $0.speedSampleSum = Double(tick) * 36
+                $0.maxSpeedKPH = 36
             }
         }
         #expect(checkpointCount.value == 1)
@@ -911,6 +921,9 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 60
             $0.distanceMeters = 600.0
+            $0.speedSampleCount = 60
+            $0.speedSampleSum = 2160.0
+            $0.maxSpeedKPH = 36
         }
         await store.receive(\.trackRecorder.checkpointFired)
         #expect(checkpointCount.value == 2)
@@ -936,6 +949,72 @@ struct ActiveRideFeatureTimerTests {
             await store.send(.elapsedTick)
         }
         #expect(checkpointCount.value == 1)
+    }
+
+    // MARK: - Avg/Max speed (#381)
+
+    @Test("Avg/Max speed follow the displayed wheel speed, not the GPS behind it")
+    func speedAggregatesFollowTheWheel() async {
+        let wheelMPS = 40.0 / 3.6
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                speed: SpeedFeature.State(speedMPS: wheelMPS, activeSpeedSource: .bleWheel)
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .testValue
+        }
+        store.exhaustivity = .off
+
+        await store.send(.elapsedTick)
+        #expect(abs(store.state.maxSpeedKPH - 40) < 1e-9)
+        #expect(store.state.speedSampleCount == 1)
+
+        // GPS lagging on the descent: shown nowhere, counted nowhere.
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0, longitude: -89.0), altitude: 280,
+            speed: 36.0 / 3.6, horizontalAccuracy: 5, heading: 0, timestamp: testDate
+        )))
+        #expect(store.state.speed.speedMPS == wheelMPS)
+        #expect(abs(store.state.maxSpeedKPH - 40) < 1e-9)
+        #expect(store.state.speedSampleCount == 1)
+    }
+
+    @Test("A second at or below stationarySpeedMPS stays out of Avg/Max speed")
+    func stoppedSecondStaysOutOfSpeedAggregates() async {
+        let store = makeStore(speedMPS: 0.4)
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = 1
+            // No distance, no speed sample, no max.
+        }
+    }
+
+    @Test("Average speed is distance over moving time")
+    func averageSpeedIsDistanceOverMovingTime() async {
+        let store = makeStore()
+        store.exhaustivity = .off
+        let speeds = [5.0, 0.3, 8.0, 0.0, 12.0, ActiveRideFeature.stationarySpeedMPS, 6.5]
+        for speed in speeds {
+            await store.send(.speed(.gpsSpeedReceived(speed)))
+            await store.send(.elapsedTick)
+        }
+
+        let moving = speeds.filter { $0 > ActiveRideFeature.stationarySpeedMPS }
+        #expect(store.state.speedSampleCount == moving.count)
+        // Relative: `averageSpeedMPS` converts through Foundation's km/h unit, whose
+        // coefficient is 0.277778 rather than exactly 1/3.6 (a ~1e-6 relative error).
+        let rebuilt = store.state.averageSpeedMPS * Double(moving.count)
+        #expect(abs(rebuilt - store.state.distanceMeters) / store.state.distanceMeters < 1e-5)
+        #expect(abs(store.state.maxSpeedKPH - 12.0 * 3.6) < 1e-9)
     }
 }
 
@@ -1713,9 +1792,6 @@ struct ActiveRideFeatureStateMachineTests {
             $0.lastRecordablePositionAt = testDate
             $0.heading = 0
             $0.speedKPH = 8.0 * 3.6
-            $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.0 * 3.6
-            $0.maxSpeedKPH = 8.0 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.0))) {
             $0.speed.speedMPS = 8.0
@@ -1732,6 +1808,10 @@ struct ActiveRideFeatureStateMachineTests {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 8.0
             $0.zeroSpeedSeconds = 0
+            // Avg/Max speed are sampled here, not from the fix above (#381).
+            $0.speedSampleCount = 1
+            $0.speedSampleSum = 8.0 * 3.6
+            $0.maxSpeedKPH = 8.0 * 3.6
         }
         await store.receive(\.trackRecorder.timerTick)
     }

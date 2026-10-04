@@ -240,6 +240,9 @@ struct ActiveRideFeature {
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
         var navigation = NavigationFeature.State()
+        /// Avg/Max speed over moving seconds of the displayed speed, sampled once per
+        /// `.elapsedTick` on the same sample and threshold as `distanceMeters` (#381) — so
+        /// the average is distance over moving time. `speedSampleCount` counts those seconds.
         var maxSpeedKPH: Double = 0
         var speedSampleCount: Int = 0
         var speedSampleSum: Double = 0
@@ -847,14 +850,19 @@ struct ActiveRideFeature {
                 expireHeldHR(in: &state)
                 coverSilentStrapWithHealthKit(in: &state)
                 state.elapsedSeconds += 1
-                // One threshold governs both: a second spent below it adds no distance
-                // and counts toward auto-pause. Integrating the noise floor instead —
-                // what `max(speedMPS, 0)` did — grew the odometer while the bike stood
-                // still (#262).
+                // One threshold governs all three: a second spent below it adds no distance,
+                // counts toward auto-pause, and stays out of Avg/Max speed. Integrating the
+                // noise floor instead — what `max(speedMPS, 0)` did — grew the odometer while
+                // the bike stood still (#262), and averaging it dragged Avg speed down (#381).
+                // The displayed speed, so a wheel sensor's reading wins over GPS here too.
                 let speedMPS = max(state.speed.speedMPS ?? 0, 0)
                 if speedMPS > Self.stationarySpeedMPS {
                     state.distanceMeters += speedMPS
                     state.zeroSpeedSeconds = 0
+                    let kph = speedMPS * 3.6
+                    state.speedSampleCount += 1
+                    state.speedSampleSum += kph
+                    state.maxSpeedKPH = max(state.maxSpeedKPH, kph)
                 } else {
                     state.zeroSpeedSeconds += 1
                 }
@@ -1033,17 +1041,9 @@ struct ActiveRideFeature {
                     state.altitudeSamples.removeAll { $0.time < cutoff }
                 }
                 state.heading = update.heading
-                let kph = max(update.speed, 0) * 3.6
-                state.speedKPH = kph
-                // The ride's average and max cover recorded time only, like distance and the
-                // track (#379): a fix while paused still shows, but is not part of the ride.
-                if state.recordingState == .active {
-                    if kph > 0 {
-                        state.speedSampleCount += 1
-                        state.speedSampleSum += kph
-                    }
-                    if kph > state.maxSpeedKPH { state.maxSpeedKPH = kph }
-                }
+                // Display only. The ride's Avg/Max speed are sampled at `.elapsedTick` from the
+                // displayed speed, not from GPS fixes (#381).
+                state.speedKPH = max(update.speed, 0) * 3.6
                 return .merge(
                     .send(.speed(.gpsSpeedReceived(update.speed))),
                     .send(.calibration(.locationUpdated(update))),
