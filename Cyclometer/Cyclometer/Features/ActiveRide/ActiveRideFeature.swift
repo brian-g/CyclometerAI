@@ -1035,11 +1035,15 @@ struct ActiveRideFeature {
                 state.heading = update.heading
                 let kph = max(update.speed, 0) * 3.6
                 state.speedKPH = kph
-                if kph > 0 {
-                    state.speedSampleCount += 1
-                    state.speedSampleSum += kph
+                // The ride's average and max cover recorded time only, like distance and the
+                // track (#379): a fix while paused still shows, but is not part of the ride.
+                if state.recordingState == .active {
+                    if kph > 0 {
+                        state.speedSampleCount += 1
+                        state.speedSampleSum += kph
+                    }
+                    if kph > state.maxSpeedKPH { state.maxSpeedKPH = kph }
                 }
-                if kph > state.maxSpeedKPH { state.maxSpeedKPH = kph }
                 return .merge(
                     .send(.speed(.gpsSpeedReceived(update.speed))),
                     .send(.calibration(.locationUpdated(update))),
@@ -1137,14 +1141,14 @@ struct ActiveRideFeature {
                 healthZoneCeilings: state.healthZoneCeilingsBPM
               ).rawValue
             : 0
-        if bpm > 0 {
-            state.hrSampleCount += 1
-            state.hrSampleSum += Double(bpm)
-            state.heldHR = HeldHeartRate(bpm: bpm, zone: state.hrZone, heldSince: date.now)
-        }
-        if bpm > state.maxHeartRateBPM {
-            state.maxHeartRateBPM = bpm
-        }
+        guard bpm > 0 else { return }
+        state.heldHR = HeldHeartRate(bpm: bpm, zone: state.hrZone, heldSince: date.now)
+        // Only recorded time feeds the ride's average and max (#379): a café stop with the
+        // strap still on shows the rider's heart rate, but must not pull Avg HR toward resting.
+        guard state.recordingState == .active else { return }
+        state.hrSampleCount += 1
+        state.hrSampleSum += Double(bpm)
+        state.maxHeartRateBPM = max(state.maxHeartRateBPM, bpm)
     }
 
     /// Drops the held reading once it has aged past `hrHoldWindow` (#221), so the
@@ -1402,7 +1406,7 @@ extension ActiveRideFeature.State {
         cadence.maxCadenceRPM = summary.maxCadenceRPM ?? 0
         // W5's detail sheet (#340): without these its zone and coasting times would cover
         // only the post-resume stretch, while the Avg/Max restored above reach back past the
-        // kill. The live tally keeps adding to them from here.
+        // kill. Both keep accumulating from here, over recorded time only (#379).
         cadence.zoneSeconds = summary.cadenceZoneSeconds
         cadence.coastingSeconds = summary.cadenceCoastingSeconds
         // Nil stays nil: a ride that had no radar before the kill still has none (#285).

@@ -36,8 +36,8 @@ struct CadenceFeature {
         var pairedPeripheralId: UUID? = nil
         /// Timestamped cadence samples from the last `historyWindow` seconds.
         var cadenceSamples: [CadenceSample] = []
-        /// Count of pedalling readings (rpm > 0); coasting is excluded so the
-        /// average reflects effort while actually pedalling.
+        /// Count of pedalling readings (rpm > 0) taken while recording; coasting is excluded
+        /// so the average reflects effort while actually pedalling.
         var pedalingSampleCount: Int = 0
         /// Running sum of pedalling readings, paired with `pedalingSampleCount`.
         var cadenceSum: Double = 0
@@ -49,7 +49,9 @@ struct CadenceFeature {
         var coastingSeconds: TimeInterval = 0
         /// Whether the ride is actively recording. Driven by `ActiveRideFeature` from its
         /// `recordingState`: the sensor keeps notifying through a pause or auto-pause, and
-        /// that stopped time must not be tallied as coasting.
+        /// none of it belongs to the ride — not the zone/coasting tally, and not the
+        /// average or max (#379, PRD: "all sensor recording suspended"). The live reading
+        /// and the watermark still follow it.
         var isRecording = false
 
         /// Average cadence over pedalling time: mean of non-zero rpm readings.
@@ -122,7 +124,7 @@ struct CadenceFeature {
                 state.cadenceSamples.append(CadenceSample(time: now, rpm: rpm))
                 let cutoff = now.addingTimeInterval(-Self.historyWindow)
                 state.cadenceSamples.removeAll { $0.time < cutoff }
-                if rpm > 0 {
+                if state.isRecording, rpm > 0 {
                     state.pedalingSampleCount += 1
                     state.cadenceSum += rpm
                     state.maxCadenceRPM = max(state.maxCadenceRPM, Int(rpm.rounded()))

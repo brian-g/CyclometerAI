@@ -624,10 +624,9 @@ struct ActiveRideFeatureLocationTests {
             $0.altitude = 300.0
             $0.horizontalAccuracy = 3.0
             $0.heading = 45.0
+            // The live speed follows the fix, but the ride's average and max don't: paused
+            // time is not part of the ride (#379). They stay at the active fix's values.
             $0.speedKPH = 12.0 * 3.6
-            $0.speedSampleCount = 2
-            $0.speedSampleSum = 8.5 * 3.6 + 12.0 * 3.6
-            $0.maxSpeedKPH = 12.0 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(12.0))) {
             $0.speed.speedMPS = 12.0
@@ -1469,6 +1468,36 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(updatedSummary.value?.recordingState == .active)
     }
 
+    /// #379: cadence Avg/Max count only while `cadence.isRecording`, a mirror of
+    /// `recordingState` that is synced on transition. A fresh ride must reach it through
+    /// its own `.idle` → `.active`; a store built straight at `.active` never does.
+    @Test("A fresh ride's start counts its cadence readings toward the average")
+    func freshRideCountsCadence() async {
+        let store = TestStore(initialState: ActiveRideFeature.State(recordingState: .idle)) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock()
+        }
+        store.exhaustivity = .off
+
+        await store.startFreshRide()
+        #expect(store.state.recordingState == .active)
+        #expect(store.state.cadence.isRecording)
+
+        await store.send(.cadence(.cadenceReceived(88)))
+        #expect(store.state.cadence.pedalingSampleCount == 1)
+        #expect(store.state.cadence.maxCadenceRPM == 88)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
     @Test("Pause and resume drive the cadence tally's recording flag")
     func recordingStateDrivesCadenceRecording() async {
         let store = makeStore(recordingState: .paused)
@@ -2272,6 +2301,27 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 420
             $0.maxHeartRateBPM = 160
             $0.heldHR = HeldHeartRate(bpm: 120, zone: 1, heldSince: Self.fixedNow)
+        }
+    }
+
+    /// #379: a café stop with the strap still on. The rider still sees their heart rate, but
+    /// the paused minutes are not part of the ride, so they must not pull Avg HR toward resting.
+    @Test("A reading while paused shows, but stays out of the HR average and max")
+    func pausedReadingStaysOutOfAggregates() async {
+        let store = makeStore(ActiveRideFeature.State(recordingState: .paused))
+        await store.send(.heartRateUpdated(140)) {
+            $0.heartRateBPM = 140
+            $0.heartRateProvenance = .bleHR
+            $0.hrZone = 2
+            $0.heldHR = HeldHeartRate(bpm: 140, zone: 2, heldSince: Self.fixedNow)
+            // No hrSampleCount/hrSampleSum/maxHeartRateBPM change.
+        }
+        // The Apple Watch source goes through the same path and is gated the same way.
+        await store.send(.healthKitHeartRateUpdated(150)) {
+            $0.healthKitHRSample = HealthKitHRSample(bpm: 150, receivedAt: Self.fixedNow)
+            $0.heartRateBPM = 150
+            $0.heartRateProvenance = .appleWatch
+            $0.heldHR = HeldHeartRate(bpm: 150, zone: 2, heldSince: Self.fixedNow)
         }
     }
 
