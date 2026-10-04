@@ -222,7 +222,6 @@ struct AutoPauseReplayTests {
         #expect(replay.pausedSeconds.isEmpty)
         #expect(replay.speedSampleCount == moving.count)
         let movingAverage = moving.reduce(0, +) / Double(moving.count)
-        // Relative, for the km/h conversion's rounded coefficient (see the timer suite).
-        #expect(abs(replay.averageSpeedMPS - movingAverage) / movingAverage < 1e-5)
+        #expect(abs(replay.averageSpeedMPS - movingAverage) < 1e-9)
     }
 }

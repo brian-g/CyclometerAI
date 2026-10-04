@@ -192,9 +192,8 @@ extension ActiveRideFeature.State {
             cadence: CadenceFeature.State(cadenceRPM: 87, pedalingSampleCount: 120, cadenceSum: 10_200, maxCadenceRPM: 102),
             distanceMeters: 12300,
             speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
-            maxSpeedKPH: 34.1,
-            speedSampleCount: 120,
-            speedSampleSum: 3408
+            maxSpeedMPS: 9.47,
+            speedSampleCount: 1560
         )
     }
 }

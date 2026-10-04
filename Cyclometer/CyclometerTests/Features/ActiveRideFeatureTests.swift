@@ -418,6 +418,7 @@ struct ActiveRideFeatureLocationTests {
             $0.speedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.maxSpeedMPS = 8.5
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -475,6 +476,7 @@ struct ActiveRideFeatureLocationTests {
             $0.speedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.maxSpeedMPS = 8.5
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -513,6 +515,7 @@ struct ActiveRideFeatureLocationTests {
         // The Doppler speed on that same fix is position-independent, and calibration runs
         // its own gate on the same data — both still see it.
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.maxSpeedMPS = 8.5
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -580,6 +583,7 @@ struct ActiveRideFeatureLocationTests {
             $0.speedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.maxSpeedMPS = 8.5
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -638,6 +642,7 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
+            $0.maxSpeedMPS = 8.5
         }
 
         let invalidUpdate = LocationUpdate(
@@ -801,15 +806,11 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
             $0.speedSampleCount = 1
-            $0.speedSampleSum = 36.0
-            $0.maxSpeedKPH = 36
         }
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
             $0.speedSampleCount = 2
-            $0.speedSampleSum = 72.0
-            $0.maxSpeedKPH = 36
         }
     }
 
@@ -843,8 +844,6 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
             $0.speedSampleCount = 1
-            $0.speedSampleSum = 36.0
-            $0.maxSpeedKPH = 36
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
@@ -872,8 +871,6 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
             $0.speedSampleCount = 2
-            $0.speedSampleSum = 72.0
-            $0.maxSpeedKPH = 36
         }
     }
 
@@ -891,8 +888,6 @@ struct ActiveRideFeatureTimerTests {
                 $0.elapsedSeconds = tick
                 $0.distanceMeters = Double(tick) * 10.0
                 $0.speedSampleCount = tick
-                $0.speedSampleSum = Double(tick) * 36
-                $0.maxSpeedKPH = 36
             }
         }
         #expect(checkpointCount.value == 0)
@@ -901,8 +896,6 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 30
             $0.distanceMeters = 300.0
             $0.speedSampleCount = 30
-            $0.speedSampleSum = 1080.0
-            $0.maxSpeedKPH = 36
         }
         await store.receive(\.trackRecorder.checkpointFired)
         #expect(checkpointCount.value == 1)
@@ -912,8 +905,6 @@ struct ActiveRideFeatureTimerTests {
                 $0.elapsedSeconds = tick
                 $0.distanceMeters = Double(tick) * 10.0
                 $0.speedSampleCount = tick
-                $0.speedSampleSum = Double(tick) * 36
-                $0.maxSpeedKPH = 36
             }
         }
         #expect(checkpointCount.value == 1)
@@ -922,8 +913,6 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 60
             $0.distanceMeters = 600.0
             $0.speedSampleCount = 60
-            $0.speedSampleSum = 2160.0
-            $0.maxSpeedKPH = 36
         }
         await store.receive(\.trackRecorder.checkpointFired)
         #expect(checkpointCount.value == 2)
@@ -959,7 +948,7 @@ struct ActiveRideFeatureTimerTests {
         let store = TestStore(
             initialState: ActiveRideFeature.State(
                 recordingState: .active,
-                speed: SpeedFeature.State(speedMPS: wheelMPS, activeSpeedSource: .bleWheel)
+                speed: SpeedFeature.State(activeSpeedSource: .bleWheel)
             )
         ) {
             ActiveRideFeature()
@@ -974,32 +963,52 @@ struct ActiveRideFeatureTimerTests {
         }
         store.exhaustivity = .off
 
+        await store.send(.speed(.bleSpeedReceived(wheelMPS)))
         await store.send(.elapsedTick)
-        #expect(abs(store.state.maxSpeedKPH - 40) < 1e-9)
+        #expect(store.state.maxSpeedMPS == wheelMPS)
         #expect(store.state.speedSampleCount == 1)
+        #expect(store.state.averageSpeedMPS == wheelMPS)
 
         // GPS lagging on the descent: shown nowhere, counted nowhere.
         await store.send(.locationUpdated(LocationUpdate(
             coordinate: Coordinate(latitude: 43.0, longitude: -89.0), altitude: 280,
             speed: 36.0 / 3.6, horizontalAccuracy: 5, heading: 0, timestamp: testDate
         )))
+        await store.send(.elapsedTick)
         #expect(store.state.speed.speedMPS == wheelMPS)
-        #expect(abs(store.state.maxSpeedKPH - 40) < 1e-9)
-        #expect(store.state.speedSampleCount == 1)
+        #expect(store.state.maxSpeedMPS == wheelMPS)
+        #expect(store.state.averageSpeedMPS == wheelMPS)
     }
 
-    @Test("A second at or below stationarySpeedMPS stays out of Avg/Max speed")
-    func stoppedSecondStaysOutOfSpeedAggregates() async {
-        let store = makeStore(speedMPS: 0.4)
-        await store.send(.elapsedTick) {
-            $0.elapsedSeconds = 1
-            $0.zeroSpeedSeconds = 1
-            // No distance, no speed sample, no max.
-        }
+    @Test("A GPS fix at or below stationarySpeedMPS stays out of Avg/Max speed")
+    func stoppedFixStaysOutOfSpeedAggregates() async {
+        let store = makeStore()
+        store.exhaustivity = .off
+        // Through `.locationUpdated`, where the old rule counted any speed above zero.
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0, longitude: -89.0), altitude: 280,
+            speed: 0.4, horizontalAccuracy: 5, heading: 0, timestamp: testDate
+        )))
+        await store.send(.elapsedTick)
+        #expect(store.state.speed.speedMPS == 0.4)
+        #expect(store.state.speedSampleCount == 0)
+        #expect(store.state.maxSpeedMPS == 0)
+        #expect(store.state.distanceMeters == 0)
+        #expect(store.state.zeroSpeedSeconds == 1)
     }
 
-    @Test("Average speed is distance over moving time")
-    func averageSpeedIsDistanceOverMovingTime() async {
+    @Test("Max speed catches a peak that is replaced before the next tick")
+    func maxSpeedCatchesAPeakBetweenTicks() async {
+        let store = makeStore()
+        store.exhaustivity = .off
+        await store.send(.speed(.gpsSpeedReceived(52.0 / 3.6)))
+        await store.send(.speed(.gpsSpeedReceived(49.0 / 3.6)))
+        await store.send(.elapsedTick)
+        #expect(store.state.maxSpeedMPS == 52.0 / 3.6)
+    }
+
+    @Test("Average speed is the mean of the moving seconds")
+    func averageSpeedIsMeanOfMovingSeconds() async {
         let store = makeStore()
         store.exhaustivity = .off
         let speeds = [5.0, 0.3, 8.0, 0.0, 12.0, ActiveRideFeature.stationarySpeedMPS, 6.5]
@@ -1010,11 +1019,8 @@ struct ActiveRideFeatureTimerTests {
 
         let moving = speeds.filter { $0 > ActiveRideFeature.stationarySpeedMPS }
         #expect(store.state.speedSampleCount == moving.count)
-        // Relative: `averageSpeedMPS` converts through Foundation's km/h unit, whose
-        // coefficient is 0.277778 rather than exactly 1/3.6 (a ~1e-6 relative error).
-        let rebuilt = store.state.averageSpeedMPS * Double(moving.count)
-        #expect(abs(rebuilt - store.state.distanceMeters) / store.state.distanceMeters < 1e-5)
-        #expect(abs(store.state.maxSpeedKPH - 12.0 * 3.6) < 1e-9)
+        #expect(abs(store.state.averageSpeedMPS - moving.reduce(0, +) / Double(moving.count)) < 1e-9)
+        #expect(store.state.maxSpeedMPS == 12.0)
     }
 }
 
@@ -1234,12 +1240,13 @@ struct ActiveRideFeatureStateMachineTests {
         // Realistic, unequal sample counts (#175 review) — proves the seeded
         // sum/count pair reconstructs the true prior weight, not a fabricated
         // single-sample average that would let one post-resume reading collapse
-        // a long ride's running average toward itself.
+        // a long ride's running average toward itself. Speed is the exception: its
+        // average is distance over moving seconds (#381), so 720 m over 120 s is 6 m/s.
         let summary = RideSummaryUpdate(
             rideId: rideId,
             recordingState: .active,
             durationSeconds: 145,
-            distanceMeters: 980,
+            distanceMeters: 720,
             averageSpeedMPS: 6.0,
             maxSpeedMPS: 12.0,
             averageHeartRateBPM: 140,
@@ -1259,11 +1266,10 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(state.rideId == rideId)
         #expect(state.recordingState == .active)
         #expect(state.elapsedSeconds == 145)
-        #expect(state.distanceMeters == 980)
-        #expect(abs(state.maxSpeedKPH - 12.0 * 3.6) < 0.001)
+        #expect(state.distanceMeters == 720)
+        #expect(state.maxSpeedMPS == 12.0)
         #expect(state.speedSampleCount == 120)
-        #expect(abs(state.averageSpeedKPH - 6.0 * 3.6) < 0.001)
-        #expect(abs(state.speedSampleSum - 6.0 * 3.6 * 120) < 0.01)
+        #expect(state.averageSpeedMPS == 6.0)
         #expect(state.maxHeartRateBPM == 172)
         #expect(state.hrSampleCount == 90)
         #expect(state.hrSampleSum == 140 * 90)
@@ -1297,7 +1303,7 @@ struct ActiveRideFeatureStateMachineTests {
         let state = ActiveRideFeature.State(resuming: summary)
 
         #expect(state.speedSampleCount == 0)
-        #expect(state.speedSampleSum == 0)
+        #expect(state.averageSpeedMPS == 0)
         #expect(state.hrSampleCount == 0)
         #expect(state.hrSampleSum == 0)
         #expect(state.maxHeartRateBPM == 0)
@@ -1794,6 +1800,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.speedKPH = 8.0 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.0))) {
+            $0.maxSpeedMPS = 8.0
             $0.speed.speedMPS = 8.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.0
@@ -1810,8 +1817,6 @@ struct ActiveRideFeatureStateMachineTests {
             $0.zeroSpeedSeconds = 0
             // Avg/Max speed are sampled here, not from the fix above (#381).
             $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.0 * 3.6
-            $0.maxSpeedKPH = 8.0 * 3.6
         }
         await store.receive(\.trackRecorder.timerTick)
     }
@@ -3156,6 +3161,8 @@ struct ActiveRideFeatureSharedPeripheralTests {
         await store.send(.speed(.bleConnectionChanged(.disconnected))) {
             $0.speed.connectionState = .disconnected
             $0.speed.speedMPS = 5.0
+            // The GPS fallback is now the displayed speed, so it is the ride's max (#381).
+            $0.maxSpeedMPS = 5.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.sourceSwitchBanner =
                 SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
@@ -3184,6 +3191,8 @@ struct ActiveRideFeatureSharedPeripheralTests {
         await store.send(.speed(.bleConnectionChanged(.disconnected))) {
             $0.speed.connectionState = .disconnected
             $0.speed.speedMPS = 5.0
+            // The GPS fallback is now the displayed speed, so it is the ride's max (#381).
+            $0.maxSpeedMPS = 5.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.sourceSwitchBanner =
                 SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")

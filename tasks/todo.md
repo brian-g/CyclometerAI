@@ -781,3 +781,15 @@ Branch: `fix/381-speed-aggregates`
   - The first full run stalled mid-log at the same minute as an `AppIntentsLiveEntityService` sim crash.
   - The touched suites passed on their own (38).
   - A `test-without-building` rerun was green: 1611 unique names, nothing missing, 4 new.
+
+### Review fixes (/code-review high)
+- `speedSampleSum` removed. `averageSpeedMPS = distanceMeters / speedSampleCount` (moving seconds); a sum on the same samples as distance could only ever be distance again. Resume restores just the count.
+- Speed aggregates are stored in m/s (`maxSpeedMPS`). `maxSpeedKPH` and `averageSpeedKPH` are gone: nothing outside the feature read them, and it removes the hardcoded `* 3.6` and the km/h round trip behind the relative-tolerance band-aid. Checks are exact again.
+- Max is taken on every displayed reading in `.speed` (after auto-resume, so the resuming reading counts), not once per tick, so a peak between ticks isn't lost.
+- `stoppedFixStaysOutOfSpeedAggregates` now sends a 0.4 m/s `.locationUpdated`, so it catches the old any-speed-counts rule.
+- Previews: `speedSampleCount: 1560` (12.3 km → 28.4 km/h), and `maxSpeedMPS: 9.47` / `8.67`.
+- Exhaustive tests that receive an active speed reading now expect `maxSpeedMPS`, including both wheel-disconnect → GPS-fallback tests.
+- Filed #383: the mini-player shows GPS-only `speedKPH`, and a held speed keeps counting after updates stop (needs a ride file).
+- Skipped: a ride resumed across the app update mixes old and new sample counts (rare; one ride's Avg slightly off).
+- Revert check: removing Max-on-reading, plus the old `.locationUpdated` count → the wheel, stopped-fix and peak tests all fail.
+- Suite: the first full run caught 3 exhaustive tests (fixed). The confirm run stalled with the sim (`intelligencetasksd` crash). A `test-without-building` rerun was green: 1612 unique names, nothing missing apart from 2 renames.
