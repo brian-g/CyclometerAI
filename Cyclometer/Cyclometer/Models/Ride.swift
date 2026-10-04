@@ -119,6 +119,17 @@ final class Ride {
     var speedSampleCount: Int = 0
     var hrSampleCount: Int = 0
     var cadenceSampleCount: Int = 0
+    /// W5's time in each cadence zone and time coasting, mirroring `CadenceFeature.State`
+    /// (#340) — persisted so a resumed ride's detail sheet still covers the whole ride, next to
+    /// the ride-wide Avg/Max beside it. Bounded to the same one-checkpoint-window staleness as
+    /// every other resumed aggregate. Unlike the HR zone seconds #284 declined to store, these
+    /// can't go stale: cadence zones are fixed rpm thresholds, not resolved at read time.
+    /// Read and written as one dictionary through `cadenceZoneSeconds`.
+    var cadenceGrindingSeconds: TimeInterval = 0
+    var cadenceTransitionSeconds: TimeInterval = 0
+    var cadenceOptimalSeconds: TimeInterval = 0
+    var cadenceOverspinSeconds: TimeInterval = 0
+    var cadenceCoastingSeconds: TimeInterval = 0
     /// How many times this ride has been resumed, which is the index of the track segment
     /// currently being recorded (#263). Persisted for the same reason `zeroSpeedSeconds`
     /// is: a kill and resume mid-ride would otherwise restart the numbering at 0 and merge
@@ -145,7 +156,33 @@ final class Ride {
         self.speedSampleCount = 0
         self.hrSampleCount = 0
         self.cadenceSampleCount = 0
+        self.cadenceGrindingSeconds = 0
+        self.cadenceTransitionSeconds = 0
+        self.cadenceOptimalSeconds = 0
+        self.cadenceOverspinSeconds = 0
+        self.cadenceCoastingSeconds = 0
         self.trackSegmentIndex = 0
+    }
+
+    /// The four zone columns in `CadenceFeature.State.zoneSeconds`' shape (#340). A zone with
+    /// no time is left out rather than mapped to 0, as the live tally does, so a resumed ride
+    /// that never pedalled reads back exactly as a fresh one.
+    var cadenceZoneSeconds: [CadenceZone: TimeInterval] {
+        get {
+            let columns: [CadenceZone: TimeInterval] = [
+                .grinding: cadenceGrindingSeconds,
+                .transition: cadenceTransitionSeconds,
+                .optimal: cadenceOptimalSeconds,
+                .overspin: cadenceOverspinSeconds,
+            ]
+            return columns.filter { $0.value > 0 }
+        }
+        set {
+            cadenceGrindingSeconds = newValue[.grinding] ?? 0
+            cadenceTransitionSeconds = newValue[.transition] ?? 0
+            cadenceOptimalSeconds = newValue[.optimal] ?? 0
+            cadenceOverspinSeconds = newValue[.overspin] ?? 0
+        }
     }
 
     /// Nested rather than top-level to avoid colliding with the TCA-side
@@ -182,6 +219,8 @@ extension Ride {
             speedSampleCount: speedSampleCount,
             hrSampleCount: hrSampleCount,
             cadenceSampleCount: cadenceSampleCount,
+            cadenceZoneSeconds: cadenceZoneSeconds,
+            cadenceCoastingSeconds: cadenceCoastingSeconds,
             trackSegmentIndex: trackSegmentIndex,
             // `createRide` writes the id and name together, so this is both or neither.
             route: routeId.flatMap { id in routeName.map { RouteReference(id: id, name: $0) } },

@@ -141,6 +141,10 @@ struct RideSchemaMigrationTests {
             #expect(ride.hrSampleCount == 0)
             #expect(ride.cadenceSampleCount == 0)
 
+            // #340's cadence tallies: a ride from before them reads as having none.
+            #expect(ride.cadenceZoneSeconds.isEmpty)
+            #expect(ride.cadenceCoastingSeconds == 0)
+
             // #177's thumbnail: a ride recorded before it has none, and S14 shows its
             // placeholder rather than a decode failure.
             #expect(ride.mapThumbnailLight == nil)
@@ -233,13 +237,14 @@ struct RideSchemaMigrationTests {
             let context = try ModelContext(openStore(at: url))
             let existing = try #require(context.fetch(FetchDescriptor<Ride>()).first)
             existing.cadenceSampleCount = 42
+            existing.cadenceOptimalSeconds = 90
 
             context.insert(Ride())
             try context.save()
 
             let rides = try context.fetch(FetchDescriptor<Ride>())
             #expect(rides.count == 2)
-            #expect(rides.contains { $0.cadenceSampleCount == 42 })
+            #expect(rides.contains { $0.cadenceSampleCount == 42 && $0.cadenceOptimalSeconds == 90 })
         }
     }
 }

@@ -691,3 +691,25 @@ Branch: `ci/374-sim-boot-docs-skip`
 - [x] 7. HR flake fixed: `unexpectedDropReadmitsOnlyThePairedStrap` checked the rescan straight after the status flip, but the client publishes `false` before calling `startScanning`. Now `expectEventually`, the repo's helper for exactly this; 20 iterations green
 - [x] 9. Second run (37162293875) green with a cache hit, but the boot started before the restore slowed it: restore 5 min 40 s (22 s before), package resolution 2 min 42 s. The boot now starts just before the build
 - [x] 8. `-collect-test-diagnostics never` in CI: the failing run spent 10 min gathering diagnostics after the tests ended, two minutes short of the timeout
+
+# #340 — Persist cadence zone and coasting time across ride resume (W5)
+
+Plan: /Users/brian/.claude/plans/swirling-sparking-dragon.md
+Branch: `feat/340-cadence-tallies-resume`
+
+- [x] 1. `Ride`: five defaulted columns + computed `cadenceZoneSeconds`; `summarySnapshot`
+- [x] 2. `RideSummaryUpdate`: `cadenceZoneSeconds`, `cadenceCoastingSeconds`
+- [x] 3. `RidePersistenceActor.apply` writes both
+- [x] 4. `ActiveRideFeature`: `makeRideSummaryUpdate` + `State(resuming:)`
+- [x] 5. DataModel.md §3.1, §9, header
+- [x] 6. Tests: resuming (seed + adds-to), persistence round trips, migration defaults, checkpoint payload
+- [x] 7. Unit suite green + revert check
+
+## Review
+
+- Stored on `Ride` (Brian's call), using the #175 resume-aggregate pattern: five scalar `TimeInterval = 0` columns, mapped to and from the live `[CadenceZone: TimeInterval]` shape in one computed property, `Ride.cadenceZoneSeconds`. It drops zero entries, so `fetchResumableRide() == checkpoint` stays exact. The doc comment says why #284's "no stored zone seconds" rule doesn't cover these: cadence zones are fixed thresholds.
+- Post-ride cadence zones on S10/S15: not in scope, since UX.md doesn't call for them. Flagged in the PR as a possible follow-up, built from the track the way HR zones are.
+- The checkpoint-payload test goes through `pauseTapped` rather than 30 ticks, following #197's `checkpointCarriesTheRouteAndProgress`. The write path is the same (`makeRideSummaryUpdate`).
+- Unit suite: 1794 passed, 0 failed. Each new or changed test was found by name in the log.
+- Revert check (fresh derivedData, restore lines removed): both resume tests fail on the tally expectations; the checkpoint test passes, as expected, since it covers the write side. File restored.
+- Not verified: a real kill and relaunch on device. `RideRecordingTests.killAndRelaunchResumesRide` doesn't drive cadence.
