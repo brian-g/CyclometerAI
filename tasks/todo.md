@@ -720,3 +720,23 @@ Branch: `feat/340-cadence-tallies-resume`
 - The `State(resuming:)` comment no longer claims Avg/Max cover exactly the whole ride. They keep counting while paused, but the zone tally doesn't; that predates this change and is filed as #379.
 - Skipped: test-setup duplication (copying setup is the suite's norm).
 - Suite: two full runs stalled or lost their test host. The first stalled at the same minute a sim `AppIntentsLiveEntityService` crashed; the second failed every remaining test at 0.000s with no assertion. No Cyclometer crash report either time. The focused suites passed (89/0), then a full `test-without-building` rerun passed 1795/0.
+
+# #379 — Ride averages and maxima stop counting while paused
+
+Plan: /Users/brian/.claude/plans/swirling-sparking-dragon.md
+Branch: `fix/379-paused-aggregates`
+
+- [x] 1. Speed: gate count/sum/max in `.locationUpdated` on `.active`
+- [x] 2. HR: gate count/sum/max in `applyHeartRateReading` on `.active`
+- [x] 3. Cadence: gate count/sum/max on `isRecording`; fix the doc comments
+- [x] 4. Tests: CadenceFeatureTests defaults + flipped paused test; `locationContinuesWhilePaused`; new paused-HR test
+- [x] 5. Full suite green + HR revert check
+
+## Review
+
+- No question to ask: PRD line 619 ("all sensor recording suspended"), DataModel.md's "paused interval exclusion" row and UX W2 ("excluding stopped time") had already decided it.
+- Only the aggregates are gated. The live speed, HR, zone, held HR, cadence and the watermark still follow the sensors while paused.
+- Reversed on purpose: #338's `pausedRideCreditsNothing` asserted that paused readings "still feed the average/max". That pinned the old behaviour; it wasn't a decision.
+- Suite: 1796 passed, 0 failed. Changed tests found by name; the auto-pause suite (7) is green.
+- Revert check (fresh derivedData, all three gates removed): the speed, HR and cadence paused tests all fail. Files restored.
+- Side effect: readings in `.idle`/`.ended` no longer count either, and the one fix that triggers an auto-resume (it arrives while `.paused`) isn't counted.

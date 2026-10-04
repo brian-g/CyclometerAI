@@ -9,8 +9,10 @@ struct CadenceFeatureTests {
 
     private static let testDate = Date(timeIntervalSince1970: 1_000_000)
 
+    /// Recording by default: a reading only reaches the average and max while the ride is
+    /// recording (#379), which is what most of these tests are about.
     private func makeStore(
-        initialState: CadenceFeature.State = CadenceFeature.State(),
+        initialState: CadenceFeature.State = CadenceFeature.State(isRecording: true),
         clock: TestClock<Duration> = TestClock(),
         bleCSCClient: BLECSCClient = .testValue,
         date: Date = Self.testDate
@@ -138,7 +140,7 @@ struct CadenceFeatureTests {
         let now = start.addingTimeInterval(CadenceFeature.historyWindow + 1)         // t=3601
 
         let store = makeStore(
-            initialState: CadenceFeature.State(cadenceSamples: [stale, recent]),
+            initialState: CadenceFeature.State(cadenceSamples: [stale, recent], isRecording: true),
             date: now
         )
 
@@ -174,7 +176,7 @@ struct CadenceFeatureTests {
     func cadenceReceivedCancelsPendingReconnectTimer() async {
         let clock = TestClock()
         let store = makeStore(
-            initialState: CadenceFeature.State(cadenceRPM: 80),
+            initialState: CadenceFeature.State(cadenceRPM: 80, isRecording: true),
             clock: clock
         )
 
@@ -299,8 +301,13 @@ struct CadenceFeatureTests {
 
         #expect(store.state.zoneSeconds.isEmpty)
         #expect(store.state.coastingSeconds == 0)
-        // The readings themselves still show and still feed the average/max.
-        #expect(store.state.maxCadenceRPM == 90)
+        // Nor do the readings reach the average or max (#379, PRD: "all sensor recording
+        // suspended") — but the live value and the watermark still follow the sensor.
+        #expect(store.state.pedalingSampleCount == 0)
+        #expect(store.state.cadenceSum == 0)
+        #expect(store.state.maxCadenceRPM == 0)
+        #expect(store.state.cadenceRPM == 0)
+        #expect(store.state.cadenceSamples.count == 3)
     }
 
     @Test("A gap longer than maxCreditedInterval credits nothing")
