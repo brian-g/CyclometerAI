@@ -138,7 +138,7 @@ struct ActiveRideFeature {
         var heartRateBPM: Int = 0
         var hrZone: Int = 0
         /// Count of non-zero bpm readings applied to `heartRateBPM`, paired with
-        /// `hrSampleSum` — mirrors `speedSampleCount`/`speedSampleSum` (#171).
+        /// `hrSampleSum` (#171).
         var hrSampleCount: Int = 0
         var hrSampleSum: Double = 0
         var maxHeartRateBPM: Int = 0
@@ -240,25 +240,22 @@ struct ActiveRideFeature {
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
         var navigation = NavigationFeature.State()
-        var maxSpeedKPH: Double = 0
+        /// The highest displayed speed while recording and moving (#381) — taken on every
+        /// reading in `.speed`, not once a second, so a peak between two ticks still counts.
+        var maxSpeedMPS: Double = 0
+        /// Moving seconds: ticks whose displayed speed cleared `stationarySpeedMPS`, the same
+        /// sample and threshold `distanceMeters` integrates (#381). Persisted (#175).
         var speedSampleCount: Int = 0
-        var speedSampleSum: Double = 0
-        var averageSpeedKPH: Double {
-            speedSampleCount > 0 ? speedSampleSum / Double(speedSampleCount) : 0
+        /// Distance over moving time. Derived rather than summed, since a speed sum taken on
+        /// the same samples as distance could only ever be distance again.
+        var averageSpeedMPS: Double {
+            speedSampleCount > 0 ? distanceMeters / Double(speedSampleCount) : 0
         }
-        // Canonical m/s views of the speed stats for consumers (e.g. SpeedWidget)
+        // Canonical m/s view of the live speed for consumers (e.g. SpeedWidget)
         // that convert to display units themselves. Uses Measurement so the
         // KPH→MPS factor isn't hardcoded at the call site.
         var speedMPS: Double {
             Measurement(value: speedKPH, unit: UnitSpeed.kilometersPerHour)
-                .converted(to: .metersPerSecond).value
-        }
-        var averageSpeedMPS: Double {
-            Measurement(value: averageSpeedKPH, unit: UnitSpeed.kilometersPerHour)
-                .converted(to: .metersPerSecond).value
-        }
-        var maxSpeedMPS: Double {
-            Measurement(value: maxSpeedKPH, unit: UnitSpeed.kilometersPerHour)
                 .converted(to: .metersPerSecond).value
         }
         var isRadarPaired: Bool = false
@@ -847,13 +844,15 @@ struct ActiveRideFeature {
                 expireHeldHR(in: &state)
                 coverSilentStrapWithHealthKit(in: &state)
                 state.elapsedSeconds += 1
-                // One threshold governs both: a second spent below it adds no distance
-                // and counts toward auto-pause. Integrating the noise floor instead —
-                // what `max(speedMPS, 0)` did — grew the odometer while the bike stood
-                // still (#262).
+                // One threshold governs all three: a second spent below it adds no distance,
+                // counts toward auto-pause, and stays out of Avg speed. Integrating the noise
+                // floor instead — what `max(speedMPS, 0)` did — grew the odometer while the
+                // bike stood still (#262), and averaging it dragged Avg speed down (#381).
+                // The displayed speed, so a wheel sensor's reading wins over GPS here too.
                 let speedMPS = max(state.speed.speedMPS ?? 0, 0)
                 if speedMPS > Self.stationarySpeedMPS {
                     state.distanceMeters += speedMPS
+                    state.speedSampleCount += 1
                     state.zeroSpeedSeconds = 0
                 } else {
                     state.zeroSpeedSeconds += 1
@@ -1033,17 +1032,9 @@ struct ActiveRideFeature {
                     state.altitudeSamples.removeAll { $0.time < cutoff }
                 }
                 state.heading = update.heading
-                let kph = max(update.speed, 0) * 3.6
-                state.speedKPH = kph
-                // The ride's average and max cover recorded time only, like distance and the
-                // track (#379): a fix while paused still shows, but is not part of the ride.
-                if state.recordingState == .active {
-                    if kph > 0 {
-                        state.speedSampleCount += 1
-                        state.speedSampleSum += kph
-                    }
-                    if kph > state.maxSpeedKPH { state.maxSpeedKPH = kph }
-                }
+                // Display only. The ride's Avg/Max speed come from the displayed speed —
+                // `.elapsedTick` and `.speed` — not from GPS fixes (#381).
+                state.speedKPH = max(update.speed, 0) * 3.6
                 return .merge(
                     .send(.speed(.gpsSpeedReceived(update.speed))),
                     .send(.calibration(.locationUpdated(update))),
@@ -1067,6 +1058,13 @@ struct ActiveRideFeature {
                     // rider stood at the light and the bike did not travel the ground
                     // between the two fixes (#263).
                     beginTrackSegment(&state)
+                }
+                // Every displayed reading, after the resume above so the one that resumes
+                // counts too. Same "moving" bar as distance; the source is `SpeedFeature`'s
+                // choice, so a wheel sensor beats GPS (#381).
+                if state.recordingState == .active, let speedMPS = state.speed.speedMPS,
+                   speedMPS > Self.stationarySpeedMPS {
+                    state.maxSpeedMPS = max(state.maxSpeedMPS, speedMPS)
                 }
                 return .none
             case .calibration:
@@ -1379,8 +1377,7 @@ extension ActiveRideFeature.State {
         trackSegmentIndex = summary.trackSegmentIndex + (recordingState == .active ? 1 : 0)
         elapsedSeconds = Int(summary.durationSeconds)
         distanceMeters = summary.distanceMeters
-        maxSpeedKPH = Measurement(value: summary.maxSpeedMPS, unit: UnitSpeed.metersPerSecond)
-            .converted(to: .kilometersPerHour).value
+        maxSpeedMPS = summary.maxSpeedMPS
         // The running averages are seeded from their *real* persisted sample
         // counts, not a fabricated weight — `average * count` reconstructs the
         // true prior sum, so a post-resume sample is weighted correctly against
@@ -1388,12 +1385,9 @@ extension ActiveRideFeature.State {
         // exactly one had. A zero count also tells "no real sample yet" apart
         // from "genuinely averaged zero", which `averageSpeedMPS` alone (a
         // non-optional Double) can't.
-        if summary.speedSampleCount > 0 {
-            speedSampleCount = summary.speedSampleCount
-            let averageSpeedKPH = Measurement(value: summary.averageSpeedMPS, unit: UnitSpeed.metersPerSecond)
-                .converted(to: .kilometersPerHour).value
-            speedSampleSum = averageSpeedKPH * Double(summary.speedSampleCount)
-        }
+        // Speed needs only its count: Avg speed is distance over moving seconds (#381), and
+        // distance is restored above.
+        speedSampleCount = summary.speedSampleCount
         if let avgHR = summary.averageHeartRateBPM, summary.hrSampleCount > 0 {
             hrSampleCount = summary.hrSampleCount
             hrSampleSum = Double(avgHR) * Double(summary.hrSampleCount)

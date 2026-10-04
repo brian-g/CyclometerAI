@@ -298,9 +298,8 @@ private struct EditModeButton: View {
                     cadence: CadenceFeature.State(cadenceRPM: 87),
                     distanceMeters: 12300,
                     speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
-                    maxSpeedKPH: 34.1,
-                    speedSampleCount: 120,
-                    speedSampleSum: 3408,
+                    maxSpeedMPS: 9.47,
+                    speedSampleCount: 1560,
                     isRadarPaired: true,
                     radarTargets: [
                         RadarTarget(id: UUID(), relativeVelocityMPS: 8.5, rangeMetres: 45, threatLevel: .warning),
@@ -333,9 +332,8 @@ private struct EditModeButton: View {
                     cadence: CadenceFeature.State(cadenceRPM: 87),
                     distanceMeters: 12300,
                     speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
-                    maxSpeedKPH: 34.1,
-                    speedSampleCount: 120,
-                    speedSampleSum: 3408,
+                    maxSpeedMPS: 9.47,
+                    speedSampleCount: 1560,
                     isRadarPaired: false,
                     wasRadarEverPaired: false
                 )
@@ -361,7 +359,7 @@ private struct EditModeButton: View {
                 cadence: CadenceFeature.State(cadenceRPM: 87),
                 distanceMeters: 12300,
                 speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
-                maxSpeedKPH: 34.1
+                maxSpeedMPS: 9.47
             )
         ) {
             ActiveRideFeature()
@@ -388,7 +386,7 @@ private struct EditModeButton: View {
                     cadence: CadenceFeature.State(),
                     distanceMeters: 7600,
                     speed: SpeedFeature.State(speedMPS: 0, activeSpeedSource: .gps),
-                    maxSpeedKPH: 31.2
+                    maxSpeedMPS: 8.67
                 )
             ) {
                 ActiveRideFeature()

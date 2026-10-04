@@ -137,15 +137,19 @@ struct AutoPauseReplayTests {
         /// Seconds into the window at which the ride was paused, however briefly.
         var pausedSeconds: [Int] = []
         var distanceMeters: Double = 0
+        var speedSampleCount = 0
+        var averageSpeedMPS: Double = 0
     }
 
-    private func replay() async -> Replay {
+    /// Fed through `.locationUpdated`, as GPS speed arrives in a ride: it forwards the speed
+    /// to `SpeedFeature` and is where Avg/Max speed used to be sampled (#381).
+    private func replay(autoPause: Bool = true) async -> Replay {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
         } operation: { () -> TestStoreOf<ActiveRideFeature> in
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.isAutoPauseEnabled = true }
+            $preferences.withLock { $0.isAutoPauseEnabled = autoPause }
             let store = TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
                 ActiveRideFeature()
             } withDependencies: {
@@ -166,11 +170,16 @@ struct AutoPauseReplayTests {
 
         var result = Replay()
         for (second, speed) in AutoPauseReplayFixtures.stopWindowSpeedsMPS.enumerated() {
-            await store.send(.speed(.gpsSpeedReceived(speed)))
+            await store.send(.locationUpdated(LocationUpdate(
+                coordinate: Coordinate(latitude: 43.0, longitude: -89.0), altitude: 280,
+                speed: speed, horizontalAccuracy: 5, heading: 0, timestamp: testDate
+            )))
             await store.send(.elapsedTick)
             if store.state.recordingState == .paused { result.pausedSeconds.append(second) }
         }
         result.distanceMeters = store.state.distanceMeters
+        result.speedSampleCount = store.state.speedSampleCount
+        result.averageSpeedMPS = store.state.averageSpeedMPS
         return result
     }
 
@@ -200,5 +209,19 @@ struct AutoPauseReplayTests {
         // The old rule integrated every noise sample and charged the ride 83 m for these
         // six minutes. What is left is the two real shuffles forward, nothing else.
         #expect(replay.distanceMeters < 50)
+    }
+
+    /// #381: with auto-pause off nothing hides the stop, so every second of it reaches the
+    /// aggregates' threshold check. Only the rolling-in seconds and the two real shuffles
+    /// clear `stationarySpeedMPS`; the minutes of 0.1–0.3 m/s noise must not count.
+    @Test("With auto-pause off, the stop's noise stays out of Avg speed")
+    func theStopLeavesAverageSpeedAlone() async {
+        let replay = await self.replay(autoPause: false)
+        let moving = AutoPauseReplayFixtures.stopWindowSpeedsMPS
+            .filter { $0 > ActiveRideFeature.stationarySpeedMPS }
+        #expect(replay.pausedSeconds.isEmpty)
+        #expect(replay.speedSampleCount == moving.count)
+        let movingAverage = moving.reduce(0, +) / Double(moving.count)
+        #expect(abs(replay.averageSpeedMPS - movingAverage) < 1e-9)
     }
 }

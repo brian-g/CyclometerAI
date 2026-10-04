@@ -748,3 +748,48 @@ Branch: `fix/379-paused-aggregates`
 - Filed #381: stopped GPS noise still counts toward Avg Speed (`kph > 0` vs `stationarySpeedMPS`), and Avg/Max speed come only from GPS even when a wheel sensor is the displayed source.
 - Left as is: a Watch sample taken during a pause can be counted once after resume via the silent-strap fallback (≤5 min old, the fallback working as designed). The fix that triggers auto-resume is dropped (one sample per stop).
 - Suite green. 1607 unique test names, versus 1606 before: only the new test was added, nothing missing. The raw "passed" line count varies with how much the parallel log repeats.
+
+# #381 — Avg/Max speed follow the displayed speed and the stopped threshold
+
+Plan: /Users/brian/.claude/plans/swirling-sparking-dragon.md
+Branch: `fix/381-speed-aggregates`
+
+- [x] 1. Move speed count/sum/max from `.locationUpdated` into `.elapsedTick`'s moving branch
+- [x] 2. Doc comments: speed aggregates; "one threshold governs" now covers three things
+- [x] 3. Update the exhaustive location/tick tests
+- [x] 4. New timer tests: wheel speed, stopped second, average = distance / moving time, field replay
+- [x] 5. Full suite green + revert check
+
+## Review
+
+- Brian's call: #381 only, no CoreMotion. Notes from the research:
+  - Motion & Fitness is already a required permission, and Info.plist already promises auto-pause from it, but nothing reads motion data.
+  - Apple doesn't document how long `CMMotionActivity` takes to switch states.
+  - `CLLocationUpdate.isStationary` is set only when Core Location *suspends* updates, which would mean replacing the `CLLocationManager` 1 Hz pipeline.
+  - No field file shows stopped GPS speed above 0.5 m/s.
+- Avg/Max speed are now sampled in `.elapsedTick`'s moving branch, from the displayed speed, at the same threshold as distance. Avg speed = distance ÷ moving seconds.
+- `speedSampleCount` now counts moving seconds. Resume weighting is unchanged, and there's no schema change.
+- Tests:
+  - 5 exhaustive `.locationUpdated` tests dropped their speed asserts; 8 timer-suite tick asserts gained them.
+  - New: wheel beats GPS, a stopped second stays out, average = distance / moving time.
+  - The 2026-09-20 stop replay now feeds `.locationUpdated` and has an auto-pause-off Avg-speed test.
+- Two test-only fixes on the way:
+  - The timer suite's `makeStore` gained a fixed `date`, because `gpsSpeedReceived` timestamps its sample.
+  - The average checks use a relative tolerance: Foundation's km/h coefficient is 0.277778, not exactly 1/3.6.
+- Revert check (old fix-time aggregation restored): the wheel and replay tests fail. The stopped-second test passes either way, since it pins the tick threshold, not the regression.
+- Suite:
+  - The first full run stalled mid-log at the same minute as an `AppIntentsLiveEntityService` sim crash.
+  - The touched suites passed on their own (38).
+  - A `test-without-building` rerun was green: 1611 unique names, nothing missing, 4 new.
+
+### Review fixes (/code-review high)
+- `speedSampleSum` removed. `averageSpeedMPS = distanceMeters / speedSampleCount` (moving seconds); a sum on the same samples as distance could only ever be distance again. Resume restores just the count.
+- Speed aggregates are stored in m/s (`maxSpeedMPS`). `maxSpeedKPH` and `averageSpeedKPH` are gone: nothing outside the feature read them, and it removes the hardcoded `* 3.6` and the km/h round trip behind the relative-tolerance band-aid. Checks are exact again.
+- Max is taken on every displayed reading in `.speed` (after auto-resume, so the resuming reading counts), not once per tick, so a peak between ticks isn't lost.
+- `stoppedFixStaysOutOfSpeedAggregates` now sends a 0.4 m/s `.locationUpdated`, so it catches the old any-speed-counts rule.
+- Previews: `speedSampleCount: 1560` (12.3 km → 28.4 km/h), and `maxSpeedMPS: 9.47` / `8.67`.
+- Exhaustive tests that receive an active speed reading now expect `maxSpeedMPS`, including both wheel-disconnect → GPS-fallback tests.
+- Filed #383: the mini-player shows GPS-only `speedKPH`, and a held speed keeps counting after updates stop (needs a ride file).
+- Skipped: a ride resumed across the app update mixes old and new sample counts (rare; one ride's Avg slightly off).
+- Revert check: removing Max-on-reading, plus the old `.locationUpdated` count → the wheel, stopped-fix and peak tests all fail.
+- Suite: the first full run caught 3 exhaustive tests (fixed). The confirm run stalled with the sim (`intelligencetasksd` crash). A `test-without-building` rerun was green: 1612 unique names, nothing missing apart from 2 renames.

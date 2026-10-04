@@ -185,9 +185,8 @@ private enum DashboardZoom {
                         cadence: CadenceFeature.State(cadenceRPM: 87),
                         distanceMeters: 12300,
                         speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
-                        maxSpeedKPH: 34.1,
-                        speedSampleCount: 120,
-                        speedSampleSum: 3408
+                        maxSpeedMPS: 9.47,
+                        speedSampleCount: 1560
                     )
                 )
             ) {
