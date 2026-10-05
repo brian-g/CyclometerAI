@@ -64,17 +64,19 @@ struct DirectionsDashboardWidgetTests {
         #expect(try invalidates { $0.navigation.progressMeters = 700 })
     }
 
-    /// The sheet is W8's, with the track as it stands when it opens — including points recorded
-    /// after the widget last rendered.
+    /// The sheet is W8's, with the track and orientation as they stand when it opens — including
+    /// changes made after the widget last rendered.
     @Test func theSheetShowsTheCurrentTrackAndRoute() throws {
         let point = Coordinate(latitude: 0, longitude: 0.001)
         let state = try onRoute()
         let store = Store(initialState: state) {
             Reduce<ActiveRideFeature.State, ActiveRideFeature.Action> { state, _ in
                 state.trackSegments[state.trackSegments.count - 1].append(point)
+                state.$preferences.withLock { $0.mapOrientation.toggle() }
                 return .none
             }
         }
+        #expect(store.preferences.mapOrientation == .headingUp)
         let widget = try #require(DirectionsDashboardWidget(size: .oneByOne, store: store).body as? DirectionsWidget)
         store.send(.mapOrientationToggled)
 
@@ -82,6 +84,6 @@ struct DirectionsDashboardWidgetTests {
         #expect(sheet.trackSegments == [[Coordinate(latitude: 0, longitude: 0), point]])
         #expect(sheet.route == store.mapSheetRoute)
         #expect(!sheet.route.isEmpty)
-        #expect(sheet.orientation == store.preferences.mapOrientation)
+        #expect(sheet.orientation == .northUp)
     }
 }
