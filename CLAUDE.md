@@ -16,7 +16,7 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 
 | Asset | Path | Purpose |
 |---|---|---|
-| Color tokens | `assets/design/colors.md` | **Canonical source** for all 30 semantic color tokens, light + dark mode hex values, and WCAG AA contrast notes |
+| Color tokens | `assets/design/colors.md` | **Canonical source** for the semantic color tokens, light + dark mode hex values, and WCAG AA contrast notes |
 | Primary design file | `assets/design/Design.sketch` | Screen layouts, component specs, interaction flows for all screens in the screen inventory |
 | App icon | `assets/design/CyclometerIcon.sketch` | App icon artwork, all required sizes |
 | D-DIN fonts | `assets/design/d-din/` | Dashboard numeric typeface; must be bundled in the Xcode target. OTF files are licensed under SIL Open Font License. |
