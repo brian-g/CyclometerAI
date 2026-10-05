@@ -594,8 +594,9 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 
 **Sizes:** 1x1
 
-- Primary value: rolling average speed, excluding stopped time
+- Primary value: the ride's average speed, excluding stopped time: distance over moving time, the same number as W1's AVG. "—" until the first moving second (#140)
 - Unit: km/h or mph
+- Watermark of recent speed, with the average's own history drawn over it: `ratingGood` while it climbs, `ratingOkay` while it falls. It turns only after moving one step of the number (0.1 km/h) back from its peak or trough (#140)
 - Sheet: Ride metrics
 
 ---
@@ -604,7 +605,7 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 
 **Sizes:** 1x1
 
-- Primary value: elapsed ride time, excluding stopped time; format HH:MM:SS
+- Primary value: moving time, which leaves out stopped and paused time, so W6 = W2 × W3. W1's Time also counts stopped seconds that haven't reached auto-pause. Format MM:SS, then H:MM:SS from an hour, as W1's Time (#140)
 - No unit
 - Sheet: Ride metrics
 

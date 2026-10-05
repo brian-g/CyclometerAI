@@ -373,6 +373,9 @@ extension DashboardLayout {
         ]),
         DashboardPage(placements: [
             WidgetPlacement(SpeedDashboardWidget.self, size: .oneByOne, row: 0, column: 0),
+            WidgetPlacement(AverageSpeedDashboardWidget.self, size: .oneByOne, row: 0, column: 1),
+            WidgetPlacement(DurationDashboardWidget.self, size: .oneByOne, row: 1, column: 0),
+            WidgetPlacement(DistanceDashboardWidget.self, size: .oneByOne, row: 1, column: 1),
         ]),
     ])
 }

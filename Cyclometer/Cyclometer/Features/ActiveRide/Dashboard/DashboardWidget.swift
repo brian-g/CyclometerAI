@@ -45,6 +45,9 @@ enum WidgetCategory: CaseIterable {
 enum DashboardWidgetCatalog {
     static let all: [any DashboardWidget.Type] = [
         SpeedDashboardWidget.self,
+        AverageSpeedDashboardWidget.self,
+        DurationDashboardWidget.self,
+        DistanceDashboardWidget.self,
         CadenceDashboardWidget.self,
         HeartRateDashboardWidget.self,
         HRZonesDashboardWidget.self,
