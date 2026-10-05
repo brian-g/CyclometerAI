@@ -23,6 +23,16 @@ Branch: `feat/140-ride-metric-widgets`
 - Tests: full `CyclometerTests` run (1771 passed, apart from the first-record snapshot failures), `PersistenceClientTests` alone (46), then the changed suites, all green.
 - Not verified: the W2 line under real, varying speed on a device. The simulator feed is constant.
 
+### Follow-up: /code-review
+- **W3 now shows moving time** (`speedSampleCount`), per UX.md, so W6 = W2 × W3. Brian chose it over matching W1's Time. Format kept as MM:SS / H:MM:SS, and W2 stays the whole-ride average; UX.md §W2/§W3 now say both.
+- **Bucket edges are integers.** The floating-point edges dropped the newest sample at 404 counts below 20,000 (e.g. 123). This predates the PR, from W1's watermark.
+- **W2's average is trimmed to the watermark's oldest reading before plotting.** It only trims on moving ticks, so after a long stop the shared axis stretched past the hour.
+- **Trend runs turn with hysteresis:** only after moving one display step (0.1 km/h) back from the run's peak or trough. Comparing each step's sign flickered late in a ride, and a fixed per-step dead-band would have hidden a slow, real decline.
+- **S08's sample ride now has an hour of speed history**, `SpeedSample.sampleHour`, shared with W2's previews and snapshots. W1 and W2 preview their graphs.
+- **Cleanups:** `Int.spokenElapsed` is shared by W1 and W3; W2 uses `HeroNumber(Double, unit:)`.
+- **Rejected:** "the pause bridge is a misleading diagonal". The average can't change during a pause, so the bridge is flat. The re-bucketing cost is the same as W1's.
+- **Tests:** full suite 1792 passed. One `RideSummarySnapshotTests` case failed in 0.000 s on a lost test host and passed on a rerun.
+
 
 # #330 — Larger grab targets: dashboard grabber + map sheet
 

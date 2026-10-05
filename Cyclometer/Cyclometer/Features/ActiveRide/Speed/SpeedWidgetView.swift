@@ -189,8 +189,7 @@ struct SpeedWidget: View {
             parts += ["average \(displayAvg)", "maximum \(displayMax)"]
         }
         if size == .twoByTwo {
-            let time = Duration.seconds(elapsed).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide))
-            parts += ["distance \(unit.spokenDistance(fromMeters: distance))", "time \(time)"]
+            parts += ["distance \(unit.spokenDistance(fromMeters: distance))", "time \(elapsed.spokenElapsed)"]
         }
         return parts.joined(separator: ", ")
     }
@@ -261,6 +260,12 @@ private struct SpeedHistoryChart: View {
 // MARK: - Helpers
 
 extension Int {
+    /// Seconds in words, "1 hour, 2 minutes, 33 seconds": VoiceOver reads "1:02:33" digit by
+    /// digit (#361).
+    var spokenElapsed: String {
+        Duration.seconds(self).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide))
+    }
+
     var formattedElapsed: String {
         let d = Duration.seconds(self)
         if self >= 3600 {

@@ -12,11 +12,27 @@ struct AverageSpeedDashboardWidget: DashboardWidget {
     let store: StoreOf<ActiveRideFeature>
 
     var body: some View {
+        let series = Self.plottedSeries(speed: store.speed.speedSamples, average: store.averageSpeedSamples)
         AverageSpeedWidget(
             averageSpeed: store.averageSpeedMPS,
-            speedHistory: store.speed.speedSamples.bucketAveraged(to: SpeedFeature.watermarkResolution),
-            averageHistory: store.averageSpeedSamples.bucketAveraged(to: SpeedFeature.watermarkResolution),
+            speedHistory: series.speed,
+            averageHistory: series.average,
             unit: store.unitSystem
+        )
+    }
+
+    /// Both series over the watermark's window, downsampled. The speed samples are trimmed on every
+    /// reading, paused or not, but the average only gains (and trims) on moving ticks — so after a
+    /// long stop its oldest samples would stretch the shared time axis past the watermark (#140
+    /// review). Trimming to the watermark's oldest reading keeps one window for both.
+    static func plottedSeries(
+        speed: [SpeedSample],
+        average: [SpeedSample]
+    ) -> (speed: [SpeedSample], average: [SpeedSample]) {
+        let windowStart = speed.first?.time ?? .distantPast
+        return (
+            speed.bucketAveraged(to: SpeedFeature.watermarkResolution),
+            average.filter { $0.time >= windowStart }.bucketAveraged(to: SpeedFeature.watermarkResolution)
         )
     }
 }

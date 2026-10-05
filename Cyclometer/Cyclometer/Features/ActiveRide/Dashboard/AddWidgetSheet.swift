@@ -191,10 +191,26 @@ extension ActiveRideFeature.State {
             isHRPaired: true,
             cadence: CadenceFeature.State(cadenceRPM: 87, pedalingSampleCount: 120, cadenceSum: 10_200, maxCadenceRPM: 102),
             distanceMeters: 12300,
-            speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps),
+            speed: SpeedFeature.State(speedMPS: 7.89, activeSpeedSource: .gps, speedSamples: SpeedSample.sampleHour),
             maxSpeedMPS: 9.47,
-            speedSampleCount: 1560
+            speedSampleCount: 1560,
+            averageSpeedSamples: SpeedSample.sampleHourAverage
         )
+    }
+}
+
+extension SpeedSample {
+    /// A sample hour, one reading a minute, that builds then fades — so S08's speed previews draw
+    /// their watermarks, and W2's line both climbs and falls (#140). Also W2's previews and snapshots.
+    static let sampleHour: [SpeedSample] = (0..<60).map { minute in
+        let mps = minute < 40 ? 6 + Double(minute) * 0.08 : 9.2 - Double(minute - 40) * 0.115
+        return SpeedSample(time: Date(timeIntervalSinceReferenceDate: Double(minute) * 60), mps: mps)
+    }
+
+    /// The ride average at each of `sampleHour`'s readings.
+    static let sampleHourAverage: [SpeedSample] = sampleHour.indices.map { i in
+        let sofar = sampleHour[...i]
+        return SpeedSample(time: sampleHour[i].time, mps: sofar.reduce(0) { $0 + $1.mps } / Double(sofar.count))
     }
 }
 

@@ -178,6 +178,16 @@ struct SpeedFeatureTests {
         #expect(Array(samples.prefix(10)).bucketAveraged(to: 60) == Array(samples.prefix(10)))
     }
 
+    @Test("The last bucket always holds the newest sample (#140 review)")
+    func bucketAveragedKeepsNewestSample() {
+        // 123 is a count where floating-point bucket edges ended one short and dropped it.
+        for count in [61, 123, 245, 490, 3_600] {
+            let samples = (0..<count).map { SpeedSample(time: Date(timeIntervalSinceReferenceDate: Double($0)), mps: 0) }
+                + [SpeedSample(time: Date(timeIntervalSinceReferenceDate: Double(count)), mps: 1_000)]
+            #expect(samples.bucketAveraged(to: 60).last!.mps > 0, "count \(count + 1)")
+        }
+    }
+
     // MARK: - BLE priority / fallback / promotion
 
     @Test("BLE speed cancels a pending fallback timer")

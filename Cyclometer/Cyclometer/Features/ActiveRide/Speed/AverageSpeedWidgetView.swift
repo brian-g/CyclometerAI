@@ -22,7 +22,7 @@ struct AverageSpeedWidget: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 WidgetLabel("Average Speed")
-                HeroNumber(displayAverage, unit: hasAverage ? unit.speedLabel : "").heroNumberSize(.medium)
+                averageHero.heroNumberSize(.medium)
                 Spacer()
             }
             .padding(Spacing.sm)
@@ -38,8 +38,8 @@ struct AverageSpeedWidget: View {
     /// Zero until the ride has a moving second — an average of nothing, not a slow ride.
     private var hasAverage: Bool { averageSpeed > 0 }
 
-    private var displayAverage: String {
-        hasAverage ? unit.speed(fromMPS: averageSpeed).formatted(.number.precision(.fractionLength(1))) : "—"
+    private var averageHero: HeroNumber<EmptyView> {
+        hasAverage ? HeroNumber(unit.speed(fromMPS: averageSpeed), unit: unit.speedLabel) : HeroNumber("—", unit: "")
     }
 
     /// What VoiceOver reads after the title (#361), with no "—" read aloud.
@@ -50,31 +50,50 @@ struct AverageSpeedWidget: View {
 
 // MARK: - Average Trend
 
-/// W2's average line, split into runs that each only rise or only fall so each run takes one
-/// color. Neighbouring runs share their junction sample, so the line stays unbroken. A level
-/// stretch continues the run before it; the first run takes the first change's direction.
+/// W2's average line, split into runs that each rise or fall, so each run takes one color.
+/// Neighbouring runs share their turning sample, so the line stays unbroken.
+///
+/// A run turns only once the average has come back more than `turnThresholdMPS` from the run's
+/// peak (or trough). Comparing each step on its own sign flickered: late in a ride the average
+/// barely moves, and bucket means re-cut every second wobble around it (#140 review). Measured
+/// from the extreme, a slow real decline still adds up past the threshold and turns the line.
 enum AverageSpeedTrend {
     struct Run: Equatable {
         let isRising: Bool
         let samples: [SpeedSample]
     }
 
+    /// One step of W2's number (0.1 km/h). A move the number can't show isn't a trend. Taken in
+    /// canonical m/s, so the line turns at the same point in either unit.
+    static let turnThresholdMPS = Measurement(value: 0.1, unit: UnitSpeed.kilometersPerHour)
+        .converted(to: .metersPerSecond).value
+
     static func runs(_ samples: [SpeedSample]) -> [Run] {
         guard samples.count > 1 else { return [] }
-        let pairs = zip(samples, samples.dropFirst())
-        var isRising = pairs.first { $0.mps != $1.mps }.map { $0.mps < $1.mps } ?? true
         var runs: [Run] = []
-        var current = [samples[0]]
-        for (previous, sample) in pairs {
-            let direction = sample.mps == previous.mps ? isRising : previous.mps < sample.mps
-            if direction != isRising {
-                runs.append(Run(isRising: isRising, samples: current))
-                current = [previous]
-                isRising = direction
+        var runStart = 0
+        var extreme = 0
+        // Unknown until the average first moves a full threshold away from where it started.
+        var isRising: Bool?
+        for (i, sample) in samples.enumerated().dropFirst() {
+            guard let rising = isRising else {
+                if abs(sample.mps - samples[0].mps) > turnThresholdMPS {
+                    isRising = sample.mps > samples[0].mps
+                    extreme = i
+                }
+                continue
             }
-            current.append(sample)
+            let fromExtreme = sample.mps - samples[extreme].mps
+            if rising ? fromExtreme >= 0 : fromExtreme <= 0 {
+                extreme = i
+            } else if abs(fromExtreme) > turnThresholdMPS {
+                runs.append(Run(isRising: rising, samples: Array(samples[runStart...extreme])))
+                runStart = extreme
+                extreme = i
+                isRising = !rising
+            }
         }
-        runs.append(Run(isRising: isRising, samples: current))
+        runs.append(Run(isRising: isRising ?? true, samples: Array(samples[runStart...])))
         return runs
     }
 }
@@ -114,26 +133,11 @@ private struct AverageSpeedHistoryChart: View {
 
 // MARK: - Previews
 
-/// A ride that speeds up, then fades: the average climbs, then falls (#140).
-private let previewHistory: (speed: [SpeedSample], average: [SpeedSample]) = {
-    let start = Date(timeIntervalSinceReferenceDate: 0)
-    let speed = (0..<60).map { i in
-        let mps = i < 40 ? 4 + Double(i) * 0.15 : 10 - Double(i - 40) * 0.3
-        return SpeedSample(time: start.addingTimeInterval(Double(i) * 60), mps: mps)
-    }
-    var total = 0.0
-    let average = speed.enumerated().map { i, sample in
-        total += sample.mps
-        return SpeedSample(time: sample.time, mps: total / Double(i + 1))
-    }
-    return (speed, average)
-}()
-
 #Preview("Metric") {
     AverageSpeedWidget(
-        averageSpeed: 5.6,
-        speedHistory: previewHistory.speed,
-        averageHistory: previewHistory.average,
+        averageSpeed: SpeedSample.sampleHourAverage.last!.mps,
+        speedHistory: SpeedSample.sampleHour,
+        averageHistory: SpeedSample.sampleHourAverage,
         unit: .metric
     )
     .frame(width: 196, height: 96)
@@ -141,9 +145,9 @@ private let previewHistory: (speed: [SpeedSample], average: [SpeedSample]) = {
 
 #Preview("Imperial — Dark") {
     AverageSpeedWidget(
-        averageSpeed: 5.6,
-        speedHistory: previewHistory.speed,
-        averageHistory: previewHistory.average,
+        averageSpeed: SpeedSample.sampleHourAverage.last!.mps,
+        speedHistory: SpeedSample.sampleHour,
+        averageHistory: SpeedSample.sampleHourAverage,
         unit: .imperial
     )
     .frame(width: 196, height: 96)

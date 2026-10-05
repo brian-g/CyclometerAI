@@ -13,11 +13,10 @@ extension Array where Element == SpeedSample {
     /// against one axis, #140). Returned unchanged when already within `resolution`.
     func bucketAveraged(to resolution: Int) -> [SpeedSample] {
         guard count > resolution else { return self }
-        let bucket = Double(count) / Double(resolution)
         return (0..<resolution).map { i in
-            let start = Int(Double(i) * bucket)
-            let end = Swift.max(start + 1, Int(Double(i + 1) * bucket))
-            let slice = self[start..<Swift.min(end, count)]
+            // Integer edges: `Double(count) / resolution` scaled back up can land one short of
+            // `count` (e.g. 123 at 60) and drop the newest sample.
+            let slice = self[(i * count / resolution)..<((i + 1) * count / resolution)]
             let n = Double(slice.count)
             let time = slice.reduce(0) { $0 + $1.time.timeIntervalSinceReferenceDate } / n
             return SpeedSample(

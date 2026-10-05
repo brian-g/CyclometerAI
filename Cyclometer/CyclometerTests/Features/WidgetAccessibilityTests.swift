@@ -183,7 +183,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .averageSpeed:
             AnyView(AverageSpeedWidget(averageSpeed: 8, speedHistory: [], averageHistory: []))
         case .duration:
-            AnyView(DurationWidget(elapsed: 3_753))
+            AnyView(DurationWidget(movingSeconds: 3_753))
         case .distance:
             AnyView(DistanceWidget(distance: 12_400, unit: .metric))
         case .directions:
