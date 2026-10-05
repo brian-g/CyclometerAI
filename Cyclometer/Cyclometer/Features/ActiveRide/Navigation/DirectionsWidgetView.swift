@@ -16,25 +16,18 @@ struct DirectionsWidget: View {
     let distanceMeters: Double?
     let unit: UnitSystem
     var size: WidgetSize = .oneByOne   // only .oneByOne / .twoByOne used by W9
-    /// The map sheet's inputs, as `MapWidget` takes them.
-    var trackSegments: [[Coordinate]] = [[]]
-    var route: [RouteCoordinate] = []
-    var sheetOrientation: MapOrientation = .headingUp
-    var onOrientationToggle: () -> Void = {}
+    /// The map sheet, W8's. A closure so the dashboard never reads the (growing) track itself —
+    /// only the presented sheet does (#362).
+    var detail: () -> LiveMapSheet = {
+        LiveMapSheet(trackSegments: [[]], route: [], orientation: .headingUp, onOrientationToggle: {})
+    }
 
     var body: some View {
         content
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color.cyBgSecondary)
-            .widgetDetail(label: DirectionsDashboardWidget.title, value: accessibilityValue) {
-                LiveMapSheet(
-                    trackSegments: trackSegments,
-                    route: route,
-                    orientation: sheetOrientation,
-                    onOrientationToggle: onOrientationToggle
-                )
-            }
+            .widgetDetail(label: DirectionsDashboardWidget.title, value: accessibilityValue, detail)
     }
 
     // MARK: - Layout Variants

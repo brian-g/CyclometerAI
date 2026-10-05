@@ -712,3 +712,20 @@ A burst of screenshots, about 75 ms apart, showed the cause of the first two. Th
 **Rules.**
 - When a modifier is supposed to be a no-op in one state, test it against the view most likely to notice. For a clip or mask, that's anything that overflows on purpose, such as a map, a shadow or a bleed.
 - `clipShape` is never free, even with radius 0: it clips to the frame. For a conditional clip, mask with a shape that ignores the safe area when off.
+
+---
+
+## "I'll keep checking" needs a mechanism, not an intention (2026-10-04, #362)
+
+**What happened.** I started a full `CyclometerTests` run in the background and said I'd report when it
+finished. It deadlocked a few minutes in, and nothing woke me. Brian asked "what is going on?" an hour
+later. I killed it, restarted it, and said "I'll check the restarted run at intervals" — again with
+nothing scheduled. It stalled again one minute in, and Brian caught it 27 minutes later: "Pretty sure it
+stalled again and you didn't catch it."
+
+**Why I was wrong.** A background run notifies me only when it *exits*. A hang never exits, so silence
+looked exactly like progress. Saying I would check was a promise I had no way to keep.
+
+**Rule.** Every long background run gets a watcher that covers the hang case: a `Monitor` that emits on the
+result line, on the process exiting without one, **and** on the log going quiet for a few minutes. Never
+tell Brian I'll keep an eye on something unless a tool call is actually doing the watching.
