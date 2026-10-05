@@ -7,6 +7,27 @@ struct SpeedSample: Equatable, Sendable {
     let mps: Double
 }
 
+extension Array where Element == SpeedSample {
+    /// At most `resolution` samples, each the mean time and speed of a contiguous bucket — so a
+    /// downsampled series still sits on the time axis it was recorded on (W2 plots two series
+    /// against one axis, #140). Returned unchanged when already within `resolution`.
+    func bucketAveraged(to resolution: Int) -> [SpeedSample] {
+        guard count > resolution else { return self }
+        let bucket = Double(count) / Double(resolution)
+        return (0..<resolution).map { i in
+            let start = Int(Double(i) * bucket)
+            let end = Swift.max(start + 1, Int(Double(i + 1) * bucket))
+            let slice = self[start..<Swift.min(end, count)]
+            let n = Double(slice.count)
+            let time = slice.reduce(0) { $0 + $1.time.timeIntervalSinceReferenceDate } / n
+            return SpeedSample(
+                time: Date(timeIntervalSinceReferenceDate: time),
+                mps: slice.reduce(0) { $0 + $1.mps } / n
+            )
+        }
+    }
+}
+
 @Reducer
 struct SpeedFeature {
     /// Wall-clock window of speed samples retained for the watermark sparkline.
@@ -52,15 +73,7 @@ struct SpeedFeature {
         /// Watermark series (m/s), downsampled to ≤ `watermarkResolution` points
         /// by averaging contiguous buckets.
         var watermarkSamples: [Double] {
-            let values = speedSamples.map(\.mps)
-            guard values.count > SpeedFeature.watermarkResolution else { return values }
-            let bucket = Double(values.count) / Double(SpeedFeature.watermarkResolution)
-            return (0..<SpeedFeature.watermarkResolution).map { i in
-                let start = Int(Double(i) * bucket)
-                let end = max(start + 1, Int(Double(i + 1) * bucket))
-                let slice = values[start..<min(end, values.count)]
-                return slice.reduce(0, +) / Double(slice.count)
-            }
+            speedSamples.bucketAveraged(to: SpeedFeature.watermarkResolution).map(\.mps)
         }
     }
 

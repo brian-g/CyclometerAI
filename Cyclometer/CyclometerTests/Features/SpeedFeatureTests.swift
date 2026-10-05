@@ -166,6 +166,18 @@ struct SpeedFeatureTests {
         #expect(SpeedFeature.State(speedSamples: few).watermarkSamples.count == 10)
     }
 
+    @Test("Downsampling averages each bucket's time as well as its speed (#140)")
+    func bucketAveragedKeepsTimeAxis() {
+        let samples = (0..<120).map {
+            SpeedSample(time: Date(timeIntervalSinceReferenceDate: Double($0)), mps: Double($0) * 2)
+        }
+        let buckets = samples.bucketAveraged(to: 60)
+        #expect(buckets.count == 60)
+        #expect(buckets.first == SpeedSample(time: Date(timeIntervalSinceReferenceDate: 0.5), mps: 1))
+        #expect(buckets.last == SpeedSample(time: Date(timeIntervalSinceReferenceDate: 118.5), mps: 237))
+        #expect(Array(samples.prefix(10)).bucketAveraged(to: 60) == Array(samples.prefix(10)))
+    }
+
     // MARK: - BLE priority / fallback / promotion
 
     @Test("BLE speed cancels a pending fallback timer")

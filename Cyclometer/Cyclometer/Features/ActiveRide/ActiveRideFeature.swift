@@ -251,6 +251,10 @@ struct ActiveRideFeature {
         var averageSpeedMPS: Double {
             speedSampleCount > 0 ? distanceMeters / Double(speedSampleCount) : 0
         }
+        /// `averageSpeedMPS` after each moving tick, for W2's trend line (#140) — the only ticks
+        /// that change it. Kept over `SpeedFeature.historyWindow`, the speed watermark's own
+        /// window, so the two share a time axis. Not persisted, like the watermark.
+        var averageSpeedSamples: [SpeedSample] = []
         // Canonical m/s view of the live speed for consumers (e.g. SpeedWidget)
         // that convert to display units themselves. Uses Measurement so the
         // KPH→MPS factor isn't hardcoded at the call site.
@@ -854,6 +858,10 @@ struct ActiveRideFeature {
                     state.distanceMeters += speedMPS
                     state.speedSampleCount += 1
                     state.zeroSpeedSeconds = 0
+                    let now = date.now
+                    state.averageSpeedSamples.append(SpeedSample(time: now, mps: state.averageSpeedMPS))
+                    let cutoff = now.addingTimeInterval(-SpeedFeature.historyWindow)
+                    state.averageSpeedSamples.removeAll { $0.time < cutoff }
                 } else {
                     state.zeroSpeedSeconds += 1
                 }

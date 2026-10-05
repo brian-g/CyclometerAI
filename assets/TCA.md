@@ -993,8 +993,9 @@ Cyclometer/
 │   │   ├── ActiveRideAccessoryView.swift  // S05.3 accessory
 │   │   ├── Dashboard/                     // DashboardPageView, DashboardGridLayout, DashboardWidget, DashboardEditChrome (S07), AddWidgetSheet (S08)
 │   │   │                                  // (protocol + catalog) — #139; each widget folder has its adapter
-│   │   ├── Speed/                         // SpeedFeature, SpeedWidgetView (W1/W2),
-│   │   │                                  // PaceWidgetView (W11)
+│   │   ├── Speed/                         // SpeedFeature, SpeedWidgetView (W1), AverageSpeed (W2),
+│   │   │                                  // Duration (W3), Distance (W6), PaceWidgetView (W11),
+│   │   │                                  // RideMetricsSheet
 │   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12) — HR state lives
 │   │   │                                  // on ActiveRideFeature (§3)
 │   │   ├── Cadence/                       // CadenceFeature, CadenceWidgetView (W5)

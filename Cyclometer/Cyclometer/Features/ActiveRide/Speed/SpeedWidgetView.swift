@@ -38,9 +38,7 @@ struct SpeedWidget: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: SpeedDashboardWidget.title, value: accessibilityValue) {
-            Text("Ride Metrics")
-                .font(.headline)
-                .presentationDetents([.medium])
+            RideMetricsSheet()
         }
     }
 

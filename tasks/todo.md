@@ -1,3 +1,29 @@
+# #140 — W2 Avg Speed, W3 Duration, W6 Distance 1×1 widgets
+
+Plan: /Users/brian/.claude/plans/tingly-splashing-frost.md
+Branch: `feat/140-ride-metric-widgets`
+
+- [x] 1. `bucketAveraged(to:)` on `[SpeedSample]`; `watermarkSamples` uses it
+- [x] 2. `ActiveRideFeature.State.averageSpeedSamples`, appended on moving ticks, pruned to the window
+- [x] 3. `RideMetricsSheet` placeholder shared by W1/W2/W3/W6
+- [x] 4. W2 view + adapter, `AverageSpeedTrend`
+- [x] 5. W3 and W6 views + adapters; catalog entries
+- [x] 6. Tests: reducer, pure, snapshots (+ S08 re-record), a11y
+- [x] 7. TCA.md §8
+- [x] 8. Unit suite green; Sketch compare; sim drive
+
+## Review
+
+- The W2 line uses a new `averageSpeedSamples` series, appended only on moving ticks: the average changes on no other tick. Only the existing tests that tick while moving gained an assertion (9 lines across 4 tests). No test was switched to non-exhaustive.
+- `bucketAveraged(to:)` replaces `watermarkSamples`' inline loop and keeps time on each bucket, so W2's two series share a Date axis. W1's values are unchanged.
+- **Not in the plan:** the factory layout's showcase page 3 gains W2/W3/W6 beside Speed 1×1. `factoryCoversEveryWidgetAndSize` requires every catalog widget there.
+- The S08 picker's Ride section now pairs evenly, so the "lone 1×1 last" row case moved to a Route-section assertion.
+- Snapshot names are widget-prefixed (`testAverageSpeedMetric`…). Generic names clashed with Pace's in the flat bundle.
+- Sim drive, fresh build: W2/W3/W6 update live (00:26→00:46, 0.1→0.2 mi), and a tap opens the Ride Metrics placeholder. The drive found that at a steady speed W2's line stroked above its tile, and Charts doesn't clip; `.clipped()` fixed it, confirmed on a second drive.
+- Tests: full `CyclometerTests` run (1771 passed, apart from the first-record snapshot failures), `PersistenceClientTests` alone (46), then the changed suites, all green.
+- Not verified: the W2 line under real, varying speed on a device. The simulator feed is constant.
+
+
 # #330 — Larger grab targets: dashboard grabber + map sheet
 
 Plan: /Users/brian/.claude/plans/harmonic-waddling-heron.md

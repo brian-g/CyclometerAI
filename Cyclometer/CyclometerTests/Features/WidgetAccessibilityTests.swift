@@ -136,7 +136,7 @@ private enum ElementChecks {
 
 /// The widgets that adopt `.widgetDetail`.
 enum TappableWidget: CaseIterable, CustomTestStringConvertible {
-    case map, cadence, speed, directions
+    case map, cadence, speed, averageSpeed, duration, distance, directions
 
     var testDescription: String { title }
 
@@ -148,6 +148,9 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .map: "Map"
         case .cadence: "Cadence"
         case .speed: "Speed"
+        case .averageSpeed: "Average Speed"
+        case .duration: "Duration"
+        case .distance: "Distance"
         case .directions: "Directions"
         }
     }
@@ -158,6 +161,9 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .map: ""
         case .cadence: "92 rpm, average 88, maximum 110"
         case .speed: "36.0 kilometers per hour, average 28.8, maximum 43.2, distance 12.4 kilometers, time 1 hour, 2 minutes, 33 seconds"
+        case .averageSpeed: "28.8 kilometers per hour"
+        case .duration: "1 hour, 2 minutes, 33 seconds"
+        case .distance: "12.4 kilometers"
         case .directions: "No route"
         }
     }
@@ -174,6 +180,12 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
                 speed: 10, speedHistory: [], activeSpeedSource: .gps,
                 distance: 12_400, elapsed: 3_753, averageSpeed: 8, maxSpeed: 12
             ))
+        case .averageSpeed:
+            AnyView(AverageSpeedWidget(averageSpeed: 8, speedHistory: [], averageHistory: []))
+        case .duration:
+            AnyView(DurationWidget(elapsed: 3_753))
+        case .distance:
+            AnyView(DistanceWidget(distance: 12_400, unit: .metric))
         case .directions:
             AnyView(DirectionsWidget(hasRoute: false, nextTurn: nil, distanceMeters: nil, unit: .metric))
         }

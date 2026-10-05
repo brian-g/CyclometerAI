@@ -806,11 +806,69 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
             $0.speedSampleCount = 1
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
         }
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
             $0.speedSampleCount = 2
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
+        }
+    }
+
+    @Test("A moving tick records the ride average for W2's trend line (#140)")
+    func movingTickRecordsAverage() async {
+        let store = makeStore(speedMPS: 10.0)
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.distanceMeters = 10.0
+            $0.speedSampleCount = 1
+            $0.averageSpeedSamples = [SpeedSample(time: testDate, mps: 10.0)]
+        }
+    }
+
+    @Test("A stationary or paused tick leaves the average series alone (#140)")
+    func stillTickRecordsNoAverage() async {
+        let store = makeStore(speedMPS: 0)
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = 1
+        }
+        await store.send(.pauseTapped) {
+            $0.recordingState = .paused
+        }
+        await store.receive(\.trackRecorder.pauseRecording)
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+        await store.send(.elapsedTick)
+    }
+
+    @Test("Average samples older than the watermark window are dropped (#140)")
+    func averageSeriesPrunesToWindow() async {
+        let stale = SpeedSample(time: testDate.addingTimeInterval(-SpeedFeature.historyWindow - 1), mps: 4)
+        let edge = SpeedSample(time: testDate.addingTimeInterval(-SpeedFeature.historyWindow), mps: 5)
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                speed: SpeedFeature.State(speedMPS: 10.0, activeSpeedSource: .gps),
+                averageSpeedSamples: [stale, edge]
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+        }
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.distanceMeters = 10.0
+            $0.speedSampleCount = 1
+            $0.averageSpeedSamples = [edge, SpeedSample(time: testDate, mps: 10.0)]
         }
     }
 
@@ -844,6 +902,7 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
             $0.speedSampleCount = 1
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
@@ -871,6 +930,7 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
             $0.speedSampleCount = 2
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
         }
     }
 
@@ -888,6 +948,7 @@ struct ActiveRideFeatureTimerTests {
                 $0.elapsedSeconds = tick
                 $0.distanceMeters = Double(tick) * 10.0
                 $0.speedSampleCount = tick
+                $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
             }
         }
         #expect(checkpointCount.value == 0)
@@ -896,6 +957,7 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 30
             $0.distanceMeters = 300.0
             $0.speedSampleCount = 30
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
         }
         await store.receive(\.trackRecorder.checkpointFired)
         #expect(checkpointCount.value == 1)
@@ -905,6 +967,7 @@ struct ActiveRideFeatureTimerTests {
                 $0.elapsedSeconds = tick
                 $0.distanceMeters = Double(tick) * 10.0
                 $0.speedSampleCount = tick
+                $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
             }
         }
         #expect(checkpointCount.value == 1)
@@ -913,6 +976,7 @@ struct ActiveRideFeatureTimerTests {
             $0.elapsedSeconds = 60
             $0.distanceMeters = 600.0
             $0.speedSampleCount = 60
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
         }
         await store.receive(\.trackRecorder.checkpointFired)
         #expect(checkpointCount.value == 2)
@@ -1817,6 +1881,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.zeroSpeedSeconds = 0
             // Avg/Max speed are sampled here, not from the fix above (#381).
             $0.speedSampleCount = 1
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 8.0))
         }
         await store.receive(\.trackRecorder.timerTick)
     }
