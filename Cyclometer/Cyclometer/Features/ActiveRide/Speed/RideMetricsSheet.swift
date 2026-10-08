@@ -95,13 +95,19 @@ extension ActiveRideFeature.State {
 
 /// UX.md's "Sheet: Ride metrics", shared by W1 Speed, W2 Avg Speed, W3 Duration, W6 Distance and
 /// W11 Pace (#144). W5 Cadence is tagged the same in UX.md but keeps its own sheet (#147).
+///
+/// `metrics` is called in this view's own `body`, so the ride state it reads invalidates the
+/// sheet directly. Called in the presenter's `.sheet` builder instead, a change re-ran the
+/// builder but now and then never reached the open sheet, which stayed stale until the card
+/// behind it redrew — and W3's card doesn't while the rider is stopped.
 struct RideMetricsSheet: View {
-    var metrics = RideMetrics()
+    var metrics: () -> RideMetrics = { RideMetrics() }
 
     @Environment(\.dismiss) private var dismiss
     @State private var detent = PresentationDetent.medium
 
     var body: some View {
+        let metrics = metrics()
         NavigationStack {
             RideMetricsList(metrics: metrics)
                 .navigationTitle("Ride Metrics")
@@ -129,6 +135,9 @@ struct RideMetricsList: View {
         let paceRuns = PaceTrace.runs(metrics.speedHistory, resolution: RideMetricsCharts.maxPlottedPoints)
             .filter { $0.count > 1 }
         List {
+            Section {
+                row("Distance", metrics.distance)
+            }
             Section("Speed") {
                 if let range {
                     RideSpeedChart(
@@ -150,9 +159,6 @@ struct RideMetricsList: View {
                 }
                 row("Current", metrics.currentPace)
                 row("Average", metrics.averagePace)
-            }
-            Section {
-                row("Distance", metrics.distance)
             }
             Section("Time") {
                 if metrics.rideSeconds > 0 {
@@ -205,11 +211,11 @@ extension RideMetrics {
 }
 
 #Preview("Live") {
-    RideMetricsSheet(metrics: .sample())
+    RideMetricsSheet { .sample() }
 }
 
 #Preview("Imperial — Dark") {
-    RideMetricsSheet(metrics: .sample(.imperial))
+    RideMetricsSheet { .sample(.imperial) }
     .preferredColorScheme(.dark)
 }
 

@@ -44,6 +44,13 @@ Open:
 - **Missing samples:** a stretch with no samples at all (a GPS dropout) draws as a straight line, not a gap.
 - **Cadence sheet axis:** it still repeats minute labels. `RideTimeAxis` could be shared with it.
 
+### Follow-up: Distance first; stale-sheet fix
+
+- Distance moved to the first section; snapshots re-recorded.
+- **Stale open sheet, a real bug.** `rideMetricsSheetFollowsTheRideWhileOpen` failed about one fresh `xcodebuild` run in seven. A read-count probe showed the `.sheet` builder re-ran with the new value (1 → 2 reads), but the open sheet kept the old one for 5 s+. The update never reached the presented host. Relaunch iterations within one invocation never reproduced it; separate invocations did.
+- **Fix:** `RideMetricsSheet` takes the closure and calls it in its own `body`, which was the original plan. The design I dropped after a one-off mutation check had passed was the right one. Result: 20/20 fresh invocations passed, against 1 failure in 7 before.
+- **Same pattern elsewhere:** `CadenceDetailSheet` and the Directions map sheet (#362) still read in the builder, so they likely have the same latent staleness. Not fixed here.
+
 ---
 
 # #140 — W2 Avg Speed, W3 Duration, W6 Distance 1×1 widgets

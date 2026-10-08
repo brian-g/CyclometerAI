@@ -8,7 +8,8 @@ import SwiftUI
 struct DistanceWidget: View {
     let distance: Double   // meters
     let unit: UnitSystem
-    /// The Ride Metrics sheet's data. A closure so the card never reads it; only the open sheet does (#144).
+    /// The Ride Metrics sheet's data. A closure so the card never reads it; only the open sheet does,
+    /// in its own body (#144).
     var metrics: () -> RideMetrics = { RideMetrics() }
 
     var body: some View {
@@ -21,7 +22,7 @@ struct DistanceWidget: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: DistanceDashboardWidget.title, value: unit.spokenDistance(fromMeters: distance)) {
-            RideMetricsSheet(metrics: metrics())
+            RideMetricsSheet(metrics: metrics)
         }
     }
 }

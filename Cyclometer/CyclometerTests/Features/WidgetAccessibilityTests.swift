@@ -95,7 +95,9 @@ struct WidgetAccessibilityTests {
     }
 
     /// #144: the open Ride Metrics sheet follows the ride by itself, not only when the card that
-    /// opened it redraws. W3's card here never changes, as while stopped. Checked on the top row:
+    /// opened it redraws. W3's card here never changes, as while stopped. With the metrics read in
+    /// the `.sheet` builder this failed about one fresh run in seven: the builder re-ran with the
+    /// new value, but the open sheet kept the old one. Checked on the top row:
     /// rows below the medium detent aren't in the accessibility tree.
     @Test func rideMetricsSheetFollowsTheRideWhileOpen() throws {
         let ride = LiveRide()

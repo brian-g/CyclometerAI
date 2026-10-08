@@ -576,7 +576,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 - 2x1, 2x2: Current average speed with directional arrow indicating above/below average (`small-hero`, labeled "AVG")
 - 2x2 only: Ride duration (`medium-hero`)
 - 2x2 only: Ride distance (`medium-hero`)
-- Sheet: Ride metrics. As built (#144), W1, W2, W3, W6 and W11 open the one sheet, at the medium detent and expandable to large. **Speed:** a chart of the last hour's speed over a faint elevation area (the Cadence sheet's treatment), then current, average and max. **Pace:** a chart of the same hour, faster plotted higher, with a gap wherever the rider stopped, then current and average. **Distance:** its own row. **Time:** a moving vs stopped donut, then Moving Time (W3's) and Ride Time (W1's Time). A value with no source reads "—", including pace, where W11's own card shows "--:--". W5 is tagged the same but keeps its own Cadence sheet (#147), whose content is cadence-specific
+- Sheet: Ride metrics. As built (#144), W1, W2, W3, W6 and W11 open the one sheet, at the medium detent and expandable to large. **Distance** comes first, on its own. **Speed:** a chart of the last hour's speed over a faint elevation area (the Cadence sheet's treatment), then current, average and max. **Pace:** a chart of the same hour, faster plotted higher, with a gap wherever the rider stopped, then current and average. **Time:** a moving vs stopped donut, then Moving Time (W3's) and Ride Time (W1's Time). A value with no source reads "—", including pace, where W11's own card shows "--:--". W5 is tagged the same but keeps its own Cadence sheet (#147), whose content is cadence-specific
 
 
 

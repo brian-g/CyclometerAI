@@ -6,7 +6,8 @@ import SwiftUI
 struct PaceWidget: View {
     let speedMPS: Double
     let unit: UnitSystem
-    /// The Ride Metrics sheet's data. A closure so the card never reads it; only the open sheet does (#144).
+    /// The Ride Metrics sheet's data. A closure so the card never reads it; only the open sheet does,
+    /// in its own body (#144).
     var metrics: () -> RideMetrics = { RideMetrics() }
 
     var body: some View {
@@ -19,7 +20,7 @@ struct PaceWidget: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: PaceDashboardWidget.title, value: accessibilityValue) {
-            RideMetricsSheet(metrics: metrics())
+            RideMetricsSheet(metrics: metrics)
         }
     }
 

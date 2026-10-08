@@ -13,7 +13,8 @@ struct SpeedWidget: View {
     let maxSpeed: Double        // m/s
     var unit: UnitSystem = .metric
     var size: WidgetSize = .twoByTwo
-    /// The Ride Metrics sheet's data. A closure so the card never reads it; only the open sheet does (#144).
+    /// The Ride Metrics sheet's data. A closure so the card never reads it; only the open sheet does,
+    /// in its own body (#144).
     var metrics: () -> RideMetrics = { RideMetrics() }
 
     // Hero number scales proportionally to slot height: the large-hero spec is
@@ -40,7 +41,7 @@ struct SpeedWidget: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: SpeedDashboardWidget.title, value: accessibilityValue) {
-            RideMetricsSheet(metrics: metrics())
+            RideMetricsSheet(metrics: metrics)
         }
     }
 
