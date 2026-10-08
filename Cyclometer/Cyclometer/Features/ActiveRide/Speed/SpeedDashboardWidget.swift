@@ -21,7 +21,8 @@ struct SpeedDashboardWidget: DashboardWidget {
             averageSpeed: store.averageSpeedMPS,
             maxSpeed: store.maxSpeedMPS,
             unit: store.unitSystem,
-            size: size
+            size: size,
+            metrics: { store.rideMetrics }
         )
     }
 }

@@ -14,6 +14,6 @@ struct DurationDashboardWidget: DashboardWidget {
     var body: some View {
         // Moving time, as UX.md §W3 specifies — the seconds W2's average divides by, so
         // W2 × W3 = W6. W1's Time is `elapsedSeconds`, which counts stopped seconds too (#140 review).
-        DurationWidget(movingSeconds: store.speedSampleCount)
+        DurationWidget(movingSeconds: store.speedSampleCount, metrics: { store.rideMetrics })
     }
 }

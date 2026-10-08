@@ -12,6 +12,6 @@ struct DistanceDashboardWidget: DashboardWidget {
     let store: StoreOf<ActiveRideFeature>
 
     var body: some View {
-        DistanceWidget(distance: store.distanceMeters, unit: store.unitSystem)
+        DistanceWidget(distance: store.distanceMeters, unit: store.unitSystem, metrics: { store.rideMetrics })
     }
 }

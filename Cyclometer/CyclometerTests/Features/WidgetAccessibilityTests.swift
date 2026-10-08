@@ -58,6 +58,15 @@ struct WidgetAccessibilityTests {
         #expect(noFix.accessibilityValue == "No reading")
     }
 
+    @Test func paceReadsMinutesAndSeconds() {
+        #expect(PaceWidget(speedMPS: 3, unit: .metric).accessibilityValue == "5 minutes, 33 seconds per kilometer")
+        #expect(PaceWidget(speedMPS: 3, unit: .imperial).accessibilityValue == "8 minutes, 56 seconds per mile")
+    }
+
+    @Test func paceNeverReadsADash() {
+        #expect(PaceWidget(speedMPS: 0, unit: .metric).accessibilityValue == "No reading")
+    }
+
     @Test func directionsReadsItsThreeStates() {
         let withTurn = DirectionsWidget(hasRoute: true, nextTurn: turn, distanceMeters: 347, unit: .metric)
         let noTurn = DirectionsWidget(hasRoute: true, nextTurn: nil, distanceMeters: nil, unit: .metric)
@@ -83,6 +92,23 @@ struct WidgetAccessibilityTests {
     @Test(arguments: TappableWidget.withoutMap)
     func editModeIsNotAButton(_ widget: TappableWidget) throws {
         try ElementChecks.editModeIsNotAButton(widget)
+    }
+
+    /// #144: the open Ride Metrics sheet follows the ride by itself, not only when the card that
+    /// opened it redraws. W3's card here never changes, as while stopped. Checked on the top row:
+    /// rows below the medium detent aren't in the accessibility tree.
+    @Test func rideMetricsSheetFollowsTheRideWhileOpen() throws {
+        let ride = LiveRide()
+        let host = try Host(DurationWidget(movingSeconds: 0, metrics: { ride.metrics }))
+        defer { host.tearDown() }
+
+        #expect(try host.onlyElement().accessibilityActivate())
+        host.settle()
+        #expect(host.presentedText().contains("Current No reading"))
+
+        ride.metrics.speedMPS = 10
+        host.settle { host.presentedText().contains("36.0 kilometers per hour") }
+        #expect(host.presentedText().contains("Current 36.0 kilometers per hour"))
     }
 }
 
@@ -134,9 +160,15 @@ private enum ElementChecks {
     }
 }
 
+/// Ride state as the store holds it: observable, read through a widget's `metrics` closure.
+@Observable
+private final class LiveRide {
+    var metrics = RideMetrics()
+}
+
 /// The widgets that adopt `.widgetDetail`.
 enum TappableWidget: CaseIterable, CustomTestStringConvertible {
-    case map, cadence, speed, averageSpeed, duration, distance, directions
+    case map, cadence, speed, averageSpeed, duration, distance, pace, directions
 
     var testDescription: String { title }
 
@@ -151,6 +183,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .averageSpeed: "Average Speed"
         case .duration: "Duration"
         case .distance: "Distance"
+        case .pace: "Pace"
         case .directions: "Directions"
         }
     }
@@ -164,6 +197,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .averageSpeed: "28.8 kilometers per hour"
         case .duration: "1 hour, 2 minutes, 33 seconds"
         case .distance: "12.4 kilometers"
+        case .pace: "5 minutes, 33 seconds per kilometer"
         case .directions: "No route"
         }
     }
@@ -186,6 +220,8 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
             AnyView(DurationWidget(movingSeconds: 3_753))
         case .distance:
             AnyView(DistanceWidget(distance: 12_400, unit: .metric))
+        case .pace:
+            AnyView(PaceWidget(speedMPS: 3, unit: .metric))
         case .directions:
             AnyView(DirectionsWidget(hasRoute: false, nextTurn: nil, distanceMeters: nil, unit: .metric))
         }
@@ -226,9 +262,26 @@ private final class Host {
         return elements[0]
     }
 
+    /// Every label and value in the presented sheet, joined.
+    func presentedText() -> String {
+        guard let sheet = controller.presentedViewController else { return "" }
+        return Self.elements(in: sheet.view)
+            .map { "\($0.accessibilityLabel ?? "") \($0.accessibilityValue ?? "")" }
+            .joined(separator: "\n")
+    }
+
     /// Lets layout, the accessibility tree and any presentation catch up.
     func settle() {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5))
+    }
+
+    /// Settles until `condition` holds, or `limit` passes. Under a loaded run an update can reach
+    /// the accessibility tree after `settle()`'s fixed half second.
+    func settle(limit: TimeInterval = 5, until condition: () -> Bool) {
+        let deadline = Date(timeIntervalSinceNow: limit)
+        while !condition(), Date() < deadline {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+        }
     }
 
     func tearDown() {

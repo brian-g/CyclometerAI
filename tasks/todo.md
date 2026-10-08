@@ -1,3 +1,51 @@
+# #144 — Ride Metrics detail sheet (W1, W2, W3, W6, W11)
+
+Plan: /Users/brian/.claude/plans/cosmic-sprouting-sutherland.md
+Branch: `feat/144-ride-metrics-sheet`
+
+- [x] 1. `RideMetrics` value + display strings; `ActiveRideFeature.State.rideMetrics`
+- [x] 2. `RideMetricsSheet` — list, close button
+- [x] 3. `metrics:` on W1/W2/W3/W6 views + adapters
+- [x] 4. W11 Pace: `.widgetDetail`, `accessibilityValue`, `UnitSystem.formattedPace`/`spokenPace`
+- [x] 5. Tests: `RideMetricsTests`, `RideMetricsSheetSnapshotTests`, a11y `.pace` + sheet liveness
+- [x] 6. UX.md as-built note
+- [x] 7. Feedback round 1: detents medium→large; speed chart + elevation; pace chart (inverted, gaps at stops); Distance own section; moving vs stopped donut
+- [x] 8. Unit suite green (persistence suite alone); sim drive
+
+## Review
+
+- **Sheet:** detents medium → large, opening at medium. Speed section: last-hour speed over a faint elevation area, then Current/Average/Max. Pace section: inverted line (faster higher) with gaps at stops, then Current/Average. Distance in its own section. Time section: moving vs stopped donut, then Moving Time (W3's `speedSampleCount`) and Ride Time (W1's `elapsedSeconds`).
+- **Plumbing:** each of the five widgets takes a lazy `metrics: () -> RideMetrics`, called only in the sheet builder. Adapters pass `{ store.rideMetrics }`. `RideMetrics` holds the numbers, the display strings and the two histories.
+- **Plan claim corrected:** I said the closure had to be called in the sheet's `body` to stay live. A mutation check showed reads made in the `.sheet` content builder are tracked too, so the sheet takes a plain value, as `CadenceDetailSheet` does. `rideMetricsSheetFollowsTheRideWhileOpen` pins liveness; it passes, and a frozen-value control fails it.
+- **W11:** now tappable, one VoiceOver button reading pace in words (`UnitSystem.spokenPace`). The card's M:SS moved into `UnitSystem.formattedPace`, and its snapshots are unchanged.
+- **DonutChart** moved from the Cadence file to `UI/Components/DonutChart/` for reuse. No behavior change.
+- **Found by the sim drive:** automatic time-axis ticks repeated "6:39 PM" a minute into a ride. `RideMetricsCharts.timeTicks` now ticks on whole-minute steps (≤3), and labels a sub-minute span at its start (history restarts when the app does). Unit-tested. The Cadence sheet's chart still uses automatic ticks, so it has the same repeat. Not fixed here.
+- **Tests:** full `CyclometerTests` minus `PersistenceClientTests` gave 1816 passed, and that suite alone gave 47. The first full run hung in the known PersistenceClientTests × MapKit deadlock; I confirmed it with `sample` and stopped it. After the axis fix, I re-ran only the changed suites (RideMetricsTests, snapshots, a11y), all green.
+- **Sim drive:** three fresh builds. The sheet opens from W11, W1, W2, W3 and W6 at medium, and values and the chart advance live.
+- **Not verified:** the elevation area and pace gaps under a real ride. The simulator feed is flat and constant, so these are covered by snapshots and unit tests only.
+
+### Follow-up: /code-review xhigh
+
+Fixed:
+- **Pace when stopped:** a stationary phone's GPS reads 0.02–0.04 m/s, which showed as a 500-minute pace, on the W11 card too. That predates this branch. `UnitSystem.paceSeconds` is now `nil` at or below `stationarySpeedMPS`, the same threshold the ride clock and `PaceTrace` use.
+- **Pace y-axis:** the slow end is capped at 2× the median pace, so one slow red-light bucket can't squash the riding pace. Out-of-range points are clipped, and ticks fall on whole 15 s–10 min steps. Plotted as negative seconds, because an explicit domain can't be reversed.
+- **Time axis:** both charts share the speed history's range. Labels are formatted in the environment's time zone and locale. The snapshot was really encoding New York, and failed under Tokyo; it passes there now. An aligned span can no longer get four ticks.
+- **CI:** `RideMetricsSheetSnapshotTests` added to CI's snapshot skip list.
+- **Short pace runs:** one-point runs (no line to draw) are dropped, so the pace chart never shows empty axes.
+- **VoiceOver:** sheet rows speak units and times in words, and "No reading" for "—" (`MetricReading`).
+- **Reuse:** the speed line uses `bucketAveraged(to:)` instead of a copy.
+
+Declined:
+- **Per-update recompute:** a few O(n) passes over at most an hour of samples, only while the sheet is open.
+- **English "per kilometer" in `spokenPace`:** the app is English-only, like every other spoken string.
+- **Dropping the explicit detent selection:** opening at medium is a stated requirement, and I won't rely on the system's unspecified default for a Set of detents.
+
+Open:
+- **Missing samples:** a stretch with no samples at all (a GPS dropout) draws as a straight line, not a gap.
+- **Cadence sheet axis:** it still repeats minute labels. `RideTimeAxis` could be shared with it.
+
+---
+
 # #140 — W2 Avg Speed, W3 Duration, W6 Distance 1×1 widgets
 
 Plan: /Users/brian/.claude/plans/tingly-splashing-frost.md
