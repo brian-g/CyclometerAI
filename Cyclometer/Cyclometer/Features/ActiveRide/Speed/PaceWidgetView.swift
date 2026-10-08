@@ -6,23 +6,24 @@ import SwiftUI
 struct PaceWidget: View {
     let speedMPS: Double
     let unit: UnitSystem
-
-    private var pace: String {
-        guard let paceSeconds = unit.paceSeconds(fromMPS: speedMPS) else { return "--:--" }
-        let minutes = Int(paceSeconds) / 60
-        let seconds = Int(paceSeconds) % 60
-        let secondsStr = seconds < 10 ? "0\(seconds)" : "\(seconds)"
-        return "\(minutes):\(secondsStr)"
-    }
+    /// The Ride Metrics sheet's data. A closure so the card never reads it; only the open sheet does,
+    /// in its own body (#144).
+    var metrics: () -> RideMetrics = { RideMetrics() }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetLabel("Pace")
-            HeroNumber(pace, unit: unit.paceLabel).heroNumberSize(.medium)
+            HeroNumber(unit.formattedPace(fromMPS: speedMPS) ?? "--:--", unit: unit.paceLabel).heroNumberSize(.medium)
             Spacer()
         }
         .padding(Spacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Color.cyBgSecondary)
+        .widgetDetail(label: PaceDashboardWidget.title, value: accessibilityValue) {
+            RideMetricsSheet(metrics: metrics)
+        }
     }
+
+    /// What VoiceOver reads after the title (#144), with no "--:--" read aloud.
+    var accessibilityValue: String { unit.spokenPace(fromMPS: speedMPS) ?? "No reading" }
 }

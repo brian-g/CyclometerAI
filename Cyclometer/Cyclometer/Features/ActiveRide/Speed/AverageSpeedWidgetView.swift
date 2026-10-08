@@ -11,6 +11,9 @@ struct AverageSpeedWidget: View {
     let speedHistory: [SpeedSample]     // the speed watermark
     let averageHistory: [SpeedSample]   // `averageSpeed` over the same window
     var unit: UnitSystem = .metric
+    /// The Ride Metrics sheet's data. A closure so the card never reads it; only the open sheet does,
+    /// in its own body (#144).
+    var metrics: () -> RideMetrics = { RideMetrics() }
 
     var body: some View {
         ZStack {
@@ -31,7 +34,7 @@ struct AverageSpeedWidget: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: AverageSpeedDashboardWidget.title, value: accessibilityValue) {
-            RideMetricsSheet()
+            RideMetricsSheet(metrics: metrics)
         }
     }
 

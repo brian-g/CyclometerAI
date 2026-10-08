@@ -8,6 +8,9 @@ import SwiftUI
 struct DistanceWidget: View {
     let distance: Double   // meters
     let unit: UnitSystem
+    /// The Ride Metrics sheet's data. A closure so the card never reads it; only the open sheet does,
+    /// in its own body (#144).
+    var metrics: () -> RideMetrics = { RideMetrics() }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -19,7 +22,7 @@ struct DistanceWidget: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: DistanceDashboardWidget.title, value: unit.spokenDistance(fromMeters: distance)) {
-            RideMetricsSheet()
+            RideMetricsSheet(metrics: metrics)
         }
     }
 }

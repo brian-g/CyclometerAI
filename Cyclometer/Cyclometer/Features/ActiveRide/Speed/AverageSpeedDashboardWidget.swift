@@ -17,7 +17,8 @@ struct AverageSpeedDashboardWidget: DashboardWidget {
             averageSpeed: store.averageSpeedMPS,
             speedHistory: series.speed,
             averageHistory: series.average,
-            unit: store.unitSystem
+            unit: store.unitSystem,
+            metrics: { store.rideMetrics }
         )
     }
 

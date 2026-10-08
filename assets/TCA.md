@@ -995,7 +995,7 @@ Cyclometer/
 │   │   │                                  // (protocol + catalog) — #139; each widget folder has its adapter
 │   │   ├── Speed/                         // SpeedFeature, SpeedWidgetView (W1), AverageSpeed (W2),
 │   │   │                                  // Duration (W3), Distance (W6), PaceWidgetView (W11),
-│   │   │                                  // RideMetricsSheet
+│   │   │                                  // RideMetricsSheet + RideMetricsCharts (#144)
 │   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12) — HR state lives
 │   │   │                                  // on ActiveRideFeature (§3)
 │   │   ├── Cadence/                       // CadenceFeature, CadenceWidgetView (W5)
@@ -1028,7 +1028,7 @@ Cyclometer/
 │   ├── DesignSystem/                      // Color+Cyclometer, AppFonts, Typography,
 │   │                                      // Spacing, Opacity, WidgetSize
 │   └── Components/                        // HeroNumber, WidgetLabel, SensorListRow,
-│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, …
+│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, DonutChart, …
 ├── PreviewContent/
 └── Resources/Fonts/                       // D-DIN
 ```
