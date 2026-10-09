@@ -3,7 +3,13 @@
 **Date:** 2026-09-17
 
 **Updated:** 2026-10-04—  Added details for additional widgets.
-****Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink into hairline-bordered cards (glass frames bled into each other, so they were dropped at review), and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
+**Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink into hairline-bordered cards (glass frames bled into each other, so they were dropped at review), and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
+**Updated:** 2026-10-09 — §W4/§W12 built with the Heart rate sheet (#145). W4 is built as W5 Cadence: a last-hour watermark on zone bands, a trend ▲/▼, and Avg/Max at 2×1. W12 follows Design.sketch "W12 - Zones": a donut and the time in each zone. The sheet's chart is the Cadence sheet's, for heart rate. §W4's zone labels now use §S12's names.  
+**Updated:** 2026-10-02 — §S08 opens from an empty cell (#368): in edit mode each empty cell shows a dashed slot; tapping it lists only the sizes that fit with that cell as their top-left, and adds there.  
+**Updated:** 2026-10-02 — §S08 Add Widget built (#142): Add opens it; a widget goes into the first open spot on the page the rider is on, and an entry that page can't take is dimmed. "Empty page" inserts a blank page after the current one. Tapping an empty cell is not yet built (#368), nor is rearranging by drag (#367).  
+**Updated:** 2026-10-02 — §S07 widgets can be moved by drag (#367): onto an empty spot that fits, or swapped with a widget of the same size; any other drop springs back. Nothing reflows yet, so §S05 "Customization" 2's "shift other items around" waits on the open questions in §S07.  
+**Updated:** 2026-10-02 — §S07 no longer appends a blank page on entering edit mode (#142): new pages come only from §S08's "Empty page", as §S05 "Customization" 5 says.  
+**Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink into hairline-bordered cards (glass frames bled into each other, so they were dropped at review), and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
 **Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
 **Updated:** 2026-10-02—  Added interaction for the Add Widget sheet
 ****Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
@@ -121,6 +127,7 @@ Units should always be set baseline aligned with their corresponding values.
 - `watermark` (0.2) — background sparkline / watermark behind a dashboard hero number (e.g. W1 speed history).
 - `iconTile` (0.14) — tinted square behind a sensor row's SF Symbol (`SensorListRowView`).
 - `turnOverlay` (0.9) — the centred turn instruction's card (`TurnInstructionOverlay`, Sketch `Sxx - Route overlay`).
+- `unavailable` (0.4) — an §S08 Add Widget entry the current page can't take.
 
 ### Navigation Pattern
 The navigation in the app will follow standard iOS application guidelines patterns. In this case, the application to model is the Apple Music app. The bottom TabView should have the following 3 items:
@@ -474,7 +481,7 @@ The grid always occupies the full screen height between the Dynamic Island and t
 
 **Map widget — safe area bleed** When the map is placed in row 1-2 (top) or rows 6–7 (bottom) of the grid, its rendering extends past the standard content area and bleeds into the iOS safe zones — beneath the Dynamic Island at the top, or beneath the home indicator at the bottom. All interactive controls and data labels within the map widget must remain inside safe area bounds.
 
-**Empty cells** Any unoccupied cells render as empty space with no content and no interactive behaviour.
+**Empty cells** Any unoccupied cells render as empty space with no content and no interactive behaviour, outside S07 edit mode. In edit mode each shows a dashed slot that opens S08 aimed at it (#368).
 
 **Grabber** A minimal grabber-style strip sits between the Dynamic Island and the top grid row. This allows the user to minimize the ride and look at other aspects of the app while riding (typically while stopped). The capsule is only a visual cue. The dashboard is a system zoom presentation, as in Apple Music: a tap on the ride accessory expands it out of the capsule, and a drag down anywhere on the dashboard collapses it back in, following the finger, with display-matched corners (#333). VoiceOver gets a "Minimize Ride" button on the capsule. The full-screen map sheet reserves a 52 pt band along its top edge, so pulling it down never pans the map (#330).
 
@@ -558,6 +565,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 - Optional label: `.caption`, uppercased, 16pt
 - Each widget exposes a label modifier; the label is hidden on 2x2 widgets
 - Tapping any widget opens a detail sheet for that metric category
+- VoiceOver reads each tappable widget as one button: its title, then what the card shows in words ("Cadence, 92 rpm, average 88, maximum 110"); units and time are spelled out ("36.0 kilometers per hour", "1 hour, 2 minutes"), and "—" is read as "No reading". A double-tap opens the same sheet (#361). In S07 edit mode the card's own element, with its Move actions, replaces it (#367)
 
 ---
 
@@ -571,7 +579,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 - 2x1, 2x2: Current average speed with directional arrow indicating above/below average (`small-hero`, labeled "AVG")
 - 2x2 only: Ride duration (`medium-hero`)
 - 2x2 only: Ride distance (`medium-hero`)
-- Sheet: Ride metrics
+- Sheet: Ride metrics. As built (#144), W1, W2, W3, W6 and W11 open the one sheet, at the medium detent and expandable to large. **Distance** comes first, on its own. **Speed:** a chart of the last hour's speed over a faint elevation area (the Cadence sheet's treatment), then current, average and max. **Pace:** a chart of the same hour, faster plotted higher, with a gap wherever the rider stopped, then current and average. **Time:** a moving vs stopped donut, then Moving Time (W3's) and Ride Time (W1's Time). A value with no source reads "—", including pace, where W11's own card shows "--:--". W5 is tagged the same but keeps its own Cadence sheet (#147), whose content is cadence-specific
 
 
 
@@ -599,8 +607,9 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 **Sizes:** 1x1
 
-- Primary value: rolling average speed, excluding stopped time
+- Primary value: the ride's average speed, excluding stopped time: distance over moving time, the same number as W1's AVG. "—" until the first moving second (#140)
 - Unit: km/h or mph
+- Watermark of recent speed, with the average's own history drawn over it: `ratingGood` while it climbs, `ratingOkay` while it falls. It turns only after moving one step of the number (0.1 km/h) back from its peak or trough (#140)
 - Sheet: Ride metrics
 
 ---
@@ -609,7 +618,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 **Sizes:** 1x1
 
-- Primary value: elapsed ride time, excluding stopped time; format HH:MM:SS
+- Primary value: moving time, which leaves out stopped and paused time, so W6 = W2 × W3. W1's Time also counts stopped seconds that haven't reached auto-pause. Format MM:SS, then H:MM:SS from an hour, as W1's Time (#140)
 - No unit
 - Sheet: Ride metrics
 
@@ -621,8 +630,9 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 - Value: current BPM
 - A watermark graph of the historical HR for the ride. The horizontal bands in the chart should show the zones (`brHRZone1`–`brHRZone5`)
-- Zone label: "Z1 Recovery", "Z2 Endurance", "Z3 Tempo", "Z4 Threshold", "Z5 VO₂ Max"
-- Sheet: Heart rate
+- As built (#145), W4 matches W5 Cadence. Behind the number, the last hour of heart rate is a faint line on the rider's zone bands. The y-axis is fixed from resting to max HR, so the bands don't move. A ▲ (`brRatingGood`) or ▼ (`brRatingBad`) over the unit shows the trend (Design.sketch "W4 - Heart Rate"): the last 10 s of readings against the 20 s before, by 3 bpm or more. The ▲/▼ is hidden when steady or with no reading. At 2×1 the hero has Avg and Max beside it, as W5's does. The left border shows the current zone's colour
+- Zone label: "Z1 Recovery/Light", "Z2 Endurance", "Z3 Aerobic", "Z4 Threshold", "Z5 Anaerobic" — §S12's names, so the dashboard and Settings use the same words (#145)
+- Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. The first section is the Cadence sheet's chart for heart rate (the last hour on zone bands over a faint elevation area, its y-axis fixed from resting to max), on the Ride Metrics charts' time axis; then current heart rate and zone, matching the cards' empty states: "No HR Source" with nothing connected, "—" with no reading. Then **Time in Zones**: a donut in the zone colours, and one row per zone giving its name, its bpm range as §S12 resolves it, and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
 
 ---
 
@@ -724,7 +734,8 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - Time in zone accumulates locally from the HR readings the dashboard already classifies, not from HealthKit's `HKLiveWorkoutZoneUpdate`, since the app runs no iPhone workout session (PRD §9.4, #318)
 - Zone colors: `brHRZone1`–`brHRZone5`
 - Empty state when no HR source active: "--"
-- Sheet: Heart rate
+- As built (#145), 1×1 follows Design.sketch "W12 - Zones". Under a "Heart Rate Zones" label, a donut in the zone colours sits beside one row per zone: a colour square and "Z1: 05:12" (MM:SS, then H:MM:SS, as W3). The current zone's row is bold. The 2×1, which has no Sketch frame, adds each zone's §S12 name and right-aligns the times. Before any time, the donut is a neutral ring. "No HR Source" shows only with no source and no time, since time recorded before a dropout stays true. 2×2 is not built
+- Sheet: Heart rate — see §W4
 
 ---
 
@@ -800,14 +811,19 @@ Modeled on SpringBoard widget editing:
 1. Long press on the dashboard enters customization mode
 2. Existing widgets wiggle and display a "minus" remove button at the upper-left corner
 3. The navigation area shows an "Add" button (upper left) and "Done" (upper right)
-4. A blank page is automatically appended; rider can swipe to it to place widgets. Empty pages are removed on exit.
+4. ~~A blank page is automatically appended~~ — removed (#142): new pages come only from S08's "Empty page" (§S05 "Customization" 5). Empty pages are removed on exit.
 5. "Add" opens the Add Widget sheet (S08)
 
 As built (#141): Add (`plus`) and Done (`checkmark`) are glass capsules the Dynamic Island's height (37 pt) and the golden ratio as wide, flanking the island where the status bar would be; the status bar is hidden while editing, and Done is tinted `primary`. Each widget shrinks into a rounded card (90% for one column, 95% for two, so every card insets its sides equally) with a hairline `borderStrong` border, and wiggles unless Reduce Motion is on, its corners swinging the same 1.5 pt whatever its size. A red `destructive` remove button sits centred on each card's top-left corner and holds still while the card wiggles. A widget's tap does nothing while editing. A long press anywhere on the page, radar lane included, enters edit mode, and VoiceOver offers an "Edit Dashboard" action on the page indicator. The dashboard can't be minimised by a drag until Done. Removals save at once. If every widget is removed, Done leaves one blank page.
 
+As built (#367): a press held a quarter of a second on a widget lifts it — it stops wiggling, grows 5% and draws above the rest — and a drag carries it, remove button and all. A swipe that moves before the hold ends still pages. On release the widget's top-left goes to the nearest cell: it moves there if the spot is empty once it has left it, or swaps with a widget of the same size whose top-left is there. Any other drop — onto a different-size widget, half onto a same-size one, off the grid — springs back. The widget keeps its size, it can't be dragged to another page, and nothing shifts to make room. Moves save at once. In edit mode VoiceOver reads each widget as one element, "Speed, row 1, full width", with Move Up, Down, Left and Right actions; each goes to the nearest spot that way a drag could drop it, jumping a widget in the way, and is offered only when there is one.
+
 ### Open UX Questions
 
-- [ ] TBD
+- [ ] Reflow (#367): when a 2×2 is dropped onto a row holding two 1×1s, do the 1×1s move down, swap, or is the drop refused? (Refused today.)
+- [ ] Overflow: if shifting pushes widgets past row 7, do they spill onto the next page, or is the drop refused?
+- [ ] Gaps: do widgets close up into empty cells? §S05 "an empty grid item will not get auto-filled" points to no.
+- [ ] Between pages: can a widget be dragged to another page by holding it at the screen edge, as on SpringBoard?
 
 ---
 
@@ -820,9 +836,13 @@ As built (#141): Add (`plus`) and Done (`checkmark`) are glass capsules the Dyna
 
 The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart Rate, Weather (future), Route, and Force (future). The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
 
+As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
+
+As built (#368): in edit mode each empty cell shows a slot: a dashed hairline `borderStrong` outline, the size and inset of a 1×1 card, with no glyph and no wiggle. Tapping it opens the sheet aimed at that cell. The tapped cell is the widget's top-left and nothing shifts to fit, so the sheet lists only the sizes that fit from there: a 1×1 always; a 2×1 from the left column with its neighbour free; a 2×2 from the left column, above the last row, with its block free. A right-hand cell therefore shows only 1×1s. The Page section is hidden. A widget already on the page is still dimmed. Picking an entry puts its top-left at the tapped cell. VoiceOver reads a slot as "Empty, row 3, left", hint "Add widget here".
+
 ### Open UX Questions
 
-- [ ] TBD
+- [x] Does the picker exclude widgets already placed on the current page, or allow duplicates? Neither: they are shown dimmed. A widget appears at most once per page, and may appear on other pages (§S05 "Customisation").
 
 ---
 

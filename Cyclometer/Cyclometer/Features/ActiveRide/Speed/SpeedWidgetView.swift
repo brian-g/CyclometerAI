@@ -13,6 +13,9 @@ struct SpeedWidget: View {
     let maxSpeed: Double        // m/s
     var unit: UnitSystem = .metric
     var size: WidgetSize = .twoByTwo
+    /// The Ride Metrics sheet's data. A closure so the card never reads it; only the open sheet does,
+    /// in its own body (#144).
+    var metrics: () -> RideMetrics = { RideMetrics() }
 
     // Hero number scales proportionally to slot height: the large-hero spec is
     // `heroNominalFont`pt in a `heroNominalHeight`pt 2×2 slot, floored at
@@ -37,10 +40,8 @@ struct SpeedWidget: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
-        .widgetDetail {
-            Text("Ride Metrics")
-                .font(.headline)
-                .presentationDetents([.medium])
+        .widgetDetail(label: SpeedDashboardWidget.title, value: accessibilityValue) {
+            RideMetricsSheet(metrics: metrics)
         }
     }
 
@@ -183,6 +184,19 @@ struct SpeedWidget: View {
     private var displayMax: String { oneDecimal(unit.speed(fromMPS: maxSpeed)) }
     private var displayDistance: String { oneDecimal(unit.distance(fromMeters: distance)) }
 
+    /// What VoiceOver reads after "Speed" (#361): what this size shows, with no "—" read aloud. Units
+    /// and time are spelled out: VoiceOver reads "1:02:33" digit by digit, and a symbol is a guess.
+    var accessibilityValue: String {
+        var parts = [speed.map(unit.spokenSpeed(fromMPS:)) ?? "No reading"]
+        if size != .oneByOne {
+            parts += ["average \(displayAvg)", "maximum \(displayMax)"]
+        }
+        if size == .twoByTwo {
+            parts += ["distance \(unit.spokenDistance(fromMeters: distance))", "time \(elapsed.spokenElapsed)"]
+        }
+        return parts.joined(separator: ", ")
+    }
+
     // MARK: - Trend Chevron
 
     private enum Trend: Equatable { case up, even, down }
@@ -249,6 +263,12 @@ private struct SpeedHistoryChart: View {
 // MARK: - Helpers
 
 extension Int {
+    /// Seconds in words, "1 hour, 2 minutes, 33 seconds": VoiceOver reads "1:02:33" digit by
+    /// digit (#361).
+    var spokenElapsed: String {
+        Duration.seconds(self).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide))
+    }
+
     var formattedElapsed: String {
         let d = Duration.seconds(self)
         if self >= 3600 {

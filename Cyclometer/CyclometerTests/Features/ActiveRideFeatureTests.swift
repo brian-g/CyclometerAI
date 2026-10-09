@@ -416,11 +416,9 @@ struct ActiveRideFeatureLocationTests {
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
-            $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.5 * 3.6
-            $0.maxSpeedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.maxSpeedMPS = 8.5
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -476,11 +474,9 @@ struct ActiveRideFeatureLocationTests {
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
-            $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.5 * 3.6
-            $0.maxSpeedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.maxSpeedMPS = 8.5
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -513,15 +509,13 @@ struct ActiveRideFeatureLocationTests {
             $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
-            $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.5 * 3.6
-            $0.maxSpeedKPH = 8.5 * 3.6
         }
         #expect(store.state.trackSegments.flatMap { $0 }.isEmpty)
         #expect(!store.state.isFixRecordable)
         // The Doppler speed on that same fix is position-independent, and calibration runs
         // its own gate on the same data — both still see it.
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.maxSpeedMPS = 8.5
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -587,11 +581,9 @@ struct ActiveRideFeatureLocationTests {
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
-            $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.5 * 3.6
-            $0.maxSpeedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
+            $0.maxSpeedMPS = 8.5
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -624,10 +616,9 @@ struct ActiveRideFeatureLocationTests {
             $0.altitude = 300.0
             $0.horizontalAccuracy = 3.0
             $0.heading = 45.0
+            // The live speed follows the fix, but the ride's average and max don't: paused
+            // time is not part of the ride (#379). They stay at the active fix's values.
             $0.speedKPH = 12.0 * 3.6
-            $0.speedSampleCount = 2
-            $0.speedSampleSum = 8.5 * 3.6 + 12.0 * 3.6
-            $0.maxSpeedKPH = 12.0 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(12.0))) {
             $0.speed.speedMPS = 12.0
@@ -651,6 +642,7 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
+            $0.maxSpeedMPS = 8.5
         }
 
         let invalidUpdate = LocationUpdate(
@@ -774,6 +766,7 @@ struct ActiveRideFeatureTimerTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -812,10 +805,70 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
+            $0.speedSampleCount = 1
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
         }
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
+            $0.speedSampleCount = 2
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
+        }
+    }
+
+    @Test("A moving tick records the ride average for W2's trend line (#140)")
+    func movingTickRecordsAverage() async {
+        let store = makeStore(speedMPS: 10.0)
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.distanceMeters = 10.0
+            $0.speedSampleCount = 1
+            $0.averageSpeedSamples = [SpeedSample(time: testDate, mps: 10.0)]
+        }
+    }
+
+    @Test("A stationary or paused tick leaves the average series alone (#140)")
+    func stillTickRecordsNoAverage() async {
+        let store = makeStore(speedMPS: 0)
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.zeroSpeedSeconds = 1
+        }
+        await store.send(.pauseTapped) {
+            $0.recordingState = .paused
+        }
+        await store.receive(\.trackRecorder.pauseRecording)
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = true
+        }
+        await store.send(.elapsedTick)
+    }
+
+    @Test("Average samples older than the watermark window are dropped (#140)")
+    func averageSeriesPrunesToWindow() async {
+        let stale = SpeedSample(time: testDate.addingTimeInterval(-SpeedFeature.historyWindow - 1), mps: 4)
+        let edge = SpeedSample(time: testDate.addingTimeInterval(-SpeedFeature.historyWindow), mps: 5)
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                speed: SpeedFeature.State(speedMPS: 10.0, activeSpeedSource: .gps),
+                averageSpeedSamples: [stale, edge]
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+        }
+        await store.send(.elapsedTick) {
+            $0.elapsedSeconds = 1
+            $0.distanceMeters = 10.0
+            $0.speedSampleCount = 1
+            $0.averageSpeedSamples = [edge, SpeedSample(time: testDate, mps: 10.0)]
         }
     }
 
@@ -848,6 +901,8 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 10.0
+            $0.speedSampleCount = 1
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
@@ -874,6 +929,8 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 2
             $0.distanceMeters = 20.0
+            $0.speedSampleCount = 2
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
         }
     }
 
@@ -890,6 +947,8 @@ struct ActiveRideFeatureTimerTests {
             await store.send(.elapsedTick) {
                 $0.elapsedSeconds = tick
                 $0.distanceMeters = Double(tick) * 10.0
+                $0.speedSampleCount = tick
+                $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
             }
         }
         #expect(checkpointCount.value == 0)
@@ -897,6 +956,8 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 30
             $0.distanceMeters = 300.0
+            $0.speedSampleCount = 30
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
         }
         await store.receive(\.trackRecorder.checkpointFired)
         #expect(checkpointCount.value == 1)
@@ -905,6 +966,8 @@ struct ActiveRideFeatureTimerTests {
             await store.send(.elapsedTick) {
                 $0.elapsedSeconds = tick
                 $0.distanceMeters = Double(tick) * 10.0
+                $0.speedSampleCount = tick
+                $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
             }
         }
         #expect(checkpointCount.value == 1)
@@ -912,6 +975,8 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 60
             $0.distanceMeters = 600.0
+            $0.speedSampleCount = 60
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 10.0))
         }
         await store.receive(\.trackRecorder.checkpointFired)
         #expect(checkpointCount.value == 2)
@@ -937,6 +1002,89 @@ struct ActiveRideFeatureTimerTests {
             await store.send(.elapsedTick)
         }
         #expect(checkpointCount.value == 1)
+    }
+
+    // MARK: - Avg/Max speed (#381)
+
+    @Test("Avg/Max speed follow the displayed wheel speed, not the GPS behind it")
+    func speedAggregatesFollowTheWheel() async {
+        let wheelMPS = 40.0 / 3.6
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active,
+                speed: SpeedFeature.State(activeSpeedSource: .bleWheel)
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .testValue
+        }
+        store.exhaustivity = .off
+
+        await store.send(.speed(.bleSpeedReceived(wheelMPS)))
+        await store.send(.elapsedTick)
+        #expect(store.state.maxSpeedMPS == wheelMPS)
+        #expect(store.state.speedSampleCount == 1)
+        #expect(store.state.averageSpeedMPS == wheelMPS)
+
+        // GPS lagging on the descent: shown nowhere, counted nowhere.
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0, longitude: -89.0), altitude: 280,
+            speed: 36.0 / 3.6, horizontalAccuracy: 5, heading: 0, timestamp: testDate
+        )))
+        await store.send(.elapsedTick)
+        #expect(store.state.speed.speedMPS == wheelMPS)
+        #expect(store.state.maxSpeedMPS == wheelMPS)
+        #expect(store.state.averageSpeedMPS == wheelMPS)
+    }
+
+    @Test("A GPS fix at or below stationarySpeedMPS stays out of Avg/Max speed")
+    func stoppedFixStaysOutOfSpeedAggregates() async {
+        let store = makeStore()
+        store.exhaustivity = .off
+        // Through `.locationUpdated`, where the old rule counted any speed above zero.
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0, longitude: -89.0), altitude: 280,
+            speed: 0.4, horizontalAccuracy: 5, heading: 0, timestamp: testDate
+        )))
+        await store.send(.elapsedTick)
+        #expect(store.state.speed.speedMPS == 0.4)
+        #expect(store.state.speedSampleCount == 0)
+        #expect(store.state.maxSpeedMPS == 0)
+        #expect(store.state.distanceMeters == 0)
+        #expect(store.state.zeroSpeedSeconds == 1)
+    }
+
+    @Test("Max speed catches a peak that is replaced before the next tick")
+    func maxSpeedCatchesAPeakBetweenTicks() async {
+        let store = makeStore()
+        store.exhaustivity = .off
+        await store.send(.speed(.gpsSpeedReceived(52.0 / 3.6)))
+        await store.send(.speed(.gpsSpeedReceived(49.0 / 3.6)))
+        await store.send(.elapsedTick)
+        #expect(store.state.maxSpeedMPS == 52.0 / 3.6)
+    }
+
+    @Test("Average speed is the mean of the moving seconds")
+    func averageSpeedIsMeanOfMovingSeconds() async {
+        let store = makeStore()
+        store.exhaustivity = .off
+        let speeds = [5.0, 0.3, 8.0, 0.0, 12.0, ActiveRideFeature.stationarySpeedMPS, 6.5]
+        for speed in speeds {
+            await store.send(.speed(.gpsSpeedReceived(speed)))
+            await store.send(.elapsedTick)
+        }
+
+        let moving = speeds.filter { $0 > ActiveRideFeature.stationarySpeedMPS }
+        #expect(store.state.speedSampleCount == moving.count)
+        #expect(abs(store.state.averageSpeedMPS - moving.reduce(0, +) / Double(moving.count)) < 1e-9)
+        #expect(store.state.maxSpeedMPS == 12.0)
     }
 }
 
@@ -1117,6 +1265,37 @@ struct ActiveRideFeatureStateMachineTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    /// #340: what a relaunch reads back into W5's detail sheet. Same write path as the
+    /// 30-tick checkpoint (`makeRideSummaryUpdate`), reached through a pause as above.
+    @Test("a checkpoint carries the cadence zone and coasting tallies")
+    func checkpointCarriesCadenceTallies() async throws {
+        let (written, write) = AsyncStream<RideSummaryUpdate>.makeStream()
+        var state = ActiveRideFeature.State(recordingState: .active)
+        state.cadence.zoneSeconds = [.transition: 18, .optimal: 240]
+        state.cadence.coastingSeconds = 33
+        let store = TestStore(initialState: state) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(onUpdateRideSummary: { write.yield($0) })
+        }
+        store.exhaustivity = .off
+
+        await store.send(.pauseTapped)
+        var updates = written.makeAsyncIterator()
+        let next = await updates.next()
+        let update = try #require(next)
+        #expect(update.cadenceZoneSeconds == [.transition: 18, .optimal: 240])
+        #expect(update.cadenceCoastingSeconds == 33)
+
+        await store.skipInFlightEffects(strict: false)
+    }
+
     // MARK: - State(resuming:) (#175)
 
     @Test("State(resuming:) seeds cumulative aggregates from a persisted snapshot, weighted by the real sample counts")
@@ -1125,12 +1304,13 @@ struct ActiveRideFeatureStateMachineTests {
         // Realistic, unequal sample counts (#175 review) — proves the seeded
         // sum/count pair reconstructs the true prior weight, not a fabricated
         // single-sample average that would let one post-resume reading collapse
-        // a long ride's running average toward itself.
+        // a long ride's running average toward itself. Speed is the exception: its
+        // average is distance over moving seconds (#381), so 720 m over 120 s is 6 m/s.
         let summary = RideSummaryUpdate(
             rideId: rideId,
             recordingState: .active,
             durationSeconds: 145,
-            distanceMeters: 980,
+            distanceMeters: 720,
             averageSpeedMPS: 6.0,
             maxSpeedMPS: 12.0,
             averageHeartRateBPM: 140,
@@ -1140,7 +1320,9 @@ struct ActiveRideFeatureStateMachineTests {
             vehiclePassCount: 2,
             speedSampleCount: 120,
             hrSampleCount: 90,
-            cadenceSampleCount: 60
+            cadenceSampleCount: 60,
+            cadenceZoneSeconds: [.grinding: 12, .optimal: 40, .overspin: 3],
+            cadenceCoastingSeconds: 25
         )
 
         let state = ActiveRideFeature.State(resuming: summary)
@@ -1148,11 +1330,10 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(state.rideId == rideId)
         #expect(state.recordingState == .active)
         #expect(state.elapsedSeconds == 145)
-        #expect(state.distanceMeters == 980)
-        #expect(abs(state.maxSpeedKPH - 12.0 * 3.6) < 0.001)
+        #expect(state.distanceMeters == 720)
+        #expect(state.maxSpeedMPS == 12.0)
         #expect(state.speedSampleCount == 120)
-        #expect(abs(state.averageSpeedKPH - 6.0 * 3.6) < 0.001)
-        #expect(abs(state.speedSampleSum - 6.0 * 3.6 * 120) < 0.01)
+        #expect(state.averageSpeedMPS == 6.0)
         #expect(state.maxHeartRateBPM == 172)
         #expect(state.hrSampleCount == 90)
         #expect(state.hrSampleSum == 140 * 90)
@@ -1160,6 +1341,9 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(state.cadence.pedalingSampleCount == 60)
         #expect(state.cadence.cadenceSum == 78 * 60)
         #expect(state.cadence.averageCadenceRPM == 78)
+        // W5's zone and coasting tallies (#340), so the detail sheet still covers the whole ride.
+        #expect(state.cadence.zoneSeconds == [.grinding: 12, .optimal: 40, .overspin: 3])
+        #expect(state.cadence.coastingSeconds == 25)
         #expect(state.vehiclePassCount == 2)
     }
 
@@ -1183,15 +1367,45 @@ struct ActiveRideFeatureStateMachineTests {
         let state = ActiveRideFeature.State(resuming: summary)
 
         #expect(state.speedSampleCount == 0)
-        #expect(state.speedSampleSum == 0)
+        #expect(state.averageSpeedMPS == 0)
         #expect(state.hrSampleCount == 0)
         #expect(state.hrSampleSum == 0)
         #expect(state.maxHeartRateBPM == 0)
         #expect(state.cadence.pedalingSampleCount == 0)
         #expect(state.cadence.cadenceSum == 0)
         #expect(state.cadence.maxCadenceRPM == 0)
+        #expect(state.cadence.zoneSeconds.isEmpty)
+        #expect(state.cadence.coastingSeconds == 0)
         // No radar before the kill means still no radar, not a measured 0 (#285).
         #expect(state.vehiclePassCount == nil)
+    }
+
+    @Test("a resumed ride keeps adding to its restored cadence zone and coasting tallies (#340)")
+    func resumedRideAddsToRestoredCadenceTallies() async {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .active,
+            durationSeconds: 600, distanceMeters: 4_000, averageSpeedMPS: 6.5, maxSpeedMPS: 11,
+            averageCadenceRPM: 88, maxCadenceRPM: 104, cadenceSampleCount: 500,
+            cadenceZoneSeconds: [.grinding: 30, .optimal: 400], cadenceCoastingSeconds: 70
+        )
+        let clock = LockIsolated(testDate)
+        let store = TestStore(initialState: ActiveRideFeature.State(resuming: summary)) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.date = DateGenerator { clock.value }
+            $0.bleCSCClient = .testValue
+        }
+        store.exhaustivity = .off
+
+        await store.send(.cadence(.cadenceReceived(90)))    // optimal
+        clock.withValue { $0 = $0.addingTimeInterval(2) }
+        await store.send(.cadence(.cadenceReceived(0)))     // credits 2s to optimal
+        clock.withValue { $0 = $0.addingTimeInterval(3) }
+        await store.send(.cadence(.cadenceReceived(60)))    // credits 3s to coasting
+
+        // Added to the restored totals, not counted from zero beside them.
+        #expect(store.state.cadence.zoneSeconds == [.grinding: 30, .optimal: 402])
+        #expect(store.state.cadence.coastingSeconds == 73)
     }
 
     @Test("State(resuming:) preserves .paused, doesn't force .active")
@@ -1401,6 +1615,36 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(\.calibration.suspensionChanged)
         #expect(updatedSummary.value?.rideId == rideId)
         #expect(updatedSummary.value?.recordingState == .active)
+    }
+
+    /// #379: cadence Avg/Max count only while `cadence.isRecording`, a mirror of
+    /// `recordingState` that is synced on transition. A fresh ride must reach it through
+    /// its own `.idle` → `.active`; a store built straight at `.active` never does.
+    @Test("A fresh ride's start counts its cadence readings toward the average")
+    func freshRideCountsCadence() async {
+        let store = TestStore(initialState: ActiveRideFeature.State(recordingState: .idle)) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock()
+        }
+        store.exhaustivity = .off
+
+        await store.startFreshRide()
+        #expect(store.state.recordingState == .active)
+        #expect(store.state.cadence.isRecording)
+
+        await store.send(.cadence(.cadenceReceived(88)))
+        #expect(store.state.cadence.pedalingSampleCount == 1)
+        #expect(store.state.cadence.maxCadenceRPM == 88)
+
+        await store.skipInFlightEffects(strict: false)
     }
 
     @Test("Pause and resume drive the cadence tally's recording flag")
@@ -1618,11 +1862,9 @@ struct ActiveRideFeatureStateMachineTests {
             $0.lastRecordablePositionAt = testDate
             $0.heading = 0
             $0.speedKPH = 8.0 * 3.6
-            $0.speedSampleCount = 1
-            $0.speedSampleSum = 8.0 * 3.6
-            $0.maxSpeedKPH = 8.0 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.0))) {
+            $0.maxSpeedMPS = 8.0
             $0.speed.speedMPS = 8.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.0
@@ -1637,6 +1879,9 @@ struct ActiveRideFeatureStateMachineTests {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 8.0
             $0.zeroSpeedSeconds = 0
+            // Avg/Max speed are sampled here, not from the fix above (#381).
+            $0.speedSampleCount = 1
+            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 8.0))
         }
         await store.receive(\.trackRecorder.timerTick)
     }
@@ -1916,6 +2161,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 150
             $0.maxHeartRateBPM = 150
             $0.heldHR = HeldHeartRate(bpm: 150, zone: 2, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 150))
         }
     }
 
@@ -1936,6 +2182,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 165
             $0.maxHeartRateBPM = 165
             $0.heldHR = HeldHeartRate(bpm: 165, zone: 3, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 165))
         }
         #expect(store.state.riderProfile.resolvedMaxBPM() == 200)
         #expect(store.state.riderProfile.resolvedRestingBPM() == 45)
@@ -2096,6 +2343,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 72
             $0.maxHeartRateBPM = 72
             $0.heldHR = HeldHeartRate(bpm: 72, zone: 1, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 72))
         }
         #expect(store.state.hrSource == .healthKit)
     }
@@ -2189,6 +2437,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 140
             $0.maxHeartRateBPM = 140
             $0.heldHR = HeldHeartRate(bpm: 140, zone: 2, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 140))
         }
         await store.send(.heartRateUpdated(160)) {
             $0.heartRateBPM = 160
@@ -2197,6 +2446,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 300
             $0.maxHeartRateBPM = 160
             $0.heldHR = HeldHeartRate(bpm: 160, zone: 3, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 160))
         }
         // A drop below the running max doesn't move maxHeartRateBPM.
         await store.send(.heartRateUpdated(120)) {
@@ -2206,6 +2456,30 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 420
             $0.maxHeartRateBPM = 160
             $0.heldHR = HeldHeartRate(bpm: 120, zone: 1, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 120))
+        }
+    }
+
+    /// #379: a café stop with the strap still on. The rider still sees their heart rate, but
+    /// the paused minutes are not part of the ride, so they must not pull Avg HR toward resting.
+    @Test("A reading while paused shows, but stays out of the HR average and max")
+    func pausedReadingStaysOutOfAggregates() async {
+        let store = makeStore(ActiveRideFeature.State(recordingState: .paused))
+        await store.send(.heartRateUpdated(140)) {
+            $0.heartRateBPM = 140
+            $0.heartRateProvenance = .bleHR
+            $0.hrZone = 2
+            $0.heldHR = HeldHeartRate(bpm: 140, zone: 2, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 140))
+            // No hrSampleCount/hrSampleSum/maxHeartRateBPM change.
+        }
+        // The Apple Watch source goes through the same path and is gated the same way.
+        await store.send(.healthKitHeartRateUpdated(150)) {
+            $0.healthKitHRSample = HealthKitHRSample(bpm: 150, receivedAt: Self.fixedNow)
+            $0.heartRateBPM = 150
+            $0.heartRateProvenance = .appleWatch
+            $0.heldHR = HeldHeartRate(bpm: 150, zone: 2, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 150))
         }
     }
 
@@ -2288,6 +2562,7 @@ struct ActiveRideFeatureHRDropoutTests {
             $0.hrSampleSum = 150
             $0.maxHeartRateBPM = 150
             $0.heldHR = Self.heldAt150
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 150))
         }
         // The live reading is gone — nothing may be recorded for this second — but the
         // held one carries the display, which is the whole point of the window.
@@ -2527,6 +2802,77 @@ struct ActiveRideFeatureHRDropoutTests {
         #expect(recorded.dropFirst().allSatisfy { $0.heartRateBPM == nil })
         // It is still the best reading available, so it stays on screen throughout.
         #expect(store.state.displayHeartRateBPM == 72)
+    }
+
+    /// #145: the Heart Rate sheet's time in zone counts the seconds S10 will count from the
+    /// saved track, by the same rule, so it reads the same at finish.
+    @Test("The live HR tally counts the recorded track's seconds, not paused ones")
+    func hrTallyMatchesRecordedTrack() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.heartRateUpdated(150))
+        await store.send(.elapsedTick)
+        await store.send(.elapsedTick)
+        await store.send(.heartRateUpdated(0))   // a strap dropout counts for nothing
+        await store.send(.elapsedTick)
+        await store.send(.pauseTapped)
+        await store.send(.heartRateUpdated(160))
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2])
+        #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(recorded))
+    }
+
+    @Test("The live HR tally holds an Apple Watch sample forward, as S10 does")
+    func hrTallyHoldsWatchSample() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.healthKitHeartRateUpdated(72))
+        await store.send(.hrPairingChanged(false))
+        for offset in 1...5 {
+            now.setValue(Self.fixedNow + Double(offset))
+            await store.send(.elapsedTick)
+        }
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(store.state.hrSecondsTally.secondsByBPM == [72: 5])
+        #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(recorded))
+    }
+
+    /// #145: W4's watermark and the sheet's chart are cadence's history for heart rate: every live
+    /// reading, recording or not, over the last `CadenceFeature.historyWindow`.
+    @Test("HR history keeps the last hour of live readings, through a pause")
+    func hrHistoryIsCadencesWindow() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.heartRateUpdated(150))
+        await store.send(.heartRateUpdated(0))          // no reading: not history
+        await store.send(.pauseTapped)
+        now.setValue(Self.fixedNow + 60)
+        await store.send(.heartRateUpdated(120))        // paused, still shown, still history
+        #expect(store.state.hrSamples == [
+            HeartRateSample(time: Self.fixedNow, bpm: 150),
+            HeartRateSample(time: Self.fixedNow + 60, bpm: 120),
+        ])
+
+        now.setValue(Self.fixedNow + CadenceFeature.historyWindow + 30)
+        await store.send(.heartRateUpdated(130))
+        #expect(store.state.hrSamples.map(\.bpm) == [120, 130])
+        await store.skipInFlightEffects(strict: false)
     }
 
     /// The same rule for position's third axis (#303): a fix CoreLocation gave no valid
@@ -2960,6 +3306,8 @@ struct ActiveRideFeatureSharedPeripheralTests {
         await store.send(.speed(.bleConnectionChanged(.disconnected))) {
             $0.speed.connectionState = .disconnected
             $0.speed.speedMPS = 5.0
+            // The GPS fallback is now the displayed speed, so it is the ride's max (#381).
+            $0.maxSpeedMPS = 5.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.sourceSwitchBanner =
                 SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
@@ -2988,6 +3336,8 @@ struct ActiveRideFeatureSharedPeripheralTests {
         await store.send(.speed(.bleConnectionChanged(.disconnected))) {
             $0.speed.connectionState = .disconnected
             $0.speed.speedMPS = 5.0
+            // The GPS fallback is now the displayed speed, so it is the ride's max (#381).
+            $0.maxSpeedMPS = 5.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.sourceSwitchBanner =
                 SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
@@ -3316,8 +3666,8 @@ struct ActiveRideFeatureMapOrientationTests {
 @Suite("ActiveRideFeature — S07 dashboard edit mode")
 struct ActiveRideFeatureDashboardEditTests {
     private let storage = FileStorage.inMemory
-    /// `UUIDGenerator.incrementing`'s first id: the blank page edit mode appends.
-    private let blankPageID = UUID(0)
+    /// `UUIDGenerator.incrementing`'s first id: the page S08's "Empty page" inserts.
+    private let insertedPageID = UUID(0)
 
     private func makeStore(layout: DashboardLayout? = nil) -> TestStoreOf<ActiveRideFeature> {
         withDependencies {
@@ -3337,18 +3687,15 @@ struct ActiveRideFeatureDashboardEditTests {
     private static let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
     private static let speed = WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 0, column: 0)
 
-    @Test("A long press enters edit mode and appends one blank page, saved")
+    /// New pages come only from S08's "Empty page" (UX.md §S05 "Customization" 5).
+    @Test("A long press enters edit mode without adding a page")
     func longPressEntersEditMode() async {
         let store = makeStore()
-        let factory = DashboardLayout.factory
 
         await store.send(.dashboardLongPressed) {
             $0.isEditingDashboard = true
-            $0.$preferences.withLock {
-                $0.dashboardLayout = DashboardLayout(pages: factory.pages + [DashboardPage(id: self.blankPageID, placements: [])])
-            }
         }
-        #expect(store.state.dashboardLayout.pages.count == factory.pages.count + 1)
+        #expect(store.state.dashboardLayout.pages.count == DashboardLayout.factory.pages.count)
         // A second long press while editing changes nothing.
         await store.send(.dashboardLongPressed)
     }
@@ -3357,15 +3704,13 @@ struct ActiveRideFeatureDashboardEditTests {
     func removeWidgetPersists() async {
         let first = DashboardPage(placements: [Self.pace, WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1)])
         let store = makeStore(layout: DashboardLayout(pages: [first]))
-        let blank = DashboardPage(id: blankPageID, placements: [])
 
         await store.send(.dashboardLongPressed) {
             $0.isEditingDashboard = true
-            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, blank]) }
         }
         await store.send(.removeWidgetTapped(pageID: first.id, widgetID: HeartRateDashboardWidget.id)) {
             $0.$preferences.withLock {
-                $0.dashboardLayout = DashboardLayout(pages: [DashboardPage(id: first.id, placements: [Self.pace]), blank])
+                $0.dashboardLayout = DashboardLayout(pages: [DashboardPage(id: first.id, placements: [Self.pace])])
             }
         }
     }
@@ -3385,15 +3730,13 @@ struct ActiveRideFeatureDashboardEditTests {
         let second = DashboardPage(placements: [Self.pace])
         let third = DashboardPage(placements: [Self.speed])
         let store = makeStore(layout: DashboardLayout(pages: [first, second, third]))
-        let blank = DashboardPage(id: blankPageID, placements: [])
 
         await store.send(.dashboardLongPressed) {
             $0.isEditingDashboard = true
-            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second, third, blank]) }
         }
         await store.send(.removeWidgetTapped(pageID: second.id, widgetID: PaceDashboardWidget.id)) {
             $0.$preferences.withLock {
-                $0.dashboardLayout = DashboardLayout(pages: [first, DashboardPage(id: second.id, placements: []), third, blank])
+                $0.dashboardLayout = DashboardLayout(pages: [first, DashboardPage(id: second.id, placements: []), third])
             }
         }
         await store.send(.dashboardPageChanged(2)) {
@@ -3406,22 +3749,29 @@ struct ActiveRideFeatureDashboardEditTests {
         }
     }
 
-    /// Done from the blank page prunes the page the rider is on. The index must land on a real
-    /// page, not stay past the end — or the next edit's blank page fills it and the rider is
-    /// thrown onto it (#141 review).
-    @Test("Done from the blank page leaves the rider on the last real page")
-    func doneFromBlankPage() async {
+    /// Done from an empty last page prunes the page the rider is on. The index must land on a real
+    /// page, not stay past the end — or a page added later takes it over and the rider is thrown
+    /// onto it (#141 review).
+    @Test("Done from an empty last page leaves the rider on the last real page")
+    func doneFromEmptyLastPage() async {
         let first = DashboardPage(placements: [Self.pace])
         let second = DashboardPage(placements: [Self.speed])
         let store = makeStore(layout: DashboardLayout(pages: [first, second]))
-        let blank = DashboardPage(id: blankPageID, placements: [])
+        let inserted = DashboardPage(id: insertedPageID, placements: [])
 
         await store.send(.dashboardLongPressed) {
             $0.isEditingDashboard = true
-            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second, blank]) }
         }
-        await store.send(.dashboardPageChanged(2)) {
+        await store.send(.dashboardPageChanged(1)) {
+            $0.dashboardPage = 1
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addEmptyPageTapped) {
+            $0.isAddWidgetPresented = false
             $0.dashboardPage = 2
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second, inserted]) }
         }
         await store.send(.dashboardEditingDoneTapped) {
             $0.isEditingDashboard = false
@@ -3430,9 +3780,6 @@ struct ActiveRideFeatureDashboardEditTests {
         }
         await store.send(.dashboardLongPressed) {
             $0.isEditingDashboard = true
-            $0.$preferences.withLock {
-                $0.dashboardLayout = DashboardLayout(pages: [first, second, DashboardPage(id: UUID(1), placements: [])])
-            }
         }
         #expect(store.state.visibleDashboardPage == 1)
     }
@@ -3443,37 +3790,31 @@ struct ActiveRideFeatureDashboardEditTests {
     func removeAllLeavesOnePage() async {
         let only = DashboardPage(placements: [Self.pace])
         let store = makeStore(layout: DashboardLayout(pages: [only]))
-        let blank = DashboardPage(id: blankPageID, placements: [])
 
         await store.send(.dashboardLongPressed) {
             $0.isEditingDashboard = true
-            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [only, blank]) }
         }
         let emptied = DashboardPage(id: only.id, placements: [])
         await store.send(.removeWidgetTapped(pageID: only.id, widgetID: PaceDashboardWidget.id)) {
-            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [emptied, blank]) }
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [emptied]) }
         }
         await store.send(.dashboardEditingDoneTapped) {
             $0.isEditingDashboard = false
-            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [emptied]) }
         }
+        #expect(store.state.dashboardLayout == DashboardLayout(pages: [emptied]))
     }
 
-    /// Done saves the pruned layout, which equals the factory one again, so the rider keeps
-    /// following `.factory` rather than a saved copy of it (#139 review).
+    /// Entering edit mode and Done both save the layout; it equals the factory one, so the rider
+    /// keeps following `.factory` rather than a saved copy of it (#139 review).
     @Test("Entering and leaving edit mode without changes keeps the rider on the factory layout")
     func noChangesKeepsFactory() async {
         let store = makeStore()
 
         await store.send(.dashboardLongPressed) {
             $0.isEditingDashboard = true
-            $0.$preferences.withLock {
-                $0.dashboardLayout = DashboardLayout(pages: DashboardLayout.factory.pages + [DashboardPage(id: self.blankPageID, placements: [])])
-            }
         }
         await store.send(.dashboardEditingDoneTapped) {
             $0.isEditingDashboard = false
-            $0.$preferences.withLock { $0.dashboardLayout = .factory }
         }
         #expect(store.state.preferences.dashboardLayoutOverride == nil)
     }
@@ -3489,9 +3830,264 @@ struct ActiveRideFeatureDashboardEditTests {
         #expect(store.state.dashboardLayout == DashboardLayout(pages: [filled]))
         await store.send(.dashboardLongPressed) {
             $0.isEditingDashboard = true
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [filled]) }
+        }
+    }
+
+    // ── S08 Add Widget (#142) ──────────────────────────────────────────────────
+
+    @Test("Add opens the picker only in edit mode")
+    func addOpensPickerOnlyWhileEditing() async {
+        let store = makeStore(layout: DashboardLayout(pages: [DashboardPage(placements: [Self.pace])]))
+
+        await store.send(.addWidgetTapped)
+        await store.send(.addWidgetPresentationChanged(true))
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addWidgetPresentationChanged(false)) {
+            $0.isAddWidgetPresented = false
+        }
+    }
+
+    @Test("Picking a widget adds it to the page the rider is on, saved, and closes the picker")
+    func pickingAddsToVisiblePage() async {
+        let first = DashboardPage(placements: [Self.pace])
+        let second = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [first, second]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.dashboardPageChanged(1)) {
+            $0.dashboardPage = 1
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        let heartRate = WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1)
+        await store.send(.addWidgetSelected(widgetID: HeartRateDashboardWidget.id, size: .oneByOne)) {
+            $0.isAddWidgetPresented = false
             $0.$preferences.withLock {
-                $0.dashboardLayout = DashboardLayout(pages: [filled, DashboardPage(id: self.blankPageID, placements: [])])
+                $0.dashboardLayout = DashboardLayout(pages: [first, DashboardPage(id: second.id, placements: [Self.pace, heartRate])])
             }
         }
+    }
+
+    /// The picker dims these; a tap that lands anyway (a stale view) must not touch the layout.
+    @Test("Picking a widget the page can't take changes nothing")
+    func pickingUnplaceableIsIgnored() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addWidgetSelected(widgetID: PaceDashboardWidget.id, size: .oneByOne))
+        await store.send(.addWidgetSelected(widgetID: MapDashboardWidget.id, size: .oneByOne))
+    }
+
+    @Test("Without the picker up, a pick or Empty page is ignored")
+    func pickWithoutPickerIsIgnored() async {
+        let store = makeStore(layout: DashboardLayout(pages: [DashboardPage(placements: [Self.pace])]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.addWidgetSelected(widgetID: HeartRateDashboardWidget.id, size: .oneByOne))
+        await store.send(.addEmptyPageTapped)
+    }
+
+    @Test("Empty page goes after the page the rider is on, takes them to it, and Done prunes it unused")
+    func emptyPageInsertsAfterVisiblePage() async {
+        let first = DashboardPage(placements: [Self.pace])
+        let second = DashboardPage(placements: [Self.speed])
+        let store = makeStore(layout: DashboardLayout(pages: [first, second]))
+        let inserted = DashboardPage(id: insertedPageID, placements: [])
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addEmptyPageTapped) {
+            $0.isAddWidgetPresented = false
+            $0.dashboardPage = 1
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, inserted, second]) }
+        }
+        // Back to the page it was inserted from, not on to the page after it (#142 review).
+        await store.send(.dashboardEditingDoneTapped) {
+            $0.isEditingDashboard = false
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [first, second]) }
+            $0.dashboardPage = 0
+        }
+    }
+
+    /// SwiftUI won't show the finish alert from a dashboard already showing the picker, and
+    /// auto-end fires only once (#142 review).
+    @Test("Auto-end closes the Add Widget sheet so its finish alert can show")
+    func autoEndClosesPicker() async {
+        let store = makeStore(layout: DashboardLayout(pages: [DashboardPage(placements: [Self.pace])]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.autoEndTriggered)
+        await store.receive(\.finishTapped) {
+            $0.isAddWidgetPresented = false
+        }
+        #expect(store.state.finishAlert != nil)
+    }
+
+    @Test("Empty page from an empty page adds nothing")
+    func emptyPageFromEmptyPageIsIgnored() async {
+        let only = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [only]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.removeWidgetTapped(pageID: only.id, widgetID: PaceDashboardWidget.id)) {
+            $0.$preferences.withLock { $0.dashboardLayout = DashboardLayout(pages: [DashboardPage(id: only.id, placements: [])]) }
+        }
+        await store.send(.addWidgetTapped) {
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addEmptyPageTapped)
+    }
+
+    // ── S08 from an empty cell (#368) ──────────────────────────────────────────
+
+    @Test("An empty cell opens the picker only in edit mode, and only when it's empty")
+    func emptyCellOpensPickerOnlyWhileEditing() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let other = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page, other]))
+
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 3, column: 1)))
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 0, column: 0)))
+        // A tap from a page the rider isn't on: the sheet would add to the wrong page.
+        await store.send(.emptyCellTapped(pageID: other.id, cell: DashboardGrid.Cell(row: 3, column: 1)))
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 3, column: 1))) {
+            $0.addWidgetCell = DashboardGrid.Cell(row: 3, column: 1)
+            $0.isAddWidgetPresented = true
+        }
+        // The cell stays set as the sheet slides away, so it doesn't redraw as Add's sheet.
+        await store.send(.addWidgetPresentationChanged(false)) {
+            $0.isAddWidgetPresented = false
+        }
+    }
+
+    @Test("Picking from an empty cell puts the widget's top-left there, saved, and closes the picker")
+    func pickingFromCellAddsThere() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 4, column: 0))) {
+            $0.addWidgetCell = DashboardGrid.Cell(row: 4, column: 0)
+            $0.isAddWidgetPresented = true
+        }
+        // At the tapped cell, not Add's first open spot, which a 2×1 would find at row 1.
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 4, column: 0)
+        await store.send(.addWidgetSelected(widgetID: CadenceDashboardWidget.id, size: .twoByOne)) {
+            $0.isAddWidgetPresented = false
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [DashboardPage(id: page.id, placements: [Self.pace, cadence])])
+            }
+        }
+    }
+
+    /// The picker hides what doesn't fit at the cell; a tap that lands anyway must not shift it.
+    @Test("From a right-hand cell, a 2×1 is refused rather than shifted left")
+    func pickingFromCellRefusesWhatDoesNotFit() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 2, column: 1))) {
+            $0.addWidgetCell = DashboardGrid.Cell(row: 2, column: 1)
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addWidgetSelected(widgetID: CadenceDashboardWidget.id, size: .twoByOne))
+    }
+
+    @Test("Add after an empty cell goes back to the first open spot, and Empty page isn't offered from a cell")
+    func addAfterCellResetsTarget() async {
+        let page = DashboardPage(placements: [Self.pace])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.emptyCellTapped(pageID: page.id, cell: DashboardGrid.Cell(row: 2, column: 1))) {
+            $0.addWidgetCell = DashboardGrid.Cell(row: 2, column: 1)
+            $0.isAddWidgetPresented = true
+        }
+        await store.send(.addEmptyPageTapped)
+        await store.send(.addWidgetTapped) {
+            $0.addWidgetCell = nil
+        }
+    }
+
+    // ── S07 move by drag (#367) ────────────────────────────────────────────────
+
+    @Test("A move to an empty spot, and a swap with a same-size widget, save at once")
+    func moveAndSwapSave() async {
+        let heartRate = WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1)
+        let page = DashboardPage(placements: [Self.pace, heartRate])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 4, column: 0))) {
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [DashboardPage(id: page.id, placements: [
+                    WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 4, column: 0), heartRate,
+                ])])
+            }
+        }
+        await store.send(.moveWidget(pageID: page.id, widgetID: HeartRateDashboardWidget.id, to: DashboardGrid.Cell(row: 4, column: 0))) {
+            $0.$preferences.withLock {
+                $0.dashboardLayout = DashboardLayout(pages: [DashboardPage(id: page.id, placements: [
+                    WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 1),
+                    WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 4, column: 0),
+                ])])
+            }
+        }
+    }
+
+    @Test("A refused drop leaves the layout as it was, and outside edit mode a move is ignored")
+    func refusedOrOutsideEditModeMoveIsIgnored() async {
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 1, column: 0)
+        let page = DashboardPage(placements: [Self.pace, cadence])
+        let store = makeStore(layout: DashboardLayout(pages: [page]))
+
+        await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 4, column: 0)))
+        await store.send(.dashboardLongPressed) {
+            $0.isEditingDashboard = true
+        }
+        // A 1×1 onto a 2×1, and off the grid.
+        await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 1, column: 0)))
+        await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 7, column: 0)))
     }
 }

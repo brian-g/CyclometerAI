@@ -53,9 +53,9 @@ struct ActiveRideFeature {
     /// `zeroSpeedSeconds`, so auto-end cannot trigger from a stop auto-pause already
     /// caught. No PRD-specified threshold exists; chosen to match a brief stop.
     static let autoPauseZeroSpeedSeconds = 10
-    /// Wall-clock window of altitude samples retained for the cadence sheet's elevation
-    /// watermark. Matches `CadenceFeature.historyWindow` on purpose: the two series share one
-    /// time axis, so elevation must cover the span the cadence trace does.
+    /// Wall-clock window of altitude samples retained for the cadence and heart-rate sheets'
+    /// elevation watermark. Matches `CadenceFeature.historyWindow` on purpose: each series
+    /// shares one time axis with elevation, so elevation must cover the span its trace does.
     static let altitudeHistoryWindow: TimeInterval = CadenceFeature.historyWindow
 
     /// At or below this speed the rider counts as stopped (#262).
@@ -138,10 +138,18 @@ struct ActiveRideFeature {
         var heartRateBPM: Int = 0
         var hrZone: Int = 0
         /// Count of non-zero bpm readings applied to `heartRateBPM`, paired with
-        /// `hrSampleSum` — mirrors `speedSampleCount`/`speedSampleSum` (#171).
+        /// `hrSampleSum` (#171).
         var hrSampleCount: Int = 0
         var hrSampleSum: Double = 0
         var maxHeartRateBPM: Int = 0
+        /// Recorded seconds at each bpm, for the Heart Rate sheet's time in zone (#145). Fed the
+        /// track points the recorder writes, by S10's rule, so the sheet shows what S10 will.
+        /// Starts over when a ride resumes after a crash: nothing seeds it from the saved track.
+        var hrSecondsTally = HeartRateSecondsTally()
+        /// Heart-rate readings from the last `CadenceFeature.historyWindow`, behind W4's watermark,
+        /// its trend and the Heart Rate sheet's chart (#145) — cadence's history, for heart rate.
+        /// Every displayed reading, recording or not, as `CadenceFeature.State.cadenceSamples`.
+        var hrSamples: [HeartRateSample] = []
         var isHRPaired: Bool = false
         /// HealthKit-resolved terms fetched once at ride start (#160), threaded into
         /// every `riderProfile` resolver call below instead of the defaulted `nil`.
@@ -212,6 +220,33 @@ struct ActiveRideFeature {
         var displayHRZone: Int {
             heartRateBPM > 0 ? hrZone : (heldHR?.zone ?? 0)
         }
+        /// Mean of the recorded readings (#171); 0 before the first.
+        var averageHeartRateBPM: Int {
+            hrSampleCount > 0 ? Int((hrSampleSum / Double(hrSampleCount)).rounded()) : 0
+        }
+        /// Each zone's bpm range, zone 1 first, resolved as S12 and S10 resolve them.
+        var hrZoneBounds: [ClosedRange<Int>] {
+            HeartRateZone.allCases.map {
+                riderProfile.bounds(for: $0, healthResting: healthRestingBPM, healthMax: healthMaxBPM,
+                                    healthZoneCeilings: healthZoneCeilingsBPM)
+            }
+        }
+        /// Recorded seconds in each zone, zone 1 first: W12's and the sheet's time in zone.
+        var hrZoneSeconds: [Int] {
+            RideDetailSeries.zoneSeconds(hrSecondsTally.secondsByBPM, zoneBounds: hrZoneBounds)
+        }
+        /// W4's watermark: `hrSamples` in at most `CadenceFeature.watermarkResolution` bucket means,
+        /// as `CadenceFeature.State.watermarkSamples`.
+        var hrWatermarkSamples: [Double] {
+            let values = hrSamples.map { Double($0.bpm) }
+            let count = values.count
+            let buckets = min(count, CadenceFeature.watermarkResolution)
+            return (0..<buckets).map { i in
+                let slice = values[(i * count / buckets)..<((i + 1) * count / buckets)]
+                return slice.reduce(0, +) / Double(slice.count)
+            }
+        }
+        var hrTrend: HeartRateTrend { HeartRateTrend(hrSamples) }
         /// Whether this second's reading is a measurement worth writing to the track,
         /// as opposed to no reading at all or a HealthKit sample already recorded
         /// (#221). Note it reads `heartRateBPM`, never `displayHeartRateBPM` — a held
@@ -240,25 +275,26 @@ struct ActiveRideFeature {
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
         var navigation = NavigationFeature.State()
-        var maxSpeedKPH: Double = 0
+        /// The highest displayed speed while recording and moving (#381) — taken on every
+        /// reading in `.speed`, not once a second, so a peak between two ticks still counts.
+        var maxSpeedMPS: Double = 0
+        /// Moving seconds: ticks whose displayed speed cleared `stationarySpeedMPS`, the same
+        /// sample and threshold `distanceMeters` integrates (#381). Persisted (#175).
         var speedSampleCount: Int = 0
-        var speedSampleSum: Double = 0
-        var averageSpeedKPH: Double {
-            speedSampleCount > 0 ? speedSampleSum / Double(speedSampleCount) : 0
+        /// Distance over moving time. Derived rather than summed, since a speed sum taken on
+        /// the same samples as distance could only ever be distance again.
+        var averageSpeedMPS: Double {
+            speedSampleCount > 0 ? distanceMeters / Double(speedSampleCount) : 0
         }
-        // Canonical m/s views of the speed stats for consumers (e.g. SpeedWidget)
+        /// `averageSpeedMPS` after each moving tick, for W2's trend line (#140) — the only ticks
+        /// that change it. Kept over `SpeedFeature.historyWindow`, the speed watermark's own
+        /// window, so the two share a time axis. Not persisted, like the watermark.
+        var averageSpeedSamples: [SpeedSample] = []
+        // Canonical m/s view of the live speed for consumers (e.g. SpeedWidget)
         // that convert to display units themselves. Uses Measurement so the
         // KPH→MPS factor isn't hardcoded at the call site.
         var speedMPS: Double {
             Measurement(value: speedKPH, unit: UnitSpeed.kilometersPerHour)
-                .converted(to: .metersPerSecond).value
-        }
-        var averageSpeedMPS: Double {
-            Measurement(value: averageSpeedKPH, unit: UnitSpeed.kilometersPerHour)
-                .converted(to: .metersPerSecond).value
-        }
-        var maxSpeedMPS: Double {
-            Measurement(value: maxSpeedKPH, unit: UnitSpeed.kilometersPerHour)
                 .converted(to: .metersPerSecond).value
         }
         var isRadarPaired: Bool = false
@@ -333,14 +369,22 @@ struct ActiveRideFeature {
         /// immediately to every dashboard widget with no lifecycle action needed.
         var unitSystem: UnitSystem { preferences.preferredUnit }
         /// Reads through to `AppPreferences.dashboardLayout` (#139), so S07's edits show at once.
-        /// Empty pages exist for edit mode and show only there: a ride that ends mid-edit never
-        /// reaches Done's prune, and the next ride must not open on them.
+        /// Empty pages — S08's "Empty page", or one whose widgets were all removed — show only in
+        /// edit mode: a ride that ends mid-edit never reaches Done's prune, and the next ride must
+        /// not open on them.
         var dashboardLayout: DashboardLayout {
             isEditingDashboard ? preferences.dashboardLayout : preferences.dashboardLayout.prunedEmptyPages()
         }
-        /// S07 edit mode (#141): widgets wiggle and can be removed, a blank page waits at the end,
-        /// and the dashboard can't be minimised until Done.
+        /// S07 edit mode (#141): widgets wiggle and can be removed, and the dashboard can't be
+        /// minimised until Done. New pages come only from S08's "Empty page" (UX.md §S05
+        /// "Customization" 5), not by themselves.
         var isEditingDashboard = false
+        /// S08's Add Widget sheet (#142), opened from edit mode's Add or an empty cell (#368).
+        var isAddWidgetPresented = false
+        /// The empty cell S08 was opened from (#368): it lists only what fits there and adds there.
+        /// `nil` from Add, which adds in the first open spot. Read only while the sheet is up, and
+        /// left set as it closes, so the sheet doesn't redraw as Add's while it slides away.
+        var addWidgetCell: DashboardGrid.Cell?
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
         /// The page the rider is on, an index into `dashboardLayout.pages`. Held here, not in
@@ -367,7 +411,18 @@ struct ActiveRideFeature {
         /// S07 (#141): a long press anywhere on the dashboard enters edit mode.
         case dashboardLongPressed
         case removeWidgetTapped(pageID: DashboardPage.ID, widgetID: String)
+        /// S07 (#367): a drag's drop, or a VoiceOver Move action. Moves the widget to `cell`, or swaps
+        /// it with the same-size widget there; any other drop leaves the layout as it was.
+        case moveWidget(pageID: DashboardPage.ID, widgetID: String, to: DashboardGrid.Cell)
         case dashboardEditingDoneTapped
+        /// S08 (#142): Add opens the picker; an entry adds that widget to the page the rider is on.
+        case addWidgetTapped
+        /// S08 (#368): an empty cell in edit mode opens the picker aimed at that cell.
+        case emptyCellTapped(pageID: DashboardPage.ID, cell: DashboardGrid.Cell)
+        case addWidgetPresentationChanged(Bool)
+        case addWidgetSelected(widgetID: String, size: WidgetSize)
+        /// S08's "Empty page" (#142): a blank page after the one the rider is on.
+        case addEmptyPageTapped
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)
@@ -511,29 +566,71 @@ struct ActiveRideFeature {
                 return .none
             case .dashboardLongPressed:
                 guard !state.isEditingDashboard else { return .none }
-                // Built from the layout as shown, before the flag flips: empty pages a ride left
-                // behind mid-edit stay gone, so the rider's page index means the same page.
-                let editing = state.dashboardLayout.appendingBlankPage(id: uuid())
+                // Saves the layout as shown, before the flag flips: empty pages a ride left behind
+                // mid-edit stay gone, so the rider's page index means the same page.
+                setDashboardLayout(state.dashboardLayout, in: &state)
                 state.isEditingDashboard = true
-                setDashboardLayout(editing, in: &state)
                 return .none
             case .removeWidgetTapped(let pageID, let widgetID):
                 guard state.isEditingDashboard else { return .none }
                 setDashboardLayout(state.dashboardLayout.removingWidget(widgetID, fromPage: pageID), in: &state)
                 return .none
+            case .moveWidget(let pageID, let widgetID, let cell):
+                guard state.isEditingDashboard else { return .none }
+                setDashboardLayout(state.dashboardLayout.movingWidget(widgetID, onPage: pageID, to: cell), in: &state)
+                return .none
+            case .addWidgetTapped:
+                guard state.isEditingDashboard else { return .none }
+                state.addWidgetCell = nil
+                state.isAddWidgetPresented = true
+                return .none
+            case .emptyCellTapped(let pageID, let cell):
+                // The sheet adds to the page the rider is on, so the tap must be from that page.
+                let page = state.dashboardLayout.pages[state.visibleDashboardPage]
+                guard state.isEditingDashboard, page.id == pageID, page.emptyCells.contains(cell) else { return .none }
+                state.addWidgetCell = cell
+                state.isAddWidgetPresented = true
+                return .none
+            case .addWidgetPresentationChanged(let isPresented):
+                state.isAddWidgetPresented = isPresented && state.isEditingDashboard
+                return .none
+            case .addWidgetSelected(let widgetID, let size):
+                guard state.isEditingDashboard, state.isAddWidgetPresented else { return .none }
+                let page = state.dashboardLayout.pages[state.visibleDashboardPage]
+                let cell = state.addWidgetCell
+                // The picker dims or hides an entry that doesn't fit, so this only refuses a stale tap.
+                guard page.openPlacement(widgetID: widgetID, size: size, at: cell) != nil,
+                      setDashboardLayout(state.dashboardLayout.addingWidget(widgetID, size: size, toPage: page.id, at: cell), in: &state)
+                else { return .none }
+                state.isAddWidgetPresented = false
+                return .none
+            case .addEmptyPageTapped:
+                // The Page section isn't offered from an empty cell.
+                guard state.isEditingDashboard, state.isAddWidgetPresented, state.addWidgetCell == nil else { return .none }
+                let index = state.visibleDashboardPage
+                let page = state.dashboardLayout.pages[index]
+                // The rider is already on a blank page; another beside it would be pruned unused.
+                guard !page.placements.isEmpty,
+                      setDashboardLayout(state.dashboardLayout.insertingBlankPage(id: uuid(), after: page.id), in: &state)
+                else { return .none }
+                state.dashboardPage = index + 1
+                state.isAddWidgetPresented = false
+                return .none
             case .dashboardEditingDoneTapped:
                 guard state.isEditingDashboard else { return .none }
-                let visiblePage = state.dashboardLayout.pages[state.visibleDashboardPage].id
+                // Pruning shifts every page after an empty one; stay on the page the rider was
+                // looking at. If that page is pruned — an Empty page they added nothing to — go
+                // back to the nearest page before it, the one they inserted it from. Counting the
+                // filled pages up to it never lands past the end, which a later page would take over.
+                let filledThroughVisible = state.dashboardLayout.pages
+                    .prefix(state.visibleDashboardPage + 1)
+                    .filter { !$0.placements.isEmpty }
+                    .count
                 state.isEditingDashboard = false
                 // Saving the pruned layout, not just hiding empty pages, is what returns a rider
                 // who changed nothing to the factory layout (`AppPreferences.dashboardLayout`).
-                let pruned = state.preferences.dashboardLayout.prunedEmptyPages()
-                setDashboardLayout(pruned, in: &state)
-                // Pruning shifts every page after an empty one; stay on the page the rider was
-                // looking at. If that page was pruned, take whichever now holds its place, or the
-                // last — never an index past the end, which the next edit's blank page would fill.
-                state.dashboardPage = pruned.pages.firstIndex { $0.id == visiblePage }
-                    ?? min(max(state.dashboardPage, 0), pruned.pages.count - 1)
+                setDashboardLayout(state.preferences.dashboardLayout.prunedEmptyPages(), in: &state)
+                state.dashboardPage = max(filledThroughVisible - 1, 0)
                 return .none
             case .mapOrientationToggled:
                 // The preference itself, not a copy: the next ride's sheet, and one reopened
@@ -568,6 +665,9 @@ struct ActiveRideFeature {
                 )
             case .finishTapped:
                 guard state.recordingState == .paused else { return .none }
+                // Auto-end sends this with no rider at the screen. SwiftUI won't show an alert
+                // from a view already showing a sheet, so the Add Widget sheet steps aside.
+                state.isAddWidgetPresented = false
                 state.finishAlert = AlertState {
                     TextState("Finish Ride")
                 } actions: {
@@ -783,14 +883,20 @@ struct ActiveRideFeature {
                 expireHeldHR(in: &state)
                 coverSilentStrapWithHealthKit(in: &state)
                 state.elapsedSeconds += 1
-                // One threshold governs both: a second spent below it adds no distance
-                // and counts toward auto-pause. Integrating the noise floor instead —
-                // what `max(speedMPS, 0)` did — grew the odometer while the bike stood
-                // still (#262).
+                // One threshold governs all three: a second spent below it adds no distance,
+                // counts toward auto-pause, and stays out of Avg speed. Integrating the noise
+                // floor instead — what `max(speedMPS, 0)` did — grew the odometer while the
+                // bike stood still (#262), and averaging it dragged Avg speed down (#381).
+                // The displayed speed, so a wheel sensor's reading wins over GPS here too.
                 let speedMPS = max(state.speed.speedMPS ?? 0, 0)
                 if speedMPS > Self.stationarySpeedMPS {
                     state.distanceMeters += speedMPS
+                    state.speedSampleCount += 1
                     state.zeroSpeedSeconds = 0
+                    let now = date.now
+                    state.averageSpeedSamples.append(SpeedSample(time: now, mps: state.averageSpeedMPS))
+                    let cutoff = now.addingTimeInterval(-SpeedFeature.historyWindow)
+                    state.averageSpeedSamples.removeAll { $0.time < cutoff }
                 } else {
                     state.zeroSpeedSeconds += 1
                 }
@@ -806,6 +912,7 @@ struct ActiveRideFeature {
                     if point.heartRateSource == .appleWatch {
                         state.recordedHealthKitSampleAt = state.healthKitHRSample?.receivedAt
                     }
+                    state.hrSecondsTally.add(point)
                     effects.append(.send(.trackRecorder(.timerTick(point))))
                 }
 
@@ -969,13 +1076,9 @@ struct ActiveRideFeature {
                     state.altitudeSamples.removeAll { $0.time < cutoff }
                 }
                 state.heading = update.heading
-                let kph = max(update.speed, 0) * 3.6
-                state.speedKPH = kph
-                if kph > 0 {
-                    state.speedSampleCount += 1
-                    state.speedSampleSum += kph
-                }
-                if kph > state.maxSpeedKPH { state.maxSpeedKPH = kph }
+                // Display only. The ride's Avg/Max speed come from the displayed speed —
+                // `.elapsedTick` and `.speed` — not from GPS fixes (#381).
+                state.speedKPH = max(update.speed, 0) * 3.6
                 return .merge(
                     .send(.speed(.gpsSpeedReceived(update.speed))),
                     .send(.calibration(.locationUpdated(update))),
@@ -999,6 +1102,13 @@ struct ActiveRideFeature {
                     // rider stood at the light and the bike did not travel the ground
                     // between the two fixes (#263).
                     beginTrackSegment(&state)
+                }
+                // Every displayed reading, after the resume above so the one that resumes
+                // counts too. Same "moving" bar as distance; the source is `SpeedFeature`'s
+                // choice, so a wheel sensor beats GPS (#381).
+                if state.recordingState == .active, let speedMPS = state.speed.speedMPS,
+                   speedMPS > Self.stationarySpeedMPS {
+                    state.maxSpeedMPS = max(state.maxSpeedMPS, speedMPS)
                 }
                 return .none
             case .calibration:
@@ -1037,12 +1147,15 @@ struct ActiveRideFeature {
     /// The only place the dashboard layout is written (#139 review). An edit that breaks a layout
     /// rule would render at once — duplicate `ForEach` ids, no pages — and then be swapped for the
     /// factory layout on the next launch, so it is refused rather than saved.
-    private func setDashboardLayout(_ layout: DashboardLayout, in state: inout State) {
+    /// Returns whether it was saved, so an edit can skip what follows from a refused one.
+    @discardableResult
+    private func setDashboardLayout(_ layout: DashboardLayout, in state: inout State) -> Bool {
         guard DashboardLayoutValidator.isValid(layout) else {
             reportIssue("Refused an invalid dashboard layout: \(layout)")
-            return
+            return false
         }
         state.$preferences.withLock { $0.dashboardLayout = layout }
+        return true
     }
 
     /// Applies a resolved bpm reading — from either source — to the displayed state.
@@ -1070,14 +1183,17 @@ struct ActiveRideFeature {
                 healthZoneCeilings: state.healthZoneCeilingsBPM
               ).rawValue
             : 0
-        if bpm > 0 {
-            state.hrSampleCount += 1
-            state.hrSampleSum += Double(bpm)
-            state.heldHR = HeldHeartRate(bpm: bpm, zone: state.hrZone, heldSince: date.now)
-        }
-        if bpm > state.maxHeartRateBPM {
-            state.maxHeartRateBPM = bpm
-        }
+        guard bpm > 0 else { return }
+        state.heldHR = HeldHeartRate(bpm: bpm, zone: state.hrZone, heldSince: date.now)
+        state.hrSamples.append(HeartRateSample(time: date.now, bpm: bpm))
+        let cutoff = date.now.addingTimeInterval(-CadenceFeature.historyWindow)
+        state.hrSamples.removeAll { $0.time < cutoff }
+        // Only recorded time feeds the ride's average and max (#379): a café stop with the
+        // strap still on shows the rider's heart rate, but must not pull Avg HR toward resting.
+        guard state.recordingState == .active else { return }
+        state.hrSampleCount += 1
+        state.hrSampleSum += Double(bpm)
+        state.maxHeartRateBPM = max(state.maxHeartRateBPM, bpm)
     }
 
     /// Drops the held reading once it has aged past `hrHoldWindow` (#221), so the
@@ -1140,8 +1256,7 @@ struct ActiveRideFeature {
             distanceMeters: state.distanceMeters,
             averageSpeedMPS: state.averageSpeedMPS,
             maxSpeedMPS: state.maxSpeedMPS,
-            averageHeartRateBPM: state.hrSampleCount > 0
-                ? Int((state.hrSampleSum / Double(state.hrSampleCount)).rounded()) : nil,
+            averageHeartRateBPM: state.hrSampleCount > 0 ? state.averageHeartRateBPM : nil,
             maxHeartRateBPM: state.hrSampleCount > 0 ? state.maxHeartRateBPM : nil,
             averageCadenceRPM: state.cadence.pedalingSampleCount > 0
                 ? state.cadence.averageCadenceRPM : nil,
@@ -1153,6 +1268,8 @@ struct ActiveRideFeature {
             speedSampleCount: state.speedSampleCount,
             hrSampleCount: state.hrSampleCount,
             cadenceSampleCount: state.cadence.pedalingSampleCount,
+            cadenceZoneSeconds: state.cadence.zoneSeconds,
+            cadenceCoastingSeconds: state.cadence.coastingSeconds,
             trackSegmentIndex: state.trackSegmentIndex,
             route: state.route,
             routeProgressMeters: state.navigation.progressMeters
@@ -1306,8 +1423,7 @@ extension ActiveRideFeature.State {
         trackSegmentIndex = summary.trackSegmentIndex + (recordingState == .active ? 1 : 0)
         elapsedSeconds = Int(summary.durationSeconds)
         distanceMeters = summary.distanceMeters
-        maxSpeedKPH = Measurement(value: summary.maxSpeedMPS, unit: UnitSpeed.metersPerSecond)
-            .converted(to: .kilometersPerHour).value
+        maxSpeedMPS = summary.maxSpeedMPS
         // The running averages are seeded from their *real* persisted sample
         // counts, not a fabricated weight — `average * count` reconstructs the
         // true prior sum, so a post-resume sample is weighted correctly against
@@ -1315,12 +1431,9 @@ extension ActiveRideFeature.State {
         // exactly one had. A zero count also tells "no real sample yet" apart
         // from "genuinely averaged zero", which `averageSpeedMPS` alone (a
         // non-optional Double) can't.
-        if summary.speedSampleCount > 0 {
-            speedSampleCount = summary.speedSampleCount
-            let averageSpeedKPH = Measurement(value: summary.averageSpeedMPS, unit: UnitSpeed.metersPerSecond)
-                .converted(to: .kilometersPerHour).value
-            speedSampleSum = averageSpeedKPH * Double(summary.speedSampleCount)
-        }
+        // Speed needs only its count: Avg speed is distance over moving seconds (#381), and
+        // distance is restored above.
+        speedSampleCount = summary.speedSampleCount
         if let avgHR = summary.averageHeartRateBPM, summary.hrSampleCount > 0 {
             hrSampleCount = summary.hrSampleCount
             hrSampleSum = Double(avgHR) * Double(summary.hrSampleCount)
@@ -1331,6 +1444,11 @@ extension ActiveRideFeature.State {
             cadence.cadenceSum = Double(avgCadence) * Double(summary.cadenceSampleCount)
         }
         cadence.maxCadenceRPM = summary.maxCadenceRPM ?? 0
+        // W5's detail sheet (#340): without these its zone and coasting times would cover
+        // only the post-resume stretch, while the Avg/Max restored above reach back past the
+        // kill. Both keep accumulating from here, over recorded time only (#379).
+        cadence.zoneSeconds = summary.cadenceZoneSeconds
+        cadence.coastingSeconds = summary.cadenceCoastingSeconds
         // Nil stays nil: a ride that had no radar before the kill still has none (#285).
         vehiclePassCount = summary.vehiclePassCount
         // The route, and how far along it the ride had got (#197): `.task` reloads the route,

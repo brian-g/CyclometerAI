@@ -126,17 +126,229 @@ struct DashboardLayoutTests {
         #expect(removed.pages.map(\.id) == layout.pages.map(\.id))
     }
 
-    @Test("Edit mode's blank page is appended once, however often it's asked for")
-    func appendingBlankPage() {
+    @Test("A new widget goes in the first open spot in reading order")
+    func firstOpenPlacementReadingOrder() {
         let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
-        let layout = DashboardLayout(pages: [page(pace)])
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 1, column: 0)
+        let open = page(pace, cadence)
 
+        #expect(open.firstOpenPlacement(widgetID: HeartRateDashboardWidget.id, size: .oneByOne)
+            == WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1))
+        // Row 0 has a 1×1 gap, row 1 is full: a 2×2 needs rows 2–3.
+        #expect(open.firstOpenPlacement(widgetID: SpeedDashboardWidget.id, size: .twoByTwo)
+            == WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 2, column: 0))
+    }
+
+    @Test("A widget already on the page, or a size the page has no room for, has no open spot")
+    func firstOpenPlacementRefuses() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        #expect(page(pace).firstOpenPlacement(widgetID: PaceDashboardWidget.id, size: .oneByOne) == nil)
+        #expect(page(pace).firstOpenPlacement(widgetID: MapDashboardWidget.id, size: .twoByOne) == nil, "Map has no 2×1")
+
+        // Every other row filled leaves only 1×1 and 2×1 gaps: no 2×2 fits, a 1×1 still does.
+        let striped = DashboardPage(placements: [
+            WidgetPlacement(SpeedDashboardWidget.self, size: .twoByOne, row: 0, column: 0),
+            WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
+            WidgetPlacement(DirectionsDashboardWidget.self, size: .twoByOne, row: 4, column: 0),
+            WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 6, column: 0),
+        ])
+        #expect(striped.firstOpenPlacement(widgetID: MapDashboardWidget.id, size: .twoByTwo) == nil)
+        #expect(striped.firstOpenPlacement(widgetID: PaceDashboardWidget.id, size: .oneByOne)
+            == WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 1, column: 0))
+    }
+
+    @Test("Adding a widget touches only its page, and does nothing when there's no room")
+    func addingWidget() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let layout = DashboardLayout(pages: [page(pace), page(pace)])
+
+        let added = layout.addingWidget(HeartRateDashboardWidget.id, size: .oneByOne, toPage: layout.pages[1].id)
+        #expect(added.pages.map(\.placements) == [
+            [pace],
+            [pace, WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1)],
+        ])
+        #expect(added.pages.map(\.id) == layout.pages.map(\.id))
+        #expect(layout.addingWidget(PaceDashboardWidget.id, size: .oneByOne, toPage: layout.pages[0].id) == layout)
+    }
+
+    // ── Adding at a tapped empty cell (#368) ──────────────────────────────────
+
+    private func cell(_ row: Int, _ column: Int) -> DashboardGrid.Cell {
+        DashboardGrid.Cell(row: row, column: column)
+    }
+
+    @Test("Empty cells are the ones no placement covers, in reading order")
+    func emptyCells() {
+        let speed = WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 0, column: 0)
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 2, column: 1)
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 3, column: 0)
+        let directions = WidgetPlacement(DirectionsDashboardWidget.self, size: .twoByOne, row: 4, column: 0)
+        let map = WidgetPlacement(MapDashboardWidget.self, size: .twoByTwo, row: 5, column: 0)
+
+        #expect(page(speed, pace, cadence, directions, map).emptyCells == [cell(2, 0)])
+        #expect(page().emptyCells.count == DashboardGrid.rows * DashboardGrid.columns)
+        #expect(page(speed).emptyCells.first == cell(2, 0))
+    }
+
+    /// The tapped cell is the widget's top-left; nothing shifts to fit (#368).
+    @Test("A size fits at a cell only with that cell as its top-left, on the grid, over empty cells")
+    func fitsAtCell() {
+        let empty = page()
+        #expect(empty.fits(.oneByOne, at: cell(6, 1)))
+        #expect(empty.fits(.twoByOne, at: cell(0, 0)))
+        #expect(!empty.fits(.twoByOne, at: cell(0, 1)), "Right column: a 2×1 would leave the grid")
+        #expect(empty.fits(.twoByTwo, at: cell(5, 0)))
+        #expect(!empty.fits(.twoByTwo, at: cell(6, 0)), "Last row: a 2×2 would leave the grid")
+
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 1, column: 1)
+        #expect(page(pace).fits(.oneByOne, at: cell(1, 0)))
+        #expect(!page(pace).fits(.twoByOne, at: cell(1, 0)), "Its neighbour is taken")
+        #expect(!page(pace).fits(.twoByTwo, at: cell(0, 0)), "Its block overlaps Pace")
+        #expect(!page(pace).fits(.oneByOne, at: cell(1, 1)), "The cell itself is taken")
+    }
+
+    @Test("A widget placed at a cell anchors there, under the layout rules; no cell means the first open spot")
+    func openPlacementAtCell() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let open = page(pace)
+
+        #expect(open.openPlacement(widgetID: HeartRateDashboardWidget.id, size: .oneByOne, at: cell(3, 1))
+            == WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 3, column: 1))
+        #expect(open.openPlacement(widgetID: SpeedDashboardWidget.id, size: .twoByTwo, at: cell(4, 0))
+            == WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 4, column: 0))
+        #expect(open.openPlacement(widgetID: PaceDashboardWidget.id, size: .oneByOne, at: cell(3, 1)) == nil, "Already on the page")
+        #expect(open.openPlacement(widgetID: MapDashboardWidget.id, size: .oneByOne, at: cell(3, 1)) == nil, "Map has no 1×1")
+        #expect(open.openPlacement(widgetID: CadenceDashboardWidget.id, size: .twoByOne, at: cell(3, 1)) == nil, "Not shifted left to fit")
+        #expect(open.openPlacement(widgetID: HeartRateDashboardWidget.id, size: .oneByOne, at: nil)
+            == open.firstOpenPlacement(widgetID: HeartRateDashboardWidget.id, size: .oneByOne))
+    }
+
+    @Test("Adding at a cell touches only its page, and does nothing when it doesn't fit there")
+    func addingWidgetAtCell() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let layout = DashboardLayout(pages: [page(pace), page(pace)])
+
+        let added = layout.addingWidget(HeartRateDashboardWidget.id, size: .oneByOne, toPage: layout.pages[1].id, at: cell(5, 1))
+        #expect(added.pages.map(\.placements) == [
+            [pace],
+            [pace, WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 5, column: 1)],
+        ])
+        #expect(added.pages.map(\.id) == layout.pages.map(\.id))
+        #expect(layout.addingWidget(SpeedDashboardWidget.id, size: .twoByOne, toPage: layout.pages[0].id, at: cell(0, 1)) == layout)
+    }
+
+    // ── Moving a widget (#367) ────────────────────────────────────────────────
+
+    @Test("A widget moves into a spot that's empty once it has left, its own cells included")
+    func movingToEmptySpot() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let speed = WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 2, column: 0)
+        let start = page(pace, speed)
+
+        #expect(start.moving(PaceDashboardWidget.id, to: cell(6, 1))?.placements == [
+            WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 6, column: 1), speed,
+        ])
+        // Rows 3–4: row 3 is Speed's own.
+        #expect(start.moving(SpeedDashboardWidget.id, to: cell(3, 0))?.placements == [
+            pace, WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 3, column: 0),
+        ])
+    }
+
+    @Test("A widget dropped on a same-size widget's top-left swaps with it, at every size")
+    func movingSwapsSameSize() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let heartRate = WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 4, column: 1)
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 1, column: 0)
+        let directions = WidgetPlacement(DirectionsDashboardWidget.self, size: .twoByOne, row: 6, column: 0)
+        let speed = WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 2, column: 0)
+        let start = page(pace, heartRate, cadence, directions, speed)
+
+        func at(_ placement: WidgetPlacement, _ row: Int, _ column: Int) -> WidgetPlacement {
+            WidgetPlacement(widgetID: placement.widgetID, size: placement.size, row: row, column: column)
+        }
+        #expect(start.moving(PaceDashboardWidget.id, to: cell(4, 1))?.placements
+            == [at(pace, 4, 1), at(heartRate, 0, 0), cadence, directions, speed])
+        #expect(start.moving(DirectionsDashboardWidget.id, to: cell(1, 0))?.placements
+            == [pace, heartRate, at(cadence, 6, 0), at(directions, 1, 0), speed])
+
+        let map = WidgetPlacement(MapDashboardWidget.self, size: .twoByTwo, row: 5, column: 0)
+        #expect(page(speed, map).moving(MapDashboardWidget.id, to: cell(2, 0))?.placements
+            == [at(speed, 5, 0), at(map, 2, 0)])
+    }
+
+    @Test("A drop onto a different size, an out-of-line widget, off the grid, or its own spot is refused")
+    func movingRefuses() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let heartRate = WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 0, column: 1)
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 1, column: 0)
+        let speed = WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 2, column: 0)
+        let map = WidgetPlacement(MapDashboardWidget.self, size: .twoByTwo, row: 4, column: 0)
+        let start = page(pace, heartRate, cadence, speed, map)
+
+        #expect(start.moving(SpeedDashboardWidget.id, to: cell(0, 0)) == nil, "A 2×2 onto two 1×1s and a 2×1")
+        #expect(start.moving(PaceDashboardWidget.id, to: cell(1, 0)) == nil, "A 1×1 onto a 2×1")
+        #expect(start.moving(SpeedDashboardWidget.id, to: cell(3, 0)) == nil, "A 2×2 half onto another 2×2")
+        #expect(start.moving(MapDashboardWidget.id, to: cell(6, 0)) == nil, "Off the bottom")
+        #expect(start.moving(PaceDashboardWidget.id, to: cell(6, -1)) == nil, "Off the left")
+        #expect(start.moving(CadenceDashboardWidget.id, to: cell(6, 1)) == nil, "A 2×1 from the right column")
+        #expect(start.moving(PaceDashboardWidget.id, to: cell(0, 0)) == nil, "Its own spot")
+        #expect(start.moving(DirectionsDashboardWidget.id, to: cell(6, 0)) == nil, "Not on the page")
+    }
+
+    @Test("Moving touches only its page, and leaves the layout as it was when refused")
+    func movingWidget() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 1, column: 0)
+        let layout = DashboardLayout(pages: [page(pace, cadence), page(pace, cadence)])
+
+        let moved = layout.movingWidget(PaceDashboardWidget.id, onPage: layout.pages[1].id, to: cell(0, 1))
+        #expect(moved.pages.map(\.placements) == [
+            [pace, cadence],
+            [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 1), cadence],
+        ])
+        #expect(moved.pages.map(\.id) == layout.pages.map(\.id))
+        #expect(layout.movingWidget(PaceDashboardWidget.id, onPage: layout.pages[0].id, to: cell(1, 0)) == layout)
+    }
+
+    /// VoiceOver's Move actions (#367) can't drag past a widget in the way, so they jump it.
+    @Test("A Move action goes to the nearest spot that way the move accepts, jumping what's in the way")
+    func moveTarget() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 3, column: 0)
+        let heartRate = WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 3, column: 1)
+        let cadence = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 2, column: 0)
+        let speed = WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 5, column: 0)
+        let start = page(pace, heartRate, cadence, speed)
+
+        #expect(start.moveTarget(for: PaceDashboardWidget.id, .up) == cell(1, 0), "Jumps Cadence")
+        #expect(start.moveTarget(for: PaceDashboardWidget.id, .right) == cell(3, 1), "Swaps with Heart Rate")
+        #expect(start.moveTarget(for: PaceDashboardWidget.id, .down) == cell(4, 0))
+        #expect(start.moveTarget(for: PaceDashboardWidget.id, .left) == nil, "Already at the edge")
+        #expect(start.moveTarget(for: SpeedDashboardWidget.id, .down) == nil, "Already at the bottom")
+        #expect(start.moveTarget(for: SpeedDashboardWidget.id, .up) == cell(4, 0), "One row: its own row 5 counts as free")
+        #expect(start.moveTarget(for: CadenceDashboardWidget.id, .left) == nil, "A full-width widget can't go sideways")
+        #expect(start.moveTarget(for: CadenceDashboardWidget.id, .right) == nil)
+        #expect(start.moveTarget(for: DirectionsDashboardWidget.id, .up) == nil, "Not on the page")
+    }
+
+    @Test("A drop lands on the cell nearest the widget's top-left, unclamped, and needs a sized grid")
+    func cellNearestOrigin() {
+        let grid = CGSize(width: 200, height: 700)
+        #expect(DashboardGrid.cell(nearest: CGPoint(x: 49, y: 149), in: grid) == cell(1, 0))
+        #expect(DashboardGrid.cell(nearest: CGPoint(x: 51, y: 151), in: grid) == cell(2, 1))
+        #expect(DashboardGrid.cell(nearest: CGPoint(x: -60, y: 690), in: grid) == cell(7, -1), "Off the grid stays off")
+        #expect(DashboardGrid.cell(nearest: .zero, in: .zero) == nil)
+    }
+
+    @Test("An empty page goes right after the page it's added from")
+    func insertingBlankPage() {
+        let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
+        let layout = DashboardLayout(pages: [page(pace), page(pace)])
         let blank = UUID()
-        let once = layout.appendingBlankPage(id: blank)
-        let twice = once.appendingBlankPage(id: UUID())
 
-        #expect(once == DashboardLayout(pages: [layout.pages[0], DashboardPage(id: blank, placements: [])]))
-        #expect(twice == once)
+        let inserted = layout.insertingBlankPage(id: blank, after: layout.pages[0].id)
+        #expect(inserted.pages.map(\.id) == [layout.pages[0].id, blank, layout.pages[1].id])
+        #expect(inserted.pages[1].placements.isEmpty)
+        #expect(layout.insertingBlankPage(id: blank, after: UUID()) == layout)
     }
 
     @Test("Pruning removes empty pages wherever they are, keeping the rest in order")

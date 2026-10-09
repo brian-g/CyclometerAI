@@ -1,9 +1,29 @@
 name: Tests
 
+# Docs-only changes don't run the suite (#374): specs, task notes and Markdown can't change
+# a test result. Both triggers carry the same list. Nothing under Cyclometer/ is ignored,
+# and the app never reads from assets/ (the D-DIN font is a copy in
+# Cyclometer/Cyclometer/Resources/Fonts/). .github/** still runs, so a workflow change
+# always tests itself.
+#
+# This is safe only while main requires no status check: its ruleset
+# (pull-requests-on-main) requires a review and nothing else. A required check on a
+# workflow that never starts stays pending and blocks the merge. If one is added, move
+# this filter into the job (a paths check that skips the steps) so the check still reports.
 on:
   pull_request:
+    paths-ignore:
+      - 'assets/**'
+      - 'tasks/**'
+      - '.claude/**'
+      - '**/*.md'
   push:
     branches: [main]
+    paths-ignore:
+      - 'assets/**'
+      - 'tasks/**'
+      - '.claude/**'
+      - '**/*.md'
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -26,7 +46,8 @@ jobs:
     # on PermissionsClientTests) and removed both times: a deadline inside the run is
     # subject to the same simulator contention it is meant to guard against, so it kills
     # tests that were merely delayed while a real hang on a healthy runner is obvious
-    # anyway. A job timeout has no such coupling. Successful runs take 9–12 minutes.
+    # anyway. A job timeout has no such coupling. Successful runs take 16–20 minutes
+    # (2026-10-03, #372).
     timeout-minutes: 30
 
     steps:
@@ -45,11 +66,49 @@ jobs:
           fi
 
       - name: Show toolchain
-        run: xcodebuild -version
+        id: xcode
+        run: |
+          xcodebuild -version
+          echo "build=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_OUTPUT"
+
+      # The dependency build, cached (#372). A clean run compiled ~1,500 package units, mostly
+      # swift-syntax for TCA's macros, against ~330 for the app and tests, and that was about
+      # half the job. A restored DerivedData survives a fresh checkout: the checkout path is
+      # stable, so only the app and tests recompile (measured locally: 326 units, none from
+      # packages).
+      #
+      # No restore-keys, deliberately: a Package.resolved or Xcode change is a cold build,
+      # never a partial reuse of a build made against other sources or another toolchain.
+      # Bump v1 to drop the cache by hand. actions/cache only saves after a green job, and
+      # caches are per ref: a PR's first run restores main's, and a run that misses saves
+      # its own.
+      #
+      # Prebuilt swift-syntax was tried first and doesn't apply. Xcode 27 downloads
+      # prebuilts/swift-syntax/…-MacroSupport by default, yet xcodebuild still compiles
+      # swift-syntax for the macro host, with IDEPackageEnablePrebuilts set or not.
+      #
+      # What it buys, measured 2026-10-03 (run 37156042525, cold then warm):
+      # - Compiling: 1,156 units → 302, none from packages. Restoring takes ~22 s (~800 MB).
+      # - Wall clock: smaller than that suggests. Package targets compile in parallel, while
+      #   the app and test modules are the serial path, and runner speed varies ~1.7× from job
+      #   to job. Relative to each machine's test time, the warm build was ~15% faster.
+      # - SDKStatCaches.noindex is excluded: xcodebuild regenerates it on every run
+      #   ("Base directory status changed") whether it was restored or not.
+      - name: Restore the dependency build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/DerivedData
+            !${{ runner.temp }}/DerivedData/Logs
+            !${{ runner.temp }}/DerivedData/Index.noindex
+            !${{ runner.temp }}/DerivedData/SDKStatCaches.noindex
+          key: deriveddata-v1-${{ runner.os }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Cyclometer/Cyclometer.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}-arm64
 
       - name: Resolve SPM dependencies
         working-directory: Cyclometer
-        run: xcodebuild -resolvePackageDependencies -project Cyclometer.xcodeproj -scheme Cyclometer
+        run: |
+          xcodebuild -resolvePackageDependencies -project Cyclometer.xcodeproj -scheme Cyclometer \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData"
 
       # The destination used to be the literal name "iPhone 17 Pro", and twice that
       # device simply wasn't on the runner — 2026-08-30 and 2026-09-07 both died with
@@ -57,6 +116,15 @@ jobs:
       # second listing no concrete simulators at all. GitHub reimages macos-26 on its
       # own schedule and the preinstalled simulator set is not a contract. Resolve a
       # device (creating one if needed) instead of naming one.
+      #
+      # The script only starts the boot, in the background, and returns: `simctl boot`
+      # blocks for ~2 min on the runner. Here, the boot overlaps the build, and "Wait for
+      # the simulator" collects it afterwards (#374).
+      #
+      # Not earlier: started before the cache restore, the boot competed with it for the
+      # runner's disk and few cores. Run 37162293875's restore of the same ~800 MB cache
+      # took 5 min 40 s against 22 s, and package resolution took 2 min 42 s against
+      # 21–44 s, which more than cancelled the 2 min saved.
       - name: Resolve a simulator
         run: .github/scripts/resolve-simulator.sh
 
@@ -65,6 +133,30 @@ jobs:
       # is no headless equivalent, so a fresh runner fails the build outright. The
       # macros here are the pointfreeco TCA stack, version-pinned in Package.resolved.
       #
+      # ARCHS=arm64: the runner and the simulator are both arm64, but the macro host tools
+      # were built for x86_64 too. That was 464 compile units (462 of them swift-syntax) of
+      # a 1,926-unit clean build, with no use (#372).
+      - name: Build for testing
+        working-directory: Cyclometer
+        run: |
+          xcodebuild build-for-testing \
+            -project Cyclometer.xcodeproj \
+            -scheme Cyclometer \
+            -destination "id=$SIM_UDID" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -skipMacroValidation \
+            ARCHS=arm64
+
+      # The boot started in "Resolve a simulator" has had the whole build to finish, so this
+      # is normally instant. If the boot failed, its log says why (#374).
+      - name: Wait for the simulator
+        run: |
+          if ! xcrun simctl bootstatus "$SIM_UDID" -b; then
+            echo "::error::Simulator $SIM_UDID did not boot"
+            cat "$RUNNER_TEMP/simulator-boot.log" || true
+            exit 1
+          fi
+
       # -parallel-testing-enabled NO: xcodebuild otherwise clones the simulator to
       # split the suite across destinations, and that bought us two recurring problems
       # for no speedup. First, clone launch is itself flaky — the failures on
@@ -79,20 +171,31 @@ jobs:
       # The speedup was never real: the whole suite is ~8 seconds of execution
       # (715 tests, 69 suites). CI wall-clock is build and simulator boot, not tests.
       #
+      # -collect-test-diagnostics never: after any failure xcodebuild otherwise spends ~10 min
+      # gathering a sysdiagnose. In run 37160465778 the tests finished at 23:21:33 and the step
+      # at 23:31:42, two minutes short of the job timeout. The result bundle still carries
+      # every failure, and "Summarize test failures" reads it from there.
+      #
       # Snapshot suites are excluded deliberately, not by oversight. Their reference
       # images were recorded against a local simulator and SwiftUI pixel output
       # varies across runner images, so gating merges on them would be flaky from
       # day one. Running them in CI needs its own issue — record-on-CI or a
       # per-pixel tolerance. They all pass locally.
+      #
+      # MapWidgetAccessibilityTests is skipped for a different reason: it puts a live
+      # MapKit view in a window, and on the runner that never returned, so the job sat
+      # until its 30-minute timeout (#361, 2026-10-03). It passes locally. The same
+      # checks run here on the pure-SwiftUI widgets in WidgetAccessibilityTests.
       - name: Run unit tests
         working-directory: Cyclometer
         run: |
-          xcodebuild test \
+          xcodebuild test-without-building \
             -project Cyclometer.xcodeproj \
             -scheme Cyclometer \
             -destination "id=$SIM_UDID" \
-            -skipMacroValidation \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -parallel-testing-enabled NO \
+            -collect-test-diagnostics never \
             -resultBundlePath "$RUNNER_TEMP/TestResults.xcresult" \
             -only-testing:CyclometerTests \
             -skip-testing:CyclometerTests/HeroNumberSnapshotTests \
@@ -111,13 +214,15 @@ jobs:
             -skip-testing:CyclometerTests/RideSummarySnapshotTests \
             -skip-testing:CyclometerTests/TurnInstructionOverlaySnapshotTests \
             -skip-testing:CyclometerTests/PaceWidgetSnapshotTests \
+            -skip-testing:CyclometerTests/RideMetricsSheetSnapshotTests \
+            -skip-testing:CyclometerTests/HeartRateSheetSnapshotTests \
+            -skip-testing:CyclometerTests/HeartRateWidgetSnapshotTests \
+            -skip-testing:CyclometerTests/HRZonesWidgetSnapshotTests \
             -skip-testing:CyclometerTests/SensorBatteryLabelSnapshotTests \
             -skip-testing:CyclometerTests/MapSheetButtonsSnapshotTests \
-            -skip-testing:CyclometerTests/DirectionsWidgetSnapshotTests
+            -skip-testing:CyclometerTests/DirectionsWidgetSnapshotTests \
+            -skip-testing:CyclometerTests/MapWidgetAccessibilityTests
 
-      # Every failure before this existed as three bare test names in 14k lines of
-      # xcodebuild noise. The bundle carries the assertion text and source location;
-      # the summary puts it on the job page so the common case needs no download.
       - name: Summarize test failures
         if: failure()
         run: |

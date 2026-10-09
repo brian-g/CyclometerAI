@@ -18,4 +18,6 @@ enum Opacity {
     /// The centred turn overlay's card (Sketch "Sxx - Route overlay") — solid, not a material, and
     /// just short of opaque so the dashboard stays visible under it.
     static let turnOverlay: Double = 0.9
+    /// An S08 picker entry the current page can't take (#142): already on it, or no room.
+    static let unavailable: Double = 0.4
 }

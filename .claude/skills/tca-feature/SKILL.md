@@ -5,7 +5,7 @@ description: This skill should be used when the user asks to add a new TCA featu
 
 # TCA Feature Scaffold
 
-This skill encodes the real pattern already living in `Features/ActiveRide/Cadence/CadenceFeature.swift` and its three companion files — the most complete, currently-accurate example in the repo (a BLE-backed sensor feature with a reconnect grace window, a widget view, reducer tests, and snapshot tests). For where files go, `assets/TCA.md` §8 is the map of the source tree.
+This skill encodes the real pattern already living in `Features/ActiveRide/Cadence/CadenceFeature.swift` and its companion files — the most complete, currently-accurate example in the repo (a BLE-backed sensor feature with a reconnect grace window, a widget view, its dashboard adapter, reducer tests, and snapshot tests). For where files go, `assets/TCA.md` §8 is the map of the source tree.
 
 ## File placement
 
@@ -36,7 +36,11 @@ Parent `State` gets `var <name> = <Name>Feature.State()`; parent `Action` gets `
 
 ## View
 
-A widget view takes **primitive parameters**, never a `Store` — `CadenceWidget` takes `cadence: Int?`, `cadenceHistory: [Double]`, `averageCadence: Int`, `maxCadence: Int`, `size: WidgetSize`. This keeps it independently previewable and snapshot-testable without a TCA harness; the parent dashboard view reads the fields off `store.state.<name>...` and passes them down. Rules that apply to every widget view in this codebase:
+A widget view takes **primitive parameters**, never a `Store` — `CadenceWidget` takes `cadence: Int?`, `cadenceHistory: [Double]`, `averageCadence: Int`, `maxCadence: Int`, a `detail:` closure for its detail sheet, and `size: WidgetSize`. This keeps it independently previewable and snapshot-testable without a TCA harness.
+
+The store is read by a separate `<Name>DashboardWidget` adapter beside the view (see `CadenceDashboardWidget.swift`): it conforms to `DashboardWidget` (`id`, `title`, `supportedSizes`, `category`), reads the fields off `store.<name>` and passes them down. A widget is placeable only once its adapter is listed in `DashboardWidgetCatalog.all` (`Features/ActiveRide/Dashboard/DashboardWidget.swift`). Never rename an existing `id` — saved layouts reference it.
+
+Rules that apply to every widget view in this codebase:
 
 - Design-system tokens only: `cy`-prefixed colors (`Color.cyBgSecondary`, `Color.cyTextPrimary`, …), `Spacing`/`Opacity` constants, shared components (`HeroNumber`, `WidgetLabel`) — never a hardcoded hex, point size, or opacity literal.
 - Layout branches on `size: WidgetSize` (`.oneByOne`/`.twoByOne`/`.twoByTwo`) with a dedicated `oneByOneContent`/`twoByOneContent` computed property per variant.

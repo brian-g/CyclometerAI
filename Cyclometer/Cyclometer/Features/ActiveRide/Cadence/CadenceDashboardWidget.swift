@@ -6,6 +6,7 @@ struct CadenceDashboardWidget: DashboardWidget {
     static let id = "cadence"
     static let title = "Cadence"
     static let supportedSizes: [WidgetSize] = [.oneByOne, .twoByOne]
+    static let category = WidgetCategory.ride
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>

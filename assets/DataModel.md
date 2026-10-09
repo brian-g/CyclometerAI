@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-09-26 (#284) — §3.1: `Ride` drops `elevationGainMeters`, `elevationDropMeters` and `hrZoneDurations`, which were declared but never written. S10 and S15 derive elevation and zone time from the saved track, and zones resolve at read time. §9 records the migration
+**Updated:** 2026-10-03 (#340) — §3.1: `Ride` gains five defaulted `TimeInterval` columns holding W5's time in each cadence zone and coasting time, written at every checkpoint and read back by `State(resuming:)`. They don't contradict #284: cadence zones are fixed rpm thresholds, so a stored tally cannot go stale. §9 records the migration
+**Previously:** 2026-09-26 (#284) — §3.1: `Ride` drops `elevationGainMeters`, `elevationDropMeters` and `hrZoneDurations`, which were declared but never written. S10 and S15 derive elevation and zone time from the saved track, and zones resolve at read time. §9 records the migration
 **Previously:** 2026-08-17 (#96) — §3.5 revised: RiderProfile leaves SwiftData for a `@Shared(.fileStorage)` JSON document, and stores HR *overrides* rather than values, since resting HR and date of birth are HealthKit's to own and max HR has no HealthKit type at all. `heartRateSourceIsAppleHealth` becomes derived; `dateOfBirth` is not stored. §8 gains the worked example it was already cited for, plus the zone → bpm inverse and the `minimumHRReserve` floor it requires. SwiftData now lands with M7's Ride
 **Previously:** 2026-08-08 (PR #83 review) — §3.9 revised: no Wheelset entity; wheel circumference moves onto the speed-role PairedSensor; Bike gains stravaGearID; Ride gains a bikeName snapshot. §3.6 records why JSON over plist. Research basis: PRD §8.9.1
 **Previously:** 2026-08-03 (#69) — AppPreferences moved out of SwiftData to a `@Shared(.fileStorage)` JSON document; PairedSensor / ConnectedService ownership reopened for #67; §3.9 added
@@ -120,6 +121,9 @@ final class Ride {
     var maxSpeedMPS: Double
     // No stored elevation gain/drop or HR zone seconds (#284): S10 and S15 derive both from the
     // saved track, and zones resolve at read time (§8), so a stored breakdown would go stale.
+    // W5's cadence zone and coasting seconds *are* stored (#340): written at every checkpoint
+    // and at ride end, read back on resume. Cadence zones are fixed rpm thresholds, so they
+    // have nothing to go stale against.
 
     // MARK: - Heart Rate
     var averageHeartRateBPM: Int?
@@ -1168,6 +1172,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 | 1.0 (MVP) | All entities as specified above |
 | 1.1 (MVP — Routes, M8) | Add Route @Model (§3.10); #252 later adds its optional `terrainData` and `surfaceData`, backfilling terrain for routes imported before it. Add `Ride.routeId: UUID?` and `Ride.routeProgressMeters: Double?` alongside the existing `Ride.routeName`. All three are optional, so there is no backfill: a pre-M8 store opens with them nil (`RideSchemaMigrationTests`). `Ride.route: Route?` was **not** added — see OQDM1 |
 | 1.1.1 (MVP — #284) | Remove `Ride.elevationGainMeters`, `Ride.elevationDropMeters` and `Ride.hrZoneDurations`. They were never written: elevation comes from the saved track, and zones resolve at read time (§8). Inferred lightweight migration drops the columns, and a store that still carries them opens with its rides intact (`RideSchemaMigrationTests`) |
+| 1.1.2 (MVP — #340) | Add `Ride.cadenceGrindingSeconds`, `cadenceTransitionSeconds`, `cadenceOptimalSeconds`, `cadenceOverspinSeconds` and `cadenceCoastingSeconds`, each `TimeInterval = 0` at the declaration so inferred lightweight migration backfills older rides with 0 (#186). `RideSchemaMigrationTests` covers it |
 | 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 

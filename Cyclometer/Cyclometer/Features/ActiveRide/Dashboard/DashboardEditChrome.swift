@@ -83,10 +83,80 @@ private struct DashboardRemoveButton: ViewModifier {
     }
 }
 
-/// The SpringBoard wiggle while S07 edit mode is on (#141). None under Reduce Motion.
+/// S07 edit mode's slot for an empty cell (#368): a dashed outline where a 1×1 card would sit, which
+/// opens S08 aimed at that cell. Outside edit mode it draws nothing and takes no taps (UX.md §S05
+/// "Empty cells"). It doesn't wiggle: there's no widget to move.
+struct DashboardEmptySlot: View {
+    let cell: DashboardGrid.Cell
+    let onTap: () -> Void
+
+    @Environment(\.isEditingDashboard) private var isEditing
+
+    var body: some View {
+        if isEditing {
+            Button(action: onTap) {
+                RoundedRectangle(cornerRadius: Spacing.cornerMd)
+                    .strokeBorder(
+                        Color.cyBorderStrong,
+                        style: StrokeStyle(lineWidth: Spacing.strokeHairline, dash: [Spacing.strokeDash])
+                    )
+                    .scaleEffect(WidgetSize.oneByOne.editingScale)
+                    // The whole cell, not just the outline.
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Empty, \(cell.spokenPosition(for: .oneByOne))")
+            .accessibilityHint("Add widget here")
+        }
+    }
+}
+
+/// S07 edit mode's VoiceOver element for a widget (#367): the card read as one element, "Speed,
+/// row 1, full width", with a Move action for each way it can go. Moving needs a drag otherwise.
+/// An overlay rather than an `if` around the widget, which would rebuild it — the live map — on
+/// entering edit mode; the widget's own elements are hidden while editing.
+private struct DashboardMoveActions: ViewModifier {
+    let title: String
+    let placement: WidgetPlacement
+    let targets: [(direction: DashboardGrid.Direction, cell: DashboardGrid.Cell)]
+    let onMove: (DashboardGrid.Cell) -> Void
+
+    @Environment(\.isEditingDashboard) private var isEditing
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHidden(isEditing)
+            .overlay {
+                if isEditing {
+                    Color.clear
+                        .allowsHitTesting(false)
+                        .accessibilityElement()
+                        .accessibilityLabel("\(title), \(placement.cell.spokenPosition(for: placement.size))")
+                        .accessibilityActions {
+                            ForEach(targets, id: \.direction) { target in
+                                Button(target.direction.title) { onMove(target.cell) }
+                            }
+                        }
+                }
+            }
+    }
+}
+
+extension DashboardGrid.Cell {
+    /// Where VoiceOver says a `size` widget or empty slot with its top-left here sits: "row 3,
+    /// left" (#368), or "full width" for a widget spanning both columns (#367).
+    func spokenPosition(for size: WidgetSize) -> String {
+        let side = size.columns == DashboardGrid.columns ? "full width" : column == 0 ? "left" : "right"
+        return "row \(row + 1), \(side)"
+    }
+}
+
+/// The SpringBoard wiggle while S07 edit mode is on (#141). None under Reduce Motion, nor while the
+/// widget is held by a drag (#367), as on SpringBoard.
 private struct DashboardWiggle: ViewModifier {
     /// Offsets this widget's swing, in cycles, so neighbours don't wiggle in step.
     let phase: Double
+    let isHeld: Bool
 
     @Environment(\.isEditingDashboard) private var isEditing
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -97,7 +167,7 @@ private struct DashboardWiggle: ViewModifier {
     /// One full swing and back, in seconds.
     private static let period = 0.26
 
-    private var isWiggling: Bool { isEditing && !reduceMotion }
+    private var isWiggling: Bool { isEditing && !reduceMotion && !isHeld }
 
     func body(content: Content) -> some View {
         TimelineView(.animation(paused: !isWiggling)) { timeline in
@@ -124,9 +194,21 @@ extension View {
         modifier(DashboardEditCard(size: size))
     }
 
-    /// S07 edit mode's wiggle (#141), `phase` cycles out of step with its neighbours.
-    func dashboardWiggle(phase: Double) -> some View {
-        modifier(DashboardWiggle(phase: phase))
+    /// S07 edit mode's wiggle (#141), `phase` cycles out of step with its neighbours. Still while
+    /// `isHeld` by a drag (#367).
+    func dashboardWiggle(phase: Double, isHeld: Bool) -> some View {
+        modifier(DashboardWiggle(phase: phase, isHeld: isHeld))
+    }
+
+    /// S07 edit mode's VoiceOver element for the widget `title` at `placement` (#367), with a Move
+    /// action to each of `targets`.
+    func dashboardMoveActions(
+        title: String,
+        placement: WidgetPlacement,
+        targets: [(direction: DashboardGrid.Direction, cell: DashboardGrid.Cell)],
+        onMove: @escaping (DashboardGrid.Cell) -> Void
+    ) -> some View {
+        modifier(DashboardMoveActions(title: title, placement: placement, targets: targets, onMove: onMove))
     }
 
     /// S07 edit mode's remove button for the widget `title` (#141). Apply it outside

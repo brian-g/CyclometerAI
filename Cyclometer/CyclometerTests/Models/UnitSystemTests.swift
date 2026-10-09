@@ -50,7 +50,8 @@ struct UnitSystemTests {
         #expect(abs(seconds - expectedSeconds) < 0.01)
     }
 
-    @Test("Pace is undefined at zero or negative speed", arguments: [0.0, -1.0])
+    /// GPS noise on a stationary phone (#262) is stopped, not a 500-minute pace (#144).
+    @Test("Pace is undefined when stopped", arguments: [0.0, -1.0, 0.03, ActiveRideFeature.stationarySpeedMPS])
     func paceSecondsIsNilWhenStopped(mps: Double) {
         #expect(UnitSystem.metric.paceSeconds(fromMPS: mps) == nil)
         #expect(UnitSystem.imperial.paceSeconds(fromMPS: mps) == nil)
@@ -105,5 +106,41 @@ struct UnitSystemTests {
     @Test("A turn distance never reads negative", arguments: UnitSystem.allCases)
     func turnDistanceClampsAtZero(unit: UnitSystem) {
         #expect(unit.turnDistance(fromMeters: -5).value == "0")
+    }
+
+    // MARK: - Spoken (#361)
+
+    @Test("A spoken turn distance is the shown one, units in words", arguments: [
+        (UnitSystem.metric, 347.0, "350 meters"),
+        (UnitSystem.metric, 996.0, "1.0 kilometers"),
+        (UnitSystem.imperial, 100.0, "330 feet"),
+        (UnitSystem.imperial, 1_000.0, "0.6 miles")
+    ])
+    func spokenTurnDistanceMatchesShown(unit: UnitSystem, meters: Double, spoken: String) {
+        #expect(unit.spokenTurnDistance(fromMeters: meters) == spoken)
+    }
+
+    @Test func spokenSpeedAndDistanceSpellOutUnits() {
+        #expect(UnitSystem.metric.spokenSpeed(fromMPS: 10) == "36.0 kilometers per hour")
+        #expect(UnitSystem.imperial.spokenSpeed(fromMPS: 10) == "22.4 miles per hour")
+        #expect(UnitSystem.metric.spokenDistance(fromMeters: 12_400) == "12.4 kilometers")
+        #expect(UnitSystem.imperial.spokenDistance(fromMeters: 12_400) == "7.7 miles")
+    }
+
+    /// 10 m/s is 100 s/km and 160.9 s/mi: whole seconds, truncated, as W11 has always shown them.
+    @Test("Pace reads M:SS, shown and spoken, and is nil where pace is undefined", arguments: [
+        (UnitSystem.metric, 10.0, "1:40", "1 minute, 40 seconds per kilometer"),
+        (.imperial, 10.0, "2:40", "2 minutes, 40 seconds per mile"),
+        (.metric, 1.0, "16:40", "16 minutes, 40 seconds per kilometer"),
+    ])
+    func paceFormats(unit: UnitSystem, mps: Double, shown: String, spoken: String) {
+        #expect(unit.formattedPace(fromMPS: mps) == shown)
+        #expect(unit.spokenPace(fromMPS: mps) == spoken)
+    }
+
+    @Test("No pace to show or speak at zero speed", arguments: UnitSystem.allCases)
+    func paceFormatsAreNilWhenStopped(unit: UnitSystem) {
+        #expect(unit.formattedPace(fromMPS: 0) == nil)
+        #expect(unit.spokenPace(fromMPS: 0) == nil)
     }
 }

@@ -297,7 +297,8 @@ struct ActiveRideFeature {
         // Paused state
         var pausedAt: Date? = nil
 
-        // Ride summary (Phase 2: running HR zone durations)
+        // Running HR zone durations. As built (#145): `hrSecondsTally`, recorded seconds per
+        // bpm by S10's rule, sorted into zones when the Heart rate sheet reads it
         var hrZoneDurations: [Int: TimeInterval] = [:]
     }
 
@@ -991,11 +992,12 @@ Cyclometer/
 │   │   ├── ActiveRideFeature.swift        // parent reducer for the ride
 │   │   ├── RideDashboardView.swift        // S05 dashboard
 │   │   ├── ActiveRideAccessoryView.swift  // S05.3 accessory
-│   │   ├── Dashboard/                     // DashboardPageView, DashboardGridLayout, DashboardWidget, DashboardEditChrome (S07)
+│   │   ├── Dashboard/                     // DashboardPageView, DashboardGridLayout, DashboardWidget, DashboardEditChrome (S07), AddWidgetSheet (S08)
 │   │   │                                  // (protocol + catalog) — #139; each widget folder has its adapter
-│   │   ├── Speed/                         // SpeedFeature, SpeedWidgetView (W1/W2),
-│   │   │                                  // PaceWidgetView (W11)
-│   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12) — HR state lives
+│   │   ├── Speed/                         // SpeedFeature, SpeedWidgetView (W1), AverageSpeed (W2),
+│   │   │                                  // Duration (W3), Distance (W6), PaceWidgetView (W11),
+│   │   │                                  // RideMetricsSheet + RideMetricsCharts (#144)
+│   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12), HeartRateSheet — HR state lives
 │   │   │                                  // on ActiveRideFeature (§3)
 │   │   ├── Cadence/                       // CadenceFeature, CadenceWidgetView (W5)
 │   │   ├── Map/                           // MapWidgetView (W8), ActiveRideMapView,
@@ -1027,7 +1029,7 @@ Cyclometer/
 │   ├── DesignSystem/                      // Color+Cyclometer, AppFonts, Typography,
 │   │                                      // Spacing, Opacity, WidgetSize
 │   └── Components/                        // HeroNumber, WidgetLabel, SensorListRow,
-│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, …
+│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, DonutChart, …
 ├── PreviewContent/
 └── Resources/Fonts/                       // D-DIN
 ```

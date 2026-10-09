@@ -18,8 +18,26 @@ protocol DashboardWidget: View {
     /// The sizes this widget has a layout for. The validator rejects any other, and S08 (#142)
     /// filters its picker by them.
     static var supportedSizes: [WidgetSize] { get }
+    /// The section of S08's picker (#142) this widget is listed under.
+    static var category: WidgetCategory { get }
 
     init(size: WidgetSize, store: StoreOf<ActiveRideFeature>)
+}
+
+/// S08's picker sections (#142), in the order it lists them. UX.md §S08 also names Weather and
+/// Force; they get a case when they get a widget.
+enum WidgetCategory: CaseIterable {
+    case ride
+    case heartRate
+    case route
+
+    var title: String {
+        switch self {
+        case .ride: "Ride"
+        case .heartRate: "Heart Rate"
+        case .route: "Route"
+        }
+    }
 }
 
 /// Every placeable widget. Swift can't discover conforming types at runtime, so adding a widget
@@ -27,6 +45,9 @@ protocol DashboardWidget: View {
 enum DashboardWidgetCatalog {
     static let all: [any DashboardWidget.Type] = [
         SpeedDashboardWidget.self,
+        AverageSpeedDashboardWidget.self,
+        DurationDashboardWidget.self,
+        DistanceDashboardWidget.self,
         CadenceDashboardWidget.self,
         HeartRateDashboardWidget.self,
         HRZonesDashboardWidget.self,

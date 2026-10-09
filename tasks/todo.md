@@ -1,3 +1,144 @@
+# #145 — Heart Rate detail sheet (W4, W12)
+
+Plan: /Users/brian/.claude/plans/serialized-sparking-mist.md
+Branch: `feat/145-heart-rate-sheet`
+
+- [x] 1. `HeartRateSecondsTally` — S10's `secondsByBPM` rule, incremental
+- [x] 2. `ActiveRideFeature.State.hrSecondsTally`, fed per recorded track point
+- [x] 3. `HeartRateMetrics` + `HeartRateSheet`/`HeartRateList`
+- [x] 4. W4/W12: `.widgetDetail`, `accessibilityValue`, `metrics:`; adapters
+- [x] 5. Tests: tally, reducer, metrics, a11y, snapshots
+- [x] 6. Specs: UX §W4/§W12, PRD §9.4, TCA.md
+- [x] 7. Unit suite green; sim drive
+
+## Review
+
+- **Sheet:** W4 and W12 open one Heart Rate sheet (medium → large). The Current section shows the bpm and the zone ("Z3 Aerobic", with a zone-colour dot). Empty states match the cards: "No HR Source" when nothing is connected, "—" when there's no reading. The Time in Zones section has a donut in the zone colours (only once there is time to show), then one row per zone: its S12 name, its resolved bpm range, and the ride's time in it.
+- **Time in zone (pulled into scope; PRD v0.6.7 assigned it to #145):** `HeartRateSecondsTally` is S10's `secondsByBPM` loop, now run incrementally, so `secondsByBPM` is a fold over it. `ActiveRideFeature` feeds the tally every track point it records, so the live sheet counts exactly the seconds S10 will count from the saved track, including the held Apple Watch reading. The tally is sorted into zones at read time through `RideDetailSeries.zoneSeconds` + `riderProfile.bounds`, the same path `RideSummaryFeature` uses.
+- **Zone names:** `HeartRateZone.s12DisplayName`. UX §W4's old Tempo/VO₂ Max list is corrected.
+- **Tests:**
+  - `HeartRateMetricsTests` (5)
+  - two reducer tests in `ActiveRideFeatureHRDropoutTests`, each asserting the tally equals `secondsByBPM(recorded)`
+  - `WidgetAccessibilityTests` now includes `.heartRate`/`.hrZones`, spoken-text tests, and sheet liveness
+  - 3 snapshots, inspected: not blank
+  - Results: full `CyclometerTests` minus `PersistenceClientTests` gave 1843 passed; `PersistenceClientTests` alone gave 47. Grepped the log for the new tests to confirm they ran.
+- **Sim drive:** a fresh install, ride started; W4 and W12 each open the sheet, showing No HR Source with every zone at 0:00:00, and Close returns to the dashboard.
+- **Not verified on the sim:** a live HR reading. The simulator has no strap. The hosted liveness test and the reducer tests cover that path.
+- **Known gap:** after a crash and resume, the tally starts from zero. Cadence persists its zone seconds; HR doesn't. Filed as #393. #392 is the auto-resume recorder bug.
+
+### Follow-up: W4/W12 per Cadence and Sketch (Brian's correction)
+
+- **What went wrong:** I had scoped out W4's watermark, which UX §W4 specifies, and I never opened Sketch; the MCP was down and I didn't say so. Logged in `tasks/lessons.md`. The whole-ride chart I first built is replaced.
+- **HR history:** `hrSamples` is now cadence's history for heart rate. Every live reading goes in through `applyHeartRateReading`, recording or not, and it is trimmed to `CadenceFeature.historyWindow`.
+- **New derived state:** `hrZoneBounds`, `hrZoneSeconds`, `averageHeartRateBPM`, `hrWatermarkSamples` and `hrTrend`.
+- **W4:** built as W5. It comes in 1×1 and 2×1, with a last-hour watermark on fixed resting-to-max zone bands, a ▲/▼ trend over the unit (Sketch), and Avg/Max at 2×1. The full-card zone tint is gone; the left zone bar stays.
+- **W12:** 1×1 per Sketch "W12 - Zones" (a donut, a colour square plus "Z1: 05:12" per row, the current zone bold), plus a 2×1 that adds S12 names. "No HR Source" shows only with no source *and* no time.
+- **Sheet chart:** the Cadence sheet's chart for HR (bands, the elevation watermark, a fixed y-axis, the last hour), on the shared `RideTimeAxis`. `HeartRateZoneBands` and `chartDomain(including:)` are shared by W4 and the sheet.
+- **Tests:**
+  - `HeartRateTrendTests`
+  - a reducer test for history being windowed and following through a pause
+  - state-derived values
+  - a11y for the trend, 2×1 stats and W12 times
+  - two new widget snapshot suites
+  - the sheet and edit-chrome references re-recorded, with images inspected
+  - the six exhaustive HR reducer tests updated for `hrSamples`
+  - the expected Add Widget order updated for the new 2×1s
+- **CI:** the new snapshot suites are on the skip list.
+- **Noise:** Xcode was open and locked the build database twice, so those runs were repeated.
+
+---
+
+# #144 — Ride Metrics detail sheet (W1, W2, W3, W6, W11)
+
+Plan: /Users/brian/.claude/plans/cosmic-sprouting-sutherland.md
+Branch: `feat/144-ride-metrics-sheet`
+
+- [x] 1. `RideMetrics` value + display strings; `ActiveRideFeature.State.rideMetrics`
+- [x] 2. `RideMetricsSheet` — list, close button
+- [x] 3. `metrics:` on W1/W2/W3/W6 views + adapters
+- [x] 4. W11 Pace: `.widgetDetail`, `accessibilityValue`, `UnitSystem.formattedPace`/`spokenPace`
+- [x] 5. Tests: `RideMetricsTests`, `RideMetricsSheetSnapshotTests`, a11y `.pace` + sheet liveness
+- [x] 6. UX.md as-built note
+- [x] 7. Feedback round 1: detents medium→large; speed chart + elevation; pace chart (inverted, gaps at stops); Distance own section; moving vs stopped donut
+- [x] 8. Unit suite green (persistence suite alone); sim drive
+
+## Review
+
+- **Sheet:** detents medium → large, opening at medium. Speed section: last-hour speed over a faint elevation area, then Current/Average/Max. Pace section: inverted line (faster higher) with gaps at stops, then Current/Average. Distance in its own section. Time section: moving vs stopped donut, then Moving Time (W3's `speedSampleCount`) and Ride Time (W1's `elapsedSeconds`).
+- **Plumbing:** each of the five widgets takes a lazy `metrics: () -> RideMetrics`, called only in the sheet builder. Adapters pass `{ store.rideMetrics }`. `RideMetrics` holds the numbers, the display strings and the two histories.
+- **Plan claim corrected:** I said the closure had to be called in the sheet's `body` to stay live. A mutation check showed reads made in the `.sheet` content builder are tracked too, so the sheet takes a plain value, as `CadenceDetailSheet` does. `rideMetricsSheetFollowsTheRideWhileOpen` pins liveness; it passes, and a frozen-value control fails it.
+- **W11:** now tappable, one VoiceOver button reading pace in words (`UnitSystem.spokenPace`). The card's M:SS moved into `UnitSystem.formattedPace`, and its snapshots are unchanged.
+- **DonutChart** moved from the Cadence file to `UI/Components/DonutChart/` for reuse. No behavior change.
+- **Found by the sim drive:** automatic time-axis ticks repeated "6:39 PM" a minute into a ride. `RideMetricsCharts.timeTicks` now ticks on whole-minute steps (≤3), and labels a sub-minute span at its start (history restarts when the app does). Unit-tested. The Cadence sheet's chart still uses automatic ticks, so it has the same repeat. Not fixed here.
+- **Tests:** full `CyclometerTests` minus `PersistenceClientTests` gave 1816 passed, and that suite alone gave 47. The first full run hung in the known PersistenceClientTests × MapKit deadlock; I confirmed it with `sample` and stopped it. After the axis fix, I re-ran only the changed suites (RideMetricsTests, snapshots, a11y), all green.
+- **Sim drive:** three fresh builds. The sheet opens from W11, W1, W2, W3 and W6 at medium, and values and the chart advance live.
+- **Not verified:** the elevation area and pace gaps under a real ride. The simulator feed is flat and constant, so these are covered by snapshots and unit tests only.
+
+### Follow-up: /code-review xhigh
+
+Fixed:
+- **Pace when stopped:** a stationary phone's GPS reads 0.02–0.04 m/s, which showed as a 500-minute pace, on the W11 card too. That predates this branch. `UnitSystem.paceSeconds` is now `nil` at or below `stationarySpeedMPS`, the same threshold the ride clock and `PaceTrace` use.
+- **Pace y-axis:** the slow end is capped at 2× the median pace, so one slow red-light bucket can't squash the riding pace. Out-of-range points are clipped, and ticks fall on whole 15 s–10 min steps. Plotted as negative seconds, because an explicit domain can't be reversed.
+- **Time axis:** both charts share the speed history's range. Labels are formatted in the environment's time zone and locale. The snapshot was really encoding New York, and failed under Tokyo; it passes there now. An aligned span can no longer get four ticks.
+- **CI:** `RideMetricsSheetSnapshotTests` added to CI's snapshot skip list.
+- **Short pace runs:** one-point runs (no line to draw) are dropped, so the pace chart never shows empty axes.
+- **VoiceOver:** sheet rows speak units and times in words, and "No reading" for "—" (`MetricReading`).
+- **Reuse:** the speed line uses `bucketAveraged(to:)` instead of a copy.
+
+Declined:
+- **Per-update recompute:** a few O(n) passes over at most an hour of samples, only while the sheet is open.
+- **English "per kilometer" in `spokenPace`:** the app is English-only, like every other spoken string.
+- **Dropping the explicit detent selection:** opening at medium is a stated requirement, and I won't rely on the system's unspecified default for a Set of detents.
+
+Open:
+- **Missing samples:** a stretch with no samples at all (a GPS dropout) draws as a straight line, not a gap.
+- **Cadence sheet axis:** it still repeats minute labels. `RideTimeAxis` could be shared with it.
+
+### Follow-up: Distance first; stale-sheet fix
+
+- Distance moved to the first section; snapshots re-recorded.
+- **Stale open sheet, a real bug.** `rideMetricsSheetFollowsTheRideWhileOpen` failed about one fresh `xcodebuild` run in seven. A read-count probe showed the `.sheet` builder re-ran with the new value (1 → 2 reads), but the open sheet kept the old one for 5 s+. The update never reached the presented host. Relaunch iterations within one invocation never reproduced it; separate invocations did.
+- **Fix:** `RideMetricsSheet` takes the closure and calls it in its own `body`, which was the original plan. The design I dropped after a one-off mutation check had passed was the right one. Result: 20/20 fresh invocations passed, against 1 failure in 7 before.
+- **Same pattern elsewhere:** `CadenceDetailSheet` and the Directions map sheet (#362) still read in the builder, so they likely have the same latent staleness. Not fixed here.
+
+---
+
+# #140 — W2 Avg Speed, W3 Duration, W6 Distance 1×1 widgets
+
+Plan: /Users/brian/.claude/plans/tingly-splashing-frost.md
+Branch: `feat/140-ride-metric-widgets`
+
+- [x] 1. `bucketAveraged(to:)` on `[SpeedSample]`; `watermarkSamples` uses it
+- [x] 2. `ActiveRideFeature.State.averageSpeedSamples`, appended on moving ticks, pruned to the window
+- [x] 3. `RideMetricsSheet` placeholder shared by W1/W2/W3/W6
+- [x] 4. W2 view + adapter, `AverageSpeedTrend`
+- [x] 5. W3 and W6 views + adapters; catalog entries
+- [x] 6. Tests: reducer, pure, snapshots (+ S08 re-record), a11y
+- [x] 7. TCA.md §8
+- [x] 8. Unit suite green; Sketch compare; sim drive
+
+## Review
+
+- The W2 line uses a new `averageSpeedSamples` series, appended only on moving ticks: the average changes on no other tick. Only the existing tests that tick while moving gained an assertion (9 lines across 4 tests). No test was switched to non-exhaustive.
+- `bucketAveraged(to:)` replaces `watermarkSamples`' inline loop and keeps time on each bucket, so W2's two series share a Date axis. W1's values are unchanged.
+- **Not in the plan:** the factory layout's showcase page 3 gains W2/W3/W6 beside Speed 1×1. `factoryCoversEveryWidgetAndSize` requires every catalog widget there.
+- The S08 picker's Ride section now pairs evenly, so the "lone 1×1 last" row case moved to a Route-section assertion.
+- Snapshot names are widget-prefixed (`testAverageSpeedMetric`…). Generic names clashed with Pace's in the flat bundle.
+- Sim drive, fresh build: W2/W3/W6 update live (00:26→00:46, 0.1→0.2 mi), and a tap opens the Ride Metrics placeholder. The drive found that at a steady speed W2's line stroked above its tile, and Charts doesn't clip; `.clipped()` fixed it, confirmed on a second drive.
+- Tests: full `CyclometerTests` run (1771 passed, apart from the first-record snapshot failures), `PersistenceClientTests` alone (46), then the changed suites, all green.
+- Not verified: the W2 line under real, varying speed on a device. The simulator feed is constant.
+
+### Follow-up: /code-review
+- **W3 now shows moving time** (`speedSampleCount`), per UX.md, so W6 = W2 × W3. Brian chose it over matching W1's Time. Format kept as MM:SS / H:MM:SS, and W2 stays the whole-ride average; UX.md §W2/§W3 now say both.
+- **Bucket edges are integers.** The floating-point edges dropped the newest sample at 404 counts below 20,000 (e.g. 123). This predates the PR, from W1's watermark.
+- **W2's average is trimmed to the watermark's oldest reading before plotting.** It only trims on moving ticks, so after a long stop the shared axis stretched past the hour.
+- **Trend runs turn with hysteresis:** only after moving one display step (0.1 km/h) back from the run's peak or trough. Comparing each step's sign flickered late in a ride, and a fixed per-step dead-band would have hidden a slow, real decline.
+- **S08's sample ride now has an hour of speed history**, `SpeedSample.sampleHour`, shared with W2's previews and snapshots. W1 and W2 preview their graphs.
+- **Cleanups:** `Int.spokenElapsed` is shared by W1 and W3; W2 uses `HeroNumber(Double, unit:)`.
+- **Rejected:** "the pause bridge is a misleading diagonal". The average can't change during a pause, so the bridge is flat. The re-bucketing cost is the same as W1's.
+- **Tests:** full suite 1792 passed. One `RideSummarySnapshotTests` case failed in 0.000 s on a lost test host and passed on a rerun.
+
+
 # #330 — Larger grab targets: dashboard grabber + map sheet
 
 Plan: /Users/brian/.claude/plans/harmonic-waddling-heron.md
@@ -496,3 +637,300 @@ Branch: `feat/141-dashboard-edit-mode`
 - **Factory matching** uses `DashboardLayout.isFactory` (placements only) in the setter and on decode. The other fix considered was fixed UUID literals on the factory pages. That alone would leave a decoded factory copy pinning the rider until their next edit.
 - **Not changed: one `TimelineView` per widget while editing.** Its closure only applies `visualEffect` rotation to a content placeholder, so widget bodies aren't re-evaluated each frame. Edit mode is also a short, deliberate state. Revisit if a device trace shows a cost.
 - **Unit suite:** 1740 passed, 0 failed. The 5 new tests were confirmed in the log by name. Snapshots re-recorded and looked at; the 2×1 card's sides line up with the 1×1s above it.
+
+# #142 — S08 Add Widget sheet
+
+Plan: /Users/brian/.claude/plans/fuzzy-snacking-phoenix.md
+Branch: `feat/142-add-widget-sheet`
+
+- [x] 1. Model: `firstOpenPlacement`, `addingWidget`, `insertingBlankPage` + tests
+- [x] 2. `WidgetCategory` + `category` on each widget
+- [x] 3. Reducer: present / select / empty page + tests
+- [x] 4. `AddWidgetSheet` (sections, scaled previews, sample store) + entry-order test + snapshot
+- [x] 5. Wire Add button + sheet in `RideDashboardView`
+- [x] 6. Docs: UX.md §S08 as built, TCA.md §8
+- [x] 6b. Follow-ups filed: #368 (tap an empty cell to add), #367 (rearrange by drag; no issue had picked up UX.md §S05 item 2)
+- [x] 7. Unit suite green; sim drive
+
+## Review
+
+- Unit suite: 1754 passed, 0 failed (the one expected failure is the deliberate `withKnownIssue`). The new cases are in the log by name.
+- Snapshot `testAddWidgetCatalog` light/dark recorded and inspected. The first recording had a 2×2 narrower than the content and uneven row gaps, because a fixed-height frame squeezed `.fit`. The sheet scrolls, so the test now uses a `ScrollView` too. Cadence's sample AVG/MAX were blank, so the sample now sets them.
+- Sim drive (throwaway XCUITest, deleted):
+  - Full factory page 1: every entry dimmed, Empty page live.
+  - Empty page inserts page 2 and moves to it.
+  - HR 1×1 lands at (0,0), Speed 2×2 at rows 1–2.
+  - Done prunes the trailing blank and stays on page 2.
+- Only runtime warning: the known onboarding `ifLet` (`deviceManagement(.onDisappear)`).
+- Not done: UX.md's screen table still says Stub for S08, as it does for the built S07. The status column doesn't track builds.
+- Follow-up (Brian): removed S07's auto-appended blank page. New pages now come only from Empty page (UX.md §S05 item 5). Entering edit mode still saves the layout as shown, so empty pages a ride left behind mid-edit don't come back and shift the page index. `appendingBlankPage` and its test are deleted, and the edit-mode tests are rewritten without the page. The Empty page icon is now `text.rectangle.page`, the mockup's glyph; snapshot re-recorded and checked. Unit suite 1753/0.
+- /code-review xhigh fixes:
+  - The snapshot now uses imperial units, so it no longer depends on the machine's locale.
+  - Finish closes the Add Widget sheet, so auto-end's alert can show.
+  - Done after an unused Empty page returns to the page it was inserted from, not the next one.
+  - Empty page row: full width, 52 pt tall.
+  - Previews subtract the radar lane from their width.
+  - A zero canvas renders nothing instead of scaling by ∞.
+  - `presentationChanged(true)` only opens the picker in edit mode.
+  - `setDashboardLayout` returns Bool, so a refused save doesn't move the rider or close the sheet.
+  - The Xcode preview opens the picker.
+  - Skipped as cleanups: the duplicate grid scan, the sample store being built per render, and sharing the card styling.
+  - Unit suite 1754/0.
+
+# #368 — S08: tap an empty cell to add a widget there
+
+Plan: /Users/brian/.claude/plans/twinkly-pondering-graham.md
+Branch: `feat/368-tap-empty-cell`
+
+- [x] 1. Model: `emptyCells`, `fits(_:at:)`, `openPlacement(…at:)`, `addingWidget(…at:)` + tests
+- [x] 2. Grid layout key carries cell + size; `dashboardPlacement(at:size:)`
+- [x] 3. Reducer: `addWidgetCell`, `emptyCellTapped`, select/Empty page/close paths + TestStore tests
+- [x] 4. Sheet: catalog `cell` filter, Page section hidden (filter is `page.fits`, tested in the model; `entries(in:)` unchanged)
+- [x] 5. `DashboardEmptySlot` (dashed 90% card, VoiceOver) in `DashboardPageView` + snapshot
+- [x] 6. Docs: UX.md §S05 Empty cells, §S08 as built
+- [x] 7. Unit suite green; sim drive
+
+## Review
+
+- Unit suite: 1762 passed, 0 failed. The 9 new cases are in the log by name: 4 model, 4 `TestStore`, 1 snapshot.
+- Snapshot `testDashboardEditChromeEmptySlot` was recorded in light and dark and checked: the dashed slot matches the 1×1 card's size and inset.
+- Sim drive (throwaway XCUITest, deleted) passed. It covered:
+  - Removing Pace leaves a "row 5, left" slot. The sheet from it lists only 1×1s, with no Page section, and dims widgets already on the page.
+  - Pace lands back at its cell.
+  - A right-column cell offers no 2×1.
+  - Row 1 left, under the Add/Done band, offers a 2×2. Speed 2×1 lands at row 1.
+  - The row 7 right slot opens the sheet even with the ride controls over that row.
+  - Add still shows Empty page, and puts Map 2×2 in the first open spot (rows 6–7).
+  - Done leaves no slots.
+- Design choice: the grid's layout key now carries cell + size, not a `WidgetPlacement`, so slots and widgets share one frame calculation and no dummy widget id is needed.
+- Not done: no runtime-issue log stream was captured during the drive. No device check.
+- /code-review high --fix: applied 5 fixes. Full unit suite 1762/0 after them.
+  - The cell stays set as the sheet closes, so it doesn't redraw as Add's sheet while sliding away.
+  - `emptyCellTapped` carries `pageID`.
+  - `firstOpenPlacement` reuses `openPlacement(at:)`.
+  - `fits` is derived from `emptyCells`.
+  - Fixed the plan's view name.
+- Skipped from the review:
+  - The single-enum sheet target: it would rework the #142 binding.
+  - Computing the placement twice: the existing #142 pattern.
+  - Gating the slot `ForEach`: at most 14 cells.
+  - The UX.md "contradiction": a misread. A 1×1 gap does show only 1×1s.
+
+# #367 — S07 rearrange widgets by drag (move to empty spot, swap same size)
+
+Plan: /Users/brian/.claude/plans/proud-whistling-pearl.md
+Branch: `feat/367-drag-rearrange`
+
+- [x] 1. Model: `DashboardPage.moving`, `DashboardLayout.movingWidget`, `DashboardGrid.Direction`, `moveTarget`, `DashboardGrid.cell(nearest:in:)` + tests
+- [x] 2. Reducer: `moveWidget(pageID:widgetID:to:)` + TestStore tests
+- [x] 3. View: `DashboardWidgetCell` (lift gesture, offset/zIndex, edit-mode a11y element + Move actions); wiggle `isHeld`
+- [x] 4. UX.md §S07 "As built (#367)" + Updated line
+- [x] 5. Unit suite green (new tests confirmed present in log)
+- [x] 6. Sim drive (throwaway XCUITest, deleted): move, swap, refused, page swipe, remove, persistence
+- [x] 7. VoiceOver: card labels found by the sim drive; Move actions covered by `moveTarget` tests only (see Review)
+
+## Review
+
+- **Gesture, changed during the work.** The planned SwiftUI `LongPressGesture.sequenced(before: DragGesture)` blocked paging. A sim probe showed a swipe starting on a widget didn't page in edit mode, though one starting on an empty slot did; with the gesture disabled, the widget swipe paged again. I switched to the plan's contingency, `UILongPressGestureRecognizer` via `UIGestureRecognizerRepresentable` (`DashboardLiftGesture`). The probe then paged from a widget, an empty slot and the centre.
+- **Sim drive** (fresh install, throwaway XCUITest, deleted) passed end to end:
+  - long press enters edit mode;
+  - a horizontal hold-drag swaps Heart Rate and HR Zones, and the page stays 1;
+  - a 1×1 onto Cadence's 2×1 springs back;
+  - Remove Directions removes;
+  - a diagonal drag moves HR Zones into the gap;
+  - a swipe pages;
+  - on page 2, Pace moves into the empty last row;
+  - after Done and a relaunch, all three moves are kept.
+- **Unit suite:** 1770 passed, 0 failed. All 8 new tests are confirmed in the log, and the edit-chrome snapshots are unchanged.
+- **Not verified:**
+  - VoiceOver Move actions weren't performed, because XCUITest can't invoke custom actions. Their targets are covered by `moveTarget` tests; the labels were found on the sim.
+  - Drag feel on a device: the 0.25 s hold, the 5% lift, and the spring.
+
+# #373 — BLE reconnect tests stall on CI
+
+Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md
+Branch: `fix/373-ble-reconnect-tests`
+
+- [x] 1. Find the real cause from CI run 37083342499's log
+- [x] 2. `SteppedClock`: no yields, wakes the sleeper directly, `advanceToNextSleep()` returns the step length
+- [x] 3. Swap both BLE harnesses to it; ladder steps assert their length; recovery checks assert `clock.isIdle`
+- [x] 4. Revert checks, 20 iterations, full suite
+- [ ] 5. CI: the three tests under 2 s, the CSC live suite under 10 s
+
+## Review
+
+- **The issue's cause was wrong.** There was no late-sleeper race; that would hang the test forever, not slow it down. `Task.megaYield()` runs each of its 20 yields as a detached `.background` task and waits for it. `TestClock.advance` does at least 3 megaYields, so the 10-step ladder was about 600 background hops. The CI VM throttles background QoS, so each advance took 10–30 s. Locally, under the same CI-style serial run, the test took 0.008 s. The test, event-loop and reconnect tasks were measured at priority 25, so only megaYield's own tasks were throttled.
+- **A check I nearly weakened:** the "+120 s, nothing reconnects" checks relied on `TestClock`'s yields after waking. Without them, removing the client's cancel-on-success still passed. Fix: in the two recovery tests the check is now `clock.isIdle`, which is deterministic because both clients cancel before publishing `.connected`. With the cancel removed they fail 3/3. The three user-disconnect checks assert that a task is *never* spawned, which no clock can make deterministic, so they keep `advance(by:)` + yields as before, at the caller's priority.
+- Revert checks: a wrong ladder value fails at once (`:776`).
+- Results: both suites green over 20 iterations, 1360/0. Full CI-style suite 1488/0 in 37 s.
+# #361 — VoiceOver: every tappable widget is one button
+
+Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md
+Branch: `feat/361-widget-voiceover-buttons`
+
+- [x] 1. `.widgetDetail(label:value:)`: grouping, label/value, `.isButton` (not in edit mode), explicit default action
+- [x] 2. Map, Cadence, Speed pass their summaries; Directions drops its hand-rolled modifiers
+- [x] 3. UX.md §S05 sentence
+- [x] 4. Spoken-text unit tests
+- [x] 5. Tree shape + activation test (in-process, via the automation switch; no XCUITest needed)
+- [x] 6. Full unit suite green, snapshots unchanged
+
+## Review
+
+- The modifier owns grouping, label/value, trait and the default action. `label` is required, so a widget can't adopt the tap without saying what VoiceOver reads.
+- Before this change, **Map had no accessibility element at all**, not just a missing trait. Cadence, Speed and Directions came out as loose texts (revert check).
+- Found by the tests: `accessibilityAddTraits([])` in edit mode still left `.button`. SwiftUI infers the trait from the tap gesture and the action, so edit mode now removes it explicitly.
+- SwiftUI builds no accessibility tree in a unit test. The tests turn on libAccessibility's automation switch (`_AXSSetAutomationEnabled`, private, test target only), and the suite is `.serialized` because the switch is process-wide.
+- Directions' spoken text moved "Directions" into the label: "No turn ahead" replaces "Directions, no turn ahead".
+- Full suite 1780/0. The 28 widget/edit-chrome snapshot tests ran, and no reference changed.
+- Not verified: VoiceOver on a device. In-process `accessibilityActivate()` is the same entry point VoiceOver uses, but nobody has listened to it.
+
+### Follow-up: /code-review high (findings 1–4 applied)
+- The test host's automation switch is counted, not a flag, and its window is shown but never made key, so other suites running during `settle()` don't find it.
+- Labels come from the catalog (`CadenceDashboardWidget.title` and the rest), the same names #367's edit-mode card reads.
+- The element test also checks `accessibilityValue`. Revert check: removing `.accessibilityValue(value)` fails Cadence, Speed and Directions.
+- Units are spoken in words through new `UnitSystem.spokenSpeed`, `spokenDistance` and `spokenTurnDistance`. The turn distance shares its rounding with `turnDistance`.
+- Not applied: the Speed badge/trend, the Directions 1×1 wording, the edit-mode trait guard, the formatting cost, localization, locale pinning (see the PR thread).
+- Full suite 1793/0, snapshots unchanged.
+
+# #372 — CI stops rebuilding SPM dependencies on every run
+
+Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md
+Branch: `ci/372-dependency-build`
+
+- [x] 1. Prebuilt swift-syntax: measured, doesn't apply (xcodebuild still compiles it for the macro host)
+- [x] 2. `ARCHS=arm64`: a clean build goes from 1,926 to 1,523 units, 0 x86_64
+- [x] 3. DerivedData cache: survives a fresh checkout locally (326 units, 0 packages)
+- [x] 4. CI cold + warm runs (37156042525 attempts 1–2)
+
+## Review
+
+- The cache works: the warm run compiled 302 units, none from packages. Restore takes ~22 s, ~800 MB.
+- **The wall-clock win is unproven.**
+  - Cold took 16.1 min and warm 19.4 min, but the runners differed 1.7× on identical tests (144 s vs 250 s).
+  - Relative to each machine's own speed, the warm build was ~15% faster.
+  - Package targets compiled in parallel; the app and test modules are the serial path.
+- Brian chose to ship both. The measured numbers are in the `tests.yml` comment.
+- Untouched fixed costs, now about half the build step:
+  - ~2 min of xcodebuild startup;
+  - ~1 min re-resolving packages, which "Resolve SPM dependencies" had already done;
+  - 1–3 min regenerating SDK stat caches every run.
+
+  These are candidates for a follow-up.
+
+# #374 — CI boots the simulator during the build; skips docs-only pushes
+
+Plan: /Users/brian/.claude/plans/prancy-dreaming-yao.md
+Branch: `ci/374-sim-boot-docs-skip`
+
+- [x] 1. `resolve-simulator.sh` starts the boot in the background (`simctl boot` itself blocked ~2 min)
+- [x] 2. "Resolve a simulator" moved first; test step split into build-for-testing, wait, test-without-building
+- [x] 3. `paths-ignore` for assets/, tasks/, .claude/, **/*.md on both triggers, with the required-check caveat
+- [ ] 4. CI run: simulator step under 15 s, wait step a few seconds, green
+- [ ] 5. First docs-only change after merge starts no Tests run
+- [x] 6. First CI run (37160465778): simulator step 3 s, wait 1 s, but red on a flaky HR test
+- [x] 7. HR flake fixed: `unexpectedDropReadmitsOnlyThePairedStrap` checked the rescan straight after the status flip, but the client publishes `false` before calling `startScanning`. Now `expectEventually`, the repo's helper for exactly this; 20 iterations green
+- [x] 9. Second run (37162293875) green with a cache hit, but the boot started before the restore slowed it: restore 5 min 40 s (22 s before), package resolution 2 min 42 s. The boot now starts just before the build
+- [x] 8. `-collect-test-diagnostics never` in CI: the failing run spent 10 min gathering diagnostics after the tests ended, two minutes short of the timeout
+
+# #340 — Persist cadence zone and coasting time across ride resume (W5)
+
+Plan: /Users/brian/.claude/plans/swirling-sparking-dragon.md
+Branch: `feat/340-cadence-tallies-resume`
+
+- [x] 1. `Ride`: five defaulted columns + computed `cadenceZoneSeconds`; `summarySnapshot`
+- [x] 2. `RideSummaryUpdate`: `cadenceZoneSeconds`, `cadenceCoastingSeconds`
+- [x] 3. `RidePersistenceActor.apply` writes both
+- [x] 4. `ActiveRideFeature`: `makeRideSummaryUpdate` + `State(resuming:)`
+- [x] 5. DataModel.md §3.1, §9, header
+- [x] 6. Tests: resuming (seed + adds-to), persistence round trips, migration defaults, checkpoint payload
+- [x] 7. Unit suite green + revert check
+
+## Review
+
+- Stored on `Ride` (Brian's call), using the #175 resume-aggregate pattern: five scalar `TimeInterval = 0` columns, mapped to and from the live `[CadenceZone: TimeInterval]` shape in one computed property, `Ride.cadenceZoneSeconds`. It drops zero entries, so `fetchResumableRide() == checkpoint` stays exact. The doc comment says why #284's "no stored zone seconds" rule doesn't cover these: cadence zones are fixed thresholds.
+- Post-ride cadence zones on S10/S15: not in scope, since UX.md doesn't call for them. Flagged in the PR as a possible follow-up, built from the track the way HR zones are.
+- The checkpoint-payload test goes through `pauseTapped` rather than 30 ticks, following #197's `checkpointCarriesTheRouteAndProgress`. The write path is the same (`makeRideSummaryUpdate`).
+- Unit suite: 1794 passed, 0 failed. Each new or changed test was found by name in the log.
+- Revert check (fresh derivedData, restore lines removed): both resume tests fail on the tally expectations; the checkpoint test passes, as expected, since it covers the write side. File restored.
+- Not verified: a real kill and relaunch on device. `RideRecordingTests.killAndRelaunchResumesRide` doesn't drive cadence.
+
+### Review fixes (/code-review)
+- `Ride.column(for:)`: an exhaustive switch from `CadenceZone` to its column, used by both accessors, so a new zone fails to compile instead of resetting to 0 on resume.
+- DataModel.md §3.1 and the `Ride` doc comment: the values are written at every checkpoint *and* at ride end, not "for a resumed ride only".
+- The `State(resuming:)` comment no longer claims Avg/Max cover exactly the whole ride. They keep counting while paused, but the zone tally doesn't; that predates this change and is filed as #379.
+- Skipped: test-setup duplication (copying setup is the suite's norm).
+- Suite: two full runs stalled or lost their test host. The first stalled at the same minute a sim `AppIntentsLiveEntityService` crashed; the second failed every remaining test at 0.000s with no assertion. No Cyclometer crash report either time. The focused suites passed (89/0), then a full `test-without-building` rerun passed 1795/0.
+
+# #379 — Ride averages and maxima stop counting while paused
+
+Plan: /Users/brian/.claude/plans/swirling-sparking-dragon.md
+Branch: `fix/379-paused-aggregates`
+
+- [x] 1. Speed: gate count/sum/max in `.locationUpdated` on `.active`
+- [x] 2. HR: gate count/sum/max in `applyHeartRateReading` on `.active`
+- [x] 3. Cadence: gate count/sum/max on `isRecording`; fix the doc comments
+- [x] 4. Tests: CadenceFeatureTests defaults + flipped paused test; `locationContinuesWhilePaused`; new paused-HR test
+- [x] 5. Full suite green + HR revert check
+
+## Review
+
+- No question to ask: PRD line 619 ("all sensor recording suspended"), DataModel.md's "paused interval exclusion" row and UX W2 ("excluding stopped time") had already decided it.
+- Only the aggregates are gated. The live speed, HR, zone, held HR, cadence and the watermark still follow the sensors while paused.
+- Reversed on purpose: #338's `pausedRideCreditsNothing` asserted that paused readings "still feed the average/max". That pinned the old behaviour; it wasn't a decision.
+- Suite: 1796 passed, 0 failed. Changed tests found by name; the auto-pause suite (7) is green.
+- Revert check (fresh derivedData, all three gates removed): the speed, HR and cadence paused tests all fail. Files restored.
+- Side effect: readings in `.idle`/`.ended` no longer count either, and the one fix that triggers an auto-resume (it arrives while `.paused`) isn't counted.
+
+### Review fixes (/code-review high)
+- `applyHeartRateReading`: `guard bpm > 0`, then `heldHR`, then the `.active` guard and the counters. One check instead of two. Same behaviour.
+- `pausedRideCreditsNothing` ends on 75, not 0, so the live-value check can fail.
+- `freshRideCountsCadence` (new): `startFreshRide()`'s `.idle` → `.active` sets `cadence.isRecording`, and a reading counts. Cadence Avg/Max now depend on that mirrored flag, and nothing pinned the fresh-ride path.
+- Filed #381: stopped GPS noise still counts toward Avg Speed (`kph > 0` vs `stationarySpeedMPS`), and Avg/Max speed come only from GPS even when a wheel sensor is the displayed source.
+- Left as is: a Watch sample taken during a pause can be counted once after resume via the silent-strap fallback (≤5 min old, the fallback working as designed). The fix that triggers auto-resume is dropped (one sample per stop).
+- Suite green. 1607 unique test names, versus 1606 before: only the new test was added, nothing missing. The raw "passed" line count varies with how much the parallel log repeats.
+
+# #381 — Avg/Max speed follow the displayed speed and the stopped threshold
+
+Plan: /Users/brian/.claude/plans/swirling-sparking-dragon.md
+Branch: `fix/381-speed-aggregates`
+
+- [x] 1. Move speed count/sum/max from `.locationUpdated` into `.elapsedTick`'s moving branch
+- [x] 2. Doc comments: speed aggregates; "one threshold governs" now covers three things
+- [x] 3. Update the exhaustive location/tick tests
+- [x] 4. New timer tests: wheel speed, stopped second, average = distance / moving time, field replay
+- [x] 5. Full suite green + revert check
+
+## Review
+
+- Brian's call: #381 only, no CoreMotion. Notes from the research:
+  - Motion & Fitness is already a required permission, and Info.plist already promises auto-pause from it, but nothing reads motion data.
+  - Apple doesn't document how long `CMMotionActivity` takes to switch states.
+  - `CLLocationUpdate.isStationary` is set only when Core Location *suspends* updates, which would mean replacing the `CLLocationManager` 1 Hz pipeline.
+  - No field file shows stopped GPS speed above 0.5 m/s.
+- Avg/Max speed are now sampled in `.elapsedTick`'s moving branch, from the displayed speed, at the same threshold as distance. Avg speed = distance ÷ moving seconds.
+- `speedSampleCount` now counts moving seconds. Resume weighting is unchanged, and there's no schema change.
+- Tests:
+  - 5 exhaustive `.locationUpdated` tests dropped their speed asserts; 8 timer-suite tick asserts gained them.
+  - New: wheel beats GPS, a stopped second stays out, average = distance / moving time.
+  - The 2026-09-20 stop replay now feeds `.locationUpdated` and has an auto-pause-off Avg-speed test.
+- Two test-only fixes on the way:
+  - The timer suite's `makeStore` gained a fixed `date`, because `gpsSpeedReceived` timestamps its sample.
+  - The average checks use a relative tolerance: Foundation's km/h coefficient is 0.277778, not exactly 1/3.6.
+- Revert check (old fix-time aggregation restored): the wheel and replay tests fail. The stopped-second test passes either way, since it pins the tick threshold, not the regression.
+- Suite:
+  - The first full run stalled mid-log at the same minute as an `AppIntentsLiveEntityService` sim crash.
+  - The touched suites passed on their own (38).
+  - A `test-without-building` rerun was green: 1611 unique names, nothing missing, 4 new.
+
+### Review fixes (/code-review high)
+- `speedSampleSum` removed. `averageSpeedMPS = distanceMeters / speedSampleCount` (moving seconds); a sum on the same samples as distance could only ever be distance again. Resume restores just the count.
+- Speed aggregates are stored in m/s (`maxSpeedMPS`). `maxSpeedKPH` and `averageSpeedKPH` are gone: nothing outside the feature read them, and it removes the hardcoded `* 3.6` and the km/h round trip behind the relative-tolerance band-aid. Checks are exact again.
+- Max is taken on every displayed reading in `.speed` (after auto-resume, so the resuming reading counts), not once per tick, so a peak between ticks isn't lost.
+- `stoppedFixStaysOutOfSpeedAggregates` now sends a 0.4 m/s `.locationUpdated`, so it catches the old any-speed-counts rule.
+- Previews: `speedSampleCount: 1560` (12.3 km → 28.4 km/h), and `maxSpeedMPS: 9.47` / `8.67`.
+- Exhaustive tests that receive an active speed reading now expect `maxSpeedMPS`, including both wheel-disconnect → GPS-fallback tests.
+- Filed #383: the mini-player shows GPS-only `speedKPH`, and a held speed keeps counting after updates stop (needs a ride file).
+- Skipped: a ride resumed across the app update mixes old and new sample counts (rare; one ride's Avg slightly off).
+- Revert check: removing Max-on-reading, plus the old `.locationUpdated` count → the wheel, stopped-fix and peak tests all fail.
+- Suite: the first full run caught 3 exhaustive tests (fixed). The confirm run stalled with the sim (`intelligencetasksd` crash). A `test-without-building` rerun was green: 1612 unique names, nothing missing apart from 2 renames.

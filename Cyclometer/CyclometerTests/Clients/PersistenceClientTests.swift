@@ -295,7 +295,9 @@ struct PersistenceClientTests {
             zeroSpeedSeconds: 7,
             speedSampleCount: 900,
             hrSampleCount: 850,
-            cadenceSampleCount: 700
+            cadenceSampleCount: 700,
+            cadenceZoneSeconds: [.grinding: 120, .transition: 300, .optimal: 900, .overspin: 45],
+            cadenceCoastingSeconds: 240
         )
         try await client.updateRideSummary(update)
 
@@ -314,6 +316,11 @@ struct PersistenceClientTests {
         #expect(ride.speedSampleCount == 900)
         #expect(ride.hrSampleCount == 850)
         #expect(ride.cadenceSampleCount == 700)
+        #expect(ride.cadenceGrindingSeconds == 120)
+        #expect(ride.cadenceTransitionSeconds == 300)
+        #expect(ride.cadenceOptimalSeconds == 900)
+        #expect(ride.cadenceOverspinSeconds == 45)
+        #expect(ride.cadenceCoastingSeconds == 240)
     }
 
     @Test("updateRideSummary preserves an existing vehiclePassCount when the incoming update is nil")
@@ -731,7 +738,11 @@ struct PersistenceClientTests {
             zeroSpeedSeconds: 9,
             speedSampleCount: 120,
             hrSampleCount: 90,
-            cadenceSampleCount: 60
+            cadenceSampleCount: 60,
+            // A zone with no time is absent, as in the live tally (#340): the round trip
+            // must not hand it back as an explicit 0.
+            cadenceZoneSeconds: [.transition: 14, .optimal: 52.5],
+            cadenceCoastingSeconds: 21
         )
         try await client.updateRideSummary(checkpoint)
 
