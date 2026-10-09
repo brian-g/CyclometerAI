@@ -215,6 +215,7 @@ jobs:
             -skip-testing:CyclometerTests/TurnInstructionOverlaySnapshotTests \
             -skip-testing:CyclometerTests/PaceWidgetSnapshotTests \
             -skip-testing:CyclometerTests/RideMetricsSheetSnapshotTests \
+            -skip-testing:CyclometerTests/HeartRateSheetSnapshotTests \
             -skip-testing:CyclometerTests/SensorBatteryLabelSnapshotTests \
             -skip-testing:CyclometerTests/MapSheetButtonsSnapshotTests \
             -skip-testing:CyclometerTests/DirectionsWidgetSnapshotTests \

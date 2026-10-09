@@ -20,6 +20,9 @@ struct HeartRateWidget: View {
     let bpm: Int
     let zone: Int
     let source: HRSource
+    /// The Heart Rate sheet's data. A closure so the card never reads it; only the open sheet
+    /// does, in its own body (#145).
+    var metrics: () -> HeartRateMetrics = { HeartRateMetrics() }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -39,6 +42,16 @@ struct HeartRateWidget: View {
                 .fill(Color.hrZone(zone))
                 .frame(width: Spacing.hrBorderWidth)
         }
+        .widgetDetail(label: HeartRateDashboardWidget.title, value: accessibilityValue) {
+            HeartRateSheet(metrics: metrics)
+        }
+    }
+
+    /// What VoiceOver reads after "Heart Rate" (#361), with no "—" read aloud.
+    var accessibilityValue: String {
+        if source == .none { return "No HR source" }
+        guard bpm > 0 else { return "No reading" }
+        return "\(bpm) beats per minute, zone \(zone)"
     }
 }
 
@@ -46,6 +59,8 @@ struct HeartRateWidget: View {
 struct HRZonesWidget: View {
     let zone: Int
     let source: HRSource
+    /// See `HeartRateWidget.metrics`.
+    var metrics: () -> HeartRateMetrics = { HeartRateMetrics() }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -60,5 +75,14 @@ struct HRZonesWidget: View {
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.hrZone(zone).opacity(0.12))
+        .widgetDetail(label: HRZonesDashboardWidget.title, value: accessibilityValue) {
+            HeartRateSheet(metrics: metrics)
+        }
+    }
+
+    /// What VoiceOver reads after "HR Zones" (#361), with no "—" read aloud.
+    var accessibilityValue: String {
+        if source == .none { return "No HR source" }
+        return zone == 0 ? "No reading" : "Zone \(zone)"
     }
 }

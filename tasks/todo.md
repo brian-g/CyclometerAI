@@ -1,3 +1,33 @@
+# #145 — Heart Rate detail sheet (W4, W12)
+
+Plan: /Users/brian/.claude/plans/serialized-sparking-mist.md
+Branch: `feat/145-heart-rate-sheet`
+
+- [x] 1. `HeartRateSecondsTally` — S10's `secondsByBPM` rule, incremental
+- [x] 2. `ActiveRideFeature.State.hrSecondsTally`, fed per recorded track point
+- [x] 3. `HeartRateMetrics` + `HeartRateSheet`/`HeartRateList`
+- [x] 4. W4/W12: `.widgetDetail`, `accessibilityValue`, `metrics:`; adapters
+- [x] 5. Tests: tally, reducer, metrics, a11y, snapshots
+- [x] 6. Specs: UX §W4/§W12, PRD §9.4, TCA.md
+- [x] 7. Unit suite green; sim drive
+
+## Review
+
+- **Sheet:** W4 and W12 open one Heart Rate sheet (medium → large). The Current section shows the bpm and the zone ("Z3 Aerobic", with a zone-colour dot). Empty states match the cards: "No HR Source" when nothing is connected, "—" when there's no reading. The Time in Zones section has a donut in the zone colours (only once there is time to show), then one row per zone: its S12 name, its resolved bpm range, and the ride's time in it.
+- **Time in zone (pulled into scope; PRD v0.6.7 assigned it to #145):** `HeartRateSecondsTally` is S10's `secondsByBPM` loop, now run incrementally, so `secondsByBPM` is a fold over it. `ActiveRideFeature` feeds the tally every track point it records, so the live sheet counts exactly the seconds S10 will count from the saved track, including the held Apple Watch reading. The tally is sorted into zones at read time through `RideDetailSeries.zoneSeconds` + `riderProfile.bounds`, the same path `RideSummaryFeature` uses.
+- **Zone names:** `HeartRateZone.s12DisplayName`. UX §W4's old Tempo/VO₂ Max list is corrected.
+- **Tests:**
+  - `HeartRateMetricsTests` (5)
+  - two reducer tests in `ActiveRideFeatureHRDropoutTests`, each asserting the tally equals `secondsByBPM(recorded)`
+  - `WidgetAccessibilityTests` now includes `.heartRate`/`.hrZones`, spoken-text tests, and sheet liveness
+  - 3 snapshots, inspected: not blank
+  - Results: full `CyclometerTests` minus `PersistenceClientTests` gave 1843 passed; `PersistenceClientTests` alone gave 47. Grepped the log for the new tests to confirm they ran.
+- **Sim drive:** a fresh install, ride started; W4 and W12 each open the sheet, showing No HR Source with every zone at 0:00:00, and Close returns to the dashboard.
+- **Not verified on the sim:** a live HR reading. The simulator has no strap. The hosted liveness test and the reducer tests cover that path.
+- **Known gap:** after a crash and resume, the tally starts from zero. Cadence persists its zone seconds; HR doesn't. Needs a follow-up issue.
+
+---
+
 # #144 — Ride Metrics detail sheet (W1, W2, W3, W6, W11)
 
 Plan: /Users/brian/.claude/plans/cosmic-sprouting-sutherland.md

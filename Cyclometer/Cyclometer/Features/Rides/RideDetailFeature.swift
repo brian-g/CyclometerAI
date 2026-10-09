@@ -197,19 +197,9 @@ enum RideDetailSeries {
     /// up to `appleWatchHoldSeconds` and never across a pause. Counting only stamped seconds
     /// would credit a 2 h Watch ride with minutes of zone time.
     static func secondsByBPM(_ points: [TrackPointDTO]) -> [Int: Int] {
-        var seconds: [Int: Int] = [:]
-        var held: TrackPointDTO?
-        for point in points {
-            if let bpm = point.heartRateBPM {
-                held = point.heartRateSource == .appleWatch ? point : nil
-                seconds[bpm, default: 0] += 1
-            } else if let reading = held, let bpm = reading.heartRateBPM,
-                      reading.segmentIndex == point.segmentIndex,
-                      point.timestamp.timeIntervalSince(reading.timestamp) <= appleWatchHoldSeconds {
-                seconds[bpm, default: 0] += 1
-            }
-        }
-        return seconds
+        var tally = HeartRateSecondsTally()
+        points.forEach { tally.add($0) }
+        return tally.secondsByBPM
     }
 
     /// Seconds in each zone, zone 1 first, against `zoneBounds` (zone 1 first). A reading below
@@ -222,5 +212,24 @@ enum RideDetailSeries {
             zones[zone] += seconds
         }
         return zones
+    }
+}
+
+/// `RideDetailSeries.secondsByBPM`, one track point at a time, so the live ride's Heart Rate
+/// sheet (#145) counts the seconds S10 will count from the saved track, by the same rule.
+struct HeartRateSecondsTally: Equatable, Sendable {
+    private(set) var secondsByBPM: [Int: Int] = [:]
+    /// The Apple Watch reading standing for the seconds after it.
+    private var held: TrackPointDTO?
+
+    mutating func add(_ point: TrackPointDTO) {
+        if let bpm = point.heartRateBPM {
+            held = point.heartRateSource == .appleWatch ? point : nil
+            secondsByBPM[bpm, default: 0] += 1
+        } else if let reading = held, let bpm = reading.heartRateBPM,
+                  reading.segmentIndex == point.segmentIndex,
+                  point.timestamp.timeIntervalSince(reading.timestamp) <= RideDetailSeries.appleWatchHoldSeconds {
+            secondsByBPM[bpm, default: 0] += 1
+        }
     }
 }

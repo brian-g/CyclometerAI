@@ -2795,6 +2795,52 @@ struct ActiveRideFeatureHRDropoutTests {
         #expect(store.state.displayHeartRateBPM == 72)
     }
 
+    /// #145: the Heart Rate sheet's time in zone counts the seconds S10 will count from the
+    /// saved track, by the same rule, so it reads the same at finish.
+    @Test("The live HR tally counts the recorded track's seconds, not paused ones")
+    func hrTallyMatchesRecordedTrack() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.heartRateUpdated(150))
+        await store.send(.elapsedTick)
+        await store.send(.elapsedTick)
+        await store.send(.heartRateUpdated(0))   // a strap dropout counts for nothing
+        await store.send(.elapsedTick)
+        await store.send(.pauseTapped)
+        await store.send(.heartRateUpdated(160))
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2])
+        #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(recorded))
+    }
+
+    @Test("The live HR tally holds an Apple Watch sample forward, as S10 does")
+    func hrTallyHoldsWatchSample() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.healthKitHeartRateUpdated(72))
+        await store.send(.hrPairingChanged(false))
+        for offset in 1...5 {
+            now.setValue(Self.fixedNow + Double(offset))
+            await store.send(.elapsedTick)
+        }
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(store.state.hrSecondsTally.secondsByBPM == [72: 5])
+        #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(recorded))
+    }
+
     /// The same rule for position's third axis (#303): a fix CoreLocation gave no valid
     /// altitude is recorded without one — not as the 0 m it reported, and not as the
     /// altitude before it, which would fabricate a measurement exactly as a held HR does.

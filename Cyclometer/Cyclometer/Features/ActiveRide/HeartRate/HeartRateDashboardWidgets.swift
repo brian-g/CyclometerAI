@@ -12,7 +12,12 @@ struct HeartRateDashboardWidget: DashboardWidget {
     let store: StoreOf<ActiveRideFeature>
 
     var body: some View {
-        HeartRateWidget(bpm: store.displayHeartRateBPM, zone: store.displayHRZone, source: store.hrSource)
+        HeartRateWidget(
+            bpm: store.displayHeartRateBPM,
+            zone: store.displayHRZone,
+            source: store.hrSource,
+            metrics: { store.heartRateMetrics }
+        )
     }
 }
 
@@ -27,6 +32,6 @@ struct HRZonesDashboardWidget: DashboardWidget {
     let store: StoreOf<ActiveRideFeature>
 
     var body: some View {
-        HRZonesWidget(zone: store.displayHRZone, source: store.hrSource)
+        HRZonesWidget(zone: store.displayHRZone, source: store.hrSource, metrics: { store.heartRateMetrics })
     }
 }

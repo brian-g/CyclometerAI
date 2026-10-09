@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-09 — §W4/§W12 Heart rate sheet built (#145): current bpm and zone, then the rider's zones with the ride's time in each. §W4's zone labels now use §S12's names.  
 **Updated:** 2026-10-02 — §S08 opens from an empty cell (#368): in edit mode each empty cell shows a dashed slot; tapping it lists only the sizes that fit with that cell as their top-left, and adds there.  
 **Updated:** 2026-10-02 — §S08 Add Widget built (#142): Add opens it; a widget goes into the first open spot on the page the rider is on, and an entry that page can't take is dimmed. "Empty page" inserts a blank page after the current one. Tapping an empty cell is not yet built (#368), nor is rearranging by drag (#367).  
 **Updated:** 2026-10-02 — §S07 widgets can be moved by drag (#367): onto an empty spot that fits, or swapped with a widget of the same size; any other drop springs back. Nothing reflows yet, so §S05 "Customization" 2's "shift other items around" waits on the open questions in §S07.  
@@ -617,8 +618,8 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 
 - Value: current BPM
 - A watermark graph of the historical HR for the ride. The horizontal bands in the chart should show the zones (`brHRZone1`–`brHRZone5`)
-- Zone label: "Z1 Recovery", "Z2 Endurance", "Z3 Tempo", "Z4 Threshold", "Z5 VO₂ Max"
-- Sheet: Heart rate
+- Zone label: "Z1 Recovery/Light", "Z2 Endurance", "Z3 Aerobic", "Z4 Threshold", "Z5 Anaerobic" — §S12's names, so the dashboard and Settings use the same words (#145)
+- Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. Current heart rate and zone come first, matching the cards' empty states: "No HR Source" with nothing connected, "—" with no reading. Then **Time in Zones**: a donut in the zone colours, and one row per zone giving its name, its bpm range as §S12 resolves it, and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
 
 ---
 
@@ -717,7 +718,7 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 - Time in zone accumulates locally from the HR readings the dashboard already classifies, not from HealthKit's `HKLiveWorkoutZoneUpdate`, since the app runs no iPhone workout session (PRD §9.4, #318)
 - Zone colors: `brHRZone1`–`brHRZone5`
 - Empty state when no HR source active: "--"
-- Sheet: Heart rate
+- Sheet: Heart rate — see §W4. As built, W12 is 1×1 only and shows the current zone; the distribution chart above appears in the sheet, not yet on the card
 
 ---
 

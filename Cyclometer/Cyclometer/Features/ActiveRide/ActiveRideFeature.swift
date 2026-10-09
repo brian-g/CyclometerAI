@@ -142,6 +142,10 @@ struct ActiveRideFeature {
         var hrSampleCount: Int = 0
         var hrSampleSum: Double = 0
         var maxHeartRateBPM: Int = 0
+        /// Recorded seconds at each bpm, for the Heart Rate sheet's time in zone (#145). Fed the
+        /// track points the recorder writes, by S10's rule, so the sheet shows what S10 will.
+        /// Starts over when a ride resumes after a crash: nothing seeds it from the saved track.
+        var hrSecondsTally = HeartRateSecondsTally()
         var isHRPaired: Bool = false
         /// HealthKit-resolved terms fetched once at ride start (#160), threaded into
         /// every `riderProfile` resolver call below instead of the defaulted `nil`.
@@ -877,6 +881,7 @@ struct ActiveRideFeature {
                     if point.heartRateSource == .appleWatch {
                         state.recordedHealthKitSampleAt = state.healthKitHRSample?.receivedAt
                     }
+                    state.hrSecondsTally.add(point)
                     effects.append(.send(.trackRecorder(.timerTick(point))))
                 }
 
