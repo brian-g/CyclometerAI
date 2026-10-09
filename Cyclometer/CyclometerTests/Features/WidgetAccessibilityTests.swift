@@ -83,6 +83,22 @@ struct WidgetAccessibilityTests {
         #expect(HeartRateWidget(bpm: 0, zone: 0, source: .none).accessibilityValue == "No HR source")
     }
 
+    @Test func heartRateReadsTrendAndTwoByOneStats() {
+        let rising = HeartRateWidget(bpm: 156, zone: 3, source: .bleStrap, trend: .up,
+                                     averageBPM: 148, maxBPM: 171, size: .twoByOne)
+        #expect(rising.accessibilityValue == "156 beats per minute, zone 3, rising, average 148, maximum 171")
+        let falling = HeartRateWidget(bpm: 156, zone: 3, source: .bleStrap, trend: .down, averageBPM: 148)
+        #expect(falling.accessibilityValue == "156 beats per minute, zone 3, falling")
+    }
+
+    /// Time recorded before a dropout is still read; only a ride with no source and no time is empty.
+    @Test func hrZonesReadsTimeInZone() {
+        let live = HRZonesWidget(zone: 3, source: .bleStrap, zoneSeconds: [0, 125, 60, 0, 0])
+        #expect(live.accessibilityValue == "Zone 3; zone 2 2 minutes, 5 seconds; zone 3 1 minute")
+        let dropped = HRZonesWidget(zone: 0, source: .none, zoneSeconds: [0, 125, 0, 0, 0])
+        #expect(dropped.accessibilityValue == "No reading; zone 2 2 minutes, 5 seconds")
+    }
+
     @Test func hrZonesReadsItsThreeStates() {
         #expect(HRZonesWidget(zone: 3, source: .healthKit).accessibilityValue == "Zone 3")
         #expect(HRZonesWidget(zone: 0, source: .bleStrap).accessibilityValue == "No reading")

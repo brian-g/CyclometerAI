@@ -62,6 +62,52 @@ struct HeartRateMetricsTests {
         ))
     }
 
+    /// The chart spans the first reading to the last, and needs two to draw a line.
+    @Test func historyRange() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        let one = [HeartRateSample(time: start, bpm: 140)]
+        let two = one + [HeartRateSample(time: start.addingTimeInterval(60), bpm: 150)]
+        #expect(HeartRateMetrics().historyRange == nil)
+        #expect(HeartRateMetrics(history: one).historyRange == nil)
+        #expect(HeartRateMetrics(history: two).historyRange == start...start.addingTimeInterval(60))
+    }
+
+    @Test func builtFromRideStateCarriesHistory() {
+        var state = ActiveRideFeature.State()
+        let samples = [HeartRateSample(time: Date(timeIntervalSince1970: 0), bpm: 120)]
+        state.hrSamples = samples
+        #expect(state.heartRateMetrics.history == samples)
+    }
+
+    /// W12 and the sheet read one time-in-zone, the one S10 will compute from the same seconds.
+    @Test func zoneSecondsMatchS10() {
+        var state = ActiveRideFeature.State()
+        for bpm in [120, 145, 145, 156, 170] { state.hrSecondsTally.add(point(bpm: bpm)) }
+        #expect(state.hrZoneSeconds == RideDetailSeries.zoneSeconds(state.hrSecondsTally.secondsByBPM,
+                                                                     zoneBounds: state.hrZoneBounds))
+        #expect(state.hrZoneSeconds == [1, 2, 1, 1, 0])
+        #expect(state.heartRateMetrics.zoneSeconds == state.hrZoneSeconds)
+    }
+
+    @Test func averageHeartRate() {
+        var state = ActiveRideFeature.State()
+        #expect(state.averageHeartRateBPM == 0)
+        state.hrSampleCount = 3
+        state.hrSampleSum = 140 + 150 + 151
+        #expect(state.averageHeartRateBPM == 147)
+    }
+
+    /// W4's watermark keeps at most `watermarkResolution` points, as cadence's does.
+    @Test func watermarkIsBucketed() {
+        var state = ActiveRideFeature.State()
+        let start = Date(timeIntervalSince1970: 0)
+        state.hrSamples = (0..<30).map { HeartRateSample(time: start.addingTimeInterval(Double($0)), bpm: 100 + $0) }
+        #expect(state.hrWatermarkSamples == (0..<30).map { Double(100 + $0) })
+        state.hrSamples = (0..<600).map { HeartRateSample(time: start.addingTimeInterval(Double($0)), bpm: 120) }
+        #expect(state.hrWatermarkSamples.count == CadenceFeature.watermarkResolution)
+        #expect(state.hrWatermarkSamples.allSatisfy { $0 == 120 })
+    }
+
     private func point(bpm: Int) -> TrackPointDTO {
         RideSummaryFeatureTests.track(count: 1, heartRate: { _ in bpm })[0]
     }

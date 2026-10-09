@@ -222,6 +222,11 @@ struct HeartRateSecondsTally: Equatable, Sendable {
     /// The Apple Watch reading standing for the seconds after it.
     private var held: TrackPointDTO?
 
+    /// A tally already holding `secondsByBPM`, for previews (S08's sample ride).
+    init(secondsByBPM: [Int: Int] = [:]) {
+        self.secondsByBPM = secondsByBPM
+    }
+
     mutating func add(_ point: TrackPointDTO) {
         if let bpm = point.heartRateBPM {
             held = point.heartRateSource == .appleWatch ? point : nil

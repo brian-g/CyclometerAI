@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 
 // MARK: - Heart Rate
@@ -14,6 +15,10 @@ struct HeartRateMetrics: Equatable {
     var zoneBounds: [ClosedRange<Int>] = HeartRateZone.allCases.map { RiderProfile().bounds(for: $0) }
     /// Recorded seconds in each zone, zone 1 first, as S10 will count them.
     var zoneSeconds: [Int] = []
+    /// The last hour of readings, behind the chart (`State.hrSamples`).
+    var history: [HeartRateSample] = []
+    /// Elevation over the same window, beneath the chart, as on the Cadence sheet.
+    var altitudeHistory: [AltitudeSample] = []
 
     /// One row of the zone table.
     struct ZoneRow: Equatable, Identifiable {
@@ -42,6 +47,12 @@ struct HeartRateMetrics: Equatable {
 
     var hasZoneTime: Bool { zoneSeconds.contains { $0 > 0 } }
 
+    /// The chart's span, first reading to last. `nil` with nothing to plot.
+    var historyRange: ClosedRange<Date>? {
+        guard let first = history.first?.time, let last = history.last?.time, first < last else { return nil }
+        return first...last
+    }
+
     var zoneRows: [ZoneRow] {
         zip(HeartRateZone.allCases, zoneBounds).map { zone, bounds in
             let seconds = zone.rawValue <= zoneSeconds.count ? zoneSeconds[zone.rawValue - 1] : 0
@@ -63,19 +74,16 @@ struct HeartRateMetrics: Equatable {
 }
 
 extension ActiveRideFeature.State {
-    /// The Heart Rate sheet's inputs: W4/W12's reading, and zones resolved the way S12 and S10
-    /// resolve them.
+    /// The Heart Rate sheet's inputs: the fields W4 and W12 read, and the histories behind its chart.
     var heartRateMetrics: HeartRateMetrics {
-        let bounds = HeartRateZone.allCases.map {
-            riderProfile.bounds(for: $0, healthResting: healthRestingBPM, healthMax: healthMaxBPM,
-                                healthZoneCeilings: healthZoneCeilingsBPM)
-        }
-        return HeartRateMetrics(
+        HeartRateMetrics(
             bpm: displayHeartRateBPM,
             zone: displayHRZone,
             source: hrSource,
-            zoneBounds: bounds,
-            zoneSeconds: RideDetailSeries.zoneSeconds(hrSecondsTally.secondsByBPM, zoneBounds: bounds)
+            zoneBounds: hrZoneBounds,
+            zoneSeconds: hrZoneSeconds,
+            history: hrSamples,
+            altitudeHistory: altitudeSamples
         )
     }
 }
@@ -112,12 +120,22 @@ struct HeartRateSheet: View {
 struct HeartRateList: View {
     let metrics: HeartRateMetrics
 
+    private static let chartHeight: CGFloat = 140
     private static let donutHeight: CGFloat = 120
 
     var body: some View {
         let zoneRows = metrics.zoneRows
         List {
             Section {
+                if let range = metrics.historyRange {
+                    HeartRateChart(
+                        history: metrics.history,
+                        altitudeHistory: metrics.altitudeHistory,
+                        zoneBounds: metrics.zoneBounds,
+                        range: range
+                    )
+                        .frame(height: Self.chartHeight)
+                }
                 row("Heart Rate", metrics.current)
                 LabeledContent("Zone") {
                     HStack(spacing: Spacing.sm) {
@@ -177,15 +195,105 @@ struct HeartRateList: View {
     }
 }
 
+// MARK: - Heart Rate Chart
+
+/// `CadenceDetailChart` for heart rate (#145): the last hour on the rider's zone bands, with the
+/// ride's elevation as a faint watermark behind, on the Ride Metrics time axis — whose whole-minute
+/// ticks don't repeat a label, as the Cadence chart's automatic ones do.
+struct HeartRateChart: View {
+    let history: [HeartRateSample]
+    let altitudeHistory: [AltitudeSample]
+    /// Zone 1 first, as `HeartRateMetrics.zoneBounds`.
+    let zoneBounds: [ClosedRange<Int>]
+    let range: ClosedRange<Date>
+
+    /// Elevation is normalised into the heart-rate y-domain (a chart has one y-scale), filling only
+    /// the lower part of it so it never competes with the trace. Cadence's constants.
+    private static let elevationHeightFraction = 0.6
+    private static let minElevationSpanMeters = RouteGeometry.elevationNoiseThresholdMeters
+
+    private struct Point: Identifiable {
+        let time: Date
+        let value: Double
+        var id: Date { time }
+    }
+
+    /// At most `RideMetricsCharts.maxPlottedPoints` bucket means (integer edges, as
+    /// `bucketAveraged(to:)`): an hour of 1 Hz readings would be thousands of marks.
+    private static func downsampled(_ points: [Point]) -> [Point] {
+        let count = points.count
+        let buckets = min(count, RideMetricsCharts.maxPlottedPoints)
+        return (0..<buckets).map { i in
+            let slice = points[(i * count / buckets)..<((i + 1) * count / buckets)]
+            let n = Double(slice.count)
+            return Point(
+                time: Date(timeIntervalSinceReferenceDate: slice.reduce(0) { $0 + $1.time.timeIntervalSinceReferenceDate } / n),
+                value: slice.reduce(0) { $0 + $1.value } / n
+            )
+        }
+    }
+
+    var body: some View {
+        let heartRate = Self.downsampled(history.map { Point(time: $0.time, value: Double($0.bpm)) })
+        let domain = zoneBounds.chartDomain(including: heartRate.map(\.value))
+        let elevation = elevationPoints(base: domain.lowerBound,
+                                        height: (domain.upperBound - domain.lowerBound) * Self.elevationHeightFraction)
+        Chart {
+            HeartRateZoneBands(zoneBounds: zoneBounds, domain: domain, x: range)
+            ForEach(elevation) { point in
+                AreaMark(
+                    x: .value("t", point.time),
+                    yStart: .value("base", domain.lowerBound),
+                    yEnd: .value("elevation", point.value),
+                    series: .value("Series", "elevation")
+                )
+                .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.watermark))
+            }
+            ForEach(heartRate) { point in
+                LineMark(
+                    x: .value("t", point.time),
+                    y: .value("bpm", point.value),
+                    series: .value("Series", "heartRate")
+                )
+                .foregroundStyle(Color.cyTextPrimary)
+            }
+        }
+        .chartYScale(domain: domain)
+        .chartYAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
+        .modifier(RideTimeAxis(range: range))
+    }
+
+    /// Elevation over `range` as heights from `base` up to `base + height`.
+    private func elevationPoints(base: Double, height: Double) -> [Point] {
+        let visible = altitudeHistory.filter { range.contains($0.time) }
+        guard let low = visible.map(\.meters).min(), let high = visible.map(\.meters).max() else { return [] }
+        let span = max(high - low, Self.minElevationSpanMeters)
+        return Self.downsampled(visible.map {
+            Point(time: $0.time, value: base + ($0.meters - low) / span * height)
+        })
+    }
+}
+
 // MARK: - Previews
 
 extension HeartRateMetrics {
-    /// A strap reading 156 bpm in zone 3 (151–163), 39 minutes in, against the default profile.
+    /// A strap reading 156 bpm in zone 3 (151–163), 39 minutes in, against the default profile:
+    /// one reading every 5 s, warming up, rolling between Z2 and Z4, easing at a stop at 17 min,
+    /// over the climb and descent of `RideMetrics.sample`.
     static let sample = HeartRateMetrics(
         bpm: 156,
         zone: 3,
         source: .bleStrap,
-        zoneSeconds: [312, 846, 702, 318, 42]
+        zoneSeconds: [312, 846, 702, 318, 42],
+        history: (0..<468).map { i in
+            let warmUp = min(Double(i) / 60, 1)
+            let effort = (204..<228).contains(i) ? 128 : 150 + 14 * sin(Double(i) / 18)
+            return HeartRateSample(
+                time: Date(timeIntervalSince1970: 1_000_000).addingTimeInterval(Double(i) * 5),
+                bpm: Int(100 + (effort - 100) * warmUp)
+            )
+        },
+        altitudeHistory: RideMetrics.sample().altitudeHistory
     )
 }
 

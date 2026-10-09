@@ -2,7 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
-**Updated:** 2026-10-09 — §W4/§W12 Heart rate sheet built (#145): current bpm and zone, then the rider's zones with the ride's time in each. §W4's zone labels now use §S12's names.  
+**Updated:** 2026-10-09 — §W4/§W12 built with the Heart rate sheet (#145). W4 is built as W5 Cadence: a last-hour watermark on zone bands, a trend ▲/▼, and Avg/Max at 2×1. W12 follows Design.sketch "W12 - Zones": a donut and the time in each zone. The sheet's chart is the Cadence sheet's, for heart rate. §W4's zone labels now use §S12's names.  
 **Updated:** 2026-10-02 — §S08 opens from an empty cell (#368): in edit mode each empty cell shows a dashed slot; tapping it lists only the sizes that fit with that cell as their top-left, and adds there.  
 **Updated:** 2026-10-02 — §S08 Add Widget built (#142): Add opens it; a widget goes into the first open spot on the page the rider is on, and an entry that page can't take is dimmed. "Empty page" inserts a blank page after the current one. Tapping an empty cell is not yet built (#368), nor is rearranging by drag (#367).  
 **Updated:** 2026-10-02 — §S07 widgets can be moved by drag (#367): onto an empty spot that fits, or swapped with a widget of the same size; any other drop springs back. Nothing reflows yet, so §S05 "Customization" 2's "shift other items around" waits on the open questions in §S07.  
@@ -618,8 +618,9 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 
 - Value: current BPM
 - A watermark graph of the historical HR for the ride. The horizontal bands in the chart should show the zones (`brHRZone1`–`brHRZone5`)
+- As built (#145), W4 matches W5 Cadence. Behind the number, the last hour of heart rate is a faint line on the rider's zone bands. The y-axis is fixed from resting to max HR, so the bands don't move. A ▲ (`brRatingGood`) or ▼ (`brRatingBad`) over the unit shows the trend (Design.sketch "W4 - Heart Rate"): the last 10 s of readings against the 20 s before, by 3 bpm or more. The ▲/▼ is hidden when steady or with no reading. At 2×1 the hero has Avg and Max beside it, as W5's does. The left border shows the current zone's colour
 - Zone label: "Z1 Recovery/Light", "Z2 Endurance", "Z3 Aerobic", "Z4 Threshold", "Z5 Anaerobic" — §S12's names, so the dashboard and Settings use the same words (#145)
-- Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. Current heart rate and zone come first, matching the cards' empty states: "No HR Source" with nothing connected, "—" with no reading. Then **Time in Zones**: a donut in the zone colours, and one row per zone giving its name, its bpm range as §S12 resolves it, and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
+- Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. The first section is the Cadence sheet's chart for heart rate (the last hour on zone bands over a faint elevation area, its y-axis fixed from resting to max), on the Ride Metrics charts' time axis; then current heart rate and zone, matching the cards' empty states: "No HR Source" with nothing connected, "—" with no reading. Then **Time in Zones**: a donut in the zone colours, and one row per zone giving its name, its bpm range as §S12 resolves it, and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
 
 ---
 
@@ -718,7 +719,8 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 - Time in zone accumulates locally from the HR readings the dashboard already classifies, not from HealthKit's `HKLiveWorkoutZoneUpdate`, since the app runs no iPhone workout session (PRD §9.4, #318)
 - Zone colors: `brHRZone1`–`brHRZone5`
 - Empty state when no HR source active: "--"
-- Sheet: Heart rate — see §W4. As built, W12 is 1×1 only and shows the current zone; the distribution chart above appears in the sheet, not yet on the card
+- As built (#145), 1×1 follows Design.sketch "W12 - Zones". Under a "Heart Rate Zones" label, a donut in the zone colours sits beside one row per zone: a colour square and "Z1: 05:12" (MM:SS, then H:MM:SS, as W3). The current zone's row is bold. The 2×1, which has no Sketch frame, adds each zone's §S12 name and right-aligns the times. Before any time, the donut is a neutral ring. "No HR Source" shows only with no source and no time, since time recorded before a dropout stays true. 2×2 is not built
+- Sheet: Heart rate — see §W4
 
 ---
 

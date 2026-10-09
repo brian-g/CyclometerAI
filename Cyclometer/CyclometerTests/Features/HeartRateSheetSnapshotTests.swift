@@ -3,18 +3,21 @@ import SnapshotTesting
 import SwiftUI
 @testable import Cyclometer
 
-/// The Heart Rate sheet's rows (#145), opened from W4 and W12: a live strap reading in zone 3 with
-/// time in every zone, and no HR source at all.
+/// The Heart Rate sheet's chart and rows (#145), opened from W4 and W12: a live strap reading in
+/// zone 3 with 39 minutes of history and time in every zone, and no HR source at all.
 ///
 /// Renders `HeartRateList` without the sheet's `NavigationStack`, as `RideMetricsSheetSnapshotTests`
 /// does and for the same reasons. What each row reads is pinned by `HeartRateMetricsTests`.
 final class HeartRateSheetSnapshotTests: XCTestCase {
 
-    private let canvas: SwiftUISnapshotLayout = .fixed(width: 402, height: 720)
+    private let canvas: SwiftUISnapshotLayout = .fixed(width: 402, height: 900)
 
     private func makeList(_ metrics: HeartRateMetrics, scheme: ColorScheme) -> some View {
         HeartRateList(metrics: metrics)
-            .frame(width: 402, height: 720)
+            .frame(width: 402, height: 900)
+            // The chart labels clock times: pinned, or another machine records another image.
+            .environment(\.locale, Locale(identifier: "en_US"))
+            .environment(\.timeZone, TimeZone(identifier: "America/Chicago")!)
             .preferredColorScheme(scheme)
     }
 
