@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "security-guidance@anthropic-plugin-directory": true,
+    "superpowers@claude-plugins-official": true
+  }
+}
