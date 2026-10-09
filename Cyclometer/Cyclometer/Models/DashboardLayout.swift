@@ -376,6 +376,8 @@ extension DashboardLayout {
             WidgetPlacement(AverageSpeedDashboardWidget.self, size: .oneByOne, row: 0, column: 1),
             WidgetPlacement(DurationDashboardWidget.self, size: .oneByOne, row: 1, column: 0),
             WidgetPlacement(DistanceDashboardWidget.self, size: .oneByOne, row: 1, column: 1),
+            WidgetPlacement(HeartRateDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
+            WidgetPlacement(HRZonesDashboardWidget.self, size: .twoByOne, row: 3, column: 0),
         ]),
     ])
 }

@@ -76,6 +76,35 @@ struct WidgetAccessibilityTests {
         #expect(noRoute.accessibilityValue == "No route")
     }
 
+    @Test func heartRateReadsItsThreeStates() {
+        #expect(HeartRateWidget(bpm: 156, zone: 3, source: .bleStrap).accessibilityValue
+            == "156 beats per minute, zone 3")
+        #expect(HeartRateWidget(bpm: 0, zone: 0, source: .bleStrap).accessibilityValue == "No reading")
+        #expect(HeartRateWidget(bpm: 0, zone: 0, source: .none).accessibilityValue == "No HR source")
+    }
+
+    @Test func heartRateReadsTrendAndTwoByOneStats() {
+        let rising = HeartRateWidget(bpm: 156, zone: 3, source: .bleStrap, trend: .up,
+                                     averageBPM: 148, maxBPM: 171, size: .twoByOne)
+        #expect(rising.accessibilityValue == "156 beats per minute, zone 3, rising, average 148, maximum 171")
+        let falling = HeartRateWidget(bpm: 156, zone: 3, source: .bleStrap, trend: .down, averageBPM: 148)
+        #expect(falling.accessibilityValue == "156 beats per minute, zone 3, falling")
+    }
+
+    /// Time recorded before a dropout is still read; only a ride with no source and no time is empty.
+    @Test func hrZonesReadsTimeInZone() {
+        let live = HRZonesWidget(zone: 3, source: .bleStrap, zoneSeconds: [0, 125, 60, 0, 0])
+        #expect(live.accessibilityValue == "Zone 3; zone 2 2 minutes, 5 seconds; zone 3 1 minute")
+        let dropped = HRZonesWidget(zone: 0, source: .none, zoneSeconds: [0, 125, 0, 0, 0])
+        #expect(dropped.accessibilityValue == "No reading; zone 2 2 minutes, 5 seconds")
+    }
+
+    @Test func hrZonesReadsItsThreeStates() {
+        #expect(HRZonesWidget(zone: 3, source: .healthKit).accessibilityValue == "Zone 3")
+        #expect(HRZonesWidget(zone: 0, source: .bleStrap).accessibilityValue == "No reading")
+        #expect(HRZonesWidget(zone: 0, source: .none).accessibilityValue == "No HR source")
+    }
+
     // MARK: - Element shape and activation
 
     /// Map's run in `MapWidgetAccessibilityTests`, which CI skips.
@@ -111,6 +140,21 @@ struct WidgetAccessibilityTests {
         ride.metrics.speedMPS = 10
         host.settle { host.presentedText().contains("36.0 kilometers per hour") }
         #expect(host.presentedText().contains("Current 36.0 kilometers per hour"))
+    }
+
+    /// #145: the same for the Heart Rate sheet, opened from W12, whose card here never changes.
+    @Test func heartRateSheetFollowsTheRideWhileOpen() throws {
+        let ride = LiveRide()
+        let host = try Host(HRZonesWidget(zone: 0, source: .none, metrics: { ride.heartRate }))
+        defer { host.tearDown() }
+
+        #expect(try host.onlyElement().accessibilityActivate())
+        host.settle()
+        #expect(host.presentedText().contains("Heart Rate No HR source"))
+
+        ride.heartRate = .sample
+        host.settle { host.presentedText().contains("156 beats per minute") }
+        #expect(host.presentedText().contains("Heart Rate 156 beats per minute"))
     }
 }
 
@@ -166,11 +210,12 @@ private enum ElementChecks {
 @Observable
 private final class LiveRide {
     var metrics = RideMetrics()
+    var heartRate = HeartRateMetrics()
 }
 
 /// The widgets that adopt `.widgetDetail`.
 enum TappableWidget: CaseIterable, CustomTestStringConvertible {
-    case map, cadence, speed, averageSpeed, duration, distance, pace, directions
+    case map, cadence, speed, averageSpeed, duration, distance, pace, directions, heartRate, hrZones
 
     var testDescription: String { title }
 
@@ -187,6 +232,8 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .distance: "Distance"
         case .pace: "Pace"
         case .directions: "Directions"
+        case .heartRate: "Heart Rate"
+        case .hrZones: "HR Zones"
         }
     }
 
@@ -201,6 +248,8 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .distance: "12.4 kilometers"
         case .pace: "5 minutes, 33 seconds per kilometer"
         case .directions: "No route"
+        case .heartRate: "156 beats per minute, zone 3"
+        case .hrZones: "Zone 3"
         }
     }
 
@@ -226,6 +275,10 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
             AnyView(PaceWidget(speedMPS: 3, unit: .metric))
         case .directions:
             AnyView(DirectionsWidget(hasRoute: false, nextTurn: nil, distanceMeters: nil, unit: .metric))
+        case .heartRate:
+            AnyView(HeartRateWidget(bpm: 156, zone: 3, source: .bleStrap))
+        case .hrZones:
+            AnyView(HRZonesWidget(zone: 3, source: .bleStrap))
         }
     }
 }

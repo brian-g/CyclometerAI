@@ -729,3 +729,22 @@ looked exactly like progress. Saying I would check was a promise I had no way to
 **Rule.** Every long background run gets a watcher that covers the hang case: a `Monitor` that emits on the
 result line, on the process exiting without one, **and** on the log going quiet for a few minutes. Never
 tell Brian I'll keep an eye on something unless a tool call is actually doing the watching.
+
+---
+
+## Read the widget's whole spec and its Sketch frame before scoping a sheet (2026-10-09, #145)
+
+**What happened.** #145 asked for the Heart Rate sheet. I declared W4's history watermark "out of scope" though
+UX §W4 specifies it ("a watermark graph of the historical HR … bands show the zones"), built a sheet chart that
+looked nothing like the Cadence sheet's sibling, and kept W12 as "Z3" though the Sketch file has a W12 frame (donut
+plus time per zone). The Sketch MCP had failed to connect at session start and I never told Brian, so I designed
+without the design file. Brian: "I thought I had specifically indicated that the HR widget should be aligned to the
+cadence widget … I have drawn what I expect in the Sketch file under W12 - Zones."
+
+**Rules.**
+- When a spec line (UX §W##) describes the widget a sheet hangs off, it's part of the picture. Don't mark it out of
+  scope on my own: ask.
+- Before any UI decision, open the Sketch frame for every widget/screen touched (CLAUDE.md: "always check these
+  sources"). If the Sketch MCP is down, say so at once and use the HTTP fallback (memory: sketch-mcp-http-fallback).
+- When a sibling already exists (Cadence ↔ Heart Rate: both sensor widgets with zones), build to the sibling's
+  shape (window, chart treatment, sizes) unless told otherwise.

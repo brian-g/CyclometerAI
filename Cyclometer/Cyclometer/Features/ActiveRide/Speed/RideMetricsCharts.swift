@@ -85,8 +85,9 @@ enum RideMetricsCharts {
     }
 }
 
-/// One time axis for both charts, so the pace chart lines up under the speed chart.
-private struct RideTimeAxis: ViewModifier {
+/// One time axis for both charts, so the pace chart lines up under the speed chart. Shared with
+/// the Heart Rate sheet's chart (#145).
+struct RideTimeAxis: ViewModifier {
     let range: ClosedRange<Date>
 
     @Environment(\.timeZone) private var timeZone

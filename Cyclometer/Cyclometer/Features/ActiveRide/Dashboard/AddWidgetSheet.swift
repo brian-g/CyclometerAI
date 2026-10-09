@@ -183,7 +183,7 @@ private struct AddWidgetPreview: View {
 extension ActiveRideFeature.State {
     /// The ride S08's previews show (#142): mid-ride, every sensor reading.
     static var addWidgetSample: Self {
-        Self(
+        var state = Self(
             recordingState: .active,
             elapsedSeconds: 2340,
             heartRateBPM: 155,
@@ -196,6 +196,22 @@ extension ActiveRideFeature.State {
             speedSampleCount: 1560,
             averageSpeedSamples: SpeedSample.sampleHourAverage
         )
+        // W4's watermark and Avg/Max, and W12's time in zone (#145).
+        state.hrSamples = HeartRateSample.sampleHour
+        state.hrSampleCount = HeartRateSample.sampleHour.count
+        state.hrSampleSum = HeartRateSample.sampleHour.reduce(0) { $0 + Double($1.bpm) }
+        state.maxHeartRateBPM = HeartRateSample.sampleHour.map(\.bpm).max() ?? 0
+        state.hrSecondsTally = HeartRateSecondsTally(secondsByBPM: [125: 300, 145: 840, 157: 720, 168: 420, 180: 60])
+        return state
+    }
+}
+
+extension HeartRateSample {
+    /// A sample hour, one reading a minute, rolling from Z2 into Z4 — so S08's W4 previews draw
+    /// their watermark.
+    static let sampleHour: [HeartRateSample] = (0..<60).map { minute in
+        HeartRateSample(time: Date(timeIntervalSinceReferenceDate: Double(minute) * 60),
+                        bpm: Int(150 + 15 * sin(Double(minute) / 6)))
     }
 }
 

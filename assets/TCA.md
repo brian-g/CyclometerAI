@@ -297,7 +297,8 @@ struct ActiveRideFeature {
         // Paused state
         var pausedAt: Date? = nil
 
-        // Ride summary (Phase 2: running HR zone durations)
+        // Running HR zone durations. As built (#145): `hrSecondsTally`, recorded seconds per
+        // bpm by S10's rule, sorted into zones when the Heart rate sheet reads it
         var hrZoneDurations: [Int: TimeInterval] = [:]
     }
 
@@ -996,7 +997,7 @@ Cyclometer/
 │   │   ├── Speed/                         // SpeedFeature, SpeedWidgetView (W1), AverageSpeed (W2),
 │   │   │                                  // Duration (W3), Distance (W6), PaceWidgetView (W11),
 │   │   │                                  // RideMetricsSheet + RideMetricsCharts (#144)
-│   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12) — HR state lives
+│   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12), HeartRateSheet — HR state lives
 │   │   │                                  // on ActiveRideFeature (§3)
 │   │   ├── Cadence/                       // CadenceFeature, CadenceWidgetView (W5)
 │   │   ├── Map/                           // MapWidgetView (W8), ActiveRideMapView,

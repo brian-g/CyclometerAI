@@ -53,9 +53,9 @@ struct ActiveRideFeature {
     /// `zeroSpeedSeconds`, so auto-end cannot trigger from a stop auto-pause already
     /// caught. No PRD-specified threshold exists; chosen to match a brief stop.
     static let autoPauseZeroSpeedSeconds = 10
-    /// Wall-clock window of altitude samples retained for the cadence sheet's elevation
-    /// watermark. Matches `CadenceFeature.historyWindow` on purpose: the two series share one
-    /// time axis, so elevation must cover the span the cadence trace does.
+    /// Wall-clock window of altitude samples retained for the cadence and heart-rate sheets'
+    /// elevation watermark. Matches `CadenceFeature.historyWindow` on purpose: each series
+    /// shares one time axis with elevation, so elevation must cover the span its trace does.
     static let altitudeHistoryWindow: TimeInterval = CadenceFeature.historyWindow
 
     /// At or below this speed the rider counts as stopped (#262).
@@ -142,6 +142,14 @@ struct ActiveRideFeature {
         var hrSampleCount: Int = 0
         var hrSampleSum: Double = 0
         var maxHeartRateBPM: Int = 0
+        /// Recorded seconds at each bpm, for the Heart Rate sheet's time in zone (#145). Fed the
+        /// track points the recorder writes, by S10's rule, so the sheet shows what S10 will.
+        /// Starts over when a ride resumes after a crash: nothing seeds it from the saved track.
+        var hrSecondsTally = HeartRateSecondsTally()
+        /// Heart-rate readings from the last `CadenceFeature.historyWindow`, behind W4's watermark,
+        /// its trend and the Heart Rate sheet's chart (#145) — cadence's history, for heart rate.
+        /// Every displayed reading, recording or not, as `CadenceFeature.State.cadenceSamples`.
+        var hrSamples: [HeartRateSample] = []
         var isHRPaired: Bool = false
         /// HealthKit-resolved terms fetched once at ride start (#160), threaded into
         /// every `riderProfile` resolver call below instead of the defaulted `nil`.
@@ -212,6 +220,33 @@ struct ActiveRideFeature {
         var displayHRZone: Int {
             heartRateBPM > 0 ? hrZone : (heldHR?.zone ?? 0)
         }
+        /// Mean of the recorded readings (#171); 0 before the first.
+        var averageHeartRateBPM: Int {
+            hrSampleCount > 0 ? Int((hrSampleSum / Double(hrSampleCount)).rounded()) : 0
+        }
+        /// Each zone's bpm range, zone 1 first, resolved as S12 and S10 resolve them.
+        var hrZoneBounds: [ClosedRange<Int>] {
+            HeartRateZone.allCases.map {
+                riderProfile.bounds(for: $0, healthResting: healthRestingBPM, healthMax: healthMaxBPM,
+                                    healthZoneCeilings: healthZoneCeilingsBPM)
+            }
+        }
+        /// Recorded seconds in each zone, zone 1 first: W12's and the sheet's time in zone.
+        var hrZoneSeconds: [Int] {
+            RideDetailSeries.zoneSeconds(hrSecondsTally.secondsByBPM, zoneBounds: hrZoneBounds)
+        }
+        /// W4's watermark: `hrSamples` in at most `CadenceFeature.watermarkResolution` bucket means,
+        /// as `CadenceFeature.State.watermarkSamples`.
+        var hrWatermarkSamples: [Double] {
+            let values = hrSamples.map { Double($0.bpm) }
+            let count = values.count
+            let buckets = min(count, CadenceFeature.watermarkResolution)
+            return (0..<buckets).map { i in
+                let slice = values[(i * count / buckets)..<((i + 1) * count / buckets)]
+                return slice.reduce(0, +) / Double(slice.count)
+            }
+        }
+        var hrTrend: HeartRateTrend { HeartRateTrend(hrSamples) }
         /// Whether this second's reading is a measurement worth writing to the track,
         /// as opposed to no reading at all or a HealthKit sample already recorded
         /// (#221). Note it reads `heartRateBPM`, never `displayHeartRateBPM` — a held
@@ -877,6 +912,7 @@ struct ActiveRideFeature {
                     if point.heartRateSource == .appleWatch {
                         state.recordedHealthKitSampleAt = state.healthKitHRSample?.receivedAt
                     }
+                    state.hrSecondsTally.add(point)
                     effects.append(.send(.trackRecorder(.timerTick(point))))
                 }
 
@@ -1149,6 +1185,9 @@ struct ActiveRideFeature {
             : 0
         guard bpm > 0 else { return }
         state.heldHR = HeldHeartRate(bpm: bpm, zone: state.hrZone, heldSince: date.now)
+        state.hrSamples.append(HeartRateSample(time: date.now, bpm: bpm))
+        let cutoff = date.now.addingTimeInterval(-CadenceFeature.historyWindow)
+        state.hrSamples.removeAll { $0.time < cutoff }
         // Only recorded time feeds the ride's average and max (#379): a café stop with the
         // strap still on shows the rider's heart rate, but must not pull Avg HR toward resting.
         guard state.recordingState == .active else { return }
@@ -1217,8 +1256,7 @@ struct ActiveRideFeature {
             distanceMeters: state.distanceMeters,
             averageSpeedMPS: state.averageSpeedMPS,
             maxSpeedMPS: state.maxSpeedMPS,
-            averageHeartRateBPM: state.hrSampleCount > 0
-                ? Int((state.hrSampleSum / Double(state.hrSampleCount)).rounded()) : nil,
+            averageHeartRateBPM: state.hrSampleCount > 0 ? state.averageHeartRateBPM : nil,
             maxHeartRateBPM: state.hrSampleCount > 0 ? state.maxHeartRateBPM : nil,
             averageCadenceRPM: state.cadence.pedalingSampleCount > 0
                 ? state.cadence.averageCadenceRPM : nil,

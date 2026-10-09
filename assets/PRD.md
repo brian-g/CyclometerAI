@@ -1068,8 +1068,8 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 > **What stays.**
 > - The dashboard's zone is classified locally on each reading.
 > - S10's zone breakdown is derived from the saved track.
-> - W12's time in zone (UX.md §W12, not yet built; #145) accumulates locally from the same readings,
->   not from Health.
+> - W12's time in zone (UX.md §W12, built in the Heart rate sheet; #145) accumulates locally from the
+>   same readings, not from Health.
 >
 > **Open threads, neither needing a session.**
 > - On iOS 27 a plain `HKWorkoutBuilder` computes zone durations (`HKWorkout.zoneGroupsByType`), but

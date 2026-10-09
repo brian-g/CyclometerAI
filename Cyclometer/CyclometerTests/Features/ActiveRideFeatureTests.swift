@@ -2161,6 +2161,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 150
             $0.maxHeartRateBPM = 150
             $0.heldHR = HeldHeartRate(bpm: 150, zone: 2, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 150))
         }
     }
 
@@ -2181,6 +2182,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 165
             $0.maxHeartRateBPM = 165
             $0.heldHR = HeldHeartRate(bpm: 165, zone: 3, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 165))
         }
         #expect(store.state.riderProfile.resolvedMaxBPM() == 200)
         #expect(store.state.riderProfile.resolvedRestingBPM() == 45)
@@ -2341,6 +2343,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 72
             $0.maxHeartRateBPM = 72
             $0.heldHR = HeldHeartRate(bpm: 72, zone: 1, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 72))
         }
         #expect(store.state.hrSource == .healthKit)
     }
@@ -2434,6 +2437,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 140
             $0.maxHeartRateBPM = 140
             $0.heldHR = HeldHeartRate(bpm: 140, zone: 2, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 140))
         }
         await store.send(.heartRateUpdated(160)) {
             $0.heartRateBPM = 160
@@ -2442,6 +2446,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 300
             $0.maxHeartRateBPM = 160
             $0.heldHR = HeldHeartRate(bpm: 160, zone: 3, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 160))
         }
         // A drop below the running max doesn't move maxHeartRateBPM.
         await store.send(.heartRateUpdated(120)) {
@@ -2451,6 +2456,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.hrSampleSum = 420
             $0.maxHeartRateBPM = 160
             $0.heldHR = HeldHeartRate(bpm: 120, zone: 1, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 120))
         }
     }
 
@@ -2464,6 +2470,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.heartRateProvenance = .bleHR
             $0.hrZone = 2
             $0.heldHR = HeldHeartRate(bpm: 140, zone: 2, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 140))
             // No hrSampleCount/hrSampleSum/maxHeartRateBPM change.
         }
         // The Apple Watch source goes through the same path and is gated the same way.
@@ -2472,6 +2479,7 @@ struct ActiveRideFeatureHeartRateTests {
             $0.heartRateBPM = 150
             $0.heartRateProvenance = .appleWatch
             $0.heldHR = HeldHeartRate(bpm: 150, zone: 2, heldSince: Self.fixedNow)
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 150))
         }
     }
 
@@ -2554,6 +2562,7 @@ struct ActiveRideFeatureHRDropoutTests {
             $0.hrSampleSum = 150
             $0.maxHeartRateBPM = 150
             $0.heldHR = Self.heldAt150
+            $0.hrSamples.append(HeartRateSample(time: Self.fixedNow, bpm: 150))
         }
         // The live reading is gone — nothing may be recorded for this second — but the
         // held one carries the display, which is the whole point of the window.
@@ -2793,6 +2802,77 @@ struct ActiveRideFeatureHRDropoutTests {
         #expect(recorded.dropFirst().allSatisfy { $0.heartRateBPM == nil })
         // It is still the best reading available, so it stays on screen throughout.
         #expect(store.state.displayHeartRateBPM == 72)
+    }
+
+    /// #145: the Heart Rate sheet's time in zone counts the seconds S10 will count from the
+    /// saved track, by the same rule, so it reads the same at finish.
+    @Test("The live HR tally counts the recorded track's seconds, not paused ones")
+    func hrTallyMatchesRecordedTrack() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.heartRateUpdated(150))
+        await store.send(.elapsedTick)
+        await store.send(.elapsedTick)
+        await store.send(.heartRateUpdated(0))   // a strap dropout counts for nothing
+        await store.send(.elapsedTick)
+        await store.send(.pauseTapped)
+        await store.send(.heartRateUpdated(160))
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2])
+        #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(recorded))
+    }
+
+    @Test("The live HR tally holds an Apple Watch sample forward, as S10 does")
+    func hrTallyHoldsWatchSample() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.healthKitHeartRateUpdated(72))
+        await store.send(.hrPairingChanged(false))
+        for offset in 1...5 {
+            now.setValue(Self.fixedNow + Double(offset))
+            await store.send(.elapsedTick)
+        }
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(store.state.hrSecondsTally.secondsByBPM == [72: 5])
+        #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(recorded))
+    }
+
+    /// #145: W4's watermark and the sheet's chart are cadence's history for heart rate: every live
+    /// reading, recording or not, over the last `CadenceFeature.historyWindow`.
+    @Test("HR history keeps the last hour of live readings, through a pause")
+    func hrHistoryIsCadencesWindow() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.heartRateUpdated(150))
+        await store.send(.heartRateUpdated(0))          // no reading: not history
+        await store.send(.pauseTapped)
+        now.setValue(Self.fixedNow + 60)
+        await store.send(.heartRateUpdated(120))        // paused, still shown, still history
+        #expect(store.state.hrSamples == [
+            HeartRateSample(time: Self.fixedNow, bpm: 150),
+            HeartRateSample(time: Self.fixedNow + 60, bpm: 120),
+        ])
+
+        now.setValue(Self.fixedNow + CadenceFeature.historyWindow + 30)
+        await store.send(.heartRateUpdated(130))
+        #expect(store.state.hrSamples.map(\.bpm) == [120, 130])
+        await store.skipInFlightEffects(strict: false)
     }
 
     /// The same rule for position's third axis (#303): a fix CoreLocation gave no valid

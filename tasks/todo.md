@@ -1,3 +1,53 @@
+# #145 — Heart Rate detail sheet (W4, W12)
+
+Plan: /Users/brian/.claude/plans/serialized-sparking-mist.md
+Branch: `feat/145-heart-rate-sheet`
+
+- [x] 1. `HeartRateSecondsTally` — S10's `secondsByBPM` rule, incremental
+- [x] 2. `ActiveRideFeature.State.hrSecondsTally`, fed per recorded track point
+- [x] 3. `HeartRateMetrics` + `HeartRateSheet`/`HeartRateList`
+- [x] 4. W4/W12: `.widgetDetail`, `accessibilityValue`, `metrics:`; adapters
+- [x] 5. Tests: tally, reducer, metrics, a11y, snapshots
+- [x] 6. Specs: UX §W4/§W12, PRD §9.4, TCA.md
+- [x] 7. Unit suite green; sim drive
+
+## Review
+
+- **Sheet:** W4 and W12 open one Heart Rate sheet (medium → large). The Current section shows the bpm and the zone ("Z3 Aerobic", with a zone-colour dot). Empty states match the cards: "No HR Source" when nothing is connected, "—" when there's no reading. The Time in Zones section has a donut in the zone colours (only once there is time to show), then one row per zone: its S12 name, its resolved bpm range, and the ride's time in it.
+- **Time in zone (pulled into scope; PRD v0.6.7 assigned it to #145):** `HeartRateSecondsTally` is S10's `secondsByBPM` loop, now run incrementally, so `secondsByBPM` is a fold over it. `ActiveRideFeature` feeds the tally every track point it records, so the live sheet counts exactly the seconds S10 will count from the saved track, including the held Apple Watch reading. The tally is sorted into zones at read time through `RideDetailSeries.zoneSeconds` + `riderProfile.bounds`, the same path `RideSummaryFeature` uses.
+- **Zone names:** `HeartRateZone.s12DisplayName`. UX §W4's old Tempo/VO₂ Max list is corrected.
+- **Tests:**
+  - `HeartRateMetricsTests` (5)
+  - two reducer tests in `ActiveRideFeatureHRDropoutTests`, each asserting the tally equals `secondsByBPM(recorded)`
+  - `WidgetAccessibilityTests` now includes `.heartRate`/`.hrZones`, spoken-text tests, and sheet liveness
+  - 3 snapshots, inspected: not blank
+  - Results: full `CyclometerTests` minus `PersistenceClientTests` gave 1843 passed; `PersistenceClientTests` alone gave 47. Grepped the log for the new tests to confirm they ran.
+- **Sim drive:** a fresh install, ride started; W4 and W12 each open the sheet, showing No HR Source with every zone at 0:00:00, and Close returns to the dashboard.
+- **Not verified on the sim:** a live HR reading. The simulator has no strap. The hosted liveness test and the reducer tests cover that path.
+- **Known gap:** after a crash and resume, the tally starts from zero. Cadence persists its zone seconds; HR doesn't. Filed as #393. #392 is the auto-resume recorder bug.
+
+### Follow-up: W4/W12 per Cadence and Sketch (Brian's correction)
+
+- **What went wrong:** I had scoped out W4's watermark, which UX §W4 specifies, and I never opened Sketch; the MCP was down and I didn't say so. Logged in `tasks/lessons.md`. The whole-ride chart I first built is replaced.
+- **HR history:** `hrSamples` is now cadence's history for heart rate. Every live reading goes in through `applyHeartRateReading`, recording or not, and it is trimmed to `CadenceFeature.historyWindow`.
+- **New derived state:** `hrZoneBounds`, `hrZoneSeconds`, `averageHeartRateBPM`, `hrWatermarkSamples` and `hrTrend`.
+- **W4:** built as W5. It comes in 1×1 and 2×1, with a last-hour watermark on fixed resting-to-max zone bands, a ▲/▼ trend over the unit (Sketch), and Avg/Max at 2×1. The full-card zone tint is gone; the left zone bar stays.
+- **W12:** 1×1 per Sketch "W12 - Zones" (a donut, a colour square plus "Z1: 05:12" per row, the current zone bold), plus a 2×1 that adds S12 names. "No HR Source" shows only with no source *and* no time.
+- **Sheet chart:** the Cadence sheet's chart for HR (bands, the elevation watermark, a fixed y-axis, the last hour), on the shared `RideTimeAxis`. `HeartRateZoneBands` and `chartDomain(including:)` are shared by W4 and the sheet.
+- **Tests:**
+  - `HeartRateTrendTests`
+  - a reducer test for history being windowed and following through a pause
+  - state-derived values
+  - a11y for the trend, 2×1 stats and W12 times
+  - two new widget snapshot suites
+  - the sheet and edit-chrome references re-recorded, with images inspected
+  - the six exhaustive HR reducer tests updated for `hrSamples`
+  - the expected Add Widget order updated for the new 2×1s
+- **CI:** the new snapshot suites are on the skip list.
+- **Noise:** Xcode was open and locked the build database twice, so those runs were repeated.
+
+---
+
 # #144 — Ride Metrics detail sheet (W1, W2, W3, W6, W11)
 
 Plan: /Users/brian/.claude/plans/cosmic-sprouting-sutherland.md
