@@ -2,7 +2,8 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
-**Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink into hairline-bordered cards (glass frames bled into each other, so they were dropped at review), and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
+**Updated:** 2026-10-04—  Added details for additional widgets.
+****Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink into hairline-bordered cards (glass frames bled into each other, so they were dropped at review), and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
 **Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
 **Updated:** 2026-10-02—  Added interaction for the Add Widget sheet
 ****Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
@@ -574,13 +575,23 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 
 
 
-W1 — Speed Alternative
+W1 — Speed option a
 
 Sizes: 2x2
 
 This version of the speed widget uses a speedometer like dial to visualize the current speed. It has max, average and miles, but does not have duration.
 
 ![image-20260927182805675](/Users/brian/Library/Application Support/typora-user-images/image-20260927182805675.png)
+
+---
+
+W1 — Speed option B
+
+Sizes: 2x2
+
+Similar to option A of the speed widget uses a speedometer like dial to visualize the current speed. The avg/max/distance/duration are in the quadrants around the gauge.
+
+![image-20261004152326754](/Users/brian/Library/Application Support/typora-user-images/image-20261004152326754.png)
 
 ---
 
@@ -621,7 +632,8 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 
 - Value: current RPM
 - Empty state: "--" 
-- 2x1 displays the average
+- 2x1 displays the average and max
+- A watermark graph of the historical Cadence for the ride. The horizontal bands in the chart show the cadence zones.
 - Sheet: Ride metrics
 
 ---
@@ -631,6 +643,7 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 **Sizes:** 1x1
 
 - Value with unit (km or mi); from active speed source (BLE wheel or GPS)
+- If on a route, show the distance remaining in smaller text under the value. 
 - Sheet: Ride metrics
 
 ---
@@ -639,7 +652,7 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 
 **Sizes:** 2x2, 2x1, 1x1
 
-- 24pt-wide vertical strip on the right edge representing the road behind the rider
+- 24pt-wide vertical strip on the right edge representing the road behind the rider. Technically not a widget.
 - Vehicles as car icons; vertical position = relative distance (closer = lower); icon color = closing speed severity
 - Background: `brRatingOkayBg` / `brRatingBadBg` by alert level; neutral/transparent at L0
 - Layer naming in Design.sketch: background (strip bg), `critical` (L3 vehicle icon), `warning` (L2 vehicle icon), `car` (L1/neutral vehicle icon)
@@ -698,6 +711,7 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 **Sizes:** 2x2, 2x1, 1x1
 
 - Current pace in min/mi or min/km (`UserProfile.preferredUnit`)
+- Pace should be shown as an average for the last 30s rather than a live pace. Updating it every second is  noisy.
 - Sheet: Ride metrics
 
 ---
@@ -706,11 +720,19 @@ This version of the speed widget uses a speedometer like dial to visualize the c
 
 **Sizes:** 2x2, 2x1, 1x1
 
-- HR zone distribution chart: time spent in each zone for the current ride
+- HR zone distribution donut chart: time spent in each zone for the current ride. 
 - Time in zone accumulates locally from the HR readings the dashboard already classifies, not from HealthKit's `HKLiveWorkoutZoneUpdate`, since the app runs no iPhone workout session (PRD §9.4, #318)
 - Zone colors: `brHRZone1`–`brHRZone5`
 - Empty state when no HR source active: "--"
 - Sheet: Heart rate
+
+---
+
+#### W13 — Wind
+
+**Sizes:** 1x1
+
+- Shows only one thing, the wind speed, and direction oriented on the direction that the rider is riding in. That is to say if the wind is from the north and the rider is going east, the arrow should be pointing from the left. 
 
 ---
 
