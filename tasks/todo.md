@@ -35,7 +35,7 @@ Branch: `feat/387-elevation-widgets`
   - Grepped the logs to confirm every new suite ran.
 - **`MapWidgetAccessibilityTests` hangs locally**, alone and in the suite: `ActiveRideMapView.body` re-evaluates without end. Its doc comment records the same hang on CI, which skips it. Nothing in its path changed here, but it was **not** run on `main` to confirm the hang predates this branch.
 - **Sim drive.** A fresh install: start a ride, swipe to page 4, all five widgets present, Ascent opens the Elevation sheet. The first drive caught W18's no-route face titled "Elevation"; fixed, with a test case added.
-- **Not verified.** The barometric path. The simulator has no barometer, and `simctl location` gives no altitude, so the drive showed "—" for elevation and grade (the empty states). The barometer, the relative anchor and the 1 m floor need a stair or hill check on a device.
+- **Device check.** The simulator has no barometer, and `simctl location` gives no altitude, so the sim drive only showed the empty states. Brian verified the barometric path on a real device after the review fixes (2026-10-10).
 - **Follow-ups (not filed).** HealthKit route locations still write `verticalAccuracy: -1`, marking altitude unusable; fixing it needs a per-point accuracy column. `HKMetadataKeyElevationAscended`. Ascent and descent on S10/S15.
 
 ### Follow-up: /code-review xhigh
