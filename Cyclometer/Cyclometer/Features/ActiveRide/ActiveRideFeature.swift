@@ -135,7 +135,6 @@ struct ActiveRideFeature {
         var route: RouteReference? = nil
         var recordingState: RideRecordingState = .idle
         var elapsedSeconds: Int = 0
-        var speedKPH: Double = 0
         var heartRateBPM: Int = 0
         var hrZone: Int = 0
         /// Count of non-zero bpm readings applied to `heartRateBPM`, paired with
@@ -291,13 +290,9 @@ struct ActiveRideFeature {
         /// that change it. Kept over `SpeedFeature.historyWindow`, the speed watermark's own
         /// window, so the two share a time axis. Not persisted, like the watermark.
         var averageSpeedSamples: [SpeedSample] = []
-        // Canonical m/s view of the live speed for consumers (e.g. SpeedWidget)
-        // that convert to display units themselves. Uses Measurement so the
-        // KPH→MPS factor isn't hardcoded at the call site.
-        var speedMPS: Double {
-            Measurement(value: speedKPH, unit: UnitSpeed.kilometersPerHour)
-                .converted(to: .metersPerSecond).value
-        }
+        /// The displayed speed, for surfaces outside the dashboard (the mini-player): `SpeedFeature`'s
+        /// pick, so a wheel sensor wins over GPS here as it does on the dashboard (#383).
+        var speedMPS: Double { speed.speedMPS ?? 0 }
         var isRadarPaired: Bool = false
         var radarTargets: [RadarTarget] = []
         /// Raw BLE lifecycle, mirrors CadenceFeature/SpeedFeature's `connectionState`
@@ -1102,9 +1097,6 @@ struct ActiveRideFeature {
                 }
                 state.altitudeResolver.gpsFix(altitude: update.altitude, verticalAccuracy: update.verticalAccuracy)
                 state.heading = update.heading
-                // Display only. The ride's Avg/Max speed come from the displayed speed —
-                // `.elapsedTick` and `.speed` — not from GPS fixes (#381).
-                state.speedKPH = max(update.speed, 0) * 3.6
                 return .merge(
                     .send(.speed(.gpsSpeedReceived(update.speed))),
                     .send(.calibration(.locationUpdated(update))),
