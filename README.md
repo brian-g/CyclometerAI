@@ -246,11 +246,10 @@ The dashboard is the primary UI with the user while riding. It should be a confi
         * 10s power average
         * 60s power average
     * Ride time
-    * Elevation
-        * Show total ascent and decent in the 2x1 size.
-        * Only show accent in 1x1 size
-        * As a watermark, show the elevation profile of the ride
-    * Grade
+    * Ascent and Descent (1x1 each) — total climb and drop
+    * Grade (1x1) — signed percent over the last 100 m
+    * Elevation (2x1) — current elevation and grade over the ride's elevation profile
+    * Route Elevation (2x1) — the route's elevation profile, ridden part darker; Elevation without a route
     * Pace
     * Distance
     * Map

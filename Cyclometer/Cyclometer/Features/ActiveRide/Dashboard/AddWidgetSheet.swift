@@ -202,6 +202,12 @@ extension ActiveRideFeature.State {
         state.hrSampleSum = HeartRateSample.sampleHour.reduce(0) { $0 + Double($1.bpm) }
         state.maxHeartRateBPM = HeartRateSample.sampleHour.map(\.bpm).max() ?? 0
         state.hrSecondsTally = HeartRateSecondsTally(secondsByBPM: [125: 300, 145: 840, 157: 720, 168: 420, 180: 60])
+        // W14–W17's readings and watermark (#387): the sample hour at 200 m a minute.
+        state.altitudeSamples = AltitudeSample.sampleHour
+        for (minute, sample) in AltitudeSample.sampleHour.enumerated() {
+            state.elevation.record(altitude: sample.meters, distanceMeters: Double(minute) * 200, source: .barometric)
+        }
+        state.altitudeResolver.barometer(.absolute(meters: AltitudeSample.sampleHour.last?.meters ?? 0, accuracy: 1))
         return state
     }
 }

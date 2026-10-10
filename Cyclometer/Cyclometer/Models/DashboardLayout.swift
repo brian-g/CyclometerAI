@@ -346,7 +346,7 @@ enum DashboardLayoutValidator {
 
 extension DashboardLayout {
     /// What a new rider sees. Page 1 is the dashboard as built before #139, which differs from
-    /// UX.md's S05.4 table (no radar cell; Cadence 2×1 on row 3). Pages 2–3 are a
+    /// UX.md's S05.4 table (no radar cell; Cadence 2×1 on row 3). Pages 2–4 are a
     /// temporary showcase that puts every widget on screen at every size it supports, until the
     /// spec settles page 2 (UX.md §S05 "Multiple pages": TBD).
     static let factory = DashboardLayout(pages: [
@@ -378,6 +378,14 @@ extension DashboardLayout {
             WidgetPlacement(DistanceDashboardWidget.self, size: .oneByOne, row: 1, column: 1),
             WidgetPlacement(HeartRateDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
             WidgetPlacement(HRZonesDashboardWidget.self, size: .twoByOne, row: 3, column: 0),
+        ]),
+        // Elevation (#387): page 3 has six cells free, one short.
+        DashboardPage(placements: [
+            WidgetPlacement(ElevationDashboardWidget.self, size: .twoByOne, row: 0, column: 0),
+            WidgetPlacement(RouteElevationDashboardWidget.self, size: .twoByOne, row: 1, column: 0),
+            WidgetPlacement(AscentDashboardWidget.self, size: .oneByOne, row: 2, column: 0),
+            WidgetPlacement(DescentDashboardWidget.self, size: .oneByOne, row: 2, column: 1),
+            WidgetPlacement(GradeDashboardWidget.self, size: .oneByOne, row: 3, column: 0),
         ]),
     ])
 }

@@ -394,29 +394,17 @@ enum RouteGeometry {
     /// same confident zero standing in for absent data that #211 had to unpick out of the
     /// track-point sentinels.
     ///
-    /// Hysteresis rather than a raw positive-delta sum: a move is banked only once it
-    /// clears `elevationNoiseThresholdMeters` from the last banked *reference*, which is
-    /// then moved. Filtering each delta individually instead would discard a real 500 m
-    /// climb sampled in 0.5 m steps; moving the reference accumulates that in full while
-    /// still rejecting jitter about a level road.
+    /// Hysteresis rather than a raw positive-delta sum, against `elevationNoiseThresholdMeters`:
+    /// `ElevationGainTally`, the rule the live ride's ascent uses too (#387).
     static func elevationGainLoss(_ coordinates: [RouteCoordinate]) -> (gain: Double, loss: Double)? {
         let elevations = coordinates.compactMap(\.elevationMeters)
-        guard elevations.count > 1, let first = elevations.first else { return nil }
+        guard elevations.count > 1 else { return nil }
 
-        var gain = 0.0
-        var loss = 0.0
-        var reference = first
-        for elevation in elevations.dropFirst() {
-            let delta = elevation - reference
-            if delta >= elevationNoiseThresholdMeters {
-                gain += delta
-                reference = elevation
-            } else if delta <= -elevationNoiseThresholdMeters {
-                loss -= delta
-                reference = elevation
-            }
+        var tally = ElevationGainTally()
+        for elevation in elevations {
+            tally.add(elevation, noiseMeters: elevationNoiseThresholdMeters)
         }
-        return (gain, loss)
+        return (tally.gainMeters, tally.lossMeters)
     }
 
     /// The route's elevation at `sampleCount` evenly spaced distances from start to finish — S20's

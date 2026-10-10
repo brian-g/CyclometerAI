@@ -54,6 +54,11 @@ enum DashboardWidgetCatalog {
         PaceDashboardWidget.self,
         DirectionsDashboardWidget.self,
         MapDashboardWidget.self,
+        AscentDashboardWidget.self,
+        DescentDashboardWidget.self,
+        GradeDashboardWidget.self,
+        ElevationDashboardWidget.self,
+        RouteElevationDashboardWidget.self,
     ]
 
     private static let byID = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })

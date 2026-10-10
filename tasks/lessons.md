@@ -748,3 +748,20 @@ cadence widget … I have drawn what I expect in the Sketch file under W12 - Zon
   sources"). If the Sketch MCP is down, say so at once and use the HTTP fallback (memory: sketch-mcp-http-fallback).
 - When a sibling already exists (Cadence ↔ Heart Rate: both sensor widgets with zones), build to the sibling's
   shape (window, chart treatment, sizes) unless told otherwise.
+
+---
+
+## Reach for the best sensor first, not the one already wired (2026-10-09, #387)
+
+**What happened.** #387 asked for Ascent, Descent, Grade and Elevation widgets. The app only had GPS altitude,
+so I recommended "GPS now, barometer later" and offered CMAltimeter as the costlier option. Brian: "I'm
+unimpressed that you took the easy way out and didn't use this from the start."
+
+**Why I was wrong.** The product is a premium bike computer; accuracy *is* the feature. GPS altitude is noisy by
+metres per fix, so ascent from it overcounts and grade over 100 m wanders — I knew that and said so in the very
+question that recommended it. Every supported iPhone has a barometer. "Consistent with what's already stored" is
+not a reason to keep storing the worse number.
+
+**Rule.** When a feature's accuracy depends on a sensor, find the best source the hardware has before planning,
+and plan on it. What's already wired is a fallback, not the default. Only offer the cheaper path as an option
+when it is genuinely good enough for the feature — never as the recommendation just because it is smaller.

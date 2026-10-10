@@ -409,8 +409,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
-            $0.altitude = 280.0
-            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
+            $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
@@ -467,8 +466,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
-            $0.altitude = 280.0
-            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
+            $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
@@ -505,8 +503,7 @@ struct ActiveRideFeatureLocationTests {
             // `isFixRecordable` false means `.elapsedTick` writes no track point either.
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.horizontalAccuracy = 13.2
-            $0.altitude = 280.0
-            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
+            $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.heading = 192.0
             $0.speedKPH = 8.5 * 3.6
         }
@@ -546,6 +543,7 @@ struct ActiveRideFeatureLocationTests {
         store.exhaustivity = .off
 
         await store.send(.locationUpdated(Self.sampleUpdate))
+        await store.send(.elapsedTick)
 
         #expect(store.state.altitudeSamples == [recent, AltitudeSample(time: testDate, meters: 280.0)])
     }
@@ -564,6 +562,7 @@ struct ActiveRideFeatureLocationTests {
         )
 
         await store.send(.locationUpdated(noAltitude))
+        await store.send(.elapsedTick)
 
         #expect(store.state.altitudeSamples.isEmpty)
     }
@@ -574,8 +573,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
-            $0.altitude = 280.0
-            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
+            $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
@@ -613,7 +611,7 @@ struct ActiveRideFeatureLocationTests {
             $0.coordinate = Coordinate(latitude: 44.0, longitude: -90.0)
             // The track does NOT grow while paused — it stays at the single point
             // recorded during the active update above.
-            $0.altitude = 300.0
+            $0.altitudeResolver.gpsFix(altitude: 300.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 3.0
             $0.heading = 45.0
             // The live speed follows the fix, but the ride's average and max don't: paused
@@ -657,8 +655,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.locationUpdated(invalidUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
-            $0.altitude = 280.0
-            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
+            $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
@@ -1855,8 +1852,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.locationUpdated(update)) {
             $0.coordinate = Coordinate(latitude: 43.0, longitude: -89.0)
             $0.trackSegments = [[Coordinate(latitude: 43.0, longitude: -89.0)]]
-            $0.altitude = 280.0
-            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
+            $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
@@ -1882,6 +1878,9 @@ struct ActiveRideFeatureStateMachineTests {
             // Avg/Max speed are sampled here, not from the fix above (#381).
             $0.speedSampleCount = 1
             $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 8.0))
+            // The fix's altitude, sampled once a recorded second (#387).
+            $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
+            $0.elevation.record(altitude: 280.0, distanceMeters: 8.0, source: .gps)
         }
         await store.receive(\.trackRecorder.timerTick)
     }

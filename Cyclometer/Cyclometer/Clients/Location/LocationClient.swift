@@ -15,6 +15,8 @@ struct Coordinate: Sendable, Equatable, Hashable {
 struct LocationUpdate: Sendable, Equatable {
     let coordinate: Coordinate
     let altitude: Double?             // meters above sea level; nil when CoreLocation marks it invalid
+    /// Metres, one sigma; nil exactly when `altitude` is. Defaulted so a test fix needn't say.
+    var verticalAccuracy: Double? = nil
     let speed: Double                 // m/s; -1 if invalid
     let horizontalAccuracy: Double    // meters; lower is better
     let heading: Double               // degrees from true north (0–360); -1 if unavailable
@@ -33,6 +35,7 @@ extension LocationUpdate {
                 longitude: location.coordinate.longitude
             ),
             altitude: location.verticalAccuracy < 0 ? nil : location.altitude,
+            verticalAccuracy: location.verticalAccuracy < 0 ? nil : location.verticalAccuracy,
             speed: location.speed,
             horizontalAccuracy: location.horizontalAccuracy,
             heading: location.course,
