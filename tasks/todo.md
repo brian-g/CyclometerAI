@@ -1,3 +1,22 @@
+# #404 — Mini-player route progress ring is never shown
+
+Plan: /Users/brian/.claude/plans/404-piped-perlis.md
+Branch: `fix/404-mini-player-route-progress`
+
+- [x] 1. `AppView`: pass `ride.navigation.routeProgressFraction` to the accessory
+- [x] 2. Snapshot test MARK comment no longer says the glyph is the only reachable state
+- [x] 3. `NavigationFeatureTests`: `routeProgressFraction` cases + `== 1` at route end
+- [x] 4. Build + targeted tests + full unit suite
+
+## Review
+
+- **Fix.** `AppView` passes `ride.navigation.routeProgressFraction` instead of `nil`. The ring shows while a route is followed; the bicycle glyph shows with no route, turn-by-turn off, or before the first matched fix. No view or layout change.
+- **Tests.** New `routeProgressFraction()`: nil with no route, nil before a fix, nil with turn-by-turn off, 0.5 at halfway, 1 when clamped past the end. `reachingTheEndStopsCleanly` now checks the ring reads 1 when the route finishes 20 m short of its end. The AppView line itself isn't unit-tested, same as #383. Snapshots are unchanged: both accessory states were already covered.
+- **Stale build.** The first runs used a test binary from 15:30. The app rebuilt; the test target didn't. All results below come from a fresh `-derivedDataPath` with `COMPILATION_CACHE_ENABLE_CACHING=NO`.
+- **Results.** Full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests` (known local hangs): 1950 passed, 0 failed. `PersistenceClientTests` alone: 47 passed.
+- **Spec drift, not changed.** UX.md §S05.3 Layout still says no route → "ring shows empty"; the resolved OQ and the code use the bicycle glyph.
+
+
 # #383 — Mini-player speed follows the wheel sensor (part 1 only)
 
 Plan: /Users/brian/.claude/plans/rosy-swinging-corbato.md

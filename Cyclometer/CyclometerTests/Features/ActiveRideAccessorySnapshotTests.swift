@@ -33,7 +33,7 @@ final class ActiveRideAccessorySnapshotTests: XCTestCase {
         .preferredColorScheme(scheme)
     }
 
-    // MARK: - No route → bicycle glyph (the only state reachable today)
+    // MARK: - No route → bicycle glyph
 
     func testNoRouteMetric() {
         assertSnapshot(of: strip(), as: .image(layout: canvas))
