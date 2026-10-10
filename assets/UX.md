@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-10 — §W1's above/below-average indicator moved from AVG to the speed (#81): ▲/▼ as W4's, right of the value and level with its top, at every size.  
 **Updated:** 2026-10-04—  Added details for additional widgets.
 **Updated:** 2026-10-09 — §W14–§W18 added and built (#387): Ascent, Descent and Grade (1×1), Elevation and Route Elevation (2×1), and the Elevation sheet they share. Altitude now comes from the barometer.  
 **Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink into hairline-bordered cards (glass frames bled into each other, so they were dropped at review), and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
@@ -575,9 +576,10 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 **Sizes:** 2x2, 2x1, 1x1
 
 - Primary value: `large-hero`; unit: km/h or mph (`UserProfile.preferredUnit`)
+- Trend, at every size (#81): a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the primary value, level with the tops of its digits, when current speed is above or below the ride average by more than 0.5 km/h. Hidden when even or with no reading. The unit doesn't move
 - Watermark speed history graph (area line behind the numbers)
 - 2x1, 2x2: Max speed for ride (`small-hero`, labeled "MAX")
-- 2x1, 2x2: Current average speed with directional arrow indicating above/below average (`small-hero`, labeled "AVG")
+- 2x1, 2x2: Current average speed (`small-hero`, labeled "AVG")
 - 2x2 only: Ride duration (`medium-hero`)
 - 2x2 only: Ride distance (`medium-hero`)
 - Sheet: Ride metrics. As built (#144), W1, W2, W3, W6 and W11 open the one sheet, at the medium detent and expandable to large. **Distance** comes first, on its own. **Speed:** a chart of the last hour's speed over a faint elevation area (the Cadence sheet's treatment), then current, average and max. **Pace:** a chart of the same hour, faster plotted higher, with a gap wherever the rider stopped, then current and average. **Time:** a moving vs stopped donut, then Moving Time (W3's) and Ride Time (W1's Time). A value with no source reads "—", including pace, where W11's own card shows "--:--". W5 is tagged the same but keeps its own Cadence sheet (#147), whose content is cadence-specific

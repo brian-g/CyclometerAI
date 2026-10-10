@@ -88,6 +88,16 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
         )
     }
 
+    // MARK: - Trend indicator (#81)
+
+    func testSpeedTrendDown() {
+        // ~22 km/h against a 28.4 km/h average → ▼ right of the speed, level with its digits.
+        assertSnapshot(
+            of: make2x2(speed: 6.11),
+            as: .image(layout: canvas2x2)
+        )
+    }
+
     // MARK: - 2×1 (single grid row: 393×96)
 
     func testTwoByOneLayout() {
@@ -113,6 +123,24 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
         let canvas: SwiftUISnapshotLayout = .fixed(width: 196, height: 96)
         let widget = SpeedWidget(
             speed: 7.89,
+            speedHistory: [],
+            activeSpeedSource: .gps,
+            distance: 12_300,
+            elapsed: 2340,
+            averageSpeed: 7.89,
+            maxSpeed: 9.47,
+            unit: .metric,
+            size: .oneByOne
+        )
+        .frame(width: 196, height: 96)
+        assertSnapshot(of: widget, as: .image(layout: canvas))
+    }
+
+    func testSpeedOneByOneTrendUp() {
+        // 1×1 shows no AVG, but the speed still carries the ▲ against it (#81).
+        let canvas: SwiftUISnapshotLayout = .fixed(width: 196, height: 96)
+        let widget = SpeedWidget(
+            speed: 9.0,
             speedHistory: [],
             activeSpeedSource: .gps,
             distance: 12_300,

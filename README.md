@@ -236,7 +236,8 @@ The dashboard is the primary UI with the user while riding. It should be a confi
     * Speed
         * Current speed is prominent
         * A watermarked graph in the widget should show the speed history for the current ride. The max speed line should be shown as well as a line for the running average.
-        * Average is shown with indicator that displays if the current trend is up or down
+        * Current speed shows an indicator for whether it is above or below the average
+        * Average
         * Max
     * Cadence
         * Current cadence

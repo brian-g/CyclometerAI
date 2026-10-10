@@ -116,6 +116,17 @@ struct SpeedWidget: View {
                 .dDINCondensed(size: fontSize, relativeTo: .largeTitle)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
+                // Measured from the rendered baseline, so it holds when the text scales down.
+                .alignmentGuide(.heroCapTop) { $0[.firstTextBaseline] * (1 - Self.capHeightToAscent) }
+                // Right of the value, level with the tops of its digits. An overlay, so the unit
+                // keeps its place (#81).
+                .overlay(alignment: Alignment(horizontal: .trailing, vertical: .heroCapTop)) {
+                    trendIndicator
+                        .font(.title3)
+                        .alignmentGuide(.trailing) { $0[.leading] - Spacing.xs }
+                        // The glyph's top, not its frame's: a symbol's frame has room above it.
+                        .alignmentGuide(.heroCapTop) { $0[.firstTextBaseline] - Self.trendCapHeight }
+                }
             if speed != nil {
                 Text(unit.speedLabel)
                     .font(.footnote)
@@ -130,7 +141,6 @@ struct SpeedWidget: View {
         HeroNumber(displayAvg, unit: "") { Text("Avg").font(.caption) }
             .heroNumberSize(.small)
             .layout(.vertical)
-            .heroAccessory { trendChevron }
     }
 
     private var maxStat: some View {
@@ -197,16 +207,14 @@ struct SpeedWidget: View {
         return parts.joined(separator: ", ")
     }
 
-    // MARK: - Trend Chevron
+    // MARK: - Trend Indicator
 
     private enum Trend: Equatable { case up, even, down }
 
-    /// Minimum delta from the ride average before the trend chevron points
-    /// up/down. Compared in canonical m/s (≈0.5 km/h) so sensitivity is
+    /// Minimum delta from the ride average before the trend indicator shows
+    /// ▲/▼. Compared in canonical m/s (≈0.5 km/h) so sensitivity is
     /// identical regardless of the display unit.
     private static let trendThresholdMPS = 0.14
-    /// Chevron tilt (degrees) for up (negative) / down (positive) trend.
-    private static let chevronTiltDegrees: Double = 45
 
     private var trend: Trend {
         guard let s = speed, averageSpeed > 0 else { return .even }
@@ -216,22 +224,38 @@ struct SpeedWidget: View {
         return .even
     }
 
-    private var trendChevron: some View {
-        let tilt = trend == .up ? -Self.chevronTiltDegrees
-                 : trend == .down ? Self.chevronTiltDegrees : 0
-        return Image(systemName: "chevron.forward.circle.fill")
-            .foregroundStyle(
-                trend == .up   ? Color.cyRatingGood :
-                trend == .down ? Color.cyRatingBad  : Color.secondary
-            )
-            .rotationEffect(.degrees(tilt))
-            .animation(.easeInOut(duration: 0.3), value: trend)
+    /// Current speed against the ride average, as W4's ▲/▼; hidden when even or with no reading.
+    @ViewBuilder
+    private var trendIndicator: some View {
+        switch trend {
+        case .up:   Image(systemName: "arrowtriangle.up.fill").foregroundStyle(Color.cyRatingGood)
+        case .down: Image(systemName: "arrowtriangle.down.fill").foregroundStyle(Color.cyRatingBad)
+        case .even: EmptyView()
+        }
     }
+
+    /// Cap height of the indicator's `.title3`, which its ▲/▼ is drawn to.
+    private static var trendCapHeight: CGFloat { UIFont.preferredFont(forTextStyle: .title3).capHeight }
+
+    /// D-DIN's cap height as a share of its ascent: where the digits' tops sit between the hero's
+    /// top and its baseline, at any size.
+    private static let capHeightToAscent: CGFloat = {
+        guard let font = UIFont(name: AppFonts.dDINCondensedPostScriptName, size: 100) else { return 0 }
+        return font.capHeight / font.ascender
+    }()
 
     // Scale the large-hero font proportionally to the available slot height.
     private func heroFontSize(for height: CGFloat) -> CGFloat {
         max(Self.heroMinFont, Self.heroNominalFont * (height / Self.heroNominalHeight))
     }
+}
+
+private extension VerticalAlignment {
+    /// The top of the speed hero's digits.
+    enum HeroCapTop: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat { d[.top] }
+    }
+    static let heroCapTop = VerticalAlignment(HeroCapTop.self)
 }
 
 // MARK: - Speed History Watermark Chart
