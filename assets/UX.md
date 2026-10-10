@@ -1284,7 +1284,7 @@ ContentUnavailableView {
 
 ### Layout
 
-> *Refer to S21 - Live Activity in Sketch*
+> *Refer to S22 - Live Activity in Sketch*
 
 ### Key Components
 
