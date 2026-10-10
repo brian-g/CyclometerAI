@@ -105,6 +105,16 @@ struct WidgetAccessibilityTests {
         #expect(HRZonesWidget(zone: 0, source: .none).accessibilityValue == "No HR source")
     }
 
+    @Test func elevationReadsInWordsWithNoDash() {
+        #expect(ElevationTotalWidget(title: "Ascent", meters: 412, unit: .imperial).accessibilityValue == "1,352 feet")
+        #expect(GradeWidget(percent: 4.4).accessibilityValue == "4 percent")
+        #expect(GradeWidget(percent: nil).accessibilityValue == "No reading")
+        #expect(ElevationWidget(altitude: nil, gradePercent: nil, history: [], unit: .metric).accessibilityValue
+            == "No reading")
+        #expect(ElevationWidget(altitude: 284, gradePercent: nil, history: [], unit: .metric).accessibilityValue
+            == "284 meters")
+    }
+
     // MARK: - Element shape and activation
 
     /// Map's run in `MapWidgetAccessibilityTests`, which CI skips.
@@ -216,6 +226,7 @@ private final class LiveRide {
 /// The widgets that adopt `.widgetDetail`.
 enum TappableWidget: CaseIterable, CustomTestStringConvertible {
     case map, cadence, speed, averageSpeed, duration, distance, pace, directions, heartRate, hrZones
+    case ascent, descent, grade, elevation, routeElevation, routeElevationWithoutRoute
 
     var testDescription: String { title }
 
@@ -234,6 +245,11 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .directions: "Directions"
         case .heartRate: "Heart Rate"
         case .hrZones: "HR Zones"
+        case .ascent: "Ascent"
+        case .descent: "Descent"
+        case .grade: "Grade"
+        case .elevation: "Elevation"
+        case .routeElevation, .routeElevationWithoutRoute: "Route Elevation"
         }
     }
 
@@ -250,6 +266,11 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .directions: "No route"
         case .heartRate: "156 beats per minute, zone 3"
         case .hrZones: "Zone 3"
+        case .ascent: "412 meters"
+        case .descent: "368 meters"
+        case .grade: "-3 percent"
+        case .elevation: "284 meters, grade 4 percent"
+        case .routeElevation, .routeElevationWithoutRoute: "284 meters, grade 4 percent"
         }
     }
 
@@ -279,6 +300,24 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
             AnyView(HeartRateWidget(bpm: 156, zone: 3, source: .bleStrap))
         case .hrZones:
             AnyView(HRZonesWidget(zone: 3, source: .bleStrap))
+        case .ascent:
+            AnyView(ElevationTotalWidget(title: "Ascent", meters: 412, unit: .metric))
+        case .descent:
+            AnyView(ElevationTotalWidget(title: "Descent", meters: 368, unit: .metric))
+        case .grade:
+            AnyView(GradeWidget(percent: -3.2))
+        case .elevation:
+            AnyView(ElevationWidget(altitude: 284, gradePercent: 4.4, history: [], unit: .metric))
+        case .routeElevation:
+            AnyView(RouteElevationWidget(
+                altitude: 284, gradePercent: 4.4, routeProfile: [250, 300, 260], routeProgress: 0.5,
+                history: [], unit: .metric
+            ))
+        case .routeElevationWithoutRoute:
+            // W17's face, still named for W18.
+            AnyView(RouteElevationWidget(
+                altitude: 284, gradePercent: 4.4, routeProfile: nil, routeProgress: nil, history: [], unit: .metric
+            ))
         }
     }
 }

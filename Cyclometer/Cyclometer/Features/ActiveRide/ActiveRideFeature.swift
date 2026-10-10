@@ -113,6 +113,7 @@ struct ActiveRideFeature {
     @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.variaRadarClient) var variaRadarClient
     @Dependency(\.locationClient) var locationClient
+    @Dependency(\.altimeterClient) var altimeterClient
     @Dependency(\.permissionsClient) var permissionsClient
     @Dependency(\.healthKitClient) var healthKitClient
     @Dependency(\.date) var date
@@ -331,13 +332,16 @@ struct ActiveRideFeature {
         /// coordinates are transient and a resumed ride redraws its map from empty, so
         /// after a resume the two deliberately disagree.
         var trackSegmentIndex: Int = 0
-        /// Nil until a fix with a valid altitude, and after any fix without one (#303): an
-        /// invalid fix is never covered with the altitude before it, since recording that
-        /// would fabricate a measurement.
-        var altitude: Double?
-        /// Valid altitudes from the last `CadenceFeature.historyWindow` while riding, so the
-        /// cadence sheet can draw elevation behind the cadence trace on the same time axis.
+        /// The barometer where there is one, GPS where there isn't (#387): what `altitude` reads.
+        var altitudeResolver = AltitudeResolver()
+        /// The ride's altitude everywhere — dashboard, track point, GPX `<ele>`. Nil until a source
+        /// has given one, and after a GPS fix without one while GPS is the source (#303).
+        var altitude: Double? { altitudeResolver.altitude }
+        /// `altitude` once a recorded second over the last `CadenceFeature.historyWindow`: the
+        /// elevation behind the sheets' charts and W17/W18's watermark (#387).
         var altitudeSamples: [AltitudeSample] = []
+        /// Ascent, descent and grade (#387), fed once a recorded second.
+        var elevation = ElevationTracker()
         var heading: Double = -1
         var horizontalAccuracy: Double = 0
         /// Whether the fix behind `coordinate` is good enough to record (#210). Sticky
@@ -446,6 +450,12 @@ struct ActiveRideFeature {
         case trackRecorder(TrackPointRecorderFeature.Action)
         case locationUpdated(LocationUpdate)
         case locationAuthorizationResult(PermissionState)
+        case altimeterReading(AltimeterReading)
+        /// The altimeter stream finished — no barometer, no Motion access, or an error — so
+        /// altitude comes from GPS from here on (#387).
+        case altimeterEnded
+        /// A resumed ride's elevation before the kill, from its saved track (#387).
+        case elevationSeeded(ElevationTracker.Seed)
 
         @CasePathable
         enum FinishAlert: Equatable {
@@ -559,7 +569,17 @@ struct ActiveRideFeature {
                             await send(.locationUpdated(update))
                         }
                         await locationClient.stopUpdates()
-                    }
+                    },
+                    .run { [altimeterClient] send in
+                        var hadReading = false
+                        for await reading in altimeterClient.updates() {
+                            hadReading = true
+                            await send(.altimeterReading(reading))
+                        }
+                        // A stream that never gave a reading leaves GPS in charge already.
+                        if hadReading { await send(.altimeterEnded) }
+                    },
+                    isResuming ? seedElevation(rideId: state.rideId) : .none
                 )
             case .dashboardPageChanged(let page):
                 state.dashboardPage = page
@@ -900,6 +920,17 @@ struct ActiveRideFeature {
                 } else {
                     state.zeroSpeedSeconds += 1
                 }
+                // Here rather than on each reading: one sample a second whichever source is live,
+                // as the track point below records it.
+                if let altitude = state.altitude {
+                    let now = date.now
+                    state.altitudeSamples.append(AltitudeSample(time: now, meters: altitude))
+                    let cutoff = now.addingTimeInterval(-Self.altitudeHistoryWindow)
+                    state.altitudeSamples.removeAll { $0.time < cutoff }
+                    state.elevation.record(
+                        altitude: altitude, distanceMeters: state.distanceMeters, source: state.altitudeResolver.source
+                    )
+                }
 
                 var effects: [Effect<Action>] = []
 
@@ -1069,12 +1100,7 @@ struct ActiveRideFeature {
                         """
                     )
                 }
-                state.altitude = update.altitude
-                if state.recordingState == .active, let altitude = update.altitude {
-                    state.altitudeSamples.append(AltitudeSample(time: date.now, meters: altitude))
-                    let cutoff = date.now.addingTimeInterval(-Self.altitudeHistoryWindow)
-                    state.altitudeSamples.removeAll { $0.time < cutoff }
-                }
+                state.altitudeResolver.gpsFix(altitude: update.altitude, verticalAccuracy: update.verticalAccuracy)
                 state.heading = update.heading
                 // Display only. The ride's Avg/Max speed come from the displayed speed —
                 // `.elapsedTick` and `.speed` — not from GPS fixes (#381).
@@ -1086,6 +1112,15 @@ struct ActiveRideFeature {
                     // off, never involve navigation at all (#197).
                     state.navigation.isFollowingRoute ? .send(.navigation(.locationUpdated(update))) : .none
                 )
+            case .altimeterReading(let reading):
+                state.altitudeResolver.barometer(reading)
+                return .none
+            case .altimeterEnded:
+                state.altitudeResolver.barometerEnded()
+                return .none
+            case .elevationSeeded(let seed):
+                state.elevation.seed(seed)
+                return .none
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = status.isGranted
                 return .none
@@ -1282,6 +1317,17 @@ struct ActiveRideFeature {
     /// misreported as having passed. Shared by both call sites (#172 review).
     private func resetVehiclePassTracking(_ state: inout State) {
         state.vehiclePassTracking = [:]
+    }
+
+    /// A resumed ride's elevation from before the kill, read back from its saved track (#387). A
+    /// failed read leaves it at what the ride has done since the resume.
+    private func seedElevation(rideId: UUID) -> Effect<Action> {
+        .run { [persistenceClient] send in
+            guard let points = try? await persistenceClient.fetchTrackPoints(rideId),
+                  let seed = ElevationTracker.Seed(savedAltitudes: points.compactMap(\.altitudeMeters))
+            else { return }
+            await send(.elevationSeeded(seed))
+        }
     }
 
     /// Builds the per-second track point for `TrackPointRecorderFeature` (#170). Nil

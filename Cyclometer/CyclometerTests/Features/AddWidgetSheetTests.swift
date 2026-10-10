@@ -11,14 +11,16 @@ struct AddWidgetSheetTests {
     func entriesLargestFirst() {
         #expect(names(AddWidgetEntry.entries(in: .ride)) == [
             "speed twoByTwo",
-            "speed twoByOne", "cadence twoByOne",
+            "speed twoByOne", "cadence twoByOne", "elevation twoByOne",
             "speed oneByOne", "averageSpeed oneByOne", "duration oneByOne", "distance oneByOne",
-            "cadence oneByOne", "pace oneByOne",
+            "cadence oneByOne", "pace oneByOne", "ascent oneByOne", "descent oneByOne", "grade oneByOne",
         ])
         #expect(names(AddWidgetEntry.entries(in: .heartRate)) == [
             "heartRate twoByOne", "hrZones twoByOne", "heartRate oneByOne", "hrZones oneByOne",
         ])
-        #expect(names(AddWidgetEntry.entries(in: .route)) == ["map twoByTwo", "directions twoByOne", "directions oneByOne"])
+        #expect(names(AddWidgetEntry.entries(in: .route)) == [
+            "map twoByTwo", "directions twoByOne", "routeElevation twoByOne", "directions oneByOne",
+        ])
     }
 
     /// Issue AC: every widget appears, at every size it supports — once.
@@ -37,13 +39,17 @@ struct AddWidgetSheetTests {
             ["speed twoByTwo"],
             ["speed twoByOne"],
             ["cadence twoByOne"],
+            ["elevation twoByOne"],
             ["speed oneByOne", "averageSpeed oneByOne"],
             ["duration oneByOne", "distance oneByOne"],
             ["cadence oneByOne", "pace oneByOne"],
+            ["ascent oneByOne", "descent oneByOne"],
+            ["grade oneByOne"],
         ])
         #expect(AddWidgetEntry.rows(AddWidgetEntry.entries(in: .route)).map(names) == [
             ["map twoByTwo"],
             ["directions twoByOne"],
+            ["routeElevation twoByOne"],
             ["directions oneByOne"],
         ])
     }

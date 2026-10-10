@@ -1,3 +1,43 @@
+# #387 — Ascent, Descent, Grade, Elevation, Route Elevation widgets + barometric altimeter
+
+Plan: /Users/brian/.claude/plans/logical-stargazing-reef.md
+Branch: `feat/387-elevation-widgets`
+
+- [x] 1. `AltimeterClient` + `LocationUpdate.verticalAccuracy` + pure `AltitudeResolver`
+- [x] 2. `ActiveRideFeature`: altimeter stream, resolver drives `altitude`, samples on tick
+- [x] 3. Pure `ElevationTracker` (ascent/descent hysteresis, grade window) + resume seed
+- [x] 4. `NavigationRoute.elevationProfile`
+- [x] 5. Widgets W14–W18 + catalog + factory page 4
+- [x] 6. Elevation sheet
+- [x] 7. Tests: pure, reducer, catalog, a11y, snapshots
+- [x] 8. Specs: UX W14–W18, README, PRD §8.7, TCA.md
+- [x] 9. Unit suite green; sim drive
+
+## Review
+
+- **Altitude source.** `AltimeterClient` streams `CMAltimeter`: absolute altitude where the device has it, relative otherwise. Its stream finishes at once with no barometer (the simulator) or with Motion access denied. The pure `AltitudeResolver` decides what `state.altitude` is: absolute as is; relative added to an anchor from the first GPS fix with ≤ 10 m vertical accuracy, continuing from that fix's value so there is no step; GPS when there is no barometer or its stream ends. `makeTrackPoint` already read `state.altitude`, so the track, the GPX `<ele>` and the energy estimate now carry barometric altitude with no further change. `LocationUpdate` gained `verticalAccuracy` (nil exactly when `altitude` is).
+- **Samples move to the tick.** `altitudeSamples` is appended on `.elapsedTick` rather than on each fix: one sample a second from whichever source is live.
+- **Ascent, descent, grade.** The pure `ElevationTracker` is fed once a recorded second. Ascent and descent use hysteresis through `ElevationGainTally`, which `RouteGeometry.elevationGainLoss` now uses too, so the rule lives in one place. The floor is 1 m on the barometer and 3 m on GPS. Grade is rise over run across the trailing 100 m (`RouteTerrain.gradeWindowMeters`), nil before that, held while stopped; anything past 25% is dropped. The tracker also keeps steepest climb and descent, and highest and lowest.
+- **Crash resume.** `.task` reads the saved track and seeds ascent, descent, highest and lowest using GPS's floor. The seed is kept apart from live tracking, so it can't race the ticks.
+- **Widgets.** W14 Ascent, W15 Descent, W16 Grade (1×1); W17 Elevation and W18 Route Elevation (2×1). W18 draws the whole route by distance, ridden part darker; with turn-by-turn off nothing is marked ridden; with no route it shows W17's face under its own title. All five open the new Elevation sheet. They are in the S08 catalog and on a new factory showcase page 4.
+- **Specs.** UX §W14–§W18 and the sheet; README widget list; PRD §8.7 `<ele>` source; TCA.md client list, `LocationUpdate` and the §8 tree.
+- **Tests.**
+  - Pure: `ElevationGainTally`, `ElevationTracker`, `AltitudeResolver`.
+  - Reducer: `ActiveRideElevationTests` (4): barometer altitude recorded, GPS fallback, accumulation and pause, resume seed.
+  - `ElevationMetricsTests`, plus adapter observation tests.
+  - Accessibility: 6 new `TappableWidget` cases, including W18 without a route.
+  - Snapshots: 15 widget and 3 sheet references, all looked at. The S08 catalog canvas went from 1040 to 1400 pt to keep the Heart Rate header in frame, and was re-recorded.
+  - Two existing tests updated for the new shape (`LocationClientTests`, `zeroSpeedCounterResetsOnSpeed`).
+- **Results.**
+  - Full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests`: 1921 passed and 2 failed. Both failures were tests asserting the old shape; fixed, and their suites rerun at 43/0.
+  - `PersistenceClientTests` alone: 47/0.
+  - Accessibility and elevation snapshot suites rerun after the W18 title fix: 73 passed. One failed, the intended re-record of `testRouteElevationNoRoute`.
+  - Grepped the logs to confirm every new suite ran.
+- **`MapWidgetAccessibilityTests` hangs locally**, alone and in the suite: `ActiveRideMapView.body` re-evaluates without end. Its doc comment records the same hang on CI, which skips it. Nothing in its path changed here, but it was **not** run on `main` to confirm the hang predates this branch.
+- **Sim drive.** A fresh install: start a ride, swipe to page 4, all five widgets present, Ascent opens the Elevation sheet. The first drive caught W18's no-route face titled "Elevation"; fixed, with a test case added.
+- **Not verified.** The barometric path. The simulator has no barometer, and `simctl location` gives no altitude, so the drive showed "—" for elevation and grade (the empty states). The barometer, the relative anchor and the 1 m floor need a stair or hill check on a device.
+- **Follow-ups (not filed).** HealthKit route locations still write `verticalAccuracy: -1`, marking altitude unusable; fixing it needs a per-point accuracy column. `HKMetadataKeyElevationAscended`. Ascent and descent on S10/S15.
+
 # #145 — Heart Rate detail sheet (W4, W12)
 
 Plan: /Users/brian/.claude/plans/serialized-sparking-mist.md

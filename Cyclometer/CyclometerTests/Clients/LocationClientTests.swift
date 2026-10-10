@@ -76,7 +76,10 @@ struct LocationClientTests {
 
     @Test("an altitude CoreLocation marks invalid arrives as nil, never as its 0 m")
     func invalidAltitudeIsNil() {
-        #expect(LocationUpdate(Self.clLocation(verticalAccuracy: -1)).altitude == nil)
+        let update = LocationUpdate(Self.clLocation(verticalAccuracy: -1))
+        #expect(update.altitude == nil)
+        // Nor its -1 accuracy, which could otherwise anchor the barometer (#387).
+        #expect(update.verticalAccuracy == nil)
     }
 
     @Test("a valid altitude arrives as measured, sea level included")
@@ -84,7 +87,7 @@ struct LocationClientTests {
         let update = LocationUpdate(Self.clLocation(verticalAccuracy: 3))
         #expect(update == LocationUpdate(
             coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
-            altitude: 0, speed: 8.5, horizontalAccuracy: 5, heading: 90,
+            altitude: 0, verticalAccuracy: 3, speed: 8.5, horizontalAccuracy: 5, heading: 90,
             timestamp: Date(timeIntervalSince1970: 1_000_000)
         ))
     }

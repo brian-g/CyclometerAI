@@ -96,6 +96,11 @@ enum UnitSystem: String, Equatable, Sendable, Codable, CaseIterable {
         Self.spoken(Measurement(value: distance(fromMeters: meters), unit: lengthUnit), fractionLength: 1)
     }
 
+    /// Elevation in words, whole metres or feet as the widgets show it: "312 meters" (#387).
+    func spokenElevation(fromMeters meters: Double) -> String {
+        Self.spoken(Measurement(value: elevation(fromMeters: meters), unit: elevationUnit), fractionLength: 0)
+    }
+
     private static func spoken<U: Dimension>(_ measurement: Measurement<U>, fractionLength: Int) -> String {
         measurement.formatted(.measurement(
             width: .wide,

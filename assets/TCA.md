@@ -3,6 +3,7 @@
 **Date:** 2026-05-21  
 **Updated:** 2026-05-22 - HKWorkout write at ride end; SyncClient + RideSummaryFeature spec; service sync from S10  
 **Updated:** 2026-09-30 - §3 and §8 rewritten to match the implemented tree (#339, #342)  
+**Updated:** 2026-10-09 - `AltimeterClient` and `LocationUpdate.verticalAccuracy` (#387)  
 **Status:** Draft — Ready for Engineering Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
 **Companion Documents:** `PRD.md §11`, `BLE.md`, `DataModel.md`
@@ -52,6 +53,7 @@ All side effects are injected as `@Dependency` values. No feature directly impor
 @DependencyClient struct BluetoothClient        // See BLE.md §7
 @DependencyClient struct HealthKitClient
 @DependencyClient struct LocationClient
+struct AltimeterClient                          // #387: CMAltimeter readings; AltitudeResolver picks the ride's altitude
 @DependencyClient struct HapticClient
 @DependencyClient struct AudioAlertClient
 @DependencyClient struct PersistenceClient
@@ -116,7 +118,8 @@ struct LocationClient: Sendable {
 
 struct LocationUpdate: Sendable {
     let coordinate: Coordinate
-    let altitude: Double
+    let altitude: Double?             // nil when CoreLocation marks it invalid (#303)
+    var verticalAccuracy: Double?     // #387: what may anchor the relative barometer
     let speed: Double          // m/s (-1 if invalid)
     let horizontalAccuracy: Double
     let heading: Double        // degrees; -1 if unavailable
@@ -1000,6 +1003,8 @@ Cyclometer/
 │   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12), HeartRateSheet — HR state lives
 │   │   │                                  // on ActiveRideFeature (§3)
 │   │   ├── Cadence/                       // CadenceFeature, CadenceWidgetView (W5)
+│   │   ├── Elevation/                     // ElevationWidgetView (W14–W18), ElevationSheet (#387) —
+│   │   │                                  // altitude and ElevationTracker live on ActiveRideFeature
 │   │   ├── Map/                           // MapWidgetView (W8), ActiveRideMapView,
 │   │   │                                  // LiveMapCamera, MapSheetButtons
 │   │   ├── Navigation/                    // NavigationFeature, DirectionsWidgetView (W9),
@@ -1016,7 +1021,7 @@ Cyclometer/
 │   └── Onboarding/                        // Onboarding*, Welcome*, SensorPairing*
 │
 ├── Clients/                               // one folder per dependency client
-│   ├── Audio/  BLE/  Geocoding/  Haptics/  HealthKit/  Location/
+│   ├── Altimeter/  Audio/  BLE/  Geocoding/  Haptics/  HealthKit/  Location/
 │   ├── MapSnapshot/  Overpass/  Permissions/  Screen/
 │   ├── Persistence/                       // PersistenceClient, Ride/RoutePersistenceActor,
 │   │                                      // SwiftDataStack, CoreDataStack, RideDataBuffer,

@@ -3,6 +3,7 @@
 **Date:** 2026-09-17
 
 **Updated:** 2026-10-04—  Added details for additional widgets.
+**Updated:** 2026-10-09 — §W14–§W18 added and built (#387): Ascent, Descent and Grade (1×1), Elevation and Route Elevation (2×1), and the Elevation sheet they share. Altitude now comes from the barometer.  
 **Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink into hairline-bordered cards (glass frames bled into each other, so they were dropped at review), and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
 **Updated:** 2026-10-09 — §W4/§W12 built with the Heart rate sheet (#145). W4 is built as W5 Cadence: a last-hour watermark on zone bands, a trend ▲/▼, and Avg/Max at 2×1. W12 follows Design.sketch "W12 - Zones": a donut and the time in each zone. The sheet's chart is the Cadence sheet's, for heart rate. §W4's zone labels now use §S12's names.  
 **Updated:** 2026-10-02 — §S08 opens from an empty cell (#368): in edit mode each empty cell shows a dashed slot; tapping it lists only the sizes that fit with that cell as their top-left, and adds there.  
@@ -744,6 +745,58 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 **Sizes:** 1x1
 
 - Shows only one thing, the wind speed, and direction oriented on the direction that the rider is riding in. That is to say if the wind is from the north and the rider is going east, the arrow should be pointing from the left. 
+
+---
+
+#### W14 — Ascent
+
+**Sizes:** 1x1
+
+- Value: the ride's total climb, in m or ft (#387). Medium hero with its unit, as W6. Real at zero, as distance is
+- Altitude comes from the barometer (`CMAltimeter`), with GPS altitude only where there is none. Climb is banked with hysteresis, the rule S20 uses for a route's gain: past 1 m from the last banked height on the barometer, 3 m on GPS
+- A crashed ride that resumes picks up its climb from the saved track, since the `Ride` row stores none (#284)
+- Sheet: Elevation
+
+---
+
+#### W15 — Descent
+
+**Sizes:** 1x1
+
+- Value: the ride's total descent, as W14 (#387)
+- Sheet: Elevation
+
+---
+
+#### W16 — Grade
+
+**Sizes:** 1x1
+
+- Value: the road's slope over the last 100 m ridden (S20's grade window), signed whole percent: "+4 %" climbing, "-3 %" descending (#387). "—" until the ride has covered 100 m with an altitude
+- Holds while stopped. A grade steeper than 25% (`RideEnergy.maxPlausibleGrade`) is altitude noise, not road, and is dropped for the last believable one
+- Sheet: Elevation
+
+---
+
+#### W17 — Elevation
+
+**Sizes:** 2x1
+
+- Medium hero: current elevation, m or ft. On the right, a small hero: grade as W16 — the W5 2×1 arrangement (#387)
+- Watermark: the ride's elevation on W1's x-axis — the ride so far, up to the last hour, averaged into 60 points. A level ride is drawn flat rather than stretched: the y-axis never spans less than 3 m
+- Empty state: "—" for each value with no reading
+- Sheet: Elevation
+
+---
+
+#### W18 — Route Elevation
+
+**Sizes:** 2x1
+
+- Watermark: the whole route's elevation profile by distance, the part ridden darker than the part ahead (#387). With turn-by-turn off the route isn't matched, so nothing is marked ridden
+- The same heroes as W17
+- With no route, or a route whose file has no `<ele>`, it is W17
+- Sheet: Elevation. As built (#387), W14–W18 open the one sheet, at the medium detent and expandable to large: the last hour's elevation on the Ride Metrics time axis, then Current, Highest and Lowest; **Climbing**: Ascent and Descent; **Grade**: Current, Steepest Climb, Steepest Descent; and **Route**, with a route that has elevation: W18's profile
 
 ---
 

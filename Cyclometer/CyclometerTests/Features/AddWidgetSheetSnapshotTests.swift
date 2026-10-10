@@ -11,7 +11,7 @@ import ComposableArchitecture
 /// The sheet's toolbar isn't part of this: toolbars don't render in a hosted snapshot.
 final class AddWidgetSheetSnapshotTests: XCTestCase {
 
-    private let canvas: SwiftUISnapshotLayout = .fixed(width: 402, height: 1040)
+    private let canvas: SwiftUISnapshotLayout = .fixed(width: 402, height: 1400)
 
     private func makeCatalog(scheme: ColorScheme) -> some View {
         withDependencies {
@@ -30,7 +30,7 @@ final class AddWidgetSheetSnapshotTests: XCTestCase {
                     onAdd: { _ in }
                 )
             }
-            .frame(width: 402, height: 1040)
+            .frame(width: 402, height: 1400)
             .background(Color.cyBgPrimary)
             .preferredColorScheme(scheme)
         }

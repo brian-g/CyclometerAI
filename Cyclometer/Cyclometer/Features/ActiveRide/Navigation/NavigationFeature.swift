@@ -213,6 +213,15 @@ struct NavigationFeature {
         }
 
         var isTurnAlertActive: Bool { announcedManeuverIndex != nil }
+
+        /// How far along the route the rider is, 0–1: where W18 splits ridden from ahead (#387).
+        /// Nil while fixes aren't matched to the route, so with turn-by-turn off nothing is marked
+        /// ridden rather than a stale restored position.
+        var routeProgressFraction: Double? {
+            guard isFollowingRoute, let progressMeters, let total = activeRoute?.totalDistanceMeters, total > 0
+            else { return nil }
+            return isRouteComplete ? 1 : min(max(progressMeters / total, 0), 1)
+        }
     }
 
     enum Action: Equatable {
@@ -528,6 +537,9 @@ struct NavigationRoute: Equatable, Sendable {
     /// Whether the route ends where it starts (`NavigationFeature.loopClosureMeters`), so that its
     /// end is also its start. An out-and-back is one too.
     let isLoop: Bool
+    /// The route's elevation at `elevationProfileSamples` even distances, start to finish — W18's
+    /// profile (#387) — or nil for a file with no `<ele>`. Here so no frame pays for it.
+    let elevationProfile: [Double]?
 
     var totalDistanceMeters: Double { cumulativeDistances.last ?? 0 }
 
@@ -539,7 +551,12 @@ struct NavigationRoute: Equatable, Sendable {
         self.cumulativeDistances = RouteGeometry.cumulativeDistances(coordinates)
         self.maneuvers = maneuvers
         self.isLoop = RouteGeometry.distanceMeters([first, last]) <= NavigationFeature.loopClosureMeters
+        self.elevationProfile = RouteGeometry.elevationProfile(coordinates, sampleCount: Self.elevationProfileSamples)
     }
+
+    /// Twice the 2×1 watermark's resolution (`SpeedFeature.watermarkResolution`): a route is often
+    /// longer than an hour's riding, and its climbs shouldn't blur into one.
+    static let elevationProfileSamples = 120
 
     /// Derives the turns (#192) here, at load, rather than reading a stored copy — there is none,
     /// so a fix to the derivation reaches routes imported before it.

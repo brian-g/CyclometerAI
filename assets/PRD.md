@@ -534,7 +534,7 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 | Field | Source | GPX Element |
 |---|---|---|
 | Latitude, Longitude | CoreLocation | `<trkpt lat="..." lon="...">` |
-| Elevation | CoreLocation altitude | `<ele>` |
+| Elevation | Barometric altimeter (`CMAltimeter`); CoreLocation altitude where there is none (#387) | `<ele>` |
 | Timestamp | System clock (UTC) | `<time>` |
 | Heart Rate | Active HR source (BPM) | `<gpxtpx:hr>` |
 | Cadence | BLE cadence sensor (RPM) | `<gpxtpx:cad>` |
