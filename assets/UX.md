@@ -427,7 +427,7 @@ The accessory is enabled via:
 
 The accessory is a full-width horizontal strip. Internal layout (left to right):
 
-- **Leading progress ring** — `OpenRingProgressView`: a donut-style Swift Charts `SectorMark` showing route completion percentage. The visible arc spans 84% of the circle with a gap at the bottom; the completed segment uses `brPrimary` tint, the remaining segment uses `.secondary` at 22% opacity. The percentage integer is displayed in `.caption2.weight(.semibold)` at the center. When no route is loaded, progress is `0.0` (ring shows empty). Frame: 42×42pt.
+- **Leading progress ring** — `OpenRingProgressView`: a donut-style Swift Charts `SectorMark` showing route completion percentage. The visible arc spans 84% of the circle with a gap at the bottom; the completed segment uses `brPrimary` tint, the remaining segment uses `.secondary` at 22% opacity. The percentage integer is displayed in `.caption2.weight(.semibold)` at the center. When no route is being followed, a `figure.outdoor.cycle` SF Symbol in `brPrimary` replaces the ring. Frame: 42×42pt.
 - **Live stats** — two `HeroNumber` views at `.small` size (34pt D-DIN Condensed), `.horizontal` layout, showing current distance and current speed with units from `UserProfile.preferredUnit`. Stats update at 1Hz matching the dashboard.
 - **Spacer**
 
