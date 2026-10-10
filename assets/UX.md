@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-10 — Added S21 for the Live Activity.  
 **Updated:** 2026-10-10 — §W1's above/below-average indicator moved from AVG to the speed (#81): ▲/▼ as W4's, right of the value and level with its top, at every size.  
 **Updated:** 2026-10-04—  Added details for additional widgets.
 **Updated:** 2026-10-09 — §W14–§W18 added and built (#387): Ascent, Descent and Grade (1×1), Elevation and Route Elevation (2×1), and the Elevation sheet they share. Altitude now comes from the barometer.  
@@ -1273,6 +1274,24 @@ ContentUnavailableView {
 ### Open UX Questions
 - [x] Should weather be fetched live or cached at route-save time? The weather should be fetched live since the user is trying to plan a route.
 - [x] If the route has never been ridden, should Previous Rides be hidden or show an empty state? Hidden.
+
+------
+
+## S22 — Live Activity
+
+**Phase:** MVP  
+**Purpose:** Display of the active ride when the phone is locked.
+
+### Layout
+
+> *Refer to S21 - Live Activity in Sketch*
+
+### Key Components
+
+- Status: Displays one of the following depending on state: ride progress when route is loaded, the app icon otherwise. When paused, displays the pause icon. 
+- Ride duration
+- Current mileage
+- Current speed
 
 ---
 
