@@ -1321,10 +1321,15 @@ struct ActiveRideFeature {
 
     /// A resumed ride's elevation from before the kill, read back from its saved track (#387). A
     /// failed read leaves it at what the ride has done since the resume.
+    ///
+    /// A phone with a barometer most likely recorded the track from it, and the seed counts it on
+    /// the barometer's floor; GPS's coarser one would drop the short rollers the dashboard already
+    /// counted, and Ascent would go down across the resume.
     private func seedElevation(rideId: UUID) -> Effect<Action> {
-        .run { [persistenceClient] send in
+        .run { [persistenceClient, altimeterClient] send in
+            let source: AltitudeResolver.Source = altimeterClient.isAvailable() ? .barometric : .gps
             guard let points = try? await persistenceClient.fetchTrackPoints(rideId),
-                  let seed = ElevationTracker.Seed(savedAltitudes: points.compactMap(\.altitudeMeters))
+                  let seed = ElevationTracker.Seed(savedTrack: points, source: source)
             else { return }
             await send(.elevationSeeded(seed))
         }
@@ -1373,9 +1378,13 @@ struct ActiveRideFeature {
     /// Called on both resumes — the manual `.resumeTapped` and the auto-resume in `.speed`
     /// — and nowhere else. Starting a segment on *pause* instead would leave an empty one
     /// hanging on any ride the rider finished without resuming.
+    ///
+    /// The elevation profile breaks there too (#387): whatever the altitude did while paused — a
+    /// lift, a train — wasn't ridden.
     private func beginTrackSegment(_ state: inout State) {
         state.trackSegmentIndex += 1
         state.trackSegments.append([])
+        state.elevation.restart()
     }
 
     /// Drops a HealthKit shadow sample once it's aged past `healthKitHRStalenessWindow`

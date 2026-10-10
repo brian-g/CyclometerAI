@@ -19,16 +19,27 @@ struct ElevationTracker: Equatable, Sendable {
         var highestMeters: Double
         var lowestMeters: Double
 
-        /// Nil for a track with no altitude. The track doesn't record which source each altitude
-        /// came from, so it takes GPS's floor — the stricter one, which can only undercount a
-        /// barometric stretch, never invent climbing in a GPS one.
-        init?(savedAltitudes altitudes: [Double]) {
-            guard let highest = altitudes.max(), let lowest = altitudes.min() else { return nil }
-            var gain = ElevationGainTally()
-            for altitude in altitudes {
-                gain.add(altitude, noiseMeters: RouteGeometry.elevationNoiseThresholdMeters)
+        /// Nil for a track with no altitude. The saved track replayed through the live rule — its
+        /// pauses and stops break the profile as they did on the ride — so the totals carry on from
+        /// what the dashboard showed before the kill rather than dropping. The track doesn't record
+        /// which source each altitude came from, so `source` is the caller's best guess at it.
+        init?(savedTrack points: [TrackPointDTO], source: AltitudeResolver.Source) {
+            var tracker = ElevationTracker()
+            var distanceMeters = 0.0
+            var segmentIndex = points.first?.segmentIndex
+            for point in points {
+                if point.segmentIndex != segmentIndex {
+                    tracker.restart()
+                    segmentIndex = point.segmentIndex
+                }
+                // The distance `ActiveRideFeature` integrates each second, from the speed it recorded.
+                let speedMPS = point.speedMPS ?? 0
+                if speedMPS > ActiveRideFeature.stationarySpeedMPS { distanceMeters += speedMPS }
+                guard let altitude = point.altitudeMeters else { continue }
+                tracker.record(altitude: altitude, distanceMeters: distanceMeters, source: source)
             }
-            self.init(ascentMeters: gain.gainMeters, descentMeters: gain.lossMeters,
+            guard let highest = tracker.highestMeters, let lowest = tracker.lowestMeters else { return nil }
+            self.init(ascentMeters: tracker.ascentMeters, descentMeters: tracker.descentMeters,
                       highestMeters: highest, lowestMeters: lowest)
         }
 
@@ -47,6 +58,9 @@ struct ElevationTracker: Equatable, Sendable {
 
     private var liveHighestMeters: Double?
     private var liveLowestMeters: Double?
+    /// The last moving second's distance and source, to tell a stop and a change of source.
+    private var lastDistanceMeters: Double?
+    private var lastSource: AltitudeResolver.Source?
 
     /// Rise over run across the last `RouteTerrain.gradeWindowMeters` ridden, in percent; nil until
     /// the ride has covered that far with an altitude.
@@ -67,13 +81,23 @@ struct ElevationTracker: Equatable, Sendable {
     var lowestMeters: Double? { [seed?.lowestMeters, liveLowestMeters].compactMap { $0 }.min() }
 
     mutating func record(altitude: Double, distanceMeters: Double, source: AltitudeResolver.Source) {
+        // Stopped, the altitude still moves — the barometer with the weather, GPS with its wander —
+        // and none of it is climbing: riding on is measured from wherever it has drifted to. The
+        // run is unchanged too, so the grade holds.
+        if let lastDistanceMeters, distanceMeters <= lastDistanceMeters {
+            gain.restart(from: altitude)
+            return
+        }
+        // Two sources disagree by metres about the same spot: the step between them wasn't ridden.
+        if source != lastSource { restart() }
+        lastDistanceMeters = distanceMeters
+        lastSource = source
+
         let noise = source == .barometric ? Self.barometricNoiseMeters : RouteGeometry.elevationNoiseThresholdMeters
         gain.add(altitude, noiseMeters: noise)
         liveHighestMeters = max(liveHighestMeters ?? altitude, altitude)
         liveLowestMeters = min(liveLowestMeters ?? altitude, altitude)
 
-        // Stopped, the run is unchanged and so is the grade.
-        guard distanceMeters > (window.last?.distance ?? -.infinity) else { return }
         window.append(Point(distance: distanceMeters, altitude: altitude))
         let start = distanceMeters - RouteTerrain.gradeWindowMeters
         // Keeps the newest point at or before the window's start, so the run spans it in full.
@@ -87,6 +111,14 @@ struct ElevationTracker: Equatable, Sendable {
         gradePercent = percent
         if percent > 0 { steepestClimbPercent = max(steepestClimbPercent ?? 0, percent) }
         if percent < 0 { steepestDescentPercent = min(steepestDescentPercent ?? 0, percent) }
+    }
+
+    /// A break in the ridden profile — a pause, or a change of altitude source: whatever the
+    /// altitude did across it isn't banked, and the grade holds until a fresh window is ridden.
+    /// Totals, range and the steepest grades stay.
+    mutating func restart() {
+        gain.restart()
+        window.removeAll()
     }
 
     mutating func seed(_ seed: Seed) {

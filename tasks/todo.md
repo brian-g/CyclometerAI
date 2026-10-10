@@ -38,6 +38,20 @@ Branch: `feat/387-elevation-widgets`
 - **Not verified.** The barometric path. The simulator has no barometer, and `simctl location` gives no altitude, so the drive showed "—" for elevation and grade (the empty states). The barometer, the relative anchor and the 1 m floor need a stair or hill check on a device.
 - **Follow-ups (not filed).** HealthKit route locations still write `verticalAccuracy: -1`, marking altitude unusable; fixing it needs a per-point accuracy column. `HKMetadataKeyElevationAscended`. Ascent and descent on S10/S15.
 
+### Follow-up: /code-review xhigh
+- **Breaks in the profile.** `ElevationGainTally.restart(from:)` moves or drops the reference and keeps the totals; `ElevationTracker.restart()` also clears the grade window.
+  - A change of source restarts both, so the step between GPS and the barometer isn't banked or graded.
+  - A pause restarts both, from `beginTrackSegment`: the same place the track breaks.
+  - A stop (distance not advancing) skips the second and moves the reference to the drifted altitude, so riding on is measured from there. The grade window is kept, so the grade doesn't blank after every light.
+- **Resolver.** Absolute altitude takes over only at ≤ 10 m accuracy (`trustedAccuracyMeters`, renamed from `anchorAccuracyMeters`), then stays. `barometerEnded()` clears a barometric altitude, so no stale reading is recorded until GPS gives one.
+- **Altimeter queue** is serial (`maxConcurrentOperationCount = 1`).
+- **Resume seed** replays the saved track through the live rule (`Seed(savedTrack:source:)`: segments restart, stopped seconds skip), on the barometer's floor when `altimeterClient.isAvailable()`. Ascent no longer drops across a resume.
+- **W18** is one view: only the watermark switches on the route, so a route landing can't close the open sheet. W17's `title` parameter and `RouteProfileChart.showsAxis` are gone.
+- UX §W14–§W16 updated for the stop, pause, source-switch and accuracy rules.
+- Tests: 5 tracker/seed, 2 resolver, 2 reducer (pause banks nothing; barometer-floor seed).
+- Results: full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests`: 1935 passed, 0 failed. Persistence is untouched by these fixes.
+- Filed #396 (GPS-only noise), #397 (seed fetches whole DTOs), #398 (W14–W16 re-render each tick), #399 (one bucket-average helper).
+
 # #145 — Heart Rate detail sheet (W4, W12)
 
 Plan: /Users/brian/.claude/plans/serialized-sparking-mist.md

@@ -103,19 +103,91 @@ struct ElevationTrackerTests {
     }
 
     @Test("a resume's seed adds to what the ride has done since, whenever it lands")
-    func seedAdds() throws {
+    func seedAdds() {
         var tracker = tracker([100, 110])
-        let seed = try #require(ElevationTracker.Seed(savedAltitudes: [50, 80, 60, 200]))
-        tracker.seed(seed)
-        #expect(tracker.ascentMeters == 30 + 140 + 10)
+        tracker.seed(ElevationTracker.Seed(ascentMeters: 170, descentMeters: 20, highestMeters: 200, lowestMeters: 50))
+        #expect(tracker.ascentMeters == 170 + 10)
         #expect(tracker.descentMeters == 20)
         #expect(tracker.highestMeters == 200)
         #expect(tracker.lowestMeters == 50)
     }
 
+    // MARK: Breaks in the profile (#387 review)
+
+    @Test("the step between two sources' altitudes isn't climbing")
+    func sourceChangeIsNotClimbing() {
+        var tracker = tracker([280, 280.5], source: .gps)
+        // Core Motion settles 5.5 m below GPS's idea of the same spot.
+        tracker.record(altitude: 274.5, distanceMeters: 20, source: .barometric)
+        tracker.record(altitude: 274.6, distanceMeters: 30, source: .barometric)
+        #expect(tracker.ascentMeters == 0)
+        #expect(tracker.descentMeters == 0)
+        // Nor a grade across the step: the window starts afresh on the new source.
+        #expect(tracker.steepestDescentPercent == nil)
+    }
+
+    @Test("stopped, the altitude's drift banks nothing, and riding on carries on from there")
+    func stopIsNotClimbing() throws {
+        var tracker = tracker((0...10).map { Double($0) * 0.6 })   // +6%, 100 m
+        let ascent = tracker.ascentMeters
+        // An hour at the café: 4 m of pressure drift at the same distance.
+        for minute in 1...4 { tracker.record(altitude: 6 + Double(minute), distanceMeters: 100, source: .barometric) }
+        #expect(tracker.ascentMeters == ascent)
+        // Riding on from the drifted reading: the climb after it counts, the drift doesn't.
+        for step in 1...5 { tracker.record(altitude: 10 + Double(step), distanceMeters: 100 + Double(step) * 10, source: .barometric) }
+        #expect(tracker.ascentMeters == ascent + 5)
+    }
+
+    @Test("a restart — a pause — banks nothing across it and waits for a fresh grade window")
+    func restartBreaksTheProfile() throws {
+        var tracker = tracker((0...10).map { Double($0) * 0.3 })   // +3%
+        let ascent = tracker.ascentMeters
+        tracker.restart()
+        // A gondola 300 m up, then a level road.
+        tracker.record(altitude: 303, distanceMeters: 110, source: .barometric)
+        tracker.record(altitude: 303, distanceMeters: 120, source: .barometric)
+        #expect(tracker.ascentMeters == ascent)
+        #expect(abs(try #require(tracker.gradePercent) - 3) < 1e-9)
+        #expect(abs(try #require(tracker.steepestClimbPercent) - 3) < 1e-9)
+    }
+
+    // MARK: Seed
+
+    private static func saved(_ altitudes: [Double?], speedMPS: Double = 6, segmentIndex: Int = 0) -> [TrackPointDTO] {
+        altitudes.map { altitude in
+            TrackPointDTO(
+                rideId: UUID(), timestamp: .now, latitude: 43, longitude: -89, altitudeMeters: altitude,
+                horizontalAccuracyMeters: 5, speedMPS: speedMPS, speedSource: .gps, heartRateBPM: nil,
+                heartRateSource: .none, cadenceRPM: nil, powerWatts: nil, segmentIndex: segmentIndex
+            )
+        }
+    }
+
+    @Test("the seed counts the saved track on the floor of the source it's given")
+    func seedFloorFollowsSource() throws {
+        let rollers = Self.saved((0..<10).map { 100 + ($0.isMultiple(of: 2) ? 0.0 : 2.0) })
+        #expect(try #require(ElevationTracker.Seed(savedTrack: rollers, source: .barometric)).ascentMeters == 10)
+        #expect(try #require(ElevationTracker.Seed(savedTrack: rollers, source: .gps)).ascentMeters == 0)
+    }
+
+    @Test("the seed replays the live rule: a stop and a pause bank nothing")
+    func seedReplaysBreaks() throws {
+        let track = Self.saved([100, 101])
+            + Self.saved([104], speedMPS: 0)                    // drift while stopped
+            + Self.saved([105, 106])
+            + Self.saved([400, 401], segmentIndex: 1)           // resumed 300 m up
+        let seed = try #require(ElevationTracker.Seed(savedTrack: track, source: .barometric))
+        // 100→101, then 104→106 after the stop, then 400→401 after the pause.
+        #expect(seed.ascentMeters == 1 + 2 + 1)
+        #expect(seed.descentMeters == 0)
+        #expect(seed.highestMeters == 401)
+        #expect(seed.lowestMeters == 100)
+    }
+
     @Test("a saved track with no altitude seeds nothing")
     func emptySeed() {
-        #expect(ElevationTracker.Seed(savedAltitudes: []) == nil)
+        #expect(ElevationTracker.Seed(savedTrack: [], source: .barometric) == nil)
+        #expect(ElevationTracker.Seed(savedTrack: Self.saved([nil, nil]), source: .barometric) == nil)
     }
 }
 
@@ -161,6 +233,33 @@ struct AltitudeResolverTests {
         // Anchored: later fixes don't move it.
         resolver.gpsFix(altitude: 270, verticalAccuracy: 3)
         #expect(resolver.altitude == 282.5)
+    }
+
+    @Test("absolute altitude waits until Core Motion is sure of it, then stays")
+    func absoluteWaitsForAccuracy() {
+        var resolver = AltitudeResolver()
+        resolver.gpsFix(altitude: 280, verticalAccuracy: 6)
+        // Pressure alone: tens of metres out.
+        resolver.barometer(.absolute(meters: 240, accuracy: 40))
+        #expect(resolver.altitude == 280)
+        #expect(resolver.source == .gps)
+
+        resolver.barometer(.absolute(meters: 276, accuracy: 4))
+        #expect(resolver.altitude == 276)
+        #expect(resolver.source == .barometric)
+        // Trusted once, it stays the source.
+        resolver.barometer(.absolute(meters: 277, accuracy: 12))
+        resolver.gpsFix(altitude: 290, verticalAccuracy: 6)
+        #expect(resolver.altitude == 277)
+    }
+
+    @Test("when the barometer stops there's no altitude until GPS gives one — not its last reading")
+    func endedBarometerLeavesNoAltitude() {
+        var resolver = AltitudeResolver()
+        resolver.barometer(.absolute(meters: 274.5, accuracy: 2))
+        resolver.barometerEnded()
+        #expect(resolver.altitude == nil)
+        #expect(resolver.source == .gps)
     }
 
     @Test("when the barometer stops, the next GPS fix takes over")

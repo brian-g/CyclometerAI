@@ -24,6 +24,8 @@ enum AltimeterReading: Equatable, Sendable {
 /// access denied. `AltitudeResolver` falls back to GPS for that.
 struct AltimeterClient: Sendable {
     var updates: @Sendable () -> AsyncStream<AltimeterReading>
+    /// Whether `updates` can give readings at all: a barometer, and Motion & Fitness access.
+    var isAvailable: @Sendable () -> Bool
 }
 
 // MARK: - DependencyKey
@@ -36,11 +38,18 @@ extension AltimeterClient: DependencyKey {
                 continuation.onTermination = { _ in session.stop() }
                 session.start(continuation)
             }
+        },
+        isAvailable: {
+            switch CMAltimeter.authorizationStatus() {
+            case .denied, .restricted: false
+            default: CMAltimeter.isRelativeAltitudeAvailable()
+            }
         }
     )
 
     static let testValue = AltimeterClient(
-        updates: { AsyncStream { $0.finish() } }
+        updates: { AsyncStream { $0.finish() } },
+        isAvailable: { false }
     )
 }
 
@@ -60,7 +69,13 @@ extension DependencyValues {
 /// from any thread — Core Motion delivers on `queue`.
 private final class AltimeterSession: @unchecked Sendable {
     private let altimeter = CMAltimeter()
-    private let queue = OperationQueue()
+    /// Serial, so readings reach the stream in the order Core Motion took them: a plain
+    /// `OperationQueue` runs its handlers concurrently.
+    private let queue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }()
 
     func start(_ continuation: AsyncStream<AltimeterReading>.Continuation) {
         switch CMAltimeter.authorizationStatus() {

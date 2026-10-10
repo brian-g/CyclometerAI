@@ -90,6 +90,55 @@ struct ActiveRideElevationTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    @Test("what the altitude did during a pause isn't climbing")
+    func pauseIsNotClimbing() async {
+        var state = ActiveRideFeature.State(recordingState: .active)
+        state.speed = SpeedFeature.State(speedMPS: 10, activeSpeedSource: .gps)
+        let store = makeStore(state)
+
+        await store.send(.altimeterReading(.absolute(meters: 200, accuracy: 1)))
+        await store.send(.elapsedTick)
+        await store.send(.pauseTapped)
+        // A lift 300 m up.
+        await store.send(.altimeterReading(.absolute(meters: 500, accuracy: 1)))
+        await store.send(.resumeTapped)
+        await store.send(.elapsedTick)
+        await store.send(.altimeterReading(.absolute(meters: 501, accuracy: 1)))
+        await store.send(.elapsedTick)
+
+        #expect(store.state.elevation.ascentMeters == 1)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    @Test("on a phone with a barometer, the resume seed counts on the barometer's floor")
+    func resumeSeedUsesBarometerFloor() async {
+        let rideId = UUID()
+        let summary = RideSummaryUpdate(
+            rideId: rideId, recordingState: .active,
+            durationSeconds: 600, distanceMeters: 4_000, averageSpeedMPS: 6.5, maxSpeedMPS: 11
+        )
+        // 2 m rollers: under GPS's 3 m floor, over the barometer's 1 m.
+        let saved = [250.0, 252, 250, 252].map { altitude in
+            TrackPointDTO(
+                rideId: rideId, timestamp: Self.now, latitude: 43, longitude: -89, altitudeMeters: altitude,
+                horizontalAccuracyMeters: 5, speedMPS: 6, speedSource: .gps, heartRateBPM: nil,
+                heartRateSource: .none, cadenceRPM: nil, powerWatts: nil
+            )
+        }
+        let store = makeStore(
+            ActiveRideFeature.State(resuming: summary),
+            persistenceClient: .mock(trackPoints: [rideId: saved])
+        )
+        store.dependencies.altimeterClient.isAvailable = { true }
+
+        await store.send(.task)
+        await store.receive(\.elevationSeeded)
+        await store.skipInFlightEffects(strict: false)
+
+        #expect(store.state.elevation.ascentMeters == 4)
+        #expect(store.state.elevation.descentMeters == 2)
+    }
+
     @Test("a resumed ride's ascent and descent pick up from its saved track")
     func resumeSeedsFromTheSavedTrack() async {
         let rideId = UUID()

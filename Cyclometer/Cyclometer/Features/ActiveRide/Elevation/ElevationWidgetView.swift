@@ -85,9 +85,6 @@ struct ElevationWidget: View {
     let history: [Double]       // meters, oldest first, for the watermark
     let unit: UnitSystem
     var metrics: () -> ElevationMetrics = { ElevationMetrics() }
-    /// W18 shows this face without a route, and keeps its own title on it: the rider placed
-    /// Route Elevation, and the card, VoiceOver and edit mode all name it so.
-    var title = ElevationDashboardWidget.title
 
     var body: some View {
         ZStack {
@@ -96,7 +93,7 @@ struct ElevationWidget: View {
                     .opacity(Opacity.watermark)
             }
             ElevationReadout(
-                title: title,
+                title: ElevationDashboardWidget.title,
                 altitude: altitude,
                 gradePercent: gradePercent,
                 unit: unit
@@ -104,7 +101,7 @@ struct ElevationWidget: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
-        .widgetDetail(label: title, value: accessibilityValue) {
+        .widgetDetail(label: ElevationDashboardWidget.title, value: accessibilityValue) {
             ElevationSheet(metrics: metrics)
         }
     }
@@ -131,27 +128,29 @@ struct RouteElevationWidget: View {
     let unit: UnitSystem
     var metrics: () -> ElevationMetrics = { ElevationMetrics() }
 
+    /// Only the watermark changes with the route, and the card stays one view: a route landing while
+    /// the Elevation sheet is open would otherwise replace the `.widgetDetail` presenting it, and
+    /// the sheet would close on its own. The title stays W18's either way — the rider placed Route
+    /// Elevation, and the card, VoiceOver and edit mode all name it so.
     var body: some View {
-        if let routeProfile {
-            ZStack {
+        ZStack {
+            if let routeProfile {
                 RouteProfileChart(profile: routeProfile, progress: routeProgress)
-                ElevationReadout(
-                    title: RouteElevationDashboardWidget.title,
-                    altitude: altitude,
-                    gradePercent: gradePercent,
-                    unit: unit
-                )
+            } else if !history.isEmpty {
+                ElevationHistoryChart(history: history)
+                    .opacity(Opacity.watermark)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.cyBgSecondary)
-            .widgetDetail(label: RouteElevationDashboardWidget.title, value: accessibilityValue) {
-                ElevationSheet(metrics: metrics)
-            }
-        } else {
-            ElevationWidget(
-                altitude: altitude, gradePercent: gradePercent, history: history, unit: unit, metrics: metrics,
-                title: RouteElevationDashboardWidget.title
+            ElevationReadout(
+                title: RouteElevationDashboardWidget.title,
+                altitude: altitude,
+                gradePercent: gradePercent,
+                unit: unit
             )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.cyBgSecondary)
+        .widgetDetail(label: RouteElevationDashboardWidget.title, value: accessibilityValue) {
+            ElevationSheet(metrics: metrics)
         }
     }
 
@@ -242,7 +241,6 @@ private struct ElevationHistoryChart: View {
 struct RouteProfileChart: View {
     let profile: [Double]   // meters at even distances, start to finish
     let progress: Double?   // 0–1; nil → nothing ridden shown
-    var showsAxis = false
 
     private struct Point: Identifiable {
         let index: Int
@@ -277,7 +275,7 @@ struct RouteProfileChart: View {
         .chartYScale(domain: domain)
         .chartXScale(domain: 0...Swift.max(profile.count - 1, 1))
         .chartXAxis(.hidden)
-        .chartYAxis(showsAxis ? .automatic : .hidden)
+        .chartYAxis(.hidden)
         .chartLegend(.hidden)
         .clipped()
     }

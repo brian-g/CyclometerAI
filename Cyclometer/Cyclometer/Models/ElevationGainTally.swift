@@ -28,4 +28,12 @@ struct ElevationGainTally: Equatable, Sendable {
             self.reference = elevation
         }
     }
+
+    /// Moves the reference to `elevation`, or drops it so the next sample sets it, and keeps the
+    /// totals. For a break in the ridden profile — a pause, a stop, a change of altitude source —
+    /// whose altitude change wasn't climbing. Anything short of the floor since the last bank is
+    /// let go.
+    mutating func restart(from elevation: Double? = nil) {
+        reference = elevation
+    }
 }
