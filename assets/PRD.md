@@ -31,6 +31,7 @@
 | 0.6.5 | 2026-09-25 | Brian / Claude | Workout active energy (#276, supersedes #274). §9.4 adds `bodyMass` (read) and `activeEnergyBurned` (write): `biologicalSex` (read) too. The ride's energy comes from heart rate (Keytel 2005) when a strap covered half the ride and Health has weight, date of birth and a Male or Female sex; otherwise from the track (physics, with dropouts and implausible grades costed flat; Compendium MET only for a ride with no usable track). None is written when Health has no weight. Bike weight is a 10 kg constant, not a setting. |
 | 0.6.6 | 2026-09-26 | Brian / Claude | Health's preferred HR zones (#238, supersedes #167). §8.5 and §9.4: zone boundaries resolve `S12 override ?? Health's preferred zones ?? Karvonen`, read with iOS 27's `preferredWorkoutZoneConfiguration` (no extra permission). A resting or max override sets Health's zones aside. When the rider has an S12 override, the ride's `HKWorkout` carries the app's zones. Otherwise it keeps Health's preferred ones. OQ9's Karvonen becomes the fallback. Live `HKLiveWorkoutZoneUpdate` needs an iPhone workout session and is split to its own issue. |
 | 0.6.7 | 2026-09-26 | Brian / Claude | iPhone workout session declined (#318). §9.4 adds a decision note. No `HKWorkoutSession` / `HKLiveWorkoutBuilder` runs during a ride, so there is no live `HKLiveWorkoutZoneUpdate`, and a paired Watch still prompts to start its own workout. The post-ride `HKWorkoutBuilder` write (#250, #277), its overlap skip and SwiftData crash recovery (#175, #188) stay. The dashboard's zone and any W12 time in zone stay local to the strap's readings. #318 moves to Phase 2 with the S17 Watch companion. |
+| 0.6.7 | 2026-10-10 | Brian | Removed scope from the Live Activity. |
 
 ---
 
@@ -804,7 +805,7 @@ on hardware; no ride has yet exercised a commit at any threshold.
 
 **Milestone:** M10.5. **Added:** v0.6.4.
 
-A pocketed or bar-mounted phone with a locked screen hides ride state. Unlocking mid-ride to check speed, time or radar is unsafe (P1, P7). The Live Activity shows live ride metrics, radar threat status and the next turn on the Lock Screen and, on iPhones that have one, the Dynamic Island.
+A pocketed or bar-mounted phone with a locked screen hides ride state. Unlocking mid-ride to check speed, time or radar is unsafe (P1, P7). The Live Activity shows ~~live ride metrics, radar threat status and the next turn~~ the same ride state as the S05.3 mini-player (`ActiveRideAccessoryView`) on the Lock Screen and, on iPhones that have one, the Dynamic Island.
 
 #### Scope decisions
 
@@ -812,10 +813,12 @@ A pocketed or bar-mounted phone with a locked screen hides ride state. Unlocking
 |---|---|
 | Visual only | The Live Activity never plays sound, fires a haptic or wakes the screen. No `AlertConfiguration` is passed on any update. Radar sound and haptics remain the audio client's job (§8.3, `Audio.md`) |
 | Phone only | CarPlay, Mac and Apple Watch Smart Stack presentations are out of scope. No `.supplementalActivityFamilies` are declared; the absence of a default rendering on those surfaces is verified on device |
-| Next-turn cue | In scope whenever an M8 route is active; no turn row otherwise |
+| Content | The S05.3 mini-player's: route progress ring (bicycle glyph with no route; pause icon while paused), elapsed time, distance and speed. No HR, radar or next-turn cue |
+| ~~Next-turn cue~~ | ~~In scope whenever an M8 route is active; no turn row otherwise~~ |
+| No controls | Display only. No Pause/Resume buttons or `LiveActivityIntent`s |
 | Local updates only | Updates come from the running app. No APNs push tokens |
 
-Live Activity rendering is scheduled by the system and carries no latency guarantee, so it is never the primary radar alert channel.
+~~Live Activity rendering is scheduled by the system and carries no latency guarantee, so it is never the primary radar alert channel.~~
 
 #### Lifecycle
 
@@ -823,10 +826,12 @@ Live Activity rendering is scheduled by the system and carries no latency guaran
 |---|---|
 | Ride starts | `Activity.request(...)` when `ActivityAuthorizationInfo().areActivitiesEnabled` and the S12 toggle is on |
 | Metrics change | `activity.update(...)`, coalesced to at most 1 Hz |
-| Radar threat level increases | Immediate update, bypassing the throttle |
-| Next turn changes, or its distance crosses 500 m, 100 m or 0 m | Immediate update, bypassing the throttle |
-| Pause / resume | Update `status`; the elapsed timer freezes and resumes |
-| Ride ends | `activity.end(finalContent, dismissalPolicy: .after(now + 15 min))`, showing a summary |
+| ~~Radar threat level increases~~ | ~~Immediate update, bypassing the throttle~~ |
+| ~~Next turn changes, or its distance crosses 500 m, 100 m or 0 m~~ | ~~Immediate update, bypassing the throttle~~ |
+| ~~Pause / resume~~ | ~~Update `status`; the elapsed timer freezes and resumes~~ |
+| ~~Ride ends~~ | ~~`activity.end(finalContent, dismissalPolicy: .after(now + 15 min))`, showing a summary~~ |
+| Pause / resume | Update `status` to show the pause icon; the elapsed timer freezes and resumes. The activity stays running |
+| Ride ends | `activity.end(nil, dismissalPolicy: .immediate)`. No summary |
 | App terminated | Each update sets `staleDate` about 30 s ahead, so a dead app's activity shows as stale |
 
 System limits: an activity stays active for at most 8 hours and remains on the Lock Screen for up to 4 more; `ContentState` must stay under 4 KB.
@@ -836,68 +841,51 @@ System limits: an activity stays active for at most 8 hours and remains on the L
 ```swift
 struct RideActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
-        var status: RideStatus            // .riding, .paused, .ended
+        var status: RideStatus            // .riding, .paused
         var startDate: Date               // drives Text(timerInterval:)
         var pausedElapsed: TimeInterval?  // frozen value while paused
-        var speedKPH: Double
+        var speedMPS: Double
         var distanceMeters: Double
-        var heartRate: Int?
-        var hrZone: Int?
-        var radar: RadarSnapshot?         // nil = no radar paired
-        var nextTurn: TurnCue?            // nil = no route active
+        var routeProgress: Double?        // 0…1; nil = no route followed → bicycle glyph
     }
-    var rideName: String
     var units: UnitSystem
 }
-
-struct RadarSnapshot: Codable, Hashable {
-    var threatCount: Int
-    var closestMeters: Int?
-    var level: ThreatLevel                // .none, .approaching, .fast
-    var isConnected: Bool
-}
-
-struct TurnCue: Codable, Hashable {
-    var maneuver: Maneuver                // .left, .right, .slightLeft, .slightRight, .uTurn, .straight, .arrive
-    var distanceMeters: Int
-    var streetName: String?               // truncated to 40 characters
-    var isOffRoute: Bool
-}
 ```
+
+v0.6.7 dropped `heartRate`, `hrZone`, `rideName`, `RadarSnapshot` and `TurnCue`; speed is m/s like the rest of the app. `routeProgress` is `NavigationFeature.State.routeProgressFraction`.
 
 State values are canonical (metric); unit conversion happens in the view.
 
 #### Presentations
 
-- **Lock Screen (primary).** Elapsed timer large in D-DIN. Metric row: speed, distance, HR tinted by `hrZone(_:)`. Radar strip on the trailing edge in the §8.2 sidebar language, `brRatingOkay` / `brRatingBad` by level, grey when disconnected. With a route active, a turn row above the metrics: maneuver symbol, distance, street name in `brTextSecondary`; "Off route" in `brRatingOkay` replaces it when off route. Pause/Resume button in `brPrimary`.
-- **Dynamic Island** (iPhones with one; others show the Lock Screen presentation only). Compact leading: elapsed time. Compact trailing and minimal follow a priority: radar threat, then a turn within 100 m, then speed. Expanded: speed, time, HR, radar count and distance, turn row, Pause button.
-- **Reduced luminance.** Read `isLuminanceReduced`; drop tinted backgrounds, keep text white, keep radar colour.
+- **Lock Screen (primary).** Elapsed timer large in D-DIN. Metric row: speed, distance. Leading: the route progress ring, the bicycle glyph with no route, or the pause icon while paused. ~~HR tinted by `hrZone(_:)`. Radar strip on the trailing edge in the §8.2 sidebar language, `brRatingOkay` / `brRatingBad` by level, grey when disconnected. With a route active, a turn row above the metrics: maneuver symbol, distance, street name in `brTextSecondary`; "Off route" in `brRatingOkay` replaces it when off route. Pause/Resume button in `brPrimary`.~~
+- **Dynamic Island** (iPhones with one; others show the Lock Screen presentation only). Compact leading: elapsed time. Compact trailing: speed. Minimal: the progress ring, bicycle glyph or pause icon. Expanded: the Lock Screen's content. ~~Compact trailing and minimal follow a priority: radar threat, then a turn within 100 m, then speed. Expanded: speed, time, HR, radar count and distance, turn row, Pause button.~~
+- **Reduced luminance.** Read `isLuminanceReduced`; drop tinted backgrounds, keep text white~~, keep radar colour~~.
 - **Stale.** Metrics dim to `brTextSecondary` with a "Reconnecting…" caption.
 
-Design frames in `Design.sketch`: Lock Screen light and dark × radar none / approaching / fast, paused, ended, stale, turn far / near / arrive / off-route, threat and turn together; Dynamic Island compact, minimal and expanded.
+Design frames in `Design.sketch`: Lock Screen light and dark × ~~radar none / approaching / fast, paused, ended, stale, turn far / near / arrive / off-route, threat and turn together~~ no route / route, paused, stale; Dynamic Island compact, minimal and expanded.
 
 #### Interactivity
 
-`PauseRideIntent` and `ResumeRideIntent` conform to `LiveActivityIntent` and run in the app process, reaching the ride store through a shared command bus. Buttons keep a 44 pt hit target.
+~~`PauseRideIntent` and `ResumeRideIntent` conform to `LiveActivityIntent` and run in the app process, reaching the ride store through a shared command bus. Buttons keep a 44 pt hit target.~~ None — the Live Activity is display only.
 
 #### Architecture
 
 - `CyclometerWidgets` widget extension with `ActivityConfiguration(for: RideActivityAttributes.self)`.
-- `RideActivityKit` Swift package shared by app and extension: attributes, snapshots, formatters and colour tokens. Colour assets and D-DIN are bundled into the extension.
+- `RideActivityKit` Swift package shared by app and extension: attributes, ~~snapshots,~~ formatters, colour tokens, `HeroNumber` and the progress ring. Colour assets and D-DIN are bundled into the extension.
 - `LiveActivityClient` dependency (`start`, `update`, `end`, `isEnabled`); `liveValue` wraps ActivityKit, `testValue` records calls. `update` takes no alert parameter.
-- `LiveActivityFeature` reducer scoped into the active ride feature. It observes ride, sensor, radar and `NavigationFeature` state, owns the 1 Hz throttle on an injected clock, and applies the threat and turn bypasses. Turn cues are derived by navigation; the Live Activity mirrors them.
+- `LiveActivityFeature` reducer scoped into the active ride feature. It observes ride ~~, sensor, radar~~ and `NavigationFeature` state (route progress only) and owns the 1 Hz throttle on an injected clock~~, and applies the threat and turn bypasses. Turn cues are derived by navigation; the Live Activity mirrors them~~.
 - `Info.plist`: `NSSupportsLiveActivities = YES`. Background updates rely on the ride's location background mode.
 - S12 gains **Show Live Activity** (default on). When the system setting is off, S12 explains and links to iOS Settings.
 
 #### Acceptance criteria
 
-- [ ] Activity appears within 1 s of ride start and ends with ride end, its summary retained 15 minutes
+- [ ] Activity appears within 1 s of ride start and ends with ride end
 - [ ] Elapsed time ticks without per-second updates
-- [ ] Radar escalation and turn-threshold crossings appear within one update cycle, never held by the throttle
 - [ ] No sound, haptic or screen wake from the Live Activity in any state
 - [ ] No rendering on Apple Watch or CarPlay (device-verified)
-- [ ] Turn row appears only with an active route; radar wins Dynamic Island priority over the turn cue
-- [ ] Pause/Resume from the Lock Screen changes ride state and the dashboard
+- [ ] ~~Turn row appears only with an active route; radar wins Dynamic Island priority over the turn cue~~
+- [ ] ~~Pause/Resume from the Lock Screen changes ride state and the dashboard~~
 - [ ] Text/background pairs pass WCAG AA in light, dark and reduced luminance
 - [ ] `ContentState` encodes under 4 KB at worst case
 - [ ] "CyclometerAI" appears nowhere in the extension
