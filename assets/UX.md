@@ -576,7 +576,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 **Sizes:** 2x2, 2x1, 1x1
 
 - Primary value: `large-hero`; unit: km/h or mph (`UserProfile.preferredUnit`)
-- Trend, at every size (#81): a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the primary value, level with the tops of its digits, when current speed is above or below the ride average by more than 0.5 km/h. Hidden when even or with no reading. The unit doesn't move
+- Trend, at every size (#81): a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the primary value, level with the tops of its digits and a quarter of their height, when current speed is above or below the ride average by more than 0.5 km/h. Hidden when even or with no reading. The unit doesn't move
 - Watermark speed history graph (area line behind the numbers)
 - 2x1, 2x2: Max speed for ride (`small-hero`, labeled "MAX")
 - 2x1, 2x2: Current average speed (`small-hero`, labeled "AVG")

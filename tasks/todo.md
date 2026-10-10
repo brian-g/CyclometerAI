@@ -19,6 +19,13 @@ Branch: `feat/81-speed-trend-indicator`
 - **Results.** Full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests` (known local hangs, untouched here): 1935 passed, 1 failed. The failure was `testAddWidgetCatalog`, then re-recorded and passing. Speed snapshot and `WidgetAccessibilityTests` speed cases confirmed in the log.
 - **Not done.** VoiceOver doesn't read the trend ("above/below average"); HR reads rising/falling. Out of scope for #81.
 
+### Follow-up: /code-review xhigh --fix
+- **Fixed by the review.** The font fallback measures the system font instead of returning 0. `Trend`'s dead `Equatable` is gone. The `heroAccessory` doc example is now W9's turn arrow. New snapshots `testSpeedTrendDownDark` and `testSpeedTwoByOneTrendUp`.
+- **Overlap at large text (your call: size from the hero).** At 1×1 and 2×1 the hero is limited by the slot's height, but the `.title3` arrow kept growing toward the unit, ending about 2pt above "km/h" even at default size at 2×1. The arrow is now a resizable symbol sized to 0.25× the digits' rendered height, from the mock's 16 of 63 px. That height comes from `onGeometryChange` on the hero × D-DIN's cap/line ratio, so it holds when the text scales down. This also removes the review's `dynamicTypeSize` and `trendCapHeight` fix, which no longer applies. Measured at 2×2, 2×1 and 1×1: 0.24× the digit height, top within 0.7–1.3pt of the digit tops, and the unit identical to `main`.
+- **Large text itself.** A throwaway AX5 snapshot (not committed) shows the 1×1 and 2×1 cards already break on their own: "km/h" grows taller than the digits and the label pushes the hero out. That's not caused by the arrow, and not filed.
+- **Filed** #401 (VoiceOver reads the trend) and #402 (shared TrendIndicator for W1 and W4). Hysteresis was not filed, per your call.
+- **Results.** Speed snapshots (13), `WidgetAccessibilityTests` and `AddWidgetSheetSnapshotTests`: 73 passed, 0 failed.
+
 # #387 — Ascent, Descent, Grade, Elevation, Route Elevation widgets + barometric altimeter
 
 Plan: /Users/brian/.claude/plans/logical-stargazing-reef.md

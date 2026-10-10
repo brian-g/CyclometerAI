@@ -85,7 +85,7 @@ struct HeroNumber<Label: View>: View {
     }
 
     /// Optional view shown immediately before the value, baseline-aligned with
-    /// it (e.g. a trend chevron). Lives inside HeroNumber so callers don't have
+    /// it (e.g. W9's turn arrow). Lives inside HeroNumber so callers don't have
     /// to re-derive the value's baseline.
     func heroAccessory<A: View>(@ViewBuilder _ make: () -> A) -> Self {
         var copy = self

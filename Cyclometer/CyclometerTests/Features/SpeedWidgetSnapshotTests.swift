@@ -98,12 +98,38 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
         )
     }
 
+    func testSpeedTrendDownDark() {
+        // `cyRatingBad` has its own dark value.
+        assertSnapshot(
+            of: make2x2(speed: 6.11, scheme: .dark),
+            as: .image(layout: canvas2x2, traits: .init(userInterfaceStyle: .dark))
+        )
+    }
+
     // MARK: - 2×1 (single grid row: 393×96)
 
     func testTwoByOneLayout() {
         let canvas: SwiftUISnapshotLayout = .fixed(width: 393, height: 96)
         let widget = SpeedWidget(
             speed: 7.89,
+            speedHistory: sampleHistory,
+            activeSpeedSource: .gps,
+            distance: 12_300,
+            elapsed: 2340,
+            averageSpeed: 7.89,
+            maxSpeed: 9.47,
+            unit: .metric,
+            size: .twoByOne
+        )
+        .frame(width: 393, height: 96)
+        assertSnapshot(of: widget, as: .image(layout: canvas))
+    }
+
+    func testSpeedTwoByOneTrendUp() {
+        // The one size where the ▲ sits between the speed and AVG (#81).
+        let canvas: SwiftUISnapshotLayout = .fixed(width: 393, height: 96)
+        let widget = SpeedWidget(
+            speed: 9.0,
             speedHistory: sampleHistory,
             activeSpeedSource: .gps,
             distance: 12_300,

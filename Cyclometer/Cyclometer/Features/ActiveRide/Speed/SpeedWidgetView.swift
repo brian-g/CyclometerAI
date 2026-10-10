@@ -17,6 +17,9 @@ struct SpeedWidget: View {
     /// in its own body (#144).
     var metrics: () -> RideMetrics = { RideMetrics() }
 
+    /// The hero's rendered height, which sizes the trend indicator.
+    @State private var heroHeight: CGFloat = 0
+
     // Hero number scales proportionally to slot height: the large-hero spec is
     // `heroNominalFont`pt in a `heroNominalHeight`pt 2×2 slot, floored at
     // `heroMinFont`pt for the compact slots.
@@ -118,14 +121,14 @@ struct SpeedWidget: View {
                 .minimumScaleFactor(0.5)
                 // Measured from the rendered baseline, so it holds when the text scales down.
                 .alignmentGuide(.heroCapTop) { $0[.firstTextBaseline] * (1 - Self.capHeightToAscent) }
+                .onGeometryChange(for: CGFloat.self, of: \.size.height) { heroHeight = $0 }
                 // Right of the value, level with the tops of its digits. An overlay, so the unit
-                // keeps its place (#81).
+                // keeps its place (#81). Sized from the digits, not Dynamic Type: the hero is held
+                // to its slot's height, so a text-styled glyph would outgrow it onto the unit.
                 .overlay(alignment: Alignment(horizontal: .trailing, vertical: .heroCapTop)) {
                     trendIndicator
-                        .font(.title3)
+                        .frame(height: heroHeight * Self.capHeightToLineHeight * Self.trendToCapHeight)
                         .alignmentGuide(.trailing) { $0[.leading] - Spacing.xs }
-                        // The glyph's top, not its frame's: a symbol's frame has room above it.
-                        .alignmentGuide(.heroCapTop) { $0[.firstTextBaseline] - Self.trendCapHeight }
                 }
             if speed != nil {
                 Text(unit.speedLabel)
@@ -209,7 +212,7 @@ struct SpeedWidget: View {
 
     // MARK: - Trend Indicator
 
-    private enum Trend: Equatable { case up, even, down }
+    private enum Trend { case up, even, down }
 
     /// Minimum delta from the ride average before the trend indicator shows
     /// ▲/▼. Compared in canonical m/s (≈0.5 km/h) so sensitivity is
@@ -228,21 +231,25 @@ struct SpeedWidget: View {
     @ViewBuilder
     private var trendIndicator: some View {
         switch trend {
-        case .up:   Image(systemName: "arrowtriangle.up.fill").foregroundStyle(Color.cyRatingGood)
-        case .down: Image(systemName: "arrowtriangle.down.fill").foregroundStyle(Color.cyRatingBad)
+        case .up:   Image(systemName: "arrowtriangle.up.fill").resizable().scaledToFit().foregroundStyle(Color.cyRatingGood)
+        case .down: Image(systemName: "arrowtriangle.down.fill").resizable().scaledToFit().foregroundStyle(Color.cyRatingBad)
         case .even: EmptyView()
         }
     }
 
-    /// Cap height of the indicator's `.title3`, which its ▲/▼ is drawn to.
-    private static var trendCapHeight: CGFloat { UIFont.preferredFont(forTextStyle: .title3).capHeight }
+    /// The ▲/▼'s height as a share of the digits' height, as in the #81 mock (16 of 63 px).
+    private static let trendToCapHeight: CGFloat = 0.25
+
+    /// Without D-DIN, SwiftUI draws the system font, so that's the one to measure.
+    private static let heroFont = UIFont(name: AppFonts.dDINCondensedPostScriptName, size: 100)
+        ?? .systemFont(ofSize: 100)
 
     /// D-DIN's cap height as a share of its ascent: where the digits' tops sit between the hero's
     /// top and its baseline, at any size.
-    private static let capHeightToAscent: CGFloat = {
-        guard let font = UIFont(name: AppFonts.dDINCondensedPostScriptName, size: 100) else { return 0 }
-        return font.capHeight / font.ascender
-    }()
+    private static let capHeightToAscent = heroFont.capHeight / heroFont.ascender
+
+    /// D-DIN's cap height as a share of its line: the digits' height from the hero's rendered height.
+    private static let capHeightToLineHeight = heroFont.capHeight / (heroFont.ascender - heroFont.descender)
 
     // Scale the large-hero font proportionally to the available slot height.
     private func heroFontSize(for height: CGFloat) -> CGFloat {
