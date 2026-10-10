@@ -414,7 +414,6 @@ struct ActiveRideFeatureLocationTests {
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
-            $0.speedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.maxSpeedMPS = 8.5
@@ -471,7 +470,6 @@ struct ActiveRideFeatureLocationTests {
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
-            $0.speedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.maxSpeedMPS = 8.5
@@ -505,7 +503,6 @@ struct ActiveRideFeatureLocationTests {
             $0.horizontalAccuracy = 13.2
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.heading = 192.0
-            $0.speedKPH = 8.5 * 3.6
         }
         #expect(store.state.trackSegments.flatMap { $0 }.isEmpty)
         #expect(!store.state.isFixRecordable)
@@ -578,7 +575,6 @@ struct ActiveRideFeatureLocationTests {
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
-            $0.speedKPH = 8.5 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
             $0.maxSpeedMPS = 8.5
@@ -614,11 +610,10 @@ struct ActiveRideFeatureLocationTests {
             $0.altitudeResolver.gpsFix(altitude: 300.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 3.0
             $0.heading = 45.0
-            // The live speed follows the fix, but the ride's average and max don't: paused
-            // time is not part of the ride (#379). They stay at the active fix's values.
-            $0.speedKPH = 12.0 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(12.0))) {
+            // The live speed follows the fix, but the ride's average and max don't: paused
+            // time is not part of the ride (#379). They stay at the active fix's values.
             $0.speed.speedMPS = 12.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 12.0
@@ -660,7 +655,6 @@ struct ActiveRideFeatureLocationTests {
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
-            $0.speedKPH = 0
         }
         await store.receive(.speed(.gpsSpeedReceived(-1))) {
             $0.speed.speedMPS = nil
@@ -1037,6 +1031,8 @@ struct ActiveRideFeatureTimerTests {
         )))
         await store.send(.elapsedTick)
         #expect(store.state.speed.speedMPS == wheelMPS)
+        // What the mini-player reads: the dashboard's speed, not the fix's (#383).
+        #expect(store.state.speedMPS == wheelMPS)
         #expect(store.state.maxSpeedMPS == wheelMPS)
         #expect(store.state.averageSpeedMPS == wheelMPS)
     }
@@ -1827,7 +1823,6 @@ struct ActiveRideFeatureStateMachineTests {
         let store = TestStore(
             initialState: ActiveRideFeature.State(
                 recordingState: .active,
-                speedKPH: 0,
                 zeroSpeedSeconds: 100
             )
         ) {
@@ -1857,7 +1852,6 @@ struct ActiveRideFeatureStateMachineTests {
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
             $0.heading = 0
-            $0.speedKPH = 8.0 * 3.6
         }
         await store.receive(.speed(.gpsSpeedReceived(8.0))) {
             $0.maxSpeedMPS = 8.0

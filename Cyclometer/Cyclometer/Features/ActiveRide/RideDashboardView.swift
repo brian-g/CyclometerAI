@@ -291,7 +291,6 @@ private struct EditModeButton: View {
                 initialState: ActiveRideFeature.State(
                     recordingState: .active,
                     elapsedSeconds: 2340,
-                    speedKPH: 28.4,
                     heartRateBPM: 155,
                     hrZone: 4,
                     isHRPaired: true,
@@ -325,7 +324,6 @@ private struct EditModeButton: View {
                 initialState: ActiveRideFeature.State(
                     recordingState: .active,
                     elapsedSeconds: 2340,
-                    speedKPH: 28.4,
                     heartRateBPM: 155,
                     hrZone: 4,
                     isHRPaired: true,

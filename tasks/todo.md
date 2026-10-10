@@ -1,3 +1,22 @@
+# #383 — Mini-player speed follows the wheel sensor (part 1 only)
+
+Plan: /Users/brian/.claude/plans/rosy-swinging-corbato.md
+Branch: `fix/383-mini-player-speed`
+
+- [x] 1. Regression `#expect(store.state.speedMPS == wheelMPS)` in `speedAggregatesFollowTheWheel`; confirm it fails
+- [x] 2. `ActiveRideFeature`: delete `speedKPH`, derive `speedMPS` from `speed.speedMPS`
+- [x] 3. Previews (AppView, RideDashboardView ×2) and tests drop `speedKPH`
+- [x] 4. Build + targeted tests + full unit suite
+- [x] 5. PR; comment on #383 with part (2) status and the ride-file scanner
+
+## Review
+
+- **Fix.** `ActiveRideFeature.State.speedMPS` is now `speed.speedMPS ?? 0`, the speed `SpeedFeature` picks. `speedKPH` and the line in `.locationUpdated` that wrote it are gone. The mini-player (`AppView` → `ActiveRideAccessoryView`), the property's only reader, needed no change. The 3 previews lost their `speedKPH: 28.4`; they already seeded `speed.speedMPS: 7.89`, which is the same speed.
+- **Test.** New `#expect(store.state.speedMPS == wheelMPS)` in `speedAggregatesFollowTheWheel`, added before the fix. It failed first: 10.000008 (the 36 km/h GPS fix) vs 11.11 (the wheel). It passes after the fix. 8 `speedKPH` lines removed from `ActiveRideFeatureTests`, and one #379 comment moved to the closure it describes.
+- **Snapshots.** Unaffected: `ActiveRideAccessorySnapshotTests` passes `speedMPS` straight into the view, and `AppView` has no snapshot tests.
+- **Results.** Build succeeded. `ActiveRideFeature*Tests` + `SpeedFeatureTests`: 172 passed. Full `CyclometerTests` minus `PersistenceClientTests`: 1711 unique cases passed, 0 failed. `PersistenceClientTests` alone: 47 passed.
+- **Part (2) not done, by decision.** No ride evidence: the only exports on disk (4 short Sept 2–4 rides in Trash) show no held run. A scanner (checked against a synthetic held run) goes on #383 for the next ride through signal loss.
+
 # #81 — Average trend indicator moves from AVG to the speed (W1)
 
 Plan: /Users/brian/.claude/plans/imperative-wishing-popcorn.md
