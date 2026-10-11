@@ -9,6 +9,8 @@ extension Logger {
     enum Category: String {
         case alerts, audio, ble, csc, healthkit, hr, location, navigation, network
         case permissions, persistence, radar, recording, routes
+        /// Lowercase like the rest, so a filter written in their style matches.
+        case liveActivity = "liveactivity"
     }
 
     static func cyclometer(_ category: Category) -> Logger {

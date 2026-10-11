@@ -7,7 +7,7 @@ import Foundation
 ///
 /// State values are canonical — metres, m/s — and converted with `units` in the view, as the
 /// mini-player does.
-struct RideActivityAttributes: ActivityAttributes {
+struct RideActivityAttributes: ActivityAttributes, Hashable {
     struct ContentState: Codable, Hashable {
         var status: RideStatus
         /// When the ride started, less any paused time: `Text(timerInterval:)` counts from it,
