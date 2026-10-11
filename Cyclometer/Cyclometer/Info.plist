@@ -50,6 +50,8 @@
 	<string>Cyclometer uses your location to record your route. GPS is not active unless you are recording a ride.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Cyclometer uses motion and fitness activity to tell riding from stopping, so it can pause and resume your ride automatically.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIAppFonts</key>
 	<array>
 		<string>D-DINCondensed.otf</string>
