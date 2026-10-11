@@ -586,14 +586,15 @@ struct NavigationFeatureTests {
     // MARK: - Route progress
 
     /// The fraction the S05.3 mini-player's ring and W18 draw (#404). Nil — the bicycle glyph —
-    /// whenever the rider isn't following a route or no fix has placed them on it yet.
+    /// whenever the rider isn't following a route or has no position on it yet. A resumed ride's
+    /// restored position counts before any fix confirms it, as the halfway case shows.
     @Test("route progress is the fraction ridden, and nil unless a route is being followed")
     func routeProgressFraction() throws {
         let line = try route(straight, turns: [])
         let total = line.totalDistanceMeters
 
         #expect(makeStore(route: nil).state.routeProgressFraction == nil)
-        #expect(makeStore(route: line).state.routeProgressFraction == nil, "no fix matched yet")
+        #expect(makeStore(route: line).state.routeProgressFraction == nil, "no position on the route yet")
         #expect(makeStore(route: line, progressMeters: total / 2, turnByTurn: false).state.routeProgressFraction == nil)
 
         let halfway = try #require(makeStore(route: line, progressMeters: total / 2).state.routeProgressFraction)

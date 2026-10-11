@@ -10,11 +10,12 @@ Branch: `fix/404-mini-player-route-progress`
 
 ## Review
 
-- **Fix.** `AppView` passes `ride.navigation.routeProgressFraction` instead of `nil`. The ring shows while a route is followed; the bicycle glyph shows with no route, turn-by-turn off, or before the first matched fix. No view or layout change.
+- **Fix.** `AppView` passes `ride.navigation.routeProgressFraction` instead of `nil`. The ring shows while a route is followed; the bicycle glyph shows with no route, turn-by-turn off, or before the rider has a position on the route (a resumed ride's restored position counts). No layout change.
 - **Tests.** New `routeProgressFraction()`: nil with no route, nil before a fix, nil with turn-by-turn off, 0.5 at halfway, 1 when clamped past the end. `reachingTheEndStopsCleanly` now checks the ring reads 1 when the route finishes 20 m short of its end. The AppView line itself isn't unit-tested, same as #383. Snapshots are unchanged: both accessory states were already covered.
 - **Stale build.** The first runs used a test binary from 15:30. The app rebuilt; the test target didn't. All results below come from a fresh `-derivedDataPath` with `COMPILATION_CACHE_ENABLE_CACHING=NO`.
 - **Results.** Full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests` (known local hangs): 1950 passed, 0 failed. `PersistenceClientTests` alone: 47 passed.
-- **Spec drift, not changed.** UX.md §S05.3 Layout still says no route → "ring shows empty"; the resolved OQ and the code use the bicycle glyph.
+- **Spec drift, fixed in ff6bd2a.** UX.md §S05.3 Layout said no route → "ring shows empty"; it now says the bicycle glyph, as the resolved OQ and the code do.
+- **Review (`/code-review --fix`).** The ring's label no longer rounds up to 100% before the finish (99.5% of a 100 km route is 500 m to go); it reads 100% only at `routeProgressFraction == 1`. Docs that said nil meant "no route loaded" or "no fix yet" now cover turn-by-turn off and a resumed ride's restored position.
 
 
 # #383 — Mini-player speed follows the wheel sensor (part 1 only)
