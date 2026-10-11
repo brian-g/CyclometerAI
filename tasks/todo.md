@@ -16,6 +16,8 @@ Branch: `feat/307-live-activity-client`
 - **Mutation check.** With the adopt branch removed, `startAgainAdoptsTheRunningActivity` fails (two activities). Restored, verified by `cmp`, then rebuilt fresh.
 - **Results.** Fresh build. Full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests`: 1952 passed, 0 failed, plus the known issue. `PersistenceClientTests` alone: 47 ran, `TEST SUCCEEDED` (one result line was cut by an interleaved xcodebuild log line).
 - **CI.** The suite is `.enabled(if: areActivitiesEnabled)`. Whether the CI runner's simulator allows activities is unknown; the PR's run will tell.
+- **Review (`/code-review xhigh`), fixed.** `start` adopted any listed activity, including `.ended` ones the system keeps for hours, so a ride after an unresumed crash got no activity; it now adopts only an `.active`/`.stale` one with equal attributes (`RideActivityAttributes` is `Hashable`) and ends the rest. A change of units therefore gets a new activity. `previewValue = testValue`. The log category's raw value is `liveactivity`, lowercase like the others. Tests use the shared `expectEventually` and wait on every read; the end test now requires `.dismissed`, so a `.default` end fails it. Two new tests: an ended activity is replaced, and other units replace the activity. Mutations: `.default` end and no units check fail the end and units tests; adopting ended activities fails the ended-activity test. Restored (`cmp`), fresh build: 1954 passed, 0 failed, plus the known issue; `PersistenceClientTests` alone succeeded. The review's #307 section had also been pasted into #404's and #383's reviews (a replace on a line all three share, with no count check); removed.
+- **Review, moved to #308** (comment on the issue): a paused ride goes stale with no keep-alive; a refused `start` is invisible to the reducer.
 
 # #306 — Live Activity: widget extension target and shared code
 
@@ -56,15 +58,6 @@ Branch: `fix/404-mini-player-route-progress`
 
 ## Review
 
-- **Client.** `Clients/LiveActivity/LiveActivityClient.swift`: `start`, `update`, `end`, `isEnabled`, following `ScreenClient`'s shape. The live value holds no `Activity`: it acts on `Activity<RideActivityAttributes>.activities`, so a relaunch loses nothing. `start` adopts a running activity (crash resume) before it requests one, and a failed request is logged, not thrown. Every update's `staleDate` is `staleInterval` (30 s) ahead. `end` uses `.immediate`. No call takes an `AlertConfiguration`. New log category `liveActivity`.
-- **Test value.** No-ops, with `isEnabled` true, as `ScreenClient` and `HapticsClient` do; the issue's "records calls" becomes a test-side recorder in #308.
-- **Tests run against real ActivityKit.** `Activity.request` works from the unit-test host on the simulator, so `LiveActivityClientTests` checks the live client itself: start shows the ride; a second start adopts it (still one); update lands with the stale date ~30 s ahead; end leaves none. ActivityKit applies an update asynchronously (read back too early, the old state shows), so the tests poll for up to 5 s; it arrives in about 50 ms.
-- **Mutation check.** With the adopt branch removed, `startAgainAdoptsTheRunningActivity` fails (two activities). Restored, verified by `cmp`, then rebuilt fresh.
-- **Results.** Fresh build. Full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests`: 1952 passed, 0 failed, plus the known issue. `PersistenceClientTests` alone: 47 ran, `TEST SUCCEEDED` (one result line was cut by an interleaved xcodebuild log line).
-- **CI.** The suite is `.enabled(if: areActivitiesEnabled)`. Whether the CI runner's simulator allows activities is unknown; the PR's run will tell.
-
-## Review
-
 - **Fix.** `AppView` passes `ride.navigation.routeProgressFraction` instead of `nil`. The ring shows while a route is followed; the bicycle glyph shows with no route, turn-by-turn off, or before the rider has a position on the route (a resumed ride's restored position counts). No layout change.
 - **Tests.** New `routeProgressFraction()`: nil with no route, nil before a fix, nil with turn-by-turn off, 0.5 at halfway, 1 when clamped past the end. `reachingTheEndStopsCleanly` now checks the ring reads 1 when the route finishes 20 m short of its end. The AppView line itself isn't unit-tested, same as #383. Snapshots are unchanged: both accessory states were already covered.
 - **Stale build.** The first runs used a test binary from 15:30. The app rebuilt; the test target didn't. All results below come from a fresh `-derivedDataPath` with `COMPILATION_CACHE_ENABLE_CACHING=NO`.
@@ -83,15 +76,6 @@ Branch: `fix/383-mini-player-speed`
 - [x] 2. `ActiveRideFeature`: delete `speedKPH`, derive `speedMPS` from `speed.speedMPS`
 - [x] 3. Previews (AppView, RideDashboardView ×2) and tests drop `speedKPH`
 - [x] 4. Build + targeted tests + full unit suite
-
-## Review
-
-- **Client.** `Clients/LiveActivity/LiveActivityClient.swift`: `start`, `update`, `end`, `isEnabled`, following `ScreenClient`'s shape. The live value holds no `Activity`: it acts on `Activity<RideActivityAttributes>.activities`, so a relaunch loses nothing. `start` adopts a running activity (crash resume) before it requests one, and a failed request is logged, not thrown. Every update's `staleDate` is `staleInterval` (30 s) ahead. `end` uses `.immediate`. No call takes an `AlertConfiguration`. New log category `liveActivity`.
-- **Test value.** No-ops, with `isEnabled` true, as `ScreenClient` and `HapticsClient` do; the issue's "records calls" becomes a test-side recorder in #308.
-- **Tests run against real ActivityKit.** `Activity.request` works from the unit-test host on the simulator, so `LiveActivityClientTests` checks the live client itself: start shows the ride; a second start adopts it (still one); update lands with the stale date ~30 s ahead; end leaves none. ActivityKit applies an update asynchronously (read back too early, the old state shows), so the tests poll for up to 5 s; it arrives in about 50 ms.
-- **Mutation check.** With the adopt branch removed, `startAgainAdoptsTheRunningActivity` fails (two activities). Restored, verified by `cmp`, then rebuilt fresh.
-- **Results.** Fresh build. Full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests`: 1952 passed, 0 failed, plus the known issue. `PersistenceClientTests` alone: 47 ran, `TEST SUCCEEDED` (one result line was cut by an interleaved xcodebuild log line).
-- **CI.** The suite is `.enabled(if: areActivitiesEnabled)`. Whether the CI runner's simulator allows activities is unknown; the PR's run will tell.
 - [x] 5. PR; comment on #383 with part (2) status and the ride-file scanner
 
 ## Review

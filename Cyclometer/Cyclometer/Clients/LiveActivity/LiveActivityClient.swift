@@ -13,8 +13,8 @@ private let logger = Logger.cyclometer(.liveActivity)
 /// `AlertConfiguration`, so the activity cannot sound, buzz or wake the screen. Rider alerts are
 /// the audio and haptics clients' job.
 struct LiveActivityClient {
-    /// Shows the ride. Adopts an activity that's already running — a ride resumed after a crash
-    /// finds the one it started — rather than requesting a second.
+    /// Shows the ride. Adopts an activity that's already running with the same attributes — a
+    /// ride resumed after a crash finds the one it started — rather than requesting a second.
     var start: @Sendable (RideActivityAttributes, RideActivityAttributes.ContentState) async -> Void
     var update: @Sendable (RideActivityAttributes.ContentState) async -> Void
     /// Ends it with `.immediate` dismissal: no summary is left on the Lock Screen.
@@ -34,10 +34,19 @@ extension LiveActivityClient: DependencyKey {
     /// relaunch can't lose. There should only ever be one.
     static let liveValue = LiveActivityClient(
         start: { attributes, state in
-            if !Activity<RideActivityAttributes>.activities.isEmpty {
-                await updateAll(state)
-                return
+            // Adopt one that's still showing this ride's units; end the rest. The system's list
+            // keeps ended activities for hours, and units are fixed at request, so an ended one
+            // or one in the other units can't carry the new ride.
+            var adopted = false
+            for activity in Activity<RideActivityAttributes>.activities {
+                if !adopted, [.active, .stale].contains(activity.activityState), activity.attributes == attributes {
+                    await activity.update(content(state))
+                    adopted = true
+                } else {
+                    await activity.end(nil, dismissalPolicy: .immediate)
+                }
             }
+            if adopted { return }
             do {
                 _ = try Activity.request(attributes: attributes, content: content(state), pushType: nil)
             } catch {
@@ -59,6 +68,9 @@ extension LiveActivityClient: DependencyKey {
         end: { },
         isEnabled: { true }
     )
+
+    /// Previews never reach ActivityKit.
+    static let previewValue = testValue
 
     private static func content(_ state: RideActivityAttributes.ContentState) -> ActivityContent<RideActivityAttributes.ContentState> {
         ActivityContent(state: state, staleDate: .now.addingTimeInterval(staleInterval))
