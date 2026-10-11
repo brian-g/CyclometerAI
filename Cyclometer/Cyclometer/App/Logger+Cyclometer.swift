@@ -7,7 +7,7 @@ extension Logger {
     /// Category names as they appear in Console. The raw values are what saved log filters match;
     /// don't rename a case without treating it as a filter-breaking change.
     enum Category: String {
-        case alerts, audio, ble, csc, healthkit, hr, location, navigation, network
+        case alerts, audio, ble, csc, healthkit, hr, liveActivity, location, navigation, network
         case permissions, persistence, radar, recording, routes
     }
 
