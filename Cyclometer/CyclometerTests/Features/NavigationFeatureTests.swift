@@ -583,6 +583,25 @@ struct NavigationFeatureTests {
         #expect(store.state.announcedManeuverIndex == nil)
     }
 
+    // MARK: - Route progress
+
+    /// The fraction the S05.3 mini-player's ring and W18 draw (#404). Nil — the bicycle glyph —
+    /// whenever the rider isn't following a route or has no position on it yet. A resumed ride's
+    /// restored position counts before any fix confirms it, as the halfway case shows.
+    @Test("route progress is the fraction ridden, and nil unless a route is being followed")
+    func routeProgressFraction() throws {
+        let line = try route(straight, turns: [])
+        let total = line.totalDistanceMeters
+
+        #expect(makeStore(route: nil).state.routeProgressFraction == nil)
+        #expect(makeStore(route: line).state.routeProgressFraction == nil, "no position on the route yet")
+        #expect(makeStore(route: line, progressMeters: total / 2, turnByTurn: false).state.routeProgressFraction == nil)
+
+        let halfway = try #require(makeStore(route: line, progressMeters: total / 2).state.routeProgressFraction)
+        #expect(abs(halfway - 0.5) < 1e-9)
+        #expect(makeStore(route: line, progressMeters: total + 100).state.routeProgressFraction == 1)
+    }
+
     // MARK: - Route end
 
     @Test("reaching the end stops everything, and riding on past it is not off route")
@@ -595,6 +614,8 @@ struct NavigationFeatureTests {
             second += 1
         }
         #expect(store.state.isRouteComplete)
+        // Finished 20 m short of the end, the mini-player's ring still reads 100% (#404).
+        #expect(store.state.routeProgressFraction == 1)
         #expect(store.state.nextManeuverIndex == 1)
         #expect(store.state.distanceToNextTurnMeters == nil)
         #expect(!store.state.isTurnAlertActive)

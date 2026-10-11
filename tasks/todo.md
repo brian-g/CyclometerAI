@@ -1,3 +1,24 @@
+# #404 — Mini-player route progress ring is never shown
+
+Plan: /Users/brian/.claude/plans/404-piped-perlis.md
+Branch: `fix/404-mini-player-route-progress`
+
+- [x] 1. `AppView`: pass `ride.navigation.routeProgressFraction` to the accessory
+- [x] 2. Snapshot test MARK comment no longer says the glyph is the only reachable state
+- [x] 3. `NavigationFeatureTests`: `routeProgressFraction` cases + `== 1` at route end
+- [x] 4. Build + targeted tests + full unit suite
+
+## Review
+
+- **Fix.** `AppView` passes `ride.navigation.routeProgressFraction` instead of `nil`. The ring shows while a route is followed; the bicycle glyph shows with no route, turn-by-turn off, or before the rider has a position on the route (a resumed ride's restored position counts). No layout change.
+- **Tests.** New `routeProgressFraction()`: nil with no route, nil before a fix, nil with turn-by-turn off, 0.5 at halfway, 1 when clamped past the end. `reachingTheEndStopsCleanly` now checks the ring reads 1 when the route finishes 20 m short of its end. The AppView line itself isn't unit-tested, same as #383. Snapshots are unchanged: both accessory states were already covered.
+- **Stale build.** The first runs used a test binary from 15:30. The app rebuilt; the test target didn't. All results below come from a fresh `-derivedDataPath` with `COMPILATION_CACHE_ENABLE_CACHING=NO`.
+- **Results.** Full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests` (known local hangs): 1939 passed, 0 failed, plus the deliberate `withKnownIssue`. (First reported as 1950: the count added 11 passing tests with "failed" in their names.) `PersistenceClientTests` alone: 47 passed.
+- **Spec drift, fixed in ff6bd2a.** UX.md §S05.3 Layout said no route → "ring shows empty"; it now says the bicycle glyph, as the resolved OQ and the code do.
+- **Review (`/code-review --fix`).** The ring's label no longer rounds up to 100% before the finish (99.5% of a 100 km route is 500 m to go); it reads 100% only at `routeProgressFraction == 1`. Docs that said nil meant "no route loaded" or "no fix yet" now cover turn-by-turn off and a resumed ride's restored position.
+- **Review follow-ups.** VoiceOver read the ring as a bare "42%"; it now reads "Route 42 percent complete" before the stats (new `WidgetAccessibilityTests/accessoryReadsRouteProgress`, failed first). New 0% and 100% snapshots showed "100%" running over the arc: the label had `minimumScaleFactor` but no width limit. Padding it to `Spacing.sm` keeps it inside the hole; "42%" shrinks slightly too, and the pixel diff is confined to the label. Full suite after: 1945 passed, 0 failed, plus the known issue. Resumed finished route filed separately.
+
+
 # #383 — Mini-player speed follows the wheel sensor (part 1 only)
 
 Plan: /Users/brian/.claude/plans/rosy-swinging-corbato.md

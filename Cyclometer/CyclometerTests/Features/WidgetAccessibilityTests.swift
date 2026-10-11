@@ -166,6 +166,28 @@ struct WidgetAccessibilityTests {
         host.settle { host.presentedText().contains("156 beats per minute") }
         #expect(host.presentedText().contains("Heart Rate 156 beats per minute"))
     }
+
+    // MARK: - S05.3 mini-player
+
+    /// #404: the strip is one button, and its ring reads as route progress rather than a bare
+    /// percent. With no route the bicycle glyph is silent and the stats lead.
+    @Test(arguments: [
+        (0.42, "Route 42 percent complete, 39:00"),
+        (1, "Route 100 percent complete, 39:00"),
+        (nil, "39:00"),
+    ] as [(Double?, String)])
+    func accessoryReadsRouteProgress(_ progress: Double?, _ opening: String) throws {
+        let host = try Host(ActiveRideAccessoryView(
+            progress: progress, distanceMeters: 12_300, speedMPS: 7.89, elapsedSeconds: 2340,
+            unit: .metric, onOpen: {}
+        ))
+        defer { host.tearDown() }
+
+        let element = try host.onlyElement()
+        let label = element.accessibilityLabel ?? ""
+        #expect(label.hasPrefix(opening + ","), "read \(label)")
+        #expect(element.isButton == true)
+    }
 }
 
 /// The element checks for W8 Map, apart so CI can skip them, as it does every suite that renders a

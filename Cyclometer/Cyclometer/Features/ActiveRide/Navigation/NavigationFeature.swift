@@ -214,7 +214,8 @@ struct NavigationFeature {
 
         var isTurnAlertActive: Bool { announcedManeuverIndex != nil }
 
-        /// How far along the route the rider is, 0–1: where W18 splits ridden from ahead (#387).
+        /// How far along the route the rider is, 0–1: where W18 splits ridden from ahead (#387),
+        /// and the S05.3 mini-player's ring (#404).
         /// Nil while fixes aren't matched to the route, so with turn-by-turn off nothing is marked
         /// ridden rather than a stale restored position.
         var routeProgressFraction: Double? {

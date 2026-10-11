@@ -7,7 +7,8 @@ import Charts
 /// anywhere on the strip, which reopens the dashboard (#333, as Apple Music's mini
 /// player does); the ride lifecycle lives in `AppFeature`/`ActiveRideFeature`.
 struct ActiveRideAccessoryView: View {
-    /// Route completion 0…1. `nil` when no route is loaded → bicycle glyph.
+    /// Route completion 0…1 (`NavigationFeature.State.routeProgressFraction`). `nil` → bicycle
+    /// glyph: no route, turn-by-turn off, or no position on the route yet.
     let progress: Double?
     let distanceMeters: Double
     let speedMPS: Double
@@ -54,7 +55,7 @@ struct ActiveRideAccessoryView: View {
 }
 
 /// Donut-style route-completion ring (Swift Charts `SectorMark`, 84% arc with a
-/// gap at the bottom). When `progress` is `nil` (no route loaded), a bicycle
+/// gap at the bottom). When `progress` is `nil` (no route being followed), a bicycle
 /// SF Symbol replaces the ring per S05.3.
 private struct OpenRingProgressView: View {
     private struct Segment: Identifiable {
@@ -71,6 +72,12 @@ private struct OpenRingProgressView: View {
         ]
     }
 
+    /// The nearest percent, except that 100% waits for the finish: 99.5% of a 100 km route
+    /// is still 500 m to ride.
+    private func percent(_ progress: Double) -> Int {
+        progress < 1 ? min(Int((progress * 100).rounded()), 99) : 100
+    }
+
     var body: some View {
         if let progress {
             ZStack {
@@ -83,11 +90,17 @@ private struct OpenRingProgressView: View {
                 .chartLegend(.hidden)
                 .rotationEffect(.degrees(90))
 
-                Text("\(Int((progress * 100).rounded()))%")
+                Text("\(percent(progress))%")
                     .font(.caption2.weight(.semibold))
                     .monospacedDigit()
+                    .lineLimit(1)
                     .minimumScaleFactor(0.7)
+                    // Narrower than the ring's hole, so "100%" shrinks inside it rather than
+                    // running over the arc (#404).
+                    .padding(.horizontal, Spacing.sm)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Route \(percent(progress)) percent complete")
         } else {
             Image(systemName: "figure.outdoor.cycle")
                 .font(.title3)

@@ -74,7 +74,7 @@ struct AppView: View {
             .tabViewBottomAccessory(isEnabled: hasVisibleRide) {
                 if let ride = store.activeRide, hasVisibleRide {
                     ActiveRideAccessoryView(
-                        progress: nil,                       // no route model yet → bicycle glyph
+                        progress: ride.navigation.routeProgressFraction,
                         distanceMeters: ride.distanceMeters,
                         speedMPS: ride.speedMPS,
                         elapsedSeconds: ride.elapsedSeconds,

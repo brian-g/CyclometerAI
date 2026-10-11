@@ -33,7 +33,7 @@ final class ActiveRideAccessorySnapshotTests: XCTestCase {
         .preferredColorScheme(scheme)
     }
 
-    // MARK: - No route → bicycle glyph (the only state reachable today)
+    // MARK: - No route → bicycle glyph
 
     func testNoRouteMetric() {
         assertSnapshot(of: strip(), as: .image(layout: canvas))
@@ -54,6 +54,16 @@ final class ActiveRideAccessorySnapshotTests: XCTestCase {
 
     func testWithRouteMetric() {
         assertSnapshot(of: strip(progress: 0.42), as: .image(layout: canvas))
+    }
+
+    /// Every route's start (#404): a sliver of the completed arc is still drawn.
+    func testWithRouteStart() {
+        assertSnapshot(of: strip(progress: 0), as: .image(layout: canvas))
+    }
+
+    /// Every route's finish (#404): "100%" is the widest label in the ring.
+    func testWithRouteFinished() {
+        assertSnapshot(of: strip(progress: 1), as: .image(layout: canvas))
     }
 
     func testWithRouteDark() {
