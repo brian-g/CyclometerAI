@@ -93,8 +93,14 @@ private struct OpenRingProgressView: View {
                 Text("\(percent(progress))%")
                     .font(.caption2.weight(.semibold))
                     .monospacedDigit()
+                    .lineLimit(1)
                     .minimumScaleFactor(0.7)
+                    // Narrower than the ring's hole, so "100%" shrinks inside it rather than
+                    // running over the arc (#404).
+                    .padding(.horizontal, Spacing.sm)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Route \(percent(progress)) percent complete")
         } else {
             Image(systemName: "figure.outdoor.cycle")
                 .font(.title3)
