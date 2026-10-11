@@ -871,8 +871,8 @@ Design frames in `Design.sketch`: Lock Screen light and dark × ~~radar none / a
 
 #### Architecture
 
-- `CyclometerWidgets` widget extension with `ActivityConfiguration(for: RideActivityAttributes.self)`.
-- `RideActivityKit` Swift package shared by app and extension: attributes, ~~snapshots,~~ formatters, colour tokens, `HeroNumber` and the progress ring. Colour assets and D-DIN are bundled into the extension.
+- `CyclometerWidgets` widget extension (target `CyclometerWidgetsExtension`) with `ActivityConfiguration(for: RideActivityAttributes.self)`.
+- ~~`RideActivityKit` Swift package shared by app and extension: attributes, snapshots, formatters, colour tokens, `HeroNumber` and the progress ring.~~ The extension compiles a set of the app's own files through target membership (#306): `RideActivityAttributes`, `UnitSystem`, `HeroNumber`, `OpenRingProgressView`, `Spacing`, `AppFonts`, the asset catalog and D-DIN. No package and no copies; a shared file that picks up an app-only type breaks the extension build. TCA.md §8 lists the set.
 - `LiveActivityClient` dependency (`start`, `update`, `end`, `isEnabled`); `liveValue` wraps ActivityKit, `testValue` records calls. `update` takes no alert parameter.
 - `LiveActivityFeature` reducer scoped into the active ride feature. It observes ride ~~, sensor, radar~~ and `NavigationFeature` state (route progress only) and owns the 1 Hz throttle on an injected clock~~, and applies the threat and turn bypasses. Turn cues are derived by navigation; the Live Activity mirrors them~~.
 - `Info.plist`: `NSSupportsLiveActivities = YES`. Background updates rely on the ride's location background mode.

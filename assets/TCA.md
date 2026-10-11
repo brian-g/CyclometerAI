@@ -1009,6 +1009,7 @@ Cyclometer/
 │   │   │                                  // LiveMapCamera, MapSheetButtons
 │   │   ├── Navigation/                    // NavigationFeature, DirectionsWidgetView (W9),
 │   │   │                                  // TurnInstructionOverlay
+│   │   ├── LiveActivity/                  // RideActivityAttributes (PRD §8.10) — shared with the extension
 │   │   ├── Recording/                     // TrackPointRecorderFeature, GPSFixFilter
 │   │   ├── Alerts/                        // AlertOrchestratorFeature, VehiclePassDetector,
 │   │   │                                  // RideBanner
@@ -1034,10 +1035,20 @@ Cyclometer/
 │   ├── DesignSystem/                      // Color+Cyclometer, AppFonts, Typography,
 │   │                                      // Spacing, Opacity, WidgetSize
 │   └── Components/                        // HeroNumber, WidgetLabel, SensorListRow,
-│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, DonutChart, …
+│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, DonutChart,
+│                                          // OpenRingProgressView (S05.3 ring), …
 ├── PreviewContent/
 └── Resources/Fonts/                       // D-DIN
 ```
+
+The `CyclometerWidgets/` folder beside it is the widget extension (target `CyclometerWidgetsExtension`,
+#306), holding the ride's Live Activity: `CyclometerWidgetsBundle` and `RideLiveActivity`. It has no
+copies of app code. Instead it compiles these app files through target membership, recorded as an
+exception set on the `Cyclometer` folder in `project.pbxproj`: `LiveActivity/RideActivityAttributes`,
+`Models/UnitSystem`, `HeroNumber`, `OpenRingProgressView`, `DesignSystem/Spacing`, `DesignSystem/AppFonts`,
+`Assets.xcassets` and the D-DIN font. Keep that set free of app-only types (TCA, features, clients):
+the extension build fails on the first one, which is how `UnitSystem`'s pace helpers came to live in
+`Speed/UnitSystem+Pace.swift`.
 
 Tests live in `Cyclometer/CyclometerTests/`, mirroring the top level only (`App/`, `Clients/`,
 `DesignSystem/`, `Export/`, `Features/`, `Models/`); within each folder they are flat, and

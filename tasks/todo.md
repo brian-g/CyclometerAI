@@ -1,3 +1,30 @@
+# #306 — Live Activity: widget extension target and shared code
+
+Plan: /Users/brian/.claude/plans/404-piped-perlis.md
+Branch: `feat/306-live-activity-extension`
+
+- [x] 1. Brian creates the `CyclometerWidgets` target in Xcode
+- [x] 2. Review Xcode's output; align extension build settings with the app
+- [x] 3. Replace the template with `CyclometerWidgetsBundle` + placeholder `RideLiveActivity`; extension `UIAppFonts`
+- [x] 4. `RideActivityAttributes` (PRD §8.10 data model)
+- [x] 5. Extract `OpenRingProgressView` to `UI/Components/` (pure move; snapshots byte-identical)
+- [x] 6. Shared files → extension membership (synchronized-group exception set)
+- [x] 7. App `Info.plist`: `NSSupportsLiveActivities`
+- [x] 8. Docs: PRD §8.10, #306 body, TCA.md §8
+- [x] 9. `RideActivityAttributesTests`: round trip, worst case < 4 KB
+- [x] 10. Verify: appex contents, no "CyclometerAI", CI build-for-testing, full suite
+
+## Review
+
+- **Extension.** Xcode made target `CyclometerWidgetsExtension` (folder `CyclometerWidgets/`, bundle `com.xavier.cyclometer.CyclometerWidgets`). Its static widget, Control, sample activity and own asset catalog are gone; `CyclometerWidgetsBundle` holds only `RideLiveActivity`, a bare placeholder (ring/glyph or pause icon, timer, distance, speed; minimal Dynamic Island) with `#Preview(as:)` for riding, no route and paused. Device family set to iPhone only; the template's `WidgetBackground` setting removed.
+- **Sharing.** One exception set on the `Cyclometer` folder puts 8 app paths in the extension: `RideActivityAttributes`, `UnitSystem`, `HeroNumber`, `OpenRingProgressView`, `Spacing`, `AppFonts`, `Assets.xcassets`, D-DIN. Extension `Info.plist` registers D-DIN.
+- **The guard worked once already.** `UnitSystem.paceSeconds` read `ActiveRideFeature.stationarySpeedMPS`, so the extension didn't build. The four pace helpers moved unchanged to `Speed/UnitSystem+Pace.swift` (app only).
+- **Ring.** `OpenRingProgressView` moved out of `ActiveRideAccessoryView.swift` to `UI/Components/`, private → internal. No snapshot reference moved.
+- **Built product.** Appex embedded with `Assets.car` (36 `cy*` colours), `D-DINCondensed.otf`, `UIAppFonts`. App has `NSSupportsLiveActivities`. No `supplementalActivityFamilies`. "CyclometerAI" in neither the extension sources nor the appex.
+- **Docs.** PRD §8.10 Architecture (package struck, shared membership described), TCA.md §8 (`LiveActivity/`, ring, extension paragraph), #306 body.
+- **Results.** CI-style `build-for-testing … ARCHS=arm64`: succeeded. Full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests`: 1948 passed, 0 failed, plus the known issue. `PersistenceClientTests` alone: 47 passed. New `RideActivityAttributesTests`: round trip (riding, paused), worst case < 4 KB.
+- **Not checked.** The widget previews weren't rendered: nothing on the command line draws an `ActivityConfiguration`, and nothing starts an activity until #307/#308. Open `RideLiveActivity.swift`'s previews in Xcode to see D-DIN and `cyPrimary` in the extension.
+
 # #404 — Mini-player route progress ring is never shown
 
 Plan: /Users/brian/.claude/plans/404-piped-perlis.md
