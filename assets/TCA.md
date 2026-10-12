@@ -1009,7 +1009,8 @@ Cyclometer/
 │   │   │                                  // LiveMapCamera, MapSheetButtons
 │   │   ├── Navigation/                    // NavigationFeature, DirectionsWidgetView (W9),
 │   │   │                                  // TurnInstructionOverlay
-│   │   ├── LiveActivity/                  // RideActivityAttributes (PRD §8.10) — shared with the extension
+│   │   ├── LiveActivity/                  // RideActivityAttributes (PRD §8.10) — shared with the extension;
+│   │   │                                  // LiveActivityFeature (app only)
 │   │   ├── Recording/                     // TrackPointRecorderFeature, GPSFixFilter
 │   │   ├── Alerts/                        // AlertOrchestratorFeature, VehiclePassDetector,
 │   │   │                                  // RideBanner

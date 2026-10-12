@@ -275,6 +275,8 @@ struct ActiveRideFeature {
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
         var navigation = NavigationFeature.State()
+        /// The ride's Live Activity (#308), kept by `LiveActivityFeature`.
+        var liveActivity = LiveActivityState()
         /// The highest displayed speed while recording and moving (#381) — taken on every
         /// reading in `.speed`, not once a second, so a peak between two ticks still counts.
         var maxSpeedMPS: Double = 0
@@ -451,6 +453,8 @@ struct ActiveRideFeature {
         case altimeterEnded
         /// A resumed ride's elevation before the kill, from its saved track (#387).
         case elevationSeeded(ElevationTracker.Seed)
+        /// Handled by `LiveActivityFeature` (#308).
+        case liveActivity(LiveActivityAction)
 
         @CasePathable
         enum FinishAlert: Equatable {
@@ -1150,6 +1154,8 @@ struct ActiveRideFeature {
                 return .none
             case .trackRecorder:
                 return .none
+            case .liveActivity:
+                return .none
             }
         }
         // Radar targets arrive continuously and recording state changes from five
@@ -1169,6 +1175,8 @@ struct ActiveRideFeature {
             }
         }
         .ifLet(\.$finishAlert, action: \.finishAlert)
+        // Last, so it reads each tick's values once the ride has applied them (#308).
+        LiveActivityFeature()
     }
 
     /// The only place the dashboard layout is written (#139 review). An edit that breaks a layout

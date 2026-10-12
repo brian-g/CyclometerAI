@@ -35,7 +35,7 @@ struct LiveActivityClientTests {
 
     @Test func startShowsTheRide() async throws {
         await clearActivities()
-        await client.start(metric, Self.state())
+        #expect(await client.start(metric, Self.state()))
 
         await expectEventually("one activity, showing the state") {
             Self.showing().only?.content.state == Self.state()
@@ -47,11 +47,11 @@ struct LiveActivityClientTests {
     /// A ride resumed after a crash calls `start` again; it must not leave two activities.
     @Test func startAgainAdoptsTheRunningActivity() async throws {
         await clearActivities()
-        await client.start(metric, Self.state())
+        #expect(await client.start(metric, Self.state()))
         await expectEventually { Self.showing().count == 1 }
         let first = try #require(Self.showing().only?.id)
 
-        await client.start(metric, Self.state(distanceMeters: 15_000))
+        #expect(await client.start(metric, Self.state(distanceMeters: 15_000)))
         await expectEventually("the new state, on the same activity") {
             Self.showing().only?.content.state.distanceMeters == 15_000
         }
@@ -63,13 +63,13 @@ struct LiveActivityClientTests {
     /// one, and the next ride must get an activity of its own, not adopt the dead one.
     @Test func startReplacesAnEndedActivity() async throws {
         await clearActivities()
-        await client.start(metric, Self.state())
+        #expect(await client.start(metric, Self.state()))
         await expectEventually { Self.showing().count == 1 }
         let ended = try #require(Self.showing().only)
         await ended.end(nil, dismissalPolicy: .default)
         await expectEventually("ended, but still listed") { ended.activityState == .ended }
 
-        await client.start(metric, Self.state(distanceMeters: 15_000))
+        #expect(await client.start(metric, Self.state(distanceMeters: 15_000)))
         await expectEventually("a new activity shows the new ride") {
             Self.showing().only?.content.state.distanceMeters == 15_000
         }
@@ -81,11 +81,11 @@ struct LiveActivityClientTests {
     /// Units are fixed when an activity is requested, so a ride in other units needs a new one.
     @Test func startInOtherUnitsReplacesTheActivity() async throws {
         await clearActivities()
-        await client.start(metric, Self.state())
+        #expect(await client.start(metric, Self.state()))
         await expectEventually { Self.showing().count == 1 }
 
         let imperial = RideActivityAttributes(units: .imperial)
-        await client.start(imperial, Self.state())
+        #expect(await client.start(imperial, Self.state()))
         await expectEventually("one activity, in the new units") {
             Self.showing().only?.attributes == imperial
         }
@@ -94,7 +94,7 @@ struct LiveActivityClientTests {
 
     @Test func updateReplacesTheStateAndPushesStaleness() async throws {
         await clearActivities()
-        await client.start(metric, Self.state())
+        #expect(await client.start(metric, Self.state()))
         await expectEventually { Self.showing().count == 1 }
 
         let before = Date.now
@@ -111,7 +111,7 @@ struct LiveActivityClientTests {
     /// left behind. A `.default` end would leave it `.ended` and on screen for up to 4 hours.
     @Test func endTakesTheRideOffTheLockScreen() async throws {
         await clearActivities()
-        await client.start(metric, Self.state())
+        #expect(await client.start(metric, Self.state()))
         await expectEventually { Self.showing().count == 1 }
 
         await client.end()

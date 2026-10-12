@@ -15,7 +15,9 @@ private let logger = Logger.cyclometer(.liveActivity)
 struct LiveActivityClient {
     /// Shows the ride. Adopts an activity that's already running with the same attributes — a
     /// ride resumed after a crash finds the one it started — rather than requesting a second.
-    var start: @Sendable (RideActivityAttributes, RideActivityAttributes.ContentState) async -> Void
+    /// False when none is showing: ActivityKit refused the request, which it does to an app
+    /// in the background (#308 retries on the next foreground).
+    var start: @Sendable (RideActivityAttributes, RideActivityAttributes.ContentState) async -> Bool
     var update: @Sendable (RideActivityAttributes.ContentState) async -> Void
     /// Ends it with `.immediate` dismissal: no summary is left on the Lock Screen.
     var end: @Sendable () async -> Void
@@ -46,11 +48,13 @@ extension LiveActivityClient: DependencyKey {
                     await activity.end(nil, dismissalPolicy: .immediate)
                 }
             }
-            if adopted { return }
+            if adopted { return true }
             do {
                 _ = try Activity.request(attributes: attributes, content: content(state), pushType: nil)
+                return true
             } catch {
                 logger.error("Live Activity request failed: \(error.localizedDescription, privacy: .public)")
+                return false
             }
         },
         update: { state in await updateAll(state) },
@@ -62,11 +66,12 @@ extension LiveActivityClient: DependencyKey {
         isEnabled: { ActivityAuthorizationInfo().areActivitiesEnabled }
     )
 
+    /// Switched off, so a ride under test shows no activity unless the test supplies a client.
     static let testValue = LiveActivityClient(
-        start: { _, _ in },
+        start: { _, _ in false },
         update: { _ in },
         end: { },
-        isEnabled: { true }
+        isEnabled: { false }
     )
 
     /// Previews never reach ActivityKit.

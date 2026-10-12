@@ -832,7 +832,8 @@ A pocketed or bar-mounted phone with a locked screen hides ride state. Unlocking
 | ~~Ride ends~~ | ~~`activity.end(finalContent, dismissalPolicy: .after(now + 15 min))`, showing a summary~~ |
 | Pause / resume | Update `status` to show the pause icon; the elapsed timer freezes and resumes. The activity stays running |
 | Ride ends | `activity.end(nil, dismissalPolicy: .immediate)`. No summary |
-| App terminated | Each update sets `staleDate` about 30 s ahead, so a dead app's activity shows as stale |
+| App terminated | Each update sets `staleDate` about 30 s ahead, so a dead app's activity shows as stale. An unchanged activity, a paused ride's say, is sent again every 15 s so it doesn't go stale while the app is alive |
+| Request refused | ActivityKit grants a request only to an app in the foreground. A ride that started or resumed in the background requests again when the app next comes forward. A card the rider swiped away isn't brought back |
 
 System limits: an activity stays active for at most 8 hours and remains on the Lock Screen for up to 4 more; `ContentState` must stay under 4 KB.
 
@@ -873,8 +874,8 @@ Design frames in `Design.sketch`: Lock Screen light and dark × ~~radar none / a
 
 - `CyclometerWidgets` widget extension (target `CyclometerWidgetsExtension`) with `ActivityConfiguration(for: RideActivityAttributes.self)`.
 - ~~`RideActivityKit` Swift package shared by app and extension: attributes, snapshots, formatters, colour tokens, `HeroNumber` and the progress ring.~~ The extension compiles a set of the app's own files through target membership (#306): `RideActivityAttributes`, `UnitSystem`, `HeroNumber`, `OpenRingProgressView`, `Spacing`, `AppFonts`, the asset catalog and D-DIN. No package and no copies; a shared file that picks up an app-only type breaks the extension build. TCA.md §8 lists the set.
-- `LiveActivityClient` dependency (`start`, `update`, `end`, `isEnabled`); `liveValue` wraps ActivityKit, `testValue` records calls. `update` takes no alert parameter.
-- `LiveActivityFeature` reducer scoped into the active ride feature. It observes ride ~~, sensor, radar~~ and `NavigationFeature` state (route progress only) and owns the 1 Hz throttle on an injected clock~~, and applies the threat and turn bypasses. Turn cues are derived by navigation; the Live Activity mirrors them~~.
+- `LiveActivityClient` dependency (`start`, `update`, `end`, `isEnabled`); `liveValue` wraps ActivityKit; `testValue` is switched off, and tests supply a recording client. `start` reports whether an activity is showing. `update` takes no alert parameter.
+- `LiveActivityFeature` reducer scoped into the active ride feature. It observes ride ~~, sensor, radar~~ and `NavigationFeature` state (route progress only) and owns the 1 Hz throttle on an injected clock~~, and applies the threat and turn bypasses. Turn cues are derived by navigation; the Live Activity mirrors them~~. Built (#308) as a reducer layered onto `ActiveRideFeature`'s domain rather than a scoped child, so it reads the whole ride and ends the activity on the action that tears the ride down. The ride's 1 Hz tick, on the injected clock, is the throttle.
 - `Info.plist`: `NSSupportsLiveActivities = YES`. Background updates rely on the ride's location background mode.
 - S12 gains **Show Live Activity** (default on). When the system setting is off, S12 explains and links to iOS Settings.
 

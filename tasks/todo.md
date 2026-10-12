@@ -1,3 +1,27 @@
+# #308 — Live Activity: `LiveActivityFeature` reducer
+
+Plan: /Users/brian/.claude/plans/404-piped-perlis.md
+Branch: `feat/308-live-activity-reducer`
+
+- [x] 1. `LiveActivityClient.start` returns `Bool`; test value disabled; client tests assert the result
+- [x] 2. `LiveActivityFeatureTests` (written first): start, disabled, ≤1 Hz, keep-alive, pause, resume, resumed ride, route progress, finish, foreground retry, anchor
+- [x] 3. `LiveActivityFeature` over `ActiveRideFeature`'s domain; state field + action case; composed last in `body`
+- [x] 4. `AppFeature` forwards the foreground to a ride with no activity showing
+- [x] 5. PRD §8.10 + TCA.md §8
+- [x] 6. Fresh build, targeted tests, mutation checks, full suite
+
+## Review
+
+- **Reducer.** `LiveActivityFeature` is layered onto `ActiveRideFeature`'s own domain (State/Action typealiases), composed last in its `body`, not a `Scope`d child: it reads the whole ride each tick, and ends the activity on `.confirmFinish`, the action on which `AppFeature` nils the ride (a forwarded child action would find no state). Its own state is `ActiveRideFeature.State.liveActivity` (phase, what was last shown, ticks since the last update); its actions are `.liveActivity(.started(Bool))` and `.liveActivity(.appBecameActive)`.
+- **Throttle.** The ride's 1 Hz `.elapsedTick` on the injected clock. Readings between ticks fold into the next; nothing is sent ahead of a tick. An update goes only when the content changed, or as a keep-alive after 15 unchanged ticks (half `staleInterval`), so a paused ride stays fresh while the app is alive (#308 comment, item 1).
+- **Timer start.** While riding, `startDate` is `now − elapsedSeconds`, keeping the shown one while it's within 1 s; a resume moves it by the pause's length. Paused keeps it, with `pausedElapsed`.
+- **Refused start (item 2).** `start` returns `Bool`. Refused, the phase returns to `.notShowing`, and `AppFeature` forwards the next `.scenePhaseChanged(isActive: true)` to retry. A card the rider swiped away stays `.showing` and isn't brought back.
+- **Test value.** `isEnabled` false and `start` false, so the ~20 test files that send `.task` see no new state or actions; the Live Activity tests opt in with a recording client.
+- **Tests.** `LiveActivityFeatureTests`, 11: start (units, riding, start date), disabled, resumed-paused start, route progress, readings coalesce to the tick, keep-alive every 15 ticks, pause + keep-alive, resume moves the start, anchor tolerance, finish ends it through `AppFeature` with nothing after, refused start retried in the foreground but a showing one not. Mutations: no keep-alive, no end, no foreground forward → keep-alive/pause/resume, finish and retry tests fail; always-send and no anchor tolerance → coalesce, keep-alive, pause, resume and anchor tests fail. Restored (`cmp`).
+- **Results.** Fresh build. Full `CyclometerTests` minus `PersistenceClientTests` and `MapWidgetAccessibilityTests`: 1965 passed (1954 + 11), 0 failed, 1 expected failure. `PersistenceClientTests` alone: 47 passed.
+- **Simulator drive** (throwaway XCUITest, deleted). Riding: the Dynamic Island shows elapsed time and speed; the Lock Screen card shows the bicycle glyph, the timer, 0.1 mi and 13.4 mph. Paused 40 s: the pause icon, the timer frozen at 0:24. After Finish: gone. iOS asked "Allow Live Activities from Cyclometer?" under the first card, which #313's S12 explainer should account for. The placeholder has no stale styling yet (#309), so staleness wasn't visible.
+- **Not built.** Ending an orphaned activity at launch when no ride resumes (the next ride's `start` clears it); a mid-ride units change (attributes keep the start's units).
+
 # #307 — Live Activity: `LiveActivityClient` dependency
 
 Plan: /Users/brian/.claude/plans/404-piped-perlis.md
