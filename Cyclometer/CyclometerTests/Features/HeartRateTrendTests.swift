@@ -14,29 +14,29 @@ struct HeartRateTrendTests {
     }
 
     @Test func risingAndFalling() {
-        #expect(HeartRateTrend(strap(baseline: 140, recent: 145)) == .up)
-        #expect(HeartRateTrend(strap(baseline: 145, recent: 140)) == .down)
+        #expect(Trend(strap(baseline: 140, recent: 145)) == .up)
+        #expect(Trend(strap(baseline: 145, recent: 140)) == .down)
     }
 
-    /// Under `thresholdBPM` is a strap's wander, not a trend.
+    /// Under `heartRateThresholdBPM` is a strap's wander, not a trend.
     @Test func smallChangeIsSteady() {
-        #expect(HeartRateTrend(strap(baseline: 140, recent: 142)) == .steady)
-        #expect(HeartRateTrend(strap(baseline: 140, recent: 143)) == .up)
+        #expect(Trend(strap(baseline: 140, recent: 142)) == .steady)
+        #expect(Trend(strap(baseline: 140, recent: 143)) == .up)
     }
 
     /// Too little to compare — a ride seconds old, or an Apple Watch sampling minutes apart.
     @Test func sparseOrEmptyIsSteady() {
-        #expect(HeartRateTrend([]) == .steady)
-        #expect(HeartRateTrend(Array(strap(baseline: 140, recent: 160).suffix(5))) == .steady)
+        #expect(Trend([]) == .steady)
+        #expect(Trend(Array(strap(baseline: 140, recent: 160).suffix(5))) == .steady)
         let watch = [HeartRateSample(time: start, bpm: 120),
                      HeartRateSample(time: start.addingTimeInterval(180), bpm: 150)]
-        #expect(HeartRateTrend(watch) == .steady)
+        #expect(Trend(watch) == .steady)
     }
 
     /// Counted back from the newest reading, so readings older than the baseline don't count.
     @Test func olderReadingsAreIgnored() {
         let old = (0..<60).map { HeartRateSample(time: start.addingTimeInterval(Double($0)), bpm: 100) }
         let flat = (60..<90).map { HeartRateSample(time: start.addingTimeInterval(Double($0)), bpm: 150) }
-        #expect(HeartRateTrend(old + flat) == .steady)
+        #expect(Trend(old + flat) == .steady)
     }
 }

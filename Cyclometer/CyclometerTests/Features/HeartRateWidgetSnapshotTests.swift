@@ -18,7 +18,7 @@ final class HeartRateWidgetSnapshotTests: XCTestCase {
         bpm: Int = 156,
         source: HRSource = .bleStrap,
         history: [Double]? = nil,
-        trend: HeartRateTrend = .up,
+        trend: Trend = .up,
         size: WidgetSize,
         scheme: ColorScheme = .light
     ) -> some View {

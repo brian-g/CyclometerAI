@@ -77,4 +77,28 @@ final class CadenceWidgetSnapshotTests: XCTestCase {
             as: .image(layout: canvas1x1, traits: .init(userInterfaceStyle: .dark))
         )
     }
+
+    // MARK: - Trend (#402)
+
+    func testCadenceOneByOneTrendUp() {
+        assertSnapshot(
+            of: widget(cadence: 96, history: sampleHistory, size: .oneByOne),
+            as: .image(layout: canvas1x1)
+        )
+    }
+
+    func testCadenceTwoByOneTrendDown() {
+        // The one size where the ▼ sits between the cadence and AVG.
+        assertSnapshot(
+            of: widget(cadence: 78, history: sampleHistory, size: .twoByOne),
+            as: .image(layout: canvas2x1)
+        )
+    }
+
+    func testCadenceTrendDownDark() {
+        assertSnapshot(
+            of: widget(cadence: 78, history: sampleHistory, size: .oneByOne, scheme: .dark),
+            as: .image(layout: canvas1x1, traits: .init(userInterfaceStyle: .dark))
+        )
+    }
 }
