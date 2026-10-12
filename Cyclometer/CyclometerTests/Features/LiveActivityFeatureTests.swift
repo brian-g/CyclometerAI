@@ -238,6 +238,24 @@ struct LiveActivityFeatureTests {
                                              routeProgress: nil))
     }
 
+    /// A one-tick pause moves the start by exactly the second the anchor's tolerance allows; kept,
+    /// the Lock Screen's timer would read a second over the dashboard's for the rest of the ride.
+    @Test("a resume after a one-second pause still moves the timer's start")
+    func resumeAfterOneSecondMovesTheStart() async {
+        let ride = Self.makeRide()
+        let calls = ride.calls
+        await ride.start()
+        await ride.tick(10)
+        await ride.store.send(.pauseTapped)
+        await ride.tick()
+        await expectEventually("the pause") { calls.updates.count == 1 }
+
+        await ride.store.send(.resumeTapped)
+        await ride.tick()
+        await expectEventually("the resume") { calls.updates.count == 2 }
+        #expect(calls.updates.last?.startDate == Self.t0.addingTimeInterval(1))
+    }
+
     // MARK: - The timer's start
 
     @Test("the start shown is kept within a second of the elapsed time, and replaced beyond it")

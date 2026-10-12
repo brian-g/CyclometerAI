@@ -375,8 +375,8 @@ struct AppFeature {
             case .scenePhaseChanged(let isActive):
                 state.isForeground = isActive
                 // ActivityKit refuses a request from the background, so a ride that started or
-                // resumed there gets its Live Activity now (#308).
-                guard isActive, state.activeRide?.liveActivity.phase == .notShowing else { return .none }
+                // resumed there gets its Live Activity now (#308). The ride decides whether it needs one.
+                guard isActive, state.activeRide != nil else { return .none }
                 return .send(.activeRide(.liveActivity(.appBecameActive)))
 
             case .screenVisibilityChanged(let isVisible):

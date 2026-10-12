@@ -69,19 +69,18 @@ struct LiveActivityFeature {
     /// The mini-player's values, as `AppView` hands them to `ActiveRideAccessoryView`.
     ///
     /// While riding, `startDate` is `now − elapsedSeconds`, so the Lock Screen's timer reads what
-    /// the dashboard does. The one already shown is kept while it's within a second of that:
-    /// a steady ride doesn't send a new date every tick, and a resume, which moves it by the
-    /// pause's length, gets a new one. While paused the shown one is kept and the timer shows
-    /// `pausedElapsed` instead.
+    /// the dashboard does. Riding on, the one already shown is kept while it's within a second of
+    /// that, so a steady ride doesn't send a new date every tick. A resume always gets a new one:
+    /// it moves the start by the pause's length, which can be the very second the tolerance
+    /// allows. While paused the shown one is kept and the timer shows `pausedElapsed` instead.
     static func content(for state: State, now: Date) -> RideActivityAttributes.ContentState {
         let elapsed = TimeInterval(state.elapsedSeconds)
-        let shownStart = state.liveActivity.shown?.startDate
+        let shown = state.liveActivity.shown
         let ridingStart = now.addingTimeInterval(-elapsed)
         let startDate: Date
-        if state.isPaused, let shownStart {
-            startDate = shownStart
-        } else if let shownStart, abs(shownStart.timeIntervalSince(ridingStart)) <= 1 {
-            startDate = shownStart
+        if let shown, state.isPaused
+            || (shown.status == .riding && abs(shown.startDate.timeIntervalSince(ridingStart)) <= 1) {
+            startDate = shown.startDate
         } else {
             startDate = ridingStart
         }
