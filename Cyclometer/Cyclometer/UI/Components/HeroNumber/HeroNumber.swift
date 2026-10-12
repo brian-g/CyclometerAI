@@ -4,7 +4,9 @@ enum HeroUnitAlignment: Hashable { case vertical, horizontal }
 enum HeroSize: Hashable { case small, medium, large }
 
 struct HeroNumber<Label: View>: View {
-    let value: String
+    /// A `Text` rather than a `String`, so a self-updating one (the Live Activity's
+    /// `Text(timerInterval:)`) gets the same type as a formatted value.
+    let value: Text
     let unit: String
     var size: HeroSize = .large
     var alignment: HeroUnitAlignment = .horizontal
@@ -16,51 +18,58 @@ struct HeroNumber<Label: View>: View {
     // MARK: - Plain-value inits
 
     init(_ value: String, unit: String) where Label == EmptyView {
-        self.value = value
+        self.value = Text(verbatim: value)
         self.unit = unit
         self.label = EmptyView()
     }
 
     init(_ value: Double, decimals: Int = 1, unit: String) where Label == EmptyView {
-        self.value = value.formatted(.number.precision(.fractionLength(decimals)))
+        self.value = Text(verbatim: value.formatted(.number.precision(.fractionLength(decimals))))
         self.unit = unit
         self.label = EmptyView()
     }
 
     init(_ value: String, unit: String, @ViewBuilder label: () -> Label) {
-        self.value = value
+        self.value = Text(verbatim: value)
         self.unit = unit
         self.label = label()
     }
 
     init(_ value: Double, decimals: Int = 1, unit: String, @ViewBuilder label: () -> Label) {
-        self.value = value.formatted(.number.precision(.fractionLength(decimals)))
+        self.value = Text(verbatim: value.formatted(.number.precision(.fractionLength(decimals))))
         self.unit = unit
         self.label = label()
+    }
+
+    /// A value that formats itself, e.g. `Text(timerInterval:)`.
+    init(_ value: Text, unit: String) where Label == EmptyView {
+        self.value = value
+        self.unit = unit
+        self.label = EmptyView()
     }
 
     // MARK: - Binding inits
 
     init(_ value: Binding<String>, unit: String) where Label == EmptyView {
-        self.value = value.wrappedValue
+        self.value = Text(verbatim: value.wrappedValue)
         self.unit = unit
         self.label = EmptyView()
     }
 
     init(_ value: Binding<Double>, decimals: Int = 1, unit: String) where Label == EmptyView {
-        self.value = value.wrappedValue.formatted(.number.precision(.fractionLength(decimals)))
+        self.value = Text(verbatim: value.wrappedValue.formatted(.number.precision(.fractionLength(decimals))))
         self.unit = unit
         self.label = EmptyView()
     }
 
     init(_ value: Binding<String>, unit: String, @ViewBuilder label: () -> Label) {
-        self.value = value.wrappedValue
+        self.value = Text(verbatim: value.wrappedValue)
         self.unit = unit
         self.label = label()
     }
 
     init(_ value: Binding<Double>, decimals: Int = 1, unit: String, @ViewBuilder label: () -> Label) {
-        self.value = value.wrappedValue.formatted(.number.precision(.fractionLength(decimals)))
+        self.value = Text(verbatim: value.wrappedValue.formatted(.number.precision(.fractionLength(decimals))))
         self.unit = unit
         self.label = label()
     }
@@ -143,6 +152,7 @@ struct HeroNumber<Label: View>: View {
                         if let accessory { accessory }
                         scaledValue
                     }
+                    .digitBaselines(offset)
                     if !unit.isEmpty { unitLabel }
                 }
             } else {
@@ -151,6 +161,7 @@ struct HeroNumber<Label: View>: View {
                     scaledValue
                     if !unit.isEmpty { unitLabel.baselineOffset(offset) }
                 }
+                .digitBaselines(offset)
             }
         }
     }
@@ -168,7 +179,7 @@ struct HeroNumber<Label: View>: View {
     // accessory takes the same offset to stay level with them.
     @ViewBuilder
     private var valueText: some View {
-        let text = Text(value)
+        let text = value
             .dDINCondensed(size: ptSize, relativeTo: .largeTitle)
             .lineLimit(1)
             .foregroundStyle(color)
@@ -181,6 +192,17 @@ struct HeroNumber<Label: View>: View {
 
     private var unitLabel: some View {
         Text(unit).textCase(.lowercase).font(.footnote)
+    }
+}
+
+private extension View {
+    /// `.baselineOffset` lowers the glyphs but not the baselines the row reports, so heroes of
+    /// different sizes (different offsets) side by side on a baseline didn't line up: the S22 Live
+    /// Activity's medium speed sat 2pt below its small time and distance (#309). Report the
+    /// baselines where the digits are drawn.
+    func digitBaselines(_ offset: CGFloat) -> some View {
+        alignmentGuide(.firstTextBaseline) { $0[.firstTextBaseline] - offset }
+            .alignmentGuide(.lastTextBaseline) { $0[.lastTextBaseline] - offset }
     }
 }
 
