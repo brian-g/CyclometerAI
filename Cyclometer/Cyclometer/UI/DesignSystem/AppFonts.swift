@@ -61,6 +61,59 @@ extension AppFonts {
     static let dDINCondensedTrackingMinSize: CGFloat = 50
 }
 
+// MARK: - Digit Metrics
+
+extension AppFonts {
+    /// Without D-DIN, SwiftUI draws the system font, so that's the one to measure.
+    private static let dDINMetricsFont = UIFont(name: dDINCondensedPostScriptName, size: 100)
+        ?? .systemFont(ofSize: 100)
+
+    /// D-DIN's cap height as a share of its ascent: where the digits' tops sit between a hero's
+    /// top and its baseline, at any size.
+    fileprivate static let dDINCapHeightToAscent = dDINMetricsFont.capHeight / dDINMetricsFont.ascender
+
+    /// D-DIN's cap height as a share of its line: the digits' height from a hero's rendered height.
+    fileprivate static let dDINCapHeightToLineHeight = dDINMetricsFont.capHeight
+        / (dDINMetricsFont.ascender - dDINMetricsFont.descender)
+}
+
+private extension VerticalAlignment {
+    /// The tops of a D-DIN hero's digits.
+    enum DDINCapTop: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat { d[.top] }
+    }
+    static let dDINCapTop = VerticalAlignment(DDINCapTop.self)
+}
+
+extension View {
+    /// Draws `accessory` right of this D-DIN text, level with the tops of its digits, and hands it
+    /// the digits' height to size itself from (#81, #402). An overlay, so nothing beside the text
+    /// moves. Apply it to the `Text` itself, after any `minimumScaleFactor` and before any fixed
+    /// frame.
+    func dDINCapAccessory<A: View>(@ViewBuilder _ accessory: @escaping (_ capHeight: CGFloat) -> A) -> some View {
+        modifier(DDINCapAccessory(accessory: accessory))
+    }
+}
+
+private struct DDINCapAccessory<A: View>: ViewModifier {
+    let accessory: (CGFloat) -> A
+
+    /// The text's rendered height. The digits' height comes from it, not from Dynamic Type: a hero
+    /// held to its slot's height stops growing, and a text-styled glyph would outgrow it.
+    @State private var height: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            // From the rendered baseline, so it holds when `minimumScaleFactor` shrinks the text.
+            .alignmentGuide(.dDINCapTop) { $0[.firstTextBaseline] * (1 - AppFonts.dDINCapHeightToAscent) }
+            .onGeometryChange(for: CGFloat.self, of: \.size.height) { height = $0 }
+            .overlay(alignment: Alignment(horizontal: .trailing, vertical: .dDINCapTop)) {
+                accessory(height * AppFonts.dDINCapHeightToLineHeight)
+                    .alignmentGuide(.trailing) { $0[.leading] - Spacing.xs }
+            }
+    }
+}
+
 // MARK: - View Modifier
 
 extension View {

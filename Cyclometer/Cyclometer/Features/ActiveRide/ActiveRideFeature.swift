@@ -246,7 +246,7 @@ struct ActiveRideFeature {
                 return slice.reduce(0, +) / Double(slice.count)
             }
         }
-        var hrTrend: HeartRateTrend { HeartRateTrend(hrSamples) }
+        var hrTrend: Trend { Trend(hrSamples) }
         /// Whether this second's reading is a measurement worth writing to the track,
         /// as opposed to no reading at all or a HealthKit sample already recorded
         /// (#221). Note it reads `heartRateBPM`, never `displayHeartRateBPM` — a held

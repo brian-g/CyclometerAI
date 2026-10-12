@@ -96,6 +96,22 @@ struct CadenceWidget: View {
     private var cadenceHero: some View {
         HeroNumber(displayCadence, unit: cadence != nil ? "rpm" : "")
             .heroNumberSize(.medium)
+            .heroTrend(Self.trend(cadence: cadence, average: averageCadence))
+    }
+
+    // MARK: - Trend
+
+    /// Minimum difference from the ride average before the trend indicator shows ▲/▼ (#402).
+    static let trendThresholdRPM = 5
+
+    /// Current cadence against the ride average, as W1's speed is (#402). Steady when coasting,
+    /// with no reading, or before any pedalling has been recorded.
+    static func trend(cadence: Int?, average: Int) -> Trend {
+        guard let cadence, cadence > 0, average > 0 else { return .steady }
+        let diff = cadence - average
+        if diff > trendThresholdRPM { return .up }
+        if diff < -trendThresholdRPM { return .down }
+        return .steady
     }
 
     // Stat cells reuse the design-system HeroNumber, matching SpeedWidget.

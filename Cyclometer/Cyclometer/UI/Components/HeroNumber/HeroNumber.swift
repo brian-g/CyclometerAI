@@ -10,6 +10,7 @@ struct HeroNumber<Label: View>: View {
     var alignment: HeroUnitAlignment = .horizontal
     var color: Color = .primary
     var accessory: AnyView? = nil
+    var capAccessory: ((CGFloat) -> AnyView)? = nil
     let label: Label
 
     // MARK: - Plain-value inits
@@ -93,6 +94,16 @@ struct HeroNumber<Label: View>: View {
         return copy
     }
 
+    /// Optional view right of the value, level with the tops of its digits and handed their
+    /// height (e.g. the trend ▲/▼, `heroTrend(_:)`). An overlay, so the unit keeps its place.
+    /// For an `Image` or shape: a `Text` would also take the value's `.baselineOffset`. The height
+    /// is measured after layout, so a single-pass render (likely a Live Activity's) may hand it 0.
+    func heroCapAccessory<A: View>(@ViewBuilder _ make: @escaping (_ capHeight: CGFloat) -> A) -> Self {
+        var copy = self
+        copy.capAccessory = { AnyView(make($0)) }
+        return copy
+    }
+
     // MARK: - Layout constants
 
     private var ptSize: CGFloat {
@@ -147,12 +158,25 @@ struct HeroNumber<Label: View>: View {
     // MARK: - Private helpers
 
     private var scaledValue: some View {
-        Text(value)
+        valueText
+            .frame(height: frameSize)
+            .baselineOffset(offset)
+    }
+
+    // The accessory goes on before the frame, so it measures the digits' own line rather than
+    // `frameSize`. `.baselineOffset` moves the digits' glyphs but not an overlay, so the
+    // accessory takes the same offset to stay level with them.
+    @ViewBuilder
+    private var valueText: some View {
+        let text = Text(value)
             .dDINCondensed(size: ptSize, relativeTo: .largeTitle)
             .lineLimit(1)
             .foregroundStyle(color)
-            .frame(height: frameSize)
-            .baselineOffset(offset)
+        if let capAccessory {
+            text.dDINCapAccessory { capAccessory($0).offset(y: -offset) }
+        } else {
+            text
+        }
     }
 
     private var unitLabel: some View {

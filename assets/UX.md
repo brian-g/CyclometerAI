@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-12 — §W1, §W4 and §W5 share one trend ▲/▼ (#402): right of the value, level with the tops of its digits and a quarter of their height. W4's moves off the unit, where Design.sketch drew it, and W5 gains one: cadence against the ride average, by more than 5 rpm.  
 **Updated:** 2026-10-10 — Added S21 for the Live Activity.  
 **Updated:** 2026-10-10 — §W1's above/below-average indicator moved from AVG to the speed (#81): ▲/▼ as W4's, right of the value and level with its top, at every size.  
 **Updated:** 2026-10-04—  Added details for additional widgets.
@@ -577,7 +578,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 **Sizes:** 2x2, 2x1, 1x1
 
 - Primary value: `large-hero`; unit: km/h or mph (`UserProfile.preferredUnit`)
-- Trend, at every size (#81): a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the primary value, level with the tops of its digits and a quarter of their height, when current speed is above or below the ride average by more than 0.5 km/h. Hidden when even or with no reading. The unit doesn't move
+- Trend, at every size (#81): the shared trend indicator (#402), a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the primary value, level with the tops of its digits and a quarter of their height. It shows when current speed is above or below the ride average by more than 0.5 km/h. Hidden when even or with no reading. The unit doesn't move
 - Watermark speed history graph (area line behind the numbers)
 - 2x1, 2x2: Max speed for ride (`small-hero`, labeled "MAX")
 - 2x1, 2x2: Current average speed (`small-hero`, labeled "AVG")
@@ -634,7 +635,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 - Value: current BPM
 - A watermark graph of the historical HR for the ride. The horizontal bands in the chart should show the zones (`brHRZone1`–`brHRZone5`)
-- As built (#145), W4 matches W5 Cadence. Behind the number, the last hour of heart rate is a faint line on the rider's zone bands. The y-axis is fixed from resting to max HR, so the bands don't move. A ▲ (`brRatingGood`) or ▼ (`brRatingBad`) over the unit shows the trend (Design.sketch "W4 - Heart Rate"): the last 10 s of readings against the 20 s before, by 3 bpm or more. The ▲/▼ is hidden when steady or with no reading. At 2×1 the hero has Avg and Max beside it, as W5's does. The left border shows the current zone's colour
+- As built (#145), W4 matches W5 Cadence. Behind the number, the last hour of heart rate is a faint line on the rider's zone bands. The y-axis is fixed from resting to max HR, so the bands don't move. The trend is the shared trend indicator (#402), as §W1's: a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the value, level with the tops of its digits and a quarter of their height, not over the unit as Design.sketch "W4 - Heart Rate" draws it. It compares the last 10 s of readings against the 20 s before, by 3 bpm or more. Hidden when steady or with no reading. The unit doesn't move. At 2×1 the hero has Avg and Max beside it, as W5's does. The left border shows the current zone's colour
 - Zone label: "Z1 Recovery/Light", "Z2 Endurance", "Z3 Aerobic", "Z4 Threshold", "Z5 Anaerobic" — §S12's names, so the dashboard and Settings use the same words (#145)
 - Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. The first section is the Cadence sheet's chart for heart rate (the last hour on zone bands over a faint elevation area, its y-axis fixed from resting to max), on the Ride Metrics charts' time axis; then current heart rate and zone, matching the cards' empty states: "No HR Source" with nothing connected, "—" with no reading. Then **Time in Zones**: a donut in the zone colours, and one row per zone giving its name, its bpm range as §S12 resolves it, and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
 
@@ -646,6 +647,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 - Value: current RPM
 - Empty state: "--" 
+- Trend, at both sizes (#402): the shared trend indicator, as §W1's: a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the value, level with the tops of its digits and a quarter of their height. It shows when current cadence is above or below the ride average by more than 5 rpm. Hidden when even, while coasting (0 rpm), with no reading, or before any pedalling is recorded. The unit doesn't move
 - 2x1 displays the average and max
 - A watermark graph of the historical Cadence for the ride. The horizontal bands in the chart show the cadence zones.
 - Sheet: Ride metrics

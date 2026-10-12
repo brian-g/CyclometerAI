@@ -13,8 +13,8 @@ private struct NoHRSourceLabel: View {
 }
 
 /// W4 — Heart Rate, 1×1 and 2×1. Built as W5 Cadence is (#145): the last hour as a watermark on
-/// the rider's zone bands behind the number, and Avg/Max at 2×1. The ▲/▼ is the trend, from
-/// Design.sketch "W4 - Heart Rate".
+/// the rider's zone bands behind the number, and Avg/Max at 2×1. The ▲/▼ is the trend, placed as
+/// W1's is (#402).
 struct HeartRateWidget: View {
     /// `ActiveRideFeature.State.displayHeartRateBPM`, not the raw reading — it resolves
     /// a brief strap silence to the held value rather than to `0` (#221). `0` here means
@@ -27,7 +27,7 @@ struct HeartRateWidget: View {
     var history: [Double] = []
     /// Zone 1 first (`State.hrZoneBounds`): the watermark's bands.
     var zoneBounds: [ClosedRange<Int>] = HeartRateMetrics().zoneBounds
-    var trend: HeartRateTrend = .steady
+    var trend: Trend = .steady
     /// 0 → no recorded reading yet.
     var averageBPM: Int = 0
     var maxBPM: Int = 0
@@ -35,9 +35,6 @@ struct HeartRateWidget: View {
     /// The Heart Rate sheet's data. A closure so the card never reads it; only the open sheet
     /// does, in its own body (#145).
     var metrics: () -> HeartRateMetrics = { HeartRateMetrics() }
-
-    /// The trend triangle's size, from Design.sketch "W4 - Heart Rate" (20 × 18).
-    private static let trendSize: CGFloat = 18
 
     var body: some View {
         ZStack {
@@ -75,17 +72,11 @@ struct HeartRateWidget: View {
         }
     }
 
-    // Over the unit, as Design.sketch draws it: `heroAccessory` would put it before the value.
+    // The trend sits as W1's does (#402): right of the value, level with its digits' tops.
     private var hero: some View {
         HeroNumber(bpm > 0 ? "\(bpm)" : "—", unit: "bpm")
             .heroNumberSize(.medium)
-            .overlay(alignment: .topTrailing) {
-                if bpm > 0, trend != .steady {
-                    Image(systemName: trend == .up ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
-                        .font(.system(size: Self.trendSize))
-                        .foregroundStyle(trend == .up ? Color.cyRatingGood : Color.cyRatingBad)
-                }
-            }
+            .heroTrend(bpm > 0 ? trend : .steady)
     }
 
     // Stat cells reuse the design-system HeroNumber, matching CadenceWidget.

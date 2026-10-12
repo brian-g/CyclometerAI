@@ -241,6 +241,7 @@ The dashboard is the primary UI with the user while riding. It should be a confi
         * Max
     * Cadence
         * Current cadence
+        * Current cadence shows an indicator for whether it is above or below the average
         * Average
         * Max
     * Power
