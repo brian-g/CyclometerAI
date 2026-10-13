@@ -26,16 +26,14 @@ struct RideLiveActivity: Widget {
                         .environment(\.colorScheme, .dark)
                 }
             } compactLeading: {
-                RideStatusMark(state: context.state, showsPercent: false)
-                    .frame(width: Spacing.islandStatusMark, height: Spacing.islandStatusMark)
+                RideIslandStatusMark(state: context.state)
                     .environment(\.colorScheme, .dark)
             } compactTrailing: {
                 RideIslandSpeed(state: context.state, units: context.attributes.units,
                                 isStale: context.isStale)
                     .environment(\.colorScheme, .dark)
             } minimal: {
-                RideStatusMark(state: context.state, showsPercent: false)
-                    .frame(width: Spacing.islandStatusMark, height: Spacing.islandStatusMark)
+                RideIslandStatusMark(state: context.state)
                     .environment(\.colorScheme, .dark)
             }
             // Sketch's 15pt, near enough, for the Lock Screen card's padding. The system's ~18pt

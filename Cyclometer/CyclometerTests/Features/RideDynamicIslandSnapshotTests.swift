@@ -11,7 +11,7 @@ import SwiftUI
 /// screenshots in the PR cover that.
 final class RideDynamicIslandSnapshotTests: XCTestCase {
 
-    private let compactCanvas: SwiftUISnapshotLayout = .fixed(width: 200, height: 37)
+    private let compactCanvas: SwiftUISnapshotLayout = .fixed(width: 200, height: Spacing.dynamicIsland)
     // The expanded island is 374pt wide on iPhone 17 Pro (simulator); less `Spacing.lg` margins
     // each side, the row gets 342pt.
     private let expandedCanvas: SwiftUISnapshotLayout = .fixed(width: 342, height: 70)
@@ -36,8 +36,7 @@ final class RideDynamicIslandSnapshotTests: XCTestCase {
         isStale: Bool = false
     ) -> some View {
         HStack {
-            RideStatusMark(state: state, showsPercent: false)
-                .frame(width: Spacing.islandStatusMark, height: Spacing.islandStatusMark)
+            RideIslandStatusMark(state: state)
             Spacer(minLength: 0)
             RideIslandSpeed(state: state, units: units, isStale: isStale)
         }
@@ -49,8 +48,7 @@ final class RideDynamicIslandSnapshotTests: XCTestCase {
     }
 
     private func minimal(_ state: RideActivityAttributes.ContentState) -> some View {
-        RideStatusMark(state: state, showsPercent: false)
-            .frame(width: Spacing.islandStatusMark, height: Spacing.islandStatusMark)
+        RideIslandStatusMark(state: state)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.black, in: .circle)
             .environment(\.colorScheme, .dark)
@@ -117,6 +115,19 @@ final class RideDynamicIslandSnapshotTests: XCTestCase {
     func testDynamicIslandExpandedLongRideMetric() {
         snap(expanded(state(status: .paused, speedMPS: 12.5, distanceMeters: 125_300, elapsed: 17_084),
                       units: .metric), expandedCanvas)
+    }
+
+    /// Past 9 h the timer's slot is "44:44:44", and even with the unit under distance the row is
+    /// ~13pt over, so speed drops its decimal (asked).
+    func testDynamicIslandExpandedNineHoursMetric() {
+        snap(expanded(state(status: .paused, speedMPS: 12.5, distanceMeters: 125_300, elapsed: 34_200),
+                      units: .metric), expandedCanvas)
+    }
+
+    /// A 393pt phone (iPhone 15/16): the island is ~365pt, so the row gets ~333pt.
+    func testDynamicIslandExpandedNarrowPhone() {
+        snap(expanded(state(status: .paused, speedMPS: 12.5, distanceMeters: 125_300, elapsed: 17_084),
+                      units: .metric), .fixed(width: 333, height: 70))
     }
 
     func testDynamicIslandExpandedPaused() {

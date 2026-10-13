@@ -123,6 +123,8 @@ struct UnitSystemTests {
     @Test func spokenSpeedAndDistanceSpellOutUnits() {
         #expect(UnitSystem.metric.spokenSpeed(fromMPS: 10) == "36.0 kilometers per hour")
         #expect(UnitSystem.imperial.spokenSpeed(fromMPS: 10) == "22.4 miles per hour")
+        // The Dynamic Island shows whole numbers, and says what it shows (#310).
+        #expect(UnitSystem.imperial.spokenSpeed(fromMPS: 10, fractionLength: 0) == "22 miles per hour")
         #expect(UnitSystem.metric.spokenDistance(fromMeters: 12_400) == "12.4 kilometers")
         #expect(UnitSystem.imperial.spokenDistance(fromMeters: 12_400) == "7.7 miles")
     }

@@ -124,3 +124,24 @@ Sketch "S22 - Dynamic Island" and "S22 - Expanded Dynamic Island" win over the i
 - **Tests.**
   - New: `RideDynamicIslandSnapshotTests` (11, all inspected) and `LiveActivityContrastTests.islandPassesOnBlack`.
   - Full `CyclometerTests` minus the two local hangs: 1998 passed. `PersistenceClientTests` and `MapWidgetAccessibilityTests` passed alone (50).
+
+### /code-review --fix (xhigh)
+
+- **Kept the reviewer's 7 fixes:**
+  - island speed spoken to the whole number shown (`spokenSpeed(fromMPS:fractionLength:)`);
+  - `RideIslandStatusMark` extracted from five copies;
+  - a metric island preview;
+  - the remaining "bicycle glyph" docs (PRD, UX, `RideActivityAttributes`);
+  - `Spacing.dynamicIsland` for the compact canvas;
+  - the `metrics(_:)` parameter shadowing.
+- **My miss:** the "337pt worst case" left out rides past 9 h, where `ElapsedTime.widest` reserves "44:44:44". Metric long rides then overflow the island (~351pt against 342) and the Lock Screen card alike; so does a 393pt phone at 4:44:44.
+  - Asked: a last `ViewThatFits` fallback with speed's decimal dropped.
+  - New snapshots: island 9:30 metric, island at 333pt, Lock Screen 9:30 metric. All three showed "4…" before the fix.
+- **My miss:** `.font(.system(size: 18))` broke the design-system rule (no hardcoded sizes; map to the nearest text style). It's now `.body` medium, and the compact references moved.
+- **Pause icon (asked):** sized to the mark, like the rider glyph, so Dynamic Type can't grow it past 26pt. On the Lock Screen it is now 40pt, filling the mark as Sketch's circle does. #309's seven paused/stale references re-recorded.
+- **Not taken:**
+  - Design.sketch on disk lacks the island frames (Brian to save and commit).
+  - Ring track contrast on black (design).
+  - Test helpers vs the system renderer.
+  - `HeroNumber` reporting its drawn bounds (follow-up).
+  - The `.now` timer snapshot pattern (pre-existing).

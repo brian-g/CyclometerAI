@@ -87,6 +87,15 @@ final class RideLockScreenSnapshotTests: XCTestCase {
         assertSnapshot(of: card(state(status: .paused, pausedElapsed: 36_000)), as: .image(layout: canvas))
     }
 
+    /// 9:30:00 metric on a long ride: the row is wider than the card even with distance's unit
+    /// under it, so speed drops its decimal (#310 review).
+    func testLockScreenNineHoursMetric() {
+        let state = RideActivityAttributes.ContentState(
+            status: .paused, startDate: .now.addingTimeInterval(-34_200), pausedElapsed: 34_200,
+            speedMPS: 12.5, distanceMeters: 125_300, routeProgress: 0.42)
+        assertSnapshot(of: card(state), as: .image(layout: canvas))
+    }
+
     // MARK: - Stale → dimmed values, "Reconnecting…"
 
     func testLockScreenStaleLight() {

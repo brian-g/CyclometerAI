@@ -782,3 +782,17 @@ its states. A preview on a wrapper doesn't show what the wrapper can't produce.
 **Rule.** `.claude/rules/previews.md`: every file declaring a non-private `View` gets `#Preview`s for
 each state its design calls out, with sample data, before the view is called done. States the
 canvas can't produce are previewed on the plain view with the input or environment set.
+
+---
+
+## A "worst case" must come from the code's own thresholds (2026-10-13, #310 review)
+
+**What happened.** I measured the expanded island's row for a set of "worst" values and wrote "337pt
+worst case" into the code, the PRD and the PR. My own `ElapsedTime.widest` switches the timer's
+reserved slot to "44:44:44" from 9 h, and none of my cases crossed it. `/code-review` measured 351pt
+past 9 h. Speed truncated to "4…" on the island and on the Lock Screen. In the same change I wrote
+`.font(.system(size: 18))`, which breaks the design-system memory's no-hardcoded-sizes rule.
+
+**Rule.** Before claiming a layout's worst case, list every branch in the code that changes a width:
+thresholds, slot strings, unit and locale switches, device widths. Put a test case on the far side
+of each. Before reproducing an exact size from a mockup, re-read the design-system conventions.

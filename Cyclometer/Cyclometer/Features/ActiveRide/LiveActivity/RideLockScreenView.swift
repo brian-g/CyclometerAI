@@ -30,6 +30,11 @@ struct RideLockScreenView: View {
     /// distance rather than truncating speed (asked).
     var distanceLayout: HeroUnitAlignment = .vertical
 
+    /// Speed's decimals: one, as everywhere, unless the row still doesn't fit with distance's unit
+    /// under it. Past 9 h the timer's slot is "44:44:44", and a metric long ride is then ~13pt over
+    /// the island and the card alike; so is a 393pt phone's island at 4:44:44 (#310 review, asked).
+    private enum SpeedDecimals: Int { case tenths = 1, whole = 0 }
+
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
     @Environment(\.colorScheme) private var colorScheme
 
@@ -46,6 +51,7 @@ struct RideLockScreenView: View {
                     if distanceLayout != .vertical {
                         metrics(.vertical)
                     }
+                    metrics(.vertical, speed: .whole)
                 }
                 .foregroundStyle(.cyTextSecondary)   // the units
             }
@@ -62,7 +68,7 @@ struct RideLockScreenView: View {
 
     /// Time, distance and speed. First baselines: with distance's unit under it, its last baseline
     /// is the unit's.
-    private func metrics(_ distanceLayout: HeroUnitAlignment) -> some View {
+    private func metrics(_ layout: HeroUnitAlignment, speed decimals: SpeedDecimals = .tenths) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
             // On the Lock Screen a `Text(timerInterval:)` takes far more width than it shows,
             // pushing distance across the card (seen on the simulator). It's laid out as h:mm:ss
@@ -77,10 +83,10 @@ struct RideLockScreenView: View {
                 }
             HeroNumber(units.distance(fromMeters: state.distanceMeters), unit: units.distanceLabel)
                 .heroNumberSize(.small)
-                .layout(distanceLayout)
+                .layout(layout)
                 .valueColor(valueColor)
             Spacer(minLength: 0)
-            HeroNumber(units.speed(fromMPS: state.speedMPS), unit: units.speedLabel)
+            HeroNumber(units.speed(fromMPS: state.speedMPS), decimals: decimals.rawValue, unit: units.speedLabel)
                 .heroNumberSize(.medium)
                 .valueColor(valueColor)
         }
@@ -96,8 +102,11 @@ struct RideStatusMark: View {
 
     var body: some View {
         if state.status == .paused {
+            // Sized to the mark, as the rider glyph is: a text style would grow with Dynamic Type
+            // past the island's 26pt (#310 review, asked). It fills the mark, Sketch's circle.
             Image(systemName: "pause.circle.fill")
-                .font(.title3)
+                .resizable()
+                .scaledToFit()
                 .foregroundStyle(.cyPrimary)
                 // A state, not the symbol's "Pause", which sounds like a button.
                 .accessibilityLabel("Paused")
@@ -117,24 +126,33 @@ struct RideStatusMark: View {
     }
 }
 
-/// The Dynamic Island's compact trailing side (#310): the speed alone, without its unit, in Sketch's
-/// SF Pro Medium 18. System type, not `HeroNumber`: D-DIN's smallest hero is 34pt, twice the island.
-/// Dims when stale, as the Lock Screen's values do.
-struct RideIslandSpeed: View {
-    /// Sketch "S22 - Dynamic Island".
-    private static let fontSize: CGFloat = 18
+/// The status mark in the Dynamic Island's compact leading and minimal presentations (#310):
+/// Sketch's 26pt, too small for the ring's percentage.
+struct RideIslandStatusMark: View {
+    let state: RideActivityAttributes.ContentState
 
+    var body: some View {
+        RideStatusMark(state: state, showsPercent: false)
+            .frame(width: Spacing.islandStatusMark, height: Spacing.islandStatusMark)
+    }
+}
+
+/// The Dynamic Island's compact trailing side (#310): the speed alone, without its unit. Sketch's
+/// SF Pro Medium 18, as the nearest text style, `.body` medium. System type, not `HeroNumber`: D-DIN's
+/// smallest hero is 34pt, twice the island. Dims when stale, as the Lock Screen's values do.
+struct RideIslandSpeed: View {
     let state: RideActivityAttributes.ContentState
     let units: UnitSystem
     let isStale: Bool
 
     var body: some View {
         Text(units.speed(fromMPS: state.speedMPS), format: .number.precision(.fractionLength(0)))
-            .font(.system(size: Self.fontSize, weight: .medium))
+            .font(.body.weight(.medium))
             .monospacedDigit()
             .foregroundStyle(isStale ? .cyTextSecondary : .cyTextPrimary)
-            // The unit isn't shown, so it's spoken; so is the Lock Screen's "Reconnecting…".
-            .accessibilityLabel("Speed, \(units.spokenSpeed(fromMPS: state.speedMPS))")
+            // The unit isn't shown, so it's spoken, to the whole number shown; so is the Lock
+            // Screen's "Reconnecting…".
+            .accessibilityLabel("Speed, \(units.spokenSpeed(fromMPS: state.speedMPS, fractionLength: 0))")
             .accessibilityValue(isStale ? "Reconnecting" : "")
     }
 }
@@ -193,21 +211,21 @@ private struct LockScreenPreview: View {
 /// The island's views on its black, in the dark scheme, as `RideLiveActivity` draws them.
 private struct IslandPreview: View {
     var state = RideActivityAttributes.ContentState.preview()
+    var units = UnitSystem.imperial
     var isStale = false
 
     var body: some View {
         VStack(spacing: Spacing.lg) {
             HStack {
-                RideStatusMark(state: state, showsPercent: false)
-                    .frame(width: Spacing.islandStatusMark, height: Spacing.islandStatusMark)
+                RideIslandStatusMark(state: state)
                 Spacer()
-                RideIslandSpeed(state: state, units: .imperial, isStale: isStale)
+                RideIslandSpeed(state: state, units: units, isStale: isStale)
             }
             .padding(.horizontal, Spacing.sm)
             .frame(width: 200, height: Spacing.dynamicIsland)
             .background(.black, in: .capsule)
 
-            RideLockScreenView(state: state, units: .imperial, isStale: isStale, distanceLayout: .horizontal)
+            RideLockScreenView(state: state, units: units, isStale: isStale, distanceLayout: .horizontal)
                 .padding(Spacing.lg)
                 .background(.black, in: .rect(cornerRadius: Spacing.xl))
         }
@@ -227,3 +245,5 @@ private struct IslandPreview: View {
 #Preview("Island no route") { IslandPreview(state: .preview(routeProgress: nil)) }
 #Preview("Island paused") { IslandPreview(state: .preview(status: .paused)) }
 #Preview("Island stale") { IslandPreview(isStale: true) }
+// Metric is wider than the island with the unit inline, so distance's unit drops under it.
+#Preview("Island metric") { IslandPreview(units: .metric) }
