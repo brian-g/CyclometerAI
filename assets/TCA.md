@@ -1009,7 +1009,7 @@ Cyclometer/
 │   │   │                                  // LiveMapCamera, MapSheetButtons
 │   │   ├── Navigation/                    // NavigationFeature, DirectionsWidgetView (W9),
 │   │   │                                  // TurnInstructionOverlay
-│   │   ├── LiveActivity/                  // RideActivityAttributes (PRD §8.10) — shared with the extension;
+│   │   ├── LiveActivity/                  // RideActivityAttributes, RideLockScreenView (PRD §8.10) — shared with the extension;
 │   │   │                                  // LiveActivityFeature (app only)
 │   │   ├── Recording/                     // TrackPointRecorderFeature, GPSFixFilter
 │   │   ├── Alerts/                        // AlertOrchestratorFeature, VehiclePassDetector,
@@ -1046,7 +1046,8 @@ The `CyclometerWidgets/` folder beside it is the widget extension (target `Cyclo
 #306), holding the ride's Live Activity: `CyclometerWidgetsBundle` and `RideLiveActivity`. It has no
 copies of app code. Instead it compiles these app files through target membership, recorded as an
 exception set on the `Cyclometer` folder in `project.pbxproj`: `LiveActivity/RideActivityAttributes`,
-`Models/UnitSystem`, `HeroNumber`, `OpenRingProgressView`, `DesignSystem/Spacing`, `DesignSystem/AppFonts`,
+`LiveActivity/RideLockScreenView` (#309), `Models/UnitSystem`, `HeroNumber`, `OpenRingProgressView`,
+`DesignSystem/Spacing`, `DesignSystem/AppFonts`, `DesignSystem/Opacity`,
 `Assets.xcassets` and the D-DIN font. Keep that set free of app-only types (TCA, features, clients):
 the extension build fails on the first one, which is how `UnitSystem`'s pace helpers came to live in
 `Speed/UnitSystem+Pace.swift`.

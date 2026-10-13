@@ -20,4 +20,8 @@ enum Opacity {
     static let turnOverlay: Double = 0.9
     /// An S08 picker entry the current page can't take (#142): already on it, or no room.
     static let unavailable: Double = 0.4
+    /// The Live Activity's `cyBgPrimary` card on the Lock Screen (#309). The least that keeps its
+    /// text at WCAG AA over any wallpaper; `LiveActivityContrastTests` holds it there. Sketch's
+    /// 67% doesn't.
+    static let liveActivityCard: Double = 0.85
 }

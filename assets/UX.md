@@ -132,6 +132,7 @@ Units should always be set baseline aligned with their corresponding values.
 - `iconTile` (0.14) — tinted square behind a sensor row's SF Symbol (`SensorListRowView`).
 - `turnOverlay` (0.9) — the centred turn instruction's card (`TurnInstructionOverlay`, Sketch `Sxx - Route overlay`).
 - `unavailable` (0.4) — an §S08 Add Widget entry the current page can't take.
+- `liveActivityCard` (0.85) — the §S22 Live Activity's `bgPrimary` card on the Lock Screen. The least that keeps its text at WCAG AA over any wallpaper (`LiveActivityContrastTests`).
 
 ### Navigation Pattern
 The navigation in the app will follow standard iOS application guidelines patterns. In this case, the application to model is the Apple Music app. The bottom TabView should have the following 3 items:
@@ -1294,6 +1295,8 @@ ContentUnavailableView {
 - Ride duration
 - Current mileage
 - Current speed
+
+As built (#309): one row on a `bgPrimary` card at `liveActivityCard` opacity. The status mark, then elapsed time and distance (unit under it) at small hero size, then speed at medium, right-aligned. With no route the status mark is the bicycle glyph, as S05.3 shows it, not the app icon. Stale: values dim to `textSecondary` with "Reconnecting…" under the row. Always-On: the dark card in either appearance, white text. The elapsed time takes an h:mm:ss slot, so distance doesn't move as it grows.
 
 ---
 

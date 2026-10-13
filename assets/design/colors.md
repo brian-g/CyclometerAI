@@ -107,3 +107,16 @@ Primary brand: `#60BD10` · Optimized for outdoor sunlight visibility · WCAG AA
 | `info` | `#42A5F5` | Info badges, tips |
 | `shadow` | `rgba(0,0,0,0.4)` | Elevation shadows |
 | `overlay` | `rgba(0,0,0,0.6)` | Modal backdrop |
+
+---
+
+#### Live Activity card (#309)
+
+The S22 Lock Screen card is `bgPrimary` at 85% (`Opacity.liveActivityCard`), so the wallpaper shows through. The Always-On display always takes the dark row's card. Worst case is the wallpaper furthest from the text. `LiveActivityContrastTests` checks both modes:
+
+| Mode | Worst wallpaper | Card composite | `textPrimary` | `textSecondary` |
+|------|-----------------|----------------|---------------|-----------------|
+| Light | black | `#D9D9D9` | 14.9:1 | 5.3:1 |
+| Dark | white | `#333333` | 12.6:1 | 4.8:1 |
+
+Sketch's 67% black fails: `textSecondary` comes out at 2.9:1 over a white wallpaper. The `primary` ring and pause glyph on the light card are 1.7:1 at worst (2.4:1 on white), under the 3:1 non-text minimum; the ring's percentage text carries the value, and the frozen timer shows the pause.

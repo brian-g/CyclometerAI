@@ -74,11 +74,13 @@
 			membershipExceptions = (
 				Assets.xcassets,
 				Features/ActiveRide/LiveActivity/RideActivityAttributes.swift,
+				Features/ActiveRide/LiveActivity/RideLockScreenView.swift,
 				Models/UnitSystem.swift,
 				"Resources/Fonts/D-DINCondensed.otf",
 				UI/Components/HeroNumber/HeroNumber.swift,
 				UI/Components/OpenRingProgressView/OpenRingProgressView.swift,
 				UI/DesignSystem/AppFonts.swift,
+				UI/DesignSystem/Opacity.swift,
 				UI/DesignSystem/Spacing.swift,
 			);
 			target = D32CD537307BBD7A00B6F931 /* CyclometerWidgetsExtension */;
