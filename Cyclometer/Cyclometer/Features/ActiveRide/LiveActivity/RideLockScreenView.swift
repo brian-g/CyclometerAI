@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// S22 — the ride's Live Activity on the Lock Screen (PRD §8.10, #309): the S05.3 mini-player's
-/// status mark, elapsed time, distance and speed, with speed the largest (Sketch "S22 - Live
-/// Activity"). Display only.
+/// S22 — the ride's Live Activity on the Lock Screen (PRD §8.10, #309): the status mark, elapsed
+/// time, distance and speed, the S05.3 mini-player's content, with speed the largest (Sketch "S22 -
+/// Live Activity"). Display only. The expanded Dynamic Island shows it too (#310).
 ///
 /// Compiled into the app, so it can be snapshot-tested, and into the `CyclometerWidgets`
-/// extension, which draws it. The card behind it, `card(colorScheme:isLuminanceReduced:)`, is the
-/// activity's background tint, `RideLiveActivity`'s job, since a view can't draw the Lock Screen's
-/// own background.
+/// extension, which draws it. It has no margins of its own: `RideLiveActivity` sets them for the
+/// Lock Screen and for the expanded Dynamic Island, which shows it too (#310). The card behind
+/// it, `card(colorScheme:isLuminanceReduced:)`, is the activity's background tint,
+/// `RideLiveActivity`'s job, since a view can't draw the Lock Screen's own background.
 struct RideLockScreenView: View {
     /// `cyBgPrimary` at `Opacity.liveActivityCard`: WCAG AA over any wallpaper
     /// (`LiveActivityContrastTests`). Dark on the Always-On display whatever the appearance. With
@@ -23,6 +24,16 @@ struct RideLockScreenView: View {
     let units: UnitSystem
     /// `ActivityViewContext.isStale`: the app stopped updating, so the values may be old.
     let isStale: Bool
+    /// Distance's unit under it on the Lock Screen (Sketch's `small-hero`); beside it in the
+    /// expanded Dynamic Island (`small-hero-h`, #310). Beside it only while the row fits: Sketch's
+    /// values do, but a metric or long ride runs 8–17pt over the island, so the unit drops under
+    /// distance rather than truncating speed (asked).
+    var distanceLayout: HeroUnitAlignment = .vertical
+
+    /// Speed's decimals: one, as everywhere, unless the row still doesn't fit with distance's unit
+    /// under it. Past 9 h the timer's slot is "44:44:44", and a metric long ride is then ~13pt over
+    /// the island and the card alike; so is a 393pt phone's island at 4:44:44 (#310 review, asked).
+    private enum SpeedDecimals: Int { case tenths = 1, whole = 0 }
 
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
     @Environment(\.colorScheme) private var colorScheme
@@ -35,28 +46,12 @@ struct RideLockScreenView: View {
                 RideStatusMark(state: state)
                     .frame(width: Spacing.xxxl, height: Spacing.xxxl)
 
-                // First baselines: distance's unit sits under it (Sketch's `small-hero`), so its
-                // last baseline is the unit's.
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                    // On the Lock Screen a `Text(timerInterval:)` takes far more width than it
-                    // shows, pushing distance across the card (seen on the simulator). It's laid
-                    // out as h:mm:ss instead, Sketch's slot, so nothing moves at the hour either.
-                    HeroNumber(ElapsedTime.widest(state), unit: "")
-                        .heroNumberSize(.small)
-                        .hidden()
-                        .overlay(alignment: .leading) {
-                            HeroNumber(ElapsedTime.text(state), unit: "")
-                                .heroNumberSize(.small)
-                                .valueColor(valueColor)
-                        }
-                    HeroNumber(units.distance(fromMeters: state.distanceMeters), unit: units.distanceLabel)
-                        .heroNumberSize(.small)
-                        .layout(.vertical)
-                        .valueColor(valueColor)
-                    Spacer(minLength: 0)
-                    HeroNumber(units.speed(fromMPS: state.speedMPS), unit: units.speedLabel)
-                        .heroNumberSize(.medium)
-                        .valueColor(valueColor)
+                ViewThatFits(in: .horizontal) {
+                    metrics(distanceLayout)
+                    if distanceLayout != .vertical {
+                        metrics(.vertical)
+                    }
+                    metrics(.vertical, speed: .whole)
                 }
                 .foregroundStyle(.cyTextSecondary)   // the units
             }
@@ -67,25 +62,98 @@ struct RideLockScreenView: View {
                     .foregroundStyle(.cyTextSecondary)
             }
         }
-        .padding(Spacing.lg)
         // The Always-On display's card is always dark, so the text is white on it.
         .environment(\.colorScheme, isLuminanceReduced ? .dark : colorScheme)
     }
+
+    /// Time, distance and speed. First baselines: with distance's unit under it, its last baseline
+    /// is the unit's.
+    private func metrics(_ layout: HeroUnitAlignment, speed decimals: SpeedDecimals = .tenths) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+            // On the Lock Screen a `Text(timerInterval:)` takes far more width than it shows,
+            // pushing distance across the card (seen on the simulator). It's laid out as h:mm:ss
+            // instead, Sketch's slot, so nothing moves at the hour either.
+            HeroNumber(ElapsedTime.widest(state), unit: "")
+                .heroNumberSize(.small)
+                .hidden()
+                .overlay(alignment: .leading) {
+                    HeroNumber(ElapsedTime.text(state), unit: "")
+                        .heroNumberSize(.small)
+                        .valueColor(valueColor)
+                }
+            HeroNumber(units.distance(fromMeters: state.distanceMeters), unit: units.distanceLabel)
+                .heroNumberSize(.small)
+                .layout(layout)
+                .valueColor(valueColor)
+            Spacer(minLength: 0)
+            HeroNumber(units.speed(fromMPS: state.speedMPS), decimals: decimals.rawValue, unit: units.speedLabel)
+                .heroNumberSize(.medium)
+                .valueColor(valueColor)
+        }
+    }
 }
 
-/// The pause icon while paused; otherwise the mini-player's ring, or its bicycle glyph with no
-/// route. Also the Dynamic Island's minimal presentation.
+/// The pause icon while paused; otherwise the mini-player's route ring, or the app's rider glyph
+/// with no route (Sketch "S22 - Dynamic Island", #310). Also the Dynamic Island's compact leading
+/// and minimal presentations, where it's too small for the ring's percentage.
 struct RideStatusMark: View {
     let state: RideActivityAttributes.ContentState
+    var showsPercent = true
 
     var body: some View {
         if state.status == .paused {
+            // Sized to the mark, as the rider glyph is: a text style would grow with Dynamic Type
+            // past the island's 26pt (#310 review, asked). It fills the mark, Sketch's circle.
             Image(systemName: "pause.circle.fill")
-                .font(.title3)
+                .resizable()
+                .scaledToFit()
                 .foregroundStyle(.cyPrimary)
+                // A state, not the symbol's "Pause", which sounds like a button.
+                .accessibilityLabel("Paused")
+        } else if let progress = state.routeProgress {
+            OpenRingProgressView(progress: progress, showsPercent: showsPercent)
         } else {
-            OpenRingProgressView(progress: state.routeProgress)
+            // Sized to the mark, not by font: the glyph is wider than a system symbol, and the
+            // mark is 40pt on the Lock Screen but 26pt in the island.
+            Image("cyclometer.rider")
+                .resizable()
+                .scaledToFit()
+                .padding(Spacing.xs)
+                .foregroundStyle(.cyPrimary)
+                // The minimal island shows nothing else, so the mark has to say something.
+                .accessibilityLabel("Riding")
         }
+    }
+}
+
+/// The status mark in the Dynamic Island's compact leading and minimal presentations (#310):
+/// Sketch's 26pt, too small for the ring's percentage.
+struct RideIslandStatusMark: View {
+    let state: RideActivityAttributes.ContentState
+
+    var body: some View {
+        RideStatusMark(state: state, showsPercent: false)
+            .frame(width: Spacing.islandStatusMark, height: Spacing.islandStatusMark)
+    }
+}
+
+/// The Dynamic Island's compact trailing side (#310): the speed alone, without its unit. Sketch's
+/// SF Pro Medium 18, as the nearest text style, `.body` medium. System type, not `HeroNumber`: D-DIN's
+/// smallest hero is 34pt, twice the island. Dims when stale, as the Lock Screen's values do.
+struct RideIslandSpeed: View {
+    let state: RideActivityAttributes.ContentState
+    let units: UnitSystem
+    let isStale: Bool
+
+    var body: some View {
+        Text(units.speed(fromMPS: state.speedMPS), format: .number.precision(.fractionLength(0)))
+            .font(.body.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(isStale ? .cyTextSecondary : .cyTextPrimary)
+            // The unit isn't shown, so it's spoken, to the whole number shown; so is the Lock
+            // Screen's "Reconnecting…".
+            .accessibilityLabel("Speed, \(units.spokenSpeed(fromMPS: state.speedMPS, fractionLength: 0))")
+            .accessibilityValue(isStale ? "Reconnecting" : "")
     }
 }
 
@@ -110,3 +178,72 @@ enum ElapsedTime {
                     countsDown: false)
     }
 }
+
+// MARK: - Previews
+
+// The views alone, for the states the Live Activity canvas can't produce (stale, the Always-On
+// display). `RideLiveActivity`'s previews show them in the system's presentations.
+private extension RideActivityAttributes.ContentState {
+    static func preview(status: RideStatus = .riding, routeProgress: Double? = 0.42) -> Self {
+        let elapsed: TimeInterval = 5_674
+        return Self(status: status, startDate: .now.addingTimeInterval(-elapsed),
+                    pausedElapsed: status == .paused ? elapsed : nil,
+                    speedMPS: status == .paused ? 0 : 7.89, distanceMeters: 25_270,
+                    routeProgress: routeProgress)
+    }
+}
+
+private struct LockScreenPreview: View {
+    var state = RideActivityAttributes.ContentState.preview()
+    var isStale = false
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
+    var body: some View {
+        RideLockScreenView(state: state, units: .imperial, isStale: isStale)
+            .padding(Spacing.lg)
+            .background(RideLockScreenView.card(colorScheme: colorScheme, isLuminanceReduced: isLuminanceReduced))
+            .padding()
+            .background(Color.blue)
+    }
+}
+
+/// The island's views on its black, in the dark scheme, as `RideLiveActivity` draws them.
+private struct IslandPreview: View {
+    var state = RideActivityAttributes.ContentState.preview()
+    var units = UnitSystem.imperial
+    var isStale = false
+
+    var body: some View {
+        VStack(spacing: Spacing.lg) {
+            HStack {
+                RideIslandStatusMark(state: state)
+                Spacer()
+                RideIslandSpeed(state: state, units: units, isStale: isStale)
+            }
+            .padding(.horizontal, Spacing.sm)
+            .frame(width: 200, height: Spacing.dynamicIsland)
+            .background(.black, in: .capsule)
+
+            RideLockScreenView(state: state, units: units, isStale: isStale, distanceLayout: .horizontal)
+                .padding(Spacing.lg)
+                .background(.black, in: .rect(cornerRadius: Spacing.xl))
+        }
+        .environment(\.colorScheme, .dark)
+        .padding()
+    }
+}
+
+#Preview("Lock Screen route") { LockScreenPreview() }
+#Preview("Lock Screen no route") { LockScreenPreview(state: .preview(routeProgress: nil)) }
+#Preview("Lock Screen paused") { LockScreenPreview(state: .preview(status: .paused)) }
+#Preview("Lock Screen stale") { LockScreenPreview(isStale: true) }
+#Preview("Lock Screen dark") { LockScreenPreview().preferredColorScheme(.dark) }
+#Preview("Lock Screen Always-On") { LockScreenPreview().environment(\.isLuminanceReduced, true) }
+
+#Preview("Island route") { IslandPreview() }
+#Preview("Island no route") { IslandPreview(state: .preview(routeProgress: nil)) }
+#Preview("Island paused") { IslandPreview(state: .preview(status: .paused)) }
+#Preview("Island stale") { IslandPreview(isStale: true) }
+// Metric is wider than the island with the unit inline, so distance's unit drops under it.
+#Preview("Island metric") { IslandPreview(units: .metric) }

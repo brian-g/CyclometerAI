@@ -12,6 +12,8 @@ import UIKit
 struct LiveActivityContrastTests {
 
     static let wcagAA = 4.5
+    /// WCAG 1.4.11, for graphics such as the status mark.
+    static let nonTextMinimum = 3.0
 
     @Test(arguments: [
         (UIUserInterfaceStyle.dark, false, UIColor.white),
@@ -31,6 +33,18 @@ struct LiveActivityContrastTests {
             let ratio = Self.contrast(text, backdrop)
             #expect(ratio >= Self.wcagAA, "\(token) \(style.rawValue) reduced \(isLuminanceReduced): \(ratio):1")
         }
+    }
+
+    /// #310 — the Dynamic Island is always black and its views take the dark scheme. Text passes
+    /// AA; the status mark (ring, rider glyph, pause icon) passes the 3:1 non-text minimum.
+    @Test func islandPassesOnBlack() {
+        let dark = UITraitCollection(userInterfaceStyle: .dark)
+        for token in [ColorResource.cyTextPrimary, .cyTextSecondary] {
+            let ratio = Self.contrast(UIColor(resource: token).resolvedColor(with: dark), .black)
+            #expect(ratio >= Self.wcagAA, "\(token) on the island: \(ratio):1")
+        }
+        let mark = Self.contrast(UIColor(resource: .cyPrimary).resolvedColor(with: dark), .black)
+        #expect(mark >= Self.nonTextMinimum, "cyPrimary on the island: \(mark):1")
     }
 
     // MARK: - WCAG 2.x

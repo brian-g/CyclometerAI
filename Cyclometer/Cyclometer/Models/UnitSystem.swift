@@ -88,7 +88,12 @@ enum UnitSystem: String, Equatable, Sendable, Codable, CaseIterable {
     /// Speed in words, to one decimal as the widgets show it: "36.0 kilometers per hour" (#361).
     /// Spelled out because a bare symbol leaves VoiceOver to guess how to read it.
     func spokenSpeed(fromMPS mps: Double) -> String {
-        Self.spoken(Measurement(value: speed(fromMPS: mps), unit: speedUnit), fractionLength: 1)
+        spokenSpeed(fromMPS: mps, fractionLength: 1)
+    }
+
+    /// Speed in words to the precision a view shows: the Dynamic Island's whole numbers (#310).
+    func spokenSpeed(fromMPS mps: Double, fractionLength: Int) -> String {
+        Self.spoken(Measurement(value: speed(fromMPS: mps), unit: speedUnit), fractionLength: fractionLength)
     }
 
     /// Distance in words, to one decimal: "12.4 kilometers" (#361).

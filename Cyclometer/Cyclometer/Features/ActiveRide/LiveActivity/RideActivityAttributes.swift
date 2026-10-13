@@ -18,7 +18,7 @@ struct RideActivityAttributes: ActivityAttributes, Hashable {
         var speedMPS: Double
         var distanceMeters: Double
         /// 0…1, `NavigationFeature.State.routeProgressFraction`. Nil while no route is being
-        /// followed, which shows the bicycle glyph.
+        /// followed, which shows the app's rider glyph (#310).
         var routeProgress: Double?
     }
 

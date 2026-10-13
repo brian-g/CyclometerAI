@@ -33,6 +33,7 @@
 | 0.6.7 | 2026-09-26 | Brian / Claude | iPhone workout session declined (#318). §9.4 adds a decision note. No `HKWorkoutSession` / `HKLiveWorkoutBuilder` runs during a ride, so there is no live `HKLiveWorkoutZoneUpdate`, and a paired Watch still prompts to start its own workout. The post-ride `HKWorkoutBuilder` write (#250, #277), its overlap skip and SwiftData crash recovery (#175, #188) stay. The dashboard's zone and any W12 time in zone stay local to the strap's readings. #318 moves to Phase 2 with the S17 Watch companion. |
 | 0.6.7 | 2026-10-10 | Brian | Removed scope from the Live Activity. |
 | 0.6.8 | 2026-10-12 | Brian / Claude | Live Activity Lock Screen (#309). §8.10 Presentations follows the S22 Sketch frame: speed is the large number, time and distance small. The card is `brBgPrimary` at 85%, not Sketch's 67% black, so its text passes WCAG AA over any wallpaper. Reduced luminance keeps the card, dark, rather than dropping it. |
+| 0.6.9 | 2026-10-13 | Brian / Claude | Live Activity Dynamic Island (#310). §8.10 Presentations follows the "S22 - Dynamic Island" and "S22 - Expanded Dynamic Island" Sketch frames over the issue: compact leading is the status mark, not elapsed time, and compact speed is white with no unit. The no-route glyph is the app's `cyclometer.rider` across the Live Activity. Expanded puts distance's unit beside it while the row fits, and under it when a metric or long ride doesn't. The design-frames line now names the frames Sketch holds. |
 
 ---
 
@@ -814,7 +815,7 @@ A pocketed or bar-mounted phone with a locked screen hides ride state. Unlocking
 |---|---|
 | Visual only | The Live Activity never plays sound, fires a haptic or wakes the screen. No `AlertConfiguration` is passed on any update. Radar sound and haptics remain the audio client's job (§8.3, `Audio.md`) |
 | Phone only | CarPlay, Mac and Apple Watch Smart Stack presentations are out of scope. No `.supplementalActivityFamilies` are declared; the absence of a default rendering on those surfaces is verified on device |
-| Content | The S05.3 mini-player's: route progress ring (bicycle glyph with no route; pause icon while paused), elapsed time, distance and speed. No HR, radar or next-turn cue |
+| Content | The S05.3 mini-player's: route progress ring (~~bicycle glyph~~ the app's rider glyph with no route, #310; pause icon while paused), elapsed time, distance and speed. No HR, radar or next-turn cue |
 | ~~Next-turn cue~~ | ~~In scope whenever an M8 route is active; no turn row otherwise~~ |
 | No controls | Display only. No Pause/Resume buttons or `LiveActivityIntent`s |
 | Local updates only | Updates come from the running app. No APNs push tokens |
@@ -848,7 +849,7 @@ struct RideActivityAttributes: ActivityAttributes {
         var pausedElapsed: TimeInterval?  // frozen value while paused
         var speedMPS: Double
         var distanceMeters: Double
-        var routeProgress: Double?        // 0…1; nil = no route followed → bicycle glyph
+        var routeProgress: Double?        // 0…1; nil = no route followed → rider glyph (#310)
     }
     var units: UnitSystem
 }
@@ -860,12 +861,12 @@ State values are canonical (metric); unit conversion happens in the view.
 
 #### Presentations
 
-- **Lock Screen (primary).** ~~Elapsed timer large in D-DIN. Metric row: speed, distance.~~ One D-DIN row, per the S22 Sketch frame: elapsed time and distance small, speed large (#309). On a `brBgPrimary` card at 85% opacity (`Opacity.liveActivityCard`), the least that keeps `brTextSecondary` at WCAG AA over any wallpaper; Sketch's 67% black doesn't. Leading: the route progress ring, the bicycle glyph with no route, or the pause icon while paused. ~~HR tinted by `hrZone(_:)`. Radar strip on the trailing edge in the §8.2 sidebar language, `brRatingOkay` / `brRatingBad` by level, grey when disconnected. With a route active, a turn row above the metrics: maneuver symbol, distance, street name in `brTextSecondary`; "Off route" in `brRatingOkay` replaces it when off route. Pause/Resume button in `brPrimary`.~~
-- **Dynamic Island** (iPhones with one; others show the Lock Screen presentation only). Compact leading: elapsed time. Compact trailing: speed. Minimal: the progress ring, bicycle glyph or pause icon. Expanded: the Lock Screen's content. ~~Compact trailing and minimal follow a priority: radar threat, then a turn within 100 m, then speed. Expanded: speed, time, HR, radar count and distance, turn row, Pause button.~~
+- **Lock Screen (primary).** ~~Elapsed timer large in D-DIN. Metric row: speed, distance.~~ One D-DIN row, per the S22 Sketch frame: elapsed time and distance small, speed large (#309). On a `brBgPrimary` card at 85% opacity (`Opacity.liveActivityCard`), the least that keeps `brTextSecondary` at WCAG AA over any wallpaper; Sketch's 67% black doesn't. Leading: the route progress ring, the ~~bicycle glyph~~ app's rider glyph (`cyclometer.rider`, #310) with no route, or the pause icon while paused. ~~HR tinted by `hrZone(_:)`. Radar strip on the trailing edge in the §8.2 sidebar language, `brRatingOkay` / `brRatingBad` by level, grey when disconnected. With a route active, a turn row above the metrics: maneuver symbol, distance, street name in `brTextSecondary`; "Off route" in `brRatingOkay` replaces it when off route. Pause/Resume button in `brPrimary`.~~
+- **Dynamic Island** (iPhones with one; others show the Lock Screen presentation only). ~~Compact leading: elapsed time. Compact trailing: speed. Minimal: the progress ring, bicycle glyph or pause icon. Expanded: the Lock Screen's content.~~ Per the Sketch frames (#310): compact leading is the 26 pt status mark (ring, rider glyph or pause icon); compact trailing is speed alone, `.body` medium (Sketch's SF Pro Medium 18, as a text style) in `brTextPrimary`, with no unit (VoiceOver speaks it). Minimal is the status mark. At those sizes the ring drops its percentage. Expanded is the Lock Screen's row with distance's unit beside it (Sketch's `small-hero-h`); a metric or long ride is wider than the island that way, so the unit drops under distance rather than cut speed. Past 9 h (the timer's slot is then "44:44:44") or on a 393 pt phone even that can be too wide, so a last fallback shows speed without its decimal; this applies to the Lock Screen too (#310 review). The status mark's pause icon fills the mark, like Sketch's circle, rather than following Dynamic Type. The island is always black, so its views take the dark scheme. Expanded margins are 16 pt, against Sketch's 15 and the system's ~18. ~~Compact trailing and minimal follow a priority: radar threat, then a turn within 100 m, then speed. Expanded: speed, time, HR, radar count and distance, turn row, Pause button.~~
 - **Reduced luminance.** Read `isLuminanceReduced`; ~~drop tinted backgrounds,~~ keep text white~~, keep radar colour~~. The card stays, always in its dark variant (#309): with no tint, iOS draws a light glass of its own, and `brTextSecondary` units all but vanished on it (seen on the simulator).
-- **Stale.** Metrics dim to `brTextSecondary` with a "Reconnecting…" caption.
+- **Stale.** Metrics dim to `brTextSecondary` with a "Reconnecting…" caption. In the compact island only the speed dims; there's no room for the caption.
 
-Design frames in `Design.sketch`: Lock Screen light and dark × ~~radar none / approaching / fast, paused, ended, stale, turn far / near / arrive / off-route, threat and turn together~~ no route / route, paused, stale; Dynamic Island compact, minimal and expanded.
+Design frames in `Design.sketch`: ~~Lock Screen light and dark × radar none / approaching / fast, paused, ended, stale, turn far / near / arrive / off-route, threat and turn together~~ ~~no route / route, paused, stale; Dynamic Island compact, minimal and expanded~~ "S22 - LIve Activity" (Lock Screen), "S22 - Dynamic Island" (compact) and "S22 - Expanded Dynamic Island". There is no minimal, paused or stale frame; those follow the issue and the Lock Screen.
 
 #### Interactivity
 

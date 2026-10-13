@@ -81,3 +81,67 @@ Branch: `feat/309`
   - The light-mode ring and pause glyph (`cyPrimary`) are 1.7:1 at worst against the card, under the 3:1 non-text minimum. The shared `OpenRingProgressView` is a follow-up.
   - The Dynamic Island is still a placeholder (#310). It now shares `ElapsedTime.text` and `RideStatusMark`.
   - Device sunlight and AOD checks (#316) haven't been run for this design.
+
+---
+
+# #310 — Live Activity: Dynamic Island presentations
+
+Plan: /Users/brian/.claude/plans/310-calm-starlight.md
+Branch: `feat/310-dynamic-island`
+
+Sketch "S22 - Dynamic Island" and "S22 - Expanded Dynamic Island" win over the issue (asked): compact leading is the status mark, not elapsed time; compact speed is white.
+
+- [x] 1. Tests first: `RideDynamicIslandSnapshotTests`, island rows in `LiveActivityContrastTests`
+- [x] 2. `OpenRingProgressView.showsPercent` (default on; mini-player unchanged)
+- [x] 3. `RideStatusMark`: `cyclometer.rider` with no route, `showsPercent`; `RideLockScreenView.distanceLayout`; `RideIslandSpeed`
+- [x] 3a. (asked) Expanded row: `Spacing.lg` island margins, unit inline with a `ViewThatFits` fallback to unit-below; padding moved out of `RideLockScreenView`
+- [x] 4. `RideLiveActivity`: compact, minimal, expanded; previews
+- [x] 5. Record + inspect references; re-record #309's two no-route references
+- [x] 6. PRD §8.10, UX §S22, colors.md
+- [x] 7. Build, full suite, simulator island screenshots, ios-reviewer
+
+## Review
+
+- **Frames over the issue (asked).** Sketch's new "S22 - Dynamic Island" puts the 26pt status mark in compact leading, not elapsed time. Speed is trailing, white SF Pro Medium 18 (read from the layer), with no unit. "S22 - Expanded Dynamic Island" is the Lock Screen row with distance's unit beside it (`small-hero-h`). There's no minimal frame: minimal is the status mark, as the issue says.
+- **Rider glyph (asked: whole Live Activity).** `RideStatusMark` draws `cyclometer.rider` itself with no route, sized to the mark (`resizable`, `Spacing.xs` inset): at `.title3` it ran 37pt wide. #309's two no-route Lock Screen references moved; only the glyph changed.
+- **Small ring (asked).** `OpenRingProgressView.showsPercent`, off in compact and minimal. The mini-player is unchanged.
+- **Expanded on the simulator:**
+  - The expanded row overflowed. `RideLockScreenView` padded itself 16pt inside the island's own ~18pt margins. The padding moved to the call sites; the Lock Screen references are unchanged.
+  - Measured ideal row widths: inline 327pt (Sketch's values) to 359pt (4:44:44, 125.3 km, 45 km/h); unit below, 308–337pt. The island leaves ~338pt at its default margins.
+  - Asked: `.contentMargins(.horizontal, Spacing.lg, for: .expanded)` (342pt), and a `ViewThatFits` that drops the unit under distance when inline doesn't fit.
+  - "mph" was still cut. A red debug fill showed why: the region's bottom corners are rounded, and `HeroNumber`'s units hang below its frame. `.padding(.vertical, Spacing.sm)` fixed it.
+  - Final shots: compact riding and paused, expanded riding and paused, nothing cut.
+- **Stale.** Not seen on the simulator. With the app terminated for ~45s, the island still drew live styling: iOS hadn't marked it stale, or hadn't re-rendered. Snapshots cover the stale styling, as #309's do.
+- **ios-reviewer.**
+  - Fixed:
+    - The minimal island had no VoiceOver element with no route (the glyph was hidden). Labels are now "Riding" and "Paused" (the symbol said "Pause", like a button).
+    - Island speed speaks `spokenSpeed` (wide unit) plus "Reconnecting" when stale.
+    - Header comment updated.
+  - Not taken: none.
+  - Noted:
+    - On a 393pt phone (iPhone 15/16) the row gets ~333pt. Only the extreme case (337pt with the unit below) would truncate speed. Not simulated; follow-up if it matters.
+    - Dynamic Type at accessibility sizes is unchecked.
+- **Tests.**
+  - New: `RideDynamicIslandSnapshotTests` (11, all inspected) and `LiveActivityContrastTests.islandPassesOnBlack`.
+  - Full `CyclometerTests` minus the two local hangs: 1998 passed. `PersistenceClientTests` and `MapWidgetAccessibilityTests` passed alone (50).
+
+### /code-review --fix (xhigh)
+
+- **Kept the reviewer's 7 fixes:**
+  - island speed spoken to the whole number shown (`spokenSpeed(fromMPS:fractionLength:)`);
+  - `RideIslandStatusMark` extracted from five copies;
+  - a metric island preview;
+  - the remaining "bicycle glyph" docs (PRD, UX, `RideActivityAttributes`);
+  - `Spacing.dynamicIsland` for the compact canvas;
+  - the `metrics(_:)` parameter shadowing.
+- **My miss:** the "337pt worst case" left out rides past 9 h, where `ElapsedTime.widest` reserves "44:44:44". Metric long rides then overflow the island (~351pt against 342) and the Lock Screen card alike; so does a 393pt phone at 4:44:44.
+  - Asked: a last `ViewThatFits` fallback with speed's decimal dropped.
+  - New snapshots: island 9:30 metric, island at 333pt, Lock Screen 9:30 metric. All three showed "4…" before the fix.
+- **My miss:** `.font(.system(size: 18))` broke the design-system rule (no hardcoded sizes; map to the nearest text style). It's now `.body` medium, and the compact references moved.
+- **Pause icon (asked):** sized to the mark, like the rider glyph, so Dynamic Type can't grow it past 26pt. On the Lock Screen it is now 40pt, filling the mark as Sketch's circle does. #309's seven paused/stale references re-recorded.
+- **Not taken:**
+  - Design.sketch on disk lacks the island frames (Brian to save and commit).
+  - Ring track contrast on black (design).
+  - Test helpers vs the system renderer.
+  - `HeroNumber` reporting its drawn bounds (follow-up).
+  - The `.now` timer snapshot pattern (pre-existing).

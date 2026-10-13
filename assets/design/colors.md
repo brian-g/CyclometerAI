@@ -120,3 +120,13 @@ The S22 Lock Screen card is `bgPrimary` at 85% (`Opacity.liveActivityCard`), so 
 | Dark | white | `#333333` | 12.6:1 | 4.8:1 |
 
 Sketch's 67% black fails: `textSecondary` comes out at 2.9:1 over a white wallpaper. The `primary` ring and pause glyph on the light card are 1.7:1 at worst (2.4:1 on white), under the 3:1 non-text minimum; the ring's percentage text carries the value, and the frozen timer shows the pause.
+
+#### Dynamic Island (#310)
+
+The island is always black, and its views take the dark row whatever the phone's appearance. `LiveActivityContrastTests` checks them on `#000000`:
+
+| Token (dark) | On black |
+|--------------|----------|
+| `textPrimary` `#FFFFFF` | 21.0:1 |
+| `textSecondary` `#A0A0A0` (stale speed, units) | 8.0:1 |
+| `primary` `#6FD11E` (status mark) | 10.8:1 |
