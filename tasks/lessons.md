@@ -765,3 +765,20 @@ not a reason to keep storing the worse number.
 **Rule.** When a feature's accuracy depends on a sensor, find the best source the hardware has before planning,
 and plan on it. What's already wired is a fallback, not the default. Only offer the cheaper path as an option
 when it is genuinely good enough for the feature — never as the recommendation just because it is smaller.
+
+---
+
+## A view isn't done without its own previews (2026-10-12, #309)
+
+**What happened.** I built `RideLockScreenView` with snapshot tests for every state, and put
+`#Preview`s only on the Live Activity wrapper in `RideLiveActivity.swift`. The view's own file had
+none, so stale and Always-On, which the activity canvas can't produce, had no preview anywhere.
+Brian: "I think we need a rule that SwiftUI previews should be added to all views." A grep found 15
+of 62 view files without one.
+
+**Why it matters.** Snapshot tests pin a state; previews are how someone working on the view sees
+its states. A preview on a wrapper doesn't show what the wrapper can't produce.
+
+**Rule.** `.claude/rules/previews.md`: every file declaring a non-private `View` gets `#Preview`s for
+each state its design calls out, with sample data, before the view is called done. States the
+canvas can't produce are previewed on the plain view with the input or environment set.

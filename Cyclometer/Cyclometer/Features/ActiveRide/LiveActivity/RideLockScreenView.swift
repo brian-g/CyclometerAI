@@ -110,3 +110,38 @@ enum ElapsedTime {
                     countsDown: false)
     }
 }
+
+// MARK: - Previews
+
+private extension RideActivityAttributes.ContentState {
+    static func sample(_ status: RideStatus = .riding, elapsed: TimeInterval = 2_340,
+                       routeProgress: Double? = 0.42) -> Self {
+        Self(status: status, startDate: .now.addingTimeInterval(-elapsed),
+             pausedElapsed: status == .paused ? elapsed : nil,
+             speedMPS: status == .paused ? 0 : 7.89, distanceMeters: 12_300, routeProgress: routeProgress)
+    }
+}
+
+/// The view on its card, as the Lock Screen draws it.
+private struct PreviewCard: View {
+    let state: RideActivityAttributes.ContentState
+    var units: UnitSystem = .metric
+    var isStale = false
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
+    var body: some View {
+        RideLockScreenView(state: state, units: units, isStale: isStale)
+            .background(RideLockScreenView.card(colorScheme: colorScheme, isLuminanceReduced: isLuminanceReduced),
+                        in: .rect(cornerRadius: Spacing.lg))
+            .padding()
+    }
+}
+
+#Preview("Route") { PreviewCard(state: .sample()) }
+#Preview("Route (dark)") { PreviewCard(state: .sample()).preferredColorScheme(.dark) }
+#Preview("No route (imperial)") { PreviewCard(state: .sample(routeProgress: nil), units: .imperial) }
+#Preview("Paused, past the hour") { PreviewCard(state: .sample(.paused, elapsed: 17_084)) }
+#Preview("Two-digit hours") { PreviewCard(state: .sample(.paused, elapsed: 36_000)) }
+#Preview("Stale") { PreviewCard(state: .sample(.paused), isStale: true) }
+#Preview("Always-On") { PreviewCard(state: .sample(.paused)).environment(\.isLuminanceReduced, true) }
