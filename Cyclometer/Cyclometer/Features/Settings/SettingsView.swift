@@ -64,12 +64,24 @@ struct SettingsView: View {
                     get: { store.isPlaceNameLookupEnabled },
                     set: { _ in store.send(.placeNameLookupToggled) }
                 ))
-                // Off in iOS Settings, the rider's own choice is kept but can't take effect (#313).
-                Toggle("Show Live Activity", isOn: Binding(
-                    get: { store.isLiveActivityEnabled },
-                    set: { _ in store.send(.liveActivityToggled) }
-                ))
-                .disabled(!store.isSystemLiveActivityEnabled)
+                // Off in iOS Settings, the rider's own choice is kept but can't take effect, and the
+                // row says why (#313).
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Show Live Activity", isOn: Binding(
+                        get: { store.isLiveActivityEnabled },
+                        set: { _ in store.send(.liveActivityToggled) }
+                    ))
+                    .disabled(!store.isSystemLiveActivityEnabled)
+                    if !store.isSystemLiveActivityEnabled {
+                        Text("Live Activities are turned off for Cyclometer in iOS Settings.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        // Borderless, or the whole row — the toggle included — becomes the button.
+                        Button("Open Settings") { store.send(.liveActivitySettingsTapped) }
+                            .font(.caption)
+                            .buttonStyle(.borderless)
+                    }
+                }
                 NavigationLink {
                     DeviceManagementView(
                         store: store.scope(state: \.deviceManagement, action: \.deviceManagement)
@@ -78,16 +90,9 @@ struct SettingsView: View {
                     LabeledContent("Sensors", value: "\(store.pairedSensorCount)")
                 }
             } footer: {
-                VStack(alignment: .leading, spacing: 8) {
-                    if store.wheelSelection == .custom {
-                        Text("Wheel circumference must be between 1,500 and 3,000 mm.")
-                            .foregroundStyle(store.isCustomCircumferenceInvalid ? Color.red : Color.secondary)
-                    }
-                    if !store.isSystemLiveActivityEnabled {
-                        Text("Live Activities are turned off for Cyclometer in iOS Settings.")
-                        Button("Open Settings") { store.send(.liveActivitySettingsTapped) }
-                            .font(.footnote)
-                    }
+                if store.wheelSelection == .custom {
+                    Text("Wheel circumference must be between 1,500 and 3,000 mm.")
+                        .foregroundStyle(store.isCustomCircumferenceInvalid ? Color.red : Color.secondary)
                 }
             }
 

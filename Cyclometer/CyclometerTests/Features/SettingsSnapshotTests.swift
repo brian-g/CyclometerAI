@@ -138,7 +138,7 @@ final class SettingsSnapshotTests: XCTestCase {
     }
 
     /// Live Activities turned off for the app in iOS Settings (#313): the Show Live Activity
-    /// toggle is disabled, and General's footer explains and links to iOS Settings.
+    /// toggle is disabled, and its row explains and links to iOS Settings.
     func testLiveActivitiesOffInIOS() {
         assertBothSchemes(screen(isSystemLiveActivityEnabled: false), named: "liveActivitiesOffInIOS")
     }

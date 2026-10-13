@@ -34,7 +34,7 @@
 | 0.6.7 | 2026-10-10 | Brian | Removed scope from the Live Activity. |
 | 0.6.8 | 2026-10-12 | Brian / Claude | Live Activity Lock Screen (#309). §8.10 Presentations follows the S22 Sketch frame: speed is the large number, time and distance small. The card is `brBgPrimary` at 85%, not Sketch's 67% black, so its text passes WCAG AA over any wallpaper. Reduced luminance keeps the card, dark, rather than dropping it. |
 | 0.6.9 | 2026-10-13 | Brian / Claude | Live Activity Dynamic Island (#310). §8.10 Presentations follows the "S22 - Dynamic Island" and "S22 - Expanded Dynamic Island" Sketch frames over the issue: compact leading is the status mark, not elapsed time, and compact speed is white with no unit. The no-route glyph is the app's `cyclometer.rider` across the Live Activity. Expanded puts distance's unit beside it while the row fits, and under it when a metric or long ride doesn't. The design-frames line now names the frames Sketch holds. |
-| 0.6.10 | 2026-10-13 | Brian / Claude | Live Activity S12 setting (#313). §8.10: Show Live Activity sits in S12's General section and takes effect mid-ride: off ends the showing activity, on starts one. With the system setting off, the toggle is disabled, keeping the rider's choice, and General's footer explains and links to iOS Settings. |
+| 0.6.10 | 2026-10-13 | Brian / Claude | Live Activity S12 setting (#313). §8.10: Show Live Activity sits in S12's General section and takes effect mid-ride: off ends the showing activity, on starts one. With the system setting off, the toggle is disabled, keeping the rider's choice, and the toggle's own row explains and links to iOS Settings. |
 
 ---
 

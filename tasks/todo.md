@@ -155,7 +155,7 @@ Branch: `feat/313`
 - [x] 2. `SettingsFeature`: toggle + delegate, system setting read on `.task`/`.appBecameActive`, Open Settings + tests
 - [x] 3. `LiveActivityFeature`: gate the start on the preference; `.preferenceChanged` starts/ends mid-ride; late `.started(true)` ends + tests
 - [x] 4. `AppFeature`: forward scene-active to Settings, delegate to the ride + test
-- [x] 5. `SettingsView`: row after Place Names, disabled when iOS is off, footer explainer + Open Settings; previews
+- [x] 5. `SettingsView`: row after Place Names, disabled when iOS is off, in-row explainer + Open Settings; previews
 - [x] 6. Snapshots: re-record S12, add the iOS-off state, inspect
 - [x] 7. UX.md §S12, PRD §8.10 + changelog
 - [x] 8. Full suite (simulator check not done — see Review)
@@ -170,7 +170,12 @@ Branch: `feat/313`
   toggle went off (`.started(true)` outside `.starting`) is ended, so nothing is orphaned.
 - **System setting.** S12 reads `liveActivityClient.isEnabled()` on `.task` and on every scene-active (`AppFeature`
   forwards it), so coming back from iOS Settings updates it. Off: the toggle is disabled with its value kept (asked),
-  and General's footer explains and links to iOS Settings (`openSettingsURLString`, as `WelcomeFeature`).
+  and the row explains and links to iOS Settings (`openSettingsURLString`, as `WelcomeFeature`).
+- **PR review: explainer in the row.** It moved from General's footer into the toggle's row, under it
+  (`VStack` + `.caption`, as the HR override errors). Open Settings is `.borderless` so it, not the whole row, is
+  the tap target. The footer is main's again. That also removed a ~7.5pt gap the first round had added above HR
+  Zones in *every* state: an empty `VStack` still counts as a footer. I hadn't compared those references
+  against main's, so I missed it; `testDefault` and `testHRZoneOverridesSet` are back to main's spacing (measured, 88px).
 - **Placement (asked).** General, after Place Names.
 - **Compiler.** `LiveActivityClient.previewValue = testValue` hit a circular-reference error once a preview used
   `testValue`; it now has an explicit type.
