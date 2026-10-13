@@ -9,6 +9,9 @@ struct OpenRingProgressView: View {
         let id: String; let value: Double; let color: Color
     }
     let progress: Double?
+    /// The percentage in the ring's hole. Off where the ring is too small to read it, as in the
+    /// Dynamic Island (#310); VoiceOver still reads it.
+    var showsPercent = true
 
     private func segments(for progress: Double) -> [Segment] {
         let arc = 0.84
@@ -37,14 +40,16 @@ struct OpenRingProgressView: View {
                 .chartLegend(.hidden)
                 .rotationEffect(.degrees(90))
 
-                Text("\(percent(progress))%")
-                    .font(.caption2.weight(.semibold))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    // Narrower than the ring's hole, so "100%" shrinks inside it rather than
-                    // running over the arc (#404).
-                    .padding(.horizontal, Spacing.sm)
+                if showsPercent {
+                    Text("\(percent(progress))%")
+                        .font(.caption2.weight(.semibold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        // Narrower than the ring's hole, so "100%" shrinks inside it rather than
+                        // running over the arc (#404).
+                        .padding(.horizontal, Spacing.sm)
+                }
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Route \(percent(progress)) percent complete")
@@ -54,4 +59,26 @@ struct OpenRingProgressView: View {
                 .foregroundStyle(.cyPrimary)
         }
     }
+}
+
+// MARK: - Previews
+
+#Preview("Route") {
+    OpenRingProgressView(progress: 0.42)
+        .frame(width: Spacing.xxxl, height: Spacing.xxxl)
+}
+
+#Preview("Route complete") {
+    OpenRingProgressView(progress: 1)
+        .frame(width: Spacing.xxxl, height: Spacing.xxxl)
+}
+
+#Preview("No route") {
+    OpenRingProgressView(progress: nil)
+        .frame(width: Spacing.xxxl, height: Spacing.xxxl)
+}
+
+#Preview("No percent") {
+    OpenRingProgressView(progress: 0.42, showsPercent: false)
+        .frame(width: Spacing.islandStatusMark, height: Spacing.islandStatusMark)
 }

@@ -3,28 +3,44 @@ import SwiftUI
 import WidgetKit
 
 /// The ride on the Lock Screen and in the Dynamic Island (PRD §8.10). The Lock Screen is
-/// `RideLockScreenView` (#309) on a `cyBgPrimary` card; the Dynamic Island is still #306's
-/// placeholder, pending #310.
+/// `RideLockScreenView` (#309) on a `cyBgPrimary` card. The Dynamic Island (#310, Sketch "S22 -
+/// Dynamic Island" and "S22 - Expanded Dynamic Island"): compact is the status mark and the speed,
+/// minimal the status mark, expanded the Lock Screen's row with distance's unit beside it. The
+/// island is always black, so its views take the dark scheme whatever the phone's appearance.
 struct RideLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RideActivityAttributes.self) { context in
             LockScreenCard {
                 RideLockScreenView(state: context.state, units: context.attributes.units,
                                    isStale: context.isStale)
+                    .padding(Spacing.lg)
             }
         } dynamicIsland: { context in
             DynamicIsland {
-                DynamicIslandExpandedRegion(.center) {
-                    ElapsedTime.text(context.state).monospacedDigit()
+                DynamicIslandExpandedRegion(.bottom) {
+                    RideLockScreenView(state: context.state, units: context.attributes.units,
+                                       isStale: context.isStale, distanceLayout: .horizontal)
+                        // `HeroNumber`'s digits and units hang past its frame, and the region's
+                        // bottom corners are rounded: unpadded, "mph" was cut (simulator, #310).
+                        .padding(.vertical, Spacing.sm)
+                        .environment(\.colorScheme, .dark)
                 }
             } compactLeading: {
-                ElapsedTime.text(context.state).monospacedDigit()
+                RideStatusMark(state: context.state, showsPercent: false)
+                    .frame(width: Spacing.islandStatusMark, height: Spacing.islandStatusMark)
+                    .environment(\.colorScheme, .dark)
             } compactTrailing: {
-                Text(context.attributes.units.speed(fromMPS: context.state.speedMPS),
-                     format: .number.precision(.fractionLength(0)))
+                RideIslandSpeed(state: context.state, units: context.attributes.units,
+                                isStale: context.isStale)
+                    .environment(\.colorScheme, .dark)
             } minimal: {
-                RideStatusMark(state: context.state)
+                RideStatusMark(state: context.state, showsPercent: false)
+                    .frame(width: Spacing.islandStatusMark, height: Spacing.islandStatusMark)
+                    .environment(\.colorScheme, .dark)
             }
+            // Sketch's 15pt, near enough, for the Lock Screen card's padding. The system's ~18pt
+            // left the row ~338pt, near its 337pt worst case (simulator, #310).
+            .contentMargins(.horizontal, Spacing.lg, for: .expanded)
         }
     }
 }
@@ -79,11 +95,22 @@ private extension RideActivityAttributes.ContentState {
     RideLiveActivity()
 } contentStates: {
     RideActivityAttributes.ContentState.riding
+    RideActivityAttributes.ContentState.noRoute
+    RideActivityAttributes.ContentState.paused
+}
+
+#Preview("Island expanded", as: .dynamicIsland(.expanded), using: RideActivityAttributes(units: .imperial)) {
+    RideLiveActivity()
+} contentStates: {
+    RideActivityAttributes.ContentState.riding
+    RideActivityAttributes.ContentState.noRoute
+    RideActivityAttributes.ContentState.paused
 }
 
 #Preview("Island minimal", as: .dynamicIsland(.minimal), using: RideActivityAttributes(units: .metric)) {
     RideLiveActivity()
 } contentStates: {
     RideActivityAttributes.ContentState.riding
+    RideActivityAttributes.ContentState.noRoute
     RideActivityAttributes.ContentState.paused
 }

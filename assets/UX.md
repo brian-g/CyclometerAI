@@ -1298,6 +1298,14 @@ ContentUnavailableView {
 
 As built (#309): one row on a `bgPrimary` card at `liveActivityCard` opacity. The status mark, then elapsed time and distance (unit under it) at small hero size, then speed at medium, right-aligned. With no route the status mark is the bicycle glyph, as S05.3 shows it, not the app icon. Stale: values dim to `textSecondary` with "Reconnecting…" under the row. Always-On: the dark card in either appearance, white text. The elapsed time takes an h:mm:ss slot, so distance doesn't move as it grows.
 
+Dynamic Island, as built (#310, Sketch "S22 - Dynamic Island" and "S22 - Expanded Dynamic Island"):
+
+- **Compact:** the status mark, 26 pt, leading; the speed alone (no unit), white SF Pro Medium 18, trailing. No elapsed time; the frames overrule the issue here.
+- **Minimal:** the status mark. In compact and minimal the route ring drops its percentage.
+- **Expanded:** the Lock Screen's row on the island's black, with distance's unit beside it. When a metric or long ride makes that row wider than the island, the unit drops under distance instead of cutting speed.
+- **Status mark:** with no route it is now the app's rider glyph (`cyclometer.rider`) on the Lock Screen too, as the S22 frames draw it, instead of S05.3's bicycle.
+- **Stale:** values dim to `textSecondary`; the compact island has no room for "Reconnecting…".
+
 ---
 
 *Cyclometer UX Specification v0.8.1 · 2026-03-31 · Updated 2026-09-17*

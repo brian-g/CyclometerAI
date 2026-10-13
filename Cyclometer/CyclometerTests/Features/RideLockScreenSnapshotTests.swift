@@ -33,6 +33,7 @@ final class RideLockScreenSnapshotTests: XCTestCase {
         scheme: ColorScheme = .light
     ) -> some View {
         RideLockScreenView(state: state, units: units, isStale: isStale)
+            .padding(Spacing.lg)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .background(RideLockScreenView.card(colorScheme: scheme, isLuminanceReduced: isLuminanceReduced))
             .background(Color.blue)
