@@ -1,4 +1,5 @@
 import ComposableArchitecture
+import UIKit
 
 /// What the wheel-size picker is showing: one of the PRD §8.9 presets, or a
 /// manually entered circumference.
@@ -11,6 +12,8 @@ enum WheelSelection: Hashable, Sendable {
 struct SettingsFeature {
     @Dependency(\.bleCSCClient) var bleCSCClient
     @Dependency(\.healthKitClient) var healthKitClient
+    @Dependency(\.liveActivityClient) var liveActivityClient
+    @Dependency(\.openURL) var openURL
     @Dependency(\.date) var date
 
     /// One row of the S12 HR Zones table — what `SettingsView` reads to build the
@@ -52,6 +55,10 @@ struct SettingsFeature {
         var healthMaxBPM: Int? = nil
         /// Health's preferred zones as ceilings (#238), the middle term of every zone boundary.
         var healthZoneCeilingsBPM: [Int]? = nil
+        /// The system's setting for this app's Live Activities (#313). Read on appearance and
+        /// whenever the app comes forward, since the rider changes it in iOS Settings. Starts
+        /// true so the explainer doesn't flash before the first read.
+        var isSystemLiveActivityEnabled = true
 
         /// Read through to storage rather than mirrored in feature state: both have
         /// to survive a relaunch, and `preferredUnit` also has to agree with whatever
@@ -62,6 +69,8 @@ struct SettingsFeature {
         var isAutoDimEnabled: Bool { preferences.isAutoDimEnabled }
         /// Read by S10 when it names a ride (#283).
         var isPlaceNameLookupEnabled: Bool { preferences.isPlaceNameLookupEnabled }
+        /// Read by `LiveActivityFeature` (#313).
+        var isLiveActivityEnabled: Bool { preferences.isLiveActivityEnabled }
 
         /// Deduped by peripheral (`AppPreferences.pairedRoles`), so a combo
         /// speed+cadence sensor counts once rather than twice.
@@ -150,6 +159,7 @@ struct SettingsFeature {
     }
     enum Action: Equatable {
         case task
+        case appBecameActive
         case healthProfileFetched(restingBPM: Int?, maxBPM: Int?, zoneCeilingsBPM: [Int]?)
         case unitSelected(UnitSystem)
         case wheelSelectionChanged(WheelSelection)
@@ -158,6 +168,8 @@ struct SettingsFeature {
         case autoPauseToggled
         case autoDimToggled
         case placeNameLookupToggled
+        case liveActivityToggled
+        case liveActivitySettingsTapped
         case hrZoneBoundaryStepped(zone: HeartRateZone, delta: Int)
         case hrZoneResetTapped
         case restingOverrideChanged(String)
@@ -165,6 +177,13 @@ struct SettingsFeature {
         case maxOverrideChanged(String)
         case maxOverrideCommitted
         case deviceManagement(DeviceManagementFeature.Action)
+        case delegate(Delegate)
+
+        @CasePathable
+        enum Delegate: Equatable {
+            /// A ride already running starts or ends its Live Activity to match (#313).
+            case liveActivityToggled
+        }
     }
     var body: some ReducerOf<Self> {
         Scope(state: \.deviceManagement, action: \.deviceManagement) {
@@ -174,6 +193,7 @@ struct SettingsFeature {
         Reduce { state, action in
             switch action {
             case .task:
+                state.isSystemLiveActivityEnabled = liveActivityClient.isEnabled()
                 return .run { [healthKitClient, date] send in
                     async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
                     async let dob = try? healthKitClient.fetchDateOfBirth()
@@ -181,6 +201,9 @@ struct SettingsFeature {
                     let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
                     await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM, zoneCeilingsBPM: await zoneCeilings))
                 }
+            case .appBecameActive:
+                state.isSystemLiveActivityEnabled = liveActivityClient.isEnabled()
+                return .none
             case .healthProfileFetched(let restingBPM, let maxBPM, let zoneCeilingsBPM):
                 state.healthRestingBPM = restingBPM
                 state.healthMaxBPM = maxBPM
@@ -223,6 +246,14 @@ struct SettingsFeature {
             case .placeNameLookupToggled:
                 state.$preferences.withLock { $0.isPlaceNameLookupEnabled.toggle() }
                 return .none
+            case .liveActivityToggled:
+                state.$preferences.withLock { $0.isLiveActivityEnabled.toggle() }
+                return .send(.delegate(.liveActivityToggled))
+            case .liveActivitySettingsTapped:
+                return .run { [openURL] _ in
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    _ = await openURL(url)
+                }
             case .hrZoneBoundaryStepped(let zone, let delta):
                 // An out-of-range step is a silent no-op — what makes the Stepper
                 // stop naturally at a clamp, with no separate disabled-state to track.
@@ -276,7 +307,7 @@ struct SettingsFeature {
                 state.$riderProfile.withLock { $0 = updated }
                 state.maxOverrideDraft = nil
                 return .none
-            case .deviceManagement:
+            case .deviceManagement, .delegate:
                 return .none
             }
         }

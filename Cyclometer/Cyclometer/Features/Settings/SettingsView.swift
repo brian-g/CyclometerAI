@@ -64,6 +64,12 @@ struct SettingsView: View {
                     get: { store.isPlaceNameLookupEnabled },
                     set: { _ in store.send(.placeNameLookupToggled) }
                 ))
+                // Off in iOS Settings, the rider's own choice is kept but can't take effect (#313).
+                Toggle("Show Live Activity", isOn: Binding(
+                    get: { store.isLiveActivityEnabled },
+                    set: { _ in store.send(.liveActivityToggled) }
+                ))
+                .disabled(!store.isSystemLiveActivityEnabled)
                 NavigationLink {
                     DeviceManagementView(
                         store: store.scope(state: \.deviceManagement, action: \.deviceManagement)
@@ -72,9 +78,16 @@ struct SettingsView: View {
                     LabeledContent("Sensors", value: "\(store.pairedSensorCount)")
                 }
             } footer: {
-                if store.wheelSelection == .custom {
-                    Text("Wheel circumference must be between 1,500 and 3,000 mm.")
-                        .foregroundStyle(store.isCustomCircumferenceInvalid ? Color.red : Color.secondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    if store.wheelSelection == .custom {
+                        Text("Wheel circumference must be between 1,500 and 3,000 mm.")
+                            .foregroundStyle(store.isCustomCircumferenceInvalid ? Color.red : Color.secondary)
+                    }
+                    if !store.isSystemLiveActivityEnabled {
+                        Text("Live Activities are turned off for Cyclometer in iOS Settings.")
+                        Button("Open Settings") { store.send(.liveActivitySettingsTapped) }
+                            .font(.footnote)
+                    }
                 }
             }
 
@@ -179,4 +192,28 @@ private struct PrivacyPolicyView: View {
         .navigationTitle("Privacy Policy")
         .navigationBarTitleDisplayMode(.inline)
     }
+}
+
+// MARK: - Previews
+
+// HealthKit and ActivityKit are stubbed: neither has a `previewValue`, and `.task` reads both.
+private func previewStore(isSystemLiveActivityEnabled: Bool) -> StoreOf<SettingsFeature> {
+    var state = SettingsFeature.State()
+    state.isSystemLiveActivityEnabled = isSystemLiveActivityEnabled
+    return Store(initialState: state) {
+        SettingsFeature()
+    } withDependencies: {
+        $0.healthKitClient = .testValue
+        var liveActivity = LiveActivityClient.testValue
+        liveActivity.isEnabled = { isSystemLiveActivityEnabled }
+        $0.liveActivityClient = liveActivity
+    }
+}
+
+#Preview("Default") {
+    NavigationStack { SettingsView(store: previewStore(isSystemLiveActivityEnabled: true)) }
+}
+
+#Preview("Live Activities off in iOS") {
+    NavigationStack { SettingsView(store: previewStore(isSystemLiveActivityEnabled: false)) }
 }

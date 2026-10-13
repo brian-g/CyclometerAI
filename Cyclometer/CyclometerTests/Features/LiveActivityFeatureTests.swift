@@ -125,6 +125,18 @@ struct LiveActivityFeatureTests {
         #expect(ride.store.state.liveActivity.phase == .notShowing)
     }
 
+    @Test("with S12's Show Live Activity off, nothing reaches ActivityKit, even on coming forward")
+    func settingOffShowsNothing() async {
+        let ride = Self.makeRide { $0.$preferences.withLock { $0.isLiveActivityEnabled = false } }
+        let calls = ride.calls
+        await ride.store.send(.task)
+        await ride.store.send(.liveActivity(.appBecameActive))
+        await ride.tick(20)
+
+        #expect(calls.value.isEmpty)
+        #expect(ride.store.state.liveActivity.phase == .notShowing)
+    }
+
     /// A ride resumed after a crash comes back as it was left; paused, its card shows paused.
     @Test("a resumed, paused ride starts paused, at its elapsed time")
     func resumedPausedRideStartsPaused() async {
@@ -323,6 +335,87 @@ struct LiveActivityFeatureTests {
         await store.send(.scenePhaseChanged(isActive: false))
         await store.send(.scenePhaseChanged(isActive: true))
         #expect(starts() == 2, "a showing activity isn't started again")
+    }
+
+    // MARK: - S12 setting (#313)
+
+    @Test("turned off mid-ride, the activity ends, and coming forward doesn't bring it back")
+    func settingOffMidRideEnds() async {
+        let ride = Self.makeRide()
+        let calls = ride.calls
+        await ride.start()
+
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = false }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+        #expect(ride.store.state.liveActivity.phase == .notShowing)
+        await expectEventually("the activity ended") { calls.value.last == .end }
+
+        await ride.store.send(.liveActivity(.appBecameActive))
+        await ride.tick(20)
+        #expect(calls.value.last == .end, "nothing after the end")
+    }
+
+    @Test("turned on mid-ride, the activity starts")
+    func settingOnMidRideStarts() async {
+        let ride = Self.makeRide { $0.$preferences.withLock { $0.isLiveActivityEnabled = false } }
+        let calls = ride.calls
+        await ride.store.send(.task)
+        await ride.tick(3)
+        #expect(calls.value.isEmpty)
+
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = true }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+        await ride.store.receive(\.liveActivity.started)
+
+        #expect(calls.value.count == 1)
+        guard case .start(_, let content) = calls.value.first else {
+            Issue.record("expected a start, got \(calls.value)")
+            return
+        }
+        #expect(content.pausedElapsed == nil)
+        #expect(ride.store.state.liveActivity.phase == .showing)
+    }
+
+    /// `Activity.request` can land after the `end` the setting sent, which found nothing to end.
+    @Test("turned off while the start is pending, the activity it then shows is ended")
+    func settingOffWhileStartingEndsTheLateActivity() async {
+        let ride = Self.makeRide()
+        let calls = ride.calls
+        let clock = ride.clock
+        var client = Self.recordingClient(into: calls)
+        let recordedStart = client.start
+        client.start = { attributes, content in
+            try? await clock.sleep(for: .milliseconds(500))
+            return await recordedStart(attributes, content)
+        }
+        ride.store.dependencies.liveActivityClient = client
+
+        await ride.store.send(.task)
+        #expect(ride.store.state.liveActivity.phase == .starting)
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = false }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+        await clock.advance(by: .milliseconds(500))
+        await ride.store.receive(\.liveActivity.started)
+
+        await expectEventually("the late activity ended") {
+            calls.value.last == .end && calls.value.filter { $0 == .end }.count == 2
+        }
+        #expect(ride.store.state.liveActivity.phase == .notShowing)
+    }
+
+    @Test("turning it off in Settings during a ride reaches the ride's activity")
+    func settingsToggleReachesTheRide() async {
+        let calls = LockIsolated<[Call]>([])
+        let store = Self.makeAppStore(clock: TestClock(), calls: calls)
+
+        await store.send(.activeRide(.task))
+        await store.receive(\.activeRide.liveActivity.started)
+        await store.send(.settings(.liveActivityToggled))
+        await store.receive(\.settings.delegate.liveActivityToggled)
+        await store.receive(\.activeRide.liveActivity.preferenceChanged)
+
+        #expect(store.state.activeRide?.liveActivity.phase == .notShowing)
+        await expectEventually("the activity ended") { calls.value.last == .end }
     }
 
     static func makeAppStore(

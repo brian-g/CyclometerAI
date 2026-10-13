@@ -32,18 +32,21 @@ struct LiveActivityFeature {
                 // A refused request (the app was in the background) or Live Activities switched
                 // on mid-ride gets another go when the app comes forward. One the rider swiped
                 // away stays `.showing`, and isn't brought back.
-                guard state.liveActivity.phase == .notShowing, liveActivityClient.isEnabled() else {
-                    return .none
-                }
-                let attributes = RideActivityAttributes(units: state.unitSystem)
-                let content = Self.content(for: state, now: date.now)
-                state.liveActivity = LiveActivityState(phase: .starting, shown: content)
-                return .run { [liveActivityClient] send in
-                    let isShowing = await liveActivityClient.start(attributes, content)
-                    await send(.liveActivity(.started(isShowing)))
-                }
+                return start(&state)
+            case .liveActivity(.preferenceChanged):
+                // S12's toggle, mid-ride (#313): on starts one now, the app being in front; off
+                // ends the one showing.
+                guard !state.preferences.isLiveActivityEnabled else { return start(&state) }
+                guard state.liveActivity.phase != .notShowing else { return .none }
+                state.liveActivity = LiveActivityState()
+                return .run { [liveActivityClient] _ in await liveActivityClient.end() }
             case .liveActivity(.started(let isShowing)):
-                guard state.liveActivity.phase == .starting else { return .none }
+                guard state.liveActivity.phase == .starting else {
+                    // Turned off while the request was out: the `end` went first and found
+                    // nothing, so the activity the request then showed is ended here.
+                    guard isShowing else { return .none }
+                    return .run { [liveActivityClient] _ in await liveActivityClient.end() }
+                }
                 state.liveActivity = isShowing
                     ? LiveActivityState(phase: .showing, shown: state.liveActivity.shown)
                     : LiveActivityState()
@@ -63,6 +66,20 @@ struct LiveActivityFeature {
             default:
                 return .none
             }
+        }
+    }
+
+    /// Requests the activity, when none is showing and both the system's setting and S12's allow it.
+    private func start(_ state: inout State) -> Effect<Action> {
+        guard state.liveActivity.phase == .notShowing,
+              state.preferences.isLiveActivityEnabled,
+              liveActivityClient.isEnabled() else { return .none }
+        let attributes = RideActivityAttributes(units: state.unitSystem)
+        let content = Self.content(for: state, now: date.now)
+        state.liveActivity = LiveActivityState(phase: .starting, shown: content)
+        return .run { [liveActivityClient] send in
+            let isShowing = await liveActivityClient.start(attributes, content)
+            await send(.liveActivity(.started(isShowing)))
         }
     }
 
@@ -117,4 +134,6 @@ enum LiveActivityAction: Equatable {
     case started(Bool)
     /// The app came to the foreground (`AppFeature`).
     case appBecameActive
+    /// S12's Show Live Activity changed (`AppFeature`, #313).
+    case preferenceChanged
 }

@@ -145,3 +145,39 @@ Sketch "S22 - Dynamic Island" and "S22 - Expanded Dynamic Island" win over the i
   - Test helpers vs the system renderer.
   - `HeroNumber` reporting its drawn bounds (follow-up).
   - The `.now` timer snapshot pattern (pre-existing).
+
+# #313 — Live Activity: S12 Show Live Activity setting
+
+Plan: /Users/brian/.claude/plans/eager-enchanting-sonnet.md
+Branch: `feat/313`
+
+- [x] 1. `AppPreferences.isLiveActivityEnabled` (default on, `decodeIfPresent`) + test
+- [x] 2. `SettingsFeature`: toggle + delegate, system setting read on `.task`/`.appBecameActive`, Open Settings + tests
+- [x] 3. `LiveActivityFeature`: gate the start on the preference; `.preferenceChanged` starts/ends mid-ride; late `.started(true)` ends + tests
+- [x] 4. `AppFeature`: forward scene-active to Settings, delegate to the ride + test
+- [x] 5. `SettingsView`: row after Place Names, disabled when iOS is off, footer explainer + Open Settings; previews
+- [x] 6. Snapshots: re-record S12, add the iOS-off state, inspect
+- [x] 7. UX.md §S12, PRD §8.10 + changelog
+- [x] 8. Full suite (simulator check not done — see Review)
+
+## Review
+
+- **Preference.** `AppPreferences.isLiveActivityEnabled`, on by default; an older document decodes to on.
+- **Gate.** `LiveActivityFeature`'s start (ride start, foreground retry) now needs S12's toggle as well as the system
+  setting, through one `start(&state)` helper.
+- **Mid-ride (asked).** `SettingsFeature` sends `.delegate(.liveActivityToggled)`; `AppFeature` passes it to a running
+  ride as `.liveActivity(.preferenceChanged)`. Off ends the activity; on starts one. A request that lands after the
+  toggle went off (`.started(true)` outside `.starting`) is ended, so nothing is orphaned.
+- **System setting.** S12 reads `liveActivityClient.isEnabled()` on `.task` and on every scene-active (`AppFeature`
+  forwards it), so coming back from iOS Settings updates it. Off: the toggle is disabled with its value kept (asked),
+  and General's footer explains and links to iOS Settings (`openSettingsURLString`, as `WelcomeFeature`).
+- **Placement (asked).** General, after Place Names.
+- **Compiler.** `LiveActivityClient.previewValue = testValue` hit a circular-reference error once a preview used
+  `testValue`; it now has an explicit type.
+- **Tests.**
+  - 5 `LiveActivityFeatureTests`, 3 `SettingsFeatureTests`, and 2 `AppPreferencesTests` assertions.
+  - Mutation check: removing the gate, the late-start end, or AppFeature's forward turns 5 tests red.
+  - S12 snapshots re-recorded, plus `liveActivitiesOffInIOS`; images inspected.
+  - Full `CyclometerTests` green: 1824 unique cases passed, 0 failed.
+- **Not verified.** No simulator drive with Live Activities off in iOS Settings; the explainer and link are covered by
+  the snapshot and the reducer tests only.

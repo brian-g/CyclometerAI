@@ -44,6 +44,11 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// coordinate is never sent to Apple's geocoder (PRD §12, Privacy).
     var isPlaceNameLookupEnabled: Bool = true
 
+    /// Whether a ride shows its Live Activity on the Lock Screen and in the Dynamic Island (#313,
+    /// PRD §8.10). On by default. It sits behind the system's own setting for the app: both have to
+    /// be on. `LiveActivityFeature` reads it when the ride starts and when S12 changes it mid-ride.
+    var isLiveActivityEnabled: Bool = true
+
     /// Speed and distance display units (DataModel.md §3.6). Defaults to the device
     /// locale's measurement system, so a rider who never opens Settings still gets
     /// the units their phone is configured for.
@@ -159,6 +164,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
         ) ?? true
         isPlaceNameLookupEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isPlaceNameLookupEnabled
+        ) ?? true
+        isLiveActivityEnabled = try container.decodeIfPresent(
+            Bool.self, forKey: .isLiveActivityEnabled
         ) ?? true
         preferredUnit = try container.decodeIfPresent(
             UnitSystem.self, forKey: .preferredUnit

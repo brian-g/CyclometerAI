@@ -34,6 +34,7 @@
 | 0.6.7 | 2026-10-10 | Brian | Removed scope from the Live Activity. |
 | 0.6.8 | 2026-10-12 | Brian / Claude | Live Activity Lock Screen (#309). §8.10 Presentations follows the S22 Sketch frame: speed is the large number, time and distance small. The card is `brBgPrimary` at 85%, not Sketch's 67% black, so its text passes WCAG AA over any wallpaper. Reduced luminance keeps the card, dark, rather than dropping it. |
 | 0.6.9 | 2026-10-13 | Brian / Claude | Live Activity Dynamic Island (#310). §8.10 Presentations follows the "S22 - Dynamic Island" and "S22 - Expanded Dynamic Island" Sketch frames over the issue: compact leading is the status mark, not elapsed time, and compact speed is white with no unit. The no-route glyph is the app's `cyclometer.rider` across the Live Activity. Expanded puts distance's unit beside it while the row fits, and under it when a metric or long ride doesn't. The design-frames line now names the frames Sketch holds. |
+| 0.6.10 | 2026-10-13 | Brian / Claude | Live Activity S12 setting (#313). §8.10: Show Live Activity sits in S12's General section and takes effect mid-ride: off ends the showing activity, on starts one. With the system setting off, the toggle is disabled, keeping the rider's choice, and General's footer explains and links to iOS Settings. |
 
 ---
 
@@ -879,7 +880,7 @@ Design frames in `Design.sketch`: ~~Lock Screen light and dark × radar none / a
 - `LiveActivityClient` dependency (`start`, `update`, `end`, `isEnabled`); `liveValue` wraps ActivityKit; `testValue` is switched off, and tests supply a recording client. `start` reports whether an activity is showing. `update` takes no alert parameter.
 - `LiveActivityFeature` reducer scoped into the active ride feature. It observes ride ~~, sensor, radar~~ and `NavigationFeature` state (route progress only) and owns the 1 Hz throttle on an injected clock~~, and applies the threat and turn bypasses. Turn cues are derived by navigation; the Live Activity mirrors them~~. Built (#308) as a reducer layered onto `ActiveRideFeature`'s domain rather than a scoped child, so it reads the whole ride and ends the activity on the action that tears the ride down. The ride's 1 Hz tick, on the injected clock, is the throttle.
 - `Info.plist`: `NSSupportsLiveActivities = YES`. Background updates rely on the ride's location background mode.
-- S12 gains **Show Live Activity** (default on). When the system setting is off, S12 explains and links to iOS Settings.
+- S12 gains **Show Live Activity** (default on), `AppPreferences.isLiveActivityEnabled`. When the system setting is off, S12 explains and links to iOS Settings. Built (#313) in the General section. Changed mid-ride it takes effect at once: off ends the activity, on starts one (`SettingsFeature` delegates to `AppFeature`, which tells the ride). With the system setting off the toggle is disabled but keeps the rider's choice; the system setting is reread whenever the app comes forward.
 
 #### Acceptance criteria
 

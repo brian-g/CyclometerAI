@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-13 — §S12 gains Show Live Activity (#313).  
 **Updated:** 2026-10-12 — §W1, §W4 and §W5 share one trend ▲/▼ (#402): right of the value, level with the tops of its digits and a quarter of their height. W4's moves off the unit, where Design.sketch drew it, and W5 gains one: cadence against the ride average, by more than 5 rpm.  
 **Updated:** 2026-10-10 — Added S21 for the Live Activity.  
 **Updated:** 2026-10-10 — §W1's above/below-average indicator moved from AVG to the speed (#81): ▲/▼ as W4's, right of the value and level with its top, at every size.  
@@ -1099,6 +1100,7 @@ a confirmation:
 - Auto-pause (toggle)
 - Auto-dim (toggle)
 - Place Names (toggle, on) — whether S10 reverse-geocodes a free ride's start for its default name (#283, §S10). Off, nothing is sent and the name is the offline one
+- Show Live Activity (toggle, on) — whether a ride shows its §S22 Live Activity (#313, PRD §8.10). Takes effect mid-ride: off ends the activity, on starts one. When iOS has Live Activities off for the app, the toggle is disabled, keeping its value, and the section footer reads "Live Activities are turned off for Cyclometer in iOS Settings." with an Open Settings link
 - Sensors — navigates to S11, with the count of paired sensors as the trailing value
 
 **HR Zones**
