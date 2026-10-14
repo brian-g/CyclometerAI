@@ -14,13 +14,27 @@ struct WelcomeView: View {
             // at default type on a full-size phone nothing actually scrolls.
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.lg) {
-                    Text("Cyclometer").font(Font.largeTitle.bold())
-                    Text("Ride faster. Arrive safer.")
-                        .font(.title2)
-                        .foregroundStyle(Color.cyTextPrimary)
-
+                    HStack() {
+                        Image("cyclometer.rider")
+                            .resizable()
+                            .scaledToFit()
+                            .padding(Spacing.md)
+                            .frame(width: 96, height: 96)
+                            .background(Color.cyPrimary)
+                            .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerLg, style: .continuous))
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("ACME").font(Font.caption)
+                            Text("Ride").font(Font.largeTitle.bold())
+                            
+                            Text("Cycling Dashboard")
+                                .font(.title2)
+                                .foregroundStyle(Color.cyTextPrimary)
+                        }
+                    }
                     Text("""
-                    Real-time radar, metrics, and intelligence — built for cyclists who take the road seriously.
+                    A bike computer for your iPhone — private by design.
+                    
+                    Real-time radar, metrics, and intelligence — no login needed.
 
                     Let's get started, first we need to grant some permissions. Tap on each item to grant permission. When completed, tap Next.
                     """)
