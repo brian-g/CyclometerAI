@@ -95,6 +95,8 @@ struct AppPreferencesTests {
         preferences.mapOrientation = .northUp
         // Added by #283.
         preferences.isPlaceNameLookupEnabled = false
+        // Added by #313.
+        preferences.isLiveActivityEnabled = false
         // Added by #139.
         preferences.dashboardLayout = DashboardLayout(pages: [
             DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 6, column: 1)])
@@ -131,6 +133,8 @@ struct AppPreferencesTests {
         #expect(decoded.isTurnByTurnEnabled)
         // Added by #283; place names start on.
         #expect(decoded.isPlaceNameLookupEnabled)
+        // Added by #313; the Live Activity starts on.
+        #expect(decoded.isLiveActivityEnabled)
         // Added by #199; the map sheet starts heading-up.
         #expect(decoded.mapOrientation == .headingUp)
         // Added by #139; the dashboard starts on the factory layout.

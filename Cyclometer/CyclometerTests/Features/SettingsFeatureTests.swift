@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import UIKit
 import ComposableArchitecture
 @testable import Cyclometer
 
@@ -25,7 +26,8 @@ struct SettingsFeatureTests {
         circumferenceMM: Int = WheelPreset.default.circumferenceMM,
         riderProfile: RiderProfile = RiderProfile(),
         bleCSCClient: BLECSCClient = .testValue,
-        healthKitClient: HealthKitClient = .testValue
+        healthKitClient: HealthKitClient = .testValue,
+        liveActivityClient: LiveActivityClient = .testValue
     ) -> TestStoreOf<SettingsFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -40,6 +42,7 @@ struct SettingsFeatureTests {
             } withDependencies: {
                 $0.bleCSCClient = bleCSCClient
                 $0.healthKitClient = healthKitClient
+                $0.liveActivityClient = liveActivityClient
                 $0.date = .constant(Date(timeIntervalSince1970: 1_800_000_000))
                 $0.defaultFileStorage = storage
             }
@@ -173,6 +176,45 @@ struct SettingsFeatureTests {
             $0.$preferences.withLock { $0.isPlaceNameLookupEnabled = false }
         }
         #expect(store.state.isPlaceNameLookupEnabled == false)
+    }
+
+    /// Read by `LiveActivityFeature` off the same document; the delegate is how a ride already
+    /// running hears of it (#313).
+    @Test("Show Live Activity persists, on by default, and tells the app")
+    func liveActivityTogglePersists() async {
+        let store = makeStore()
+        #expect(store.state.isLiveActivityEnabled)
+
+        await store.send(.liveActivityToggled) {
+            $0.$preferences.withLock { $0.isLiveActivityEnabled = false }
+        }
+        await store.receive(\.delegate.liveActivityToggled)
+        #expect(store.state.isLiveActivityEnabled == false)
+    }
+
+    /// The rider turns Live Activities on in iOS Settings and comes back; the explainer goes.
+    @Test("The system's Live Activities setting is read on appearance and on coming forward")
+    func systemLiveActivitySettingIsRead() async {
+        let isEnabled = LockIsolated(false)
+        var client = LiveActivityClient.testValue
+        client.isEnabled = { isEnabled.value }
+        let store = makeStore(liveActivityClient: client)
+        store.exhaustivity = .off  // `.task`'s HealthKit fetch
+
+        await store.send(.task) { $0.isSystemLiveActivityEnabled = false }
+        isEnabled.setValue(true)
+        await store.send(.appBecameActive) { $0.isSystemLiveActivityEnabled = true }
+    }
+
+    @Test("Open Settings opens the app's page in iOS Settings")
+    func liveActivitySettingsOpensSettings() async {
+        let opened = LockIsolated<[URL]>([])
+        let store = makeStore()
+        store.dependencies.openURL = OpenURLEffect { url in opened.withValue { $0.append(url) }; return true }
+
+        await store.send(.liveActivitySettingsTapped)
+        await store.finish()
+        #expect(opened.value == [URL(string: UIApplication.openSettingsURLString)!])
     }
 
     /// Auto-pause used to be a feature-local `Bool` nobody else could read; #102

@@ -36,7 +36,8 @@ final class SettingsSnapshotTests: XCTestCase {
     private func screen(
         wheelCircumferenceMM: Int = WheelPreset.default.circumferenceMM,
         pairedSensors: [PairedSensor] = [],
-        riderProfile profile: RiderProfile = RiderProfile()
+        riderProfile profile: RiderProfile = RiderProfile(),
+        isSystemLiveActivityEnabled: Bool = true
     ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
@@ -55,13 +56,19 @@ final class SettingsSnapshotTests: XCTestCase {
             }
             @Shared(.riderProfile) var riderProfile
             $riderProfile.withLock { $0 = profile }
-            return Store(initialState: SettingsFeature.State()) {
+            // Seeded as well as stubbed: the snapshot doesn't wait for `.task` to read it.
+            var state = SettingsFeature.State()
+            state.isSystemLiveActivityEnabled = isSystemLiveActivityEnabled
+            var liveActivityClient = LiveActivityClient.testValue
+            liveActivityClient.isEnabled = { isSystemLiveActivityEnabled }
+            return Store(initialState: state) {
                 SettingsFeature()
             } withDependencies: {
                 $0.bleCSCClient = .testValue
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
                 $0.healthKitClient = .testValue
+                $0.liveActivityClient = liveActivityClient
                 $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
                 $0.continuousClock = TestClock()
                 $0.defaultFileStorage = storage
@@ -128,5 +135,11 @@ final class SettingsSnapshotTests: XCTestCase {
             screen(riderProfile: RiderProfile(restingOverrideBPM: 52, maxOverrideBPM: 185)),
             named: "hrZoneOverridesSet"
         )
+    }
+
+    /// Live Activities turned off for the app in iOS Settings (#313): the Show Live Activity
+    /// toggle is disabled, and its row explains and links to iOS Settings.
+    func testLiveActivitiesOffInIOS() {
+        assertBothSchemes(screen(isSystemLiveActivityEnabled: false), named: "liveActivitiesOffInIOS")
     }
 }

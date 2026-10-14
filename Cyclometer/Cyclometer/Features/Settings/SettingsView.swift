@@ -64,6 +64,24 @@ struct SettingsView: View {
                     get: { store.isPlaceNameLookupEnabled },
                     set: { _ in store.send(.placeNameLookupToggled) }
                 ))
+                // Off in iOS Settings, the rider's own choice is kept but can't take effect, and the
+                // row says why (#313).
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Show Live Activity", isOn: Binding(
+                        get: { store.isLiveActivityEnabled },
+                        set: { _ in store.send(.liveActivityToggled) }
+                    ))
+                    .disabled(!store.isSystemLiveActivityEnabled)
+                    if !store.isSystemLiveActivityEnabled {
+                        Text("Live Activities are turned off for Cyclometer in iOS Settings.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        // Borderless, or the whole row — the toggle included — becomes the button.
+                        Button("Open Settings") { store.send(.liveActivitySettingsTapped) }
+                            .font(.caption)
+                            .buttonStyle(.borderless)
+                    }
+                }
                 NavigationLink {
                     DeviceManagementView(
                         store: store.scope(state: \.deviceManagement, action: \.deviceManagement)
@@ -179,4 +197,28 @@ private struct PrivacyPolicyView: View {
         .navigationTitle("Privacy Policy")
         .navigationBarTitleDisplayMode(.inline)
     }
+}
+
+// MARK: - Previews
+
+// HealthKit and ActivityKit are stubbed: neither has a `previewValue`, and `.task` reads both.
+private func previewStore(isSystemLiveActivityEnabled: Bool) -> StoreOf<SettingsFeature> {
+    var state = SettingsFeature.State()
+    state.isSystemLiveActivityEnabled = isSystemLiveActivityEnabled
+    return Store(initialState: state) {
+        SettingsFeature()
+    } withDependencies: {
+        $0.healthKitClient = .testValue
+        var liveActivity = LiveActivityClient.testValue
+        liveActivity.isEnabled = { isSystemLiveActivityEnabled }
+        $0.liveActivityClient = liveActivity
+    }
+}
+
+#Preview("Default") {
+    NavigationStack { SettingsView(store: previewStore(isSystemLiveActivityEnabled: true)) }
+}
+
+#Preview("Live Activities off in iOS") {
+    NavigationStack { SettingsView(store: previewStore(isSystemLiveActivityEnabled: false)) }
 }

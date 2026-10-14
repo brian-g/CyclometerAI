@@ -374,10 +374,14 @@ struct AppFeature {
 
             case .scenePhaseChanged(let isActive):
                 state.isForeground = isActive
+                guard isActive else { return .none }
+                // S12 rereads the system's Live Activities setting, which the rider may just have
+                // changed in iOS Settings (#313).
+                let settings = Effect<Action>.send(.settings(.appBecameActive))
                 // ActivityKit refuses a request from the background, so a ride that started or
                 // resumed there gets its Live Activity now (#308). The ride decides whether it needs one.
-                guard isActive, state.activeRide != nil else { return .none }
-                return .send(.activeRide(.liveActivity(.appBecameActive)))
+                guard state.activeRide != nil else { return settings }
+                return .merge(settings, .send(.activeRide(.liveActivity(.appBecameActive))))
 
             case .screenVisibilityChanged(let isVisible):
                 guard isVisible else {
@@ -451,6 +455,11 @@ struct AppFeature {
 
             case .routes(.delegate(.useRoute(let route))):
                 return presentStartSheet(&state, route: route)
+
+            case .settings(.delegate(.liveActivityToggled)):
+                // A ride already running follows S12's toggle now, not from the next ride (#313).
+                guard state.activeRide != nil else { return .none }
+                return .send(.activeRide(.liveActivity(.preferenceChanged)))
 
             case .rides, .routes, .settings, .activeRide, .onboarding:
                 return .none

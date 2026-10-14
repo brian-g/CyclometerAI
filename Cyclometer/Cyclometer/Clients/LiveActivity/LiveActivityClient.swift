@@ -75,7 +75,7 @@ extension LiveActivityClient: DependencyKey {
     )
 
     /// Previews never reach ActivityKit.
-    static let previewValue = testValue
+    static let previewValue: LiveActivityClient = testValue
 
     private static func content(_ state: RideActivityAttributes.ContentState) -> ActivityContent<RideActivityAttributes.ContentState> {
         ActivityContent(state: state, staleDate: .now.addingTimeInterval(staleInterval))

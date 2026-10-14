@@ -796,3 +796,22 @@ past 9 h. Speed truncated to "4…" on the island and on the Lock Screen. In the
 **Rule.** Before claiming a layout's worst case, list every branch in the code that changes a width:
 thresholds, slot strings, unit and locale switches, device widths. Put a test case on the far side
 of each. Before reproducing an exact size from a mockup, re-read the design-system conventions.
+
+---
+
+## A re-recorded reference is checked against main, not just for the new thing (2026-10-13, #313 review)
+
+**What happened.** For S12's Show Live Activity I put the iOS-off explainer in General's footer and
+wrapped that footer in a `VStack`. Brian's review: the message and the Open Settings link belong in
+the toggle's own row. Moving them back out restored main's footer, and two references that should have
+changed only by the new row failed again. The first round's empty `VStack` still counted as a
+footer. It had added ~7.5pt above HR Zones in every state, and I had approved those references
+because the new row was in them.
+
+**Rule.**
+- An explanation of one control goes in that control's row, not a section footer shared with
+  other rows.
+- When re-recording a reference, compare it with main's version and account for every difference,
+  not only the one you meant to make. Measure a landmark below the change, such as the next
+  section's header gap. A conditional container (`VStack { if … }`) in a `footer:` or `header:` is
+  never empty to `Form`: use the bare `if`.
