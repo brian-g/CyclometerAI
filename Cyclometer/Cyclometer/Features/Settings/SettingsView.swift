@@ -39,7 +39,8 @@ struct SettingsView: View {
                     Text("Custom").tag(WheelSelection.custom)
                 }
                 if store.wheelSelection == .custom {
-                    // The range sits in the field's own row, like the HR overrides' errors (#424).
+                    // The range sits in the field's own row (#424), and only while the entry is out of
+                    // range, like the HR overrides' errors (#429).
                     VStack(alignment: .leading, spacing: 4) {
                         LabeledContent("Circumference") {
                             HStack(spacing: 4) {
@@ -53,9 +54,11 @@ struct SettingsView: View {
                                 Text("mm").foregroundStyle(.secondary)
                             }
                         }
-                        Text("Wheel circumference must be between 1,500 and 3,000 mm.")
-                            .font(.caption)
-                            .foregroundStyle(store.isCustomCircumferenceInvalid ? Color.red : Color.secondary)
+                        if store.isCustomCircumferenceInvalid {
+                            Text("Wheel circumference must be between 1,500 and 3,000 mm.")
+                                .font(.caption)
+                                .foregroundStyle(Color.cyRatingBad)
+                        }
                     }
                 }
                 Toggle("Auto-pause", isOn: Binding(
@@ -112,7 +115,7 @@ struct SettingsView: View {
                         }
                     }
                     if let error = store.restingOverrideValidationError {
-                        Text(error.message).font(.caption).foregroundStyle(.red)
+                        Text(error.message).font(.caption).foregroundStyle(Color.cyRatingBad)
                     }
                 }
                 VStack(alignment: .leading, spacing: 4) {
@@ -129,7 +132,7 @@ struct SettingsView: View {
                         }
                     }
                     if let error = store.maxOverrideValidationError {
-                        Text(error.message).font(.caption).foregroundStyle(.red)
+                        Text(error.message).font(.caption).foregroundStyle(Color.cyRatingBad)
                     }
                 }
                 ForEach(store.hrZoneRows) { row in
@@ -207,12 +210,16 @@ private struct PrivacyPolicyView: View {
 private func previewStore(
     isSystemLiveActivityEnabled: Bool = true,
     isCustomWheel: Bool = false,
-    customCircumferenceDraft: String? = nil
+    customCircumferenceDraft: String? = nil,
+    restingOverrideDraft: String? = nil,
+    maxOverrideDraft: String? = nil
 ) -> StoreOf<SettingsFeature> {
     var state = SettingsFeature.State()
     state.isSystemLiveActivityEnabled = isSystemLiveActivityEnabled
     state.userChoseCustom = isCustomWheel
     state.customCircumferenceDraft = customCircumferenceDraft
+    state.restingOverrideDraft = restingOverrideDraft
+    state.maxOverrideDraft = maxOverrideDraft
     return Store(initialState: state) {
         SettingsFeature()
     } withDependencies: {
@@ -238,4 +245,8 @@ private func previewStore(
 
 #Preview("Custom wheel size, out of range") {
     NavigationStack { SettingsView(store: previewStore(isCustomWheel: true, customCircumferenceDraft: "900")) }
+}
+
+#Preview("HR overrides out of range") {
+    NavigationStack { SettingsView(store: previewStore(restingOverrideDraft: "20", maxOverrideDraft: "50")) }
 }
