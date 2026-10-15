@@ -37,7 +37,8 @@ final class SettingsSnapshotTests: XCTestCase {
         wheelCircumferenceMM: Int = WheelPreset.default.circumferenceMM,
         pairedSensors: [PairedSensor] = [],
         riderProfile profile: RiderProfile = RiderProfile(),
-        isSystemLiveActivityEnabled: Bool = true
+        isSystemLiveActivityEnabled: Bool = true,
+        customCircumferenceDraft: String? = nil
     ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
@@ -59,6 +60,7 @@ final class SettingsSnapshotTests: XCTestCase {
             // Seeded as well as stubbed: the snapshot doesn't wait for `.task` to read it.
             var state = SettingsFeature.State()
             state.isSystemLiveActivityEnabled = isSystemLiveActivityEnabled
+            state.customCircumferenceDraft = customCircumferenceDraft
             var liveActivityClient = LiveActivityClient.testValue
             liveActivityClient.isEnabled = { isSystemLiveActivityEnabled }
             return Store(initialState: state) {
@@ -125,6 +127,15 @@ final class SettingsSnapshotTests: XCTestCase {
                 ]
             ),
             named: "customWheelCircumference"
+        )
+    }
+
+    /// An out-of-range draft in the manual field (#424): the range message under
+    /// Circumference turns red, in that row rather than below the section.
+    func testCustomWheelCircumferenceInvalid() {
+        assertBothSchemes(
+            screen(wheelCircumferenceMM: 2140, customCircumferenceDraft: "900"),
+            named: "customWheelCircumferenceInvalid"
         )
     }
 
