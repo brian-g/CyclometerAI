@@ -39,17 +39,23 @@ struct SettingsView: View {
                     Text("Custom").tag(WheelSelection.custom)
                 }
                 if store.wheelSelection == .custom {
-                    LabeledContent("Circumference") {
-                        HStack(spacing: 4) {
-                            TextField("mm", text: Binding(
-                                get: { store.customCircumferenceText },
-                                set: { store.send(.customCircumferenceChanged($0)) }
-                            ))
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .focused($isCircumferenceFocused)
-                            Text("mm").foregroundStyle(.secondary)
+                    // The range sits in the field's own row, like the HR overrides' errors (#424).
+                    VStack(alignment: .leading, spacing: 4) {
+                        LabeledContent("Circumference") {
+                            HStack(spacing: 4) {
+                                TextField("mm", text: Binding(
+                                    get: { store.customCircumferenceText },
+                                    set: { store.send(.customCircumferenceChanged($0)) }
+                                ))
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .focused($isCircumferenceFocused)
+                                Text("mm").foregroundStyle(.secondary)
+                            }
                         }
+                        Text("Wheel circumference must be between 1,500 and 3,000 mm.")
+                            .font(.caption)
+                            .foregroundStyle(store.isCustomCircumferenceInvalid ? Color.red : Color.secondary)
                     }
                 }
                 Toggle("Auto-pause", isOn: Binding(
@@ -88,11 +94,6 @@ struct SettingsView: View {
                     )
                 } label: {
                     LabeledContent("Sensors", value: "\(store.pairedSensorCount)")
-                }
-            } footer: {
-                if store.wheelSelection == .custom {
-                    Text("Wheel circumference must be between 1,500 and 3,000 mm.")
-                        .foregroundStyle(store.isCustomCircumferenceInvalid ? Color.red : Color.secondary)
                 }
             }
 
@@ -202,12 +203,20 @@ private struct PrivacyPolicyView: View {
 // MARK: - Previews
 
 // HealthKit and ActivityKit are stubbed: neither has a `previewValue`, and `.task` reads both.
-private func previewStore(isSystemLiveActivityEnabled: Bool) -> StoreOf<SettingsFeature> {
+// The CSC client is too: committing a circumference pushes it to the sensor.
+private func previewStore(
+    isSystemLiveActivityEnabled: Bool = true,
+    isCustomWheel: Bool = false,
+    customCircumferenceDraft: String? = nil
+) -> StoreOf<SettingsFeature> {
     var state = SettingsFeature.State()
     state.isSystemLiveActivityEnabled = isSystemLiveActivityEnabled
+    state.userChoseCustom = isCustomWheel
+    state.customCircumferenceDraft = customCircumferenceDraft
     return Store(initialState: state) {
         SettingsFeature()
     } withDependencies: {
+        $0.bleCSCClient = .testValue
         $0.healthKitClient = .testValue
         var liveActivity = LiveActivityClient.testValue
         liveActivity.isEnabled = { isSystemLiveActivityEnabled }
@@ -221,4 +230,12 @@ private func previewStore(isSystemLiveActivityEnabled: Bool) -> StoreOf<Settings
 
 #Preview("Live Activities off in iOS") {
     NavigationStack { SettingsView(store: previewStore(isSystemLiveActivityEnabled: false)) }
+}
+
+#Preview("Custom wheel size") {
+    NavigationStack { SettingsView(store: previewStore(isCustomWheel: true)) }
+}
+
+#Preview("Custom wheel size, out of range") {
+    NavigationStack { SettingsView(store: previewStore(isCustomWheel: true, customCircumferenceDraft: "900")) }
 }

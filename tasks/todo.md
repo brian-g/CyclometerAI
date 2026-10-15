@@ -186,3 +186,33 @@ Branch: `feat/313`
   - Full `CyclometerTests` green: 1824 unique cases passed, 0 failed.
 - **Not verified.** No simulator drive with Live Activities off in iOS Settings; the explainer and link are covered by
   the snapshot and the reducer tests only.
+
+---
+
+# #424 — S12 wheel-circumference message under Circumference
+
+Plan: /Users/brian/.claude/plans/ethereal-napping-pancake.md
+Branch: `fix/424-circumference-message`
+
+- [x] 1. `SettingsView`: message into the Circumference row (`VStack` + `.caption`, as Resting/Max HR); General's footer removed
+- [x] 2. Previews: Custom wheel size; Custom wheel size, out of range (review: `bleCSCClient` stubbed)
+- [x] 3. `SettingsSnapshotTests`: `customCircumferenceDraft` seed; `testCustomWheelCircumferenceInvalid`
+- [x] 4. Run unrecorded first — only the custom reference should move
+- [x] 5. Record, re-run green, compare against main's references
+- [x] 6. Full `CyclometerTests` (Settings suites included)
+
+## Review
+
+- **Move.** The range message is a `.caption` line inside the Circumference row (`VStack(spacing: 4)`, as Resting/Max HR).
+  It is still shown only for Custom: secondary colour, red while `isCustomCircumferenceInvalid`. General has no footer.
+- **Nothing else moved.** Before re-recording, only `testCustomWheelCircumference` failed (plus the new test, which had no
+  reference yet). `testDefault`, `testHRZoneOverridesSet` and `testLiveActivitiesOffInIOS` stayed pixel-identical.
+- **Gap measured** (column x=70, 3×): General card → HR Zones card is 220px in custom, invalid and default (218px dark in
+  both). On main the custom state had 304px, because of the footer. Rows above Circumference are unchanged.
+- **New:** `testCustomWheelCircumferenceInvalid` (draft "900", red message). Previews: Custom wheel size, plus Custom out
+  of range. The review stubbed `bleCSCClient` in `previewStore`, so committing in the canvas doesn't reach live BLE.
+- **Tests.** The first full run hung on the known PersistenceClientTests × MapKit deadlock (confirmed with `sample`).
+  Rerun with that suite skipped: 1778 unique cases, 0 failed. The suite alone: 47 passed. 1825 total, #423's 1824 + 1.
+- **Not changed (review, left for a decision).** `Color.red` caption contrast on white (~3.55:1; `cyRatingBad` ≈4.98:1),
+  shared with the HR rows. The validity of the message is shown only by its colour (pre-existing). The range copy is
+  hard-coded rather than built from `WheelPreset.validRange`.
