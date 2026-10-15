@@ -216,3 +216,37 @@ Branch: `fix/424-circumference-message`
 - **Not changed (review, left for a decision).** `Color.red` caption contrast on white (~3.55:1; `cyRatingBad` ≈4.98:1),
   shared with the HR rows. The validity of the message is shown only by its colour (pre-existing). The range copy is
   hard-coded rather than built from `WheelPreset.validRange`.
+
+---
+
+# #429 — S12 field errors in cyRatingBad; wheel message only when out of range
+
+Plan: /Users/brian/.claude/plans/ethereal-napping-pancake.md
+Branch: `fix/429-error-color`
+
+- [x] 1. `SettingsView`: wheel message only while invalid; all three errors `cyRatingBad`
+- [x] 2. Preview: HR overrides out of range
+- [x] 3. `SettingsSnapshotTests`: HR draft seeds; `testHRZoneOverridesInvalid`
+- [x] 4. Unrecorded run — only the two custom references + the new test should fail
+- [x] 5. Record, re-run green, inspect against main (pixel colour check)
+- [x] 6. No `Color.red` left; full `CyclometerTests`
+
+## Review
+
+- **Colour.** All three S12 field errors use `Color.cyRatingBad`, and no `Color.red` / `.red` is left in `Cyclometer/Cyclometer`.
+  Measured in the references, the error text is #D32F2F in light and #EF5350 in dark, exactly the tokens. Main's
+  wheel error was system red, #FF383C.
+- **Visibility.** The wheel message renders only while `isCustomCircumferenceInvalid`. In the valid custom state the
+  card is one plain row taller than the default card, with no red pixels. The General → HR Zones gap is 220px in every
+  state.
+- **Snapshots.**
+  - The unrecorded run failed only on the two custom references and the new test, as expected. `testDefault`,
+    `testHRZoneOverridesSet` and `testLiveActivitiesOffInIOS` were unchanged.
+  - New: `testHRZoneOverridesInvalid`, with drafts "20" and "50", which shows both HR errors.
+  - Preview added: "HR overrides out of range".
+- **Tests.**
+  - Full `CyclometerTests`, with `PersistenceClientTests` skipped: 1779 unique, 0 failed.
+  - That suite alone: 47 passed.
+  - One snapshot rerun first hit "build database is locked": a build in the Xcode app was running at the same time.
+    The retry was green.
+- **Known.** Errors are live, so typing "2140" shows the message for "2", "21" and "214". This matches the HR rows.

@@ -38,7 +38,9 @@ final class SettingsSnapshotTests: XCTestCase {
         pairedSensors: [PairedSensor] = [],
         riderProfile profile: RiderProfile = RiderProfile(),
         isSystemLiveActivityEnabled: Bool = true,
-        customCircumferenceDraft: String? = nil
+        customCircumferenceDraft: String? = nil,
+        restingOverrideDraft: String? = nil,
+        maxOverrideDraft: String? = nil
     ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
@@ -61,6 +63,8 @@ final class SettingsSnapshotTests: XCTestCase {
             var state = SettingsFeature.State()
             state.isSystemLiveActivityEnabled = isSystemLiveActivityEnabled
             state.customCircumferenceDraft = customCircumferenceDraft
+            state.restingOverrideDraft = restingOverrideDraft
+            state.maxOverrideDraft = maxOverrideDraft
             var liveActivityClient = LiveActivityClient.testValue
             liveActivityClient.isEnabled = { isSystemLiveActivityEnabled }
             return Store(initialState: state) {
@@ -116,7 +120,8 @@ final class SettingsSnapshotTests: XCTestCase {
 
     /// A non-preset circumference, which is the only thing that reveals the manual
     /// entry field, plus a couple of paired sensors so the Sensors row's trailing
-    /// count reads something other than zero.
+    /// count reads something other than zero. The value is in range, so the row
+    /// shows no message (#429).
     func testCustomWheelCircumference() {
         assertBothSchemes(
             screen(
@@ -130,8 +135,8 @@ final class SettingsSnapshotTests: XCTestCase {
         )
     }
 
-    /// An out-of-range draft in the manual field (#424): the range message under
-    /// Circumference turns red, in that row rather than below the section.
+    /// An out-of-range draft in the manual field: the range message appears under
+    /// Circumference, in that row (#424), in `cyRatingBad` (#429).
     func testCustomWheelCircumferenceInvalid() {
         assertBothSchemes(
             screen(wheelCircumferenceMM: 2140, customCircumferenceDraft: "900"),
@@ -145,6 +150,16 @@ final class SettingsSnapshotTests: XCTestCase {
         assertBothSchemes(
             screen(riderProfile: RiderProfile(restingOverrideBPM: 52, maxOverrideBPM: 185)),
             named: "hrZoneOverridesSet"
+        )
+    }
+
+    /// Both HR override drafts out of range — the inputs `SettingsFeatureTests` pins to
+    /// `.restingOutOfRange` / `.maxOutOfRange` — so each row's error shows in
+    /// `cyRatingBad` (#429).
+    func testHRZoneOverridesInvalid() {
+        assertBothSchemes(
+            screen(restingOverrideDraft: "20", maxOverrideDraft: "50"),
+            named: "hrZoneOverridesInvalid"
         )
     }
 
