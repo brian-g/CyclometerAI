@@ -55,7 +55,7 @@ struct SettingsView: View {
                             }
                         }
                         if store.isCustomCircumferenceInvalid {
-                            Text("Wheel circumference must be between 1,500 and 3,000 mm.")
+                            Text(WheelPreset.outOfRangeMessage)
                                 .font(.caption)
                                 .foregroundStyle(Color.cyRatingBad)
                         }

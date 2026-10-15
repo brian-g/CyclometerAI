@@ -22,6 +22,21 @@ enum WheelPreset: Int, CaseIterable, Identifiable, Sendable {
     /// Sanity bounds for manual entry (PRD §8.9). Anything outside is rejected.
     static let validRange = 1500...3000
 
+    /// S12's Circumference field error. Built from `validRange`, so the message
+    /// can never drift from the check — the same rule as
+    /// `RiderProfile.ValidationError.message` (#162). The copy is English, so the
+    /// bounds are grouped in a fixed `en_US` locale rather than the device's:
+    /// "1,500", never "1.500" or "1 500" (#430).
+    ///
+    /// A resource rather than a `String`: like the literal it replaced, it
+    /// resolves to the app's English, so the view lays it out with English line
+    /// breaking. `Text(String)` would wrap it by the device's language instead,
+    /// moving the break under German.
+    static var outOfRangeMessage: LocalizedStringResource {
+        let format = IntegerFormatStyle<Int>(locale: Locale(identifier: "en_US"))
+        return "Wheel circumference must be between \(validRange.lowerBound.formatted(format)) and \(validRange.upperBound.formatted(format)) mm."
+    }
+
     var circumferenceMM: Int { rawValue }
     var id: Int { rawValue }
 
