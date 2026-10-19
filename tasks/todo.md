@@ -1,3 +1,38 @@
+# #426 — S20 Previous Rides ↔ S15 Route links
+
+Plan: /Users/brian/.claude/plans/precious-napping-sunrise.md
+Branch: `feat/426-route-ride-links`
+
+- [x] 1. Tests first: persistence (`fetchRides(routeId:)` title, `fetchRideStats` routeId, `fetchRouteSummary`), RideDetail route load, Rides/Routes stack pushes, App delegate
+- [x] 2. Data: `RouteRideSummary.title`, `RideListSummary(_:)`, `RideStats.routeId`, `fetchRouteSummary`
+- [x] 3. Shared `RideRoutePath` + `RideRoutePathView`; both tabs on it; `.detail` renames
+- [x] 4. `RidesFeature.delegate.useRoute` → `AppFeature`
+- [x] 5. `RideDetailFeature.route` + S15 Route section; S20 Previous Rides links
+- [x] 6. Snapshot harnesses, re-record S20, new S15 cases; previews
+- [x] 7. UX.md §S15/§S20
+- [x] 8. Full suite, sim drive, review, PR
+
+## Review
+
+- **Navigation.** S15 and S20 each link to the other, so both tabs now stack one `RideRoutePath` (`.ride`, `.route`). TCA's `NavigationLink(state:)` only presents when its state type is the stack's element type, so a per-tab `Path` could not hold a link built inside the shared detail lists. `RideRoutePathView` is the one `destination:` both stacks render.
+- **Use Route on the Rides tab.** `RidesFeature` forwards S20's delegate as its own `useRoute`, and `AppFeature` handles both tabs' delegate the same way. The CTA hides while a ride records, as on the Routes tab.
+- **Data.** `RouteRideSummary.title` seeds S15's title. `RideStats.routeId` plus a new `fetchRouteSummary` (summary only, no polyline decode) gives S15 its route. The route arrives in the same action as the stats, so the row never turns from plain text into a link on screen. A deleted route shows its name with no link.
+- **Tests.**
+  - 11 new cases.
+  - Full `CyclometerTests` minus the two known local hangs: exit 0, 1,790 unique passing cases. `PersistenceClientTests` (47) and `MapWidgetAccessibilityTests` (3) were run alone and passed.
+- **Snapshots.**
+  - Both harnesses now host the list in a `NavigationStack` with its bar hidden, and set TCA's `navigationDestinationType` (SPI). Outside any stack a link reports "not presentable" and draws dimmed. With the stack, only the two link cases moved.
+  - Re-recorded S20 `no-elevation-rides`. New S15 `on-route` and `deleted-route`.
+- **Sim drive** (throwaway XCUITest, deleted), with no TCA runtime issues logged:
+  - Routes → S20 → Previous Rides row → S15 under the ride's title → Route → S20.
+  - Rides → S15 → Route → S20 → Use Route → Start sheet on that route.
+- **Found, not fixed.**
+  - `RouteDetailSnapshotTests`' `elevation-rides` reference ends at Current Weather. Since #252's Summary section it never shows Previous Rides, despite its doc comment.
+  - `HealthKitClient.saveWorkout` aborts the app (an uncatchable `NSException`) when a ride's wall-clock span is over HealthKit's 4-day sample limit. My seed hit it by closing a week-old ride. The app's own launch close-out settles such rides first, but a ride resumed days later and then finished would reach it.
+- **Branch.** Mid-session the checkout switched to local `main` without a command from this session. It was switched back with the work intact.
+
+---
+
 # #402 — Shared TrendIndicator for W1, W4, W5
 
 Plan: /Users/brian/.claude/plans/silly-knitting-iverson.md

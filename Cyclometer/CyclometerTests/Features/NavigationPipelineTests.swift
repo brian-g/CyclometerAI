@@ -163,8 +163,8 @@ struct NavigationPipelineTests {
         let detail = withDependencies { $0 = store.dependencies } operation: {
             RouteDetailFeature.State(summary: summary)
         }
-        await store.send(.routes(.path(.push(id: 0, state: .detail(detail)))))
-        await store.send(.routes(.path(.element(id: 0, action: .detail(.useRouteButtonTapped)))))
+        await store.send(.routes(.path(.push(id: 0, state: .route(detail)))))
+        await store.send(.routes(.path(.element(id: 0, action: .route(.useRouteButtonTapped)))))
         await store.receive(\.routes.delegate.useRoute, summary.reference)
         #expect(store.state.startSheet?.route == summary.reference)
 
@@ -460,10 +460,10 @@ struct NavigationPipelineTests {
             let detail = withDependencies { $0 = store.dependencies } operation: {
                 RouteDetailFeature.State(summary: reimported)
             }
-            await store.send(.routes(.path(.push(id: 0, state: .detail(detail)))))
-            await store.send(.routes(.path(.element(id: 0, action: .detail(.task)))))
-            await store.receive(\.routes.path[id: 0].detail.previousRidesLoaded, [], timeout: effectDrainTimeout)
-            #expect(store.state.routes.path[id: 0]?.detail?.previousRides == [])
+            await store.send(.routes(.path(.push(id: 0, state: .route(detail)))))
+            await store.send(.routes(.path(.element(id: 0, action: .route(.task)))))
+            await store.receive(\.routes.path[id: 0].route.previousRidesLoaded, [], timeout: effectDrainTimeout)
+            #expect(store.state.routes.path[id: 0]?.route?.previousRides == [])
 
             // The old id still finds its ride — left dangling on purpose (#191) — but nothing on
             // S19 or S20 carries that id any more to ask with.

@@ -2,7 +2,8 @@ import ComposableArchitecture
 import MapKit
 import SwiftUI
 
-/// S20 — Route Detail, pushed from an S19 row as `RoutesFeature.Path` state (#195).
+/// S20 — Route Detail, pushed from an S19 row as `RideRoutePath` state (#195), or from S15's Route
+/// row on the Rides tab (#426).
 ///
 /// The layout is the prototype's that UX.md §S20 points at, now reading a persisted `Route`: the
 /// route on a map with its direction of travel, distance and climb, the elevation profile,
@@ -89,13 +90,16 @@ struct RouteDetailList<MapRow: View>: View {
             if !store.previousRides.isEmpty {
                 Section("Previous Rides") {
                     ForEach(store.previousRides) { ride in
-                        // UX.md also lists conditions, which arrive with ride weather in M10.6:
-                        // nothing writes `Ride.weather` yet.
-                        LabeledContent {
-                            Text(Int(ride.durationSeconds).formattedElapsed)
-                                .font(.subheadline.weight(.semibold))
-                        } label: {
-                            Text(ride.startedAt, format: .dateTime.month(.abbreviated).day().year())
+                        // Opens S15 on whichever tab's stack S20 is on (#426).
+                        NavigationLink(state: RideRoutePath.State.ride(RideDetailFeature.State(summary: RideListSummary(ride)))) {
+                            // UX.md also lists conditions, which arrive with ride weather in M10.6:
+                            // nothing writes `Ride.weather` yet.
+                            LabeledContent {
+                                Text(Int(ride.durationSeconds).formattedElapsed)
+                                    .font(.subheadline.weight(.semibold))
+                            } label: {
+                                Text(ride.startedAt, format: .dateTime.month(.abbreviated).day().year())
+                            }
                         }
                     }
                 }
@@ -158,34 +162,35 @@ struct RouteDetailMap: View {
 
 // MARK: - Previews
 
-#Preview("Route Detail — climb, ridden") {
+/// S20 already pushed on the Routes tab's own stack, as the app hosts it: a Previous Rides row is a
+/// `NavigationLink(state:)`, which reports "not presentable" in a plain `NavigationStack` (#426).
+private func routeDetailPreview(_ route: RouteSummary, persistenceClient: PersistenceClient) -> some View {
     withDependencies {
         $0.defaultFileStorage = .inMemory
     } operation: {
-        let route = RouteSummary.previewRoutes[1]
-        return NavigationStack {
-            RouteDetailView(store: Store(initialState: RouteDetailFeature.State(summary: route)) {
-                RouteDetailFeature()
-            } withDependencies: {
-                $0.persistenceClient = .mock(routeDetails: RouteDetail.previewRouteDetails,
-                                             ridesByRoute: [route.id: RouteRideSummary.previewRides])
-            })
-        }
+        var state = RoutesFeature.State()
+        state.path.append(.route(RouteDetailFeature.State(summary: route)))
+        return RoutesNavigationStack(store: Store(initialState: state) {
+            RoutesFeature()
+        } withDependencies: {
+            $0.persistenceClient = persistenceClient
+        })
     }
+}
+
+#Preview("Route Detail — climb, ridden") {
+    let route = RouteSummary.previewRoutes[1]
+    routeDetailPreview(route, persistenceClient: .mock(
+        routes: RouteSummary.previewRoutes,
+        routeDetails: RouteDetail.previewRouteDetails,
+        ridesByRoute: [route.id: RouteRideSummary.previewRides]
+    ))
 }
 
 /// "Coffee Spin" carries no `<ele>` and has never been ridden, so both conditional sections are gone.
 #Preview("Route Detail — no elevation, never ridden") {
-    withDependencies {
-        $0.defaultFileStorage = .inMemory
-    } operation: {
-        let route = RouteSummary.previewRoutes[3]
-        return NavigationStack {
-            RouteDetailView(store: Store(initialState: RouteDetailFeature.State(summary: route)) {
-                RouteDetailFeature()
-            } withDependencies: {
-                $0.persistenceClient = .mock(routeDetails: RouteDetail.previewRouteDetails)
-            })
-        }
-    }
+    routeDetailPreview(RouteSummary.previewRoutes[3], persistenceClient: .mock(
+        routes: RouteSummary.previewRoutes,
+        routeDetails: RouteDetail.previewRouteDetails
+    ))
 }

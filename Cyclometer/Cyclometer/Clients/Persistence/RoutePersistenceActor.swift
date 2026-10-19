@@ -57,6 +57,12 @@ actor RoutePersistenceActor {
         try routeRow(id: id)?.detail
     }
 
+    /// The route without its geometry, for a screen that only links to it — S15 (#426). Nil
+    /// for a dangling id, as `fetchRoute`.
+    func fetchRouteSummary(id: UUID) throws -> RouteSummary? {
+        try routeRow(id: id)?.summary
+    }
+
     /// No-op when the route is already gone — deleting something twice is not a failure,
     /// and S19's swipe-to-delete can race its own list refresh.
     ///

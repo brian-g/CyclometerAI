@@ -453,7 +453,8 @@ struct AppFeature {
                 state.onboarding = nil
                 return .none
 
-            case .routes(.delegate(.useRoute(let route))):
+            // S20 sits on either tab's stack (#426), so Use Route arrives from both.
+            case .routes(.delegate(.useRoute(let route))), .rides(.delegate(.useRoute(let route))):
                 return presentStartSheet(&state, route: route)
 
             case .settings(.delegate(.liveActivityToggled)):

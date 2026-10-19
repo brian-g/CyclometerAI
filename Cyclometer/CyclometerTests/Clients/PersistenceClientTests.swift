@@ -560,16 +560,21 @@ struct PersistenceClientTests {
         }
     }
 
-    @Test("fetchRideStats carries the route the ride followed, nil for a free ride")
-    func fetchRideStatsCarriesRouteName() async throws {
+    @Test("fetchRideStats carries the route the ride followed, id and name, nil for a free ride")
+    func fetchRideStatsCarriesRoute() async throws {
         let (client, _) = Self.makeLiveClient()
         let onRoute = UUID()
-        try await client.createRide(onRoute, Date(), RouteReference(id: UUID(), name: "SW Fargo"))
+        let routeId = UUID()
+        try await client.createRide(onRoute, Date(), RouteReference(id: routeId, name: "SW Fargo"))
         let free = UUID()
         try await client.createRide(free, Date(), nil)
 
-        #expect(try await client.fetchRideStats(onRoute).routeName == "SW Fargo")
+        let stats = try await client.fetchRideStats(onRoute)
+        #expect(stats.routeName == "SW Fargo")
+        // S15's link to S20 (#426).
+        #expect(stats.routeId == routeId)
         #expect(try await client.fetchRideStats(free).routeName == nil)
+        #expect(try await client.fetchRideStats(free).routeId == nil)
     }
 
     // MARK: - Rename (#249, for S10)

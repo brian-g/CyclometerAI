@@ -220,6 +220,18 @@ struct RoutePersistenceTests {
         #expect(try await client.fetchRoute(UUID()) == nil)
     }
 
+    @Test("fetchRouteSummary reads a saved route without its geometry, nil once it is gone")
+    func fetchRouteSummaryReadsTheSummary() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let summary = try await client.importRoute(Self.climbingRoute())
+
+        #expect(try await client.fetchRouteSummary(summary.id) == summary)
+        // Nil, not a throw, for the same reason as `fetchRoute`: a `Ride.routeId` may dangle.
+        #expect(try await client.fetchRouteSummary(UUID()) == nil)
+        try await client.deleteRoute(summary.id)
+        #expect(try await client.fetchRouteSummary(summary.id) == nil)
+    }
+
     @Test("deleting an unknown route is a no-op, not an error")
     func deleteRouteForAnUnknownIdIsANoOp() async throws {
         let (client, _) = Self.makeLiveClient()
@@ -304,6 +316,7 @@ struct RoutePersistenceTests {
             )
             try await client.finalizeRide(id, endedAt, summary, nil)
         }
+        try await client.renameRide(newer, "Saturday Climb")
 
         // This is also the canary for the predicate itself: `routeId` is a `UUID?` compared
         // against a captured value, the same shape that compiled and then faulted at fetch
@@ -312,6 +325,8 @@ struct RoutePersistenceTests {
         let rides = try await client.fetchRouteRides(route.id)
 
         #expect(rides.map(\.rideId) == [newer, older])
+        // S15's title when a row is opened (#426); "" for a ride S10 never named.
+        #expect(rides.map(\.title) == ["Saturday Climb", ""])
         #expect(rides.first?.durationSeconds == 3_600)
         #expect(rides.first?.distanceMeters == 42_000)
         #expect(rides.allSatisfy { $0.endedAt != nil })
@@ -404,7 +419,7 @@ struct RoutePersistenceTests {
         let summary = try await live.importRoute(Self.climbingRoute())
         let detail = try #require(await live.fetchRoute(summary.id))
         let ride = RouteRideSummary(
-            rideId: UUID(), startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            rideId: UUID(), title: "Saturday Climb", startedAt: Date(timeIntervalSince1970: 1_700_000_000),
             endedAt: Date(timeIntervalSince1970: 1_700_003_600),
             durationSeconds: 3_600, distanceMeters: 42_000
         )
@@ -418,6 +433,8 @@ struct RoutePersistenceTests {
         #expect(try await client.fetchRoute(summary.id) == detail)
         // Nil for an unscripted id, matching live — unlike fetchRide, which throws.
         #expect(try await client.fetchRoute(UUID()) == nil)
+        #expect(try await client.fetchRouteSummary(summary.id) == summary)
+        #expect(try await client.fetchRouteSummary(UUID()) == nil)
         #expect(try await client.fetchRouteRides(summary.id) == [ride])
         #expect(try await client.fetchRouteRides(UUID()).isEmpty)
     }

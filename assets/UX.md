@@ -1192,6 +1192,7 @@ ContentUnavailableView {
 
 ### Key Components
 - Full-width MapKit view (240pt height, rounded corners, inset to list edges). Tap to open full screen map as a sheet with full map controls. 
+- Route section, after the map: the route the ride followed, a link to its S20. A route deleted since shows its name with no link; a free ride has no section (#426)
 - Elevation profile chart (Swift Charts, AreaMark + LineMark in `brPrimary`)
 - Stats section: avg/max speed, avg/max cadence
 - HR zone graph over elapsed time
@@ -1199,7 +1200,7 @@ ContentUnavailableView {
 - GPX re-export action
 - Create route action
 
-> **Built (#251):** map (recorded track, per-pass markers with the vehicle's speed), elevation profile, stats (plus vehicle-pass count), HR over elapsed time on S12's zone bands (`cyHRZone1`–`5`, y-axis fitted to the ride). **Not yet:** the full-screen map sheet (follow-up); Strava segments (Phase 2, shown as Coming Soon); GPX re-export and Create Route (each needs its own issue).
+> **Built (#251):** map (recorded track, per-pass markers with the vehicle's speed), elevation profile, stats (plus vehicle-pass count), HR over elapsed time on S12's zone bands (`cyHRZone1`–`5`, y-axis fitted to the ride). The Route section and its link to S20 (#426). **Not yet:** the full-screen map sheet (follow-up); Strava segments (Phase 2, shown as Coming Soon); GPX re-export and Create Route (each needs its own issue).
 
 ---
 
@@ -1273,7 +1274,7 @@ ContentUnavailableView {
 - Elevation profile: Swift Charts `AreaMark` + `LineMark` in `brPrimary`, catmullRom interpolation
 - Current weather section: temperature, wind direction (`WindDirectionView` — rotated arrow SF Symbol + compass label + degrees), wind speed
 - Strava segments: name, distance, best time, best time date
-- Previous rides: date, elapsed time, conditions
+- Previous rides: date, elapsed time, conditions. Each row opens that ride's S15 (#426)
 - "Use Route" CTA — sets active route in Start Sheet and navigates to S05.1
 
 ### Open UX Questions

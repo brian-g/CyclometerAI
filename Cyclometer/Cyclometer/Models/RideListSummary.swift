@@ -13,6 +13,15 @@ struct RideListSummary: Sendable, Equatable, Identifiable {
     var durationSeconds: TimeInterval
 }
 
+extension RideListSummary {
+    /// The same ride as an S20 Previous Rides row holds it, to seed S15 when the row is
+    /// tapped (#426).
+    init(_ ride: RouteRideSummary) {
+        self.init(id: ride.rideId, title: ride.title, startedAt: ride.startedAt,
+                  distanceMeters: ride.distanceMeters, durationSeconds: ride.durationSeconds)
+    }
+}
+
 /// A ride's stored map thumbnail, both appearances (#177): PNGs rendered once after the ride
 /// ended.
 struct RideMapThumbnailData: Sendable, Equatable {

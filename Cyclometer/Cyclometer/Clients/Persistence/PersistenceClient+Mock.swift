@@ -75,6 +75,8 @@ extension PersistenceClient {
             },
             fetchRoutes: { routes },
             fetchRoute: { routeDetails[$0] },
+            // Either scripting serves, so a test that only lists routes need not build details.
+            fetchRouteSummary: { id in routes.first { $0.id == id } ?? routeDetails[id]?.summary },
             deleteRoute: { onDeleteRoute($0) },
             fetchRouteRides: { ridesByRoute[$0] ?? [] },
             saveRouteSurface: { onSaveRouteSurface($0, $1) },

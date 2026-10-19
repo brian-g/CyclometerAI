@@ -25,7 +25,7 @@ struct RidesView: View {
     private var rideList: some View {
         List {
             ForEach(store.rides) { ride in
-                NavigationLink(state: RidesFeature.Path.State.detail(RideDetailFeature.State(summary: ride))) {
+                NavigationLink(state: RideRoutePath.State.ride(RideDetailFeature.State(summary: ride))) {
                     RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
                             unitSystem: store.unitSystem, now: now)
                 }
@@ -76,10 +76,10 @@ struct RidesView: View {
 
 // MARK: - Navigation stack
 
-/// The Rides tab's navigation stack: S14 at the root, S15 pushed as `RidesFeature.Path` state
-/// (#251). One definition for the app, the previews and the snapshot tests, for the reason
-/// `RoutesNavigationStack` gives: a `NavigationLink(state:)` row outside a store-powered stack
-/// reports an issue and cannot push.
+/// The Rides tab's navigation stack: S14 at the root, S15 pushed as `RideRoutePath` state
+/// (#251), and S20 from S15's Route row (#426). One definition for the app, the previews and the
+/// snapshot tests, for the reason `RoutesNavigationStack` gives: a `NavigationLink(state:)` row
+/// outside a store-powered stack reports an issue and cannot push.
 struct RidesNavigationStack: View {
     @Bindable var store: StoreOf<RidesFeature>
     /// Hides Start Ride while a ride records, as every tab does.
@@ -93,10 +93,7 @@ struct RidesNavigationStack: View {
             RidesView(store: store, onStartRide: onStartRide, now: now)
                 .startRideToolbarItem(isHidden: isStartRideHidden, action: onStartRide)
         } destination: { pathStore in
-            switch pathStore.case {
-            case .detail(let detailStore):
-                RideDetailView(store: detailStore)
-            }
+            RideRoutePathView(store: pathStore, isUseRouteHidden: isStartRideHidden)
         }
     }
 }

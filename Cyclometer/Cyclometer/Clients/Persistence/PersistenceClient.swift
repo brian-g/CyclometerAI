@@ -72,6 +72,10 @@ struct PersistenceClient: Sendable {
     /// One route with its polyline and cues, for S20 and ride start. Nil when the id no
     /// longer resolves, which a `Ride.routeId` legitimately may.
     var fetchRoute: @Sendable (UUID) async throws -> RouteDetail?
+    /// One route without its polyline, for S15's link to S20 (#426): opening S20 needs the
+    /// summary, and decoding geometry to get it is the cost `RouteSummary` exists to avoid.
+    /// Nil when the id no longer resolves, as `fetchRoute`.
+    var fetchRouteSummary: @Sendable (UUID) async throws -> RouteSummary?
     /// Removes a route. Past rides keep their `routeId` and `routeName`.
     var deleteRoute: @Sendable (UUID) async throws -> Void
     /// Completed rides ridden on a route, newest first — S20's Previous Rides (#195).
@@ -132,6 +136,7 @@ extension PersistenceClient: DependencyKey {
             importRoute: { try await routeActor.importRoute($0) },
             fetchRoutes: { try await routeActor.fetchRoutes() },
             fetchRoute: { try await routeActor.fetchRoute(id: $0) },
+            fetchRouteSummary: { try await routeActor.fetchRouteSummary(id: $0) },
             deleteRoute: { try await routeActor.deleteRoute(id: $0) },
             fetchRouteRides: { try await rideActor.fetchRides(routeId: $0) },
             saveRouteSurface: { try await routeActor.saveRouteSurface(id: $0, surface: $1) },
@@ -171,6 +176,7 @@ extension PersistenceClient: DependencyKey {
         importRoute: { _ in RouteSummary.empty },
         fetchRoutes: { [] },
         fetchRoute: { _ in nil },
+        fetchRouteSummary: { _ in nil },
         deleteRoute: { _ in },
         fetchRouteRides: { _ in [] },
         saveRouteSurface: { _, _ in },

@@ -815,3 +815,16 @@ because the new row was in them.
   not only the one you meant to make. Measure a landmark below the change, such as the next
   section's header gap. A conditional container (`VStack { if … }`) in a `footer:` or `header:` is
   never empty to `Form`: use the bare `if`.
+
+---
+
+## Check the branch before every build, drive and commit (2026-10-19, #426)
+
+**What happened.** Partway through #426 the checkout moved from `feat/426-route-ride-links` to a stale local `main`,
+carrying the uncommitted work with it. Nothing in the session ran that checkout. A background build had already started
+against the wrong base before Brian caught it: "We're on the wrong branch now."
+
+**Rule.** Something outside the session (Xcode, another session) can switch the checkout. Run
+`git branch --show-current` at the start of each build, simulator drive and commit, not just when the branch is
+created. A test run on the wrong base proves nothing about the branch.
+
