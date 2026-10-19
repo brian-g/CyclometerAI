@@ -28,7 +28,6 @@ Branch: `feat/426-route-ride-links`
   - Rides → S15 → Route → S20 → Use Route → Start sheet on that route.
 - **Found, not fixed.**
   - `RouteDetailSnapshotTests`' `elevation-rides` reference ends at Current Weather. Since #252's Summary section it never shows Previous Rides, despite its doc comment.
-  - `HealthKitClient.saveWorkout` aborts the app (an uncatchable `NSException`) when a ride's wall-clock span is over HealthKit's 4-day sample limit. My seed hit it by closing a week-old ride. The app's own launch close-out settles such rides first, but a ride resumed days later and then finished would reach it.
 - **Branch.** Mid-session the checkout switched to local `main` without a command from this session. It was switched back with the work intact.
 
 ---
