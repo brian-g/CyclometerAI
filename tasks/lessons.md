@@ -815,3 +815,17 @@ because the new row was in them.
   not only the one you meant to make. Measure a landmark below the change, such as the next
   section's header gap. A conditional container (`VStack { if … }`) in a `footer:` or `header:` is
   never empty to `Form`: use the bare `if`.
+
+---
+
+## Check a sensor API's delivery contract, not just that the stream is open (2026-10-19, #433)
+
+**What happened.** I built #433's fix on the premise that Core Motion's absolute altitude arrives once a second
+through a pause. I checked that the altimeter effect runs for the whole ride and stopped there. The SDK header says
+updates come "whenever a change in elevation is detected", and `CMLogItem.timestamp` is Mach time, which stops
+while the device sleeps. The replay test then filled the pause with made-up 1 Hz readings, which is exactly what
+made it pass. Without them the "fix" left the ride 97 m high for good. Review caught it after the PR was open.
+
+**Rule.** Before a design leans on how often or when a sensor delivers, read the framework header for the delivery
+and timestamp contract and quote it in the plan. A test fixture must not invent readings the API doesn't promise. If
+it has to synthesize data, it must say what's synthesized and the test must still pass without it.
