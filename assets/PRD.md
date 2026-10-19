@@ -1544,6 +1544,7 @@ Every ride exports a GPX 1.1 file with biometric track point extensions and vehi
 
   <trk>
     <name>Morning Ride</name>
+    <type>cycling</type>
     <trkseg>
 
       <trkpt lat="36.0726" lon="-79.7920">

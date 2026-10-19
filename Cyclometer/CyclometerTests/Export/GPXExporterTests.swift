@@ -228,6 +228,30 @@ struct GPXExporterTests {
         #expect(!xml[trkRange.lowerBound...].contains("<name>"))
     }
 
+    // MARK: - trk type
+
+    /// Without it Strava files the upload as a generic "Workout", with no elevation and no
+    /// segments (#435). GPX 1.1 orders `<type>` after `<name>` and before the `<trkseg>`s.
+    @Test("trk carries <type>cycling</type> after its name and before the first segment")
+    func trkTypeIsCyclingAfterName() throws {
+        let xml = GPXExporter.buildXML(ride: Self.ride, trackPoints: [Self.point()], vehiclePassEvents: [])
+        let trk = try #require(xml.range(of: "<trk>")).lowerBound
+        let name = try #require(xml.range(of: "<name>Morning Ride</name>")).lowerBound
+        let type = try #require(xml.range(of: "<type>cycling</type>")).lowerBound
+        let trkseg = try #require(xml.range(of: "<trkseg>")).lowerBound
+        #expect(trk < name && name < type && type < trkseg)
+        #expect(xml.components(separatedBy: "<type>cycling</type>").count == 2)
+    }
+
+    @Test("trk carries <type>cycling</type> when the ride title is empty")
+    func trkTypeIsCyclingWithoutTitle() throws {
+        let untitled = RideExportMetadata(title: "", startedAt: Self.start)
+        let xml = GPXExporter.buildXML(ride: untitled, trackPoints: [Self.point()], vehiclePassEvents: [])
+        let trk = try #require(xml.range(of: "<trk>")).upperBound
+        let trkseg = try #require(xml.range(of: "<trkseg>")).lowerBound
+        #expect(xml[trk..<trkseg].contains("<type>cycling</type>"))
+    }
+
     // MARK: - write (atomic, filename convention)
 
     @Test("write creates Documents/Rides/ and names the file by the ride's local start time")
