@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import Cyclometer
 
@@ -47,5 +48,17 @@ struct WheelPresetTests {
         for preset in WheelPreset.allCases {
             #expect(WheelPreset.validRange.contains(preset.circumferenceMM))
         }
+    }
+
+    /// The S12 field error must name the bounds the check enforces, grouped the
+    /// English way whatever the host's locale (#430). Run with `-testRegion DE`
+    /// to see it hold off a US host.
+    @Test("Out-of-range message is built from validRange in a fixed en_US format")
+    func outOfRangeMessage() {
+        let message = String(localized: WheelPreset.outOfRangeMessage)
+        #expect(message == "Wheel circumference must be between 1,500 and 3,000 mm.")
+        let format = IntegerFormatStyle<Int>(locale: Locale(identifier: "en_US"))
+        #expect(message.contains(WheelPreset.validRange.lowerBound.formatted(format)))
+        #expect(message.contains(WheelPreset.validRange.upperBound.formatted(format)))
     }
 }
