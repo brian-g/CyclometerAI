@@ -113,6 +113,9 @@ enum GPXExporter {
         if !ride.title.isEmpty {
             xml += "    <name>\(xmlEscape(ride.title))</name>\n"
         }
+        // Without a type Strava files the ride as a generic "Workout": no elevation, no
+        // segments (#435). `cycling` is what Strava's own GPX exports write.
+        xml += "    <type>cycling</type>\n"
         // One `<trkseg>` per continuous stretch of riding, so a pause is a break in the
         // track rather than a straight chord across it (#263). Readers that take a single
         // `<trkseg>` as continuous travel — Strava, Garmin Connect — then see the stop.
