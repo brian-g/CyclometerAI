@@ -828,3 +828,14 @@ against the wrong base before Brian caught it: "We're on the wrong branch now."
 `git branch --show-current` at the start of each build, simulator drive and commit, not just when the branch is
 created. A test run on the wrong base proves nothing about the branch.
 
+## Check a sensor API's delivery contract, not just that the stream is open (2026-10-19, #433)
+
+**What happened.** I built #433's fix on the premise that Core Motion's absolute altitude arrives once a second
+through a pause. I checked that the altimeter effect runs for the whole ride and stopped there. The SDK header says
+updates come "whenever a change in elevation is detected", and `CMLogItem.timestamp` is Mach time, which stops
+while the device sleeps. The replay test then filled the pause with made-up 1 Hz readings, which is exactly what
+made it pass. Without them the "fix" left the ride 97 m high for good. Review caught it after the PR was open.
+
+**Rule.** Before a design leans on how often or when a sensor delivers, read the framework header for the delivery
+and timestamp contract and quote it in the plan. A test fixture must not invent readings the API doesn't promise. If
+it has to synthesize data, it must say what's synthesized and the test must still pass without it.

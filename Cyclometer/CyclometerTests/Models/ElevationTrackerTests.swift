@@ -271,4 +271,74 @@ struct AltitudeResolverTests {
         #expect(resolver.altitude == 281)
         #expect(resolver.source == .gps)
     }
+
+    /// The 2026-10-16 climb, 0.3 m a second from 1470 m, as Core Motion gives it `coreMotionError`
+    /// out. The barometer's relative altitude sees only the road.
+    private func climb(_ resolver: inout AltitudeResolver, seconds: [Int], coreMotionError: Double = 0) {
+        for second in seconds {
+            let road = Double(second) * 0.3
+            resolver.barometer(.absolute(meters: 1470 + road + coreMotionError, accuracy: 2, barometerMeters: road))
+        }
+    }
+
+    @Test("Core Motion re-anchoring 300 m the barometer never saw is carried across, not shown as a step (#433)")
+    func reanchorIsCarriedAcross() throws {
+        var resolver = AltitudeResolver()
+        climb(&resolver, seconds: Array(0...10))
+        climb(&resolver, seconds: [11], coreMotionError: -200)
+        climb(&resolver, seconds: Array(12...60), coreMotionError: -300)
+
+        // Only the disagreement comes out: the climb across the step is kept.
+        let altitude = try #require(resolver.altitude)
+        #expect(abs(altitude - (1470 + 60 * 0.3)) < 0.01)
+        #expect(resolver.source == .barometric)
+    }
+
+    @Test("Core Motion stepping back after two minutes without a reading cancels the re-anchor (#433)")
+    func stepBackAfterGapCancels() throws {
+        var resolver = AltitudeResolver()
+        climb(&resolver, seconds: Array(0...10))
+        climb(&resolver, seconds: Array(11...20), coreMotionError: -300)
+        // Absolute updates come only when Core Motion detects a change: none for 111 s.
+        climb(&resolver, seconds: Array(131...140))
+
+        let altitude = try #require(resolver.altitude)
+        #expect(abs(altitude - (1470 + 140 * 0.3)) < 0.01)
+    }
+
+    @Test("a lift is climb the barometer saw too: it's shown (#433)")
+    func liftIsReal() {
+        var resolver = AltitudeResolver()
+        resolver.barometer(.absolute(meters: 200, accuracy: 2, barometerMeters: 0))
+        resolver.barometer(.absolute(meters: 500, accuracy: 2, barometerMeters: 300))
+        #expect(resolver.altitude == 500)
+    }
+
+    @Test("Core Motion correcting a few metres against the barometer — weather, GPS — passes through (#433)")
+    func smallDisagreementPasses() {
+        var resolver = AltitudeResolver()
+        resolver.barometer(.absolute(meters: 1470, accuracy: 2, barometerMeters: 0))
+        resolver.barometer(.absolute(meters: 1475, accuracy: 2, barometerMeters: 0))
+        #expect(resolver.altitude == 1475)
+    }
+
+    @Test("without the barometer there's nothing to check: Core Motion's altitude passes as it is (#433)")
+    func noBarometerPassesThrough() {
+        var resolver = AltitudeResolver()
+        resolver.barometer(.absolute(meters: 1470, accuracy: 2))
+        resolver.barometer(.absolute(meters: 1170, accuracy: 2))
+        #expect(resolver.altitude == 1170)
+    }
+
+    @Test("a barometer that stops and starts again doesn't carry the old re-anchor (#433)")
+    func endedBarometerDropsOffset() {
+        var resolver = AltitudeResolver()
+        climb(&resolver, seconds: Array(0...10))
+        climb(&resolver, seconds: [11, 12], coreMotionError: -300)
+        resolver.barometerEnded()
+        // Back on the road, with the new stream's barometer from zero: neither the offset nor the
+        // old stream's last reading carries over to make this a step.
+        resolver.barometer(.absolute(meters: 1473.9, accuracy: 2, barometerMeters: 0))
+        #expect(resolver.altitude == 1473.9)
+    }
 }
