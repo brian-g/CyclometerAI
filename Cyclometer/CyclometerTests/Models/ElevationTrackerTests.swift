@@ -208,7 +208,7 @@ struct AltitudeResolverTests {
     func absoluteWins() {
         var resolver = AltitudeResolver()
         resolver.gpsFix(altitude: 280, verticalAccuracy: 6)
-        resolver.barometer(.absolute(meters: 274.5, accuracy: 2))
+        resolver.barometer(.absolute(meters: 274.5, accuracy: 2, timestamp: 0))
         resolver.gpsFix(altitude: 290, verticalAccuracy: 6)
         #expect(resolver.altitude == 274.5)
         #expect(resolver.source == .barometric)
@@ -240,15 +240,15 @@ struct AltitudeResolverTests {
         var resolver = AltitudeResolver()
         resolver.gpsFix(altitude: 280, verticalAccuracy: 6)
         // Pressure alone: tens of metres out.
-        resolver.barometer(.absolute(meters: 240, accuracy: 40))
+        resolver.barometer(.absolute(meters: 240, accuracy: 40, timestamp: 0))
         #expect(resolver.altitude == 280)
         #expect(resolver.source == .gps)
 
-        resolver.barometer(.absolute(meters: 276, accuracy: 4))
+        resolver.barometer(.absolute(meters: 276, accuracy: 4, timestamp: 1))
         #expect(resolver.altitude == 276)
         #expect(resolver.source == .barometric)
         // Trusted once, it stays the source.
-        resolver.barometer(.absolute(meters: 277, accuracy: 12))
+        resolver.barometer(.absolute(meters: 277, accuracy: 12, timestamp: 2))
         resolver.gpsFix(altitude: 290, verticalAccuracy: 6)
         #expect(resolver.altitude == 277)
     }
@@ -256,7 +256,7 @@ struct AltitudeResolverTests {
     @Test("when the barometer stops there's no altitude until GPS gives one — not its last reading")
     func endedBarometerLeavesNoAltitude() {
         var resolver = AltitudeResolver()
-        resolver.barometer(.absolute(meters: 274.5, accuracy: 2))
+        resolver.barometer(.absolute(meters: 274.5, accuracy: 2, timestamp: 0))
         resolver.barometerEnded()
         #expect(resolver.altitude == nil)
         #expect(resolver.source == .gps)
@@ -265,10 +265,61 @@ struct AltitudeResolverTests {
     @Test("when the barometer stops, the next GPS fix takes over")
     func fallsBackToGPS() {
         var resolver = AltitudeResolver()
-        resolver.barometer(.absolute(meters: 274.5, accuracy: 2))
+        resolver.barometer(.absolute(meters: 274.5, accuracy: 2, timestamp: 0))
         resolver.barometerEnded()
         resolver.gpsFix(altitude: 281, verticalAccuracy: 6)
         #expect(resolver.altitude == 281)
         #expect(resolver.source == .gps)
+    }
+
+    /// 0.3 m a second, from 1470 m: the 2026-10-16 climb.
+    private func climb(_ resolver: inout AltitudeResolver, seconds: ClosedRange<Int>, offset: Double = 0) {
+        for second in seconds {
+            let meters = 1470 + Double(second) * 0.3 + offset
+            resolver.barometer(.absolute(meters: meters, accuracy: 2, timestamp: Double(second)))
+        }
+    }
+
+    @Test("Core Motion re-anchoring 300 m in two readings is carried across, not shown as a step (#433)")
+    func reanchorIsCarriedAcross() throws {
+        var resolver = AltitudeResolver()
+        climb(&resolver, seconds: 0...10)
+        resolver.barometer(.absolute(meters: 1273.3, accuracy: 2, timestamp: 11))
+        resolver.barometer(.absolute(meters: 1173.6, accuracy: 2, timestamp: 12))
+        climb(&resolver, seconds: 13...60, offset: -300)
+
+        // Two seconds of climb (0.6 m) are lost across the step; the rest is ridden.
+        let altitude = try #require(resolver.altitude)
+        #expect(abs(altitude - (1470 + 60 * 0.3)) < 1)
+        #expect(resolver.source == .barometric)
+    }
+
+    @Test("when Core Motion steps back, the altitude follows it again (#433)")
+    func reanchorBackRestores() throws {
+        var resolver = AltitudeResolver()
+        climb(&resolver, seconds: 0...10)
+        climb(&resolver, seconds: 11...30, offset: -300)
+        climb(&resolver, seconds: 31...60)
+
+        let altitude = try #require(resolver.altitude)
+        #expect(abs(altitude - (1470 + 60 * 0.3)) < 1)
+    }
+
+    @Test("300 m in a minute is a lift, not a re-anchor: it's shown (#433)")
+    func liftIsReal() {
+        var resolver = AltitudeResolver()
+        resolver.barometer(.absolute(meters: 200, accuracy: 2, timestamp: 0))
+        resolver.barometer(.absolute(meters: 500, accuracy: 2, timestamp: 60))
+        #expect(resolver.altitude == 500)
+    }
+
+    @Test("a barometer that stops and starts again doesn't carry the old re-anchor (#433)")
+    func endedBarometerDropsOffset() {
+        var resolver = AltitudeResolver()
+        climb(&resolver, seconds: 0...10)
+        climb(&resolver, seconds: 11...12, offset: -300)
+        resolver.barometerEnded()
+        resolver.barometer(.absolute(meters: 1180, accuracy: 2, timestamp: 13))
+        #expect(resolver.altitude == 1180)
     }
 }

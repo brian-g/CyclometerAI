@@ -7,8 +7,10 @@ private let logger = Logger.cyclometer(.location)
 /// One barometric altimeter reading (#387).
 enum AltimeterReading: Equatable, Sendable {
     /// Metres above sea level, which Core Motion fuses from the barometer and GPS. `accuracy` is
-    /// its one-sigma error in metres.
-    case absolute(meters: Double, accuracy: Double)
+    /// its one-sigma error in metres. `timestamp` is when Core Motion took the reading, in seconds
+    /// since boot (`CMLogItem.timestamp`): readings can queue before they're delivered, and a rate
+    /// read from delivery times would see two of them as instant (#433).
+    case absolute(meters: Double, accuracy: Double, timestamp: TimeInterval)
     /// Metres climbed (negative: descended) since the stream started. The barometer alone, so it
     /// tracks change to a fraction of a metre but knows nothing about sea level.
     case relative(meters: Double)
@@ -95,7 +97,12 @@ private final class AltimeterSession: @unchecked Sendable {
                     continuation.finish()
                     return
                 }
-                continuation.yield(.absolute(meters: data.altitude, accuracy: data.accuracy))
+                logger.debug("""
+                    altimeter: \(data.altitude, format: .fixed(precision: 1)) m \
+                    ±\(data.accuracy, format: .fixed(precision: 1)) \
+                    precision \(data.precision, format: .fixed(precision: 2))
+                    """)
+                continuation.yield(.absolute(meters: data.altitude, accuracy: data.accuracy, timestamp: data.timestamp))
             }
         } else if CMAltimeter.isRelativeAltitudeAvailable() {
             logger.notice("altimeter: relative")

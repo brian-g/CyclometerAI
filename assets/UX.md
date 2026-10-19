@@ -760,7 +760,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 **Sizes:** 1x1
 
 - Value: the ride's total climb, in m or ft (#387). Medium hero with its unit, as W6. Real at zero, as distance is
-- Altitude comes from the barometer (`CMAltimeter`), with GPS altitude only where there is none. Core Motion's absolute altitude takes over only once it reports 10 m accuracy or better; GPS stands in until then. Climb is banked with hysteresis, the rule S20 uses for a route's gain: past 1 m from the last banked height on the barometer, 3 m on GPS
+- Altitude comes from the barometer (`CMAltimeter`), with GPS altitude only where there is none. Core Motion's absolute altitude takes over only once it reports 10 m accuracy or better; GPS stands in until then. After that, a change faster than 10 m/s between two of its readings is Core Motion re-anchoring, not riding, and is taken back out so the altitude carries on without a step (#433). Climb is banked with hysteresis, the rule S20 uses for a route's gain: past 1 m from the last banked height on the barometer, 3 m on GPS
 - Only ridden climb counts. Whatever the altitude does while stopped, across a pause, or at a switch between GPS and the barometer is not banked
 - A crashed ride that resumes picks up its climb from the saved track, since the `Ride` row stores none (#284). The track is recounted by the same rule, on the barometer's floor when the phone has one, so the totals don't drop across the resume
 - Sheet: Elevation

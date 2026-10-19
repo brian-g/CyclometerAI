@@ -207,7 +207,7 @@ extension ActiveRideFeature.State {
         for (minute, sample) in AltitudeSample.sampleHour.enumerated() {
             state.elevation.record(altitude: sample.meters, distanceMeters: Double(minute) * 200, source: .barometric)
         }
-        state.altitudeResolver.barometer(.absolute(meters: AltitudeSample.sampleHour.last?.meters ?? 0, accuracy: 1))
+        state.altitudeResolver.barometer(.absolute(meters: AltitudeSample.sampleHour.last?.meters ?? 0, accuracy: 1, timestamp: 0))
         return state
     }
 }

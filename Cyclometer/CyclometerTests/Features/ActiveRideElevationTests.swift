@@ -46,7 +46,7 @@ struct ActiveRideElevationTests {
         let store = makeStore()
 
         await store.send(.trackRecorder(.startRecording))
-        await store.send(.altimeterReading(.absolute(meters: 274.5, accuracy: 2)))
+        await store.send(.altimeterReading(.absolute(meters: 274.5, accuracy: 2, timestamp: 0)))
         await store.send(.locationUpdated(Self.gpsFix))
         #expect(store.state.altitude == 274.5)
         await store.send(.elapsedTick)
@@ -61,7 +61,7 @@ struct ActiveRideElevationTests {
     func altimeterEndHandsBackToGPS() async {
         let store = makeStore()
 
-        await store.send(.altimeterReading(.absolute(meters: 274.5, accuracy: 2)))
+        await store.send(.altimeterReading(.absolute(meters: 274.5, accuracy: 2, timestamp: 0)))
         await store.send(.altimeterEnded)
         await store.send(.locationUpdated(Self.gpsFix))
 
@@ -77,14 +77,14 @@ struct ActiveRideElevationTests {
 
         // 10 m a second, 0.5 m up a second: a 5% climb, for 120 m.
         for second in 0...12 {
-            await store.send(.altimeterReading(.absolute(meters: 200 + Double(second) * 0.5, accuracy: 1)))
+            await store.send(.altimeterReading(.absolute(meters: 200 + Double(second) * 0.5, accuracy: 1, timestamp: Double(second))))
             await store.send(.elapsedTick)
         }
         #expect(store.state.elevation.ascentMeters == 6)
         #expect(abs(try #require(store.state.elevation.gradePercent) - 5) < 1e-9)
 
         await store.send(.pauseTapped)
-        await store.send(.altimeterReading(.absolute(meters: 230, accuracy: 1)))
+        await store.send(.altimeterReading(.absolute(meters: 230, accuracy: 1, timestamp: 60)))
         await store.send(.elapsedTick)
         #expect(store.state.elevation.ascentMeters == 6)
         await store.skipInFlightEffects(strict: false)
@@ -96,14 +96,14 @@ struct ActiveRideElevationTests {
         state.speed = SpeedFeature.State(speedMPS: 10, activeSpeedSource: .gps)
         let store = makeStore(state)
 
-        await store.send(.altimeterReading(.absolute(meters: 200, accuracy: 1)))
+        await store.send(.altimeterReading(.absolute(meters: 200, accuracy: 1, timestamp: 0)))
         await store.send(.elapsedTick)
         await store.send(.pauseTapped)
         // A lift 300 m up.
-        await store.send(.altimeterReading(.absolute(meters: 500, accuracy: 1)))
+        await store.send(.altimeterReading(.absolute(meters: 500, accuracy: 1, timestamp: 60)))
         await store.send(.resumeTapped)
         await store.send(.elapsedTick)
-        await store.send(.altimeterReading(.absolute(meters: 501, accuracy: 1)))
+        await store.send(.altimeterReading(.absolute(meters: 501, accuracy: 1, timestamp: 61)))
         await store.send(.elapsedTick)
 
         #expect(store.state.elevation.ascentMeters == 1)

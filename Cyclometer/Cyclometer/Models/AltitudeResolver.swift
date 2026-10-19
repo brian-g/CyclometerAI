@@ -1,11 +1,16 @@
 import Foundation
+import os
+
+private let logger = Logger.cyclometer(.location)
 
 /// The ride's altitude, from the best source on hand (#387).
 ///
 /// - **Absolute barometric** (`AltimeterReading.absolute`): Core Motion's barometer-and-GPS fusion,
 ///   once it is as sure of itself as a GPS fix worth anchoring on. Its first estimates come from
 ///   pressure alone and can be tens of metres out; GPS stands in until it settles, and from then
-///   on it stays, so the ride doesn't flip between sources.
+///   on it stays, so the ride doesn't flip between sources. Core Motion can re-anchor mid-ride, moving
+///   its altitude hundreds of metres in a second or two (#433); a change faster than anyone climbs
+///   is taken back out, so the ride carries on from where it was.
 /// - **Relative barometric** (`AltimeterReading.relative`), on a device without absolute altitude:
 ///   the barometer's change since it started, added to an anchor taken from the first GPS fix
 ///   accurate enough to trust. Until then GPS altitude stands in, and the anchor is set so the
@@ -23,6 +28,11 @@ struct AltitudeResolver: Equatable, Sendable {
     /// reports 3–8 m.
     static let trustedAccuracyMeters = 10.0
 
+    /// Faster than this, a change between two absolute readings is Core Motion re-anchoring, not the
+    /// rider moving (#433). On 2026-10-16 it dropped 300 m at 99–198 m/s while the road climbed; a
+    /// gondola rises at about 6 m/s, and a fast descent on a bike loses 3.
+    static let maxVerticalSpeedMPS = 10.0
+
     /// Nil until a source has given one, and after a GPS fix without one while GPS is the source
     /// (#303): an invalid fix is never covered with the altitude before it.
     private(set) var altitude: Double?
@@ -33,6 +43,16 @@ struct AltitudeResolver: Equatable, Sendable {
     private var relativeMeters: Double?
     /// Sea-level altitude at the relative barometer's zero.
     private var anchor: Double?
+    /// What re-anchors have moved Core Motion's absolute altitude by, taken back out of it. Returns
+    /// to about zero when Core Motion steps back.
+    private var reanchorOffset = 0.0
+    /// Core Motion's last absolute reading as it gave it, to rate the next one against.
+    private var lastAbsolute: AbsoluteReading?
+
+    private struct AbsoluteReading: Equatable, Sendable {
+        let meters: Double
+        let timestamp: TimeInterval
+    }
 
     mutating func gpsFix(altitude: Double?, verticalAccuracy: Double?) {
         if isAbsoluteLive || anchor != nil { return }
@@ -49,10 +69,24 @@ struct AltitudeResolver: Equatable, Sendable {
 
     mutating func barometer(_ reading: AltimeterReading) {
         switch reading {
-        case .absolute(let meters, let accuracy):
+        case .absolute(let meters, let accuracy, let timestamp):
             guard isAbsoluteLive || (0...Self.trustedAccuracyMeters).contains(accuracy) else { return }
+            if let lastAbsolute {
+                let change = meters - lastAbsolute.meters
+                let seconds = timestamp - lastAbsolute.timestamp
+                if abs(change) > Self.maxVerticalSpeedMPS * max(seconds, 0) {
+                    reanchorOffset -= change
+                    let offset = reanchorOffset
+                    logger.notice("""
+                        altimeter re-anchored \(change, format: .fixed(precision: 1)) m \
+                        in \(seconds, format: .fixed(precision: 1)) s ±\(accuracy, format: .fixed(precision: 1)); \
+                        carried across, offset \(offset, format: .fixed(precision: 1)) m
+                        """)
+                }
+            }
+            lastAbsolute = AbsoluteReading(meters: meters, timestamp: timestamp)
             isAbsoluteLive = true
-            altitude = meters
+            altitude = meters + reanchorOffset
             source = .barometric
         case .relative(let meters):
             relativeMeters = meters
@@ -67,6 +101,8 @@ struct AltitudeResolver: Equatable, Sendable {
     /// altitude, rather than the barometer's last one passed off as current (#303).
     mutating func barometerEnded() {
         isAbsoluteLive = false
+        reanchorOffset = 0
+        lastAbsolute = nil
         relativeMeters = nil
         anchor = nil
         if source == .barometric {
