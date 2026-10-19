@@ -7,10 +7,11 @@ private let logger = Logger.cyclometer(.location)
 /// One barometric altimeter reading (#387).
 enum AltimeterReading: Equatable, Sendable {
     /// Metres above sea level, which Core Motion fuses from the barometer and GPS. `accuracy` is
-    /// its one-sigma error in metres. `timestamp` is when Core Motion took the reading, in seconds
-    /// since boot (`CMLogItem.timestamp`): readings can queue before they're delivered, and a rate
-    /// read from delivery times would see two of them as instant (#433).
-    case absolute(meters: Double, accuracy: Double, timestamp: TimeInterval)
+    /// its one-sigma error in metres. `barometerMeters` is the barometer's own relative altitude
+    /// when it was taken, nil until the barometer has given one: Core Motion can re-anchor its
+    /// fusion by hundreds of metres in a second, and the barometer is what tells that from the
+    /// rider climbing (#433).
+    case absolute(meters: Double, accuracy: Double, barometerMeters: Double? = nil)
     /// Metres climbed (negative: descended) since the stream started. The barometer alone, so it
     /// tracks change to a fraction of a metre but knows nothing about sea level.
     case relative(meters: Double)
@@ -71,6 +72,9 @@ extension DependencyValues {
 /// from any thread — Core Motion delivers on `queue`.
 private final class AltimeterSession: @unchecked Sendable {
     private let altimeter = CMAltimeter()
+    /// The barometer's latest relative altitude, attached to each absolute reading. Both handlers
+    /// run on `queue`, so it needs no lock.
+    private var barometerMeters: Double?
     /// Serial, so readings reach the stream in the order Core Motion took them: a plain
     /// `OperationQueue` runs its handlers concurrently.
     private let queue: OperationQueue = {
@@ -91,18 +95,29 @@ private final class AltimeterSession: @unchecked Sendable {
 
         if CMAltimeter.isAbsoluteAltitudeAvailable() {
             logger.notice("altimeter: absolute")
+            if CMAltimeter.isRelativeAltitudeAvailable() {
+                altimeter.startRelativeAltitudeUpdates(to: queue) { data, error in
+                    // Absolute altitude carries on without it, just unchecked.
+                    if data == nil {
+                        logger.error("barometer stopped: \(String(describing: error), privacy: .public)")
+                    }
+                    self.barometerMeters = data?.relativeAltitude.doubleValue
+                }
+            }
             altimeter.startAbsoluteAltitudeUpdates(to: queue) { data, error in
                 guard let data else {
                     logger.error("altimeter stopped: \(String(describing: error), privacy: .public)")
                     continuation.finish()
                     return
                 }
+                let barometerMeters = self.barometerMeters
                 logger.debug("""
                     altimeter: \(data.altitude, format: .fixed(precision: 1)) m \
                     ±\(data.accuracy, format: .fixed(precision: 1)) \
-                    precision \(data.precision, format: .fixed(precision: 2))
+                    precision \(data.precision, format: .fixed(precision: 2)), \
+                    barometer \(barometerMeters ?? .nan, format: .fixed(precision: 1)) m
                     """)
-                continuation.yield(.absolute(meters: data.altitude, accuracy: data.accuracy, timestamp: data.timestamp))
+                continuation.yield(.absolute(meters: data.altitude, accuracy: data.accuracy, barometerMeters: barometerMeters))
             }
         } else if CMAltimeter.isRelativeAltitudeAvailable() {
             logger.notice("altimeter: relative")

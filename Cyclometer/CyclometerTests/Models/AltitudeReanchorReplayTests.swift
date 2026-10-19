@@ -13,18 +13,21 @@ struct AltitudeReanchorReplayTests {
         var resolver = AltitudeResolver()
         var tracker = ElevationTracker()
         var distanceMeters = 0.0
+        var barometerMeters = 0.0
         var previous: (second: Int, meters: Double)?
 
         for point in Self.track {
-            if let previous, point.second > previous.second + 1 {
-                // Paused: Core Motion kept reading once a second, and the rider stood still. Then the
-                // track starts a new segment, as `beginTrackSegment` does.
-                for second in (previous.second + 1)..<point.second {
-                    resolver.barometer(.absolute(meters: previous.meters, accuracy: 2, timestamp: Double(second)))
-                }
-                tracker.restart()
+            if let previous {
+                // Synthesized: the ride has no barometer record. Its pressure is the track's own change
+                // from point to point, less Core Motion's four jumps — 35 hPa in a second is no
+                // barometer. It misses the few metres climbed across the last pause.
+                let change = point.meters - previous.meters
+                if abs(change) < 50 { barometerMeters += change }
+                // Paused: the track starts a new segment, as `beginTrackSegment` does. Core Motion sent
+                // nothing in between — it updates only when it detects a change.
+                if point.second > previous.second + 1 { tracker.restart() }
             }
-            resolver.barometer(.absolute(meters: point.meters, accuracy: 2, timestamp: Double(point.second)))
+            resolver.barometer(.absolute(meters: point.meters, accuracy: 2, barometerMeters: barometerMeters))
             if point.speedMPS > ActiveRideFeature.stationarySpeedMPS { distanceMeters += point.speedMPS }
             tracker.record(altitude: try #require(resolver.altitude), distanceMeters: distanceMeters, source: .barometric)
             previous = (point.second, point.meters)
@@ -35,6 +38,8 @@ struct AltitudeReanchorReplayTests {
         #expect(tracker.ascentMeters > 55 && tracker.ascentMeters < 80)
         #expect(try #require(tracker.lowestMeters) > 1450)
         #expect(try #require(tracker.highestMeters) < 1535)
+        // Core Motion stepped back after the 111 s pause, and the ride follows it again.
+        #expect(abs(try #require(resolver.altitude) - 1526.4) < 10)
     }
 
     /// The recorded `<trkpt>`s for miles 11.20–11.90: seconds from the first, `<ele>`, `<gpxtpx:speed>`.

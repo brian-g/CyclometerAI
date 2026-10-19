@@ -9,8 +9,8 @@ private let logger = Logger.cyclometer(.location)
 ///   once it is as sure of itself as a GPS fix worth anchoring on. Its first estimates come from
 ///   pressure alone and can be tens of metres out; GPS stands in until it settles, and from then
 ///   on it stays, so the ride doesn't flip between sources. Core Motion can re-anchor mid-ride, moving
-///   its altitude hundreds of metres in a second or two (#433); a change faster than anyone climbs
-///   is taken back out, so the ride carries on from where it was.
+///   its altitude hundreds of metres that the barometer never saw (#433); that part is taken back
+///   out, so the ride carries on from where it was.
 /// - **Relative barometric** (`AltimeterReading.relative`), on a device without absolute altitude:
 ///   the barometer's change since it started, added to an anchor taken from the first GPS fix
 ///   accurate enough to trust. Until then GPS altitude stands in, and the anchor is set so the
@@ -28,10 +28,13 @@ struct AltitudeResolver: Equatable, Sendable {
     /// reports 3–8 m.
     static let trustedAccuracyMeters = 10.0
 
-    /// Faster than this, a change between two absolute readings is Core Motion re-anchoring, not the
-    /// rider moving (#433). On 2026-10-16 it dropped 300 m at 99–198 m/s while the road climbed; a
-    /// gondola rises at about 6 m/s, and a fast descent on a bike loses 3.
-    static let maxVerticalSpeedMPS = 10.0
+    /// Past this, Core Motion's change between two absolute readings and the barometer's change over
+    /// the same span disagree because Core Motion re-anchored, not because the rider moved (#433).
+    /// On 2026-10-16 they disagreed by 300 m. Weather drifts the barometer against Core Motion's GPS
+    /// correction too, but 30 m is about 3.6 hPa, more than a front moves it across a ride's stop.
+    /// Metres, not a rate: absolute updates come only when Core Motion detects a change, so the
+    /// gap between two can be anything.
+    static let reanchorToleranceMeters = 30.0
 
     /// Nil until a source has given one, and after a GPS fix without one while GPS is the source
     /// (#303): an invalid fix is never covered with the altitude before it.
@@ -46,12 +49,13 @@ struct AltitudeResolver: Equatable, Sendable {
     /// What re-anchors have moved Core Motion's absolute altitude by, taken back out of it. Returns
     /// to about zero when Core Motion steps back.
     private var reanchorOffset = 0.0
-    /// Core Motion's last absolute reading as it gave it, to rate the next one against.
+    /// Core Motion's last absolute reading as it gave it, with the barometer's at the time, to
+    /// check the next one against.
     private var lastAbsolute: AbsoluteReading?
 
     private struct AbsoluteReading: Equatable, Sendable {
         let meters: Double
-        let timestamp: TimeInterval
+        let barometerMeters: Double?
     }
 
     mutating func gpsFix(altitude: Double?, verticalAccuracy: Double?) {
@@ -69,22 +73,24 @@ struct AltitudeResolver: Equatable, Sendable {
 
     mutating func barometer(_ reading: AltimeterReading) {
         switch reading {
-        case .absolute(let meters, let accuracy, let timestamp):
+        case .absolute(let meters, let accuracy, let barometerMeters):
             guard isAbsoluteLive || (0...Self.trustedAccuracyMeters).contains(accuracy) else { return }
-            if let lastAbsolute {
-                let change = meters - lastAbsolute.meters
-                let seconds = timestamp - lastAbsolute.timestamp
-                if abs(change) > Self.maxVerticalSpeedMPS * max(seconds, 0) {
-                    reanchorOffset -= change
+            // Without the barometer either side there's nothing to check against: Core Motion's
+            // altitude passes as it is.
+            if let lastAbsolute, let barometerMeters, let lastBarometer = lastAbsolute.barometerMeters {
+                // Only the disagreement comes out, so whatever the rider climbed across it stays.
+                let reanchor = (meters - lastAbsolute.meters) - (barometerMeters - lastBarometer)
+                if abs(reanchor) > Self.reanchorToleranceMeters {
+                    reanchorOffset -= reanchor
                     let offset = reanchorOffset
                     logger.notice("""
-                        altimeter re-anchored \(change, format: .fixed(precision: 1)) m \
-                        in \(seconds, format: .fixed(precision: 1)) s ±\(accuracy, format: .fixed(precision: 1)); \
-                        carried across, offset \(offset, format: .fixed(precision: 1)) m
+                        altimeter re-anchored \(reanchor, format: .fixed(precision: 1)) m \
+                        ±\(accuracy, format: .fixed(precision: 1)); carried across, offset \
+                        \(offset, format: .fixed(precision: 1)) m
                         """)
                 }
             }
-            lastAbsolute = AbsoluteReading(meters: meters, timestamp: timestamp)
+            lastAbsolute = AbsoluteReading(meters: meters, barometerMeters: barometerMeters)
             isAbsoluteLive = true
             altitude = meters + reanchorOffset
             source = .barometric
