@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-20 — §S12 wheel size is the inline picker as built, not a navigation row (#101 closed not planned, #84).  
 **Updated:** 2026-10-13 — §S12 gains Show Live Activity (#313).  
 **Updated:** 2026-10-12 — §W1, §W4 and §W5 share one trend ▲/▼ (#402): right of the value, level with the tops of its digits and a quarter of their height. W4's moves off the unit, where Design.sketch drew it, and W5 gains one: cadence against the ride average, by more than 5 rpm.  
 **Updated:** 2026-10-10 — Added S21 for the Live Activity.  
@@ -1091,12 +1092,13 @@ a confirmation:
 
 **General** (no section header)
 - Units: Metric (km) | Imperial (miles) [Defaults from iOS]
-- Wheel size — a **navigation row** showing the current value as a tyre designation (`700x28`), not an inline
-  editor. Presets, manual entry in millimetres and the auto-calibration status live on the detail screen it
-  pushes. One app-wide value in MVP. Phase 2 moves this row off Settings entirely: circumference belongs to
-  the speed sensor, and sensors belong to a bike (DataModel.md §3.9), so expect it to become a "Bikes"
-  navigation link — or to move into the per-sensor detail under Sensors (S11) — rather than gaining more
-  controls in place
+- Wheel size — an **inline picker** of the presets plus Custom; Custom adds a manual-entry row in millimetres,
+  committed when the field loses focus, with the valid range shown under it only while the entry is out of
+  range (#69, #424). Not a navigation row: the `700x28` row in Design.sketch — S12 is a drawing error (#101,
+  closed not planned). One app-wide value in MVP. Phase 2 moves this row off Settings entirely: circumference
+  belongs to the speed sensor, and sensors belong to a bike (DataModel.md §3.9), so expect it to become a
+  "Bikes" navigation link — or to move into the per-sensor detail under Sensors (S11) — rather than gaining
+  more controls in place
 - Auto-pause (toggle)
 - Auto-dim (toggle)
 - Place Names (toggle, on) — whether S10 reverse-geocodes a free ride's start for its default name (#283, §S10). Off, nothing is sent and the name is the offline one

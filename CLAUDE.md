@@ -38,6 +38,8 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 
 > **Not targeted:** Garmin Varia RVR820 (proprietary secured BLE protocol). ANT+ (no iOS hardware support).
 
+**Bindings:** bind store state with `$store.<property>.sending(\.<action>)` — it works on computed properties too. Use `Binding(get:set:)` only when the setter transforms the value or the source isn't store state.
+
 > File layout: `assets/TCA.md` §8 is the map of the source tree — follow it when adding files.
 
 ## Design System
