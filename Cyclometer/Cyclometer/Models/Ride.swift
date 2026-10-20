@@ -123,13 +123,15 @@ final class Ride {
     /// (#340) — persisted so a resumed ride's detail sheet still covers the time before the
     /// kill. Written at every checkpoint and at ride end, so a finished ride keeps its final
     /// values. Bounded to the same one-checkpoint-window staleness as every other resumed
-    /// aggregate. Unlike the HR zone seconds #284 declined to store, these
-    /// can't go stale: cadence zones are fixed rpm thresholds, not resolved at read time.
-    /// Read and written as one dictionary through `cadenceZoneSeconds`.
-    var cadenceGrindingSeconds: TimeInterval = 0
-    var cadenceTransitionSeconds: TimeInterval = 0
-    var cadenceOptimalSeconds: TimeInterval = 0
-    var cadenceOverspinSeconds: TimeInterval = 0
+    /// aggregate. Unlike the HR zone seconds #284 declined to store, these are credited
+    /// once, against the S12 cadence zones in effect when the time was recorded (#79): a later
+    /// zone change applies from then on rather than re-crediting the past, so nothing here
+    /// needs resolving at read time. Read and written as one dictionary through `cadenceZoneSeconds`.
+    var cadenceZone1Seconds: TimeInterval = 0
+    var cadenceZone2Seconds: TimeInterval = 0
+    var cadenceZone3Seconds: TimeInterval = 0
+    var cadenceZone4Seconds: TimeInterval = 0
+    var cadenceZone5Seconds: TimeInterval = 0
     var cadenceCoastingSeconds: TimeInterval = 0
     /// How many times this ride has been resumed, which is the index of the track segment
     /// currently being recorded (#263). Persisted for the same reason `zeroSpeedSeconds`
@@ -157,15 +159,16 @@ final class Ride {
         self.speedSampleCount = 0
         self.hrSampleCount = 0
         self.cadenceSampleCount = 0
-        self.cadenceGrindingSeconds = 0
-        self.cadenceTransitionSeconds = 0
-        self.cadenceOptimalSeconds = 0
-        self.cadenceOverspinSeconds = 0
+        self.cadenceZone1Seconds = 0
+        self.cadenceZone2Seconds = 0
+        self.cadenceZone3Seconds = 0
+        self.cadenceZone4Seconds = 0
+        self.cadenceZone5Seconds = 0
         self.cadenceCoastingSeconds = 0
         self.trackSegmentIndex = 0
     }
 
-    /// The four zone columns in `CadenceFeature.State.zoneSeconds`' shape (#340). A zone with
+    /// The five zone columns in `CadenceFeature.State.zoneSeconds`' shape (#340). A zone with
     /// no time is left out rather than mapped to 0, as the live tally does, so a resumed ride
     /// that never pedalled reads back exactly as a fresh one.
     var cadenceZoneSeconds: [CadenceZone: TimeInterval] {
@@ -188,10 +191,11 @@ final class Ride {
     /// `CadenceZone` case fails to compile here instead of silently resetting to 0 on resume.
     private static func column(for zone: CadenceZone) -> ReferenceWritableKeyPath<Ride, TimeInterval> {
         switch zone {
-        case .grinding:   \.cadenceGrindingSeconds
-        case .transition: \.cadenceTransitionSeconds
-        case .optimal:    \.cadenceOptimalSeconds
-        case .overspin:   \.cadenceOverspinSeconds
+        case .zone1: \.cadenceZone1Seconds
+        case .zone2: \.cadenceZone2Seconds
+        case .zone3: \.cadenceZone3Seconds
+        case .zone4: \.cadenceZone4Seconds
+        case .zone5: \.cadenceZone5Seconds
         }
     }
 

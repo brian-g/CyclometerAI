@@ -71,6 +71,69 @@ private enum RideSchemaBeforeSampleCounts {
     static let schema = Schema([Self.Ride.self, VehiclePassEvent.self])
 }
 
+/// `Ride` exactly as it stood before #79 replaced W5's four efficiency-zone columns with five
+/// intensity-zone ones — the shape every install from #340 onward is carrying. Stored attributes
+/// only: the computed accessors don't reach the store.
+private enum RideSchemaBeforeCadenceIntensityZones {
+    @Model
+    final class Ride {
+        var id: UUID
+        var title: String
+        var notes: String
+        var startedAt: Date
+        var endedAt: Date?
+        var distanceMeters: Double
+        var durationSeconds: TimeInterval
+        var averageSpeedMPS: Double
+        var maxSpeedMPS: Double
+        var averageHeartRateBPM: Int?
+        var maxHeartRateBPM: Int?
+        var averageCadenceRPM: Int?
+        var maxCadenceRPM: Int?
+        var radarEventCount: Int?
+        var vehiclePassCount: Int?
+        var routeId: UUID?
+        var routeName: String?
+        var routeProgressMeters: Double?
+        var gpxFileURL: URL?
+        @Attribute(.externalStorage)
+        var weatherData: Data?
+        @Attribute(.externalStorage)
+        var mapThumbnailLight: Data?
+        @Attribute(.externalStorage)
+        var mapThumbnailDark: Data?
+        var isHealthWorkoutOwed: Bool = false
+        @Attribute(.externalStorage)
+        var syncRecordsData: Data?
+        var recordingState: Cyclometer.Ride.RecordingState
+        var isAutoPaused: Bool = false
+        var zeroSpeedSeconds: Int = 0
+        var speedSampleCount: Int = 0
+        var hrSampleCount: Int = 0
+        var cadenceSampleCount: Int = 0
+        var cadenceGrindingSeconds: TimeInterval = 0
+        var cadenceTransitionSeconds: TimeInterval = 0
+        var cadenceOptimalSeconds: TimeInterval = 0
+        var cadenceOverspinSeconds: TimeInterval = 0
+        var cadenceCoastingSeconds: TimeInterval = 0
+        var trackSegmentIndex: Int = 0
+
+        init(id: UUID, startedAt: Date) {
+            self.id = id
+            self.title = ""
+            self.notes = ""
+            self.startedAt = startedAt
+            self.distanceMeters = 0
+            self.durationSeconds = 0
+            self.averageSpeedMPS = 0
+            self.maxSpeedMPS = 0
+            self.recordingState = .active
+        }
+    }
+
+    static let schema = Schema([Self.Ride.self, VehiclePassEvent.self])
+}
+
 /// Regression coverage for the #186 launch crash: the five attributes #175 added
 /// to `Ride` were non-optional and set only in `init`, so SwiftData emitted them
 /// as mandatory-with-no-default. Lightweight migration then refused every store
@@ -171,6 +234,45 @@ struct RideSchemaMigrationTests {
         }
     }
 
+    /// #79 swaps the four #340 efficiency-zone columns for five intensity-zone ones. The old
+    /// columns carry data and are dropped; the new ones open at their declared default of 0, so a
+    /// ride resumed across the upgrade restarts its zone tally rather than failing to open.
+    @Test("a store carrying #340's efficiency-zone columns still opens, and is writable")
+    func opensStoreWithEfficiencyZoneColumns() throws {
+        let rideId = UUID()
+
+        try withTemporaryStoreURL(prefix: "RideMigration") { url in
+            do {
+                let schema = RideSchemaBeforeCadenceIntensityZones.schema
+                let container = try ModelContainer(
+                    for: schema,
+                    configurations: [ModelConfiguration(schema: schema, url: url)]
+                )
+                let context = ModelContext(container)
+                let ride = RideSchemaBeforeCadenceIntensityZones.Ride(id: rideId, startedAt: .now)
+                ride.distanceMeters = 12_400
+                ride.cadenceGrindingSeconds = 120
+                ride.cadenceTransitionSeconds = 300
+                ride.cadenceOptimalSeconds = 900
+                ride.cadenceOverspinSeconds = 45
+                ride.cadenceCoastingSeconds = 60
+                context.insert(ride)
+                try context.save()
+            }
+
+            let context = try ModelContext(openStore(at: url))
+            let ride = try #require(try context.fetch(FetchDescriptor<Ride>()).first)
+            #expect(ride.id == rideId)
+            #expect(ride.distanceMeters == 12_400)
+            #expect(ride.cadenceZoneSeconds.isEmpty)
+            #expect(ride.cadenceCoastingSeconds == 60)
+
+            ride.cadenceZoneSeconds = [.zone5: 30]
+            try context.save()
+            #expect(try context.fetch(FetchDescriptor<Ride>()).first?.cadenceZoneSeconds == [.zone5: 30])
+        }
+    }
+
     /// `Route` (#191) is the first entity added to the schema since the store shipped, as
     /// opposed to an attribute added to an existing one. A store written before it existed
     /// has no `Route` table at all, so this asserts the additive half of lightweight
@@ -237,14 +339,14 @@ struct RideSchemaMigrationTests {
             let context = try ModelContext(openStore(at: url))
             let existing = try #require(context.fetch(FetchDescriptor<Ride>()).first)
             existing.cadenceSampleCount = 42
-            existing.cadenceOptimalSeconds = 90
+            existing.cadenceZone3Seconds = 90
 
             context.insert(Ride())
             try context.save()
 
             let rides = try context.fetch(FetchDescriptor<Ride>())
             #expect(rides.count == 2)
-            #expect(rides.contains { $0.cadenceSampleCount == 42 && $0.cadenceOptimalSeconds == 90 })
+            #expect(rides.contains { $0.cadenceSampleCount == 42 && $0.cadenceZone3Seconds == 90 })
         }
     }
 }

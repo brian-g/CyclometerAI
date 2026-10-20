@@ -53,6 +53,9 @@ struct CadenceFeature {
         /// average or max (#379, PRD: "all sensor recording suspended"). The live reading
         /// and the watermark still follow it.
         var isRecording = false
+        /// The rider's S12 cadence zones (#79), read on every reading so a Settings change
+        /// applies to the ride in progress. Time already credited stays where it was.
+        @SharedReader(.appPreferences) var preferences
 
         /// Average cadence over pedalling time: mean of non-zero rpm readings.
         var averageCadenceRPM: Int {
@@ -115,7 +118,7 @@ struct CadenceFeature {
                     let elapsed = now.timeIntervalSince(previous.time)
                     if elapsed > 0, elapsed <= Self.maxCreditedInterval {
                         if previous.rpm > 0 {
-                            state.zoneSeconds[CadenceZone.zone(forRPM: previous.rpm), default: 0] += elapsed
+                            state.zoneSeconds[state.preferences.cadenceZones.zone(forRPM: previous.rpm), default: 0] += elapsed
                         } else {
                             state.coastingSeconds += elapsed
                         }

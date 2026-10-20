@@ -88,6 +88,10 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// the override is stored, so a rider who never customises follows `.factory` when it changes.
     var dashboardLayoutOverride: DashboardLayout?
 
+    /// The rider's cadence zone boundaries (#79), set in S12. W5 classifies and draws its bands
+    /// against them, so a change applies to a ride already in progress.
+    var cadenceZones: CadenceZoneBoundaries = .default
+
     /// Which widgets sit where on each dashboard page. S07/S08 (#141, #142) set it; setting the
     /// factory layout, page ids aside, clears the override.
     var dashboardLayout: DashboardLayout {
@@ -189,6 +193,11 @@ struct AppPreferences: Codable, Equatable, Sendable {
         mapOrientation = try container.decodeIfPresent(
             MapOrientation.self, forKey: .mapOrientation
         ) ?? .headingUp
+        // `try?`: boundaries that no longer validate fall back to the defaults rather than
+        // throwing and resetting every other preference with them.
+        cadenceZones = (try? container.decodeIfPresent(
+            CadenceZoneBoundaries.self, forKey: .cadenceZones
+        )) ?? .default
         // `try?`, unlike the fields above: an unreadable layout must not throw and reset every
         // other preference with it. A placement that breaks a rule — naming a widget this build
         // doesn't have, or overlapping another — is dropped and the rest kept. Empty pages exist

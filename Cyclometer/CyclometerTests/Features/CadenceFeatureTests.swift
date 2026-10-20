@@ -275,16 +275,41 @@ struct CadenceFeatureTests {
         let store = makeTimedStore(clock)
         store.exhaustivity = .off
 
-        await store.send(.cadenceReceived(60))    // grinding
+        await store.send(.cadenceReceived(60))    // zone 1
         advance(clock, by: 2)
-        await store.send(.cadenceReceived(90))    // credits 2s to grinding
+        await store.send(.cadenceReceived(90))    // credits 2s to zone 1
         advance(clock, by: 1)
-        await store.send(.cadenceReceived(0))     // credits 1s to optimal
+        await store.send(.cadenceReceived(0))     // credits 1s to zone 3
         advance(clock, by: 3)
         await store.send(.cadenceReceived(75))    // credits 3s to coasting
 
-        #expect(store.state.zoneSeconds == [.grinding: 2, .optimal: 1])
+        #expect(store.state.zoneSeconds == [.zone1: 2, .zone3: 1])
         #expect(store.state.coastingSeconds == 3)
+    }
+
+    @Test("Time is credited against the rider's S12 cadence zones, read live (#79)")
+    func creditsAgainstConfiguredZones() async throws {
+        let clock = LockIsolated(Self.testDate)
+        let custom = try #require(CadenceZoneBoundaries(lowerBoundsRPM: [75, 90, 100, 120]))
+        await withDependencies {
+            $0.defaultFileStorage = .inMemory
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.cadenceZones = custom }
+            let store = makeTimedStore(clock)
+            store.exhaustivity = .off
+
+            await store.send(.cadenceReceived(72))    // Z1 under the custom zones, Z2 by default
+            advance(clock, by: 2)
+            await store.send(.cadenceReceived(72))    // credits 2s to zone 1
+            #expect(store.state.zoneSeconds == [.zone1: 2])
+
+            // A Settings change mid-ride applies from the next reading on.
+            $preferences.withLock { $0.cadenceZones = .default }
+            advance(clock, by: 1)
+            await store.send(.cadenceReceived(72))    // credits 1s to zone 2
+            #expect(store.state.zoneSeconds == [.zone1: 2, .zone2: 1])
+        }
     }
 
     @Test("Nothing is credited while the ride is not recording")
@@ -335,6 +360,6 @@ struct CadenceFeatureTests {
         advance(clock, by: CadenceFeature.maxCreditedInterval)
         await store.send(.cadenceReceived(110))
 
-        #expect(store.state.zoneSeconds == [.overspin: CadenceFeature.maxCreditedInterval])
+        #expect(store.state.zoneSeconds == [.zone5: CadenceFeature.maxCreditedInterval])
     }
 }

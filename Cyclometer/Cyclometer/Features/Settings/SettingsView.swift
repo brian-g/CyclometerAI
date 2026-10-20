@@ -160,6 +160,25 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Cadence Zones") {
+                ForEach(store.cadenceZoneRows) { row in
+                    if row.isSteppable {
+                        Stepper {
+                            LabeledContent(row.displayName, value: row.rangeText)
+                        } onIncrement: {
+                            store.send(.cadenceZoneBoundaryStepped(zone: row.zone, delta: 1))
+                        } onDecrement: {
+                            store.send(.cadenceZoneBoundaryStepped(zone: row.zone, delta: -1))
+                        }
+                    } else {
+                        LabeledContent(row.displayName, value: row.rangeText)
+                    }
+                }
+                Button("Reset Cadence Zones to Defaults") {
+                    store.send(.cadenceZoneResetTapped)
+                }
+            }
+
             Section("About") {
                 LabeledContent("Version", value: appVersion)
                 NavigationLink("Privacy Policy") { PrivacyPolicyView() }

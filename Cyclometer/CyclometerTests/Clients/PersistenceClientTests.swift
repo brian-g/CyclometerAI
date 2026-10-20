@@ -296,7 +296,7 @@ struct PersistenceClientTests {
             speedSampleCount: 900,
             hrSampleCount: 850,
             cadenceSampleCount: 700,
-            cadenceZoneSeconds: [.grinding: 120, .transition: 300, .optimal: 900, .overspin: 45],
+            cadenceZoneSeconds: [.zone1: 120, .zone2: 300, .zone3: 900, .zone4: 45, .zone5: 20],
             cadenceCoastingSeconds: 240
         )
         try await client.updateRideSummary(update)
@@ -316,10 +316,11 @@ struct PersistenceClientTests {
         #expect(ride.speedSampleCount == 900)
         #expect(ride.hrSampleCount == 850)
         #expect(ride.cadenceSampleCount == 700)
-        #expect(ride.cadenceGrindingSeconds == 120)
-        #expect(ride.cadenceTransitionSeconds == 300)
-        #expect(ride.cadenceOptimalSeconds == 900)
-        #expect(ride.cadenceOverspinSeconds == 45)
+        #expect(ride.cadenceZone1Seconds == 120)
+        #expect(ride.cadenceZone2Seconds == 300)
+        #expect(ride.cadenceZone3Seconds == 900)
+        #expect(ride.cadenceZone4Seconds == 45)
+        #expect(ride.cadenceZone5Seconds == 20)
         #expect(ride.cadenceCoastingSeconds == 240)
     }
 
@@ -746,7 +747,7 @@ struct PersistenceClientTests {
             cadenceSampleCount: 60,
             // A zone with no time is absent, as in the live tally (#340): the round trip
             // must not hand it back as an explicit 0.
-            cadenceZoneSeconds: [.transition: 14, .optimal: 52.5],
+            cadenceZoneSeconds: [.zone2: 14, .zone3: 52.5],
             cadenceCoastingSeconds: 21
         )
         try await client.updateRideSummary(checkpoint)

@@ -27,6 +27,16 @@ struct SettingsFeature {
         let isSteppable: Bool
     }
 
+    /// One row of the S12 Cadence Zones table (#79), shaped like `HRZoneRow`: rows 1-4 step the
+    /// row's upper boundary, and row 5 (Sprint) is display-only.
+    struct CadenceZoneRow: Identifiable, Equatable {
+        let zone: CadenceZone
+        var id: Int { zone.rawValue }
+        let displayName: String
+        let rangeText: String
+        let isSteppable: Bool
+    }
+
     @ObservableState
     struct State: Equatable {
         @Shared(.appPreferences) var preferences
@@ -84,6 +94,18 @@ struct SettingsFeature {
                     displayName: zone.s12DisplayName,
                     range: riderProfile.bounds(for: zone, healthResting: healthRestingBPM, healthMax: healthMaxBPM,
                                                healthZoneCeilings: healthZoneCeilingsBPM),
+                    isSteppable: zone != .zone5
+                )
+            }
+        }
+
+        /// The S12 Cadence Zones table, read straight from the stored boundaries (#79).
+        var cadenceZoneRows: [CadenceZoneRow] {
+            CadenceZone.allCases.map { zone in
+                CadenceZoneRow(
+                    zone: zone,
+                    displayName: zone.displayName,
+                    rangeText: "\(preferences.cadenceZones.rangeText(for: zone)) rpm",
                     isSteppable: zone != .zone5
                 )
             }
@@ -172,6 +194,8 @@ struct SettingsFeature {
         case liveActivitySettingsTapped
         case hrZoneBoundaryStepped(zone: HeartRateZone, delta: Int)
         case hrZoneResetTapped
+        case cadenceZoneBoundaryStepped(zone: CadenceZone, delta: Int)
+        case cadenceZoneResetTapped
         case restingOverrideChanged(String)
         case restingOverrideCommitted
         case maxOverrideChanged(String)
@@ -274,6 +298,15 @@ struct SettingsFeature {
                 return .none
             case .hrZoneResetTapped:
                 state.$riderProfile.withLock { $0 = $0.resettingZoneBoundaries() }
+                return .none
+            case .cadenceZoneBoundaryStepped(let zone, let delta):
+                // A refused step is a silent no-op, as `hrZoneBoundaryStepped`'s is.
+                guard let updated = state.preferences.cadenceZones.stepping(afterZone: zone, by: delta)
+                else { return .none }
+                state.$preferences.withLock { $0.cadenceZones = updated }
+                return .none
+            case .cadenceZoneResetTapped:
+                state.$preferences.withLock { $0.cadenceZones = .default }
                 return .none
             case .restingOverrideChanged(let text):
                 state.restingOverrideDraft = text
