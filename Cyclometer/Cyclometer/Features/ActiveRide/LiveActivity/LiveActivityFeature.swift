@@ -25,13 +25,15 @@ struct LiveActivityFeature {
     @Dependency(\.liveActivityClient) var liveActivityClient
     @Dependency(\.date) var date
 
+    private enum CancelID { case activityEnd }
+
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
             case .task, .liveActivity(.appBecameActive):
                 // A refused request (the app was in the background) or Live Activities switched
-                // on mid-ride gets another go when the app comes forward. One the rider swiped
-                // away stays `.showing`, and isn't brought back.
+                // on mid-ride gets another go when the app comes forward, as does one the system
+                // ended. One the rider swiped away is `.dismissed`, and isn't brought back.
                 return start(&state)
             case .liveActivity(.preferenceChanged):
                 // S12's toggle, mid-ride (#313): on starts one now, the app being in front; off
@@ -39,7 +41,12 @@ struct LiveActivityFeature {
                 guard !state.preferences.isLiveActivityEnabled else { return start(&state) }
                 guard state.liveActivity.phase != .notShowing else { return .none }
                 state.liveActivity = LiveActivityState()
-                return .run { [liveActivityClient] _ in await liveActivityClient.end() }
+                // The wait goes now, so this end can't come back as the rider's dismissal (#412).
+                // A new wait's `cancelInFlight` would cancel it only once that wait's task runs.
+                return .merge(
+                    .cancel(id: CancelID.activityEnd),
+                    .run { [liveActivityClient] _ in await liveActivityClient.end() }
+                )
             case .liveActivity(.started(let isShowing)):
                 guard state.liveActivity.phase == .starting else {
                     // Turned off while the request was out: the `end` went first and found
@@ -47,9 +54,26 @@ struct LiveActivityFeature {
                     guard isShowing else { return .none }
                     return .run { [liveActivityClient] _ in await liveActivityClient.end() }
                 }
-                state.liveActivity = isShowing
-                    ? LiveActivityState(phase: .showing, shown: state.liveActivity.shown)
-                    : LiveActivityState()
+                guard isShowing else {
+                    state.liveActivity = LiveActivityState()
+                    return .none
+                }
+                state.liveActivity = LiveActivityState(phase: .showing, shown: state.liveActivity.shown)
+                // Watches for the system or the rider ending it outside the app (#412). One wait
+                // at a time: a new activity's replaces the last one's.
+                return .run { [liveActivityClient] send in
+                    guard let end = await liveActivityClient.ended() else { return }
+                    await send(.liveActivity(.ended(end)))
+                }
+                .cancellable(id: CancelID.activityEnd, cancelInFlight: true)
+            case .liveActivity(.ended(let end)):
+                // The app's own `end` comes back here as a dismissal too; the phase has moved on
+                // by then, so it's dropped.
+                guard state.liveActivity.phase == .showing else { return .none }
+                // A swiped-away card stays gone. "Don't Allow" also switches Live Activities off,
+                // and `start`'s `isEnabled()` holds it until the rider switches them back on.
+                let isSwipedAway = end == .dismissed && liveActivityClient.isEnabled()
+                state.liveActivity = isSwipedAway ? LiveActivityState(phase: .dismissed) : LiveActivityState()
                 return .none
             case .elapsedTick:
                 guard state.liveActivity.phase == .showing else { return .none }
@@ -119,6 +143,8 @@ struct LiveActivityState: Equatable {
         case notShowing
         case starting
         case showing
+        /// The rider swiped it away: not requested again this ride.
+        case dismissed
     }
 
     var phase: Phase = .notShowing
@@ -132,6 +158,8 @@ struct LiveActivityState: Equatable {
 enum LiveActivityAction: Equatable {
     /// `start`'s answer: whether an activity is showing.
     case started(Bool)
+    /// `ended`'s answer: the activity ended outside the app (#412).
+    case ended(LiveActivityEnd)
     /// The app came to the foreground (`AppFeature`).
     case appBecameActive
     /// S12's Show Live Activity changed (`AppFeature`, #313).

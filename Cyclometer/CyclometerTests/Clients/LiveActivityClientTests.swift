@@ -1,4 +1,5 @@
 import ActivityKit
+import ComposableArchitecture
 import Foundation
 import Testing
 @testable import Cyclometer
@@ -118,6 +119,42 @@ struct LiveActivityClientTests {
         await expectEventually("every ride activity dismissed") {
             Activity<RideActivityAttributes>.activities.allSatisfy { $0.activityState == .dismissed }
         }
+    }
+
+    // MARK: - Ended outside the app (#412)
+
+    /// The system's end, at its 8-hour limit, leaves the card on the Lock Screen: a `.default` end.
+    @Test func endedReportsTheSystemsEnd() async throws {
+        #expect(try await endOutsideTheClient(dismissalPolicy: .default) == .ended)
+        await clearActivities()
+    }
+
+    /// A swipe-away or "Don't Allow" takes the card off the screen, as an `.immediate` end does.
+    @Test func endedReportsADismissal() async throws {
+        #expect(try await endOutsideTheClient(dismissalPolicy: .immediate) == .dismissed)
+        await clearActivities()
+    }
+
+    /// Starts a ride's activity, waits on `ended`, then ends the activity behind the client's back.
+    private func endOutsideTheClient(dismissalPolicy: ActivityUIDismissalPolicy) async throws -> LiveActivityEnd? {
+        await clearActivities()
+        #expect(await client.start(metric, Self.state()))
+        await expectEventually { Self.showing().count == 1 }
+        let activity = try #require(Self.showing().only)
+
+        let returned = LockIsolated<LiveActivityEnd?>(nil)
+        let wait = Task { [client] in
+            let end = await client.ended()
+            returned.setValue(end)
+        }
+        // `ended` must have found the activity before it ends; ended first, it reads as gone.
+        try await Task.sleep(for: .milliseconds(500))
+        // Returned already, it found none showing: `.ended` would pass the `.default` test unearned.
+        #expect(returned.value == nil, "still waiting while the activity shows")
+        await activity.end(nil, dismissalPolicy: dismissalPolicy)
+        await expectEventually("ended returns") { returned.value != nil }
+        wait.cancel()
+        return returned.value
     }
 }
 

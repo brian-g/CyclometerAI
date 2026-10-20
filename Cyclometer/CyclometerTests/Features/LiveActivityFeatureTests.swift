@@ -22,11 +22,13 @@ struct LiveActivityFeatureTests {
 
     nonisolated static let t0 = Date(timeIntervalSince1970: 1_000_000)
 
-    /// `starts` answers each `start` in turn; past its end, true.
+    /// `starts` answers each `start` in turn; past its end, true. Each `ended` waits for the next of
+    /// `ends`, or with none, until it's cancelled.
     static func recordingClient(
         into calls: LockIsolated<[Call]>,
         isEnabled: Bool = true,
-        starts: [Bool] = []
+        starts: [Bool] = [],
+        ends: AsyncStream<LiveActivityEnd>? = nil
     ) -> LiveActivityClient {
         let answers = LockIsolated(starts)
         return LiveActivityClient(
@@ -36,7 +38,15 @@ struct LiveActivityFeatureTests {
             },
             update: { content in calls.withValue { $0.append(.update(content)) } },
             end: { calls.withValue { $0.append(.end) } },
-            isEnabled: { isEnabled }
+            isEnabled: { isEnabled },
+            ended: {
+                guard let ends else {
+                    try? await Task.never()
+                    return nil
+                }
+                for await end in ends { return end }
+                return nil
+            }
         )
     }
 
@@ -68,6 +78,7 @@ struct LiveActivityFeatureTests {
     /// rides here stand still on purpose.
     static func makeRide(
         isEnabled: Bool = true,
+        ends: AsyncStream<LiveActivityEnd>? = nil,
         configure: (inout ActiveRideFeature.State) -> Void = { _ in }
     ) -> Ride {
         let storage = FileStorage.inMemory
@@ -91,7 +102,7 @@ struct LiveActivityFeatureTests {
                 $0.continuousClock = clock
                 $0.date = DateGenerator { now.value }
                 $0.defaultFileStorage = storage
-                $0.liveActivityClient = recordingClient(into: calls, isEnabled: isEnabled)
+                $0.liveActivityClient = recordingClient(into: calls, isEnabled: isEnabled, ends: ends)
             }
         }
         store.exhaustivity = .off
@@ -291,6 +302,128 @@ struct LiveActivityFeatureTests {
         }
     }
 
+    // MARK: - Ended outside the app (#412)
+
+    /// The 8-hour limit. The app is in the background then, so the new request waits for the foreground.
+    @Test("ended by the system, it gets no more updates, and coming forward requests it again")
+    func systemEndStopsUpdatesAndRetries() async {
+        let (ends, end) = AsyncStream.makeStream(of: LiveActivityEnd.self)
+        let ride = Self.makeRide(ends: ends)
+        let calls = ride.calls
+        await ride.start()
+
+        end.yield(.ended)
+        await ride.store.receive(\.liveActivity.ended)
+        #expect(ride.store.state.liveActivity.phase == .notShowing)
+        await ride.store.send(.speed(.gpsSpeedReceived(5)))
+        await ride.tick(LiveActivityFeature.keepAliveTicks)
+        #expect(calls.updates.isEmpty)
+
+        await ride.store.send(.liveActivity(.appBecameActive))
+        await ride.store.receive(\.liveActivity.started)
+        #expect(calls.starts == 2)
+        #expect(ride.store.state.liveActivity.phase == .showing)
+    }
+
+    /// A swipe-away arrives as `.dismissed`, with Live Activities still on (seen on the iOS 27 simulator).
+    @Test("swiped away, it gets no more updates, and coming forward doesn't bring it back")
+    func dismissalStopsUpdatesForTheRide() async {
+        let (ends, end) = AsyncStream.makeStream(of: LiveActivityEnd.self)
+        let ride = Self.makeRide(ends: ends)
+        let calls = ride.calls
+        await ride.start()
+
+        end.yield(.dismissed)
+        await ride.store.receive(\.liveActivity.ended)
+        #expect(ride.store.state.liveActivity.phase == .dismissed)
+        await ride.store.send(.speed(.gpsSpeedReceived(5)))
+        await ride.tick(LiveActivityFeature.keepAliveTicks)
+        #expect(calls.updates.isEmpty)
+
+        await ride.store.send(.liveActivity(.appBecameActive))
+        await ride.tick()
+        #expect(calls.starts == 1)
+        #expect(ride.store.state.liveActivity.phase == .dismissed)
+    }
+
+    /// "Don't Allow" also arrives as `.dismissed`, but with Live Activities already off (seen on the
+    /// iOS 27 simulator). Until the rider switches them back on, nothing is requested; the next ride
+    /// is `disabledShowsNothing`.
+    @Test("after Don't Allow, switching Live Activities back on in iOS Settings brings it back")
+    func dontAllowThenReenabledComesBack() async {
+        let (ends, end) = AsyncStream.makeStream(of: LiveActivityEnd.self)
+        let ride = Self.makeRide(ends: ends)
+        let calls = ride.calls
+        let isEnabled = LockIsolated(true)
+        ride.store.dependencies.liveActivityClient.isEnabled = { isEnabled.value }
+        await ride.start()
+
+        isEnabled.setValue(false)
+        end.yield(.dismissed)
+        await ride.store.receive(\.liveActivity.ended)
+        #expect(ride.store.state.liveActivity.phase == .notShowing)
+        await ride.store.send(.speed(.gpsSpeedReceived(5)))
+        await ride.tick(LiveActivityFeature.keepAliveTicks)
+        await ride.store.send(.liveActivity(.appBecameActive))
+        #expect(calls.updates.isEmpty)
+        #expect(calls.starts == 1, "nothing while Live Activities are off")
+
+        isEnabled.setValue(true)
+        await ride.store.send(.liveActivity(.appBecameActive))
+        await ride.store.receive(\.liveActivity.started)
+        #expect(calls.starts == 2)
+        #expect(ride.store.state.liveActivity.phase == .showing)
+    }
+
+    /// Turning it off ends it, and that end reads as a dismissal; it mustn't keep S12's "on" from
+    /// starting a new one.
+    @Test("the app's own end, come back as a dismissal, is dropped")
+    func ownEndIsNotADismissal() async {
+        let ride = Self.makeRide()
+        let calls = ride.calls
+        await ride.start()
+
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = false }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+        await ride.store.send(.liveActivity(.ended(.dismissed)))
+        #expect(ride.store.state.liveActivity.phase == .notShowing)
+
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = true }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+        await ride.store.receive(\.liveActivity.started)
+        #expect(calls.starts == 2)
+        #expect(ride.store.state.liveActivity.phase == .showing)
+    }
+
+    /// Off then on: left running, the first activity's wait would see the app's own end after the
+    /// second is showing, and take it for the rider's dismissal. Off cancels it at once; the new
+    /// wait's `cancelInFlight` would only once its task runs, after the end can have come back.
+    @Test("turning it off cancels the activity's wait, and on starts a new one")
+    func turningOffCancelsTheWait() async {
+        let ride = Self.makeRide()
+        let cancelled = LockIsolated<[Bool]>([])
+        ride.store.dependencies.liveActivityClient.ended = {
+            let index = cancelled.withValue { $0.append(false); return $0.count - 1 }
+            await withTaskCancellationHandler {
+                try? await Task.never()
+            } onCancel: {
+                cancelled.withValue { $0[index] = true }
+            }
+            return nil
+        }
+        await ride.start()
+        await expectEventually("the first wait") { cancelled.value.count == 1 }
+
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = false }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+        await expectEventually("off cancels the wait") { cancelled.value == [true] }
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = true }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+        await ride.store.receive(\.liveActivity.started)
+
+        await expectEventually("the first wait cancelled, the second running") { cancelled.value == [true, false] }
+    }
+
     // MARK: - Through AppFeature
 
     /// `AppFeature` nils the ride on this very action, so the end can't be a forwarded action.
@@ -311,6 +444,31 @@ struct LiveActivityFeatureTests {
         await clock.advance(by: .seconds(60))
         #expect(calls.value.filter { $0 == .end }.count == 1)
         #expect(calls.value.last == .end, "no update after the end")
+    }
+
+    /// The finish's `end` would come back through the wait as a dismissal, to a ride that's gone.
+    @Test("finishing the ride cancels the wait for an outside end")
+    func finishCancelsTheWait() async {
+        let calls = LockIsolated<[Call]>([])
+        let store = Self.makeAppStore(clock: TestClock(), calls: calls)
+        let cancelled = LockIsolated<Bool?>(nil)
+        store.dependencies.liveActivityClient.ended = {
+            cancelled.setValue(false)
+            await withTaskCancellationHandler {
+                try? await Task.never()
+            } onCancel: {
+                cancelled.setValue(true)
+            }
+            return nil
+        }
+
+        await store.send(.activeRide(.task))
+        await store.receive(\.activeRide.liveActivity.started)
+        await expectEventually("waiting") { cancelled.value == false }
+        await store.send(.activeRide(.pauseTapped))
+        await store.send(.activeRide(.finishTapped))
+        await store.send(.activeRide(.finishAlert(.presented(.confirmFinish))))
+        await expectEventually("the wait cancelled") { cancelled.value == true }
     }
 
     /// ActivityKit refuses a request from the background, as when a ride resumes there.
@@ -449,5 +607,9 @@ struct LiveActivityFeatureTests {
 private extension LockIsolated where Value == [LiveActivityFeatureTests.Call] {
     nonisolated var updates: [LiveActivityFeatureTests.Content] {
         value.compactMap { if case .update(let content) = $0 { content } else { nil } }
+    }
+
+    nonisolated var starts: Int {
+        value.filter { if case .start = $0 { true } else { false } }.count
     }
 }
