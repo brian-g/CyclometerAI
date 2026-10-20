@@ -52,6 +52,10 @@ struct RideDetailFeature {
         /// Nil until it loads, and nil for good if the read fails.
         var stats: RideStats?
 
+        /// The saved route the ride followed, S15's link to S20 (#426). Nil for a free ride,
+        /// and for one whose route has since been deleted — `stats.routeName` still names it.
+        var route: RouteSummary?
+
         /// Oldest first.
         var vehiclePasses: [VehiclePassEventDTO] = []
 
@@ -74,7 +78,9 @@ struct RideDetailFeature {
     enum Action: Equatable {
         case task
         case trackLoaded(segments: [[RouteCoordinate]], elevationProfile: [Double]?, heartRate: [Int])
-        case statsLoaded(RideStats)
+        /// The route arrives with the stats, so the Route row never turns into a link
+        /// after it is on screen.
+        case statsLoaded(RideStats, route: RouteSummary?)
         case vehiclePassesLoaded([VehiclePassEventDTO])
         case healthProfileFetched(restingBPM: Int?, maxBPM: Int?, zoneCeilingsBPM: [Int]?)
     }
@@ -106,11 +112,24 @@ struct RideDetailFeature {
                         }
                     },
                     .run { [persistenceClient] send in
+                        let stats: RideStats
                         do {
-                            await send(.statsLoaded(try await persistenceClient.fetchRideStats(id)))
+                            stats = try await persistenceClient.fetchRideStats(id)
                         } catch {
                             logger.error("fetchRideStats failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                            return
                         }
+                        // Nil for a deleted route by design, so only a failed read is logged; either
+                        // way the stats still show, and the Route row names the route without a link.
+                        var route: RouteSummary?
+                        if let routeId = stats.routeId {
+                            do {
+                                route = try await persistenceClient.fetchRouteSummary(routeId)
+                            } catch {
+                                logger.error("fetchRouteSummary failed for \(routeId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                            }
+                        }
+                        await send(.statsLoaded(stats, route: route))
                     },
                     .run { [persistenceClient] send in
                         do {
@@ -135,8 +154,9 @@ struct RideDetailFeature {
                 state.heartRateSamples = heartRate
                 return .none
 
-            case .statsLoaded(let stats):
+            case let .statsLoaded(stats, route):
                 state.stats = stats
+                state.route = route
                 return .none
 
             case .vehiclePassesLoaded(let passes):

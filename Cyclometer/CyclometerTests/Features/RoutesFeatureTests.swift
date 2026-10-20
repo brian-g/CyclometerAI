@@ -515,12 +515,12 @@ struct RoutesFeatureTests {
             $0.routes = [route]
             $0.surfaceLookupsStarted = [route.id]
         }
-        await store.send(.path(.push(id: 0, state: .detail(RouteDetailFeature.State(summary: route))))) {
-            $0.path[id: 0] = .detail(RouteDetailFeature.State(summary: route))
+        await store.send(.path(.push(id: 0, state: .route(RouteDetailFeature.State(summary: route))))) {
+            $0.path[id: 0] = .route(RouteDetailFeature.State(summary: route))
         }
         await store.send(.surfaceResolved(route.id, surface)) {
             $0.routes[0].surface = surface
-            $0.path[id: 0, case: \.detail]?.summary.surface = surface
+            $0.path[id: 0, case: \.route]?.summary.surface = surface
         }
         await store.finish()
     }

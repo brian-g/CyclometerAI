@@ -57,9 +57,9 @@ struct RidesFeature {
         /// first appears, so a long history never reads images nobody scrolled to.
         var thumbnails: [UUID: Thumbnail] = [:]
 
-        /// The tab's navigation stack: S15, pushed from a row (#251) — the same shape as
-        /// `RoutesFeature.path`, for the same reason.
-        var path = StackState<Path.State>()
+        /// The tab's navigation stack: S15, pushed from a row (#251), and S20 from S15's Route
+        /// row (#426) — the same shape as `RoutesFeature.path`, for the same reason.
+        var path = StackState<RideRoutePath.State>()
 
         var unitSystem: UnitSystem { preferences.preferredUnit }
     }
@@ -91,13 +91,15 @@ struct RidesFeature {
         case thumbnailLoaded(UUID, RideThumbnailImages?)
         case deleteRecordedRide(UUID)
         case deleteFailed
-        case path(StackActionOf<Path>)
-    }
+        case path(StackActionOf<RideRoutePath>)
+        case delegate(Delegate)
 
-    /// What the Rides tab can push (#251).
-    @Reducer(state: .equatable, action: .equatable)
-    enum Path {
-        case detail(RideDetailFeature)
+        @CasePathable
+        enum Delegate: Equatable {
+            /// "Use Route" from an S20 opened on this tab's stack (#426), on its way to
+            /// `AppFeature` — `RoutesFeature`'s delegate of the same name.
+            case useRoute(RouteReference)
+        }
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
@@ -235,7 +237,10 @@ struct RidesFeature {
             case .deleteFailed:
                 return .send(.reloadRides)
 
-            case .path:
+            case .path(.element(id: _, action: .route(.delegate(.useRoute(let route))))):
+                return .send(.delegate(.useRoute(route)))
+
+            case .path, .delegate:
                 return .none
             }
         }

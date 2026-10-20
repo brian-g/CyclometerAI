@@ -1,7 +1,8 @@
 import XCTest
 import SnapshotTesting
 import SwiftUI
-import ComposableArchitecture
+// For `navigationDestinationType`: see `screen(_:rides:)`.
+@_spi(Internals) import ComposableArchitecture
 @testable import Cyclometer
 
 /// S20 — Route Detail (#195), from seeded state.
@@ -58,7 +59,16 @@ final class RouteDetailSnapshotTests: XCTestCase {
         // `UIHostingController` capture on iOS 26 — a bare `List` with an inline title does it too,
         // while a large title offscreen and an inline title drawn in the key window both render in
         // the label colour — so a reference could only ever pin that artefact, never the screen.
-        return RouteDetailList(store: store, mapRow: Color.cyBgTertiary)
+        //
+        // A stack all the same, with its bar hidden (#426): outside any stack a `NavigationLink`
+        // draws dimmed, as if disabled, which the app never shows. A plain stack does not tell
+        // TCA's links where they push, so the type a store-powered one would set is set here;
+        // without it every Previous Rides row reports "not presentable" and fails the test.
+        return NavigationStack {
+            RouteDetailList(store: store, mapRow: Color.cyBgTertiary)
+                .toolbar(.hidden, for: .navigationBar)
+        }
+            .environment(\.navigationDestinationType, RideRoutePath.State.self)
             // Explicit rather than ambient: a reference recorded against whatever the host bundle
             // resolved would silently encode that instead of the token.
             .tint(Color.cyPrimary)

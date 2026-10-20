@@ -20,8 +20,8 @@ struct AppRouteSelectionTests {
 
     /// Pushes S20 for `route` on the Routes tab and taps Use This Route, as the rider would.
     private func useRoute(on store: TestStoreOf<AppFeature>) async {
-        await store.send(.routes(.path(.push(id: 0, state: .detail(RouteDetailFeature.State(summary: Self.route))))))
-        await store.send(.routes(.path(.element(id: 0, action: .detail(.useRouteButtonTapped)))))
+        await store.send(.routes(.path(.push(id: 0, state: .route(RouteDetailFeature.State(summary: Self.route))))))
+        await store.send(.routes(.path(.element(id: 0, action: .route(.useRouteButtonTapped)))))
         await store.receive(\.routes.delegate.useRoute, Self.route.reference)
     }
 
@@ -47,6 +47,22 @@ struct AppRouteSelectionTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await useRoute(on: store)
+        await store.finish()
+
+        #expect(store.state.startSheet?.route == Self.route.reference)
+        #expect(log.value == Self.begun)
+    }
+
+    /// S20 reached from a ride's Route section (#426) lives on the Rides stack, not the Routes one.
+    @Test("Use This Route on an S20 opened from the Rides tab opens the Start sheet on that route")
+    func useRouteFromTheRidesTabOpensTheStartSheet() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let store = StartSheetPresentationTests.makeStore(into: log)
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.rides(.path(.push(id: 0, state: .route(RouteDetailFeature.State(summary: Self.route))))))
+        await store.send(.rides(.path(.element(id: 0, action: .route(.useRouteButtonTapped)))))
+        await store.receive(\.rides.delegate.useRoute, Self.route.reference)
         await store.finish()
 
         #expect(store.state.startSheet?.route == Self.route.reference)

@@ -249,6 +249,7 @@ actor RidePersistenceActor {
             averageCadenceRPM: ride.averageCadenceRPM,
             maxCadenceRPM: ride.maxCadenceRPM,
             vehiclePassCount: ride.vehiclePassCount,
+            routeId: ride.routeId,
             routeName: ride.routeName
         )
     }
@@ -315,6 +316,7 @@ actor RidePersistenceActor {
             return try modelContext.fetch(descriptor).map {
                 RouteRideSummary(
                     rideId: $0.id,
+                    title: $0.title,
                     startedAt: $0.startedAt,
                     endedAt: $0.endedAt,
                     durationSeconds: $0.durationSeconds,

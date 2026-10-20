@@ -10,6 +10,9 @@ struct RideStats: Sendable, Equatable {
     var maxCadenceRPM: Int?
     /// Nil when no radar was paired, as on `Ride`.
     var vehiclePassCount: Int?
+    /// The route the ride followed, nil for a free ride — S15's link to S20 (#426). It can
+    /// outlive the route itself: deleting a route leaves `Ride.routeId` dangling.
+    var routeId: UUID? = nil
     /// The denormalized name of the route the ride followed, nil for a free ride — S10's Route
     /// row and default title (#249).
     var routeName: String? = nil

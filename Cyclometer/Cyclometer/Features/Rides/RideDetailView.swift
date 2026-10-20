@@ -2,7 +2,8 @@ import ComposableArchitecture
 import MapKit
 import SwiftUI
 
-/// S15 — Ride Detail, pushed from an S14 row as `RidesFeature.Path` state (#251).
+/// S15 — Ride Detail, pushed from an S14 row as `RideRoutePath` state (#251), or from S20's
+/// Previous Rides on the Routes tab (#426).
 ///
 /// The prototype's layout, now reading the persisted ride. This view owns only the loading,
 /// which a snapshot must not run; the screen itself is `RideDetailList`.
@@ -37,6 +38,18 @@ struct RideDetailList<MapRow: View>: View {
                     .frame(height: RideDetailView.mapHeight)
                     .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerMd, style: .continuous))
                     .listRowInsets(EdgeInsets())
+            }
+            // Gone for a free ride. A deleted route keeps its name, without a link (#426).
+            if let route = store.route {
+                Section("Route") {
+                    NavigationLink(state: RideRoutePath.State.route(RouteDetailFeature.State(summary: route))) {
+                        Text(route.name)
+                    }
+                }
+            } else if let routeName = store.stats?.routeName {
+                Section("Route") {
+                    Text(routeName)
+                }
             }
             Section("Elevation Profile") {
                 if let profile = store.elevationProfileMeters {
@@ -181,26 +194,41 @@ struct RideMapView: View {
 
 // MARK: - Previews
 
-#Preview("Ride Detail") {
+/// S15 already pushed on the Rides tab's own stack, as the app hosts it: the Route row is a
+/// `NavigationLink(state:)`, which reports "not presentable" in a plain `NavigationStack` (#426).
+private func rideDetailPreview(route: RouteSummary?) -> some View {
     let summary = RideListSummary(id: UUID(), title: "River Loop", startedAt: .now.addingTimeInterval(-86_400),
                                   distanceMeters: 36_050, durationSeconds: 4_712)
     return withDependencies {
         $0.defaultFileStorage = .inMemory
     } operation: {
-        NavigationStack {
-            RideDetailView(store: Store(initialState: RideDetailFeature.State(summary: summary)) {
-                RideDetailFeature()
-            } withDependencies: {
-                $0.persistenceClient = .mock(
-                    trackPoints: [summary.id: RideDetailPreview.trackPoints(rideId: summary.id)],
-                    rideStats: [summary.id: RideStats(averageSpeedMPS: 7.6, maxSpeedMPS: 12.4,
-                                                      averageCadenceRPM: 88, maxCadenceRPM: 109,
-                                                      vehiclePassCount: 1)],
-                    vehiclePassEvents: [summary.id: [RideDetailPreview.pass(rideId: summary.id)]]
-                )
-            })
-        }
+        var state = RidesFeature.State()
+        state.path.append(.ride(RideDetailFeature.State(summary: summary)))
+        return RidesNavigationStack(store: Store(initialState: state) {
+            RidesFeature()
+        } withDependencies: {
+            $0.persistenceClient = .mock(
+                trackPoints: [summary.id: RideDetailPreview.trackPoints(rideId: summary.id)],
+                rideStats: [summary.id: RideStats(averageSpeedMPS: 7.6, maxSpeedMPS: 12.4,
+                                                  averageCadenceRPM: 88, maxCadenceRPM: 109,
+                                                  vehiclePassCount: 1,
+                                                  routeId: route?.id, routeName: route?.name)],
+                vehiclePassEvents: [summary.id: [RideDetailPreview.pass(rideId: summary.id)]],
+                rides: [summary],
+                routes: route.map { [$0] } ?? [],
+                routeDetails: RouteDetail.previewRouteDetails
+            )
+        })
     }
+}
+
+#Preview("Ride Detail") {
+    rideDetailPreview(route: nil)
+}
+
+/// Ridden on "Summit Climb": the Route section links to its S20 (#426).
+#Preview("Ride Detail — on a route") {
+    rideDetailPreview(route: RouteSummary.previewRoutes[1])
 }
 
 /// A short synthetic ride for the preview only — a loop with a climb and a heart rate that

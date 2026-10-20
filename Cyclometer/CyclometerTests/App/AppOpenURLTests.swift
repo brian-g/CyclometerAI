@@ -26,7 +26,7 @@ struct AppOpenURLTests {
             var state = AppFeature.State()
             state.selectedTab = .settings
             state.routes.path.append(
-                .detail(RouteDetailFeature.State(summary: RouteSummary.previewRoutes[0]))
+                .route(RouteDetailFeature.State(summary: RouteSummary.previewRoutes[0]))
             )
             return state
         }

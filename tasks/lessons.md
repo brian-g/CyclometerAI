@@ -818,6 +818,16 @@ because the new row was in them.
 
 ---
 
+## Check the branch before every build, drive and commit (2026-10-19, #426)
+
+**What happened.** Partway through #426 the checkout moved from `feat/426-route-ride-links` to a stale local `main`,
+carrying the uncommitted work with it. Nothing in the session ran that checkout. A background build had already started
+against the wrong base before Brian caught it: "We're on the wrong branch now."
+
+**Rule.** Something outside the session (Xcode, another session) can switch the checkout. Run
+`git branch --show-current` at the start of each build, simulator drive and commit, not just when the branch is
+created. A test run on the wrong base proves nothing about the branch.
+
 ## Check a sensor API's delivery contract, not just that the stream is open (2026-10-19, #433)
 
 **What happened.** I built #433's fix on the premise that Core Motion's absolute altitude arrives once a second

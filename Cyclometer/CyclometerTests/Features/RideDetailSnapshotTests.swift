@@ -1,7 +1,8 @@
 import XCTest
 import SnapshotTesting
 import SwiftUI
-import ComposableArchitecture
+// For `navigationDestinationType`: see `screen(heartRate:stats:route:)`.
+@_spi(Internals) import ComposableArchitecture
 @testable import Cyclometer
 
 /// S15 — Ride Detail (#251), from seeded state.
@@ -32,7 +33,7 @@ final class RideDetailSnapshotTests: XCTestCase {
     // MARK: Harness
 
     /// Imperial units, and the state `.task` would have produced seeded directly.
-    private func screen(heartRate: Bool, stats: RideStats) -> some View {
+    private func screen(heartRate: Bool, stats: RideStats, route: RouteSummary? = nil) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
@@ -49,15 +50,21 @@ final class RideDetailSnapshotTests: XCTestCase {
             )
             state.heartRateSamples = RideDetailSeries.heartRate(points, sampleCount: RideDetailFeature.chartSampleCount)
             state.stats = stats
+            state.route = route
             return Store(initialState: state) {
                 RideDetailFeature()
             } withDependencies: {
                 $0.defaultFileStorage = storage
             }
         }
-        // No `NavigationStack`, so no title — the inline-title artefact `RouteDetailSnapshotTests`
-        // describes.
-        return RideDetailList(store: store, mapRow: Color.cyBgTertiary)
+        // A stack with its bar hidden, so no title — the inline-title artefact
+        // `RouteDetailSnapshotTests` describes — yet an undimmed Route link, with the type its
+        // store-powered stack would set (#426); that suite explains both.
+        return NavigationStack {
+            RideDetailList(store: store, mapRow: Color.cyBgTertiary)
+                .toolbar(.hidden, for: .navigationBar)
+        }
+            .environment(\.navigationDestinationType, RideRoutePath.State.self)
             .tint(Color.cyPrimary)
             .environment(\.locale, Locale(identifier: "en_US"))
     }
@@ -99,5 +106,22 @@ final class RideDetailSnapshotTests: XCTestCase {
     func testRideDetailGPSOnly() {
         assertBothSchemes(screen(heartRate: false, stats: RideStats(averageSpeedMPS: 7.6, maxSpeedMPS: 12.4)),
                           named: "gps-only")
+    }
+
+    /// Ridden on a saved route: a Route section under the map, linking to S20 (#426).
+    func testRideDetailOnRoute() {
+        let route = RouteSummary.previewRoutes[1]
+        assertBothSchemes(screen(heartRate: true, stats: RideStats(
+            averageSpeedMPS: 7.6, maxSpeedMPS: 12.4, averageCadenceRPM: 88, maxCadenceRPM: 109,
+            routeId: route.id, routeName: route.name
+        ), route: route), named: "on-route")
+    }
+
+    /// The route has since been deleted: its name stays, with nothing to open (#426).
+    func testRideDetailDeletedRoute() {
+        assertBothSchemes(screen(heartRate: true, stats: RideStats(
+            averageSpeedMPS: 7.6, maxSpeedMPS: 12.4, averageCadenceRPM: 88, maxCadenceRPM: 109,
+            routeId: UUID(), routeName: "Gone Loop"
+        )), named: "deleted-route")
     }
 }

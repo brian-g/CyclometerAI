@@ -180,6 +180,63 @@ struct RideDetailFeatureTests {
         #expect(store.state.stats == nil)
         #expect(store.state.trackSegments == RideMapThumbnail.drawableSegments(points))
     }
+
+    // MARK: Route (#426)
+
+    @Test("a ride on a saved route loads that route, for S15's link to S20")
+    func aRideOnASavedRouteLoadsTheRoute() async {
+        let route = RouteSummary.previewRoutes[1]
+        let stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11, routeId: route.id, routeName: route.name)
+        let store = makeStore(persistenceClient: .mock(
+            rideStats: [Self.summary.id: stats],
+            routes: [route]
+        ))
+
+        await load(store)
+
+        #expect(store.state.stats == stats)
+        #expect(store.state.route == route)
+    }
+
+    @Test("a ride whose route was deleted keeps its route's name and loads no route")
+    func aDeletedRouteKeepsTheNameOnly() async {
+        let stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11, routeId: UUID(), routeName: "Gone Loop")
+        // No scripted route: `fetchRouteSummary` comes back nil, as live does for a dangling id.
+        let store = makeStore(persistenceClient: .mock(rideStats: [Self.summary.id: stats]))
+
+        await load(store)
+
+        #expect(store.state.stats?.routeName == "Gone Loop")
+        #expect(store.state.route == nil)
+    }
+
+    @Test("a free ride never asks for a route")
+    func aFreeRideReadsNoRoute() async {
+        var client = PersistenceClient.mock(rideStats: [Self.summary.id: Self.stats])
+        client.fetchRouteSummary = { id in
+            Issue.record("fetchRouteSummary(\(id)) for a ride with no route")
+            return nil
+        }
+        let store = makeStore(persistenceClient: client)
+
+        await load(store)
+
+        #expect(store.state.stats == Self.stats)
+        #expect(store.state.route == nil)
+    }
+
+    @Test("a route read that fails still shows the stats")
+    func aFailedRouteReadStillShowsStats() async {
+        let stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11, routeId: UUID(), routeName: "River Loop")
+        var client = PersistenceClient.mock(rideStats: [Self.summary.id: stats])
+        client.fetchRouteSummary = { _ in throw PersistenceError.batchInsertFailed }
+        let store = makeStore(persistenceClient: client)
+
+        await load(store)
+
+        #expect(store.state.stats == stats)
+        #expect(store.state.route == nil)
+    }
 }
 
 @Suite("RideDetailSeries")

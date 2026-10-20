@@ -41,13 +41,13 @@ struct RoutesNavigationTests {
         // is what is asserted.
         store.exhaustivity = .off
 
-        await store.send(.path(.push(id: 0, state: .detail(RouteDetailFeature.State(summary: route)))))
-        await store.send(.path(.element(id: 0, action: .detail(.task))))
+        await store.send(.path(.push(id: 0, state: .route(RouteDetailFeature.State(summary: route)))))
+        await store.send(.path(.element(id: 0, action: .route(.task))))
         await store.finish()
         // `finish()` lets the reads land; skipping is what applies them (`RouteDetailFeatureTests`).
         await store.skipReceivedActions()
 
-        guard case let .detail(pushed)? = store.state.path[id: 0] else {
+        guard case let .route(pushed)? = store.state.path[id: 0] else {
             Issue.record("S20 is not on the stack")
             return
         }
@@ -61,11 +61,45 @@ struct RoutesNavigationTests {
         let route = Self.route
         let store = makeStore()
 
-        await store.send(.path(.push(id: 0, state: .detail(RouteDetailFeature.State(summary: route))))) {
-            $0.path[id: 0] = .detail(RouteDetailFeature.State(summary: route))
+        await store.send(.path(.push(id: 0, state: .route(RouteDetailFeature.State(summary: route))))) {
+            $0.path[id: 0] = .route(RouteDetailFeature.State(summary: route))
         }
-        await store.send(.path(.element(id: 0, action: .detail(.useRouteButtonTapped))))
-        await store.receive(\.path[id: 0].detail.delegate.useRoute, route.reference)
+        await store.send(.path(.element(id: 0, action: .route(.useRouteButtonTapped))))
+        await store.receive(\.path[id: 0].route.delegate.useRoute, route.reference)
         await store.receive(\.delegate.useRoute, route.reference)
+    }
+
+    // MARK: S20 → S15 (#426)
+
+    @Test("a Previous Rides row opens S15 on that ride, under its own title")
+    func aPreviousRideSeedsRideDetail() {
+        var ride = RouteRideSummary.previewRides[0]
+        ride.title = "Saturday Climb"
+
+        let summary = RideListSummary(ride)
+
+        #expect(summary == RideListSummary(id: ride.rideId, title: "Saturday Climb", startedAt: ride.startedAt,
+                                           distanceMeters: ride.distanceMeters, durationSeconds: ride.durationSeconds))
+    }
+
+    @Test("a ride opened from S20 is pushed on the Routes stack and loads that ride")
+    func aRideOpenedFromRouteDetailLoadsThroughTheStack() async {
+        let route = Self.route
+        let ride = RideListSummary(RouteRideSummary.previewRides[0])
+        let stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11, routeId: route.id, routeName: route.name)
+        let store = makeStore(persistenceClient: .mock(rideStats: [ride.id: stats], routes: [route]))
+        // S15's Health read estimates max HR from age on this date.
+        store.dependencies.date = .constant(Date(timeIntervalSince1970: 1_750_000_000))
+        store.exhaustivity = .off
+
+        await store.send(.path(.push(id: 0, state: .route(RouteDetailFeature.State(summary: route)))))
+        await store.send(.path(.push(id: 1, state: .ride(RideDetailFeature.State(summary: ride)))))
+        await store.send(.path(.element(id: 1, action: .ride(.task))))
+        await store.finish()
+        await store.skipReceivedActions()
+
+        #expect(store.state.path[id: 1, case: \.ride]?.summary == ride)
+        #expect(store.state.path[id: 1, case: \.ride]?.stats == stats)
+        #expect(store.state.path[id: 1, case: \.ride]?.route == route)
     }
 }

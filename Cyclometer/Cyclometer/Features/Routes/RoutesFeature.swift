@@ -85,10 +85,10 @@ struct RoutesFeature {
 
         @Presents var alert: AlertState<Action.Alert>?
 
-        /// The tab's navigation stack: S20, pushed from a row (#195). A stack rather than a
-        /// `Scope`d child because S20 is one screen per route, and `NavigationLink(state:)` is
-        /// what tells the reducer which one was tapped.
-        var path = StackState<Path.State>()
+        /// The tab's navigation stack: S20, pushed from a row (#195), and S15 from S20's Previous
+        /// Rides (#426). A stack rather than a `Scope`d child because S20 is one screen per route,
+        /// and `NavigationLink(state:)` is what tells the reducer which one was tapped.
+        var path = StackState<RideRoutePath.State>()
 
         var unitSystem: UnitSystem { preferences.preferredUnit }
 
@@ -155,7 +155,7 @@ struct RoutesFeature {
         case useRouteSwiped(RouteReference)
 
         case alert(PresentationAction<Alert>)
-        case path(StackActionOf<Path>)
+        case path(StackActionOf<RideRoutePath>)
         case delegate(Delegate)
 
         enum Alert: Equatable {}
@@ -166,12 +166,6 @@ struct RoutesFeature {
             /// which owns the Start sheet.
             case useRoute(RouteReference)
         }
-    }
-
-    /// What the Routes tab can push (#195).
-    @Reducer(state: .equatable, action: .equatable)
-    enum Path {
-        case detail(RouteDetailFeature)
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
@@ -252,8 +246,8 @@ struct RoutesFeature {
                 }
                 // An open S20 was seeded with a copy of the summary, so it is told too.
                 for elementID in state.path.ids {
-                    if state.path[id: elementID, case: \.detail]?.summary.id == id {
-                        state.path[id: elementID, case: \.detail]?.summary.surface = surface
+                    if state.path[id: elementID, case: \.route]?.summary.id == id {
+                        state.path[id: elementID, case: \.route]?.summary.surface = surface
                     }
                 }
                 return .none
@@ -469,7 +463,7 @@ struct RoutesFeature {
             case .useRouteSwiped(let route):
                 return .send(.delegate(.useRoute(route)))
 
-            case .path(.element(id: _, action: .detail(.delegate(.useRoute(let route))))):
+            case .path(.element(id: _, action: .route(.delegate(.useRoute(let route))))):
                 return .send(.delegate(.useRoute(route)))
 
             case .alert, .path, .delegate:

@@ -49,16 +49,16 @@ struct RidesFeatureTests {
             $0.date = .constant(Date(timeIntervalSince1970: 1_750_000_000))
         }
 
-        await store.send(.path(.push(id: 0, state: .detail(RideDetailFeature.State(summary: ride))))) {
-            $0.path[id: 0] = .detail(RideDetailFeature.State(summary: ride))
+        await store.send(.path(.push(id: 0, state: .ride(RideDetailFeature.State(summary: ride))))) {
+            $0.path[id: 0] = .ride(RideDetailFeature.State(summary: ride))
         }
         store.exhaustivity = .off
-        await store.send(.path(.element(id: 0, action: .detail(.task))))
+        await store.send(.path(.element(id: 0, action: .ride(.task))))
         await store.finish()
         await store.skipReceivedActions()
 
-        #expect(store.state.path[id: 0, case: \.detail]?.stats == stats)
-        #expect(store.state.path[id: 0, case: \.detail]?.summary == ride)
+        #expect(store.state.path[id: 0, case: \.ride]?.stats == stats)
+        #expect(store.state.path[id: 0, case: \.ride]?.summary == ride)
     }
 
     /// The swipe action's whole job (#261). Deleting is optimistic: the row leaves
@@ -405,5 +405,28 @@ struct RidesFeatureTests {
         // The first run never saves: it was cancelled with a render still hanging. One
         // save, from the second run, rather than one from each.
         #expect(saves.value == 1)
+    }
+
+    // MARK: S15 → S20 (#426)
+
+    /// S20 pushed from a ride's Route section sits on the Rides stack, so its Use Route has to
+    /// leave through this feature, as it leaves `RoutesFeature`, to reach `AppFeature`.
+    @Test("Use Route on an S20 opened from a ride leaves the stack as the Rides feature's delegate")
+    func useRouteFromARidesRouteBubblesOut() async {
+        let ride = Self.summary()
+        let route = RouteSummary.previewRoutes[1]
+        let store = TestStore(initialState: RidesFeature.State(rides: [ride])) {
+            RidesFeature()
+        }
+
+        await store.send(.path(.push(id: 0, state: .ride(RideDetailFeature.State(summary: ride))))) {
+            $0.path[id: 0] = .ride(RideDetailFeature.State(summary: ride))
+        }
+        await store.send(.path(.push(id: 1, state: .route(RouteDetailFeature.State(summary: route))))) {
+            $0.path[id: 1] = .route(RouteDetailFeature.State(summary: route))
+        }
+        await store.send(.path(.element(id: 1, action: .route(.useRouteButtonTapped))))
+        await store.receive(\.path[id: 1].route.delegate.useRoute, route.reference)
+        await store.receive(\.delegate.useRoute, route.reference)
     }
 }

@@ -5,7 +5,7 @@ import CoreLocation
 import UniformTypeIdentifiers
 
 /// S19 — Route Management. A row pushes S20, `RouteDetailView`, onto the tab's navigation stack
-/// as `RoutesFeature.Path` state (#195).
+/// as `RideRoutePath` state (#195).
 struct RoutesView: View {
     @Bindable var store: StoreOf<RoutesFeature>
     /// Start Ride is the global toolbar affordance every tab opts into, but items in
@@ -149,7 +149,7 @@ struct RoutesView: View {
                 ForEach(routes) { route in
                     // Seeded with the summary the row already holds, so S20 has its name,
                     // distance and climb from its first frame and reads only the geometry.
-                    NavigationLink(state: RoutesFeature.Path.State.detail(RouteDetailFeature.State(summary: route))) {
+                    NavigationLink(state: RideRoutePath.State.route(RouteDetailFeature.State(summary: route))) {
                         RouteRow(route: route, thumbnail: store.thumbnails[route.id],
                                  unitSystem: store.unitSystem)
                     }
@@ -318,8 +318,8 @@ struct RoutesView: View {
 
 // MARK: - Navigation stack
 
-/// The Routes tab's navigation stack: S19 at the root, S20 pushed as `RoutesFeature.Path` state
-/// (#195). One definition for the app, the previews and the snapshot tests, because a
+/// The Routes tab's navigation stack: S19 at the root, S20 pushed as `RideRoutePath` state
+/// (#195), and S15 from S20's Previous Rides (#426). One definition for the app, the previews and the snapshot tests, because a
 /// `NavigationLink(state:)` row outside a store-powered stack reports an issue — a failure under
 /// XCTest — and cannot push.
 struct RoutesNavigationStack: View {
@@ -333,10 +333,7 @@ struct RoutesNavigationStack: View {
         NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
             RoutesView(store: store, isStartRideHidden: isStartRideHidden, onStartRide: onStartRide)
         } destination: { pathStore in
-            switch pathStore.case {
-            case .detail(let detailStore):
-                RouteDetailView(store: detailStore, isUseRouteHidden: isStartRideHidden)
-            }
+            RideRoutePathView(store: pathStore, isUseRouteHidden: isStartRideHidden)
         }
     }
 }

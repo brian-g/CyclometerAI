@@ -145,11 +145,12 @@ extension RouteDetail {
 /// `fetchRouteRides` returns. Fixed dates rather than `.now`, so a snapshot reference recorded
 /// today still matches next month; one ride runs past an hour so both elapsed formats render.
 extension RouteRideSummary {
-    private static func preview(_ suffix: String, daysAgo: Double, seconds: TimeInterval,
+    private static func preview(_ suffix: String, title: String, daysAgo: Double, seconds: TimeInterval,
                                 meters: Double) -> RouteRideSummary {
         let startedAt = Date(timeIntervalSince1970: 1_800_000_000 - daysAgo * 86_400)
         return RouteRideSummary(
             rideId: UUID(uuidString: "00000000-0000-0000-0000-0000000000\(suffix)")!,
+            title: title,
             startedAt: startedAt,
             endedAt: startedAt.addingTimeInterval(seconds),
             durationSeconds: seconds,
@@ -158,8 +159,8 @@ extension RouteRideSummary {
     }
 
     static let previewRides: [RouteRideSummary] = [
-        preview("A1", daysAgo: 2, seconds: 4_712, meters: 36_050),
-        preview("A2", daysAgo: 16, seconds: 4_868, meters: 36_050),
-        preview("A3", daysAgo: 37, seconds: 3_287, meters: 24_900)
+        preview("A1", title: "River Loop", daysAgo: 2, seconds: 4_712, meters: 36_050),
+        preview("A2", title: "River Loop", daysAgo: 16, seconds: 4_868, meters: 36_050),
+        preview("A3", title: "River Loop Short Cut", daysAgo: 37, seconds: 3_287, meters: 24_900)
     ]
 }
