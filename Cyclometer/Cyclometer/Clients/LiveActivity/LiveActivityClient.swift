@@ -23,6 +23,19 @@ struct LiveActivityClient {
     var end: @Sendable () async -> Void
     /// The rider's system setting for this app's Live Activities.
     var isEnabled: @Sendable () -> Bool
+    /// Returns when the activity showing ends (#412). Meant for an end outside the app, but `end`
+    /// itself reads as `.dismissed` too, so the caller tells them apart. `.ended` at once when none
+    /// is showing. Nil when cancelled, or when the state updates finish without an end.
+    var ended: @Sendable () async -> LiveActivityEnd?
+}
+
+/// How an activity ended outside the app (#412). ActivityKit gives no reason, only the state.
+enum LiveActivityEnd: Equatable, Sendable {
+    /// Still on the Lock Screen but no longer updated: the system's 8-hour limit. A new one can
+    /// be requested.
+    case ended
+    /// Gone from the screen: the rider swiped it away, or chose "Don't Allow" at iOS's prompt.
+    case dismissed
 }
 
 extension LiveActivityClient {
@@ -63,7 +76,22 @@ extension LiveActivityClient: DependencyKey {
                 await activity.end(nil, dismissalPolicy: .immediate)
             }
         },
-        isEnabled: { ActivityAuthorizationInfo().areActivitiesEnabled }
+        isEnabled: { ActivityAuthorizationInfo().areActivitiesEnabled },
+        ended: {
+            // `start` ended every other ride activity, so this is the one it left showing. None
+            // showing means it has gone already; the next foreground's `start` recovers.
+            guard let activity = Activity<RideActivityAttributes>.activities
+                .first(where: { [.active, .stale].contains($0.activityState) }) else { return .ended }
+            for await state in activity.activityStateUpdates {
+                logger.info("Live Activity state: \(String(describing: state), privacy: .public)")
+                switch state {
+                case .ended: return .ended
+                case .dismissed: return .dismissed
+                default: continue
+                }
+            }
+            return nil
+        }
     )
 
     /// Switched off, so a ride under test shows no activity unless the test supplies a client.
@@ -71,7 +99,8 @@ extension LiveActivityClient: DependencyKey {
         start: { _, _ in false },
         update: { _ in },
         end: { },
-        isEnabled: { false }
+        isEnabled: { false },
+        ended: { nil }
     )
 
     /// Previews never reach ActivityKit.

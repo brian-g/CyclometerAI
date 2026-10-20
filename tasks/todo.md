@@ -305,3 +305,46 @@ out, so real climb across a gap is kept. Timing and sleep don't matter, and slow
 - **Open (not changed):** a ride killed mid-fault resumes on the wrong value and then absorbs the step back; a real
   >30 m correction after trust is rejected. Two concurrent CMAltimeter streams are device-only.
 - **Full suite.** `CyclometerTests`: 2069 passed, 0 failed (TEST SUCCEEDED).
+
+---
+
+# #412 — Live Activity: notice when the system ends the activity
+
+Plan: /Users/brian/.claude/plans/toasty-chasing-abelson.md
+Branch: `feat/412-live-activity-system-end`
+
+- [x] 1. Spike on the simulator: state transitions for a swipe-away and for "Don't Allow" (stop if a swipe passes `.ended`)
+- [x] 2. `LiveActivityClient`: `LiveActivityEnd`, `ended()` (live: first `.ended`/`.dismissed`, logged), test value
+- [x] 3. `LiveActivityFeature`: `Phase.dismissed`, `.ended(_)`, wait started on `.started(true)`, cancelled before own end
+- [x] 4. Tests: feature (system end, dismissed, late signal), live client (`.default` → ended, `.immediate` → dismissed), mutation check
+- [x] 5. PRD §8.10 + changelog
+- [ ] 6. Full `CyclometerTests`; delete the throwaway UI test
+
+## Review
+
+- **Spike, iOS 27 simulator.** A throwaway launch hook plus a Lock Screen UI test, both deleted. A swipe-away and
+  "Don't Allow" each go `active → dismissed` directly, never through `.ended`. After the swipe `isEnabled()` stays
+  true; after "Don't Allow" it's false by the time the state arrives. `activityStateUpdates` emits the current
+  state (`active`) first.
+- **Client.** `ended()` waits on the showing activity's `activityStateUpdates` and returns `.ended` (the 8-hour
+  limit, still on the Lock Screen) or `.dismissed` (swipe-away, "Don't Allow"). It logs each state at info level
+  for #316's device check.
+- **Reducer.** `.started(true)` starts the wait (`cancelInFlight`, one at a time). `.ended` → `.notShowing`,
+  so the existing foreground retry requests again. `.dismissed` → new `Phase.dismissed`, which `start` and the
+  tick both skip.
+- **Changed from the plan.** On Finish, `ifLet` cancels the wait (`finishCancelsTheWait` proves it), so there's no
+  explicit cancel there. S12's off does cancel it, as planned (restored in code review): `cancelInFlight` cancels
+  only once the new wait's task runs, which leaves a gap for the old wait's dismissal to land on `.showing`.
+- **Code review, asked.** "Don't Allow" no longer makes `.dismissed` permanent. A dismissal with `isEnabled()` false
+  goes to `.notShowing`, so turning Live Activities back on in iOS Settings mid-ride brings the card back on the next
+  foreground (`dontAllowThenReenabledComesBack`). A swipe-away (still enabled) stays `.dismissed`.
+- **Tests.** 6 new `LiveActivityFeatureTests` and 2 new `LiveActivityClientTests` (real ActivityKit: `.default` end →
+  `.ended`, `.immediate` → `.dismissed`). Mutation check: each of these turns a test red when removed: the phase guard,
+  the dismissed mapping, the `isEnabled()` condition, and (in code review) the cancel on S12 off.
+- **Full suite.** `CyclometerTests` without `MapWidgetAccessibilityTests` and `PersistenceClientTests`: 1804 passed,
+  1 failed. The failure, `LocationOneShotTests/oneShotDoesNotDisturbAnActiveStream`, is a timing race outside this
+  diff (4.6 s under load; 3/3 green alone at 0.3 s). `PersistenceClientTests` alone: 47 passed.
+  `MapWidgetAccessibilityTests` hung twice in `Host.settle()` on a live MapKit view, as CI's skip comment says.
+  It was skipped, not run.
+- **Not verified.** The full reducer on a real ride in the simulator (only the client was driven); the 8-hour end
+  itself; device behaviour (#316).
