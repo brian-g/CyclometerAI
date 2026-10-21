@@ -287,7 +287,7 @@ struct CadenceFeatureTests {
         #expect(store.state.coastingSeconds == 3)
     }
 
-    @Test("Time is credited against the rider's S12 cadence zones, read live (#79)")
+    @Test("Time is kept per whole rpm and sorted into the rider's S12 zones when read (#79)")
     func creditsAgainstConfiguredZones() async throws {
         let clock = LockIsolated(Self.testDate)
         let custom = try #require(CadenceZoneBoundaries(lowerBoundsRPM: [75, 90, 100, 120]))
@@ -301,14 +301,17 @@ struct CadenceFeatureTests {
 
             await store.send(.cadenceReceived(72))    // Z1 under the custom zones, Z2 by default
             advance(clock, by: 2)
-            await store.send(.cadenceReceived(72))    // credits 2s to zone 1
+            await store.send(.cadenceReceived(71.6))  // credits 2s to 72 rpm
+            #expect(store.state.secondsByRPM == [72: 2])
             #expect(store.state.zoneSeconds == [.zone1: 2])
 
-            // A Settings change mid-ride applies from the next reading on.
+            // A Settings change mid-ride re-sorts the time already recorded, as HR's does.
             $preferences.withLock { $0.cadenceZones = .default }
+            #expect(store.state.zoneSeconds == [.zone2: 2])
             advance(clock, by: 1)
-            await store.send(.cadenceReceived(72))    // credits 1s to zone 2
-            #expect(store.state.zoneSeconds == [.zone1: 2, .zone2: 1])
+            await store.send(.cadenceReceived(72))    // credits 1s more to 72 rpm (W5 showed "72")
+            #expect(store.state.secondsByRPM == [72: 3])
+            #expect(store.state.zoneSeconds == [.zone2: 3])
         }
     }
 
@@ -325,7 +328,7 @@ struct CadenceFeatureTests {
         // Non-zero, unlike the default, so the live-value check below can fail.
         await store.send(.cadenceReceived(75))
 
-        #expect(store.state.zoneSeconds.isEmpty)
+        #expect(store.state.secondsByRPM.isEmpty)
         #expect(store.state.coastingSeconds == 0)
         // Nor do the readings reach the average or max (#379, PRD: "all sensor recording
         // suspended") — but the live value and the watermark still follow the sensor.

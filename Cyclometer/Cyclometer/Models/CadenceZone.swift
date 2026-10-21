@@ -61,9 +61,21 @@ struct CadenceZoneBoundaries: Codable, Equatable, Sendable {
         self.lowerBoundsRPM = lowerBounds
     }
 
-    /// The zone a pedalling reading falls into. Below Z2 is Z1, whatever the floor.
+    /// The zone a pedalling reading falls into, judged on the whole rpm W5 shows for it: a
+    /// 69.6 rpm reading reads "70", so it counts toward the zone S12 lists 70 in. Below Z2 is
+    /// Z1, whatever the floor.
     func zone(forRPM rpm: Double) -> CadenceZone {
-        CadenceZone.allCases.dropFirst().last { rpm >= Double(lowerBound(of: $0)) } ?? .zone1
+        let shown = rpm.rounded()
+        return CadenceZone.allCases.dropFirst().last { shown >= Double(lowerBound(of: $0)) } ?? .zone1
+    }
+
+    /// Seconds in each zone from a tally of seconds at each whole rpm, sorted against these
+    /// boundaries when read, as HR's zones are (#284) — so a zone change re-sorts time already
+    /// recorded. A zone with no time is left out.
+    func zoneSeconds(_ secondsByRPM: [Int: TimeInterval]) -> [CadenceZone: TimeInterval] {
+        secondsByRPM.reduce(into: [:]) { zones, entry in
+            zones[zone(forRPM: Double(entry.key)), default: 0] += entry.value
+        }
     }
 
     /// The lowest whole rpm in `zone`, as S12 shows it.

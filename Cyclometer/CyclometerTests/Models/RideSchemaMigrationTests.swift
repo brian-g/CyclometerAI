@@ -205,7 +205,7 @@ struct RideSchemaMigrationTests {
             #expect(ride.cadenceSampleCount == 0)
 
             // #340's cadence tallies: a ride from before them reads as having none.
-            #expect(ride.cadenceZoneSeconds.isEmpty)
+            #expect(ride.cadenceSecondsByRPM.isEmpty)
             #expect(ride.cadenceCoastingSeconds == 0)
 
             // #177's thumbnail: a ride recorded before it has none, and S14 shows its
@@ -264,12 +264,14 @@ struct RideSchemaMigrationTests {
             let ride = try #require(try context.fetch(FetchDescriptor<Ride>()).first)
             #expect(ride.id == rideId)
             #expect(ride.distanceMeters == 12_400)
-            #expect(ride.cadenceZoneSeconds.isEmpty)
+            #expect(ride.cadenceSecondsByRPM.isEmpty)
             #expect(ride.cadenceCoastingSeconds == 60)
 
-            ride.cadenceZoneSeconds = [.zone5: 30]
+            ride.cadenceSecondsByRPM = [115: 30]
             try context.save()
-            #expect(try context.fetch(FetchDescriptor<Ride>()).first?.cadenceZoneSeconds == [.zone5: 30])
+            // A fresh context reads the store, not the object `context` still holds in memory.
+            let reread = ModelContext(context.container)
+            #expect(try reread.fetch(FetchDescriptor<Ride>()).first?.cadenceSecondsByRPM == [115: 30])
         }
     }
 
@@ -339,14 +341,14 @@ struct RideSchemaMigrationTests {
             let context = try ModelContext(openStore(at: url))
             let existing = try #require(context.fetch(FetchDescriptor<Ride>()).first)
             existing.cadenceSampleCount = 42
-            existing.cadenceZone3Seconds = 90
+            existing.cadenceSecondsByRPM = [90: 90]
 
             context.insert(Ride())
             try context.save()
 
             let rides = try context.fetch(FetchDescriptor<Ride>())
             #expect(rides.count == 2)
-            #expect(rides.contains { $0.cadenceSampleCount == 42 && $0.cadenceZone3Seconds == 90 })
+            #expect(rides.contains { $0.cadenceSampleCount == 42 && $0.cadenceSecondsByRPM == [90: 90] })
         }
     }
 }

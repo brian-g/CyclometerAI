@@ -32,7 +32,7 @@ final class SettingsSnapshotTests: XCTestCase {
     /// first screen, such as Cadence Zones (#79), are on the reference too.
     private lazy var fullHeightDevice = ViewImageConfig(
         safeArea: device.safeArea,
-        size: CGSize(width: 402, height: 2_200),
+        size: CGSize(width: device.size!.width, height: 2_200),
         traits: device.traits
     )
 

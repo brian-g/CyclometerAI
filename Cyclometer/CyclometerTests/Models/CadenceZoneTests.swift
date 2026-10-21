@@ -10,6 +10,8 @@ struct CadenceZoneTests {
         (1.0, CadenceZone.zone1),   // below Z1's 60 rpm floor still counts as Z1, as HR below resting does
         (59.0, .zone1),
         (69.0, .zone1),
+        (69.4, .zone1),             // W5 shows 69
+        (69.6, .zone2),             // W5 shows 70, so it counts where S12 lists 70
         (70.0, .zone2),             // a zone's lower bound is inclusive
         (84.0, .zone2),
         (85.0, .zone3),
@@ -42,6 +44,17 @@ struct CadenceZoneTests {
     ])
     func invalidBoundaries(lowerBounds: [Int]) {
         #expect(CadenceZoneBoundaries(lowerBoundsRPM: lowerBounds) == nil)
+    }
+
+    @Test("A per-rpm tally sorts into zones, leaving out zones with no time")
+    func zoneSecondsFromTally() throws {
+        let tally: [Int: TimeInterval] = [40: 3, 69: 2, 70: 1.5, 84: 4, 110: 6]
+        #expect(CadenceZoneBoundaries.default.zoneSeconds(tally) == [.zone1: 5, .zone2: 5.5, .zone5: 6])
+
+        // The same tally against other zones: the time moves with the boundaries.
+        let custom = try #require(CadenceZoneBoundaries(lowerBoundsRPM: [75, 90, 100, 120]))
+        #expect(custom.zoneSeconds(tally) == [.zone1: 6.5, .zone2: 4, .zone4: 6])
+        #expect(CadenceZoneBoundaries.default.zoneSeconds([:]).isEmpty)
     }
 
     @Test("Display ranges: Z1 from its floor, inclusive uppers, Z5 open-ended")

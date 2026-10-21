@@ -1303,7 +1303,7 @@ struct ActiveRideFeature {
             speedSampleCount: state.speedSampleCount,
             hrSampleCount: state.hrSampleCount,
             cadenceSampleCount: state.cadence.pedalingSampleCount,
-            cadenceZoneSeconds: state.cadence.zoneSeconds,
+            cadenceSecondsByRPM: state.cadence.secondsByRPM,
             cadenceCoastingSeconds: state.cadence.coastingSeconds,
             trackSegmentIndex: state.trackSegmentIndex,
             route: state.route,
@@ -1502,7 +1502,7 @@ extension ActiveRideFeature.State {
         // W5's detail sheet (#340): without these its zone and coasting times would cover
         // only the post-resume stretch, while the Avg/Max restored above reach back past the
         // kill. Both keep accumulating from here, over recorded time only (#379).
-        cadence.zoneSeconds = summary.cadenceZoneSeconds
+        cadence.secondsByRPM = summary.cadenceSecondsByRPM
         cadence.coastingSeconds = summary.cadenceCoastingSeconds
         // Nil stays nil: a ride that had no radar before the kill still has none (#285).
         vehiclePassCount = summary.vehiclePassCount

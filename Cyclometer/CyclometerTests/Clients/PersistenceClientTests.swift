@@ -296,7 +296,7 @@ struct PersistenceClientTests {
             speedSampleCount: 900,
             hrSampleCount: 850,
             cadenceSampleCount: 700,
-            cadenceZoneSeconds: [.zone1: 120, .zone2: 300, .zone3: 900, .zone4: 45, .zone5: 20],
+            cadenceSecondsByRPM: [64: 120, 78: 300, 90: 900, 101: 45, 118: 20],
             cadenceCoastingSeconds: 240
         )
         try await client.updateRideSummary(update)
@@ -316,11 +316,7 @@ struct PersistenceClientTests {
         #expect(ride.speedSampleCount == 900)
         #expect(ride.hrSampleCount == 850)
         #expect(ride.cadenceSampleCount == 700)
-        #expect(ride.cadenceZone1Seconds == 120)
-        #expect(ride.cadenceZone2Seconds == 300)
-        #expect(ride.cadenceZone3Seconds == 900)
-        #expect(ride.cadenceZone4Seconds == 45)
-        #expect(ride.cadenceZone5Seconds == 20)
+        #expect(ride.cadenceSecondsByRPM == [64: 120, 78: 300, 90: 900, 101: 45, 118: 20])
         #expect(ride.cadenceCoastingSeconds == 240)
     }
 
@@ -745,9 +741,9 @@ struct PersistenceClientTests {
             speedSampleCount: 120,
             hrSampleCount: 90,
             cadenceSampleCount: 60,
-            // A zone with no time is absent, as in the live tally (#340): the round trip
-            // must not hand it back as an explicit 0.
-            cadenceZoneSeconds: [.zone2: 14, .zone3: 52.5],
+            // Fractional seconds survive the round trip (#79): the live tally credits the
+            // real interval between irregular CSC notifications.
+            cadenceSecondsByRPM: [78: 14, 90: 52.5],
             cadenceCoastingSeconds: 21
         )
         try await client.updateRideSummary(checkpoint)

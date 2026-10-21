@@ -42,9 +42,11 @@ struct CadenceFeature {
         /// Running sum of pedalling readings, paired with `pedalingSampleCount`.
         var cadenceSum: Double = 0
         var maxCadenceRPM: Int = 0
-        /// Seconds spent pedalling (rpm > 0) in each zone. Accumulated as time, not
-        /// sample counts, because notifications arrive at irregular intervals.
-        var zoneSeconds: [CadenceZone: TimeInterval] = [:]
+        /// Seconds spent pedalling (rpm > 0) at each whole rpm, the reading W5 shows. Kept per
+        /// rpm rather than per zone (#79) so `zoneSeconds` sorts it against the zones in effect
+        /// when read, as `HeartRateSecondsTally` does for HR. Accumulated as time, not sample
+        /// counts, because notifications arrive at irregular intervals.
+        var secondsByRPM: [Int: TimeInterval] = [:]
         /// Seconds spent coasting (rpm == 0).
         var coastingSeconds: TimeInterval = 0
         /// Whether the ride is actively recording. Driven by `ActiveRideFeature` from its
@@ -53,9 +55,14 @@ struct CadenceFeature {
         /// average or max (#379, PRD: "all sensor recording suspended"). The live reading
         /// and the watermark still follow it.
         var isRecording = false
-        /// The rider's S12 cadence zones (#79), read on every reading so a Settings change
-        /// applies to the ride in progress. Time already credited stays where it was.
+        /// The rider's S12 cadence zones (#79). A Settings change re-sorts the whole ride's
+        /// time, the time before it included.
         @SharedReader(.appPreferences) var preferences
+
+        /// Seconds pedalling in each zone, from `secondsByRPM` against the rider's zones.
+        var zoneSeconds: [CadenceZone: TimeInterval] {
+            preferences.cadenceZones.zoneSeconds(secondsByRPM)
+        }
 
         /// Average cadence over pedalling time: mean of non-zero rpm readings.
         var averageCadenceRPM: Int {
@@ -118,7 +125,7 @@ struct CadenceFeature {
                     let elapsed = now.timeIntervalSince(previous.time)
                     if elapsed > 0, elapsed <= Self.maxCreditedInterval {
                         if previous.rpm > 0 {
-                            state.zoneSeconds[state.preferences.cadenceZones.zone(forRPM: previous.rpm), default: 0] += elapsed
+                            state.secondsByRPM[Int(previous.rpm.rounded()), default: 0] += elapsed
                         } else {
                             state.coastingSeconds += elapsed
                         }

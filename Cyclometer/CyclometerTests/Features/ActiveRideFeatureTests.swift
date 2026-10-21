@@ -1264,7 +1264,7 @@ struct ActiveRideFeatureStateMachineTests {
     func checkpointCarriesCadenceTallies() async throws {
         let (written, write) = AsyncStream<RideSummaryUpdate>.makeStream()
         var state = ActiveRideFeature.State(recordingState: .active)
-        state.cadence.zoneSeconds = [.zone2: 18, .zone3: 240]
+        state.cadence.secondsByRPM = [78: 18, 90: 240]
         state.cadence.coastingSeconds = 33
         let store = TestStore(initialState: state) {
             ActiveRideFeature()
@@ -1283,7 +1283,7 @@ struct ActiveRideFeatureStateMachineTests {
         var updates = written.makeAsyncIterator()
         let next = await updates.next()
         let update = try #require(next)
-        #expect(update.cadenceZoneSeconds == [.zone2: 18, .zone3: 240])
+        #expect(update.cadenceSecondsByRPM == [78: 18, 90: 240])
         #expect(update.cadenceCoastingSeconds == 33)
 
         await store.skipInFlightEffects(strict: false)
@@ -1314,7 +1314,7 @@ struct ActiveRideFeatureStateMachineTests {
             speedSampleCount: 120,
             hrSampleCount: 90,
             cadenceSampleCount: 60,
-            cadenceZoneSeconds: [.zone1: 12, .zone3: 40, .zone5: 3],
+            cadenceSecondsByRPM: [65: 12, 90: 40, 120: 3],
             cadenceCoastingSeconds: 25
         )
 
@@ -1335,6 +1335,7 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(state.cadence.cadenceSum == 78 * 60)
         #expect(state.cadence.averageCadenceRPM == 78)
         // W5's zone and coasting tallies (#340), so the detail sheet still covers the whole ride.
+        #expect(state.cadence.secondsByRPM == [65: 12, 90: 40, 120: 3])
         #expect(state.cadence.zoneSeconds == [.zone1: 12, .zone3: 40, .zone5: 3])
         #expect(state.cadence.coastingSeconds == 25)
         #expect(state.vehiclePassCount == 2)
@@ -1367,7 +1368,7 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(state.cadence.pedalingSampleCount == 0)
         #expect(state.cadence.cadenceSum == 0)
         #expect(state.cadence.maxCadenceRPM == 0)
-        #expect(state.cadence.zoneSeconds.isEmpty)
+        #expect(state.cadence.secondsByRPM.isEmpty)
         #expect(state.cadence.coastingSeconds == 0)
         // No radar before the kill means still no radar, not a measured 0 (#285).
         #expect(state.vehiclePassCount == nil)
@@ -1379,7 +1380,7 @@ struct ActiveRideFeatureStateMachineTests {
             rideId: UUID(), recordingState: .active,
             durationSeconds: 600, distanceMeters: 4_000, averageSpeedMPS: 6.5, maxSpeedMPS: 11,
             averageCadenceRPM: 88, maxCadenceRPM: 104, cadenceSampleCount: 500,
-            cadenceZoneSeconds: [.zone1: 30, .zone3: 400], cadenceCoastingSeconds: 70
+            cadenceSecondsByRPM: [65: 30, 90: 400], cadenceCoastingSeconds: 70
         )
         let clock = LockIsolated(testDate)
         let store = TestStore(initialState: ActiveRideFeature.State(resuming: summary)) {
@@ -1392,12 +1393,12 @@ struct ActiveRideFeatureStateMachineTests {
 
         await store.send(.cadence(.cadenceReceived(90)))    // zone 3
         clock.withValue { $0 = $0.addingTimeInterval(2) }
-        await store.send(.cadence(.cadenceReceived(0)))     // credits 2s to zone 3
+        await store.send(.cadence(.cadenceReceived(0)))     // credits 2s to 90 rpm
         clock.withValue { $0 = $0.addingTimeInterval(3) }
         await store.send(.cadence(.cadenceReceived(60)))    // credits 3s to coasting
 
         // Added to the restored totals, not counted from zero beside them.
-        #expect(store.state.cadence.zoneSeconds == [.zone1: 30, .zone3: 402])
+        #expect(store.state.cadence.secondsByRPM == [65: 30, 90: 402])
         #expect(store.state.cadence.coastingSeconds == 73)
     }
 

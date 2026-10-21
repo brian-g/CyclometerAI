@@ -119,19 +119,15 @@ final class Ride {
     var speedSampleCount: Int = 0
     var hrSampleCount: Int = 0
     var cadenceSampleCount: Int = 0
-    /// W5's time in each cadence zone and time coasting, mirroring `CadenceFeature.State`
+    /// W5's time pedalling at each whole rpm and time coasting, mirroring `CadenceFeature.State`
     /// (#340) — persisted so a resumed ride's detail sheet still covers the time before the
     /// kill. Written at every checkpoint and at ride end, so a finished ride keeps its final
     /// values. Bounded to the same one-checkpoint-window staleness as every other resumed
-    /// aggregate. Unlike the HR zone seconds #284 declined to store, these are credited
-    /// once, against the S12 cadence zones in effect when the time was recorded (#79): a later
-    /// zone change applies from then on rather than re-crediting the past, so nothing here
-    /// needs resolving at read time. Read and written as one dictionary through `cadenceZoneSeconds`.
-    var cadenceZone1Seconds: TimeInterval = 0
-    var cadenceZone2Seconds: TimeInterval = 0
-    var cadenceZone3Seconds: TimeInterval = 0
-    var cadenceZone4Seconds: TimeInterval = 0
-    var cadenceZone5Seconds: TimeInterval = 0
+    /// aggregate. Per rpm rather than per zone (#79), so the S12 cadence zones resolve at read
+    /// time, as #284 has HR's do; a stored per-zone breakdown would go stale when they change.
+    /// JSON, read and written through `cadenceSecondsByRPM`; optional, so #186's
+    /// mandatory-attribute backfill trap doesn't apply.
+    var cadenceSecondsByRPMData: Data?
     var cadenceCoastingSeconds: TimeInterval = 0
     /// How many times this ride has been resumed, which is the index of the track segment
     /// currently being recorded (#263). Persisted for the same reason `zeroSpeedSeconds`
@@ -159,44 +155,13 @@ final class Ride {
         self.speedSampleCount = 0
         self.hrSampleCount = 0
         self.cadenceSampleCount = 0
-        self.cadenceZone1Seconds = 0
-        self.cadenceZone2Seconds = 0
-        self.cadenceZone3Seconds = 0
-        self.cadenceZone4Seconds = 0
-        self.cadenceZone5Seconds = 0
         self.cadenceCoastingSeconds = 0
         self.trackSegmentIndex = 0
     }
 
-    /// The five zone columns in `CadenceFeature.State.zoneSeconds`' shape (#340). A zone with
-    /// no time is left out rather than mapped to 0, as the live tally does, so a resumed ride
-    /// that never pedalled reads back exactly as a fresh one.
-    var cadenceZoneSeconds: [CadenceZone: TimeInterval] {
-        get {
-            var seconds: [CadenceZone: TimeInterval] = [:]
-            for zone in CadenceZone.allCases {
-                let value = self[keyPath: Self.column(for: zone)]
-                if value > 0 { seconds[zone] = value }
-            }
-            return seconds
-        }
-        set {
-            for zone in CadenceZone.allCases {
-                self[keyPath: Self.column(for: zone)] = newValue[zone] ?? 0
-            }
-        }
-    }
-
-    /// The column holding `zone`'s seconds. A switch rather than a lookup table, so a new
-    /// `CadenceZone` case fails to compile here instead of silently resetting to 0 on resume.
-    private static func column(for zone: CadenceZone) -> ReferenceWritableKeyPath<Ride, TimeInterval> {
-        switch zone {
-        case .zone1: \.cadenceZone1Seconds
-        case .zone2: \.cadenceZone2Seconds
-        case .zone3: \.cadenceZone3Seconds
-        case .zone4: \.cadenceZone4Seconds
-        case .zone5: \.cadenceZone5Seconds
-        }
+    var cadenceSecondsByRPM: [Int: TimeInterval] {
+        get { cadenceSecondsByRPMData.flatMap { try? JSONDecoder().decode([Int: TimeInterval].self, from: $0) } ?? [:] }
+        set { cadenceSecondsByRPMData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
     }
 
     /// Nested rather than top-level to avoid colliding with the TCA-side
@@ -233,7 +198,7 @@ extension Ride {
             speedSampleCount: speedSampleCount,
             hrSampleCount: hrSampleCount,
             cadenceSampleCount: cadenceSampleCount,
-            cadenceZoneSeconds: cadenceZoneSeconds,
+            cadenceSecondsByRPM: cadenceSecondsByRPM,
             cadenceCoastingSeconds: cadenceCoastingSeconds,
             trackSegmentIndex: trackSegmentIndex,
             // `createRide` writes the id and name together, so this is both or neither.

@@ -654,7 +654,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - Trend, at both sizes (#402): the shared trend indicator, as §W1's: a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the value, level with the tops of its digits and a quarter of their height. It shows when current cadence is above or below the ride average by more than 5 rpm. Hidden when even, while coasting (0 rpm), with no reading, or before any pedalling is recorded. The unit doesn't move
 - 2x1 displays the average and max
 - A watermark graph of the historical Cadence for the ride. The horizontal bands in the chart show the cadence zones.
-- As built (#79), the bands are always drawn, even before any reading arrives: they show the rider's zones, not ride data. There are five zones, set in §S12's Cadence Zones section: Z1 Recovery, Z2 Endurance, Z3 Steady State, Z4 Race Pace and Z5 Sprint, coloured `brHRZone1`–`brHRZone5`. They default to 60–69, 70–84, 85–94, 95–109 and 110+ rpm. A pedalling reading below Z1's 60 rpm still counts as Z1, as a heart rate below resting counts as HR zone 1. The Z1 band runs from 0, so the chart has no unshaded strip. The y-axis is fixed at 0–150 rpm. A zone change applies from the next reading on, and time already credited stays where it was. These five zones replace #38's four efficiency bands (grinding <70, optimal 85–100, over-spinning >100)
+- As built (#79), the bands are always drawn, even before any reading arrives: they show the rider's zones, not ride data. There are five zones, set in §S12's Cadence Zones section: Z1 Recovery, Z2 Endurance, Z3 Steady State, Z4 Race Pace and Z5 Sprint, coloured `brHRZone1`–`brHRZone5`. They default to 60–69, 70–84, 85–94, 95–109 and 110+ rpm. A pedalling reading below Z1's 60 rpm still counts as Z1, as a heart rate below resting counts as HR zone 1. The Z1 band runs from 0, so the chart has no unshaded strip. The y-axis is fixed at 0–150 rpm. Time is kept per whole rpm and sorted into zones when shown, as HR's time in zone is, so a zone change re-sorts the whole ride's time, including time recorded before it. These five zones replace #38's four efficiency bands (grinding <70, optimal 85–100, over-spinning >100)
 - Sheet: Ride metrics
 
 ---
@@ -1124,7 +1124,7 @@ a confirmation:
 **Cadence Zones** (#79)
 - Five rows: Recovery, Endurance, Steady State, Race Pace, Sprint. Each shows its rpm range ("60-69 rpm", and "110+ rpm" for Sprint)
 - Rows 1–4 carry a Stepper on that zone's upper boundary, 1 rpm per step, as the HR Zones rows do. Sprint is display-only
-- A step that would empty a zone, take Recovery's upper boundary down to 60, or take Sprint's lower boundary up to 150 (the §W5 chart's ceiling) does nothing
+- A step that would empty a zone, take Recovery's upper boundary below 60, or take Sprint's lower boundary up to 150 (the §W5 chart's ceiling) does nothing
 - Reset Cadence Zones to Defaults restores 60–69 / 70–84 / 85–94 / 95–109 / 110+
 - No footer. Nothing outside the app owns cadence zones, so the boundaries are stored as set (`AppPreferences.cadenceZones`), not as overrides
 
