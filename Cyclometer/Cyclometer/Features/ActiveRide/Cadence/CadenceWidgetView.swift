@@ -36,6 +36,8 @@ struct CadenceWidget: View {
     let cadenceHistory: [Double] // rpm samples for watermark chart
     let averageCadence: Int      // rpm; 0 → no pedalling recorded yet
     let maxCadence: Int          // rpm
+    /// The rider's S12 cadence zones (#79), drawn as the watermark's bands.
+    var zones: CadenceZoneBoundaries = .default
     /// Everything only the detail sheet needs. A closure so the dashboard never reads these
     /// (large, fast-changing) arrays itself — only the presented sheet does.
     var detail: () -> CadenceDetail = { CadenceDetail() }
@@ -43,9 +45,8 @@ struct CadenceWidget: View {
 
     var body: some View {
         ZStack {
-            if !cadenceHistory.isEmpty {
-                CadenceHistoryChart(history: cadenceHistory)
-            }
+            // Drawn with or without readings (#79): the bands are the rider's zones, not data.
+            CadenceHistoryChart(history: cadenceHistory, zones: zones)
             switch size {
             case .oneByOne, .twoByTwo: oneByOneContent
             case .twoByOne:            twoByOneContent
@@ -57,6 +58,7 @@ struct CadenceWidget: View {
             CadenceDetailSheet(
                 averageCadence: averageCadence,
                 maxCadence: maxCadence,
+                zones: zones,
                 detail: detail()
             )
         }
@@ -150,17 +152,18 @@ struct CadenceWidget: View {
 
 private struct CadenceHistoryChart: View {
     let history: [Double]   // rpm
+    let zones: CadenceZoneBoundaries
 
     /// Fixed y-domain so the zone bands always map to the same screen positions
-    /// regardless of the ride's actual cadence range. 150 covers sprint/over-spin
-    /// cadences so the line and red over-spin band aren't clipped above 130.
-    private static let yMax: Double = 150
+    /// regardless of the ride's actual cadence range. 150 covers sprint cadences, and
+    /// S12 keeps every zone boundary below it so the Z5 band always shows.
+    private static let yMax = Double(CadenceZoneBoundaries.ceilingRPM)
 
     var body: some View {
         Chart {
-            // Coloured zone bands behind the cadence line (issue #38).
-            ForEach(Array(CadenceZone.allCases.enumerated()), id: \.offset) { _, zone in
-                let range = zone.rpmRange(ceiling: Self.yMax)
+            // Coloured zone bands behind the cadence line (#38, #79).
+            ForEach(CadenceZone.allCases, id: \.self) { zone in
+                let range = zones.bandRange(for: zone, ceiling: Self.yMax)
                 RectangleMark(
                     xStart: .value("t0", 0),
                     xEnd: .value("t1", max(history.count - 1, 1)),
@@ -171,7 +174,7 @@ private struct CadenceHistoryChart: View {
             }
 
             // Cadence trace as a line over the bands. No area fill — it would tint
-            // the lower (grinding/optimal) bands and defeat the at-a-glance read.
+            // the lower bands and defeat the at-a-glance read.
             ForEach(Array(history.enumerated()), id: \.offset) { index, rpm in
                 LineMark(x: .value("t", index), y: .value("rpm", rpm))
                     .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.lineWatermark))
@@ -190,8 +193,9 @@ private struct CadenceHistoryChart: View {
 private struct CadenceDetailChart: View {
     let cadenceSamples: [CadenceSample]
     let altitudeSamples: [AltitudeSample]
+    let zones: CadenceZoneBoundaries
 
-    private static let yMax: Double = 150
+    private static let yMax = Double(CadenceZoneBoundaries.ceilingRPM)
     /// Elevation is normalised into the cadence y-domain (a chart has one y-scale), so it
     /// only fills the lower part of it and never competes with the cadence trace.
     private static let elevationHeightFraction = 0.6
@@ -254,8 +258,8 @@ private struct CadenceDetailChart: View {
         let elevation = elevationPoints
         Chart {
             if let range = timeRange {
-                ForEach(Array(CadenceZone.allCases.enumerated()), id: \.offset) { _, zone in
-                    let bounds = zone.rpmRange(ceiling: Self.yMax)
+                ForEach(CadenceZone.allCases, id: \.self) { zone in
+                    let bounds = zones.bandRange(for: zone, ceiling: Self.yMax)
                     RectangleMark(
                         xStart: .value("t0", range.lowerBound),
                         xEnd: .value("t1", range.upperBound),
@@ -306,6 +310,7 @@ private struct CadenceDetailChart: View {
 private struct CadenceDetailSheet: View {
     let averageCadence: Int
     let maxCadence: Int
+    let zones: CadenceZoneBoundaries
     let detail: CadenceDetail
 
     @Environment(\.dismiss) private var dismiss
@@ -325,7 +330,8 @@ private struct CadenceDetailSheet: View {
                     Section {
                         CadenceDetailChart(
                             cadenceSamples: detail.cadenceSamples,
-                            altitudeSamples: detail.altitudeSamples
+                            altitudeSamples: detail.altitudeSamples,
+                            zones: zones
                         )
                             .frame(height: Self.chartHeight)
                     }
@@ -336,13 +342,14 @@ private struct CadenceDetailSheet: View {
                 Section("Time in Cadence Zones") {
                     if pedalingSeconds > 0 {
                         DonutChart(slices: CadenceZone.allCases.map {
-                            DonutSlice(id: $0.label, value: zoneSeconds[$0] ?? 0, color: $0.color)
+                            DonutSlice(id: $0.displayName, value: zoneSeconds[$0] ?? 0, color: $0.color)
                         })
                         .frame(height: Self.donutHeight)
                         .frame(maxWidth: .infinity)
                     }
                     ForEach(CadenceZone.allCases, id: \.self) { zone in
-                        metricRow("\(zone.label) rpm", Self.duration(zoneSeconds[zone] ?? 0))
+                        metricRow("Z\(zone.rawValue) \(zone.displayName) · \(zones.rangeText(for: zone)) rpm",
+                                  Self.duration(zoneSeconds[zone] ?? 0))
                     }
                 }
             }
@@ -453,15 +460,16 @@ private let demoAltitudeSamples: [AltitudeSample] = (0..<180).map { i in
     CadenceDetailSheet(
         averageCadence: 88,
         maxCadence: 104,
+        zones: .default,
         detail: CadenceDetail(
             cadenceSamples: demoCadenceSamples,
             altitudeSamples: demoAltitudeSamples,
-            zoneSeconds: [.grinding: 95, .transition: 210, .optimal: 1_260, .overspin: 42],
+            zoneSeconds: [.zone1: 95, .zone2: 210, .zone3: 1_260, .zone4: 300, .zone5: 42],
             coastingSeconds: 380
         )
     )
 }
 
 #Preview("Detail Sheet — No Data") {
-    CadenceDetailSheet(averageCadence: 0, maxCadence: 0, detail: CadenceDetail())
+    CadenceDetailSheet(averageCadence: 0, maxCadence: 0, zones: .default, detail: CadenceDetail())
 }

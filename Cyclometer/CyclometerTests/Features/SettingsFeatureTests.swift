@@ -25,6 +25,7 @@ struct SettingsFeatureTests {
     private func makeStore(
         circumferenceMM: Int = WheelPreset.default.circumferenceMM,
         riderProfile: RiderProfile = RiderProfile(),
+        cadenceZones: CadenceZoneBoundaries = .default,
         bleCSCClient: BLECSCClient = .testValue,
         healthKitClient: HealthKitClient = .testValue,
         liveActivityClient: LiveActivityClient = .testValue
@@ -34,7 +35,10 @@ struct SettingsFeatureTests {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.wheelCircumferenceMM = circumferenceMM }
+            $preferences.withLock {
+                $0.wheelCircumferenceMM = circumferenceMM
+                $0.cadenceZones = cadenceZones
+            }
             @Shared(.riderProfile) var profile
             $profile.withLock { $0 = riderProfile }
             return TestStore(initialState: SettingsFeature.State()) {
@@ -351,6 +355,55 @@ struct SettingsFeatureTests {
         }
 
         #expect(store.state.hrZoneRows.map(\.range) == [60...137, 138...150, 151...163, 164...176, 177...190])
+    }
+
+    // MARK: - Cadence zones (#79)
+
+    @Test("The Cadence Zones rows show the issue's defaults, with every row but Z5 steppable")
+    func cadenceZoneRowsDefault() {
+        let store = makeStore()
+
+        #expect(store.state.cadenceZoneRows.map(\.displayName) == [
+            "Recovery", "Endurance", "Steady State", "Race Pace", "Sprint"
+        ])
+        #expect(store.state.cadenceZoneRows.map(\.rangeText) == [
+            "60-69 rpm", "70-84 rpm", "85-94 rpm", "95-109 rpm", "110+ rpm"
+        ])
+        #expect(store.state.cadenceZoneRows.map(\.isSteppable) == [true, true, true, true, false])
+    }
+
+    @Test("Stepping a cadence boundary persists it to the shared preferences")
+    func steppingCadenceBoundaryPersists() async {
+        let store = makeStore()
+
+        await store.send(.cadenceZoneBoundaryStepped(zone: .zone2, delta: 1)) {
+            $0.$preferences.withLock { $0.cadenceZones = CadenceZoneBoundaries(lowerBoundsRPM: [70, 86, 95, 110])! }
+        }
+
+        #expect(store.state.cadenceZoneRows[1].rangeText == "70-85 rpm")
+        #expect(store.state.cadenceZoneRows[2].rangeText == "86-94 rpm")
+    }
+
+    @Test("Stepping a cadence boundary into its neighbour is a no-op")
+    func steppingCadenceBoundaryPastNeighbourIsNoop() async {
+        let tight = CadenceZoneBoundaries(lowerBoundsRPM: [70, 85, 86, 110])!
+        let store = makeStore(cadenceZones: tight)
+
+        // Z3 is one rpm wide: moving its upper boundary down would empty it.
+        await store.send(.cadenceZoneBoundaryStepped(zone: .zone3, delta: -1))
+        // Nothing follows Z5.
+        await store.send(.cadenceZoneBoundaryStepped(zone: .zone5, delta: 1))
+
+        #expect(store.state.preferences.cadenceZones == tight)
+    }
+
+    @Test(".cadenceZoneResetTapped restores the default cadence zones")
+    func cadenceZoneResetRestoresDefaults() async {
+        let store = makeStore(cadenceZones: CadenceZoneBoundaries(lowerBoundsRPM: [65, 80, 100, 130])!)
+
+        await store.send(.cadenceZoneResetTapped) {
+            $0.$preferences.withLock { $0.cadenceZones = .default }
+        }
     }
 
     // MARK: - Resting/max HR overrides (#162)

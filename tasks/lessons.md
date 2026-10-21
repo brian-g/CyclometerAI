@@ -839,3 +839,11 @@ made it pass. Without them the "fix" left the ride 97 m high for good. Review ca
 **Rule.** Before a design leans on how often or when a sensor delivers, read the framework header for the delivery
 and timestamp contract and quote it in the plan. A test fixture must not invent readings the API doesn't promise. If
 it has to synthesize data, it must say what's synthesized and the test must still pass without it.
+
+## tasks/todo.md is appended to, never replaced (2026-10-20, #79)
+
+**What happened.** I started #79 by overwriting `tasks/todo.md` with the new checklist. That threw away 345 lines of
+earlier review sections from #426, #412, #310 and others, including their open "found, not fixed" notes. Review caught it after the PR was open.
+
+**Rule.** Add a new task's checklist and its review section to the end of `tasks/todo.md`, under a `---` separator.
+Before committing, check `git diff --numstat main -- tasks/todo.md`. It should show only additions.

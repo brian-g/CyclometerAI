@@ -22,9 +22,9 @@ struct RideSummaryUpdate: Sendable, Equatable {
     var speedSampleCount: Int = 0
     var hrSampleCount: Int = 0
     var cadenceSampleCount: Int = 0
-    /// See `Ride.cadenceZoneSeconds`/`Ride.cadenceCoastingSeconds` (#340) — W5's zone and
-    /// coasting tallies, in `CadenceFeature.State`'s shape.
-    var cadenceZoneSeconds: [CadenceZone: TimeInterval] = [:]
+    /// See `Ride.cadenceSecondsByRPM`/`Ride.cadenceCoastingSeconds` (#340, #79) — W5's per-rpm
+    /// and coasting tallies, in `CadenceFeature.State`'s shape.
+    var cadenceSecondsByRPM: [Int: TimeInterval] = [:]
     var cadenceCoastingSeconds: TimeInterval = 0
     /// See `Ride.trackSegmentIndex` (#263) — which track segment the ride is recording
     /// into, carried across a kill so a resume doesn't merge two stretches of riding.

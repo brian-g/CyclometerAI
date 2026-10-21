@@ -28,6 +28,14 @@ final class SettingsSnapshotTests: XCTestCase {
         ])
     )
 
+    /// The same device stretched tall enough to hold the whole list, so sections below the
+    /// first screen, such as Cadence Zones (#79), are on the reference too.
+    private lazy var fullHeightDevice = ViewImageConfig(
+        safeArea: device.safeArea,
+        size: CGSize(width: device.size!.width, height: 2_200),
+        traits: device.traits
+    )
+
     // MARK: Harness
 
     /// Each store gets its own in-memory file system, and the seed happens in the same
@@ -94,18 +102,19 @@ final class SettingsSnapshotTests: XCTestCase {
     private func assertBothSchemes(
         _ view: some View,
         named name: String,
+        on config: ViewImageConfig? = nil,
         file: StaticString = #filePath,
         testName: String = #function,
         line: UInt = #line
     ) {
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.light)),
-            as: .image(on: device),
+            as: .image(on: config ?? device),
             named: "\(name)-light", file: file, testName: testName, line: line
         )
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.dark)),
-            as: .image(on: device, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(on: config ?? device, traits: .init(userInterfaceStyle: .dark)),
             named: "\(name)-dark", file: file, testName: testName, line: line
         )
     }
@@ -161,6 +170,12 @@ final class SettingsSnapshotTests: XCTestCase {
             screen(restingOverrideDraft: "20", maxOverrideDraft: "50"),
             named: "hrZoneOverridesInvalid"
         )
+    }
+
+    /// The whole list at its defaults, down to About — the only reference that reaches the
+    /// Cadence Zones section (#79): the issue's default ranges, steppers on Z1–Z4, and Reset.
+    func testSettingsFullHeight() {
+        assertBothSchemes(screen(), named: "fullHeight", on: fullHeightDevice)
     }
 
     /// Live Activities turned off for the app in iOS Settings (#313): the Show Live Activity
