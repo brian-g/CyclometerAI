@@ -29,13 +29,6 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 
 **Architecture Pattern:** The Composable Architecture (TCA) — explicit state, side-effect isolation via `Effect`, hardware abstraction via `@DependencyClient`, and `TestStore` for all safety-critical logic.
 
-**Persistence:** SwiftData (iOS 27+) for ride summaries and history. CoreData via `NSBatchInsertRequest` for high-frequency per-second `TrackPoint` time-series during active rides. GPX export via `gpxtpx:TrackPointExtension` v2 schema.
-
-**BLE Targets (Phase 1):**
-- Garmin Varia RTL515 / RCT715 radar (Cycling Radar GATT profile)
-- Generic BLE HR Profile (`0x180D`)
-- Generic BLE Cycling Speed and Cadence (CSC) Profile (`0x1816`)
-
 > **Not targeted:** Garmin Varia RVR820 (proprietary secured BLE protocol). ANT+ (no iOS hardware support).
 
 **Bindings:** bind store state with `$store.<property>.sending(\.<action>)` — it works on computed properties too. Use `Binding(get:set:)` only when the setter transforms the value or the source isn't store state.
