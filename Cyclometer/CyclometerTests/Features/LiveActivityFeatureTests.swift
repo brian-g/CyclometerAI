@@ -537,7 +537,7 @@ struct LiveActivityFeatureTests {
     /// The setting's `end` is the only one: the live client runs it after the pending request, so
     /// it ends what that request shows (#411, `LiveActivityClientTests`).
     @Test("turned off while the start is pending, the late answer sends nothing more")
-    func settingOffWhileStartingEndsTheLateActivity() async {
+    func settingOffWhileStartingSendsNothingMore() async {
         let ride = Self.makeRide()
         let calls = ride.calls
         let clock = ride.clock

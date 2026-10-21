@@ -20,7 +20,8 @@ struct LiveActivityClient {
     /// in the background (#308 retries on the next foreground).
     var start: @Sendable (RideActivityAttributes, RideActivityAttributes.ContentState) async -> Bool
     var update: @Sendable (RideActivityAttributes.ContentState) async -> Void
-    /// Ends it with `.immediate` dismissal: no summary is left on the Lock Screen.
+    /// Ends it with `.immediate` dismissal: no summary is left on the Lock Screen. Runs after any
+    /// `start` called before it, so it also ends what that `start` shows (#411).
     var end: @Sendable () async -> Void
     /// The rider's system setting for this app's Live Activities.
     var isEnabled: @Sendable () -> Bool

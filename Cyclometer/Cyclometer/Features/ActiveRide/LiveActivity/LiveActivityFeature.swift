@@ -49,7 +49,7 @@ struct LiveActivityFeature {
                 )
             case .liveActivity(.started(let isShowing)):
                 // Turned off while the request was out: the client runs that `end` after the
-                // request (#411), so the activity it showed is gone already.
+                // request (#411), so it ends the activity this request showed.
                 guard state.liveActivity.phase == .starting else { return .none }
                 guard isShowing else {
                     state.liveActivity = LiveActivityState()
