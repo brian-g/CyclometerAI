@@ -534,9 +534,10 @@ struct LiveActivityFeatureTests {
         #expect(ride.store.state.liveActivity.phase == .showing)
     }
 
-    /// `Activity.request` can land after the `end` the setting sent, which found nothing to end.
-    @Test("turned off while the start is pending, the activity it then shows is ended")
-    func settingOffWhileStartingEndsTheLateActivity() async {
+    /// The setting's `end` is the only one: the live client runs it after the pending request, so
+    /// it ends what that request shows (#411, `LiveActivityClientTests`).
+    @Test("turned off while the start is pending, the late answer sends nothing more")
+    func settingOffWhileStartingSendsNothingMore() async {
         let ride = Self.makeRide()
         let calls = ride.calls
         let clock = ride.clock
@@ -555,8 +556,12 @@ struct LiveActivityFeatureTests {
         await clock.advance(by: .milliseconds(500))
         await ride.store.receive(\.liveActivity.started)
 
-        await expectEventually("the late activity ended") {
-            calls.value.last == .end && calls.value.filter { $0 == .end }.count == 2
+        await ride.tick(3)
+        // The recording client doesn't queue, so the setting's end is recorded ahead of the start.
+        #expect(calls.value.filter { $0 == .end }.count == 1)
+        guard case .start = calls.value.last else {
+            Issue.record("nothing after the start, got \(calls.value)")
+            return
         }
         #expect(ride.store.state.liveActivity.phase == .notShowing)
     }

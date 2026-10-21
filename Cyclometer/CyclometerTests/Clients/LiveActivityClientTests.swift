@@ -121,6 +121,26 @@ struct LiveActivityClientTests {
         }
     }
 
+    // MARK: - One call at a time (#411)
+
+    /// The rider taps Finish while the foreground's `start` is still out. The `end` comes after the
+    /// `start`, so it must end what that `start` shows, not sweep the list before the request lands.
+    @Test func endDuringAStartLeavesNothingShowing() async throws {
+        await clearActivities()
+        // One in other units keeps the next `start` ending it, and waiting, before it requests.
+        #expect(await client.start(RideActivityAttributes(units: .imperial), Self.state()))
+        await expectEventually { Self.showing().count == 1 }
+
+        let starting = Task { await client.start(metric, Self.state()) }
+        // The main actor runs the `start` up to its first wait before the test goes on.
+        await Task.yield()
+        await client.end()
+        #expect(await starting.value)
+
+        await expectEventually("nothing left showing") { Self.showing().isEmpty }
+        await clearActivities()
+    }
+
     // MARK: - Ended outside the app (#412)
 
     /// The system's end, at its 8-hour limit, leaves the card on the Lock Screen: a `.default` end.
