@@ -26,8 +26,16 @@
       "mcp__sketch__run_code"
     ]
   },
-  "spinnerTipsEnabled": false,
+  "skillOverrides": {
+    "anthropic-skills:docs": "name-only",
+    "anthropic-skills:google-workspace": "off",
+    "anthropic-skills:morning": "off",
+    "anthropic-skills:xlsx": "off",
+    "anthropic-skills:docx": "off",
+    "anthropic-skills:pptx": "off"
+  },
   "enabledPlugins": {
     "cloudflare@cloudflare": false
-  }
+  },
+  "spinnerTipsEnabled": false
 }
