@@ -2,6 +2,7 @@ import ActivityKit
 import ComposableArchitecture
 import Foundation
 import os
+import Synchronization
 
 private let logger = Logger.cyclometer(.liveActivity)
 
@@ -47,8 +48,12 @@ extension LiveActivityClient {
 extension LiveActivityClient: DependencyKey {
     /// Holds no `Activity`: each call acts on the system's list of ride activities, which a
     /// relaunch can't lose. There should only ever be one.
+    ///
+    /// `start`, `update` and `end` run one at a time, in the order they're called (#411). An `end`
+    /// sent while a `start` is out would otherwise sweep the list before the request lands in it,
+    /// and leave that ride's card on the Lock Screen.
     static let liveValue = LiveActivityClient(
-        start: { attributes, state in
+        start: { attributes, state in await calls.run {
             // Adopt one that's still showing this ride's units; end the rest. The system's list
             // keeps ended activities for hours, and units are fixed at request, so an ended one
             // or one in the other units can't carry the new ride.
@@ -69,14 +74,15 @@ extension LiveActivityClient: DependencyKey {
                 logger.error("Live Activity request failed: \(error.localizedDescription, privacy: .public)")
                 return false
             }
-        },
-        update: { state in await updateAll(state) },
-        end: {
+        } },
+        update: { state in await calls.run { await updateAll(state) } },
+        end: { await calls.run {
             for activity in Activity<RideActivityAttributes>.activities {
                 await activity.end(nil, dismissalPolicy: .immediate)
             }
-        },
+        } },
         isEnabled: { ActivityAuthorizationInfo().areActivitiesEnabled },
+        // Not queued: it waits as long as the activity shows, and every call after it would too.
         ended: {
             // `start` ended every other ride activity, so this is the one it left showing. None
             // showing means it has gone already; the next foreground's `start` recovers.
@@ -106,6 +112,8 @@ extension LiveActivityClient: DependencyKey {
     /// Previews never reach ActivityKit.
     static let previewValue: LiveActivityClient = testValue
 
+    private static let calls = SerialCalls()
+
     private static func content(_ state: RideActivityAttributes.ContentState) -> ActivityContent<RideActivityAttributes.ContentState> {
         ActivityContent(state: state, staleDate: .now.addingTimeInterval(staleInterval))
     }
@@ -114,6 +122,29 @@ extension LiveActivityClient: DependencyKey {
         for activity in Activity<RideActivityAttributes>.activities {
             await activity.update(content(state))
         }
+    }
+}
+
+/// Runs calls one at a time, in the order they're made. An actor alone wouldn't: a call
+/// waiting on ActivityKit lets the next one in.
+///
+/// A call runs to the end even if its caller is cancelled: a request already underway can't be
+/// stopped, and the `end` behind it must still find what it showed.
+private final class SerialCalls: Sendable {
+    /// The call made last, which the next one waits for.
+    private let last = Mutex<Task<Void, Never>?>(nil)
+
+    func run<T: Sendable>(_ operation: @escaping @Sendable () async -> T) async -> T {
+        let call = last.withLock { last in
+            let previous = last
+            let call = Task {
+                await previous?.value
+                return await operation()
+            }
+            last = Task { _ = await call.value }
+            return call
+        }
+        return await call.value
     }
 }
 

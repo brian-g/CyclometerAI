@@ -48,12 +48,9 @@ struct LiveActivityFeature {
                     .run { [liveActivityClient] _ in await liveActivityClient.end() }
                 )
             case .liveActivity(.started(let isShowing)):
-                guard state.liveActivity.phase == .starting else {
-                    // Turned off while the request was out: the `end` went first and found
-                    // nothing, so the activity the request then showed is ended here.
-                    guard isShowing else { return .none }
-                    return .run { [liveActivityClient] _ in await liveActivityClient.end() }
-                }
+                // Turned off while the request was out: the client runs that `end` after the
+                // request (#411), so the activity it showed is gone already.
+                guard state.liveActivity.phase == .starting else { return .none }
                 guard isShowing else {
                     state.liveActivity = LiveActivityState()
                     return .none
