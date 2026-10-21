@@ -187,10 +187,10 @@ struct SettingsFeature {
         case wheelSelectionChanged(WheelSelection)
         case customCircumferenceChanged(String)
         case customCircumferenceCommitted
-        case autoPauseToggled
-        case autoDimToggled
-        case placeNameLookupToggled
-        case liveActivityToggled
+        case autoPauseChanged(Bool)
+        case autoDimChanged(Bool)
+        case placeNameLookupChanged(Bool)
+        case liveActivityChanged(Bool)
         case liveActivitySettingsTapped
         case hrZoneBoundaryStepped(zone: HeartRateZone, delta: Int)
         case hrZoneResetTapped
@@ -261,17 +261,19 @@ struct SettingsFeature {
                 // without this it would push the same circumference twice.
                 guard mm != state.preferences.wheelCircumferenceMM else { return .none }
                 return apply(mm, to: &state)
-            case .autoPauseToggled:
-                state.$preferences.withLock { $0.isAutoPauseEnabled.toggle() }
+            case .autoPauseChanged(let isOn):
+                state.$preferences.withLock { $0.isAutoPauseEnabled = isOn }
                 return .none
-            case .autoDimToggled:
-                state.$preferences.withLock { $0.isAutoDimEnabled.toggle() }
+            case .autoDimChanged(let isOn):
+                state.$preferences.withLock { $0.isAutoDimEnabled = isOn }
                 return .none
-            case .placeNameLookupToggled:
-                state.$preferences.withLock { $0.isPlaceNameLookupEnabled.toggle() }
+            case .placeNameLookupChanged(let isOn):
+                state.$preferences.withLock { $0.isPlaceNameLookupEnabled = isOn }
                 return .none
-            case .liveActivityToggled:
-                state.$preferences.withLock { $0.isLiveActivityEnabled.toggle() }
+            case .liveActivityChanged(let isOn):
+                // The delegate says it toggled, so an unchanged value doesn't send it.
+                guard isOn != state.isLiveActivityEnabled else { return .none }
+                state.$preferences.withLock { $0.isLiveActivityEnabled = isOn }
                 return .send(.delegate(.liveActivityToggled))
             case .liveActivitySettingsTapped:
                 return .run { [openURL] _ in

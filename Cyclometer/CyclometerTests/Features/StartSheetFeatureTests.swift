@@ -117,10 +117,11 @@ struct StartSheetFeatureTests {
     @Test("The turn-by-turn toggle writes the rider's preference, both ways")
     func turnByTurnToggleWritesThePreference() async {
         let store = makeStore()
-        await store.send(.turnByTurnToggled) {
+        await store.send(.turnByTurnChanged(false)) {
             $0.$preferences.withLock { $0.isTurnByTurnEnabled = false }
         }
-        await store.send(.turnByTurnToggled) {
+        await store.send(.turnByTurnChanged(false))
+        await store.send(.turnByTurnChanged(true)) {
             $0.$preferences.withLock { $0.isTurnByTurnEnabled = true }
         }
     }
