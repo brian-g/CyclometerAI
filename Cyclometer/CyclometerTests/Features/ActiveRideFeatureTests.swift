@@ -3428,7 +3428,7 @@ struct ActiveRideFeatureSharedPeripheralTests {
             $0.maxSpeedMPS = 5.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.sourceSwitchBanner =
-                SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
+                SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED", isTerminal: true)
             $0.speed.lastFallbackBannerAt = testDate
         }
         await store.send(.cadence(.bleConnectionChanged(.disconnected))) {
@@ -3459,7 +3459,7 @@ struct ActiveRideFeatureSharedPeripheralTests {
             $0.maxSpeedMPS = 5.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.sourceSwitchBanner =
-                SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
+                SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED", isTerminal: true)
             $0.speed.lastFallbackBannerAt = testDate
         }
         await store.send(.cadence(.bleConnectionChanged(.disconnected))) {

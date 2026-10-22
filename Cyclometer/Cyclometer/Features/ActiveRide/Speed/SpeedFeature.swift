@@ -57,8 +57,10 @@ struct SpeedFeature {
     /// How long the source-switch banner stays visible before auto-dismissing.
     static let bannerDismissDelay: Duration = .seconds(4)
 
-    static func gpsFallbackBannerText(sensorName: String?) -> String {
-        "Switch to GPS for speed — \(sensorName ?? "Speed sensor") disconnected"
+    /// "Disconnected" only when the link is gone: the stale-data watchdog mostly fires with
+    /// the link still up and only the readings stopped (#390).
+    static func gpsFallbackBannerText(sensorName: String?, isTerminal: Bool = false) -> String {
+        "Switched to GPS for speed — \(sensorName ?? "Speed sensor") \(isTerminal ? "disconnected" : "not responding")"
     }
 
     @Dependency(\.date.now) var now
@@ -218,7 +220,9 @@ struct SpeedFeature {
             return .none
         }
         state.lastFallbackBannerAt = shownAt
-        state.sourceSwitchBanner = Self.gpsFallbackBannerText(sensorName: state.pairedSensorName)
+        state.sourceSwitchBanner = Self.gpsFallbackBannerText(
+            sensorName: state.pairedSensorName, isTerminal: isTerminal
+        )
         return .run { send in
             try await clock.sleep(for: Self.bannerDismissDelay)
             await send(.bannerDismissed)

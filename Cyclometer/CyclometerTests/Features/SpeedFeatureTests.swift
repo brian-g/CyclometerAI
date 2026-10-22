@@ -503,7 +503,7 @@ struct SpeedFeatureTests {
             $0.connectionState = .disconnected
             $0.speedMPS = 5.0
             $0.activeSpeedSource = .gps
-            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil)
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil, isTerminal: true)
             $0.lastFallbackBannerAt = Self.testDate
         }
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
@@ -512,6 +512,14 @@ struct SpeedFeatureTests {
         }
         // No .bleFallbackTimedOut follows — an unasserted receive fails the test.
         await clock.advance(by: SpeedFeature.staleDataWindow)
+    }
+
+    @Test("The banner says \"disconnected\" only when the link is gone (#390)")
+    func bannerWordingNamesTheCause() {
+        #expect(SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            == "Switched to GPS for speed — Wahoo RPM not responding")
+        #expect(SpeedFeature.gpsFallbackBannerText(sensorName: nil, isTerminal: true)
+            == "Switched to GPS for speed — Speed sensor disconnected")
     }
 
     @Test("A terminal disconnect inside the banner cooldown is still announced")
@@ -550,7 +558,7 @@ struct SpeedFeatureTests {
             $0.connectionState = .disconnected
             $0.speedMPS = 5.5
             $0.activeSpeedSource = .gps
-            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM", isTerminal: true)
         }
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
         await store.receive(\.bannerDismissed) {
