@@ -73,6 +73,9 @@ struct StartSheetFeature {
                 // The name at pairing time, so a sensor that is out of range is still
                 // named. No client can answer for one it isn't connected to.
                 row.name = record.displayName
+                // From the last ride, not this sheet: a sagging cell reads high at rest,
+                // so the sheet itself would almost never see it (#391).
+                row.warning = record.lastRideHealth?.warning
                 return row
             }
         }
@@ -302,6 +305,9 @@ struct SensorRow: Equatable, Identifiable {
     /// Battery percentage (0–100), or nil when the sensor is disconnected or doesn't
     /// expose the Battery Service. Rendered only when non-nil and connected.
     var batteryPercent: Int? = nil
+    /// What the sensor's last ride said about it (#391), filled in from its `PairedSensor`
+    /// record. Shown whatever the status: a sensor still searching may be the dead cell.
+    var warning: SensorWarning? = nil
 
     var id: Kind { kind }
 }

@@ -88,6 +88,24 @@ struct RideSummaryFeature {
             return RideDetailSeries.zoneSeconds(heartRateSecondsByBPM, zoneBounds: bounds)
         }
 
+        /// The sensors this ride flagged (#391), one per device, in pairing order. Read from the
+        /// paired records, where `ActiveRideFeature` saved each device's verdict at ride end —
+        /// live, so nothing waits on `.task`.
+        var flaggedSensors: [FlaggedSensor] {
+            var flagged: [FlaggedSensor] = []
+            for record in preferences.pairedSensors {
+                guard let report = record.lastRideHealth, report.rideId == rideId,
+                      let warning = report.warning else { continue }
+                if let index = flagged.firstIndex(where: { $0.id == record.peripheralID }) {
+                    flagged[index].roles.append(record.role)
+                } else {
+                    flagged.append(FlaggedSensor(id: record.peripheralID, roles: [record.role],
+                                                 name: record.displayName, warning: warning))
+                }
+            }
+            return flagged
+        }
+
         /// What dismissing should store, or nil when nothing changed. A field cleared to nothing
         /// means the default, never an empty title.
         var titleToSave: String? {
@@ -95,6 +113,15 @@ struct RideSummaryFeature {
             let name = typed.isEmpty ? (defaultTitle ?? "") : typed
             return name.isEmpty || name == persistedTitle ? nil : name
         }
+    }
+
+    /// One device the ride flagged: a combo CSC sensor is one battery and one radio, listed once
+    /// with both its roles.
+    struct FlaggedSensor: Equatable, Identifiable {
+        let id: UUID
+        var roles: [SensorRole]
+        let name: String?
+        let warning: SensorWarning
     }
 
     /// Everything the screen reads once the ride is finalized, delivered together. The default

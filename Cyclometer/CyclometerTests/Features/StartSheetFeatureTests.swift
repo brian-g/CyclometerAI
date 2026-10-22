@@ -218,6 +218,31 @@ struct StartSheetFeatureTests {
         #expect(rows[0].status.badge.label == "Searching")
     }
 
+    @Test("A row carries the warning its sensor's last ride left on the record (#391)")
+    func rowCarriesLastRideWarning() {
+        let rideId = UUID(0)
+        let store = makeStore(
+            pairedSensors: [
+                PairedSensor(peripheralID: UUID(1), role: .radar, displayName: "Varia RTL515",
+                             lastRideHealth: SensorHealthReport(rideId: rideId, minBatteryPercent: 80,
+                                                                maxLinkLossesPerWindow: 0)),
+                PairedSensor(peripheralID: UUID(2), role: .speed, displayName: "Wahoo SPEED",
+                             lastRideHealth: SensorHealthReport(rideId: rideId, minBatteryPercent: 0,
+                                                                maxLinkLossesPerWindow: 43)),
+                PairedSensor(peripheralID: UUID(3), role: .cadence, displayName: "Wahoo CADENCE",
+                             lastRideHealth: SensorHealthReport(rideId: rideId, minBatteryPercent: 85,
+                                                                maxLinkLossesPerWindow: 9)),
+                PairedSensor(peripheralID: UUID(4), role: .heartRate, displayName: "Wahoo TICKR")
+            ]
+        )
+
+        let warnings = Dictionary(uniqueKeysWithValues: store.state.pairedRows.map { ($0.kind, $0.warning) })
+        #expect(warnings[.radar] == .some(nil))
+        #expect(warnings[.speed] == .batteryLow)
+        #expect(warnings[.cadence] == .linkUnreliable)
+        #expect(warnings[.heartRate] == .some(nil))
+    }
+
     @Test("An unpaired category has no row at all")
     func unpairedCategoriesAreAbsent() {
         let store = makeStore(

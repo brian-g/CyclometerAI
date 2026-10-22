@@ -89,6 +89,36 @@ struct BLEClient: Sendable {
     var requestAuthorization: @Sendable () async -> CBManagerAuthorization
 }
 
+// MARK: - Link losses
+
+extension BLEClient {
+    /// The peripherals that lose their link to a supervision timeout (CBError 6), one
+    /// element per drop — the signature of a sensor whose radio has stopped answering,
+    /// rather than one the app or the rider disconnected (#391).
+    ///
+    /// Derived from `events()` rather than a separate endpoint: the sensor clients already
+    /// receive the error, and an extra closure would be one more thing every hand-built
+    /// test client has to stub.
+    func linkTimeouts() -> AsyncStream<UUID> {
+        let events = events()
+        return AsyncStream { continuation in
+            let task = Task {
+                for await event in events {
+                    if case .disconnected(let id, let error) = event, Self.isSupervisionTimeout(error) {
+                        continuation.yield(id)
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    static func isSupervisionTimeout(_ error: (any Error)?) -> Bool {
+        (error as? CBError)?.code == .connectionTimeout
+    }
+}
+
 // MARK: - DependencyKey
 
 extension BLEClient: DependencyKey {

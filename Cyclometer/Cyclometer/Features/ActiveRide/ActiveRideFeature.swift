@@ -274,6 +274,9 @@ struct ActiveRideFeature {
         @Shared(.appPreferences) var preferences
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
+        /// Each paired sensor's battery and link over the ride, for the verdict saved at ride
+        /// end (#391).
+        var sensorHealth = SensorHealthFeature.State()
         var navigation = NavigationFeature.State()
         /// The ride's Live Activity (#308), kept by `LiveActivityFeature`.
         var liveActivity = LiveActivityState()
@@ -443,6 +446,7 @@ struct ActiveRideFeature {
         case alertOrchestrator(AlertOrchestratorFeature.Action)
         case speed(SpeedFeature.Action)
         case calibration(WheelCalibrationFeature.Action)
+        case sensorHealth(SensorHealthFeature.Action)
         case navigation(NavigationFeature.Action)
         case trackRecorder(TrackPointRecorderFeature.Action)
         case locationUpdated(LocationUpdate)
@@ -473,6 +477,9 @@ struct ActiveRideFeature {
         }
         Scope(state: \.calibration, action: \.calibration) {
             WheelCalibrationFeature()
+        }
+        Scope(state: \.sensorHealth, action: \.sensorHealth) {
+            SensorHealthFeature()
         }
         Scope(state: \.alertOrchestrator, action: \.alertOrchestrator) {
             AlertOrchestratorFeature()
@@ -513,6 +520,7 @@ struct ActiveRideFeature {
                     .send(.speed(.startListening)),
                     .send(.cadence(.startListening)),
                     .send(.calibration(.startListening)),
+                    .send(.sensorHealth(.startListening)),
                     // A resumed ride can come back `.paused` (#175) — starting the
                     // recorder unconditionally here would desync
                     // `trackRecorder.isRecording` from `recordingState`, an
@@ -712,6 +720,16 @@ struct ActiveRideFeature {
                 // `persistenceClient` is already called directly elsewhere in this reducer
                 // rather than through a child action.
                 state.trackRecorder.isRecording = false
+                // Here rather than in an effect for the same reason: by the time one ran,
+                // `activeRide` would be nil. Written before AppFeature presents S10, which
+                // reads it (#391).
+                let healthReports = state.sensorHealth.log.reports(rideId: rideId)
+                state.$preferences.withLock { preferences in
+                    for index in preferences.pairedSensors.indices {
+                        guard let report = healthReports[preferences.pairedSensors[index].peripheralID] else { continue }
+                        preferences.pairedSensors[index].lastRideHealth = report
+                    }
+                }
                 return .merge(
                     // A checkpoint queued or in flight from the same tick that just
                     // finished the ride must not land after this write and stomp the
@@ -1142,7 +1160,7 @@ struct ActiveRideFeature {
                     state.maxSpeedMPS = max(state.maxSpeedMPS, speedMPS)
                 }
                 return .none
-            case .calibration:
+            case .calibration, .sensorHealth:
                 return .none
             case .navigation(.delegate(.turnAnnounced(let direction))):
                 // Whether the turn's tone sounds is the orchestrator's call: it knows whether radar
