@@ -45,6 +45,11 @@ struct SpeedFeature {
     /// ~1 Hz, and the calculator emits nothing for the first `zeroThreshold − 1` duplicate
     /// frames of a stop (the 3rd emits 0) and nothing for the first moving frame after one.
     /// That is at most 3 s between readings; 4 s leaves one notification of slack.
+    ///
+    /// The bound holds only on an unbroken link. Every drop resets the calculator, so after a
+    /// reconnect it re-primes (one silent frame), and at a stop it then needs `zeroThreshold`
+    /// duplicates before emitting 0. Any drop at a stop, or one that takes over ~2 s to
+    /// reconnect while moving, therefore falls back here even on a healthy sensor.
     static let staleDataWindow: Duration = .seconds(4)
     /// Minimum time between fallback banners. A flapping sensor falls back every cycle;
     /// the source still switches each time, but the rider is told once per window (#390).
@@ -156,7 +161,7 @@ struct SpeedFeature {
                     }
                     return .merge(
                         .cancel(id: CancelID.fallbackTimer),
-                        fallBackToGPS(&state)
+                        fallBackToGPS(&state, isTerminal: true)
                     )
                 case .scanning, .connecting, .connected, .reconnecting, .active:
                     // The stale-data watchdog decides when to fall back; a link that
@@ -202,11 +207,13 @@ struct SpeedFeature {
         state.speedSamples.removeAll { $0.time < cutoff }
     }
 
-    private func fallBackToGPS(_ state: inout State) -> Effect<Action> {
+    /// - Parameter isTerminal: the sensor is gone, not flapping, so the rider is told even
+    ///   inside `fallbackBannerCooldown`; flaps arrive as `.reconnecting`, never here.
+    private func fallBackToGPS(_ state: inout State, isTerminal: Bool = false) -> Effect<Action> {
         state.activeSpeedSource = state.latestGPSSpeedMPS != nil ? .gps : .none
         state.speedMPS = state.latestGPSSpeedMPS
         let shownAt = now
-        if let last = state.lastFallbackBannerAt,
+        if !isTerminal, let last = state.lastFallbackBannerAt,
            shownAt.timeIntervalSince(last) < Self.fallbackBannerCooldown {
             return .none
         }

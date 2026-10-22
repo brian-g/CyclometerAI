@@ -513,4 +513,48 @@ struct SpeedFeatureTests {
         // No .bleFallbackTimedOut follows — an unasserted receive fails the test.
         await clock.advance(by: SpeedFeature.staleDataWindow)
     }
+
+    @Test("A terminal disconnect inside the banner cooldown is still announced")
+    func terminalDisconnectBypassesBannerCooldown() async {
+        let clock = TestClock()
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
+
+        // A flap: the watchdog falls back and the banner starts the cooldown.
+        await store.send(.bleSpeedReceived(6.1)) {
+            $0.speedMPS = 6.1
+            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.1)]
+        }
+        await clock.advance(by: SpeedFeature.staleDataWindow)
+        await store.receive(\.bleFallbackTimedOut) {
+            $0.speedMPS = 5.5
+            $0.activeSpeedSource = .gps
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.lastFallbackBannerAt = Self.testDate
+        }
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
+
+        // The sensor recovers, then dies for good well inside the cooldown. The rider was
+        // last told of a flap; this one changes what they're riding on, so it's announced.
+        await store.send(.bleSpeedReceived(6.2)) {
+            $0.speedMPS = 6.2
+            $0.activeSpeedSource = .bleWheel
+            $0.speedSamples = [
+                SpeedSample(time: Self.testDate, mps: 6.1),
+                SpeedSample(time: Self.testDate, mps: 6.2),
+            ]
+        }
+        await store.send(.bleConnectionChanged(.disconnected)) {
+            $0.connectionState = .disconnected
+            $0.speedMPS = 5.5
+            $0.activeSpeedSource = .gps
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+        }
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
+    }
 }
