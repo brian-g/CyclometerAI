@@ -458,3 +458,24 @@ Branch: `fix/445-live-activity-wrong-activity`
   - `settingOffWhileStartingSendsNothingMore` no longer receives `.started`; it waits for the request to be recorded instead.
   - `endedAfterAReplacementWaitsOnTheNewActivity` and `startRightAfterEndShowsANewActivity` pass on the real client. Mutation check: with every client `end` delayed 100 ms (a simulated lag), both **fail** on the issue's symptoms: `ended()` returns the old card's `.dismissed`, and `start` re-adopts the ended activity.
   - Full `CyclometerTests` minus the two known local hangs: 1,823 unique cases passing (plus the deliberate `withKnownIssue`). `PersistenceClientTests` and `MapWidgetAccessibilityTests` run alone: `TEST SUCCEEDED`.
+
+---
+
+# #314 — Live Activity: unit tests
+
+Branch: `test/314-live-activity-unit-tests`
+
+Audit of #314's checklist against the suites #306–#313, #411, #412 and #445 shipped; test-only gap fills.
+
+- [x] 1. Sustained throttle test: 4 Hz readings for 10 s → one update per tick, none between
+- [x] 2. `pauseShowsAndStaysAlive`: assert no `.end` and `phase == .showing`
+- [x] 3. Mutation checks: update on speed reading fails (1); end on pause fails (2)
+- [x] 4. LiveActivity suites green; review section; PR
+
+## Review
+
+- **Already covered on `main`:** start / disabled / S12 off (`startShowsTheRide`, `disabledShowsNothing`, `settingOffShowsNothing`); ride end (`finishEndsTheActivity`, `finishCancelsTheWait`; `AppFeature.swift:267` is the only place `activeRide` is set to nil); `routeProgress` nil with no route (`startShowsTheRide`'s full `Content` equality); 4 KB (`RideActivityAttributesTests.worstCaseFitsTheLimit`); `#Preview(as: .content)` per state in `RideLiveActivity.swift`, with stale / Always-On in `RideLockScreenView.swift` previews and snapshots.
+- **"`update` never alerts": no test, by decision.** `LiveActivityClient.update` takes no alert parameter and `AlertConfiguration` appears nowhere in the repo. A test could only grep the source, so it could never fail for a real reason.
+- **Added:** `sustainedReadingsStayAtOneHertz` (4 Hz GPS for 10 s → exactly one update per tick, none between); `pauseShowsAndStaysAlive` now asserts no `.end` and `phase == .showing`.
+- **Mutation checks:** an `update` on every `.gpsSpeedReceived` fails the new test (and `readingsCoalesceToTheTick`); an `end()` on `.pauseTapped` fails `pauseShowsAndStaysAlive` on the new assertion ("a pause doesn't end the activity", read from the xcresult). Both reverted.
+- **Tests:** `LiveActivityFeatureTests` + `RideActivityAttributesTests`, with a fresh build in its own derivedData: 27 cases passed, both new/changed tests in the list.
