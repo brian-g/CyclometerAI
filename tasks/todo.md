@@ -548,3 +548,20 @@ Plan: verdict per physical device at ride end (lowest battery reading of the rid
 - **Fix.** The auto-resume sends `.resumeRecording` (the same action a manual Resume sends), but only when the recorder isn't already running. A live auto-pause never stops the recorder, so the live path sends nothing new.
 - **Test.** `resumedAutoPausedRideRecordsAfterAutoResume` (`ActiveRideFeatureStateMachineTests`) drains the buffer after one tick. Before the fix it failed with `isRecording == false` and `recorded.count == 0`.
 - **Suite.** Full `CyclometerTests`, including `PersistenceClientTests` and `MapWidgetAccessibilityTests` (no hang this time): `TEST SUCCEEDED`, 1,904 unique cases. The new test and the live auto-resume tests (`movingAgainAutoResumes`, `autoResumeOpensANewSegment`, `motionResumesAnAutoPausedRide`) are in the log and pass.
+
+### Follow-up plan: one pause path, one resume path (review findings 1–2, prepares #267)
+
+The auto-resume does three of the five things a resume does (state, `isAutoPaused`, `zeroSpeedSeconds`, segment) and skips the other two (recorder, checkpoint). #392 was the recorder half, review finding 2 is the checkpoint half, and #267 would add a third caller that needs all five. So the auto-resume and `.resumeTapped` should share one helper, and auto-pause and `.pauseTapped` likewise.
+
+- [x] 1. `private func resume(_ state: inout State) -> Effect<Action>`: `.active`, clears `isAutoPaused`/`zeroSpeedSeconds`, `beginTrackSegment`, checkpoint, `.resumeRecording`. `.resumeTapped` and the `.speed` auto-resume both call it. It's a helper, not `.send(.resumeTapped)`, so the resuming reading still counts toward max speed in the same reduce.
+- [x] 2. `private func pause(_ state: inout State) -> Effect<Action>`: `.paused`, checkpoint, `.pauseRecording`. `.pauseTapped` calls it; `.autoPauseTriggered` sets `isAutoPaused` and then calls it. This restores the `.task` invariant `trackRecorder.isRecording == (recordingState == .active)`, and the `if !isRecording` from the first fix goes away.
+- [x] 3. Tests: the three exhaustive auto-pause tests now also receive `.pauseRecording`. The new #392 test also checks the segment index (finding 3), and a new test covers the auto-resume checkpoint (finding 2).
+- [x] 4. Full suite; update the PR.
+
+Out of scope: #267 itself (the preference, Settings row, and its open questions). After this change, #267 only has to widen the guard on the `.speed` auto-resume.
+
+#### Review
+
+- **Done as planned, plus auto-end.** `.autoEndTriggered` now goes through `pause` too. A rider who cancels its Finish alert used to be left paused with the recorder running, and a kill while the alert was up resumed as stale `.active`. That makes `pause` truly the only pause path, so the `.task` invariant holds everywhere.
+- **No test plumbing change.** `PersistenceClient.testValue.updateRideSummary` does nothing rather than failing, so the auto-resume tests that use it needed no change, despite the review's concern.
+- **Tests.** Four exhaustive tests now also receive `.pauseRecording`: `autoPauseTriggersAtThreshold`, `autoPauseTriggeredPersistsImmediately`, `autoPausePreemptsAutoEnd` and the auto-end trigger test. New: `autoResumeCheckpoints` (finding 2). The #392 test also checks `segmentIndex == summary.trackSegmentIndex + 1` (finding 3). The six pause/resume suites pass: 74 tests. Full `CyclometerTests`: `TEST SUCCEEDED`, 1,907 unique cases.

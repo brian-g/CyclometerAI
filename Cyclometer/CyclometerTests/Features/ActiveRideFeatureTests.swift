@@ -1551,6 +1551,8 @@ struct ActiveRideFeatureStateMachineTests {
 
         let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
         #expect(recorded.count == 1)
+        // A segment past the one the ride was killed in, so the track doesn't join across the pause (#263).
+        #expect(recorded.first?.segmentIndex == summary.trackSegmentIndex + 1)
     }
 
     @Test("pauseTapped only transitions from active")
@@ -1823,8 +1825,9 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(.autoEndTriggered) {
             $0.recordingState = .paused
         }
-        // .autoEndTriggered's own effect (.finishTapped) is merged ahead of the
-        // suspension notice that `onChange` appends for the same state change.
+        // .autoEndTriggered's own effects (the pause, then .finishTapped) are merged ahead of
+        // the suspension notice that `onChange` appends for the same state change.
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(.finishTapped) {
             $0.finishAlert = AlertState {
                 TextState("Finish Ride")
@@ -2009,6 +2012,7 @@ struct ActiveRideFeatureAutoPauseTests {
             $0.recordingState = .paused
             $0.isAutoPaused = true
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -2055,6 +2059,7 @@ struct ActiveRideFeatureAutoPauseTests {
             $0.recordingState = .paused
             $0.isAutoPaused = true
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -2112,6 +2117,7 @@ struct ActiveRideFeatureAutoPauseTests {
             $0.recordingState = .paused
             $0.isAutoPaused = true
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -2133,6 +2139,38 @@ struct ActiveRideFeatureAutoPauseTests {
         #expect(store.state.recordingState == .active)
         #expect(store.state.isAutoPaused == false)
         #expect(store.state.zeroSpeedSeconds == 0)
+    }
+
+    /// The auto-pause checkpointed `isAutoPaused: true`; without a checkpoint here a kill in the
+    /// next 30 s would bring a ride the rider is riding back paused.
+    @Test("An auto-resume checkpoints the ride like a manual resume")
+    func autoResumeCheckpoints() async {
+        let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
+        let rideId = UUID()
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                rideId: rideId, recordingState: .paused, isAutoPaused: true
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(onUpdateRideSummary: { updatedSummary.setValue($0) })
+        }
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
+        await store.receive(\.trackRecorder.resumeRecording)
+
+        #expect(updatedSummary.value?.rideId == rideId)
+        #expect(updatedSummary.value?.recordingState == .active)
+        #expect(updatedSummary.value?.isAutoPaused == false)
+        #expect(updatedSummary.value?.trackSegmentIndex == 1)
     }
 
     @Test("Motion does not resume a ride the rider paused manually")
