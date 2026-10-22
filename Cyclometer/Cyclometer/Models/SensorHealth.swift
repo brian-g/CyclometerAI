@@ -3,9 +3,9 @@ import Foundation
 /// What one ride's battery readings and link losses say about one physical sensor (#391).
 ///
 /// Per device, not per role: the battery and the radio belong to the peripheral, so a combo
-/// CSC device has one verdict for both its roles. Saved on each of its `PairedSensor` records
-/// at ride end, which is how the next ride's Start sheet (S05.1) can warn before the first
-/// drop, and how the Ride Summary (S10) finds the sensors that misbehaved on *its* ride.
+/// CSC device has one verdict for both its roles. Saved in `AppPreferences.sensorHealth` at
+/// ride end, which is how the next ride's Start sheet (S05.1) can warn before the first drop,
+/// and how the Ride Summary (S10) finds the sensors that misbehaved on *its* ride.
 struct SensorHealthReport: Codable, Equatable, Sendable {
     /// At or below this the battery reads low. Shared with `SensorBatteryLabel`, which tints
     /// the live level at the same point, so the two never disagree about what "low" is.
@@ -61,6 +61,13 @@ struct SensorHealthLog: Equatable {
 
     private var entries: [UUID: Entry] = [:]
 
+    /// The sensor connected this ride. Enough for a verdict on its own: a sensor without the
+    /// Battery Service that never drops has nothing else to say, and without this its last
+    /// warning would outlive any number of clean rides.
+    mutating func recordConnected(peripheral: UUID) {
+        if entries[peripheral] == nil { entries[peripheral] = Entry() }
+    }
+
     /// A `nil` level is skipped: every sensor client publishes nil on each disconnect, and
     /// it means "unknown", not empty.
     mutating func recordBattery(_ percent: Int?, peripheral: UUID) {
@@ -78,9 +85,9 @@ struct SensorHealthLog: Equatable {
         entries[peripheral] = entry
     }
 
-    /// A report for each peripheral that reported anything this ride. One that never
-    /// answered gets none, so a dead cell that never connects keeps the warning from the
-    /// ride that last saw it.
+    /// A report for each peripheral that connected or reported this ride. One that never
+    /// showed up gets none, so a dead cell that never connects keeps the warning from the ride
+    /// that last saw it.
     func reports(rideId: UUID) -> [UUID: SensorHealthReport] {
         entries.mapValues {
             SensorHealthReport(rideId: rideId,

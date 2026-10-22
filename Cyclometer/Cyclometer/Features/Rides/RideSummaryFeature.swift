@@ -88,13 +88,13 @@ struct RideSummaryFeature {
             return RideDetailSeries.zoneSeconds(heartRateSecondsByBPM, zoneBounds: bounds)
         }
 
-        /// The sensors this ride flagged (#391), one per device, in pairing order. Read from the
-        /// paired records, where `ActiveRideFeature` saved each device's verdict at ride end —
-        /// live, so nothing waits on `.task`.
+        /// The sensors this ride flagged (#391), one per device, in pairing order. Read from
+        /// `AppPreferences.sensorHealth`, where `ActiveRideFeature` saved each device's verdict at
+        /// ride end — live, so nothing waits on `.task`.
         var flaggedSensors: [FlaggedSensor] {
             var flagged: [FlaggedSensor] = []
             for record in preferences.pairedSensors {
-                guard let report = record.lastRideHealth, report.rideId == rideId,
+                guard let report = preferences.sensorHealth[record.peripheralID], report.rideId == rideId,
                       let warning = report.warning else { continue }
                 if let index = flagged.firstIndex(where: { $0.id == record.peripheralID }) {
                     flagged[index].roles.append(record.role)

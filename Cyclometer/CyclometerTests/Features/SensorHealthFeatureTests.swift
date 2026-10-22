@@ -19,7 +19,9 @@ struct SensorHealthFeatureTests {
     ]
 
     /// Seeded in the same dependency scope the store reads from — see `StartSheetFeatureTests`.
+    /// Recording by default: link losses only count while the ride records.
     private func makeStore(
+        isRecording: Bool = true,
         dependencies: @escaping (inout DependencyValues) -> Void = { _ in }
     ) -> TestStoreOf<SensorHealthFeature> {
         let storage = FileStorage.inMemory
@@ -28,7 +30,7 @@ struct SensorHealthFeatureTests {
         } operation: {
             @Shared(.appPreferences) var preferences
             $preferences.withLock { $0.pairedSensors = Self.paired }
-            return TestStore(initialState: SensorHealthFeature.State()) {
+            return TestStore(initialState: SensorHealthFeature.State(isRecording: isRecording)) {
                 SensorHealthFeature()
             } withDependencies: {
                 $0.defaultFileStorage = storage
@@ -66,13 +68,33 @@ struct SensorHealthFeatureTests {
         }
     }
 
+    @Test("A link loss while paused doesn't count — the rider may have walked off with the phone")
+    func pausedLinkLossIgnored() async {
+        let store = makeStore(isRecording: false)
+        await store.send(.linkTimedOut(Self.combo))
+        #expect(store.state.log.reports(rideId: UUID(0)).isEmpty)
+    }
+
+    @Test("Connecting is enough for a verdict, so a sensor without battery reporting gets one")
+    func connectedRecordsPresence() async {
+        let store = makeStore()
+        await store.send(.connected(.radar)) { $0.log.recordConnected(peripheral: Self.radar) }
+        #expect(store.state.log.reports(rideId: UUID(0)) == [
+            Self.radar: SensorHealthReport(rideId: UUID(0), minBatteryPercent: nil, maxLinkLossesPerWindow: 0)
+        ])
+        // An unpaired role connecting says nothing about any paired device.
+        await store.send(.connected(.heartRate))
+    }
+
     @Test("Start listening subscribes to every battery stream and to link timeouts")
     func startListeningSubscribes() async {
         let (radarStream, radarContinuation) = AsyncStream<Int?>.makeStream()
         let (speedStream, speedContinuation) = AsyncStream<Int?>.makeStream()
         let (events, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
+        let (radarState, radarStateContinuation) = AsyncStream<SensorConnectionState>.makeStream()
         var radar = VariaRadarClient.testValue
         radar.batteryLevel = { radarStream }
+        radar.connectionState = { radarState }
         var csc = BLECSCClient.testValue
         csc.batteryLevel = { role in role == .speed ? speedStream : AsyncStream { $0.finish() } }
         var ble = BLEClient.testValue
@@ -85,6 +107,10 @@ struct SensorHealthFeatureTests {
         }
         await store.send(.startListening)
 
+        // Only `.active` counts as showing up.
+        radarStateContinuation.yield(.connecting)
+        radarStateContinuation.yield(.active)
+        await store.receive(.connected(.radar)) { $0.log.recordConnected(peripheral: Self.radar) }
         radarContinuation.yield(64)
         await store.receive(.batteryReported(.radar, 64)) { $0.log.recordBattery(64, peripheral: Self.radar) }
         speedContinuation.yield(nil)
@@ -95,6 +121,7 @@ struct SensorHealthFeatureTests {
         }
 
         radarContinuation.finish()
+        radarStateContinuation.finish()
         speedContinuation.finish()
         eventContinuation.finish()
         await store.finish()
@@ -109,7 +136,7 @@ struct RideEndSensorHealthTests {
     static let earlierRide = UUID(7)
     static let rideId = UUID(8)
 
-    @Test("Finishing writes each reporting device's verdict to all its records; a silent one keeps its last")
+    @Test("Finishing saves each device that showed up; one that didn't keeps its last verdict")
     func finishWritesReports() async {
         let storage = FileStorage.inMemory
         let staleRadarReport = SensorHealthReport(rideId: Self.earlierRide, minBatteryPercent: 4, maxLinkLossesPerWindow: 0)
@@ -122,9 +149,9 @@ struct RideEndSensorHealthTests {
                 $0.pairedSensors = [
                     PairedSensor(peripheralID: Self.combo, role: .speed, displayName: "Wahoo RPM"),
                     PairedSensor(peripheralID: Self.combo, role: .cadence, displayName: "Wahoo RPM"),
-                    PairedSensor(peripheralID: Self.radar, role: .radar, displayName: "Varia RTL515",
-                                 lastRideHealth: staleRadarReport),
+                    PairedSensor(peripheralID: Self.radar, role: .radar, displayName: "Varia RTL515"),
                 ]
+                $0.sensorHealth = [Self.radar: staleRadarReport]
             }
             return ActiveRideFeature.State(rideId: Self.rideId, recordingState: .paused)
         }
@@ -150,11 +177,32 @@ struct RideEndSensorHealthTests {
         await store.send(.finishTapped)
         await store.send(.finishAlert(.presented(.confirmFinish)))
 
-        let sensors = store.state.preferences.pairedSensors
-        let expected = SensorHealthReport(rideId: Self.rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 0)
-        #expect(sensors[0].lastRideHealth == expected)
-        #expect(sensors[1].lastRideHealth == expected)
-        // A dead cell that never connects must not have its warning cleared by a ride it sat out.
-        #expect(sensors[2].lastRideHealth == staleRadarReport)
+        #expect(store.state.preferences.sensorHealth == [
+            Self.combo: SensorHealthReport(rideId: Self.rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 0),
+            // A dead cell that never connects must not have its warning cleared by a ride it sat out.
+            Self.radar: staleRadarReport,
+        ])
+    }
+
+    @Test("The link-loss count follows the ride's recording state")
+    func recordingStateForwarded() async {
+        let store = TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.defaultFileStorage = .inMemory
+            $0.continuousClock = TestClock()
+            $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock()
+        }
+        store.exhaustivity = .off
+
+        await store.send(.pauseTapped)
+        #expect(!store.state.sensorHealth.isRecording)
+        await store.send(.resumeTapped)
+        #expect(store.state.sensorHealth.isRecording)
     }
 }

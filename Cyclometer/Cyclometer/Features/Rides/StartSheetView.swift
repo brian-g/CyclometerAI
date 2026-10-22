@@ -195,14 +195,16 @@ struct SensorStatusRow: View {
     } operation: {
         @Shared(.appPreferences) var preferences
         let rideId = UUID()
+        let radar = UUID()
+        let speed = UUID()
         $preferences.withLock {
             $0.pairedSensors = [
-                PairedSensor(peripheralID: UUID(), role: .radar, displayName: "Varia RTL515",
-                             lastRideHealth: SensorHealthReport(rideId: rideId, minBatteryPercent: 64,
-                                                                maxLinkLossesPerWindow: 12)),
-                PairedSensor(peripheralID: UUID(), role: .speed, displayName: "Wahoo SPEED",
-                             lastRideHealth: SensorHealthReport(rideId: rideId, minBatteryPercent: 0,
-                                                                maxLinkLossesPerWindow: 43))
+                PairedSensor(peripheralID: radar, role: .radar, displayName: "Varia RTL515"),
+                PairedSensor(peripheralID: speed, role: .speed, displayName: "Wahoo SPEED")
+            ]
+            $0.sensorHealth = [
+                radar: SensorHealthReport(rideId: rideId, minBatteryPercent: 64, maxLinkLossesPerWindow: 12),
+                speed: SensorHealthReport(rideId: rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43)
             ]
         }
         return StartSheetView(

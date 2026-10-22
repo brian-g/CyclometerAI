@@ -12,19 +12,27 @@ struct SensorWarningLabel: View {
     var isFromLastRide = false
 
     var body: some View {
-        Label(message, systemImage: "exclamationmark.triangle.fill")
-            .font(.caption.weight(.semibold))
-            .textCase(.uppercase)
-            .foregroundStyle(Color.cyRatingBad)
+        Label {
+            Text(message)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill")
+        }
+        .font(.caption.weight(.semibold))
+        .textCase(.uppercase)
+        .foregroundStyle(Color.cyRatingBad)
     }
 
     /// Names no cause it can't know: a low reading says the battery is low, and a flapping
     /// link alone points at both things that cause one.
-    var message: String {
-        let when = isFromLastRide ? " on last ride" : ""
-        return switch warning {
-        case .batteryLow: "Low battery\(when)"
-        case .linkUnreliable: "Unreliable connection\(when) — check battery or mount"
+    ///
+    /// A resource rather than a `String`, so it wraps the English way whatever the device
+    /// language (#430), and each case is a whole sentence a translator can reorder.
+    var message: LocalizedStringResource {
+        switch (warning, isFromLastRide) {
+        case (.batteryLow, false): "Low battery"
+        case (.batteryLow, true): "Low battery on last ride"
+        case (.linkUnreliable, false): "Unreliable connection — check battery or mount"
+        case (.linkUnreliable, true): "Unreliable connection on last ride — check battery or mount"
         }
     }
 }

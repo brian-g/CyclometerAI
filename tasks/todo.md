@@ -513,3 +513,23 @@ Plan: verdict per physical device at ride end (lowest battery reading of the rid
   - The existing Start sheet and S10 references are unchanged.
   - The new references were checked by eye and are not blank.
 
+
+### Code review follow-up
+
+- **Applied by the review:**
+  - `SensorWarningLabel.message` is a `LocalizedStringResource` made of whole sentences (#430).
+  - `linkTimeouts()` is a `compactMap` over `events()`.
+  - The S10 icon comes from `SensorRowStyle.device`.
+  - `assets/TCA.md` §8 lists `SensorHealth/`.
+- **Fixed (findings 5, 10 and 7):** the verdict is now `AppPreferences.sensorHealth: [UUID: SensorHealthReport]`, keyed by device, and `PairedSensor.lastRideHealth` is gone. S11's `apply()` rebuilds the role records and so used to drop it. It is decoded with `try?`, so a verdict that can't be read never resets the other preferences.
+- **Fixed (finding 1):** a sensor reaching `.active` (HR: `pairingStatus` true) now counts as showing up for the ride. A sensor without the Battery Service is cleared by a clean ride.
+- **Fixed (finding 3):** link losses count only while the ride records. `SensorHealthFeature.State.isRecording` is forwarded the way `CadenceFeature`'s is.
+- **Left, by decision:**
+  - Finding 2: a sagging cell that connects at 95%, drops once and never reconnects scores healthy.
+  - Finding 4: the S10 Sensors section sits inside the loaded block.
+- **Tests:**
+  - New cases cover the paused link loss, the presence signal, a recording state forwarded through ActiveRide, legacy and corrupt `sensorHealth` decoding, and connected-only being healthy.
+  - Three exhaustive ActiveRide resume tests now also expect `sensorHealth.isRecording = true`.
+  - Full `CyclometerTests` minus the two known hangs: 1,851 unique cases. The only failures were those three; after the fix their suites (`ActiveRideFeatureStateMachineTests`, `ActiveRideFeatureTimerTests`) pass.
+  - `PersistenceClientTests` and `MapWidgetAccessibilityTests` run alone: `TEST SUCCEEDED`.
+  - Snapshot references are unchanged.

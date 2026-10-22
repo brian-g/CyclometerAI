@@ -139,19 +139,39 @@ struct SensorHealthTests {
 
     // MARK: Persistence
 
-    @Test("A paired record written before #391 still decodes")
-    func legacyPairedSensorDecodes() throws {
-        let legacy = Data(#"{"peripheralID":"00000000-0000-0000-0000-000000000001","role":"speed","displayName":"Wahoo SPEED"}"#.utf8)
-        let decoded = try JSONDecoder().decode(PairedSensor.self, from: legacy)
-        #expect(decoded.lastRideHealth == nil)
-        #expect(decoded.displayName == "Wahoo SPEED")
+    @Test("Preferences saved before #391 still decode, with no verdicts")
+    func legacyPreferencesDecode() throws {
+        let legacy = Data(#"{"wheelCircumferenceMM":2105}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: legacy)
+        #expect(decoded.sensorHealth.isEmpty)
+        #expect(decoded.wheelCircumferenceMM == 2105)
     }
 
-    @Test("A paired record round-trips its last ride's report")
-    func pairedSensorRoundTrips() throws {
-        var sensor = PairedSensor(peripheralID: Self.sensor, role: .speed, displayName: "Wahoo SPEED")
-        sensor.lastRideHealth = SensorHealthReport(rideId: Self.rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43)
-        let data = try JSONEncoder().encode(sensor)
-        #expect(try JSONDecoder().decode(PairedSensor.self, from: data) == sensor)
+    @Test("An unreadable verdict is dropped, not a reason to reset every preference")
+    func unreadableVerdictKeepsPreferences() throws {
+        let corrupt = Data(#"{"wheelCircumferenceMM":2105,"sensorHealth":["not-a-uuid",{"rideId":7}]}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: corrupt)
+        #expect(decoded.sensorHealth.isEmpty)
+        #expect(decoded.wheelCircumferenceMM == 2105)
+    }
+
+    @Test("Verdicts round-trip through the preferences file")
+    func verdictsRoundTrip() throws {
+        var preferences = AppPreferences()
+        preferences.sensorHealth = [
+            Self.sensor: SensorHealthReport(rideId: Self.rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43)
+        ]
+        let data = try JSONEncoder().encode(preferences)
+        #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
+    }
+
+    @Test("A connection alone yields a healthy verdict")
+    func connectedOnlyIsHealthy() throws {
+        var log = SensorHealthLog()
+        log.recordConnected(peripheral: Self.sensor)
+        log.recordConnected(peripheral: Self.sensor)
+        let report = try report(log)
+        #expect(report.minBatteryPercent == nil)
+        #expect(report.warning == nil)
     }
 }

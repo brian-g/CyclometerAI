@@ -92,6 +92,12 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// against them, so a change applies to a ride already in progress.
     var cadenceZones: CadenceZoneBoundaries = .default
 
+    /// Each device's verdict from the last ride it showed up on (#391), for the Start sheet's
+    /// warning and the Ride Summary's Sensors section. Keyed by peripheral rather than kept on
+    /// `PairedSensor`: the battery and radio belong to the device, not to its roles, so a role
+    /// change on S11 — which rebuilds the role records — leaves it alone.
+    var sensorHealth: [UUID: SensorHealthReport] = [:]
+
     /// Which widgets sit where on each dashboard page. S07/S08 (#141, #142) set it; setting the
     /// factory layout, page ids aside, clears the override.
     var dashboardLayout: DashboardLayout {
@@ -198,6 +204,11 @@ struct AppPreferences: Codable, Equatable, Sendable {
         cadenceZones = (try? container.decodeIfPresent(
             CadenceZoneBoundaries.self, forKey: .cadenceZones
         )) ?? .default
+        // `try?` for the same reason: a verdict this build can't read is a lost warning, not a
+        // reason to reset every preference.
+        sensorHealth = (try? container.decodeIfPresent(
+            [UUID: SensorHealthReport].self, forKey: .sensorHealth
+        )) ?? [:]
         // `try?`, unlike the fields above: an unreadable layout must not throw and reset every
         // other preference with it. A placement that breaks a rule — naming a widget this build
         // doesn't have, or overlapping another — is dropped and the rest kept. Empty pages exist

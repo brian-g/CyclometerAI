@@ -22,10 +22,6 @@ struct PairedSensor: Codable, Equatable, Sendable {
     /// range still has something to show on the Sensors screen, where no live
     /// advertisement is available to name it.
     var displayName: String?
-    /// The verdict from the last ride this sensor reported anything on (#391), for the
-    /// Start sheet's warning and the Ride Summary's Sensors section. Optional so records
-    /// written before it still decode — this type's `Codable` is synthesized.
-    var lastRideHealth: SensorHealthReport?
 
     /// Whether this record is one `BLECSCClient` can act on.
     ///

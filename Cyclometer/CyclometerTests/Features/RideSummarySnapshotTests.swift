@@ -40,7 +40,12 @@ final class RideSummarySnapshotTests: XCTestCase {
     // MARK: Harness
 
     /// Imperial units, and the state `.task` would have produced seeded directly.
-    private func screen(heartRate: Bool, stats: RideStats, pairedSensors: [PairedSensor] = []) -> some View {
+    private func screen(
+        heartRate: Bool,
+        stats: RideStats,
+        pairedSensors: [PairedSensor] = [],
+        sensorHealth: [UUID: SensorHealthReport] = [:]
+    ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
@@ -49,6 +54,7 @@ final class RideSummarySnapshotTests: XCTestCase {
             $preferences.withLock {
                 $0.preferredUnit = .imperial
                 $0.pairedSensors = pairedSensors
+                $0.sensorHealth = sensorHealth
             }
             let points = RideSummaryFeatureTests.track(count: 600, heartRate: { second in
                 heartRate ? 125 + Int(40 * sin(Double(second) / 40)) : nil
@@ -123,19 +129,18 @@ final class RideSummarySnapshotTests: XCTestCase {
     func testRideSummaryUnreliableSensors() {
         let rideId = Self.summary.id
         let combo = UUID(1)
-        let sagging = SensorHealthReport(rideId: rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43)
         assertBothSchemes(screen(heartRate: true, stats: RideStats(
             averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, averageCadenceRPM: 88, maxCadenceRPM: 109,
             vehiclePassCount: 4
         ), pairedSensors: [
-            PairedSensor(peripheralID: combo, role: .speed, displayName: "Wahoo RPM", lastRideHealth: sagging),
-            PairedSensor(peripheralID: combo, role: .cadence, displayName: "Wahoo RPM", lastRideHealth: sagging),
-            PairedSensor(peripheralID: UUID(2), role: .radar, displayName: "Varia RTL515",
-                         lastRideHealth: SensorHealthReport(rideId: rideId, minBatteryPercent: 70,
-                                                            maxLinkLossesPerWindow: 12)),
-            PairedSensor(peripheralID: UUID(3), role: .heartRate, displayName: "Wahoo TICKR",
-                         lastRideHealth: SensorHealthReport(rideId: rideId, minBatteryPercent: 80,
-                                                            maxLinkLossesPerWindow: 0))
+            PairedSensor(peripheralID: combo, role: .speed, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: combo, role: .cadence, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: UUID(2), role: .radar, displayName: "Varia RTL515"),
+            PairedSensor(peripheralID: UUID(3), role: .heartRate, displayName: "Wahoo TICKR")
+        ], sensorHealth: [
+            combo: SensorHealthReport(rideId: rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43),
+            UUID(2): SensorHealthReport(rideId: rideId, minBatteryPercent: 70, maxLinkLossesPerWindow: 12),
+            UUID(3): SensorHealthReport(rideId: rideId, minBatteryPercent: 80, maxLinkLossesPerWindow: 0)
         ]), named: "unreliable-sensors", on: sensorsDevice)
     }
 

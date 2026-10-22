@@ -724,12 +724,7 @@ struct ActiveRideFeature {
                 // `activeRide` would be nil. Written before AppFeature presents S10, which
                 // reads it (#391).
                 let healthReports = state.sensorHealth.log.reports(rideId: rideId)
-                state.$preferences.withLock { preferences in
-                    for index in preferences.pairedSensors.indices {
-                        guard let report = healthReports[preferences.pairedSensors[index].peripheralID] else { continue }
-                        preferences.pairedSensors[index].lastRideHealth = report
-                    }
-                }
+                state.$preferences.withLock { $0.sensorHealth.merge(healthReports) { _, new in new } }
                 return .merge(
                     // A checkpoint queued or in flight from the same tick that just
                     // finished the ride must not land after this write and stomp the
@@ -1184,11 +1179,12 @@ struct ActiveRideFeature {
                 .send(.calibration(.suspensionChanged(isSuspended)))
             }
         }
-        // Recording state changes from five places too; the cadence tally only needs to know
-        // whether it is `.active`, so it is forwarded on the transition.
+        // Recording state changes from five places too; the cadence tally and the link-loss count
+        // only need to know whether it is `.active`, so it is forwarded on the transition.
         .onChange(of: \.recordingState) { _, recordingState in
             Reduce { state, _ in
                 state.cadence.isRecording = recordingState == .active
+                state.sensorHealth.isRecording = recordingState == .active
                 return .none
             }
         }
@@ -1472,6 +1468,7 @@ extension ActiveRideFeature.State {
         // it" (#175), not silently un-pausing a ride the rider had stopped.
         recordingState = summary.recordingState == .paused ? .paused : .active
         cadence.isRecording = recordingState == .active
+        sensorHealth.isRecording = recordingState == .active
         // Only meaningful alongside `.paused` (`.pauseTapped`/`.resumeTapped`
         // always clear it) — restoring it lets the `case .speed` auto-resume
         // guard keep working after a resume exactly as it did before the kill,

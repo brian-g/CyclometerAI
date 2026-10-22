@@ -99,18 +99,10 @@ extension BLEClient {
     /// Derived from `events()` rather than a separate endpoint: the sensor clients already
     /// receive the error, and an extra closure would be one more thing every hand-built
     /// test client has to stub.
-    func linkTimeouts() -> AsyncStream<UUID> {
-        let events = events()
-        return AsyncStream { continuation in
-            let task = Task {
-                for await event in events {
-                    if case .disconnected(let id, let error) = event, Self.isSupervisionTimeout(error) {
-                        continuation.yield(id)
-                    }
-                }
-                continuation.finish()
-            }
-            continuation.onTermination = { _ in task.cancel() }
+    func linkTimeouts() -> some AsyncSequence<UUID, Never> {
+        events().compactMap { event in
+            guard case .disconnected(let id, let error) = event, Self.isSupervisionTimeout(error) else { return nil }
+            return id
         }
     }
 

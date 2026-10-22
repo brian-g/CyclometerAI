@@ -184,14 +184,18 @@ struct StartSheetFeatureTests {
     /// the store see different storage — the idiom `DeviceManagementFeatureTests` uses.
     private func makeStore(
         sensors: [SensorRow] = SensorRow.Kind.allCases.map { SensorRow(kind: $0) },
-        pairedSensors: [PairedSensor] = []
+        pairedSensors: [PairedSensor] = [],
+        sensorHealth: [UUID: SensorHealthReport] = [:]
     ) -> TestStoreOf<StartSheetFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.pairedSensors = pairedSensors }
+            $preferences.withLock {
+                $0.pairedSensors = pairedSensors
+                $0.sensorHealth = sensorHealth
+            }
             return TestStore(initialState: StartSheetFeature.State(sensors: sensors)) {
                 StartSheetFeature()
             } withDependencies: {
@@ -218,21 +222,20 @@ struct StartSheetFeatureTests {
         #expect(rows[0].status.badge.label == "Searching")
     }
 
-    @Test("A row carries the warning its sensor's last ride left on the record (#391)")
+    @Test("A row carries the warning its device's last ride left (#391)")
     func rowCarriesLastRideWarning() {
         let rideId = UUID(0)
         let store = makeStore(
             pairedSensors: [
-                PairedSensor(peripheralID: UUID(1), role: .radar, displayName: "Varia RTL515",
-                             lastRideHealth: SensorHealthReport(rideId: rideId, minBatteryPercent: 80,
-                                                                maxLinkLossesPerWindow: 0)),
-                PairedSensor(peripheralID: UUID(2), role: .speed, displayName: "Wahoo SPEED",
-                             lastRideHealth: SensorHealthReport(rideId: rideId, minBatteryPercent: 0,
-                                                                maxLinkLossesPerWindow: 43)),
-                PairedSensor(peripheralID: UUID(3), role: .cadence, displayName: "Wahoo CADENCE",
-                             lastRideHealth: SensorHealthReport(rideId: rideId, minBatteryPercent: 85,
-                                                                maxLinkLossesPerWindow: 9)),
+                PairedSensor(peripheralID: UUID(1), role: .radar, displayName: "Varia RTL515"),
+                PairedSensor(peripheralID: UUID(2), role: .speed, displayName: "Wahoo SPEED"),
+                PairedSensor(peripheralID: UUID(3), role: .cadence, displayName: "Wahoo CADENCE"),
                 PairedSensor(peripheralID: UUID(4), role: .heartRate, displayName: "Wahoo TICKR")
+            ],
+            sensorHealth: [
+                UUID(1): SensorHealthReport(rideId: rideId, minBatteryPercent: 80, maxLinkLossesPerWindow: 0),
+                UUID(2): SensorHealthReport(rideId: rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43),
+                UUID(3): SensorHealthReport(rideId: rideId, minBatteryPercent: 85, maxLinkLossesPerWindow: 9)
             ]
         )
 
