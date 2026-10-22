@@ -596,19 +596,27 @@ struct LiveActivityFeatureTests {
         #expect(ride.store.state.liveActivity.phase == .notShowing, "the second start was refused")
     }
 
-    @Test("turning it off in Settings during a ride reaches the ride's activity")
+    @Test("turning it off and on in Settings during a ride reaches the ride's activity")
     func settingsToggleReachesTheRide() async {
         let calls = LockIsolated<[Call]>([])
         let store = Self.makeAppStore(clock: TestClock(), calls: calls)
 
         await store.send(.activeRide(.task))
         await store.receive(\.activeRide.liveActivity.started)
-        await store.send(.settings(.liveActivityToggled))
+        await store.send(.settings(.liveActivityChanged(false)))
         await store.receive(\.settings.delegate.liveActivityToggled)
         await store.receive(\.activeRide.liveActivity.preferenceChanged)
 
         #expect(store.state.activeRide?.liveActivity.phase == .notShowing)
         await expectEventually("the activity ended") { calls.value.last == .end }
+
+        await store.send(.settings(.liveActivityChanged(true)))
+        await store.receive(\.settings.delegate.liveActivityToggled)
+        await store.receive(\.activeRide.liveActivity.preferenceChanged)
+        await store.receive(\.activeRide.liveActivity.started)
+
+        #expect(store.state.activeRide?.liveActivity.phase == .showing)
+        #expect(calls.starts == 2)
     }
 
     static func makeAppStore(

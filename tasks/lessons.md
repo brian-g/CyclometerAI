@@ -847,3 +847,8 @@ earlier review sections from #426, #412, #310 and others, including their open "
 
 **Rule.** Add a new task's checklist and its review section to the end of `tasks/todo.md`, under a `---` separator.
 Before committing, check `git diff --numstat main -- tasks/todo.md`. It should show only additions.
+
+**Repeated in #440 (2026-10-21).** I read only `head -100` of this file at session start, missed this rule, and
+replaced the #411 section again. I wrongly called that "the convention", because main's own #411 commit had done the same.
+**Rule.** `lessons.md` is too long to skim the top of. At session start, `grep -n` it for every file and area the task
+will touch, `tasks/todo.md` always included.
