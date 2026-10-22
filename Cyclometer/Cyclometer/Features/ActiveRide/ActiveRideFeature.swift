@@ -666,30 +666,10 @@ struct ActiveRideFeature {
                 return .none
             case .pauseTapped:
                 guard state.recordingState == .active else { return .none }
-                state.recordingState = .paused
-                let update = makeRideSummaryUpdate(from: state)
-                return .merge(
-                    .send(.trackRecorder(.pauseRecording)),
-                    .run { [persistenceClient] _ in
-                        try? await persistenceClient.updateRideSummary(update)
-                    }
-                )
+                return pause(&state)
             case .resumeTapped:
                 guard state.recordingState == .paused else { return .none }
-                state.recordingState = .active
-                state.zeroSpeedSeconds = 0
-                state.isAutoPaused = false
-                beginTrackSegment(&state)
-                // After `beginTrackSegment`, so the checkpoint this resume writes already
-                // carries the new segment index — a kill before the next one would
-                // otherwise resume into the segment that just ended (#263).
-                let update = makeRideSummaryUpdate(from: state)
-                return .merge(
-                    .send(.trackRecorder(.resumeRecording)),
-                    .run { [persistenceClient] _ in
-                        try? await persistenceClient.updateRideSummary(update)
-                    }
-                )
+                return resume(&state)
             case .finishTapped:
                 guard state.recordingState == .paused else { return .none }
                 // Auto-end sends this with no rider at the screen. SwiftUI won't show an alert
@@ -815,21 +795,14 @@ struct ActiveRideFeature {
                 return .none
             case .autoEndTriggered:
                 guard state.recordingState == .active else { return .none }
-                state.recordingState = .paused
-                return .send(.finishTapped)
+                // A pause like any other: the rider can cancel the Finish alert.
+                return .merge(pause(&state), .send(.finishTapped))
             case .autoPauseTriggered:
                 guard state.recordingState == .active else { return .none }
-                state.recordingState = .paused
+                // Before `pause`, so its checkpoint carries the flag a resumed ride needs
+                // to auto-resume (#175 review).
                 state.isAutoPaused = true
-                // Unlike a manual pause, nothing else ever checkpoints a
-                // `.paused` state to persistence — the 30s periodic checkpoint
-                // only fires while `.active` (`.elapsedTick`'s own guard), so
-                // without this write an auto-paused ride killed before the next
-                // manual action would resume as stale `.active` data (#175 review).
-                let update = makeRideSummaryUpdate(from: state)
-                return .run { [persistenceClient] _ in
-                    try? await persistenceClient.updateRideSummary(update)
-                }
+                return pause(&state)
             case .heartRateUpdated(let bpm):
                 // Everything the strap says during its post-connect warm-up is its own
                 // averaging window refilling rather than the rider (#221) — dropped
@@ -1138,14 +1111,9 @@ struct ActiveRideFeature {
                 // rider who tapped Pause has to tap Resume (#102). The bar is
                 // `movingSpeedMPS`, not any speed at all: GPS noise alone used to clear
                 // `> 0` and undo the pause on the next sample (#262).
+                var effect: Effect<Action> = .none
                 if state.isAutoPaused, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
-                    state.recordingState = .active
-                    state.isAutoPaused = false
-                    state.zeroSpeedSeconds = 0
-                    // An auto-pause is as real a break in the track as a manual one — the
-                    // rider stood at the light and the bike did not travel the ground
-                    // between the two fixes (#263).
-                    beginTrackSegment(&state)
+                    effect = resume(&state)
                 }
                 // Every displayed reading, after the resume above so the one that resumes
                 // counts too. Same "moving" bar as distance; the source is `SpeedFeature`'s
@@ -1154,7 +1122,7 @@ struct ActiveRideFeature {
                    speedMPS > Self.stationarySpeedMPS {
                     state.maxSpeedMPS = max(state.maxSpeedMPS, speedMPS)
                 }
-                return .none
+                return effect
             case .calibration, .sensorHealth:
                 return .none
             case .navigation(.delegate(.turnAnnounced(let direction))):
@@ -1385,13 +1353,47 @@ struct ActiveRideFeature {
         )
     }
 
+    /// Every pause, manual or auto. The checkpoint matters most for auto-pause: the 30 s periodic
+    /// one only fires while `.active` (`.elapsedTick`'s guard), so without it a ride killed while
+    /// paused would resume as stale `.active` data (#175 review). Stopping the recorder keeps
+    /// `trackRecorder.isRecording == (recordingState == .active)`, which `.task` relies on when it
+    /// leaves the recorder off for a ride resumed paused (#392).
+    private func pause(_ state: inout State) -> Effect<Action> {
+        state.recordingState = .paused
+        let update = makeRideSummaryUpdate(from: state)
+        return .merge(
+            .send(.trackRecorder(.pauseRecording)),
+            .run { [persistenceClient] _ in
+                try? await persistenceClient.updateRideSummary(update)
+            }
+        )
+    }
+
+    /// Every resume, manual or auto — one path, so a crash-resumed auto-paused ride restarts the
+    /// recorder (#392) and an auto-resume checkpoints like a manual one.
+    private func resume(_ state: inout State) -> Effect<Action> {
+        state.recordingState = .active
+        state.zeroSpeedSeconds = 0
+        state.isAutoPaused = false
+        beginTrackSegment(&state)
+        // After `beginTrackSegment`, so the checkpoint this resume writes already
+        // carries the new segment index — a kill before the next one would
+        // otherwise resume into the segment that just ended (#263).
+        let update = makeRideSummaryUpdate(from: state)
+        return .merge(
+            .send(.trackRecorder(.resumeRecording)),
+            .run { [persistenceClient] _ in
+                try? await persistenceClient.updateRideSummary(update)
+            }
+        )
+    }
+
     /// Opens the next track segment (#263): the points recorded from here on are stamped
     /// with a new index and the live map starts a new polyline, so neither joins the last
     /// position before the pause to the first one after it.
     ///
-    /// Called on both resumes — the manual `.resumeTapped` and the auto-resume in `.speed`
-    /// — and nowhere else. Starting a segment on *pause* instead would leave an empty one
-    /// hanging on any ride the rider finished without resuming.
+    /// Called only from `resume`. Starting a segment on *pause* instead would leave an empty
+    /// one hanging on any ride the rider finished without resuming.
     ///
     /// The elevation profile breaks there too (#387): whatever the altitude did while paused — a
     /// lift, a train — wasn't ridden.
