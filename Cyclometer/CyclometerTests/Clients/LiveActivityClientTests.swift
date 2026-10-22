@@ -141,6 +141,49 @@ struct LiveActivityClientTests {
         await clearActivities()
     }
 
+    // MARK: - Which activity is the ride's (#445)
+
+    /// `start` in other units ends the old card. `ended`, called on `start`'s answer, must wait on
+    /// the new one: the old one's dismissal would read as the rider's.
+    @Test func endedAfterAReplacementWaitsOnTheNewActivity() async throws {
+        await clearActivities()
+        #expect(await client.start(RideActivityAttributes(units: .imperial), Self.state()))
+        await expectEventually { Self.showing().count == 1 }
+
+        #expect(await client.start(metric, Self.state()))
+        let returned = LockIsolated<LiveActivityEnd?>(nil)
+        let wait = Task { [client] in
+            let end = await client.ended()
+            returned.setValue(end)
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(returned.value == nil, "still waiting while the new activity shows")
+        let new = try #require(Self.showing().only)
+        #expect(new.attributes == metric)
+        await new.end(nil, dismissalPolicy: .default)
+        await expectEventually("ended returns") { returned.value != nil }
+        wait.cancel()
+        #expect(returned.value == .ended, "the new activity's end, not the old one's dismissal")
+        await clearActivities()
+    }
+
+    /// S12 off, then on, in the same units: the `end` and the `start` run back to back. The new
+    /// ride needs an activity of its own, not the one being dismissed.
+    @Test func startRightAfterEndShowsANewActivity() async throws {
+        await clearActivities()
+        #expect(await client.start(metric, Self.state()))
+        await expectEventually { Self.showing().count == 1 }
+        let ended = try #require(Self.showing().only)
+
+        await client.end()
+        #expect(await client.start(metric, Self.state(distanceMeters: 15_000)))
+        await expectEventually("one activity, showing the new state") {
+            Self.showing().only?.content.state.distanceMeters == 15_000
+        }
+        #expect(Self.showing().only?.id != ended.id)
+        await clearActivities()
+    }
+
     // MARK: - Ended outside the app (#412)
 
     /// The system's end, at its 8-hour limit, leaves the card on the Lock Screen: a `.default` end.

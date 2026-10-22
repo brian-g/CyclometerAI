@@ -25,7 +25,7 @@ struct LiveActivityFeature {
     @Dependency(\.liveActivityClient) var liveActivityClient
     @Dependency(\.date) var date
 
-    private enum CancelID { case activityEnd }
+    private enum CancelID { case activityEnd, start }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -43,14 +43,16 @@ struct LiveActivityFeature {
                 state.liveActivity = LiveActivityState()
                 // The wait goes now, so this end can't come back as the rider's dismissal (#412).
                 // A new wait's `cancelInFlight` would cancel it only once that wait's task runs.
+                // A request still out goes too: its answer would otherwise come back as the answer
+                // to the next one, which S12's "on" can send before it (#445). The client still
+                // makes the request, and runs this `end` after it (#411).
                 return .merge(
                     .cancel(id: CancelID.activityEnd),
+                    .cancel(id: CancelID.start),
                     .run { [liveActivityClient] _ in await liveActivityClient.end() }
                 )
             case .liveActivity(.started(let isShowing)):
-                // Turned off while the request was out: the client runs that `end` after the
-                // request (#411), so it ends the activity this request showed.
-                guard state.liveActivity.phase == .starting else { return .none }
+                // Only the request still out answers: turning it off cancels the rest (#445).
                 guard isShowing else {
                     state.liveActivity = LiveActivityState()
                     return .none
@@ -102,6 +104,7 @@ struct LiveActivityFeature {
             let isShowing = await liveActivityClient.start(attributes, content)
             await send(.liveActivity(.started(isShowing)))
         }
+        .cancellable(id: CancelID.start)
     }
 
     /// The mini-player's values, as `AppView` hands them to `ActiveRideAccessoryView`.
