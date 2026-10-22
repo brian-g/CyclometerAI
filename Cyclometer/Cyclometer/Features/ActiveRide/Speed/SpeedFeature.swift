@@ -36,13 +36,31 @@ struct SpeedFeature {
     /// Maximum points plotted in the watermark; raw samples are downsampled to
     /// this many buckets so memory and render stay bounded over a full hour.
     static let watermarkResolution = 60
-    /// GPS fallback delay after a BLE disconnection (PRD §8.4).
-    static let fallbackDelay: Duration = .seconds(5)
+    /// How long BLE speed may go without a reading before the display falls back to GPS
+    /// (PRD §8.4). Driven by data, not connection state: a flapping link restarted the old
+    /// `.reconnecting` timer on every drop and cancelled it on every `.active`, so the last
+    /// reading held for up to 58 s (#390).
+    ///
+    /// Must outlast `CSCCalculator`'s longest silence on a healthy sensor. Sensors notify at
+    /// ~1 Hz, and the calculator emits nothing for the first `zeroThreshold − 1` duplicate
+    /// frames of a stop (the 3rd emits 0) and nothing for the first moving frame after one.
+    /// That is at most 3 s between readings; 4 s leaves one notification of slack.
+    ///
+    /// The bound holds only on an unbroken link. Every drop resets the calculator, so after a
+    /// reconnect it re-primes (one silent frame), and at a stop it then needs `zeroThreshold`
+    /// duplicates before emitting 0. Any drop at a stop, or one that takes over ~2 s to
+    /// reconnect while moving, therefore falls back here even on a healthy sensor.
+    static let staleDataWindow: Duration = .seconds(4)
+    /// Minimum time between fallback banners. A flapping sensor falls back every cycle;
+    /// the source still switches each time, but the rider is told once per window (#390).
+    static let fallbackBannerCooldown: TimeInterval = 300
     /// How long the source-switch banner stays visible before auto-dismissing.
     static let bannerDismissDelay: Duration = .seconds(4)
 
-    static func gpsFallbackBannerText(sensorName: String?) -> String {
-        "Switch to GPS for speed — \(sensorName ?? "Speed sensor") disconnected"
+    /// "Disconnected" only when the link is gone: the stale-data watchdog mostly fires with
+    /// the link still up and only the readings stopped (#390).
+    static func gpsFallbackBannerText(sensorName: String?, isTerminal: Bool = false) -> String {
+        "Switched to GPS for speed — \(sensorName ?? "Speed sensor") \(isTerminal ? "disconnected" : "not responding")"
     }
 
     @Dependency(\.date.now) var now
@@ -66,6 +84,8 @@ struct SpeedFeature {
         var pairedSensorName: String? = nil
         /// Transient source-switch banner text; nil means hidden.
         var sourceSwitchBanner: String? = nil
+        /// When the fallback banner last showed, for `fallbackBannerCooldown`.
+        var lastFallbackBannerAt: Date? = nil
         /// Timestamped speed samples from the last `historyWindow` seconds.
         var speedSamples: [SpeedSample] = []
 
@@ -122,32 +142,32 @@ struct SpeedFeature {
                 state.activeSpeedSource = .bleWheel
                 appendSample(mps, to: &state)
                 // Real data flowing back IS the "automatic promotion on reconnect" —
-                // no separate promotion action needed.
-                return .cancel(id: CancelID.fallbackTimer)
+                // no separate promotion action needed. Each reading also restarts the
+                // stale-data watchdog. Cancelled explicitly: `cancelInFlight` only cancels
+                // once the new task starts, which leaves room for the old timeout to land.
+                return .merge(
+                    .cancel(id: CancelID.fallbackTimer),
+                    .run { send in
+                        try await clock.sleep(for: Self.staleDataWindow)
+                        await send(.bleFallbackTimedOut)
+                    }
+                    .cancellable(id: CancelID.fallbackTimer, cancelInFlight: true)
+                )
 
             case .bleConnectionChanged(let connectionState):
                 state.connectionState = connectionState
                 switch connectionState {
-                case .active:
-                    // Optimistic cancel, mirrors ActiveRideFeature's radar `.active`
-                    // handling rather than waiting for the next bleSpeedReceived.
-                    return .cancel(id: CancelID.fallbackTimer)
-                case .reconnecting:
-                    guard state.activeSpeedSource == .bleWheel else { return .none }
-                    return .run { send in
-                        try await clock.sleep(for: Self.fallbackDelay)
-                        await send(.bleFallbackTimedOut)
-                    }
-                    .cancellable(id: CancelID.fallbackTimer, cancelInFlight: true)
                 case .disconnected:
                     guard state.activeSpeedSource == .bleWheel else {
                         return .cancel(id: CancelID.fallbackTimer)
                     }
                     return .merge(
                         .cancel(id: CancelID.fallbackTimer),
-                        fallBackToGPS(&state)
+                        fallBackToGPS(&state, isTerminal: true)
                     )
-                case .scanning, .connecting, .connected:
+                case .scanning, .connecting, .connected, .reconnecting, .active:
+                    // The stale-data watchdog decides when to fall back; a link that
+                    // flaps between these says nothing about whether data is arriving.
                     return .none
                 }
 
@@ -189,10 +209,20 @@ struct SpeedFeature {
         state.speedSamples.removeAll { $0.time < cutoff }
     }
 
-    private func fallBackToGPS(_ state: inout State) -> Effect<Action> {
+    /// - Parameter isTerminal: the sensor is gone, not flapping, so the rider is told even
+    ///   inside `fallbackBannerCooldown`; flaps arrive as `.reconnecting`, never here.
+    private func fallBackToGPS(_ state: inout State, isTerminal: Bool = false) -> Effect<Action> {
         state.activeSpeedSource = state.latestGPSSpeedMPS != nil ? .gps : .none
         state.speedMPS = state.latestGPSSpeedMPS
-        state.sourceSwitchBanner = Self.gpsFallbackBannerText(sensorName: state.pairedSensorName)
+        let shownAt = now
+        if !isTerminal, let last = state.lastFallbackBannerAt,
+           shownAt.timeIntervalSince(last) < Self.fallbackBannerCooldown {
+            return .none
+        }
+        state.lastFallbackBannerAt = shownAt
+        state.sourceSwitchBanner = Self.gpsFallbackBannerText(
+            sensorName: state.pairedSensorName, isTerminal: isTerminal
+        )
         return .run { send in
             try await clock.sleep(for: Self.bannerDismissDelay)
             await send(.bannerDismissed)
