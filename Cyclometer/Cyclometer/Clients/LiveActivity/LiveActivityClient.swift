@@ -53,6 +53,10 @@ extension LiveActivityClient: DependencyKey {
     /// `start`, `update` and `end` run one at a time, in the order they're called (#411). An `end`
     /// sent while a `start` is out would otherwise sweep the list before the request lands in it,
     /// and leave that ride's card on the Lock Screen.
+    ///
+    /// An `end` has taken effect by the time it returns: the activity is `.dismissed` and gone from
+    /// the list (iOS 27 simulator, #445). So an activity being ended is never adopted by the
+    /// `start` after it, nor waited on by `ended`. `LiveActivityClientTests` pins both.
     static let liveValue = LiveActivityClient(
         start: { attributes, state in await calls.run {
             // Adopt one that's still showing this ride's units; end the rest. The system's list
@@ -85,8 +89,9 @@ extension LiveActivityClient: DependencyKey {
         isEnabled: { ActivityAuthorizationInfo().areActivitiesEnabled },
         // Not queued: it waits as long as the activity shows, and every call after it would too.
         ended: {
-            // `start` ended every other ride activity, so this is the one it left showing. None
-            // showing means it has gone already; the next foreground's `start` recovers.
+            // `start` ended every other ride activity, and they had gone when it returned, so this
+            // is the one it left showing. None showing means it has gone already; the next
+            // foreground's `start` recovers.
             guard let activity = Activity<RideActivityAttributes>.activities
                 .first(where: { [.active, .stale].contains($0.activityState) }) else { return .ended }
             for await state in activity.activityStateUpdates {

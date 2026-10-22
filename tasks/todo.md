@@ -1,21 +1,27 @@
-# #411 — Serialise LiveActivityClient's start / update / end
+# #445 — Live Activity: a start's answer or end-wait can attach to the wrong activity
 
-Plan: /Users/brian/.claude/plans/enumerated-conjuring-leaf.md
-Branch: `fix/411-live-activity-serialise`
+Branch: `fix/445-live-activity-wrong-activity`
 
-- [x] 0. Spike: does `activities` list a requested activity at once; do client closures run nonsending
-- [x] 1. Real-ActivityKit test `endDuringAStartLeavesNothingShowing`; confirm it fails unserialised
-- [x] 2. Serial queue in `LiveActivityClient.liveValue` (start/update/end); doc comments
-- [x] 3. Reducer: drop the extra `end` in `.started`; update `settingOffWhileStartingSendsNothingMore`
-- [x] 4. Flake check (10× each way), LiveActivity suites, full suite
-- [x] 5. Review section, PR
+- [x] 0. Spike (iOS 27 sim): how far `activityState` lags `await activity.end(...)`; do cases 2 and 3 reproduce
+- [x] 1. Case 1 test (`LiveActivityFeatureTests`): off → on while start #1 is out; start #1's answer must not be taken. Confirm red
+- [x] 2. Case 1 fix: off cancels the in-flight start effect (`CancelID.start`), so its `.started` is dropped by `Send`
+- [x] 3. Cases 2 + 3: real-ActivityKit tests in `LiveActivityClientTests` (other-units replace → `ended()` waits on the new one; `end` then `start` → one showing, not adopted)
+- [x] 4. Doc comments: `LiveActivityClient` (`ended`, `liveValue`) and `LiveActivityFeature` (`.started`, off) agree
+- [x] 5. Delete the spike; LiveActivity suites, full suite; review section; PR
+
+## Spike findings
+
+- `await activity.end(nil, dismissalPolicy: .immediate)` takes 3–5 ms, and `activityState` already reads `.dismissed` when it returns: 8/8 runs, zero lag. The activity is also gone from `Activity.activities` by then.
+- Case 2 (other units): right after `start` returns, the only `.active` activity is the new one, 5/5.
+- Case 3 (`end` then `start`, same units): never adopted the dismissed one, 5/5.
+- So with #411's queue, cases 2 and 3 don't happen on the simulator. The "3 s late" in memory is `activityStateUpdates` delivery, not `activityState`.
 
 ## Review
 
-- **Cause.** `start` waits on ActivityKit (about 4 ms per `activity.end` in the sim) while it sweeps older ride activities, and only then requests. An `end` arriving in that window snapshots `Activity.activities` before the request lands, so it never sees the new card.
-- **Fix.** `LiveActivityClient.liveValue` runs `start`, `update` and `end` through `SerialCalls`: a `Mutex`-held tail of tasks, each waiting for the one before (the `RideDataBuffer.flush` idiom). An actor alone wouldn't serialise these calls, because it's reentrant across ActivityKit's awaits. `ended` stays out of the queue, since it waits as long as the card shows. Each call runs in its own task, so a cancelled caller can't drop an `end`.
-- **Spike findings.** `Activity.activities` lists a requested activity as soon as `request` returns, so the queue doesn't need to hold the `Activity`. The client's closures run on the caller's actor up to their first await (approachable concurrency, nonsending), so the queue order is the call order.
-- **Reducer.** The extra `end` in `.started` for a start that was pending when the S12 toggle went off is gone. The client's ordering covers that case now. `settingOffWhileStartingSendsNothingMore` now expects one `end`. The finish path is unchanged.
+- **Case 1 (fixed).** S12's "off" now cancels the pending start's effect alongside the end-wait (`.cancel(id: CancelID.start)`). TCA's `Send` drops actions from a cancelled effect, so the first request's `.started` never arrives to be taken as the second's. The client still finishes the request, and the queued `end` still ends it (#411). The `phase == .starting` guard in `.started` is gone, because nothing else can leave a stale answer.
+- **Cases 2 and 3 (pinned, no client change).** By decision: the sim shows no lag, so the "holds no `Activity`" design stays. Two new real-ActivityKit tests pin the assumption. `updateAll` is left as is (optional item skipped).
 - **Tests.**
-  - New `LiveActivityClientTests.endDuringAStartLeavesNothingShowing`, against real ActivityKit: **failed 10/10** on the old client, each time on "nothing left showing", and **passed 10/10** with the queue.
-  - Full `CyclometerTests` minus the two known local hangs: 1,821 unique cases, all passing. `PersistenceClientTests` and `MapWidgetAccessibilityTests` run alone: 50 cases, all passing.
+  - `settingOffAndOnWhileStartingTakesTheSecondAnswer`: the two starts answer `true` then `false`, so the final phase shows whose answer was taken. It **failed** on the old reducer (phase `.showing`) and **passes** with the fix.
+  - `settingOffWhileStartingSendsNothingMore` no longer receives `.started`; it waits for the request to be recorded instead.
+  - `endedAfterAReplacementWaitsOnTheNewActivity` and `startRightAfterEndShowsANewActivity` pass on the real client. Mutation check: with every client `end` delayed 100 ms (a simulated lag), both **fail** on the issue's symptoms: `ended()` returns the old card's `.dismissed`, and `start` re-adopts the ended activity.
+  - Full `CyclometerTests` minus the two known local hangs: 1,823 unique cases passing (plus the deliberate `withKnownIssue`). `PersistenceClientTests` and `MapWidgetAccessibilityTests` run alone: `TEST SUCCEEDED`.

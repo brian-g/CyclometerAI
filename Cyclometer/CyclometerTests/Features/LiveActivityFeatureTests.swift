@@ -535,7 +535,8 @@ struct LiveActivityFeatureTests {
     }
 
     /// The setting's `end` is the only one: the live client runs it after the pending request, so
-    /// it ends what that request shows (#411, `LiveActivityClientTests`).
+    /// it ends what that request shows (#411, `LiveActivityClientTests`). The request's answer is
+    /// dropped (#445).
     @Test("turned off while the start is pending, the late answer sends nothing more")
     func settingOffWhileStartingSendsNothingMore() async {
         let ride = Self.makeRide()
@@ -554,7 +555,7 @@ struct LiveActivityFeatureTests {
         ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = false }
         await ride.store.send(.liveActivity(.preferenceChanged))
         await clock.advance(by: .milliseconds(500))
-        await ride.store.receive(\.liveActivity.started)
+        await expectEventually("the request still made") { calls.starts == 1 }
 
         await ride.tick(3)
         // The recording client doesn't queue, so the setting's end is recorded ahead of the start.
@@ -564,6 +565,35 @@ struct LiveActivityFeatureTests {
             return
         }
         #expect(ride.store.state.liveActivity.phase == .notShowing)
+    }
+
+    /// Off then on, both while the first request is out (#445). The first request's answer comes
+    /// back first; taken for the second's, the second's card would get no updates. The two answers
+    /// differ here, so the state shows which one was taken.
+    @Test("turned off and on while the start is pending, only the second start's answer counts")
+    func settingOffAndOnWhileStartingTakesTheSecondAnswer() async {
+        let ride = Self.makeRide()
+        let calls = ride.calls
+        let clock = ride.clock
+        var client = Self.recordingClient(into: calls, starts: [true, false])
+        let recordedStart = client.start
+        client.start = { attributes, content in
+            try? await clock.sleep(for: .milliseconds(500))
+            return await recordedStart(attributes, content)
+        }
+        ride.store.dependencies.liveActivityClient = client
+
+        await ride.store.send(.task)
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = false }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+        await clock.advance(by: .milliseconds(100))
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = true }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+
+        await clock.advance(by: .milliseconds(500))
+        await expectEventually("both starts answered") { calls.starts == 2 }
+        await ride.store.receive(\.liveActivity.started)
+        #expect(ride.store.state.liveActivity.phase == .notShowing, "the second start was refused")
     }
 
     @Test("turning it off in Settings during a ride reaches the ride's activity")
