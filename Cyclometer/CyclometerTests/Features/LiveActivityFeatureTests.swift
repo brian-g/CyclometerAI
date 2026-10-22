@@ -205,6 +205,25 @@ struct LiveActivityFeatureTests {
         #expect(calls.updates.last?.startDate == Self.t0)
     }
 
+    /// GPS at 4 Hz, every reading a change: still one update a second, each at its tick.
+    @Test("readings at 4 Hz for 10 s reach the activity once a second")
+    func sustainedReadingsStayAtOneHertz() async {
+        let ride = Self.makeRide()
+        let calls = ride.calls
+        await ride.start()
+
+        for second in 1...10 {
+            for quarter in 0..<4 {
+                await ride.store.send(.speed(.gpsSpeedReceived(Double(second) + Double(quarter) / 4)))
+            }
+            #expect(calls.updates.count == second - 1, "nothing ahead of tick \(second)")
+            await ride.tick()
+            await expectEventually("tick \(second)'s update") { calls.updates.count >= second }
+            #expect(calls.updates.count == second, "one update at tick \(second)")
+        }
+        #expect(calls.updates.map(\.speedMPS) == (1...10).map { Double($0) + 0.75 })
+    }
+
     /// The stale date is 30 s after each update; without these an idle ride's card would dim.
     @Test("an unchanged ride is sent again every 15 ticks, not before")
     func unchangedRideIsKeptAlive() async {
@@ -241,6 +260,8 @@ struct LiveActivityFeatureTests {
         await ride.tick(LiveActivityFeature.keepAliveTicks)
         await expectEventually("a keep-alive while paused") { calls.updates.count == 2 }
         #expect(calls.updates.last == paused)
+        #expect(!calls.value.contains(.end), "a pause doesn't end the activity")
+        #expect(ride.store.state.liveActivity.phase == .showing)
     }
 
     @Test("a resume after a minute's pause moves the timer's start on by the minute")
