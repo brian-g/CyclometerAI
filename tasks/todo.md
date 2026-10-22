@@ -479,3 +479,57 @@ Audit of #314's checklist against the suites #306–#313, #411, #412 and #445 sh
 - **Added:** `sustainedReadingsStayAtOneHertz` (4 Hz GPS for 10 s → exactly one update per tick, none between); `pauseShowsAndStaysAlive` now asserts no `.end` and `phase == .showing`.
 - **Mutation checks:** an `update` on every `.gpsSpeedReceived` fails the new test (and `readingsCoalesceToTheTick`); an `end()` on `.pauseTapped` fails `pauseShowsAndStaysAlive` on the new assertion ("a pause doesn't end the activity", read from the xcresult). Both reverted.
 - **Tests:** `LiveActivityFeatureTests` + `RideActivityAttributesTests`, with a fresh build in its own derivedData: 27 cases passed, both new/changed tests in the list.
+
+---
+
+# #391 — Warn the rider when a BLE sensor is unreliable
+
+Branch: `feat/391-sensor-health`
+
+Plan: verdict per physical device at ride end (lowest battery reading of the ride; worst 5-min window of CBError 6 drops), saved on `PairedSensor.lastRideHealth`; shown as a full-width footer on the Start sheet row and a "Sensors" section on S10 when flagged.
+
+- [x] 1. `SensorHealth.swift`: log, report, thresholds (tests first: AC1, AC2)
+- [x] 2. `BLEClient.linkTimeouts` + `isSupervisionTimeout` (tested)
+- [x] 3. `PairedSensor.lastRideHealth` (old JSON still decodes)
+- [x] 4. `SensorHealthFeature` child of ActiveRide; started with the ride
+- [x] 5. Ride end writes reports to paired records
+- [x] 6. Start sheet footer warning + snapshots (AC3)
+- [x] 7. S10 Sensors section + snapshot (AC4)
+- [x] 8. UX.md / BLE.md updates
+- [x] 9. Full suite green; review section; PR
+
+## Review
+
+- **Pipeline.** `BLEClient.linkTimeouts()` filters the existing `events()` for `CBError.connectionTimeout`. It is an extension, not a new endpoint, so none of the 8 hand-built test clients changed. `SensorHealthFeature` (child of `ActiveRideFeature`, started on `.task`) records each paired device's lowest battery reading and worst 5-min window of drops. At `confirmFinish` the reducer writes the verdict onto every `PairedSensor` record of that device, synchronously, because `activeRide` is nil before any effect runs. A device that reported nothing keeps its previous verdict.
+- **Surfaces.** The Start sheet row gets a full-width footer: "LOW BATTERY ON LAST RIDE" or "UNRELIABLE CONNECTION ON LAST RIDE — CHECK BATTERY OR MOUNT". S10 gets a "Sensors" section only when the ride flagged a device; a combo CSC device is listed once ("Speed & Cadence").
+- **Deviations from the plan.**
+  - Warnings are drawn in `cyRatingBad`, not `cyRatingOkay`: amber caption text is 2.5:1 on white, under AA. Red is 5.0:1 in light and 4.9:1 in dark, and matches `SensorBatteryLabel`'s low tint.
+  - S10 rows drop the "· N%". One shared `SensorWarningLabel` serves both screens.
+  - The S10 snapshot uses its own 1,900 pt canvas. At 1,500 pt the floating button covered the section, and the other references must not move.
+  - `RideSummaryView.swift` had no previews; it now has two (rule).
+- **Battery window.** The window is the whole ride, since there is no mid-ride alert. The link window is 5 min. Both are documented in BLE.md §14.5.
+- **Tests.**
+  - The full `CyclometerTests` suite, minus the two known local hangs: 1,849 unique cases passing, with every new test confirmed in the log. `PersistenceClientTests` and `MapWidgetAccessibilityTests` run alone: `TEST SUCCEEDED`.
+  - The existing Start sheet and S10 references are unchanged.
+  - The new references were checked by eye and are not blank.
+
+
+### Code review follow-up
+
+- **Applied by the review:**
+  - `SensorWarningLabel.message` is a `LocalizedStringResource` made of whole sentences (#430).
+  - `linkTimeouts()` is a `compactMap` over `events()`.
+  - The S10 icon comes from `SensorRowStyle.device`.
+  - `assets/TCA.md` §8 lists `SensorHealth/`.
+- **Fixed (findings 5, 10 and 7):** the verdict is now `AppPreferences.sensorHealth: [UUID: SensorHealthReport]`, keyed by device, and `PairedSensor.lastRideHealth` is gone. S11's `apply()` rebuilds the role records and so used to drop it. It is decoded with `try?`, so a verdict that can't be read never resets the other preferences.
+- **Fixed (finding 1):** a sensor reaching `.active` (HR: `pairingStatus` true) now counts as showing up for the ride. A sensor without the Battery Service is cleared by a clean ride.
+- **Fixed (finding 3):** link losses count only while the ride records. `SensorHealthFeature.State.isRecording` is forwarded the way `CadenceFeature`'s is.
+- **Left, by decision:**
+  - Finding 2: a sagging cell that connects at 95%, drops once and never reconnects scores healthy.
+  - Finding 4: the S10 Sensors section sits inside the loaded block.
+- **Tests:**
+  - New cases cover the paused link loss, the presence signal, a recording state forwarded through ActiveRide, legacy and corrupt `sensorHealth` decoding, and connected-only being healthy.
+  - Three exhaustive ActiveRide resume tests now also expect `sensorHealth.isRecording = true`.
+  - Full `CyclometerTests` minus the two known hangs: 1,851 unique cases. The only failures were those three; after the fix their suites (`ActiveRideFeatureStateMachineTests`, `ActiveRideFeatureTimerTests`) pass.
+  - `PersistenceClientTests` and `MapWidgetAccessibilityTests` run alone: `TEST SUCCEEDED`.
+  - Snapshot references are unchanged.

@@ -1134,7 +1134,31 @@ until the next reconnect. `nil` means unknown — disconnected, or a sensor with
 `BLECSCClient.DiscoveredSensor` also carries `batteryPercent` for the per-device rows on S11.
 
 Rendered by `SensorBatteryLabel` (UX.md §S05.1 "the battery level if supported"), which picks the
-SF Symbol by level and tints at or below 20% with `cyRatingBad`.
+SF Symbol by level and tints at or below `SensorHealthReport.lowBatteryPercent` (20%) with `cyRatingBad`.
+
+### 14.5 Sensor health (#391)
+
+At ride end, each paired device gets a verdict on the ride, built from data the clients already
+receive. The code is `Models/SensorHealth.swift` (`SensorHealthReport`, `SensorHealthLog`), recorded by
+`SensorHealthFeature`.
+
+- **Battery:** the *lowest* level reported over the ride, ignoring the `nil` sent on every
+  disconnect. A sagging coin cell reads high between transmissions and collapses under radio load,
+  so the latest reading says nothing. It is low at or below 20%.
+- **Link:** supervision-timeout disconnects (`CBError.connectionTimeout`, code 6) from a paired
+  peripheral, from `BLEClient.linkTimeouts()`, counted only while the ride is recording. During a
+  pause the phone may sit at the edge of range, where a healthy sensor times out too. The link is
+  unreliable at 5 or more inside any 5-minute window, i.e. one a minute sustained.
+- **Calibration:** on 2026-10-07 a Wahoo SPEED read 87 → 10 → 95 → 0 in its first two minutes and
+  dropped 180 times in 21 minutes, about 43 per window. The cadence sensor beside it dropped none.
+- A low battery outranks an unreliable link, because it is the more specific cause. An unreliable
+  link alone names no cause.
+- The verdict is per peripheral, saved in `AppPreferences.sensorHealth` and keyed by peripheral,
+  not by role, so a role change on S11 leaves it alone.
+- A device that reaches `.active` (HR: notifying) or reports a battery level gets a fresh verdict,
+  so a sensor without `0x180F` is cleared by a clean ride. One that never shows up keeps its
+  previous verdict, so a dead cell that never connects is not cleared.
+- It is surfaced on S05.1 (the next ride's Start sheet) and S10 (UX.md).
 
 ---
 

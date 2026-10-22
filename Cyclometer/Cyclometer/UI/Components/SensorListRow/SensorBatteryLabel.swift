@@ -9,10 +9,6 @@ import SwiftUI
 struct SensorBatteryLabel: View {
     let percent: Int
 
-    /// At or below this the label turns `cyRatingBad`: the rider should charge the
-    /// sensor before setting off rather than lose it mid-ride.
-    private static let lowThreshold = 20
-
     /// Upper bound of each glyph's band. The system draws five discrete fill levels,
     /// so the bands are centred on them — 50% reads as half full, not as three
     /// quarters.
@@ -32,7 +28,9 @@ struct SensorBatteryLabel: View {
             .accessibilityLabel(isLow ? "Battery \(percent) percent, low" : "Battery \(percent) percent")
     }
 
-    private var isLow: Bool { percent <= Self.lowThreshold }
+    /// At or below the low threshold the label turns `cyRatingBad`: the rider should charge
+    /// the sensor before setting off rather than lose it mid-ride.
+    private var isLow: Bool { percent <= SensorHealthReport.lowBatteryPercent }
 
     private var symbol: String {
         Self.glyphBands.first { percent < $0.upperBound }?.symbol ?? "battery.100percent"

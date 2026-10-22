@@ -75,6 +75,22 @@ final class StartSheetSnapshotTests: XCTestCase {
         )
     }
 
+    /// The last ride flagged two sensors (#391). The warning sits full width under its row,
+    /// whatever the status — the searching one may be the dead cell — and a sensor reading
+    /// 95% at rest still carries the low-battery warning its last ride earned.
+    func testSensorWarnings() {
+        assertBothSchemes(
+            rows([
+                SensorRow(kind: .radar, name: "Varia RTL515", status: .connected, batteryPercent: 84),
+                SensorRow(kind: .speed, name: "Wahoo SPEED", status: .connected, batteryPercent: 95,
+                          warning: .batteryLow),
+                SensorRow(kind: .cadence, name: "Wahoo CADENCE", status: .searching,
+                          warning: .linkUnreliable)
+            ]),
+            named: "warnings"
+        )
+    }
+
     /// The sheet on open: paired, and the sheet's own scan still looking for them. The
     /// battery level is withheld with the connection it was read over.
     func testAllPairedNoneConnected() {

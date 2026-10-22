@@ -906,6 +906,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.resumeTapped) {
             $0.recordingState = .active
             $0.cadence.isRecording = true
+            $0.sensorHealth.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1566,6 +1567,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.resumeTapped) {
             $0.recordingState = .active
             $0.cadence.isRecording = true
+            $0.sensorHealth.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1598,6 +1600,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.resumeTapped) {
             $0.recordingState = .active
             $0.cadence.isRecording = true
+            $0.sensorHealth.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1

@@ -14,15 +14,23 @@ import ComposableArchitecture
 final class RideSummarySnapshotTests: XCTestCase {
 
     /// `RideDetailSnapshotTests`' device, tall enough for every section.
-    private let device = ViewImageConfig(
-        safeArea: UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0),
-        size: CGSize(width: 402, height: 1_500),
-        traits: UITraitCollection(traitsFrom: [
-            UITraitCollection(horizontalSizeClass: .compact),
-            UITraitCollection(verticalSizeClass: .regular),
-            UITraitCollection(displayScale: 3)
-        ])
-    )
+    private let device = RideSummarySnapshotTests.device(height: 1_500)
+
+    /// Room for the Sensors section (#391) clear of the floating Finish Ride button. Its own
+    /// height, so the other references don't move.
+    private let sensorsDevice = RideSummarySnapshotTests.device(height: 1_900)
+
+    private static func device(height: CGFloat) -> ViewImageConfig {
+        ViewImageConfig(
+            safeArea: UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0),
+            size: CGSize(width: 402, height: height),
+            traits: UITraitCollection(traitsFrom: [
+                UITraitCollection(horizontalSizeClass: .compact),
+                UITraitCollection(verticalSizeClass: .regular),
+                UITraitCollection(displayScale: 3)
+            ])
+        )
+    }
 
     private static let summary = RideListSummary(
         id: UUID(), title: "", startedAt: Date(timeIntervalSince1970: 1_700_035_200),
@@ -32,13 +40,22 @@ final class RideSummarySnapshotTests: XCTestCase {
     // MARK: Harness
 
     /// Imperial units, and the state `.task` would have produced seeded directly.
-    private func screen(heartRate: Bool, stats: RideStats) -> some View {
+    private func screen(
+        heartRate: Bool,
+        stats: RideStats,
+        pairedSensors: [PairedSensor] = [],
+        sensorHealth: [UUID: SensorHealthReport] = [:]
+    ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.preferredUnit = .imperial }
+            $preferences.withLock {
+                $0.preferredUnit = .imperial
+                $0.pairedSensors = pairedSensors
+                $0.sensorHealth = sensorHealth
+            }
             let points = RideSummaryFeatureTests.track(count: 600, heartRate: { second in
                 heartRate ? 125 + Int(40 * sin(Double(second) / 40)) : nil
             })
@@ -71,10 +88,12 @@ final class RideSummarySnapshotTests: XCTestCase {
     private func assertBothSchemes(
         _ view: some View,
         named name: String,
+        on device: ViewImageConfig? = nil,
         file: StaticString = #filePath,
         testName: String = #function,
         line: UInt = #line
     ) {
+        let device = device ?? self.device
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.light)),
             as: .image(on: device, drawHierarchyInKeyWindow: true, traits: .init(userInterfaceStyle: .light)),
@@ -103,6 +122,26 @@ final class RideSummarySnapshotTests: XCTestCase {
     func testRideSummaryGPSOnly() {
         assertBothSchemes(screen(heartRate: false, stats: RideStats(averageSpeedMPS: 7.2, maxSpeedMPS: 12.4)),
                           named: "gps-only")
+    }
+
+    /// The ride flagged two devices (#391): a sagging combo CSC sensor, listed once with both its
+    /// roles, and a flapping radar. A healthy HR strap paired for the ride is not listed.
+    func testRideSummaryUnreliableSensors() {
+        let rideId = Self.summary.id
+        let combo = UUID(1)
+        assertBothSchemes(screen(heartRate: true, stats: RideStats(
+            averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, averageCadenceRPM: 88, maxCadenceRPM: 109,
+            vehiclePassCount: 4
+        ), pairedSensors: [
+            PairedSensor(peripheralID: combo, role: .speed, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: combo, role: .cadence, displayName: "Wahoo RPM"),
+            PairedSensor(peripheralID: UUID(2), role: .radar, displayName: "Varia RTL515"),
+            PairedSensor(peripheralID: UUID(3), role: .heartRate, displayName: "Wahoo TICKR")
+        ], sensorHealth: [
+            combo: SensorHealthReport(rideId: rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43),
+            UUID(2): SensorHealthReport(rideId: rideId, minBatteryPercent: 70, maxLinkLossesPerWindow: 12),
+            UUID(3): SensorHealthReport(rideId: rideId, minBatteryPercent: 80, maxLinkLossesPerWindow: 0)
+        ]), named: "unreliable-sensors", on: sensorsDevice)
     }
 
     // No snapshot of the wait for the finalize: in the key window its `ProgressView` animates, so

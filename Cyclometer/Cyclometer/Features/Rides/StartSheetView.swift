@@ -111,19 +111,26 @@ struct SensorStatusRow: View {
     let sensor: SensorRow
 
     var body: some View {
-        SensorListRowView(
-            icon: sensor.kind.systemImage,
-            iconTint: sensor.kind.tint,
-            title: sensor.kind.displayName,
-            // Device name only; the status control conveys connection state, so we
-            // avoid a subtitle that could contradict it.
-            subtitle: sensor.name
-        ) {
-            VStack(alignment: .trailing) {
-                statusControl
-                if let battery = sensor.batteryPercent, sensor.status == .connected {
-                    SensorBatteryLabel(percent: battery)
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            SensorListRowView(
+                icon: sensor.kind.systemImage,
+                iconTint: sensor.kind.tint,
+                title: sensor.kind.displayName,
+                // Device name only; the status control conveys connection state, so we
+                // avoid a subtitle that could contradict it.
+                subtitle: sensor.name
+            ) {
+                VStack(alignment: .trailing) {
+                    statusControl
+                    if let battery = sensor.batteryPercent, sensor.status == .connected {
+                        SensorBatteryLabel(percent: battery)
+                    }
                 }
+            }
+            // Full width under the row: the hint is too long for the trailing column.
+            if let warning = sensor.warning {
+                SensorWarningLabel(warning: warning, isFromLastRide: true)
+                    .padding(.bottom, Spacing.xs)
             }
         }
     }
@@ -167,6 +174,46 @@ struct SensorStatusRow: View {
                         // Paired but out of range — the case the sheet exists to show.
                         SensorRow(kind: .speed, status: .searching),
                         SensorRow(kind: .cadence, status: .searching)
+                    ]
+                )
+            ) {
+                StartSheetFeature()
+            } withDependencies: {
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.bleCSCClient = .testValue
+                $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+            }
+        )
+    }
+}
+
+/// The last ride flagged two sensors (#391): one sagging battery, one flapping link.
+#Preview("Start Sheet — sensor warnings") {
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+    } operation: {
+        @Shared(.appPreferences) var preferences
+        let rideId = UUID()
+        let radar = UUID()
+        let speed = UUID()
+        $preferences.withLock {
+            $0.pairedSensors = [
+                PairedSensor(peripheralID: radar, role: .radar, displayName: "Varia RTL515"),
+                PairedSensor(peripheralID: speed, role: .speed, displayName: "Wahoo SPEED")
+            ]
+            $0.sensorHealth = [
+                radar: SensorHealthReport(rideId: rideId, minBatteryPercent: 64, maxLinkLossesPerWindow: 12),
+                speed: SensorHealthReport(rideId: rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43)
+            ]
+        }
+        return StartSheetView(
+            store: Store(
+                initialState: StartSheetFeature.State(
+                    sensors: [
+                        SensorRow(kind: .radar, status: .connected, batteryPercent: 82),
+                        // Reads high at rest — the reason the warning comes from the last ride.
+                        SensorRow(kind: .speed, status: .connected, batteryPercent: 95)
                     ]
                 )
             ) {
