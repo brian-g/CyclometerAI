@@ -533,3 +533,18 @@ Plan: verdict per physical device at ride end (lowest battery reading of the rid
   - Full `CyclometerTests` minus the two known hangs: 1,851 unique cases. The only failures were those three; after the fix their suites (`ActiveRideFeatureStateMachineTests`, `ActiveRideFeatureTimerTests`) pass.
   - `PersistenceClientTests` and `MapWidgetAccessibilityTests` run alone: `TEST SUCCEEDED`.
   - Snapshot references are unchanged.
+
+---
+
+# #392 — Crash-resumed auto-paused ride never restarts the track recorder
+
+- [x] 1. Failing TestStore test: a ride resumed auto-paused moves, and its tick reaches `RideDataBuffer`
+- [x] 2. Auto-resume sends `.trackRecorder(.resumeRecording)` when the recorder isn't recording
+- [x] 3. Full suite green; review section; PR
+
+## Review
+
+- **Cause, as the issue said.** `.task` leaves the recorder off for a ride that comes back `.paused` (#175), and the auto-resume in the `.speed` case set `.active` without turning it on. `TrackPointRecorderFeature`'s `isRecording` guard then dropped every `.timerTick`.
+- **Fix.** The auto-resume sends `.resumeRecording` (the same action a manual Resume sends), but only when the recorder isn't already running. A live auto-pause never stops the recorder, so the live path sends nothing new.
+- **Test.** `resumedAutoPausedRideRecordsAfterAutoResume` (`ActiveRideFeatureStateMachineTests`) drains the buffer after one tick. Before the fix it failed with `isRecording == false` and `recorded.count == 0`.
+- **Suite.** Full `CyclometerTests`, including `PersistenceClientTests` and `MapWidgetAccessibilityTests` (no hang this time): `TEST SUCCEEDED`, 1,904 unique cases. The new test and the live auto-resume tests (`movingAgainAutoResumes`, `autoResumeOpensANewSegment`, `motionResumesAnAutoPausedRide`) are in the log and pass.

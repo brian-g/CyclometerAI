@@ -1509,6 +1509,50 @@ struct ActiveRideFeatureStateMachineTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    /// The other half of the test above: `.task` leaves the recorder off for a ride that comes
+    /// back paused, so the auto-resume is what has to turn it on. It didn't, and every tick
+    /// after it was dropped by the recorder's own `isRecording` guard (#392).
+    @Test("A resumed auto-paused ride records track points once motion resumes it")
+    func resumedAutoPausedRideRecordsAfterAutoResume() async {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .paused,
+            durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 0, maxSpeedMPS: 5,
+            isAutoPaused: true, zeroSpeedSeconds: ActiveRideFeature.autoPauseZeroSpeedSeconds
+        )
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(resuming: summary)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .testValue
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: Coordinate(latitude: 37.0, longitude: -122.0), altitude: 10,
+            speed: ActiveRideFeature.movingSpeedMPS, horizontalAccuracy: 5,
+            heading: 90, timestamp: testDate
+        )))
+        await store.receive(\.speed.gpsSpeedReceived)
+        #expect(store.state.recordingState == .active)
+        await store.receive(\.trackRecorder.resumeRecording)
+        #expect(store.state.trackRecorder.isRecording)
+
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.count == 1)
+    }
+
     @Test("pauseTapped only transitions from active")
     func pauseOnlyFromActive() async {
         let store = makeStore(recordingState: .active)

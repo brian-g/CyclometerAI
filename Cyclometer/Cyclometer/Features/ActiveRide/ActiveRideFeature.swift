@@ -1138,6 +1138,7 @@ struct ActiveRideFeature {
                 // rider who tapped Pause has to tap Resume (#102). The bar is
                 // `movingSpeedMPS`, not any speed at all: GPS noise alone used to clear
                 // `> 0` and undo the pause on the next sample (#262).
+                var effect: Effect<Action> = .none
                 if state.isAutoPaused, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
                     state.recordingState = .active
                     state.isAutoPaused = false
@@ -1146,6 +1147,12 @@ struct ActiveRideFeature {
                     // rider stood at the light and the bike did not travel the ground
                     // between the two fixes (#263).
                     beginTrackSegment(&state)
+                    // A live auto-pause leaves the recorder running, but a ride resumed
+                    // auto-paused never started it (`.task`) — without this every tick from
+                    // here on is dropped by the recorder's own guard (#392).
+                    if !state.trackRecorder.isRecording {
+                        effect = .send(.trackRecorder(.resumeRecording))
+                    }
                 }
                 // Every displayed reading, after the resume above so the one that resumes
                 // counts too. Same "moving" bar as distance; the source is `SpeedFeature`'s
@@ -1154,7 +1161,7 @@ struct ActiveRideFeature {
                    speedMPS > Self.stationarySpeedMPS {
                     state.maxSpeedMPS = max(state.maxSpeedMPS, speedMPS)
                 }
-                return .none
+                return effect
             case .calibration, .sensorHealth:
                 return .none
             case .navigation(.delegate(.turnAnnounced(let direction))):
