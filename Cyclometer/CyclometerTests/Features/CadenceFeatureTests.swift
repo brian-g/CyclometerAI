@@ -26,6 +26,15 @@ struct CadenceFeatureTests {
         }
     }
 
+    /// Every reading arms the stale-data watchdog (#456): an exhaustive test runs it out to
+    /// end with nothing in flight.
+    private func expireStaleData(_ store: TestStoreOf<CadenceFeature>, _ clock: TestClock<Duration>) async {
+        await clock.advance(by: CadenceFeature.staleDataWindow)
+        await store.receive(\.staleDataTimedOut) {
+            $0.cadenceRPM = nil
+        }
+    }
+
     @Test("Start listening subscribes to BLE cadence and connection-state streams")
     func startListeningSubscribesToBLEStreams() async {
         let (cadenceStream, cadenceContinuation) = AsyncStream<Double>.makeStream()
@@ -34,7 +43,8 @@ struct CadenceFeatureTests {
         ble.cadence = { cadenceStream }
         ble.connectionState = { _ in connStream }
 
-        let store = makeStore(bleCSCClient: ble)
+        let clock = TestClock()
+        let store = makeStore(clock: clock, bleCSCClient: ble)
         await store.send(.startListening)
 
         connContinuation.yield(.scanning)
@@ -53,6 +63,7 @@ struct CadenceFeatureTests {
 
         cadenceContinuation.finish()
         connContinuation.finish()
+        await expireStaleData(store, clock)
         await store.finish()
     }
 
@@ -72,7 +83,8 @@ struct CadenceFeatureTests {
 
     @Test("cadenceReceived sets rpm, appends a sample, and updates max")
     func cadenceReceivedUpdatesState() async {
-        let store = makeStore()
+        let clock = TestClock()
+        let store = makeStore(clock: clock)
 
         await store.send(.cadenceReceived(92)) {
             $0.cadenceRPM = 92
@@ -81,11 +93,13 @@ struct CadenceFeatureTests {
             $0.cadenceSum = 92
             $0.maxCadenceRPM = 92
         }
+        await expireStaleData(store, clock)
     }
 
     @Test("Average cadence is the mean of non-zero readings; coasting is excluded")
     func averageExcludesCoasting() async {
-        let store = makeStore()
+        let clock = TestClock()
+        let store = makeStore(clock: clock)
 
         await store.send(.cadenceReceived(80)) {
             $0.cadenceRPM = 80
@@ -115,6 +129,7 @@ struct CadenceFeatureTests {
         }
 
         #expect(store.state.averageCadenceRPM == 90)   // (80 + 100) / 2, coasting 0 excluded
+        await expireStaleData(store, clock)
     }
 
     @Test("Negative cadence clears rpm and appends no sample")
@@ -139,8 +154,10 @@ struct CadenceFeatureTests {
         let recent = CadenceSample(time: start.addingTimeInterval(1800), rpm: 90)    // t=1800
         let now = start.addingTimeInterval(CadenceFeature.historyWindow + 1)         // t=3601
 
+        let clock = TestClock()
         let store = makeStore(
             initialState: CadenceFeature.State(cadenceSamples: [stale, recent], isRecording: true),
+            clock: clock,
             date: now
         )
 
@@ -152,6 +169,7 @@ struct CadenceFeatureTests {
             $0.cadenceSum = 95
             $0.maxCadenceRPM = 95
         }
+        await expireStaleData(store, clock)
     }
 
     @Test("Watermark series downsamples to at most watermarkResolution points")
@@ -170,87 +188,137 @@ struct CadenceFeatureTests {
         #expect(CadenceFeature.State(cadenceSamples: few).watermarkSamples.count == 10)
     }
 
-    // MARK: - BLE reconnect grace window
+    // MARK: - Stale-data watchdog (#456)
 
-    @Test("Cadence data cancels a pending reconnect timer")
-    func cadenceReceivedCancelsPendingReconnectTimer() async {
+    /// A live link with a reading on screen. Not recording, so readings leave the ride's
+    /// tallies alone and the assertions stay on the watchdog.
+    private static var onSensor: CadenceFeature.State {
+        CadenceFeature.State(cadenceRPM: 80, connectionState: .active)
+    }
+
+    @Test("Readings stopping while the link stays .active clear cadence (#456)")
+    func silentSensorOnALiveLinkClears() async {
         let clock = TestClock()
-        let store = makeStore(
-            initialState: CadenceFeature.State(cadenceRPM: 80, isRecording: true),
-            clock: clock
-        )
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
 
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
-        }
-        // Data resumes before the grace window elapses — cancels the timer.
         await store.send(.cadenceReceived(82)) {
             $0.cadenceRPM = 82
             $0.cadenceSamples = [CadenceSample(time: Self.testDate, rpm: 82)]
-            $0.pedalingSampleCount = 1
-            $0.cadenceSum = 82
-            $0.maxCadenceRPM = 82
         }
-        // No .cadenceReconnectTimedOut should fire — an unasserted receive fails the test.
-        await clock.advance(by: .seconds(60))
+        // The link never leaves `.active`: the data's absence is the only signal.
+        await expireStaleData(store, clock)
     }
 
-    @Test(".reconnecting with no current reading arms no timer")
-    func reconnectingWithNoCurrentReadingIsNoop() async {
+    @Test("Each reading restarts the stale-data window")
+    func eachReadingRestartsTheWindow() async {
         let clock = TestClock()
-        let store = makeStore(clock: clock)
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
 
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
+        // 9 s of readings 3 s apart: a window counted from the first would fire mid-loop,
+        // and its unasserted action would fail the next send.
+        var samples: [CadenceSample] = []
+        for rpm in [82.0, 84, 86] {
+            samples.append(CadenceSample(time: Self.testDate, rpm: rpm))
+            await store.send(.cadenceReceived(rpm)) {
+                $0.cadenceRPM = Int(rpm)
+                $0.cadenceSamples = samples
+            }
+            await clock.advance(by: .seconds(3))
         }
-        await clock.advance(by: .seconds(60))
-        // No .cadenceReconnectTimedOut fires — an unasserted receive fails the test.
-    }
-
-    @Test("Reconnect timeout clears cadence to nil after the grace window")
-    func reconnectTimeoutClearsCadenceAfterGraceWindow() async {
-        let clock = TestClock()
-        let store = makeStore(
-            initialState: CadenceFeature.State(cadenceRPM: 80),
-            clock: clock
-        )
-
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
-        }
-        await clock.advance(by: CadenceFeature.reconnectGraceDelay)
-        await store.receive(\.cadenceReconnectTimedOut) {
+        await clock.advance(by: CadenceFeature.staleDataWindow - .seconds(3))
+        await store.receive(\.staleDataTimedOut) {
             $0.cadenceRPM = nil
         }
     }
 
-    @Test("Recovery within the grace window keeps the reading — no clear")
-    func recoveryWithinGraceWindowKeepsReading() async {
+    @Test("A flapping link neither restarts nor cancels the window (#456)")
+    func flappingLinkDoesNotDriveTheClear() async {
         let clock = TestClock()
-        let store = makeStore(
-            initialState: CadenceFeature.State(cadenceRPM: 80),
-            clock: clock
-        )
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
 
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
+        await store.send(.cadenceReceived(82)) {
+            $0.cadenceRPM = 82
+            $0.cadenceSamples = [CadenceSample(time: Self.testDate, rpm: 82)]
         }
-        await clock.advance(by: .seconds(4))
-        await store.send(.bleConnectionChanged(.active)) {
-            $0.connectionState = .active
+        // A drop and a recovery every second, with no data: the old grace timer restarted
+        // on each `.reconnecting` and died on each `.active`.
+        for connection: BLECSCClient.ConnectionState in [.reconnecting, .active, .reconnecting] {
+            await clock.advance(by: .seconds(1))
+            await store.send(.bleConnectionChanged(connection)) {
+                $0.connectionState = connection
+            }
         }
-        await clock.advance(by: .seconds(60))
-        // No .cadenceReconnectTimedOut fires — an unasserted receive fails the test.
+        await clock.advance(by: CadenceFeature.staleDataWindow - .seconds(3))
+        await store.receive(\.staleDataTimedOut) {
+            $0.cadenceRPM = nil
+        }
     }
 
-    @Test("Terminal disconnect clears cadence immediately, no grace delay")
-    func terminalDisconnectClearsImmediately() async {
-        let store = makeStore(initialState: CadenceFeature.State(cadenceRPM: 80))
+    @Test("Coasting on a healthy sensor keeps showing cadence (#456)")
+    func healthySensorCoastDoesNotClear() async {
+        let clock = TestClock()
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
 
+        // What `CSCCalculator` emits at 1 Hz through a coast: a reading, two silent
+        // duplicates, 0 on the third, zeros while coasting, a silent re-prime on the first
+        // stroke, then readings. The 3 s gap is the longest; a window that short fires
+        // during it and fails the next send.
+        let emitted: [Double?] = [85, nil, nil, 0, 0, 0, nil, 80, 82]
+        var samples: [CadenceSample] = []
+        for rpm in emitted {
+            if let rpm {
+                samples.append(CadenceSample(time: Self.testDate, rpm: rpm))
+                await store.send(.cadenceReceived(rpm)) {
+                    $0.cadenceRPM = Int(rpm)
+                    $0.cadenceSamples = samples
+                }
+            }
+            await clock.advance(by: .seconds(1))
+        }
+
+        // Still guarded afterwards: the sensor actually going quiet clears as usual.
+        await clock.advance(by: CadenceFeature.staleDataWindow - .seconds(1))
+        await store.receive(\.staleDataTimedOut) {
+            $0.cadenceRPM = nil
+        }
+    }
+
+    @Test("The first reading after a clear shows again, and re-arms the watchdog")
+    func firstReadingAfterAClearShows() async {
+        let clock = TestClock()
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
+
+        await store.send(.cadenceReceived(82)) {
+            $0.cadenceRPM = 82
+            $0.cadenceSamples = [CadenceSample(time: Self.testDate, rpm: 82)]
+        }
+        await expireStaleData(store, clock)
+
+        await store.send(.cadenceReceived(88)) {
+            $0.cadenceRPM = 88
+            $0.cadenceSamples = [
+                CadenceSample(time: Self.testDate, rpm: 82),
+                CadenceSample(time: Self.testDate, rpm: 88),
+            ]
+        }
+        await expireStaleData(store, clock)
+    }
+
+    @Test("Terminal disconnect clears cadence immediately and disarms the watchdog")
+    func terminalDisconnectClearsImmediately() async {
+        let clock = TestClock()
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
+
+        await store.send(.cadenceReceived(82)) {
+            $0.cadenceRPM = 82
+            $0.cadenceSamples = [CadenceSample(time: Self.testDate, rpm: 82)]
+        }
         await store.send(.bleConnectionChanged(.disconnected)) {
             $0.connectionState = .disconnected
             $0.cadenceRPM = nil
         }
+        // No .staleDataTimedOut follows — an unasserted receive fails the test.
+        await clock.advance(by: CadenceFeature.staleDataWindow)
     }
 
     // MARK: - Zone / coasting time (#147)
@@ -261,6 +329,8 @@ struct CadenceFeatureTests {
             CadenceFeature()
         } withDependencies: {
             $0.date = DateGenerator { clock.value }
+            // Each reading arms the stale-data watchdog (#456); never advanced here.
+            $0.continuousClock = TestClock()
             $0.bleCSCClient = .testValue
         }
     }
