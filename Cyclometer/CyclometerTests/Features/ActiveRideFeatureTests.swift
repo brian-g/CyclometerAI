@@ -1975,7 +1975,8 @@ struct ActiveRideFeatureAutoPauseTests {
     /// and why `state` is an autoclosure.
     private func makeStore(
         state: @autoclosure () -> ActiveRideFeature.State,
-        isAutoPauseEnabled: Bool = true
+        isAutoPauseEnabled: Bool = true,
+        clock: TestClock<Duration> = TestClock()
     ) -> TestStoreOf<ActiveRideFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -1986,7 +1987,7 @@ struct ActiveRideFeatureAutoPauseTests {
             return TestStore(initialState: state()) {
                 ActiveRideFeature()
             } withDependencies: {
-                $0.continuousClock = TestClock()
+                $0.continuousClock = clock
                 $0.date = .constant(testDate)
                 $0.hapticsClient = .testValue
                 $0.variaRadarClient = .testValue
@@ -2016,6 +2017,44 @@ struct ActiveRideFeatureAutoPauseTests {
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
+    }
+
+    @Test("A flapping wheel sensor's last zero hands over to GPS before auto-pause (#390)")
+    func flappingSensorZeroDoesNotAutoPauseAMovingRide() async {
+        let clock = TestClock()
+        var state = ActiveRideFeature.State(recordingState: .active)
+        state.speed = SpeedFeature.State(
+            speedMPS: 0,
+            activeSpeedSource: .bleWheel,
+            connectionState: .active,
+            latestGPSSpeedMPS: 0,
+            pairedSensorName: "Wahoo SPEED"
+        )
+        let store = makeStore(state: state, clock: clock)
+        store.exhaustivity = .off
+
+        // Ride 2026-10-07, one entry a second from 19:02:49. The stopped rider's sensor
+        // reads 0 until they pull away at :52; then its link drops every 1–5 s with no
+        // readings, and GPS climbs to 6.9 m/s while the 0 is still on screen.
+        typealias Second = (ble: Double?, link: BLECSCClient.ConnectionState?, gps: Double)
+        let seconds: [Second] = [
+            (0, nil, 0), (0, nil, 0), (0, nil, 0), (0, nil, 0.4),
+            (nil, .reconnecting, 1.5), (nil, .active, 2.8), (nil, nil, 4.0),
+            (nil, .reconnecting, 5.1), (nil, .active, 6.0), (nil, .reconnecting, 6.9),
+            (nil, nil, 6.9), (nil, .active, 6.9), (nil, .reconnecting, 6.9), (nil, nil, 6.9),
+        ]
+        for second in seconds {
+            if let ble = second.ble { await store.send(.speed(.bleSpeedReceived(ble))) }
+            if let link = second.link { await store.send(.speed(.bleConnectionChanged(link))) }
+            await store.send(.speed(.gpsSpeedReceived(second.gps)))
+            await store.send(.elapsedTick)
+            // `autoPauseTriggered` sets both; on the connection-driven timer, the 10th tick did.
+            #expect(!store.state.isAutoPaused)
+            #expect(store.state.recordingState == .active)
+            await clock.advance(by: .seconds(1))
+        }
+        #expect(store.state.speed.activeSpeedSource == .gps)
+        #expect(store.state.speed.speedMPS == 6.9)
     }
 
     @Test("Auto-pause checkpoints isAutoPaused and zeroSpeedSeconds immediately (#175)")
@@ -3390,6 +3429,7 @@ struct ActiveRideFeatureSharedPeripheralTests {
             $0.speed.activeSpeedSource = .gps
             $0.speed.sourceSwitchBanner =
                 SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
+            $0.speed.lastFallbackBannerAt = testDate
         }
         await store.send(.cadence(.bleConnectionChanged(.disconnected))) {
             $0.cadence.connectionState = .disconnected
@@ -3420,6 +3460,7 @@ struct ActiveRideFeatureSharedPeripheralTests {
             $0.speed.activeSpeedSource = .gps
             $0.speed.sourceSwitchBanner =
                 SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
+            $0.speed.lastFallbackBannerAt = testDate
         }
         await store.send(.cadence(.bleConnectionChanged(.disconnected))) {
             $0.cadence.connectionState = .disconnected

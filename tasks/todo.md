@@ -565,3 +565,28 @@ Out of scope: #267 itself (the preference, Settings row, and its open questions)
 - **Done as planned, plus auto-end.** `.autoEndTriggered` now goes through `pause` too. A rider who cancels its Finish alert used to be left paused with the recorder running, and a kill while the alert was up resumed as stale `.active`. That makes `pause` truly the only pause path, so the `.task` invariant holds everywhere.
 - **No test plumbing change.** `PersistenceClient.testValue.updateRideSummary` does nothing rather than failing, so the auto-resume tests that use it needed no change, despite the review's concern.
 - **Tests.** Four exhaustive tests now also receive `.pauseRecording`: `autoPauseTriggersAtThreshold`, `autoPauseTriggeredPersistsImmediately`, `autoPausePreemptsAutoEnd` and the auto-end trigger test. New: `autoResumeCheckpoints` (finding 2). The #392 test also checks `segmentIndex == summary.trackSegmentIndex + 1` (finding 3). The six pause/resume suites pass: 74 tests. Full `CyclometerTests`: `TEST SUCCEEDED`, 1,907 unique cases.
+
+---
+
+# #390 — Stale BLE speed when the wheel sensor flaps; a stale zero auto-pauses a moving ride
+
+Plan (spec: PRD §8.4 "never left staring at a stale value"; issue scope is authoritative):
+
+- [x] 1. `SpeedFeature.staleDataWindow = .seconds(4)` replaces `fallbackDelay`. Doc comment: sensors notify ~1 Hz and `CSCCalculator` stays silent for at most `zeroThreshold` (3) frames on a healthy sensor (2 duplicates → nil, 3rd → 0; the re-prime after a stop is 1 nil), so 4 s is one interval of slack over the longest legitimate gap.
+- [x] 2. `.bleSpeedReceived` (re)arms the watchdog (`cancelInFlight: true`) → `.bleFallbackTimedOut` → existing `fallBackToGPS` (guarded on `.bleWheel`, unchanged).
+- [x] 3. `.reconnecting` / `.active` only record `connectionState`. `.disconnected` cancels the watchdog and falls back immediately (unchanged).
+- [x] 4. Banner bound: `lastFallbackBannerAt: Date?`; `fallBackToGPS` switches the source every time but shows the banner only if none was shown in the last `fallbackBannerCooldown` (5 min, wall clock via `date.now`, as `expireHeldHR` does).
+- [x] 5. Tests (SpeedFeatureTests): frames stop while `.active` → GPS + banner; stop with a healthy sensor (nil, nil, 0 at 1 Hz) → no fallback; first frame after fallback promotes; repeated flap cycles → one banner per cooldown, banner again after it. Rework the connection-timer tests to the watchdog.
+- [x] 6. Test (ActiveRide auto-pause suite): 2026-10-07 replay → GPS before zero-tick 10, no `autoPauseTriggered`.
+- [x] 7. Full suite; review section.
+- [ ] 8. Commit + PR (awaiting go-ahead).
+
+## Review
+
+- **Cause.** The fallback timer ran off connection state: each `.reconnecting` restarted the 5 s timer and each `.active` cancelled it, so a link flapping every 1–5 s never let it fire. The last reading (including a `0.00`) held on screen, and auto-pause, distance and Avg/Max all read it.
+- **Fix.** Every `.bleSpeedReceived` re-arms a 4 s `staleDataWindow` watchdog, cancelling the old timer explicitly (`cancelInFlight` cancels late, #412). On expiry the existing `fallBackToGPS` runs. `.reconnecting`/`.active` no longer touch the timer. `.disconnected` still falls back at once and now also disarms the watchdog. Promotion back is still the first real reading.
+- **Banner.** `fallbackBannerCooldown` = 5 min of wall clock (`lastFallbackBannerAt`). The source switches on every fallback; the banner shows at most once per 5 min. Brian chose this over 1 min and a stability re-arm.
+- **Tests.** SpeedFeature: silent sensor on a live link, each reading restarts the window, a flapping link doesn't drive the timer, a healthy stop (2.0, –, –, 0…, –, 1.5) stays on the sensor, round trip re-arms, banner cooldown, and a disconnect disarms the watchdog. ActiveRide: a 2026-10-07 replay switches to GPS at zero-tick 7 and never auto-pauses. Four connection-timer tests were replaced. The two shared-peripheral tests also assert `lastFallbackBannerAt`.
+- **Mutants.** Restoring the `.active` cancel fails the flapping-link and replay tests. A 3 s window fails the healthy-stop test. A zero cooldown fails the cooldown test.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST SUCCEEDED`, 1,857 unique cases. Those two suites alone: `TEST SUCCEEDED`, 49. Every new test is in the log and passes.
+- **Not done.** A sensor that stops notifying while stationary (rather than repeating its counter) would fall back at every stop. The 2026-10-07 sensor repeats, so this isn't handled. BLE.md §6.2 still says "banner shown" without the cooldown.
