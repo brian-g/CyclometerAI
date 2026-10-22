@@ -17,10 +17,7 @@ struct RideDashboardView: View {
         // S05 — Map widget safe-area bleed. The toolbar floats as an overlay
         // (not a safe-area inset) so the grid's map cell can extend behind it
         // all the way to the physical screen bottom.
-        TabView(selection: Binding(
-            get: { store.visibleDashboardPage },
-            set: { store.send(.dashboardPageChanged($0)) }
-        )) {
+        TabView(selection: $store.visibleDashboardPage.sending(\.dashboardPageChanged)) {
             // Identified by page, not index: S07 (#141) inserts and prunes pages, and a view keyed
             // by index would carry one page's widget state onto another.
             ForEach(Array(store.dashboardLayout.pages.enumerated()), id: \.element.id) { index, page in

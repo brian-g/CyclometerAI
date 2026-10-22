@@ -21,18 +21,12 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section {
-                Picker("Units", selection: Binding(
-                    get: { store.preferredUnit },
-                    set: { store.send(.unitSelected($0)) }
-                )) {
+                Picker("Units", selection: $store.preferredUnit.sending(\.unitSelected)) {
                     ForEach(UnitSystem.allCases, id: \.self) { unit in
                         Text(unit.displayName).tag(unit)
                     }
                 }
-                Picker("Wheel Size", selection: Binding(
-                    get: { store.wheelSelection },
-                    set: { store.send(.wheelSelectionChanged($0)) }
-                )) {
+                Picker("Wheel Size", selection: $store.wheelSelection.sending(\.wheelSelectionChanged)) {
                     ForEach(WheelPreset.allCases) { preset in
                         Text(preset.label).tag(WheelSelection.preset(preset))
                     }
@@ -44,10 +38,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         LabeledContent("Circumference") {
                             HStack(spacing: 4) {
-                                TextField("mm", text: Binding(
-                                    get: { store.customCircumferenceText },
-                                    set: { store.send(.customCircumferenceChanged($0)) }
-                                ))
+                                TextField("mm", text: $store.customCircumferenceText.sending(\.customCircumferenceChanged))
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
                                 .focused($isCircumferenceFocused)
@@ -61,25 +52,13 @@ struct SettingsView: View {
                         }
                     }
                 }
-                Toggle("Auto-pause", isOn: Binding(
-                    get: { store.isAutoPauseEnabled },
-                    set: { _ in store.send(.autoPauseToggled) }
-                ))
-                Toggle("Auto-dim", isOn: Binding(
-                    get: { store.isAutoDimEnabled },
-                    set: { _ in store.send(.autoDimToggled) }
-                ))
-                Toggle("Place Names", isOn: Binding(
-                    get: { store.isPlaceNameLookupEnabled },
-                    set: { _ in store.send(.placeNameLookupToggled) }
-                ))
+                Toggle("Auto-pause", isOn: $store.isAutoPauseEnabled.sending(\.autoPauseChanged))
+                Toggle("Auto-dim", isOn: $store.isAutoDimEnabled.sending(\.autoDimChanged))
+                Toggle("Place Names", isOn: $store.isPlaceNameLookupEnabled.sending(\.placeNameLookupChanged))
                 // Off in iOS Settings, the rider's own choice is kept but can't take effect, and the
                 // row says why (#313).
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show Live Activity", isOn: Binding(
-                        get: { store.isLiveActivityEnabled },
-                        set: { _ in store.send(.liveActivityToggled) }
-                    ))
+                    Toggle("Show Live Activity", isOn: $store.isLiveActivityEnabled.sending(\.liveActivityChanged))
                     .disabled(!store.isSystemLiveActivityEnabled)
                     if !store.isSystemLiveActivityEnabled {
                         Text("Live Activities are turned off for Cyclometer in iOS Settings.")
@@ -104,10 +83,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     LabeledContent("Resting HR") {
                         HStack(spacing: 4) {
-                            TextField(store.restingOverridePlaceholder, text: Binding(
-                                get: { store.restingOverrideText },
-                                set: { store.send(.restingOverrideChanged($0)) }
-                            ))
+                            TextField(store.restingOverridePlaceholder, text: $store.restingOverrideText.sending(\.restingOverrideChanged))
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .focused($isRestingOverrideFocused)
@@ -121,10 +97,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     LabeledContent("Max HR") {
                         HStack(spacing: 4) {
-                            TextField(store.maxOverridePlaceholder, text: Binding(
-                                get: { store.maxOverrideText },
-                                set: { store.send(.maxOverrideChanged($0)) }
-                            ))
+                            TextField(store.maxOverridePlaceholder, text: $store.maxOverrideText.sending(\.maxOverrideChanged))
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .focused($isMaxOverrideFocused)

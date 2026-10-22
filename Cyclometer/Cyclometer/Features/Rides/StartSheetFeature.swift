@@ -89,7 +89,7 @@ struct StartSheetFeature {
         case startRideButtonTapped
         case rideCreated(rideId: UUID, route: RouteReference?)
         case rideCreationFailed
-        case turnByTurnToggled
+        case turnByTurnChanged(Bool)
         case alert(PresentationAction<Alert>)
         case path(StackActionOf<Path>)
         case delegate(Delegate)
@@ -229,10 +229,10 @@ struct StartSheetFeature {
                 }
                 return .none
 
-            case .turnByTurnToggled:
+            case .turnByTurnChanged(let isOn):
                 // The preference itself, not a copy: the ride reads it from there — a ride resumed
                 // after a kill included.
-                state.$preferences.withLock { $0.isTurnByTurnEnabled.toggle() }
+                state.$preferences.withLock { $0.isTurnByTurnEnabled = isOn }
                 return .none
 
             case let .path(.element(id: id, action: .routePicker(.delegate(.routeSelected(route))))):
