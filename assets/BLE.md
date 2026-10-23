@@ -601,6 +601,8 @@ After `maxAttempts` the sensor is considered lost and transitions to `disconnect
 
 **Shared peripheral disconnection:** If one peripheral serves both Speed and Cadence roles, disconnection triggers both consequences simultaneously — GPS speed fallback activates and cadence shows "--" — in a single banner: "Speed sensor disconnected — using GPS speed; cadence unavailable."
 
+**Cadence clears on stale data, not connection state (#456).** Every cadence reading restarts a 5 s watchdog (`CadenceFeature.staleDataWindow`); when it expires, cadence shows "--". `.reconnecting` and `.active` don't drive it. A link flapping every few seconds used to restart and cancel a 10 s grace timer on each event, which held the last reading on screen and in the track. A terminal `.disconnected` still clears at once. Why 5 s: sensors notify at ~1 Hz, and `CSCCalculator` is silent for at most 3 frames on an unbroken link. The first stroke after a stop re-primes it and resets the duplicate count, so one crank turn mid-coast is a re-prime plus two duplicates before the next 0: 4 s between readings.
+
 ---
 
 ## 7. BluetoothClient Protocol — TCA Dependency
@@ -904,6 +906,7 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | Speed disconnection during ride | GPS fallback activates; source badge updates; banner shown |
 | Speed readings stop on a live link | GPS fallback after `staleDataWindow`; a flapping link doesn't delay it; one banner per cooldown |
 | Cadence disconnection during ride | Cadence shows "--"; no fallback; banner shown |
+| Cadence readings stop on a live link | Cadence shows "--" after `staleDataWindow`; a flapping link doesn't delay it; coasting (nil, nil, 0), or one crank turn mid-coast (0, nil, nil, nil, 0), doesn't clear |
 | Shared peripheral disconnection | Both speed fallback and cadence "--" fire; single combined banner |
 | CSC capabilities: wheel-only sensor | Auto-assigned Speed role; no role sheet shown |
 | CSC capabilities: crank-only sensor | Auto-assigned Cadence role; no role sheet shown |
