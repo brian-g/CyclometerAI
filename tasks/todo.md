@@ -590,3 +590,15 @@ Plan (spec: PRD §8.4 "never left staring at a stale value"; issue scope is auth
 - **Mutants.** Restoring the `.active` cancel fails the flapping-link and replay tests. A 3 s window fails the healthy-stop test. A zero cooldown fails the cooldown test.
 - **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST SUCCEEDED`, 1,857 unique cases. Those two suites alone: `TEST SUCCEEDED`, 49. Every new test is in the log and passes.
 - **Not done.** A sensor that stops notifying while stationary (rather than repeating its counter) would fall back at every stop. The 2026-10-07 sensor repeats, so this isn't handled. BLE.md §6.2 still says "banner shown" without the cooldown.
+
+---
+
+# #390 follow-up — Speed stale-data window is 5 s, not 4
+
+#455 merged with a 4 s window. The #456 code review showed the calculator's longest silence on an unbroken link is 4 s, not 3: a single wheel turn at a stop re-primes and resets the duplicate count, so 0, –, –, –, 0. A 4 s window expires as that 0 arrives, so creeping at a light could flip speed to GPS and show the banner.
+
+- [x] 1. `SpeedFeature.staleDataWindow` = 5 s; doc comment gives the re-prime + two-duplicate case.
+- [x] 2. `healthySensorStopDoesNotFallBack` includes one wheel turn mid-stop. It fails at 4 s and passes at 5 s.
+- [x] 3. BLE.md §6.2 "Why 5 s" and the test-matrix row.
+- [x] 4. The 2026-10-07 replay still reaches GPS before auto-pause (zero-tick 8 of 10).
+- [x] 5. Full suite; PR.

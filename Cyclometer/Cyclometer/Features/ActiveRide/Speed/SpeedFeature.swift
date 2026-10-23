@@ -44,13 +44,15 @@ struct SpeedFeature {
     /// Must outlast `CSCCalculator`'s longest silence on a healthy sensor. Sensors notify at
     /// ~1 Hz, and the calculator emits nothing for the first `zeroThreshold − 1` duplicate
     /// frames of a stop (the 3rd emits 0) and nothing for the first moving frame after one.
-    /// That is at most 3 s between readings; 4 s leaves one notification of slack.
+    /// That frame re-primes it and resets the duplicate count, so a single wheel turn at a stop
+    /// (creeping at a light) is three silent frames: re-prime, then two duplicates before the
+    /// next 0. That is at most 4 s between readings; 5 s leaves one notification of slack.
     ///
     /// The bound holds only on an unbroken link. Every drop resets the calculator, so after a
     /// reconnect it re-primes (one silent frame), and at a stop it then needs `zeroThreshold`
     /// duplicates before emitting 0. Any drop at a stop, or one that takes over ~2 s to
     /// reconnect while moving, therefore falls back here even on a healthy sensor.
-    static let staleDataWindow: Duration = .seconds(4)
+    static let staleDataWindow: Duration = .seconds(5)
     /// Minimum time between fallback banners. A flapping sensor falls back every cycle;
     /// the source still switches each time, but the rider is told once per window (#390).
     static let fallbackBannerCooldown: TimeInterval = 300

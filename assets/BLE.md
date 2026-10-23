@@ -594,9 +594,9 @@ After `maxAttempts` the sensor is considered lost and transitions to `disconnect
 | Speed | Source switches to GPS-derived speed when readings stop (see below); source badge updates; banner shown, rate-limited | Auto-reconnect (backoff); the first reading switches back |
 | Cadence | Cadence widget shows "--"; no fallback source available | Auto-reconnect (backoff) |
 
-**Speed fallback is driven by data, not connection state (#390).** Every speed reading restarts a 4 s watchdog (`SpeedFeature.staleDataWindow`); when it expires, the display switches to GPS. `.reconnecting` and `.active` don't drive it. A link flapping every few seconds used to restart and cancel a connection timer on each event, which held the last reading for up to 58 s. A terminal `.disconnected` still switches at once.
+**Speed fallback is driven by data, not connection state (#390).** Every speed reading restarts a 5 s watchdog (`SpeedFeature.staleDataWindow`); when it expires, the display switches to GPS. `.reconnecting` and `.active` don't drive it. A link flapping every few seconds used to restart and cancel a connection timer on each event, which held the last reading for up to 58 s. A terminal `.disconnected` still switches at once.
 
-- **Why 4 s.** Sensors notify at ~1 Hz, and `CSCCalculator` stays silent for at most 3 frames on an unbroken link: two duplicates before the 0 at a stop, and one re-prime frame after it. Each link drop resets the calculator, so a drop at a stop, or a reconnect over ~2 s while moving, falls back even on a healthy sensor.
+- **Why 5 s.** Sensors notify at ~1 Hz, and `CSCCalculator` stays silent for at most 3 frames on an unbroken link. Two duplicates come before the 0 at a stop. The first moving frame after a stop re-primes it and resets the duplicate count, so one wheel turn at a stop (creeping at a light) is a re-prime plus two duplicates before the next 0: 4 s between readings. Each link drop resets the calculator, so a drop at a stop, or a reconnect over ~2 s while moving, falls back even on a healthy sensor.
 - **Banner.** "Switched to GPS for speed — <sensor> not responding" for the watchdog, "… disconnected" for a terminal disconnect. A flapping sensor falls back every cycle, so the banner shows at most once per 5 min (`fallbackBannerCooldown`). A terminal disconnect is always announced.
 
 **Shared peripheral disconnection:** If one peripheral serves both Speed and Cadence roles, disconnection triggers both consequences simultaneously — GPS speed fallback activates and cadence shows "--" — in a single banner: "Speed sensor disconnected — using GPS speed; cadence unavailable."
@@ -902,7 +902,7 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | Log gate does not halve a jittering 1 Hz stream | Samples drifting either side of a 1s spacing all admit — the reason for bucketing over an interval gate |
 | Log gate survives a backwards clock | A jump backwards admits rather than stalling the gate shut |
 | Speed disconnection during ride | GPS fallback activates; source badge updates; banner shown |
-| Speed readings stop on a live link | GPS fallback after `staleDataWindow`; a flapping link doesn't delay it; one banner per cooldown |
+| Speed readings stop on a live link | GPS fallback after `staleDataWindow`; a flapping link doesn't delay it; one wheel turn at a stop (0, nil, nil, nil, 0) doesn't fall back; one banner per cooldown |
 | Cadence disconnection during ride | Cadence shows "--"; no fallback; banner shown |
 | Shared peripheral disconnection | Both speed fallback and cadence "--" fire; single combined banner |
 | CSC capabilities: wheel-only sensor | Auto-assigned Speed role; no role sheet shown |

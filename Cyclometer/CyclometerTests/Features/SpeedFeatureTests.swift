@@ -302,10 +302,12 @@ struct SpeedFeatureTests {
         let store = makeStore(initialState: Self.onSensor, clock: clock)
 
         // What `CSCCalculator` emits at 1 Hz through a stop: a reading, two silent
-        // duplicates, 0 on the third, zeros while stopped, a silent re-prime as the wheel
-        // turns again, then readings. The 3 s gap is the longest; a window that short
-        // fires during it and fails the next send.
-        let emitted: [Double?] = [2.0, nil, nil, 0, 0, 0, 0, nil, 1.5, 3.0]
+        // duplicates, 0 on the third, zeros while stopped. One wheel turn (creeping at the
+        // light) re-primes it (silent) and resets the duplicate count, so two more silent
+        // duplicates come before the next 0: a 4 s gap, the longest. Then a silent re-prime
+        // as the wheel turns again, then readings. A window that short fires during the
+        // 4 s gap and fails the next send.
+        let emitted: [Double?] = [2.0, nil, nil, 0, 0, nil, nil, nil, 0, 0, nil, 1.5, 3.0]
         var samples: [SpeedSample] = []
         for mps in emitted {
             if let mps {
