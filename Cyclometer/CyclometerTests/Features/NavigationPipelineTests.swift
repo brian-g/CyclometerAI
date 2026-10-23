@@ -513,6 +513,7 @@ struct NavigationPipelineTests {
             let navigation = try #require(store.state.activeRide?.navigation)
             let route = try #require(navigation.activeRoute)
             #expect(abs((navigation.progressMeters ?? -1) - killedAt) < 10)
+            #expect(!navigation.isRouteComplete)
 
             // Back on the road where the ride left off: the first turn is behind, the second next.
             let step = 30 / 3.6
@@ -534,6 +535,57 @@ struct NavigationPipelineTests {
             }
             await expectEventually { harness.tones.value.count >= 2 }
             #expect(harness.tones.value == [.right, .left])
+            // And it still finishes (#406).
+            #expect(store.state.activeRide?.navigation.isRouteComplete == true)
+
+            await store.skipInFlightEffects(strict: false)
+        }
+    }
+
+    /// #406: completion comes back with the progress. Before, the relaunch started the route over at
+    /// 96% done, and riding on past its end matched nothing and raised off route.
+    @Test("a ride killed after finishing its route relaunches finished, and riding on isn't off route")
+    func finishedRideRelaunchesFinished() async throws {
+        try await withTemporaryStoreURL(prefix: "NavigationPipeline") { url in
+            let harness = Harness(storeURL: url)
+            let rideId: UUID
+            var second = 0.0
+            let end: Double
+            do {
+                let store = try await harness.launch()
+                let route = try await startRide(on: try await importFixture(on: store), store)
+                rideId = try #require(store.state.activeRide?.rideId)
+                end = route.totalDistanceMeters
+
+                // Finished within the arrival radius, short of the last point.
+                await ride(store, along: route.coordinates, from: 0, through: end - 10, kph: 30, second: &second)
+                #expect(store.state.activeRide?.navigation.isRouteComplete == true)
+
+                await checkpoint(store)
+                await expectEventually { harness.rideRow(rideId)?.isRouteComplete == true }
+
+                // The kill: nothing ends the ride, and nothing is drained.
+                await store.skipInFlightEffects(strict: false)
+            }
+
+            let store = try await harness.launch()
+            await store.send(.task)
+            await store.receive(\.resumableRideFetched, timeout: effectDrainTimeout)
+            await store.receive(\.activeRide.navigation.routeLoaded, timeout: effectDrainTimeout)
+            #expect(store.state.activeRide?.rideId == rideId)
+            let route = try #require(store.state.activeRide?.navigation.activeRoute)
+            #expect(store.state.activeRide?.navigation.isRouteComplete == true)
+            #expect(store.state.activeRide?.navigation.routeProgressFraction == 1)
+
+            // On past the end, beyond `offRouteMeters` of it, for more fixes than off route takes.
+            let fixes = Double(NavigationFeature.offRouteConsecutiveFixes + 1)
+            let step = 30 / 3.6
+            await ride(
+                store, along: route.coordinates,
+                from: end + 60, through: end + 60 + fixes * step, kph: 30, second: &second
+            )
+            #expect(store.state.activeRide?.navigation.isOffRoute == false)
+            #expect(store.state.activeRide?.navigation.routeProgressFraction == 1)
 
             await store.skipInFlightEffects(strict: false)
         }

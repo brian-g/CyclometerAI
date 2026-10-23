@@ -1230,12 +1230,13 @@ struct ActiveRideFeatureStateMachineTests {
 
     /// #197: what a relaunch mid-route reads back. Awaited for the same reason as
     /// `taskCreatesRide`.
-    @Test("a checkpoint carries the route, and how far along it the ride has got")
+    @Test("a checkpoint carries the route, how far along it the ride has got, and whether it has finished")
     func checkpointCarriesTheRouteAndProgress() async throws {
         let route = RouteSummary.previewRoutes[1].reference
         let (written, write) = AsyncStream<RideSummaryUpdate>.makeStream()
         var state = ActiveRideFeature.State(route: route, recordingState: .active)
         state.navigation.progressMeters = 1_234
+        state.navigation.isRouteComplete = true
         let store = TestStore(initialState: state) {
             ActiveRideFeature()
         } withDependencies: {
@@ -1255,6 +1256,7 @@ struct ActiveRideFeatureStateMachineTests {
         let update = try #require(next)
         #expect(update.route == route)
         #expect(update.routeProgressMeters == 1_234)
+        #expect(update.isRouteComplete)
 
         await store.skipInFlightEffects(strict: false)
     }
@@ -1417,19 +1419,20 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(state.recordingState == .paused)
     }
 
-    @Test("State(resuming:) restores the route, and how far along it the ride had got (#197)")
+    @Test("State(resuming:) restores the route, how far along it the ride had got (#197), and whether it had finished (#406)")
     func stateResumingRestoresTheRoute() {
         let route = RouteSummary.previewRoutes[1].reference
         let summary = RideSummaryUpdate(
             rideId: UUID(), recordingState: .active,
             durationSeconds: 60, distanceMeters: 500, averageSpeedMPS: 8, maxSpeedMPS: 10,
-            route: route, routeProgressMeters: 1_234
+            route: route, routeProgressMeters: 1_234, isRouteComplete: true
         )
 
         let state = ActiveRideFeature.State(resuming: summary)
 
         #expect(state.route == route)
         #expect(state.navigation.progressMeters == 1_234)
+        #expect(state.navigation.isRouteComplete)
         // Loaded by `.task`, as for a fresh ride, not seeded here.
         #expect(state.navigation.activeRoute == nil)
     }
