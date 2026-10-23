@@ -622,3 +622,42 @@ Plan (issue scope as approved; mirrors #390 / PR #455):
 - **Not done.** A cadence sensor that stops notifying while coasting (rather than repeating its counter) would now show "--" instead of 0 when coasting. That's better than the old held pedalling rpm, but the 0 is lost. The window duplicates speed's 4 s (#455); once both are merged they could share one constant on `BLECSCClient`.
 - **Merging with #455.** The code and BLE.md merge cleanly with `390-speed-stale-watchdog` (dry run). `tasks/todo.md` will conflict because both append at the end; keep both sections.
 - **Code review: window raised to 5 s.** 4 s equalled the calculator's real longest silence on an unbroken link, not outlasted it: the first stroke after a stop re-primes and resets the duplicate count, so one crank turn mid-coast is re-prime + two duplicates before the next 0 (0, –, –, –, 0 = 4 s). The coasting test now includes that sequence; it fails at 4 s and passes at 5 s. Speed's 4 s (#455) has the same gap.
+
+---
+
+## #389 — Cadence and Directions detail sheets can go stale while open (W5, W9)
+
+Fix once in `WidgetDetailModifier`: present a wrapper whose own `body` calls the detail builder, so whatever the
+builder reads invalidates the open sheet directly (#144's fix, for every widget).
+
+- [x] `WidgetDetail.swift`: `WidgetDetailContent` wrapper; `.sheet` presents it; doc comment
+- [x] `cadenceSheetFollowsTheRideWhileOpen` (card unchanged, Pedaling vs Coasting follows)
+- [x] `directionsMapSheetFollowsTheRideWhileOpen` (card unchanged, orientation button follows)
+- [x] Frozen-value control fails each new test
+- [x] Revert loop: builder in `.sheet` again, 20 fresh invocations
+- [x] Fixed loop: 20/20 fresh invocations pass
+- [x] Full `CyclometerTests`
+- [x] Memory `sheet-builder-reads-go-stale` updated
+
+### Review
+
+- **Fix.** `WidgetDetailModifier` presents a private `WidgetDetailContent` whose `body` calls the widget's builder,
+  so whatever the builder reads invalidates the open sheet itself. That covers W5 and W9, and any future
+  `.widgetDetail` whose builder reads store state, with no widget changes. W8 gains nothing from it, and needs
+  nothing: everything its sheet shows is a `MapWidget` input, so a change redraws the card as well as re-running
+  the builder. That redraw is the path that masked the bug in #144; it only went stale with the card unchanged.
+  The `metrics:` closures on the RideMetrics/HR/Elevation sheets are now redundant; left as they are.
+- **Tests.** `cadenceSheetFollowsTheRideWhileOpen` (Pedaling vs Coasting "—" → "50% / 50%") and
+  `directionsMapSheetFollowsTheRideWhileOpen` (orientation button "Heading up" → "North up"). In both, the card
+  never changes. The frozen-value control fails both at the follow step.
+- **Fresh-invocation loops** (own DerivedData, no compile cache, 3 cases counted in every run):
+  - Reverted (`.sheet(isPresented:content: detail)`): Cadence failed 2/60. In both, the open sheet read only
+    Avg/Max Cadence for the full 6 s, never getting past its first partial build. Directions: 0/60.
+  - Fixed: 0/100 for all three sheet tests.
+- **What that does and doesn't show.** The revert rate here is ~1 in 30, well below #144's ~1 in 7, and two
+  failures is thin evidence: by chance alone, both would land in the revert runs ~14% of the time. The fix rests
+  mostly on being the same mechanism #388 proved for RideMetrics. The Directions test never reproduced the bug.
+  It pins the behaviour (the frozen control fails it) but isn't evidence the bug existed there. The live map
+  likely keeps the sheet's host updating on its own. [Likely]
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST EXECUTE
+  SUCCEEDED`, 1,864 unique cases, 0 failed. Those two alone: 49, 0 failed.

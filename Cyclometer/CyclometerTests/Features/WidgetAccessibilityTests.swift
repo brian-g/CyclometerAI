@@ -167,6 +167,46 @@ struct WidgetAccessibilityTests {
         #expect(host.presentedText().contains("Heart Rate 156 beats per minute"))
     }
 
+    /// #389: the same for the Cadence sheet, whose card here never changes, as while coasting. W5
+    /// calls its `detail` closure in its `.widgetDetail` builder, so this pins `.widgetDetail` building
+    /// the sheet in the sheet's own body.
+    @Test func cadenceSheetFollowsTheRideWhileOpen() throws {
+        let ride = LiveRide()
+        let host = try Host(CadenceWidget(
+            cadence: nil, cadenceHistory: [], averageCadence: 0, maxCadence: 0, detail: { ride.cadence }
+        ))
+        defer { host.tearDown() }
+
+        #expect(try host.onlyElement().accessibilityActivate())
+        host.settle { host.presentedText().contains("Pedaling vs Coasting") }
+        #expect(host.presentedText().contains("Pedaling vs Coasting, —"), "read \(host.presentedText())")
+
+        ride.cadence = CadenceDetail(zoneSeconds: [.zone3: 60], coastingSeconds: 60)
+        host.settle { host.presentedText().contains("50% / 50%") }
+        #expect(host.presentedText().contains("Pedaling vs Coasting, 50% / 50%"), "read \(host.presentedText())")
+    }
+
+    /// #389: the same for the map sheet W9 opens, whose card never reads the sheet's orientation.
+    /// W9 hands its `detail` closure to `.widgetDetail` as the sheet itself.
+    @Test func directionsMapSheetFollowsTheRideWhileOpen() throws {
+        let ride = LiveRide()
+        let host = try Host(DirectionsWidget(
+            hasRoute: false, nextTurn: nil, distanceMeters: nil, unit: .metric,
+            detail: {
+                LiveMapSheet(trackSegments: [[]], route: [], orientation: ride.mapOrientation, onOrientationToggle: {})
+            }
+        ))
+        defer { host.tearDown() }
+
+        #expect(try host.onlyElement().accessibilityActivate())
+        host.settle { host.presentedText().contains("Heading up") }
+        #expect(host.presentedText().contains("Heading up"))
+
+        ride.mapOrientation = .northUp
+        host.settle { host.presentedText().contains("North up") }
+        #expect(host.presentedText().contains("North up"))
+    }
+
     // MARK: - S05.3 mini-player
 
     /// #404: the strip is one button, and its ring reads as route progress rather than a bare
@@ -238,11 +278,13 @@ private enum ElementChecks {
     }
 }
 
-/// Ride state as the store holds it: observable, read through a widget's `metrics` closure.
+/// Ride state as the store holds it: observable, read through a widget's `metrics` or `detail` closure.
 @Observable
 private final class LiveRide {
     var metrics = RideMetrics()
     var heartRate = HeartRateMetrics()
+    var cadence = CadenceDetail()
+    var mapOrientation = MapOrientation.headingUp
 }
 
 /// The widgets that adopt `.widgetDetail`.
