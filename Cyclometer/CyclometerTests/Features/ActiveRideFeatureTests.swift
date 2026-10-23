@@ -1388,6 +1388,8 @@ struct ActiveRideFeatureStateMachineTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.date = DateGenerator { clock.value }
+            // Each reading arms cadence's stale-data watchdog (#456); never advanced here.
+            $0.continuousClock = TestClock()
             $0.bleCSCClient = .testValue
         }
         store.exhaustivity = .off
@@ -3441,10 +3443,11 @@ struct ActiveRideFeatureSharedPeripheralTests {
             $0.speed.sourceSwitchBanner = nil
         }
 
-        // Cadence cleared on the spot and had no timer to fire: the 10 s grace window
-        // guards a *reconnect*, and there is no fallback source to switch to
-        // (BLE.md §6.2). Nothing arrives here — an unasserted receive fails the test.
-        await clock.advance(by: CadenceFeature.reconnectGraceDelay)
+        // Cadence cleared on the spot and had no timer to fire: there is no fallback source
+        // to switch to (BLE.md §6.2), and no reading armed a stale-data watchdog (disarming
+        // is `CadenceFeatureTests.terminalDisconnectClearsImmediately`). Nothing arrives
+        // here — an unasserted receive fails the test.
+        await clock.advance(by: CadenceFeature.staleDataWindow)
     }
 
     @Test("One banner, not two, across a shared disconnect")

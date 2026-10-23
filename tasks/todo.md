@@ -602,3 +602,23 @@ Plan (spec: PRD §8.4 "never left staring at a stale value"; issue scope is auth
 - [x] 3. BLE.md §6.2 "Why 5 s" and the test-matrix row.
 - [x] 4. The 2026-10-07 replay still reaches GPS before auto-pause (zero-tick 8 of 10).
 - [x] 5. Full suite; PR.
+# #456 — Cadence holds a stale reading when the sensor link flaps
+
+Plan (issue scope as approved; mirrors #390 / PR #455):
+
+- [x] 1. `CadenceFeature.staleDataWindow = .seconds(4)` replaces `reconnectGraceDelay`; doc comment justifies it from the crank calculator's 3-frame silence. `CancelID.staleDataTimer`, `.staleDataTimedOut` replace the reconnect names.
+- [x] 2. Every valid `.cadenceReceived` cancels and re-arms the watchdog; expiry clears `cadenceRPM`. A negative reading already clears and arms nothing.
+- [x] 3. `.reconnecting` / `.active` only record `connectionState`; `.disconnected` clears at once and disarms.
+- [x] 4. Tests: silent sensor on `.active` clears; flapping link with no readings clears; coasting (nil, nil, 0, 0…) doesn't; first reading after a clear shows; disconnect disarms. Replace the four grace-window tests; drain the watchdog in exhaustive tests; give clock-less stores a `TestClock`.
+- [x] 5. BLE.md §6.2; full suite; review; PR.
+
+## Review
+
+- **Cause, as the issue said.** `.reconnecting` restarted the 10 s grace timer and `.active` cancelled it, so a flapping link never let it fire. The last cadence reading stayed on screen and in every track point (`ActiveRideFeature.swift:1350`).
+- **Fix.** Every valid `.cadenceReceived` re-arms a 4 s `staleDataWindow` watchdog, cancelling the old one explicitly, and on expiry cadence clears to "--". `.reconnecting`/`.active` only record the state. `.disconnected` clears at once and disarms. `reconnectGraceDelay`, `CancelID.reconnectTimer` and `.cadenceReconnectTimedOut` became `staleDataWindow`, `.staleDataTimer` and `.staleDataTimedOut`, because "reconnect" no longer describes them.
+- **Tests.** New: a silent sensor on a live link clears, each reading restarts the window, a flapping link doesn't drive it, coasting (85, –, –, 0…, –, 80) doesn't clear, the first reading after a clear shows and re-arms, and a disconnect disarms. The four grace-window tests were replaced. Exhaustive tests that send a reading drain the watchdog through `expireStaleData`. `makeTimedStore` and one ActiveRide crash-resume test now get a `TestClock`.
+- **Mutants.** Restoring the `.active` cancel fails the flapping-link test. A 3 s window fails the coasting test.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST SUCCEEDED`, 1,858 unique cases. Those two alone: `TEST SUCCEEDED`, 49. Every new test is in the log and passes.
+- **Not done.** A cadence sensor that stops notifying while coasting (rather than repeating its counter) would now show "--" instead of 0 when coasting. That's better than the old held pedalling rpm, but the 0 is lost. The window duplicates speed's 4 s (#455); once both are merged they could share one constant on `BLECSCClient`.
+- **Merging with #455.** The code and BLE.md merge cleanly with `390-speed-stale-watchdog` (dry run). `tasks/todo.md` will conflict because both append at the end; keep both sections.
+- **Code review: window raised to 5 s.** 4 s equalled the calculator's real longest silence on an unbroken link, not outlasted it: the first stroke after a stop re-primes and resets the duplicate count, so one crank turn mid-coast is re-prime + two duplicates before the next 0 (0, –, –, –, 0 = 4 s). The coasting test now includes that sequence; it fails at 4 s and passes at 5 s. Speed's 4 s (#455) has the same gap.
