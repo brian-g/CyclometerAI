@@ -227,3 +227,37 @@ struct BLEClientTests {
         await client.stopScanning([CBUUID(string: "6A4E3200-667B-11E3-949A-0800200C9A66")])
     }
 }
+
+@Suite("BLEClient — link timeouts (#391)")
+struct BLEClientLinkTimeoutTests {
+
+    @Test("Only a supervision timeout counts as a link loss")
+    func supervisionTimeoutOnly() {
+        #expect(BLEClient.isSupervisionTimeout(CBError(.connectionTimeout)))
+        #expect(!BLEClient.isSupervisionTimeout(nil))                     // the app or the rider disconnected
+        #expect(!BLEClient.isSupervisionTimeout(CBError(.peripheralDisconnected)))
+        #expect(!BLEClient.isSupervisionTimeout(CBError(.unknown)))
+        #expect(!BLEClient.isSupervisionTimeout(CocoaError(.featureUnsupported)))
+    }
+
+    @Test("linkTimeouts yields the peripheral of each supervision-timeout disconnect, nothing else")
+    func linkTimeoutsFilters() async {
+        let flapping = UUID(1)
+        let other = UUID(2)
+        var client = BLEClient.testValue
+        client.events = {
+            AsyncStream { continuation in
+                continuation.yield(.connected(id: flapping))
+                continuation.yield(.disconnected(id: flapping, error: CBError(.connectionTimeout)))
+                continuation.yield(.disconnected(id: other, error: nil))
+                continuation.yield(.failedToConnect(id: other, error: CBError(.connectionTimeout)))
+                continuation.yield(.disconnected(id: flapping, error: CBError(.connectionTimeout)))
+                continuation.finish()
+            }
+        }
+
+        var received: [UUID] = []
+        for await id in client.linkTimeouts() { received.append(id) }
+        #expect(received == [flapping, flapping])
+    }
+}

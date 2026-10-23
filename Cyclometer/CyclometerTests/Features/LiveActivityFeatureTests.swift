@@ -205,6 +205,25 @@ struct LiveActivityFeatureTests {
         #expect(calls.updates.last?.startDate == Self.t0)
     }
 
+    /// GPS at 4 Hz, every reading a change: still one update a second, each at its tick.
+    @Test("readings at 4 Hz for 10 s reach the activity once a second")
+    func sustainedReadingsStayAtOneHertz() async {
+        let ride = Self.makeRide()
+        let calls = ride.calls
+        await ride.start()
+
+        for second in 1...10 {
+            for quarter in 0..<4 {
+                await ride.store.send(.speed(.gpsSpeedReceived(Double(second) + Double(quarter) / 4)))
+            }
+            #expect(calls.updates.count == second - 1, "nothing ahead of tick \(second)")
+            await ride.tick()
+            await expectEventually("tick \(second)'s update") { calls.updates.count >= second }
+            #expect(calls.updates.count == second, "one update at tick \(second)")
+        }
+        #expect(calls.updates.map(\.speedMPS) == (1...10).map { Double($0) + 0.75 })
+    }
+
     /// The stale date is 30 s after each update; without these an idle ride's card would dim.
     @Test("an unchanged ride is sent again every 15 ticks, not before")
     func unchangedRideIsKeptAlive() async {
@@ -241,6 +260,8 @@ struct LiveActivityFeatureTests {
         await ride.tick(LiveActivityFeature.keepAliveTicks)
         await expectEventually("a keep-alive while paused") { calls.updates.count == 2 }
         #expect(calls.updates.last == paused)
+        #expect(!calls.value.contains(.end), "a pause doesn't end the activity")
+        #expect(ride.store.state.liveActivity.phase == .showing)
     }
 
     @Test("a resume after a minute's pause moves the timer's start on by the minute")
@@ -535,7 +556,8 @@ struct LiveActivityFeatureTests {
     }
 
     /// The setting's `end` is the only one: the live client runs it after the pending request, so
-    /// it ends what that request shows (#411, `LiveActivityClientTests`).
+    /// it ends what that request shows (#411, `LiveActivityClientTests`). The request's answer is
+    /// dropped (#445).
     @Test("turned off while the start is pending, the late answer sends nothing more")
     func settingOffWhileStartingSendsNothingMore() async {
         let ride = Self.makeRide()
@@ -554,7 +576,7 @@ struct LiveActivityFeatureTests {
         ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = false }
         await ride.store.send(.liveActivity(.preferenceChanged))
         await clock.advance(by: .milliseconds(500))
-        await ride.store.receive(\.liveActivity.started)
+        await expectEventually("the request still made") { calls.starts == 1 }
 
         await ride.tick(3)
         // The recording client doesn't queue, so the setting's end is recorded ahead of the start.
@@ -566,19 +588,56 @@ struct LiveActivityFeatureTests {
         #expect(ride.store.state.liveActivity.phase == .notShowing)
     }
 
-    @Test("turning it off in Settings during a ride reaches the ride's activity")
+    /// Off then on, both while the first request is out (#445). The first request's answer comes
+    /// back first; taken for the second's, the second's card would get no updates. The two answers
+    /// differ here, so the state shows which one was taken.
+    @Test("turned off and on while the start is pending, only the second start's answer counts")
+    func settingOffAndOnWhileStartingTakesTheSecondAnswer() async {
+        let ride = Self.makeRide()
+        let calls = ride.calls
+        let clock = ride.clock
+        var client = Self.recordingClient(into: calls, starts: [true, false])
+        let recordedStart = client.start
+        client.start = { attributes, content in
+            try? await clock.sleep(for: .milliseconds(500))
+            return await recordedStart(attributes, content)
+        }
+        ride.store.dependencies.liveActivityClient = client
+
+        await ride.store.send(.task)
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = false }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+        await clock.advance(by: .milliseconds(100))
+        ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = true }
+        await ride.store.send(.liveActivity(.preferenceChanged))
+
+        await clock.advance(by: .milliseconds(500))
+        await expectEventually("both starts answered") { calls.starts == 2 }
+        await ride.store.receive(\.liveActivity.started)
+        #expect(ride.store.state.liveActivity.phase == .notShowing, "the second start was refused")
+    }
+
+    @Test("turning it off and on in Settings during a ride reaches the ride's activity")
     func settingsToggleReachesTheRide() async {
         let calls = LockIsolated<[Call]>([])
         let store = Self.makeAppStore(clock: TestClock(), calls: calls)
 
         await store.send(.activeRide(.task))
         await store.receive(\.activeRide.liveActivity.started)
-        await store.send(.settings(.liveActivityToggled))
+        await store.send(.settings(.liveActivityChanged(false)))
         await store.receive(\.settings.delegate.liveActivityToggled)
         await store.receive(\.activeRide.liveActivity.preferenceChanged)
 
         #expect(store.state.activeRide?.liveActivity.phase == .notShowing)
         await expectEventually("the activity ended") { calls.value.last == .end }
+
+        await store.send(.settings(.liveActivityChanged(true)))
+        await store.receive(\.settings.delegate.liveActivityToggled)
+        await store.receive(\.activeRide.liveActivity.preferenceChanged)
+        await store.receive(\.activeRide.liveActivity.started)
+
+        #expect(store.state.activeRide?.liveActivity.phase == .showing)
+        #expect(calls.starts == 2)
     }
 
     static func makeAppStore(

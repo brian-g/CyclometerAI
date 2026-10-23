@@ -16,10 +16,18 @@ struct CadenceFeature {
     /// Maximum points plotted in the watermark; raw samples are downsampled to
     /// this many buckets so memory and render stay bounded over a full hour.
     static let watermarkResolution = 60
-    /// Grace window before a reconnecting cadence sensor clears to "--", mirroring
-    /// ActiveRideFeature's radar-reconnect grace window. No GPS-style fallback exists
-    /// for cadence (BLE.md §6.2), so this just avoids flicker on a brief drop.
-    static let reconnectGraceDelay: Duration = .seconds(10)
+    /// How long cadence may go without a reading before it clears to "--" (BLE.md §6.2). No
+    /// GPS-style fallback exists for cadence, so clearing is all there is. Driven by data, not
+    /// connection state: a flapping link restarted the old `.reconnecting` grace timer on
+    /// every drop and cancelled it on every `.active`, so the last reading held (#456).
+    ///
+    /// Must outlast `CSCCalculator`'s longest silence on an unbroken link. Sensors notify at
+    /// ~1 Hz, and the calculator emits nothing for the first `zeroThreshold − 1` duplicate
+    /// frames once the cranks stop (the 3rd emits 0) and nothing for the first pedal stroke
+    /// after. That stroke re-primes it and resets the duplicate count, so a single crank turn
+    /// mid-coast is three silent frames (re-prime, then two duplicates before the next 0).
+    /// That is at most 4 s between readings; 5 s leaves one notification of slack.
+    static let staleDataWindow: Duration = .seconds(5)
     /// Longest gap between two readings that is still credited to a zone (or to
     /// coasting). CSC notifications normally arrive about once a second; a longer
     /// gap means the sensor dropped out, and crediting it would invent ride time.
@@ -90,10 +98,10 @@ struct CadenceFeature {
         case startListening
         case cadenceReceived(Double)
         case bleConnectionChanged(BLECSCClient.ConnectionState)
-        case cadenceReconnectTimedOut
+        case staleDataTimedOut
     }
 
-    private enum CancelID { case reconnectTimer }
+    private enum CancelID { case staleDataTimer }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -139,30 +147,31 @@ struct CadenceFeature {
                     state.cadenceSum += rpm
                     state.maxCadenceRPM = max(state.maxCadenceRPM, Int(rpm.rounded()))
                 }
-                // Real data flowing back cancels any pending clear-to-"--" timer.
-                return .cancel(id: CancelID.reconnectTimer)
+                // Each reading restarts the stale-data watchdog. Cancelled explicitly:
+                // `cancelInFlight` only cancels once the new task starts, which leaves room
+                // for the old timeout to land.
+                return .merge(
+                    .cancel(id: CancelID.staleDataTimer),
+                    .run { send in
+                        try await clock.sleep(for: Self.staleDataWindow)
+                        await send(.staleDataTimedOut)
+                    }
+                    .cancellable(id: CancelID.staleDataTimer, cancelInFlight: true)
+                )
 
             case .bleConnectionChanged(let connectionState):
                 state.connectionState = connectionState
                 switch connectionState {
-                case .active:
-                    return .cancel(id: CancelID.reconnectTimer)
-                case .reconnecting:
-                    // Only worth protecting if a reading is actually on screen.
-                    guard state.cadenceRPM != nil else { return .none }
-                    return .run { send in
-                        try await clock.sleep(for: Self.reconnectGraceDelay)
-                        await send(.cadenceReconnectTimedOut)
-                    }
-                    .cancellable(id: CancelID.reconnectTimer, cancelInFlight: true)
                 case .disconnected:
                     state.cadenceRPM = nil
-                    return .cancel(id: CancelID.reconnectTimer)
-                case .scanning, .connecting, .connected:
+                    return .cancel(id: CancelID.staleDataTimer)
+                case .scanning, .connecting, .connected, .reconnecting, .active:
+                    // The stale-data watchdog decides when to clear; a link that flaps
+                    // between these says nothing about whether data is arriving.
                     return .none
                 }
 
-            case .cadenceReconnectTimedOut:
+            case .staleDataTimedOut:
                 state.cadenceRPM = nil
                 return .none
             }

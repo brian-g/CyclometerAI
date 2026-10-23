@@ -159,12 +159,13 @@ struct SettingsFeatureTests {
         let store = makeStore()
         #expect(store.state.isAutoDimEnabled)
 
-        await store.send(.autoDimToggled) {
+        await store.send(.autoDimChanged(false)) {
             $0.$preferences.withLock { $0.isAutoDimEnabled = false }
         }
+        await store.send(.autoDimChanged(false))
         #expect(store.state.isAutoDimEnabled == false)
 
-        await store.send(.autoDimToggled) {
+        await store.send(.autoDimChanged(true)) {
             $0.$preferences.withLock { $0.isAutoDimEnabled = true }
         }
         #expect(store.state.isAutoDimEnabled)
@@ -176,9 +177,10 @@ struct SettingsFeatureTests {
         let store = makeStore()
         #expect(store.state.isPlaceNameLookupEnabled)
 
-        await store.send(.placeNameLookupToggled) {
+        await store.send(.placeNameLookupChanged(false)) {
             $0.$preferences.withLock { $0.isPlaceNameLookupEnabled = false }
         }
+        await store.send(.placeNameLookupChanged(false))
         #expect(store.state.isPlaceNameLookupEnabled == false)
     }
 
@@ -189,10 +191,12 @@ struct SettingsFeatureTests {
         let store = makeStore()
         #expect(store.state.isLiveActivityEnabled)
 
-        await store.send(.liveActivityToggled) {
+        await store.send(.liveActivityChanged(false)) {
             $0.$preferences.withLock { $0.isLiveActivityEnabled = false }
         }
         await store.receive(\.delegate.liveActivityToggled)
+        // Unchanged, so the app hears nothing.
+        await store.send(.liveActivityChanged(false))
         #expect(store.state.isLiveActivityEnabled == false)
     }
 
@@ -228,12 +232,13 @@ struct SettingsFeatureTests {
         let store = makeStore()
         #expect(store.state.isAutoPauseEnabled)
 
-        await store.send(.autoPauseToggled) {
+        await store.send(.autoPauseChanged(false)) {
             $0.$preferences.withLock { $0.isAutoPauseEnabled = false }
         }
+        await store.send(.autoPauseChanged(false))
         #expect(store.state.isAutoPauseEnabled == false)
 
-        await store.send(.autoPauseToggled) {
+        await store.send(.autoPauseChanged(true)) {
             $0.$preferences.withLock { $0.isAutoPauseEnabled = true }
         }
         #expect(store.state.isAutoPauseEnabled)

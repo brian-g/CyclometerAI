@@ -91,6 +91,26 @@ struct RideSummaryList<MapRow: View>: View {
                             .padding(.vertical, Spacing.sm)
                     }
                 }
+                // Only when the ride flagged one (#391): a clean ride's summary is unchanged.
+                let flagged = store.flaggedSensors
+                if !flagged.isEmpty {
+                    Section("Sensors") {
+                        ForEach(flagged) { sensor in
+                            // A device row, like S11's, so a combo sensor draws as it does there.
+                            let style = SensorRowStyle.device(roles: Set(sensor.roles), kinds: [])
+                            VStack(alignment: .leading, spacing: Spacing.xs) {
+                                SensorListRowView(
+                                    icon: style.symbol,
+                                    iconTint: style.tint,
+                                    title: sensor.roles.map(\.displayName).joined(separator: " & "),
+                                    subtitle: sensor.name
+                                ) { EmptyView() }
+                                SensorWarningLabel(warning: sensor.warning)
+                                    .padding(.bottom, Spacing.xs)
+                            }
+                        }
+                    }
+                }
             }
         }
         .navigationTitle("Finish Ride")
@@ -188,4 +208,54 @@ struct HeartRateZonePie: View {
             }
         }
     }
+}
+
+// MARK: - Previews
+
+/// S10 as `.task` leaves it, seeded directly. A placeholder map row and no track: the charts show
+/// their empty states, which is what a preview can produce without a recorded ride.
+@MainActor
+private func previewList(
+    pairedSensors: [PairedSensor] = [],
+    sensorHealth: [UUID: SensorHealthReport] = [:],
+    rideId: UUID = UUID()
+) -> some View {
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+    } operation: {
+        @Shared(.appPreferences) var preferences
+        $preferences.withLock {
+            $0.pairedSensors = pairedSensors
+            $0.sensorHealth = sensorHealth
+        }
+        var state = RideSummaryFeature.State(rideId: rideId)
+        state.load = .loaded
+        state.summary = RideListSummary(id: rideId, title: "", startedAt: .now,
+                                        distanceMeters: 52_000, durationSeconds: 7_265)
+        state.stats = RideStats(averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, averageCadenceRPM: 88)
+        state.title = "Morning Ride"
+        return NavigationStack {
+            RideSummaryList(store: Store(initialState: state) { RideSummaryFeature() },
+                            mapRow: Color.cyBgTertiary)
+        }
+    }
+}
+
+#Preview("Ride Summary") {
+    previewList()
+}
+
+/// The ride flagged a sagging speed sensor and a flapping radar (#391).
+#Preview("Ride Summary — unreliable sensors") {
+    let rideId = UUID()
+    let combo = UUID()
+    let radar = UUID()
+    return previewList(pairedSensors: [
+        PairedSensor(peripheralID: combo, role: .speed, displayName: "Wahoo RPM"),
+        PairedSensor(peripheralID: combo, role: .cadence, displayName: "Wahoo RPM"),
+        PairedSensor(peripheralID: radar, role: .radar, displayName: "Varia RTL515")
+    ], sensorHealth: [
+        combo: SensorHealthReport(rideId: rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43),
+        radar: SensorHealthReport(rideId: rideId, minBatteryPercent: 70, maxLinkLossesPerWindow: 12)
+    ], rideId: rideId)
 }

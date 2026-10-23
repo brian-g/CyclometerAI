@@ -526,3 +526,56 @@ struct RideZoneSecondsTests {
         }
     }
 }
+
+@Suite("RideSummaryFeature — flagged sensors (#391)")
+struct RideSummaryFlaggedSensorsTests {
+    @Test("Lists this ride's flagged devices once each, in pairing order; skips healthy and other rides'")
+    func flaggedSensors() {
+        let rideId = UUID(0)
+        let combo = UUID(1)
+        let state = withDependencies {
+            $0.defaultFileStorage = .inMemory
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock {
+                $0.pairedSensors = [
+                    PairedSensor(peripheralID: UUID(2), role: .radar, displayName: "Varia RTL515"),
+                    PairedSensor(peripheralID: combo, role: .speed, displayName: "Wahoo RPM"),
+                    PairedSensor(peripheralID: combo, role: .cadence, displayName: "Wahoo RPM"),
+                    PairedSensor(peripheralID: UUID(3), role: .heartRate, displayName: "Wahoo TICKR"),
+                ]
+                $0.sensorHealth = [
+                    UUID(2): SensorHealthReport(rideId: rideId, minBatteryPercent: 70, maxLinkLossesPerWindow: 12),
+                    combo: SensorHealthReport(rideId: rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43),
+                    // Healthy this ride.
+                    UUID(3): SensorHealthReport(rideId: rideId, minBatteryPercent: 80, maxLinkLossesPerWindow: 0),
+                    // Flagged, but no longer paired.
+                    UUID(5): SensorHealthReport(rideId: rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 0),
+                ]
+            }
+            return RideSummaryFeature.State(rideId: rideId)
+        }
+
+        #expect(state.flaggedSensors == [
+            .init(id: UUID(2), roles: [.radar], name: "Varia RTL515", warning: .linkUnreliable),
+            .init(id: combo, roles: [.speed, .cadence], name: "Wahoo RPM", warning: .batteryLow),
+        ])
+    }
+
+    @Test("A warning left by an earlier ride is the Start sheet's, not this summary's")
+    func earlierRideIgnored() {
+        let state = withDependencies {
+            $0.defaultFileStorage = .inMemory
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock {
+                $0.pairedSensors = [PairedSensor(peripheralID: UUID(1), role: .speed, displayName: "Wahoo SPEED")]
+                $0.sensorHealth = [
+                    UUID(1): SensorHealthReport(rideId: UUID(7), minBatteryPercent: 0, maxLinkLossesPerWindow: 0),
+                ]
+            }
+            return RideSummaryFeature.State(rideId: UUID(8))
+        }
+        #expect(state.flaggedSensors.isEmpty)
+    }
+}

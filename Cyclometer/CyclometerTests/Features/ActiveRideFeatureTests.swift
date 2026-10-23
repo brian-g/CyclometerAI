@@ -906,6 +906,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.resumeTapped) {
             $0.recordingState = .active
             $0.cadence.isRecording = true
+            $0.sensorHealth.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1387,6 +1388,8 @@ struct ActiveRideFeatureStateMachineTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.date = DateGenerator { clock.value }
+            // Each reading arms cadence's stale-data watchdog (#456); never advanced here.
+            $0.continuousClock = TestClock()
             $0.bleCSCClient = .testValue
         }
         store.exhaustivity = .off
@@ -1508,6 +1511,52 @@ struct ActiveRideFeatureStateMachineTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    /// The other half of the test above: `.task` leaves the recorder off for a ride that comes
+    /// back paused, so the auto-resume is what has to turn it on. It didn't, and every tick
+    /// after it was dropped by the recorder's own `isRecording` guard (#392).
+    @Test("A resumed auto-paused ride records track points once motion resumes it")
+    func resumedAutoPausedRideRecordsAfterAutoResume() async {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .paused,
+            durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 0, maxSpeedMPS: 5,
+            isAutoPaused: true, zeroSpeedSeconds: ActiveRideFeature.autoPauseZeroSpeedSeconds
+        )
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(resuming: summary)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .testValue
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: Coordinate(latitude: 37.0, longitude: -122.0), altitude: 10,
+            speed: ActiveRideFeature.movingSpeedMPS, horizontalAccuracy: 5,
+            heading: 90, timestamp: testDate
+        )))
+        await store.receive(\.speed.gpsSpeedReceived)
+        #expect(store.state.recordingState == .active)
+        await store.receive(\.trackRecorder.resumeRecording)
+        #expect(store.state.trackRecorder.isRecording)
+
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.count == 1)
+        // A segment past the one the ride was killed in, so the track doesn't join across the pause (#263).
+        #expect(recorded.first?.segmentIndex == summary.trackSegmentIndex + 1)
+    }
+
     @Test("pauseTapped only transitions from active")
     func pauseOnlyFromActive() async {
         let store = makeStore(recordingState: .active)
@@ -1566,6 +1615,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.resumeTapped) {
             $0.recordingState = .active
             $0.cadence.isRecording = true
+            $0.sensorHealth.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1598,6 +1648,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.resumeTapped) {
             $0.recordingState = .active
             $0.cadence.isRecording = true
+            $0.sensorHealth.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
@@ -1776,8 +1827,9 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(.autoEndTriggered) {
             $0.recordingState = .paused
         }
-        // .autoEndTriggered's own effect (.finishTapped) is merged ahead of the
-        // suspension notice that `onChange` appends for the same state change.
+        // .autoEndTriggered's own effects (the pause, then .finishTapped) are merged ahead of
+        // the suspension notice that `onChange` appends for the same state change.
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(.finishTapped) {
             $0.finishAlert = AlertState {
                 TextState("Finish Ride")
@@ -1925,7 +1977,8 @@ struct ActiveRideFeatureAutoPauseTests {
     /// and why `state` is an autoclosure.
     private func makeStore(
         state: @autoclosure () -> ActiveRideFeature.State,
-        isAutoPauseEnabled: Bool = true
+        isAutoPauseEnabled: Bool = true,
+        clock: TestClock<Duration> = TestClock()
     ) -> TestStoreOf<ActiveRideFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -1936,7 +1989,7 @@ struct ActiveRideFeatureAutoPauseTests {
             return TestStore(initialState: state()) {
                 ActiveRideFeature()
             } withDependencies: {
-                $0.continuousClock = TestClock()
+                $0.continuousClock = clock
                 $0.date = .constant(testDate)
                 $0.hapticsClient = .testValue
                 $0.variaRadarClient = .testValue
@@ -1962,9 +2015,48 @@ struct ActiveRideFeatureAutoPauseTests {
             $0.recordingState = .paused
             $0.isAutoPaused = true
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
+    }
+
+    @Test("A flapping wheel sensor's last zero hands over to GPS before auto-pause (#390)")
+    func flappingSensorZeroDoesNotAutoPauseAMovingRide() async {
+        let clock = TestClock()
+        var state = ActiveRideFeature.State(recordingState: .active)
+        state.speed = SpeedFeature.State(
+            speedMPS: 0,
+            activeSpeedSource: .bleWheel,
+            connectionState: .active,
+            latestGPSSpeedMPS: 0,
+            pairedSensorName: "Wahoo SPEED"
+        )
+        let store = makeStore(state: state, clock: clock)
+        store.exhaustivity = .off
+
+        // Ride 2026-10-07, one entry a second from 19:02:49. The stopped rider's sensor
+        // reads 0 until they pull away at :52; then its link drops every 1–5 s with no
+        // readings, and GPS climbs to 6.9 m/s while the 0 is still on screen.
+        typealias Second = (ble: Double?, link: BLECSCClient.ConnectionState?, gps: Double)
+        let seconds: [Second] = [
+            (0, nil, 0), (0, nil, 0), (0, nil, 0), (0, nil, 0.4),
+            (nil, .reconnecting, 1.5), (nil, .active, 2.8), (nil, nil, 4.0),
+            (nil, .reconnecting, 5.1), (nil, .active, 6.0), (nil, .reconnecting, 6.9),
+            (nil, nil, 6.9), (nil, .active, 6.9), (nil, .reconnecting, 6.9), (nil, nil, 6.9),
+        ]
+        for second in seconds {
+            if let ble = second.ble { await store.send(.speed(.bleSpeedReceived(ble))) }
+            if let link = second.link { await store.send(.speed(.bleConnectionChanged(link))) }
+            await store.send(.speed(.gpsSpeedReceived(second.gps)))
+            await store.send(.elapsedTick)
+            // `autoPauseTriggered` sets both; on the connection-driven timer, the 10th tick did.
+            #expect(!store.state.isAutoPaused)
+            #expect(store.state.recordingState == .active)
+            await clock.advance(by: .seconds(1))
+        }
+        #expect(store.state.speed.activeSpeedSource == .gps)
+        #expect(store.state.speed.speedMPS == 6.9)
     }
 
     @Test("Auto-pause checkpoints isAutoPaused and zeroSpeedSeconds immediately (#175)")
@@ -2008,6 +2100,7 @@ struct ActiveRideFeatureAutoPauseTests {
             $0.recordingState = .paused
             $0.isAutoPaused = true
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -2065,6 +2158,7 @@ struct ActiveRideFeatureAutoPauseTests {
             $0.recordingState = .paused
             $0.isAutoPaused = true
         }
+        await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = true
         }
@@ -2086,6 +2180,38 @@ struct ActiveRideFeatureAutoPauseTests {
         #expect(store.state.recordingState == .active)
         #expect(store.state.isAutoPaused == false)
         #expect(store.state.zeroSpeedSeconds == 0)
+    }
+
+    /// The auto-pause checkpointed `isAutoPaused: true`; without a checkpoint here a kill in the
+    /// next 30 s would bring a ride the rider is riding back paused.
+    @Test("An auto-resume checkpoints the ride like a manual resume")
+    func autoResumeCheckpoints() async {
+        let updatedSummary = LockIsolated<RideSummaryUpdate?>(nil)
+        let rideId = UUID()
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                rideId: rideId, recordingState: .paused, isAutoPaused: true
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .mock(onUpdateRideSummary: { updatedSummary.setValue($0) })
+        }
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
+        await store.receive(\.trackRecorder.resumeRecording)
+
+        #expect(updatedSummary.value?.rideId == rideId)
+        #expect(updatedSummary.value?.recordingState == .active)
+        #expect(updatedSummary.value?.isAutoPaused == false)
+        #expect(updatedSummary.value?.trackSegmentIndex == 1)
     }
 
     @Test("Motion does not resume a ride the rider paused manually")
@@ -3304,7 +3430,8 @@ struct ActiveRideFeatureSharedPeripheralTests {
             $0.maxSpeedMPS = 5.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.sourceSwitchBanner =
-                SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
+                SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED", isTerminal: true)
+            $0.speed.lastFallbackBannerAt = testDate
         }
         await store.send(.cadence(.bleConnectionChanged(.disconnected))) {
             $0.cadence.connectionState = .disconnected
@@ -3316,10 +3443,11 @@ struct ActiveRideFeatureSharedPeripheralTests {
             $0.speed.sourceSwitchBanner = nil
         }
 
-        // Cadence cleared on the spot and had no timer to fire: the 10 s grace window
-        // guards a *reconnect*, and there is no fallback source to switch to
-        // (BLE.md §6.2). Nothing arrives here — an unasserted receive fails the test.
-        await clock.advance(by: CadenceFeature.reconnectGraceDelay)
+        // Cadence cleared on the spot and had no timer to fire: there is no fallback source
+        // to switch to (BLE.md §6.2), and no reading armed a stale-data watchdog (disarming
+        // is `CadenceFeatureTests.terminalDisconnectClearsImmediately`). Nothing arrives
+        // here — an unasserted receive fails the test.
+        await clock.advance(by: CadenceFeature.staleDataWindow)
     }
 
     @Test("One banner, not two, across a shared disconnect")
@@ -3334,7 +3462,8 @@ struct ActiveRideFeatureSharedPeripheralTests {
             $0.maxSpeedMPS = 5.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.sourceSwitchBanner =
-                SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
+                SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED", isTerminal: true)
+            $0.speed.lastFallbackBannerAt = testDate
         }
         await store.send(.cadence(.bleConnectionChanged(.disconnected))) {
             $0.cadence.connectionState = .disconnected

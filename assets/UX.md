@@ -348,6 +348,7 @@ the screen differs only in its title, the **Next** button, and the helper text, 
   - Status (Connected, Searching)
   - Icon and tint per sensor type, shared with S11 (`SensorRowStyle`)
   - When Connected, the battery level if supported
+  - A warning under the row when the sensor's last ride flagged it (#391): "LOW BATTERY ON LAST RIDE", or "UNRELIABLE CONNECTION ON LAST RIDE — CHECK BATTERY OR MOUNT". Shown full width under the row in `cyRatingBad`, whatever the status. It comes from the last ride and not from this sheet, because a sagging cell reads high at rest. See BLE.md §14.5
 
 **One row per paired role, whatever its connection state.** The list is built from the durable records, not
 from live client status: a rider setting up a ride needs to see that the strap they paired is the one about
@@ -945,6 +946,7 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 - Ride stats: total distance, total time, avg speed, average cadence (only if a cadence sensor reported), vehicle pass count (only with radar paired), route
 - Elevation profile
 - HR zone breakdown (pie chart), derived from the saved track against the rider's current zones (S12), like S15's HR chart; "No heart rate recorded" when there is none
+- **Sensors** (#391), only when the ride flagged one. Each flagged device appears once (a combo CSC sensor lists both its roles), with "LOW BATTERY" or "UNRELIABLE CONNECTION — CHECK BATTERY OR MOUNT" under it. There is no mid-ride alert, because it would compete with radar alerts. See BLE.md §14.5
 - **Sync button** — Phase 2; taps present the Service Sync sheet (see below)
 - **Finish Ride** — a floating button that closes the sheet to the tabs, where the ride is in S14
 

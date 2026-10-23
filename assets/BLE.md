@@ -591,10 +591,17 @@ After `maxAttempts` the sensor is considered lost and transitions to `disconnect
 |---|---|---|
 | Radar | Sidebar shows "Radar offline" grayed state; L1 advisory haptic fires once | Auto-reconnect (backoff) |
 | HR | Source switches to Apple Watch (if available); source badge updates; banner shown | Auto-reconnect (backoff) |
-| Speed | Source switches to GPS-derived speed; source badge updates; banner shown | Auto-reconnect (backoff) |
+| Speed | Source switches to GPS-derived speed when readings stop (see below); source badge updates; banner shown, rate-limited | Auto-reconnect (backoff); the first reading switches back |
 | Cadence | Cadence widget shows "--"; no fallback source available | Auto-reconnect (backoff) |
 
+**Speed fallback is driven by data, not connection state (#390).** Every speed reading restarts a 5 s watchdog (`SpeedFeature.staleDataWindow`); when it expires, the display switches to GPS. `.reconnecting` and `.active` don't drive it. A link flapping every few seconds used to restart and cancel a connection timer on each event, which held the last reading for up to 58 s. A terminal `.disconnected` still switches at once.
+
+- **Why 5 s.** Sensors notify at ~1 Hz, and `CSCCalculator` stays silent for at most 3 frames on an unbroken link. Two duplicates come before the 0 at a stop. The first moving frame after a stop re-primes it and resets the duplicate count, so one wheel turn at a stop (creeping at a light) is a re-prime plus two duplicates before the next 0: 4 s between readings. Each link drop resets the calculator, so a drop at a stop, or a reconnect over ~2 s while moving, falls back even on a healthy sensor.
+- **Banner.** "Switched to GPS for speed — <sensor> not responding" for the watchdog, "… disconnected" for a terminal disconnect. A flapping sensor falls back every cycle, so the banner shows at most once per 5 min (`fallbackBannerCooldown`). A terminal disconnect is always announced.
+
 **Shared peripheral disconnection:** If one peripheral serves both Speed and Cadence roles, disconnection triggers both consequences simultaneously — GPS speed fallback activates and cadence shows "--" — in a single banner: "Speed sensor disconnected — using GPS speed; cadence unavailable."
+
+**Cadence clears on stale data, not connection state (#456).** Every cadence reading restarts a 5 s watchdog (`CadenceFeature.staleDataWindow`); when it expires, cadence shows "--". `.reconnecting` and `.active` don't drive it. A link flapping every few seconds used to restart and cancel a 10 s grace timer on each event, which held the last reading on screen and in the track. A terminal `.disconnected` still clears at once. Why 5 s: sensors notify at ~1 Hz, and `CSCCalculator` is silent for at most 3 frames on an unbroken link. The first stroke after a stop re-primes it and resets the duplicate count, so one crank turn mid-coast is a re-prime plus two duplicates before the next 0: 4 s between readings.
 
 ---
 
@@ -897,7 +904,9 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | Log gate does not halve a jittering 1 Hz stream | Samples drifting either side of a 1s spacing all admit — the reason for bucketing over an interval gate |
 | Log gate survives a backwards clock | A jump backwards admits rather than stalling the gate shut |
 | Speed disconnection during ride | GPS fallback activates; source badge updates; banner shown |
+| Speed readings stop on a live link | GPS fallback after `staleDataWindow`; a flapping link doesn't delay it; one wheel turn at a stop (0, nil, nil, nil, 0) doesn't fall back; one banner per cooldown |
 | Cadence disconnection during ride | Cadence shows "--"; no fallback; banner shown |
+| Cadence readings stop on a live link | Cadence shows "--" after `staleDataWindow`; a flapping link doesn't delay it; coasting (nil, nil, 0), or one crank turn mid-coast (0, nil, nil, nil, 0), doesn't clear |
 | Shared peripheral disconnection | Both speed fallback and cadence "--" fire; single combined banner |
 | CSC capabilities: wheel-only sensor | Auto-assigned Speed role; no role sheet shown |
 | CSC capabilities: crank-only sensor | Auto-assigned Cadence role; no role sheet shown |
@@ -1134,7 +1143,31 @@ until the next reconnect. `nil` means unknown — disconnected, or a sensor with
 `BLECSCClient.DiscoveredSensor` also carries `batteryPercent` for the per-device rows on S11.
 
 Rendered by `SensorBatteryLabel` (UX.md §S05.1 "the battery level if supported"), which picks the
-SF Symbol by level and tints at or below 20% with `cyRatingBad`.
+SF Symbol by level and tints at or below `SensorHealthReport.lowBatteryPercent` (20%) with `cyRatingBad`.
+
+### 14.5 Sensor health (#391)
+
+At ride end, each paired device gets a verdict on the ride, built from data the clients already
+receive. The code is `Models/SensorHealth.swift` (`SensorHealthReport`, `SensorHealthLog`), recorded by
+`SensorHealthFeature`.
+
+- **Battery:** the *lowest* level reported over the ride, ignoring the `nil` sent on every
+  disconnect. A sagging coin cell reads high between transmissions and collapses under radio load,
+  so the latest reading says nothing. It is low at or below 20%.
+- **Link:** supervision-timeout disconnects (`CBError.connectionTimeout`, code 6) from a paired
+  peripheral, from `BLEClient.linkTimeouts()`, counted only while the ride is recording. During a
+  pause the phone may sit at the edge of range, where a healthy sensor times out too. The link is
+  unreliable at 5 or more inside any 5-minute window, i.e. one a minute sustained.
+- **Calibration:** on 2026-10-07 a Wahoo SPEED read 87 → 10 → 95 → 0 in its first two minutes and
+  dropped 180 times in 21 minutes, about 43 per window. The cadence sensor beside it dropped none.
+- A low battery outranks an unreliable link, because it is the more specific cause. An unreliable
+  link alone names no cause.
+- The verdict is per peripheral, saved in `AppPreferences.sensorHealth` and keyed by peripheral,
+  not by role, so a role change on S11 leaves it alone.
+- A device that reaches `.active` (HR: notifying) or reports a battery level gets a fresh verdict,
+  so a sensor without `0x180F` is cleared by a clean ride. One that never shows up keeps its
+  previous verdict, so a dead cell that never connects is not cleared.
+- It is surfaced on S05.1 (the next ride's Start sheet) and S10 (UX.md).
 
 ---
 

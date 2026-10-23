@@ -420,7 +420,7 @@ Wrist haptics are significantly more noticeable than pocket haptics. The same pa
 **Switching Behavior:**
 - Source switching must happen automatically when a higher-priority source connects or disconnects
 - The active source badge on each metric tile updates immediately on switch
-- A brief non-intrusive banner ("Switched to GPS speed — BLE sensor disconnected") displays on source switch during an active ride
+- A brief non-intrusive banner displays on source switch during an active ride: "Switched to GPS for speed — <sensor> not responding" when readings stop, or "Switched to GPS for speed — <sensor> disconnected" when the sensor disconnects. A flapping sensor is announced at most once per 5 minutes; a disconnect always is (BLE.md §6.2, #390)
 - The rider is never left staring at a stale value; all metrics display "—" when no source is active
 
 **Cadence Notes:**

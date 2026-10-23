@@ -60,7 +60,8 @@ struct SpeedFeatureTests {
         ble.connectionState = { _ in connStream }
         ble.sensorName = { _ in nameStream }
 
-        let store = makeStore(bleCSCClient: ble)
+        let clock = TestClock()
+        let store = makeStore(clock: clock, bleCSCClient: ble)
         await store.send(.startListening)
 
         connContinuation.yield(.scanning)
@@ -83,6 +84,18 @@ struct SpeedFeatureTests {
         speedContinuation.finish()
         connContinuation.finish()
         nameContinuation.finish()
+        // The reading armed the stale-data watchdog, and nothing follows it.
+        await clock.advance(by: SpeedFeature.staleDataWindow)
+        await store.receive(\.bleFallbackTimedOut) {
+            $0.speedMPS = nil
+            $0.activeSpeedSource = .none
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.lastFallbackBannerAt = Self.testDate
+        }
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
         await store.finish()
     }
 
@@ -190,52 +203,130 @@ struct SpeedFeatureTests {
 
     // MARK: - BLE priority / fallback / promotion
 
-    @Test("BLE speed cancels a pending fallback timer")
-    func bleSpeedCancelsPendingFallback() async {
-        let clock = TestClock()
-        let store = makeStore(clock: clock)
-
-        await store.send(.bleSpeedReceived(6.0)) {
-            $0.speedMPS = 6.0
-            $0.activeSpeedSource = .bleWheel
-            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.0)]
-        }
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
-        }
-        // Data resumes before the 5s fallback fires — cancels the timer.
-        await store.send(.bleSpeedReceived(6.2)) {
-            $0.speedMPS = 6.2
-            $0.speedSamples = [
-                SpeedSample(time: Self.testDate, mps: 6.0),
-                SpeedSample(time: Self.testDate, mps: 6.2),
-            ]
-        }
-        // No .bleFallbackTimedOut should fire — an unasserted receive fails the test.
-        await clock.advance(by: .seconds(60))
+    /// Mid-ride on the wheel sensor: a live link, with a GPS shadow value behind it.
+    private static var onSensor: SpeedFeature.State {
+        SpeedFeature.State(
+            speedMPS: 6.0,
+            activeSpeedSource: .bleWheel,
+            connectionState: .active,
+            latestGPSSpeedMPS: 5.5,
+            pairedSensorName: "Wahoo RPM"
+        )
     }
 
-    @Test("Fallback after 5s promotes the GPS shadow value and shows/dismisses the banner naming the sensor")
-    func fallbackAfter5sWithGPSShadowValue() async {
+    @Test("Readings stopping while the link stays .active fall back to GPS, with the banner (#390)")
+    func silentSensorOnALiveLinkFallsBack() async {
         let clock = TestClock()
-        let store = makeStore(
-            initialState: SpeedFeature.State(
-                speedMPS: 6.0,
-                activeSpeedSource: .bleWheel,
-                latestGPSSpeedMPS: 5.5,
-                pairedSensorName: "Wahoo RPM"
-            ),
-            clock: clock
-        )
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
 
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
+        await store.send(.bleSpeedReceived(6.1)) {
+            $0.speedMPS = 6.1
+            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.1)]
         }
-        await clock.advance(by: SpeedFeature.fallbackDelay)
+        // The link never leaves `.active`: the data's absence is the only signal.
+        await clock.advance(by: SpeedFeature.staleDataWindow)
         await store.receive(\.bleFallbackTimedOut) {
             $0.speedMPS = 5.5
             $0.activeSpeedSource = .gps
             $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.lastFallbackBannerAt = Self.testDate
+        }
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
+    }
+
+    @Test("Each reading restarts the stale-data window")
+    func eachReadingRestartsTheWindow() async {
+        let clock = TestClock()
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
+
+        // 9 s of readings 3 s apart: a window counted from the first would fire mid-loop,
+        // and its unasserted action would fail the next send.
+        var samples: [SpeedSample] = []
+        for mps in [6.1, 6.2, 6.3] {
+            samples.append(SpeedSample(time: Self.testDate, mps: mps))
+            await store.send(.bleSpeedReceived(mps)) {
+                $0.speedMPS = mps
+                $0.speedSamples = samples
+            }
+            await clock.advance(by: .seconds(3))
+        }
+        await clock.advance(by: SpeedFeature.staleDataWindow - .seconds(3))
+        await store.receive(\.bleFallbackTimedOut) {
+            $0.speedMPS = 5.5
+            $0.activeSpeedSource = .gps
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.lastFallbackBannerAt = Self.testDate
+        }
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
+    }
+
+    @Test("A flapping link neither restarts nor cancels the window (#390)")
+    func flappingLinkDoesNotDriveTheFallback() async {
+        let clock = TestClock()
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
+
+        await store.send(.bleSpeedReceived(6.1)) {
+            $0.speedMPS = 6.1
+            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.1)]
+        }
+        // A drop and a recovery every second, with no data: the old connection-driven
+        // timer restarted on each `.reconnecting` and died on each `.active`.
+        for connection: BLECSCClient.ConnectionState in [.reconnecting, .active, .reconnecting] {
+            await clock.advance(by: .seconds(1))
+            await store.send(.bleConnectionChanged(connection)) {
+                $0.connectionState = connection
+            }
+        }
+        await clock.advance(by: SpeedFeature.staleDataWindow - .seconds(3))
+        await store.receive(\.bleFallbackTimedOut) {
+            $0.speedMPS = 5.5
+            $0.activeSpeedSource = .gps
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.lastFallbackBannerAt = Self.testDate
+        }
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
+    }
+
+    @Test("A stop on a healthy sensor stays on the sensor (#390)")
+    func healthySensorStopDoesNotFallBack() async {
+        let clock = TestClock()
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
+
+        // What `CSCCalculator` emits at 1 Hz through a stop: a reading, two silent
+        // duplicates, 0 on the third, zeros while stopped. One wheel turn (creeping at the
+        // light) re-primes it (silent) and resets the duplicate count, so two more silent
+        // duplicates come before the next 0: a 4 s gap, the longest. Then a silent re-prime
+        // as the wheel turns again, then readings. A window that short fires during the
+        // 4 s gap and fails the next send.
+        let emitted: [Double?] = [2.0, nil, nil, 0, 0, nil, nil, nil, 0, 0, nil, 1.5, 3.0]
+        var samples: [SpeedSample] = []
+        for mps in emitted {
+            if let mps {
+                samples.append(SpeedSample(time: Self.testDate, mps: mps))
+                await store.send(.bleSpeedReceived(mps)) {
+                    $0.speedMPS = mps
+                    $0.speedSamples = samples
+                }
+            }
+            await clock.advance(by: .seconds(1))
+        }
+
+        // Still guarded afterwards: the sensor actually going quiet falls back as usual.
+        await clock.advance(by: SpeedFeature.staleDataWindow - .seconds(1))
+        await store.receive(\.bleFallbackTimedOut) {
+            $0.speedMPS = 5.5
+            $0.activeSpeedSource = .gps
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.lastFallbackBannerAt = Self.testDate
         }
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
         await store.receive(\.bannerDismissed) {
@@ -254,42 +345,20 @@ struct SpeedFeatureTests {
             clock: clock
         )
 
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
+        await store.send(.bleSpeedReceived(6.0)) {
+            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.0)]
         }
-        await clock.advance(by: SpeedFeature.fallbackDelay)
+        await clock.advance(by: SpeedFeature.staleDataWindow)
         await store.receive(\.bleFallbackTimedOut) {
             $0.speedMPS = nil
             $0.activeSpeedSource = .none
             $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil)
+            $0.lastFallbackBannerAt = Self.testDate
         }
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
         await store.receive(\.bannerDismissed) {
             $0.sourceSwitchBanner = nil
         }
-    }
-
-    @Test("Recovery within 5s cancels the timer — no fallback, no banner")
-    func recoveryWithinFallbackWindow() async {
-        let clock = TestClock()
-        let store = makeStore(
-            initialState: SpeedFeature.State(
-                speedMPS: 6.0,
-                activeSpeedSource: .bleWheel,
-                latestGPSSpeedMPS: 5.5
-            ),
-            clock: clock
-        )
-
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
-        }
-        await clock.advance(by: .seconds(4))
-        await store.send(.bleConnectionChanged(.active)) {
-            $0.connectionState = .active
-        }
-        await clock.advance(by: .seconds(60))
-        // No .bleFallbackTimedOut fires — an unasserted receive fails the test.
     }
 
     @Test(".reconnecting while GPS (not BLE) is active does not arm the fallback timer")
@@ -319,94 +388,97 @@ struct SpeedFeatureTests {
         }
     }
 
-    @Test("BLE → GPS → BLE: the source returns to the sensor when data resumes")
+    @Test("BLE → GPS → BLE: the first reading after a fallback puts the sensor back on screen")
     func bleToGPSToBLERoundTrip() async {
         let clock = TestClock()
-        let store = makeStore(
-            initialState: SpeedFeature.State(
-                speedMPS: 6.0,
-                activeSpeedSource: .bleWheel,
-                latestGPSSpeedMPS: 5.0,
-                pairedSensorName: "Wahoo SPEED"
-            ),
-            clock: clock
-        )
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
 
-        // Outbound leg: the sensor drops and the shadow value is promoted.
-        await store.send(.bleConnectionChanged(.disconnected)) {
-            $0.connectionState = .disconnected
-            $0.speedMPS = 5.0
+        // Outbound leg: the sensor goes quiet and the shadow value is promoted.
+        await store.send(.bleSpeedReceived(6.1)) {
+            $0.speedMPS = 6.1
+            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.1)]
+        }
+        await clock.advance(by: SpeedFeature.staleDataWindow)
+        await store.receive(\.bleFallbackTimedOut) {
+            $0.speedMPS = 5.5
             $0.activeSpeedSource = .gps
-            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo SPEED")
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.lastFallbackBannerAt = Self.testDate
         }
 
         // Return leg: data arriving *is* the promotion — there is no separate action
         // for it, so nothing else in the suite would catch this regressing. The
         // displayed value must be the sensor's, not the GPS shadow it replaces.
+        await clock.advance(by: .seconds(1))
         await store.send(.bleSpeedReceived(6.4)) {
             $0.speedMPS = 6.4
             $0.activeSpeedSource = .bleWheel
-            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.4)]
+            $0.speedSamples = [
+                SpeedSample(time: Self.testDate, mps: 6.1),
+                SpeedSample(time: Self.testDate, mps: 6.4),
+            ]
         }
 
-        // Recovery does not retract the notice: the rider was told the source moved,
-        // so the banner still runs its full dismissal delay.
-        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        // Recovery does not retract the notice: the rider was told the source moved, so
+        // the banner still runs its full dismissal delay. And the promoted sensor is
+        // guarded again: the reading re-armed the watchdog.
+        await clock.advance(by: SpeedFeature.staleDataWindow)
         await store.receive(\.bannerDismissed) {
             $0.sourceSwitchBanner = nil
         }
+        await store.receive(\.bleFallbackTimedOut) {
+            $0.speedMPS = 5.5
+            $0.activeSpeedSource = .gps
+        }
     }
 
-    @Test("A completed fallback cycle leaves no stale timer — the next drop arms a fresh one")
-    func fallbackTimerRearmsAfterACompletedCycle() async {
+    @Test("A flapping sensor switches source every cycle but shows the banner once per cooldown (#390)")
+    func flappingSensorBannerCooldown() async {
         let clock = TestClock()
-        let store = makeStore(
-            initialState: SpeedFeature.State(
-                speedMPS: 6.0,
-                activeSpeedSource: .bleWheel,
-                latestGPSSpeedMPS: 5.0
-            ),
-            clock: clock
-        )
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
+        var samples: [SpeedSample] = []
 
-        // First cycle: drop, fall back, dismiss.
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
+        func readingThenSilence(_ mps: Double, at time: Date) async {
+            samples.append(SpeedSample(time: time, mps: mps))
+            await store.send(.bleSpeedReceived(mps)) {
+                $0.speedMPS = mps
+                $0.activeSpeedSource = .bleWheel
+                $0.speedSamples = samples
+            }
+            await clock.advance(by: SpeedFeature.staleDataWindow)
         }
-        await clock.advance(by: SpeedFeature.fallbackDelay)
+
+        // First drop: the rider is told.
+        await readingThenSilence(6.1, at: Self.testDate)
         await store.receive(\.bleFallbackTimedOut) {
-            $0.speedMPS = 5.0
+            $0.speedMPS = 5.5
             $0.activeSpeedSource = .gps
-            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil)
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.lastFallbackBannerAt = Self.testDate
         }
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
         await store.receive(\.bannerDismissed) {
             $0.sourceSwitchBanner = nil
         }
 
-        // The sensor comes back: the link is restored first, then data reclaims the
-        // display. Going straight from `.reconnecting` to data would skip the
-        // optimistic cancel on `.active` that a real reconnection always passes
-        // through.
-        await store.send(.bleConnectionChanged(.active)) {
-            $0.connectionState = .active
-        }
-        await store.send(.bleSpeedReceived(6.2)) {
-            $0.speedMPS = 6.2
-            $0.activeSpeedSource = .bleWheel
-            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.2)]
+        // Further drops inside the cooldown: the source still switches, the banner stays away.
+        for mps in [6.2, 6.3] {
+            await readingThenSilence(mps, at: Self.testDate)
+            await store.receive(\.bleFallbackTimedOut) {
+                $0.speedMPS = 5.5
+                $0.activeSpeedSource = .gps
+            }
         }
 
-        // Second cycle: the fallback must arm again. A dropout mid-ride is routine —
-        // one sensor glitch must not leave the rider permanently unprotected.
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
-        }
-        await clock.advance(by: SpeedFeature.fallbackDelay)
+        // Once the cooldown has passed, the next drop is announced again.
+        let later = Self.testDate.addingTimeInterval(SpeedFeature.fallbackBannerCooldown)
+        store.dependencies.date = .constant(later)
+        await readingThenSilence(6.4, at: later)
         await store.receive(\.bleFallbackTimedOut) {
-            $0.speedMPS = 5.0
+            $0.speedMPS = 5.5
             $0.activeSpeedSource = .gps
-            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil)
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.lastFallbackBannerAt = later
         }
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
         await store.receive(\.bannerDismissed) {
@@ -414,7 +486,7 @@ struct SpeedFeatureTests {
         }
     }
 
-    @Test("Terminal disconnect while still BLE-sourced falls back immediately")
+    @Test("Terminal disconnect while still BLE-sourced falls back immediately and disarms the watchdog")
     func terminalDisconnectFallsBackImmediately() async {
         let clock = TestClock()
         let store = makeStore(
@@ -426,11 +498,69 @@ struct SpeedFeatureTests {
             clock: clock
         )
 
+        await store.send(.bleSpeedReceived(6.0)) {
+            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.0)]
+        }
         await store.send(.bleConnectionChanged(.disconnected)) {
             $0.connectionState = .disconnected
             $0.speedMPS = 5.0
             $0.activeSpeedSource = .gps
-            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil)
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: nil, isTerminal: true)
+            $0.lastFallbackBannerAt = Self.testDate
+        }
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
+        // No .bleFallbackTimedOut follows — an unasserted receive fails the test.
+        await clock.advance(by: SpeedFeature.staleDataWindow)
+    }
+
+    @Test("The banner says \"disconnected\" only when the link is gone (#390)")
+    func bannerWordingNamesTheCause() {
+        #expect(SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            == "Switched to GPS for speed — Wahoo RPM not responding")
+        #expect(SpeedFeature.gpsFallbackBannerText(sensorName: nil, isTerminal: true)
+            == "Switched to GPS for speed — Speed sensor disconnected")
+    }
+
+    @Test("A terminal disconnect inside the banner cooldown is still announced")
+    func terminalDisconnectBypassesBannerCooldown() async {
+        let clock = TestClock()
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
+
+        // A flap: the watchdog falls back and the banner starts the cooldown.
+        await store.send(.bleSpeedReceived(6.1)) {
+            $0.speedMPS = 6.1
+            $0.speedSamples = [SpeedSample(time: Self.testDate, mps: 6.1)]
+        }
+        await clock.advance(by: SpeedFeature.staleDataWindow)
+        await store.receive(\.bleFallbackTimedOut) {
+            $0.speedMPS = 5.5
+            $0.activeSpeedSource = .gps
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM")
+            $0.lastFallbackBannerAt = Self.testDate
+        }
+        await clock.advance(by: SpeedFeature.bannerDismissDelay)
+        await store.receive(\.bannerDismissed) {
+            $0.sourceSwitchBanner = nil
+        }
+
+        // The sensor recovers, then dies for good well inside the cooldown. The rider was
+        // last told of a flap; this one changes what they're riding on, so it's announced.
+        await store.send(.bleSpeedReceived(6.2)) {
+            $0.speedMPS = 6.2
+            $0.activeSpeedSource = .bleWheel
+            $0.speedSamples = [
+                SpeedSample(time: Self.testDate, mps: 6.1),
+                SpeedSample(time: Self.testDate, mps: 6.2),
+            ]
+        }
+        await store.send(.bleConnectionChanged(.disconnected)) {
+            $0.connectionState = .disconnected
+            $0.speedMPS = 5.5
+            $0.activeSpeedSource = .gps
+            $0.sourceSwitchBanner = SpeedFeature.gpsFallbackBannerText(sensorName: "Wahoo RPM", isTerminal: true)
         }
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
         await store.receive(\.bannerDismissed) {

@@ -73,6 +73,9 @@ struct StartSheetFeature {
                 // The name at pairing time, so a sensor that is out of range is still
                 // named. No client can answer for one it isn't connected to.
                 row.name = record.displayName
+                // From the last ride, not this sheet: a sagging cell reads high at rest,
+                // so the sheet itself would almost never see it (#391).
+                row.warning = preferences.sensorHealth[record.peripheralID]?.warning
                 return row
             }
         }
@@ -89,7 +92,7 @@ struct StartSheetFeature {
         case startRideButtonTapped
         case rideCreated(rideId: UUID, route: RouteReference?)
         case rideCreationFailed
-        case turnByTurnToggled
+        case turnByTurnChanged(Bool)
         case alert(PresentationAction<Alert>)
         case path(StackActionOf<Path>)
         case delegate(Delegate)
@@ -229,10 +232,10 @@ struct StartSheetFeature {
                 }
                 return .none
 
-            case .turnByTurnToggled:
+            case .turnByTurnChanged(let isOn):
                 // The preference itself, not a copy: the ride reads it from there — a ride resumed
                 // after a kill included.
-                state.$preferences.withLock { $0.isTurnByTurnEnabled.toggle() }
+                state.$preferences.withLock { $0.isTurnByTurnEnabled = isOn }
                 return .none
 
             case let .path(.element(id: id, action: .routePicker(.delegate(.routeSelected(route))))):
@@ -302,6 +305,9 @@ struct SensorRow: Equatable, Identifiable {
     /// Battery percentage (0–100), or nil when the sensor is disconnected or doesn't
     /// expose the Battery Service. Rendered only when non-nil and connected.
     var batteryPercent: Int? = nil
+    /// What the sensor's last ride said about it (#391), filled in from
+    /// `AppPreferences.sensorHealth`. Shown whatever the status: a sensor still searching may be the dead cell.
+    var warning: SensorWarning? = nil
 
     var id: Kind { kind }
 }
