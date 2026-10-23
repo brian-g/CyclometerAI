@@ -56,6 +56,10 @@ final class Ride {
     // out-and-back, is the difference between the way out and the way back. Optional for the
     // same reason as the two above.
     var routeProgressMeters: Double?
+    // Whether the ride had finished its route by the last checkpoint (#406), so a resumed ride stays
+    // finished: its ring full, and no off-route for riding on past the end. The declaration default
+    // is what migration gives rides from before it.
+    var isRouteComplete: Bool = false
     var gpxFileURL: URL?
 
     // MARK: - Weather (OQDM10)
@@ -203,7 +207,8 @@ extension Ride {
             trackSegmentIndex: trackSegmentIndex,
             // `createRide` writes the id and name together, so this is both or neither.
             route: routeId.flatMap { id in routeName.map { RouteReference(id: id, name: $0) } },
-            routeProgressMeters: routeProgressMeters
+            routeProgressMeters: routeProgressMeters,
+            isRouteComplete: isRouteComplete
         )
     }
 }

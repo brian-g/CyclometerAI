@@ -1289,7 +1289,8 @@ struct ActiveRideFeature {
             cadenceCoastingSeconds: state.cadence.coastingSeconds,
             trackSegmentIndex: state.trackSegmentIndex,
             route: state.route,
-            routeProgressMeters: state.navigation.progressMeters
+            routeProgressMeters: state.navigation.progressMeters,
+            isRouteComplete: state.navigation.isRouteComplete
         )
     }
 
@@ -1528,5 +1529,8 @@ extension ActiveRideFeature.State {
         // out-and-back they were on is the one they come back on.
         route = summary.route
         navigation.progressMeters = summary.routeProgressMeters
+        // And whether it had finished (#406): otherwise the ring would read short of full, and
+        // riding on past the end would match nothing and go off route.
+        navigation.isRouteComplete = summary.isRouteComplete
     }
 }

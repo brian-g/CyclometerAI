@@ -36,4 +36,6 @@ struct RideSummaryUpdate: Sendable, Equatable {
     /// How far along its route the ride had got (#197) — where a resumed ride starts looking for
     /// the rider. Nil for a free ride, and before the rider first reached the route.
     var routeProgressMeters: Double? = nil
+    /// Whether the ride had finished its route (#406), so a resumed ride doesn't start it again.
+    var isRouteComplete: Bool = false
 }
