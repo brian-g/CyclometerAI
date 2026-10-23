@@ -3404,8 +3404,9 @@ struct ActiveRideFeatureSharedPeripheralTests {
         }
 
         // Cadence cleared on the spot and had no timer to fire: there is no fallback source
-        // to switch to (BLE.md §6.2), and the disconnect leaves no stale-data watchdog
-        // behind. Nothing arrives here — an unasserted receive fails the test.
+        // to switch to (BLE.md §6.2), and no reading armed a stale-data watchdog (disarming
+        // is `CadenceFeatureTests.terminalDisconnectClearsImmediately`). Nothing arrives
+        // here — an unasserted receive fails the test.
         await clock.advance(by: CadenceFeature.staleDataWindow)
     }
 

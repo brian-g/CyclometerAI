@@ -24,8 +24,10 @@ struct CadenceFeature {
     /// Must outlast `CSCCalculator`'s longest silence on an unbroken link. Sensors notify at
     /// ~1 Hz, and the calculator emits nothing for the first `zeroThreshold − 1` duplicate
     /// frames once the cranks stop (the 3rd emits 0) and nothing for the first pedal stroke
-    /// after. That is at most 3 s between readings; 4 s leaves one notification of slack.
-    static let staleDataWindow: Duration = .seconds(4)
+    /// after. That stroke re-primes it and resets the duplicate count, so a single crank turn
+    /// mid-coast is three silent frames (re-prime, then two duplicates before the next 0).
+    /// That is at most 4 s between readings; 5 s leaves one notification of slack.
+    static let staleDataWindow: Duration = .seconds(5)
     /// Longest gap between two readings that is still credited to a zone (or to
     /// coasting). CSC notifications normally arrive about once a second; a longer
     /// gap means the sensor dropped out, and crediting it would invent ride time.

@@ -260,10 +260,12 @@ struct CadenceFeatureTests {
         let store = makeStore(initialState: Self.onSensor, clock: clock)
 
         // What `CSCCalculator` emits at 1 Hz through a coast: a reading, two silent
-        // duplicates, 0 on the third, zeros while coasting, a silent re-prime on the first
-        // stroke, then readings. The 3 s gap is the longest; a window that short fires
-        // during it and fails the next send.
-        let emitted: [Double?] = [85, nil, nil, 0, 0, 0, nil, 80, 82]
+        // duplicates, 0 on the third, zeros while coasting. One crank turn mid-coast
+        // re-primes it (silent) and resets the duplicate count, so two more silent
+        // duplicates come before the next 0: a 4 s gap, the longest. Then a silent re-prime
+        // on the first stroke, then readings. A window that short fires during the 4 s gap
+        // and fails the next send.
+        let emitted: [Double?] = [85, nil, nil, 0, 0, nil, nil, nil, 0, 0, nil, 80, 82]
         var samples: [CadenceSample] = []
         for rpm in emitted {
             if let rpm {
