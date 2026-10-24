@@ -13,9 +13,6 @@ struct CadenceFeature {
     /// Mirrors `SpeedFeature` — a time window (not a sample count) because BLE CSC
     /// notifications do not arrive at a fixed rate.
     static let historyWindow: TimeInterval = 3600   // last hour
-    /// Maximum points plotted in the watermark; raw samples are downsampled to
-    /// this many buckets so memory and render stay bounded over a full hour.
-    static let watermarkResolution = 60
     /// How long cadence may go without a reading before it clears to "--" (BLE.md §6.2). No
     /// GPS-style fallback exists for cadence, so clearing is all there is. Driven by data, not
     /// connection state: a flapping link restarted the old `.reconnecting` grace timer on
@@ -77,20 +74,6 @@ struct CadenceFeature {
             pedalingSampleCount > 0
                 ? Int((cadenceSum / Double(pedalingSampleCount)).rounded())
                 : 0
-        }
-
-        /// Watermark series (rpm), downsampled to ≤ `watermarkResolution` points
-        /// by averaging contiguous buckets. Identical strategy to `SpeedFeature`.
-        var watermarkSamples: [Double] {
-            let values = cadenceSamples.map(\.rpm)
-            guard values.count > CadenceFeature.watermarkResolution else { return values }
-            let bucket = Double(values.count) / Double(CadenceFeature.watermarkResolution)
-            return (0..<CadenceFeature.watermarkResolution).map { i in
-                let start = Int(Double(i) * bucket)
-                let end = max(start + 1, Int(Double(i + 1) * bucket))
-                let slice = values[start..<min(end, values.count)]
-                return slice.reduce(0, +) / Double(slice.count)
-            }
         }
     }
 

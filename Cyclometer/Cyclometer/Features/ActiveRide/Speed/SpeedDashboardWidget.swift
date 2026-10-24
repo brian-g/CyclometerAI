@@ -14,7 +14,8 @@ struct SpeedDashboardWidget: DashboardWidget {
     var body: some View {
         SpeedWidget(
             speed: store.speed.speedMPS,
-            speedHistory: store.speed.watermarkSamples,
+            speedHistory: store.speedWatermark,
+            watermarkWindow: store.watermarkWindow,
             activeSpeedSource: store.speed.activeSpeedSource,
             distance: store.distanceMeters,
             elapsed: store.elapsedSeconds,

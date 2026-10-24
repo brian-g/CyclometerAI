@@ -33,7 +33,10 @@ struct CadenceDetail: Equatable {
 
 struct CadenceWidget: View {
     let cadence: Int?            // rpm; nil → "—"
-    let cadenceHistory: [Double] // rpm samples for watermark chart
+    let cadenceHistory: [WatermarkPoint] // rpm, for the watermark chart
+    /// The time span the watermark plots over, shared with the other widgets' watermarks
+    /// (`ActiveRideFeature.State.watermarkWindow`). Nil plots the history's own span.
+    var watermarkWindow: ClosedRange<Date>? = nil
     let averageCadence: Int      // rpm; 0 → no pedalling recorded yet
     let maxCadence: Int          // rpm
     /// The rider's S12 cadence zones (#79), drawn as the watermark's bands.
@@ -46,7 +49,7 @@ struct CadenceWidget: View {
     var body: some View {
         ZStack {
             // Drawn with or without readings (#79): the bands are the rider's zones, not data.
-            CadenceHistoryChart(history: cadenceHistory, zones: zones)
+            CadenceHistoryChart(history: cadenceHistory, window: watermarkWindow, zones: zones)
             switch size {
             case .oneByOne, .twoByTwo: oneByOneContent
             case .twoByOne:            twoByOneContent
@@ -151,7 +154,8 @@ struct CadenceWidget: View {
 // MARK: - Cadence History Watermark Chart
 
 private struct CadenceHistoryChart: View {
-    let history: [Double]   // rpm
+    let history: [WatermarkPoint]   // rpm
+    let window: ClosedRange<Date>?
     let zones: CadenceZoneBoundaries
 
     /// Fixed y-domain so the zone bands always map to the same screen positions
@@ -160,13 +164,14 @@ private struct CadenceHistoryChart: View {
     private static let yMax = Double(CadenceZoneBoundaries.ceilingRPM)
 
     var body: some View {
+        let domain = history.plotDomain(window)
         Chart {
             // Coloured zone bands behind the cadence line (#38, #79).
             ForEach(CadenceZone.allCases, id: \.self) { zone in
                 let range = zones.bandRange(for: zone, ceiling: Self.yMax)
                 RectangleMark(
-                    xStart: .value("t0", 0),
-                    xEnd: .value("t1", max(history.count - 1, 1)),
+                    xStart: .value("t0", domain.lowerBound),
+                    xEnd: .value("t1", domain.upperBound),
                     yStart: .value("rpm0", range.lowerBound),
                     yEnd: .value("rpm1", range.upperBound)
                 )
@@ -174,12 +179,14 @@ private struct CadenceHistoryChart: View {
             }
 
             // Cadence trace as a line over the bands. No area fill — it would tint
-            // the lower bands and defeat the at-a-glance read.
-            ForEach(Array(history.enumerated()), id: \.offset) { index, rpm in
-                LineMark(x: .value("t", index), y: .value("rpm", rpm))
+            // the lower bands and defeat the at-a-glance read. One series per run, so a silence
+            // breaks the line rather than being drawn across.
+            ForEach(Array(history.enumerated()), id: \.offset) { _, point in
+                LineMark(x: .value("t", point.time), y: .value("rpm", point.value), series: .value("run", point.run))
                     .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.lineWatermark))
             }
         }
+        .chartXScale(domain: domain)
         .chartYScale(domain: 0...Self.yMax)
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
@@ -221,7 +228,7 @@ private struct CadenceDetailChart: View {
     }
 
     /// At most `maxPlottedPoints`, by averaging contiguous buckets (time and value) — the
-    /// same strategy as `CadenceFeature.watermarkSamples`, keeping a full hour of 1 Hz
+    /// same strategy as `SpeedSample.bucketAveraged`, keeping a full hour of 1 Hz
     /// readings from becoming thousands of marks.
     private static func downsampled(_ points: [Point]) -> [Point] {
         guard points.count > maxPlottedPoints else { return points }
@@ -397,7 +404,13 @@ private struct CadenceDetailSheet: View {
 
 // MARK: - Previews
 
-private let demoHistory: [Double] = stride(from: 60.0, to: 105.0, by: 1.2).map { $0 }
+private let demoWindow = demoCadenceSamples.first!.time...demoCadenceSamples.last!.time
+private let demoHistory = Watermark.points(demoCadenceSamples, over: demoWindow, time: \.time, value: \.rpm)
+/// The sensor asleep through a 10-minute stop: no readings at all, not zeros.
+private let demoGapHistory = Watermark.points(
+    demoCadenceSamples.enumerated().filter { !(60..<120).contains($0.offset) }.map(\.element),
+    over: demoWindow, time: \.time, value: \.rpm
+)
 
 #Preview("2×1 — Active") {
     CadenceWidget(
@@ -430,6 +443,18 @@ private let demoHistory: [Double] = stride(from: 60.0, to: 105.0, by: 1.2).map {
         size: .oneByOne
     )
     .frame(width: 196, height: 96)
+}
+
+#Preview("2×1 — Sensor gap") {
+    CadenceWidget(
+        cadence: 92,
+        cadenceHistory: demoGapHistory,
+        watermarkWindow: demoWindow,
+        averageCadence: 88,
+        maxCadence: 104,
+        size: .twoByOne
+    )
+    .frame(width: 393, height: 96)
 }
 
 #Preview("1×1 — No Signal") {

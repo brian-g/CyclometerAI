@@ -23,8 +23,11 @@ struct HeartRateWidget: View {
     let bpm: Int
     let zone: Int
     let source: HRSource
-    /// bpm for the watermark, oldest first (`State.hrWatermarkSamples`).
-    var history: [Double] = []
+    /// bpm for the watermark, oldest first (`State.hrWatermark`).
+    var history: [WatermarkPoint] = []
+    /// The time span the watermark plots over, shared with the other widgets' watermarks
+    /// (`State.watermarkWindow`). Nil plots the history's own span.
+    var watermarkWindow: ClosedRange<Date>? = nil
     /// Zone 1 first (`State.hrZoneBounds`): the watermark's bands.
     var zoneBounds: [ClosedRange<Int>] = HeartRateMetrics().zoneBounds
     var trend: Trend = .steady
@@ -39,7 +42,7 @@ struct HeartRateWidget: View {
     var body: some View {
         ZStack {
             if !history.isEmpty {
-                HeartRateHistoryChart(history: history, zoneBounds: zoneBounds)
+                HeartRateHistoryChart(history: history, window: watermarkWindow, zoneBounds: zoneBounds)
             }
             VStack(alignment: .leading, spacing: 0) {
                 WidgetLabel("Heart Rate")
@@ -108,18 +111,22 @@ struct HeartRateWidget: View {
 
 /// `CadenceHistoryChart` for heart rate: the trace as a faint line over the rider's zone bands.
 private struct HeartRateHistoryChart: View {
-    let history: [Double]   // bpm
+    let history: [WatermarkPoint]   // bpm
+    let window: ClosedRange<Date>?
     let zoneBounds: [ClosedRange<Int>]
 
     var body: some View {
-        let domain = zoneBounds.chartDomain(including: history)
+        let domain = zoneBounds.chartDomain(including: history.map(\.value))
+        let x = history.plotDomain(window)
         Chart {
-            HeartRateZoneBands(zoneBounds: zoneBounds, domain: domain, x: 0...Double(max(history.count - 1, 1)))
-            ForEach(Array(history.enumerated()), id: \.offset) { index, bpm in
-                LineMark(x: .value("t", Double(index)), y: .value("bpm", bpm))
+            HeartRateZoneBands(zoneBounds: zoneBounds, domain: domain, x: x)
+            // One series per run, so a silence breaks the line rather than being drawn across.
+            ForEach(Array(history.enumerated()), id: \.offset) { _, point in
+                LineMark(x: .value("t", point.time), y: .value("bpm", point.value), series: .value("run", point.run))
                     .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.lineWatermark))
             }
         }
+        .chartXScale(domain: x)
         .chartYScale(domain: domain)
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
@@ -252,8 +259,18 @@ struct HRZonesWidget: View {
 
 // MARK: - Previews
 
-/// A watermark's worth of points, rolling between Z1 and Z3.
-private let previewHistory: [Double] = (0..<60).map { 140 + 14 * sin(Double($0) / 6) }
+/// A watermark's worth of points, a reading a minute rolling between Z1 and Z3.
+private let previewSamples: [HeartRateSample] = (0..<60).map { minute in
+    HeartRateSample(time: Date(timeIntervalSinceReferenceDate: Double(minute) * 60),
+                    bpm: Int(140 + 14 * sin(Double(minute) / 6)))
+}
+private let previewWindow = previewSamples.first!.time...previewSamples.last!.time
+private let previewHistory = Watermark.points(previewSamples, over: previewWindow, time: \.time) { Double($0.bpm) }
+/// The strap out of range for a 15-minute stop.
+private let previewGapHistory = Watermark.points(
+    previewSamples.filter { !(30..<45).contains(Int($0.time.timeIntervalSinceReferenceDate / 60)) },
+    over: previewWindow, time: \.time
+) { Double($0.bpm) }
 private let previewZoneSeconds = [312, 846, 702, 318, 42]
 
 #Preview("W4 1×1 — Live") {
@@ -276,6 +293,12 @@ private let previewZoneSeconds = [312, 846, 702, 318, 42]
                 .frame(width: 196, height: 96)
         }
     }
+}
+
+#Preview("W4 2×1 — Sensor gap") {
+    HeartRateWidget(bpm: 156, zone: 3, source: .bleStrap, history: previewGapHistory, watermarkWindow: previewWindow,
+                    trend: .up, averageBPM: 148, maxBPM: 171, size: .twoByOne, metrics: { .sample })
+        .frame(width: 393, height: 96)
 }
 
 #Preview("W4 — No reading") {

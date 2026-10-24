@@ -14,7 +14,8 @@ struct CadenceDashboardWidget: DashboardWidget {
     var body: some View {
         CadenceWidget(
             cadence: store.cadence.cadenceRPM,
-            cadenceHistory: store.cadence.watermarkSamples,
+            cadenceHistory: store.cadenceWatermark,
+            watermarkWindow: store.watermarkWindow,
             averageCadence: store.cadence.averageCadenceRPM,
             maxCadence: store.cadence.maxCadenceRPM,
             zones: store.cadence.preferences.cadenceZones,

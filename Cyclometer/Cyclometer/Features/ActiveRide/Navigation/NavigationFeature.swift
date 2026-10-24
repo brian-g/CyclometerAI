@@ -555,7 +555,7 @@ struct NavigationRoute: Equatable, Sendable {
         self.elevationProfile = RouteGeometry.elevationProfile(coordinates, sampleCount: Self.elevationProfileSamples)
     }
 
-    /// Twice the 2×1 watermark's resolution (`SpeedFeature.watermarkResolution`): a route is often
+    /// Twice the 2×1 watermark's resolution (`Watermark.bucketCount`): a route is often
     /// longer than an hour's riding, and its climbs shouldn't blur into one.
     static let elevationProfileSamples = 120
 

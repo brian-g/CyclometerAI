@@ -66,7 +66,8 @@ struct ElevationDashboardWidget: DashboardWidget {
         ElevationWidget(
             altitude: store.altitude,
             gradePercent: store.elevation.gradePercent,
-            history: store.altitudeWatermarkSamples,
+            history: store.altitudeWatermark,
+            watermarkWindow: store.watermarkWindow,
             unit: store.unitSystem,
             metrics: { store.elevationMetrics }
         )
@@ -91,7 +92,8 @@ struct RouteElevationDashboardWidget: DashboardWidget {
             routeProfile: profile,
             routeProgress: profile == nil ? nil : store.navigation.routeProgressFraction,
             // Only W17's face reads it: a route's profile stands in for the ride's.
-            history: profile == nil ? store.altitudeWatermarkSamples : [],
+            history: profile == nil ? store.altitudeWatermark : [],
+            watermarkWindow: store.watermarkWindow,
             unit: store.unitSystem,
             metrics: { store.elevationMetrics }
         )

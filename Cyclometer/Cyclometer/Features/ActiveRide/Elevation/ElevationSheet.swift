@@ -49,12 +49,6 @@ struct ElevationMetrics: Equatable {
 }
 
 extension ActiveRideFeature.State {
-    /// W17's and W18's watermark: `altitudeSamples` in at most `SpeedFeature.watermarkResolution`
-    /// bucket means — Speed's axis.
-    var altitudeWatermarkSamples: [Double] {
-        altitudeSamples.bucketAveraged(to: SpeedFeature.watermarkResolution).map(\.meters)
-    }
-
     /// The Elevation sheet's inputs: the fields W14–W18 read, and the histories behind its charts.
     var elevationMetrics: ElevationMetrics {
         let profile = navigation.activeRoute?.elevationProfile
