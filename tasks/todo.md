@@ -661,3 +661,33 @@ builder reads invalidates the open sheet directly (#144's fix, for every widget)
   likely keeps the sheet's host updating on its own. [Likely]
 - **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST EXECUTE
   SUCCEEDED`, 1,864 unique cases, 0 failed. Those two alone: 49, 0 failed.
+
+---
+
+## #365 — Safe areas lost after a ride is finished
+
+Plan: `~/.claude/plans/velvet-chasing-cloud.md`. Branch `fix/365-safe-area-after-finish`.
+
+- [x] Sim repro: throwaway XCUITest measuring the Rides nav bar / large title before and after Finish
+- [x] Mechanism (controller-tree dump): dismissing the dashboard's zoom cover leaves `UIKitTabBarController`
+      with stale safe-area insets (top 24.3, bottom 0, margins 0) while the window and its hosting controller
+      are right; background → foreground heals it. The bottom accessory hides it during a ride.
+- [x] Heal: only an `additionalSafeAreaInsets` change recomputes them (`setNeedsLayout` on the controller or
+      its host doesn't) — `TabBarSafeAreaRepair`, run when the cover disappears
+- [x] Finish flow, per Brian: S10 rises over the dashboard; Finish Ride closes the cover, so S10 slides onto
+      Rides; S10 can't be swiped away
+- [x] Reducer tests updated; full `CyclometerTests` green on the earlier version of the reducer change
+      (2,116 + 47 PersistenceClientTests); test target builds on the final tree
+- [ ] Not to Brian's standard: the repair runs when the cover reports gone, ~0.6 s after S10 has left the
+      screen on the sim, so the stale layout can show briefly. Brian to hand the transition to Codex.
+
+### Review
+
+- **Root cause, as far as it was traced.** UIKit/SwiftUI bug: the zoom `fullScreenCover`'s dismissal leaves
+  the tab bar controller's insets stale. It isn't detached from the window (`inWindow=true` throughout), and
+  `.presentationBackground(.clear)` doesn't change it. Ruled out: S10's timing, the zoom source going away.
+- **Dead ends, for whoever picks this up.** Switching the cover's transition in the update that dismisses it
+  (SwiftUI stops updating the cover's content once it's dismissing); a no-animation `Transaction` on the S10
+  binding (no effect); `onDismiss` as a "collapse done" signal (doesn't fire when S10 presents in the same
+  update); keeping the accessory until the cover is gone (works, but the strip lingers after S10).
+- **Throwaway sim drive** (not committed): measures `navigationBars["Rides"]` and the large title's frame.

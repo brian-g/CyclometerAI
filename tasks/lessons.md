@@ -852,3 +852,38 @@ Before committing, check `git diff --numstat main -- tasks/todo.md`. It should s
 replaced the #411 section again. I wrongly called that "the convention", because main's own #411 commit had done the same.
 **Rule.** `lessons.md` is too long to skim the top of. At session start, `grep -n` it for every file and area the task
 will touch, `tasks/todo.md` always included.
+
+---
+
+## Brian runs each change before any tests do (2026-10-24, #365)
+
+**What happened.** On #365 I iterated on a transition by building a change, running sim drives and unit suites,
+and reporting the result, several rounds in a row. Brian was judging the same changes on device, and twice the
+thing he cared about (how the transition *looks*) was wrong after my tests had passed. "After every change and
+before running tests, let me run it to see what the change does. Only when we have an approved plan, proceed
+with full tests."
+
+**Why.** Tests and AX-frame measurements prove layout numbers, not whether a transition looks right. The rider's
+eye on a device is the real check for visual work. Tests run before that check spend time on a change that may
+be thrown away.
+
+**Rule.** After each code change, stop and hand it to Brian to run, saying what to look for. Run sim drives or
+test suites only when he asks, and the full suite only once he has approved the plan.
+
+---
+
+## Find the mechanism before offering transition options (2026-10-24, #365)
+
+**What happened.** On #365 I offered Brian a series of transition options (keep the accessory, leave
+without the zoom, S10 over the dashboard, a no-animation swipe) before knowing what corrupted the layout.
+Several didn't work as described: the transition switch was never applied, the transaction did nothing, and I
+called "H2 confirmed" without checking that the strip ever went away. It stuck forever. Brian's verdict:
+"Claude's options have been pretty horrible."
+
+**What would have saved the rounds.** A controller-tree dump (frames, `safeAreaInsets`, margins per level)
+before and after the bug, run on the first sim repro. It showed in one run that the tab bar controller alone
+held stale insets after the cover's dismissal, and that the accessory was only masking it.
+
+**Rule.** When a UI bug reproduces, dump the view-controller tree on both sides of it before proposing
+fixes. Offer the person an option only after it has been tried, not on the strength of how the API reads. And
+when a probe "fixes" something, check what else it changed before calling a hypothesis confirmed.

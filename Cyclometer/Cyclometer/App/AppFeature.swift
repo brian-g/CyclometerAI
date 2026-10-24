@@ -81,6 +81,8 @@ struct AppFeature {
         case rideSummary(PresentationAction<RideSummaryFeature.Action>)
         case onboarding(OnboardingFeature.Action)
         case dashboardDismissed
+        /// The dashboard's cover has gone, whatever closed it (#365).
+        case dashboardDisappeared
         case dashboardOpened
         case rides(RidesFeature.Action)
         case routes(RoutesFeature.Action)
@@ -258,6 +260,12 @@ struct AppFeature {
                 state.isDashboardPresented = false
                 return .none
 
+            case .dashboardDisappeared:
+                // S10's Finish Ride closed only the cover, so that S10 went with it as one
+                // dismissal. Its state is let go now.
+                guard state.rideSummary != nil else { return .none }
+                return .send(.rideSummary(.dismiss))
+
             case .dashboardOpened:
                 if state.activeRide != nil { state.isDashboardPresented = true }
                 return .none
@@ -265,7 +273,6 @@ struct AppFeature {
             case .activeRide(.finishAlert(.presented(.confirmFinish))):
                 let finishedRideId = state.activeRide?.rideId
                 state.activeRide = nil
-                state.isDashboardPresented = false
                 // The Rides tab only loads on its own `.task`, which fires once when it
                 // first mounts — not when a ride finishes underneath an already-mounted
                 // tab. Without this, the just-finished ride is invisible until something
@@ -273,16 +280,30 @@ struct AppFeature {
                 // not `reloadRides`: ActiveRideFeature's own finish effect (flush → GPX
                 // export → finalizeRide) is a separate effect racing this one, so the
                 // write is very often still in flight at this exact moment.
-                guard let finishedRideId else { return .none }
+                guard let finishedRideId else {
+                    state.isDashboardPresented = false
+                    return .none
+                }
                 // S10 for the ride just ended (#249). It waits for that finalize itself.
+                // The dashboard stays presented and S10 rises over it (#365): nothing under
+                // the cover could present it, and the tab view mustn't lose its accessory
+                // while the cover is up.
                 state.rideSummary = RideSummaryFeature.State(rideId: finishedRideId)
                 return .send(.rides(.rideFinished(finishedRideId)))
 
+            case .rideSummary(.presented(.finishTapped)):
+                // Closing the cover takes S10 with it as one dismissal, so S10 slides down
+                // onto Rides (#365). Nilling S10 here too would dismiss the two in turn,
+                // S10 onto the dashboard, then the dashboard.
+                state.isDashboardPresented = false
+                return .none
+
             case .rideSummary(.dismiss):
-                // The Finish Ride button and a swipe-down both land here, with the child's
-                // state still present — TCA runs this reducer before it nils it. The rename is
-                // written from here rather than from the child, whose effects are cancelled as
-                // it is dismissed.
+                // Reached from `.dashboardDisappeared`, with the child's state still present —
+                // TCA runs this reducer before it nils it. The rename is written from here
+                // rather than from the child, whose effects are cancelled as it is dismissed.
+                // S10 sits on the dashboard's cover and never closes alone (#365).
+                state.isDashboardPresented = false
                 guard let summary = state.rideSummary, let title = summary.titleToSave else { return .none }
                 let id = summary.rideId
                 return .run { [persistenceClient] send in
