@@ -6,6 +6,8 @@ struct AppView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// The dashboard zooms out of the ride accessory and collapses back into it (#333).
     @Namespace private var dashboardZoom
+    /// PROBE #365 H2: the cover is up, its collapse included.
+    @State private var isCoverOnScreen = false
 
     /// The accessory strip shows only while a ride is active or paused (S05.3).
     private var hasVisibleRide: Bool {
@@ -71,8 +73,13 @@ struct AppView: View {
             // ── Active Ride Accessory (Apple Music mini-player pattern) ──────────
             // Visible only while a ride is active or paused (S05.3), not during the
             // brief .idle window before `.task` starts the ride.
-            .tabViewBottomAccessory(isEnabled: hasVisibleRide) {
-                if let ride = store.activeRide, hasVisibleRide {
+            .tabViewBottomAccessory(isEnabled: hasVisibleRide || isCoverOnScreen) {
+                if !hasVisibleRide, isCoverOnScreen {
+                    // PROBE #365 H2: the zoom source outlives the ride until the collapse ends.
+                    ActiveRideAccessoryView(progress: nil, distanceMeters: 0, speedMPS: 0, elapsedSeconds: 0, unit: .imperial, onOpen: {})
+                        .padding(.horizontal, 4)
+                        .matchedTransitionSource(id: DashboardZoom.sourceID, in: dashboardZoom)
+                } else if let ride = store.activeRide, hasVisibleRide {
                     ActiveRideAccessoryView(
                         progress: ride.navigation.routeProgressFraction,
                         distanceMeters: ride.distanceMeters,
@@ -108,7 +115,7 @@ struct AppView: View {
             // the accessory, and a drag down anywhere collapses it back in. Hand-built
             // motion can't do this: moving a view re-flows its safe-area extension, so
             // the old overlay squished as it was dragged (#330).
-            .fullScreenCover(item: dashboardStore) { rideStore in
+            .fullScreenCover(item: dashboardStore, onDismiss: { isCoverOnScreen = false }) { rideStore in
                 RideDashboardView(store: rideStore)
                     .navigationTransition(.zoom(sourceID: DashboardZoom.sourceID, in: dashboardZoom))
             }
@@ -132,6 +139,7 @@ struct AppView: View {
                 onWake: { store.send(.wakeTapped) }
             )
         }
+        .onChange(of: store.isDashboardPresented) { _, up in if up { isCoverOnScreen = true } }
         .onChange(of: scenePhase, initial: true) { _, phase in
             store.send(.scenePhaseChanged(isActive: phase == .active))
         }
