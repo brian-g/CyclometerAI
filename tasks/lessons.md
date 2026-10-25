@@ -869,3 +869,15 @@ the slide.
 the shipped code before handing it over. Any difference in trigger, timing or lookup counts. Rate confidence for the
 code as built, not for the experiment. Where the probe checks a number (here, the Rides nav bar's y), re-running
 it is part of building the change. Brian still judges the look first.
+
+---
+
+## One cadence: good test run → commit + PR; review done → commit + push (2026-10-25, #365)
+
+**What happened.** On #365 I asked "commit?" after a good test run. When `/code-review --fix` finished, I reported
+and waited. Asked to commit, I committed without pushing, although I had pushed unasked at other steps. Brian:
+"One of my concerns is how inconsistent you are."
+
+**Rule.** After Brian has run the change and the test run is good, commit and open the PR without asking. When his
+`/code-review --fix` finishes, commit its fixes and push them to the same PR without asking. Report after each step.
+Findings the review skipped go in that report and don't hold up the commit and push.
