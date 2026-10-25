@@ -19,7 +19,7 @@ private let logger = Logger.cyclometer(.persistence)
 /// given at ride end.
 ///
 /// The rename is saved by `AppFeature` on dismissal, not here: a child's effects are cancelled
-/// as it is dismissed.
+/// as it is dismissed, and a swipe-down is a dismissal like the Finish Ride button.
 @Reducer
 struct RideSummaryFeature {
 
@@ -147,7 +147,6 @@ struct RideSummaryFeature {
         case placedTitleResolved(String)
         case titleChanged(String)
         case titleFocused
-        /// `AppFeature` closes S10 by closing the dashboard's cover under it (#365).
         case finishTapped
         case alert(PresentationAction<Alert>)
 
@@ -160,6 +159,7 @@ struct RideSummaryFeature {
     @Dependency(\.continuousClock) var clock
     @Dependency(\.date) var date
     @Dependency(\.calendar) var calendar
+    @Dependency(\.dismiss) var dismiss
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -272,7 +272,7 @@ struct RideSummaryFeature {
                 return .none
 
             case .finishTapped:
-                return .none
+                return .run { [dismiss] _ in await dismiss() }
 
             case .alert:
                 return .none
