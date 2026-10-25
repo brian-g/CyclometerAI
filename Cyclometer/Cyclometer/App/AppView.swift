@@ -6,10 +6,6 @@ struct AppView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// The dashboard zooms out of the ride accessory and collapses back into it (#333).
     @Namespace private var dashboardZoom
-    /// The dashboard's store, kept until its cover has gone. Finish nils `activeRide` with the
-    /// cover still up, and the scoped store holds the ride's last state, so the dashboard stays
-    /// behind S10 (#365).
-    @State private var dashboardStore: StoreOf<ActiveRideFeature>?
 
     /// The accessory strip shows only while a ride is active or paused (S05.3).
     private var hasVisibleRide: Bool {
@@ -19,11 +15,17 @@ struct AppView: View {
         }
     }
 
-    /// Only a dismissal is reported; presenting is always the reducer's call.
-    private var isDashboardPresented: Binding<Bool> {
+    /// The dashboard's store while it's presented. `item:` rather than `isPresented:`
+    /// so SwiftUI keeps the last store through the collapse: Finish nils `activeRide`
+    /// in the same action that dismisses, and the scoped store holds its last state.
+    private var dashboardStore: Binding<StoreOf<ActiveRideFeature>?> {
         Binding(
-            get: { store.isDashboardPresented },
-            set: { if !$0 { store.send(.dashboardDismissed) } }
+            get: {
+                store.isDashboardPresented
+                    ? store.scope(state: \.activeRide, action: \.activeRide)
+                    : nil
+            },
+            set: { if $0 == nil { store.send(.dashboardDismissed) } }
         )
     }
 
@@ -95,34 +97,20 @@ struct AppView: View {
                     .presentationDragIndicator(.visible)
             }
 
+            // ── Ride Summary (S10) ───────────────────────────────────────────────
+            .sheet(item: $store.scope(state: \.rideSummary, action: \.rideSummary)) { summaryStore in
+                RideSummaryView(store: summaryStore)
+                    .presentationDragIndicator(.visible)
+            }
+
             // ── Active Ride Dashboard (#333) ─────────────────────────────────────
             // A system zoom presentation, as Apple Music's player does it: it expands from
             // the accessory, and a drag down anywhere collapses it back in. Hand-built
             // motion can't do this: moving a view re-flows its safe-area extension, so
             // the old overlay squished as it was dragged (#330).
-            //
-            // Finish leaves it up and S10 (#249) rises over it: nothing under the cover can
-            // present while it's on screen. Closing S10 closes the cover, and S10 slides down
-            // onto Rides (#365).
-            .fullScreenCover(isPresented: isDashboardPresented) {
-                ZStack {
-                    if let rideStore = dashboardStore ?? store.scope(state: \.activeRide, action: \.activeRide) {
-                        RideDashboardView(store: rideStore)
-                    }
-                }
-                .navigationTransition(.zoom(sourceID: DashboardZoom.sourceID, in: dashboardZoom))
-                // ── Ride Summary (S10) ───────────────────────────────────────────
-                // Only Finish Ride closes it: a swipe would close S10 alone, back onto the
-                // finished ride's dashboard (#365).
-                .sheet(item: $store.scope(state: \.rideSummary, action: \.rideSummary)) { summaryStore in
-                    RideSummaryView(store: summaryStore)
-                        .interactiveDismissDisabled()
-                }
-                .onDisappear {
-                    dashboardStore = nil
-                    store.send(.dashboardDisappeared)
-                    TabBarSafeAreaRepair.repairIfStale()
-                }
+            .fullScreenCover(item: dashboardStore) { rideStore in
+                RideDashboardView(store: rideStore)
+                    .navigationTransition(.zoom(sourceID: DashboardZoom.sourceID, in: dashboardZoom))
             }
 
             // ── Onboarding (S01→S02) ──────────────────────────────────────────────
@@ -143,11 +131,6 @@ struct AppView: View {
                 onTouchEnded: { store.send(.touchEnded) },
                 onWake: { store.send(.wakeTapped) }
             )
-        }
-        .onChange(of: store.isDashboardPresented, initial: true) { _, isPresented in
-            if isPresented, dashboardStore == nil {
-                dashboardStore = store.scope(state: \.activeRide, action: \.activeRide)
-            }
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             store.send(.scenePhaseChanged(isActive: phase == .active))
