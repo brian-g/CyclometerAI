@@ -52,7 +52,7 @@ private struct GeneralSection: View {
             Toggle("Place Names", isOn: $store.isPlaceNameLookupEnabled.sending(\.placeNameLookupChanged))
             // Off in iOS Settings, the rider's own choice is kept but can't take effect, and the
             // row says why (#313).
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 Toggle("Show Live Activity", isOn: $store.isLiveActivityEnabled.sending(\.liveActivityChanged))
                 .disabled(!store.isSystemLiveActivityEnabled)
                 if !store.isSystemLiveActivityEnabled {
@@ -120,7 +120,7 @@ private struct HRZonesSection: View {
         } header: {
             Text("HR Zones")
         } footer: {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("HR Zone data is derived from data collected by Apple Health.")
             }
         }

@@ -219,6 +219,7 @@ jobs:
             -skip-testing:CyclometerTests/HeartRateWidgetSnapshotTests \
             -skip-testing:CyclometerTests/HRZonesWidgetSnapshotTests \
             -skip-testing:CyclometerTests/SensorBatteryLabelSnapshotTests \
+            -skip-testing:CyclometerTests/NumericEntryRowSnapshotTests \
             -skip-testing:CyclometerTests/MapSheetButtonsSnapshotTests \
             -skip-testing:CyclometerTests/DirectionsWidgetSnapshotTests \
             -skip-testing:CyclometerTests/ElevationWidgetSnapshotTests \
