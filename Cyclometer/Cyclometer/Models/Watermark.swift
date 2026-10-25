@@ -88,6 +88,15 @@ enum Watermark {
 }
 
 extension Array where Element == WatermarkPoint {
+    /// The points alone in their run. A line through one point draws nothing, so the charts mark
+    /// these with a dot: Apple Watch heart rate, minutes apart through HealthKit, would otherwise leave
+    /// W4 with no trace at all, and a sensor waking after a stop would show nothing for its first bucket.
+    var lonePoints: [WatermarkPoint] {
+        indices.filter { i in
+            (i == startIndex || self[i - 1].run != self[i].run) && (i == endIndex - 1 || self[i + 1].run != self[i].run)
+        }.map { self[$0] }
+    }
+
     /// The x-domain a watermark chart plots over: the shared window when there is one, otherwise these
     /// points' own span. Never zero-wide — a lone reading, or none, still gives zone bands a width to
     /// fill (#79).

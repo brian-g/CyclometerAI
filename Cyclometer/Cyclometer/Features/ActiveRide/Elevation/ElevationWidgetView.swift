@@ -225,16 +225,23 @@ private struct ElevationHistoryChart: View {
     var body: some View {
         let domain = history.map(\.value).elevationChartDomain
         // One series per run, so a silence — a pause records no altitude — breaks the trace.
-        Chart(Array(history.enumerated()), id: \.offset) { _, point in
-            AreaMark(
-                x: .value("t", point.time),
-                yStart: .value("base", domain.lowerBound),
-                yEnd: .value("elevation", point.value),
-                series: .value("run", point.run)
-            )
-            .foregroundStyle(Color.cyPrimary)
-            LineMark(x: .value("t", point.time), y: .value("elevation", point.value), series: .value("run", point.run))
+        Chart {
+            ForEach(Array(history.enumerated()), id: \.offset) { _, point in
+                AreaMark(
+                    x: .value("t", point.time),
+                    yStart: .value("base", domain.lowerBound),
+                    yEnd: .value("elevation", point.value),
+                    series: .value("run", point.run)
+                )
                 .foregroundStyle(Color.cyPrimary)
+                LineMark(x: .value("t", point.time), y: .value("elevation", point.value), series: .value("run", point.run))
+                    .foregroundStyle(Color.cyPrimary)
+            }
+            ForEach(Array(history.lonePoints.enumerated()), id: \.offset) { _, point in
+                PointMark(x: .value("t", point.time), y: .value("elevation", point.value))
+                    .symbolSize(CGSize(width: Spacing.watermarkDot, height: Spacing.watermarkDot))
+                    .foregroundStyle(Color.cyPrimary)
+            }
         }
         .chartXScale(domain: history.plotDomain(window))
         .chartYScale(domain: domain)

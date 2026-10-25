@@ -231,21 +231,28 @@ private struct SpeedHistoryChart: View {
 
     var body: some View {
         // One series per run, so a silence breaks the trace rather than being drawn across.
-        Chart(Array(history.enumerated()), id: \.offset) { _, point in
-            let displaySpeed = unit.speed(fromMPS: point.value)
-            AreaMark(
-                x: .value("t", point.time),
-                yStart: .value("base", 0),
-                yEnd: .value("speed", displaySpeed),
-                series: .value("run", point.run)
-            )
-            .foregroundStyle(Color.cyPrimary)
-            LineMark(
-                x: .value("t", point.time),
-                y: .value("speed", displaySpeed),
-                series: .value("run", point.run)
-            )
-            .foregroundStyle(Color.cyPrimary)
+        Chart {
+            ForEach(Array(history.enumerated()), id: \.offset) { _, point in
+                let displaySpeed = unit.speed(fromMPS: point.value)
+                AreaMark(
+                    x: .value("t", point.time),
+                    yStart: .value("base", 0),
+                    yEnd: .value("speed", displaySpeed),
+                    series: .value("run", point.run)
+                )
+                .foregroundStyle(Color.cyPrimary)
+                LineMark(
+                    x: .value("t", point.time),
+                    y: .value("speed", displaySpeed),
+                    series: .value("run", point.run)
+                )
+                .foregroundStyle(Color.cyPrimary)
+            }
+            ForEach(Array(history.lonePoints.enumerated()), id: \.offset) { _, point in
+                PointMark(x: .value("t", point.time), y: .value("speed", unit.speed(fromMPS: point.value)))
+                    .symbolSize(CGSize(width: Spacing.watermarkDot, height: Spacing.watermarkDot))
+                    .foregroundStyle(Color.cyPrimary)
+            }
         }
         .chartXScale(domain: history.plotDomain(window))
         .chartXAxis(.hidden)

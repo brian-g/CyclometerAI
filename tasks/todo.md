@@ -674,4 +674,13 @@ samples while its sensor slept (speed had GPS fallback).
 - [x] `ActiveRideFeature.State`: `watermarkWindow` + four `…Watermark` series; remove the index-bucket versions
 - [x] W1 / W5 / W4 / W17–W18 charts plot against time over the window; previews incl. "Sensor gap"
 - [x] Build (app target `BUILD SUCCEEDED`); hand to Brian to run on device
-- [ ] Tests: `WatermarkTests` (incl. this ride's regression), rewrite old watermark tests, re-record snapshots
+- [x] Tests: `WatermarkTests` (12, incl. this ride's regression); HR watermark test rewritten; the speed/cadence
+      count tests removed (properties gone, covered by `WatermarkTests`); snapshot call sites on `asWatermark`
+- [x] Snapshots: existing references unchanged (evenly spaced data draws the same against time); new
+      `testCadenceTwoByOneSensorGap` records the break
+- [x] Review follow-ups: lone points (a run of one) draw as a `Spacing.watermarkDot` dot, per Brian — Watch HR
+      via HealthKit lands minutes apart and drew no trace at all; W18 reads the window only without a route
+      profile (`aNewSampleDoesNotRerenderRouteElevationOnARoute` caught the redraw); new
+      `testHeartRateWidgetSparseWatchReadings`
+- [x] Full suite on the final tree: `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`
+      `TEST EXECUTE SUCCEEDED`, 1,879 unique cases, 0 failed; those two alone `TEST EXECUTE SUCCEEDED`, 0 failed

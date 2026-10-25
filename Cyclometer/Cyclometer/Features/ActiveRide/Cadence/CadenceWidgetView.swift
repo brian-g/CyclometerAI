@@ -185,6 +185,11 @@ private struct CadenceHistoryChart: View {
                 LineMark(x: .value("t", point.time), y: .value("rpm", point.value), series: .value("run", point.run))
                     .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.lineWatermark))
             }
+            ForEach(Array(history.lonePoints.enumerated()), id: \.offset) { _, point in
+                PointMark(x: .value("t", point.time), y: .value("rpm", point.value))
+                    .symbolSize(CGSize(width: Spacing.watermarkDot, height: Spacing.watermarkDot))
+                    .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.lineWatermark))
+            }
         }
         .chartXScale(domain: domain)
         .chartYScale(domain: 0...Self.yMax)

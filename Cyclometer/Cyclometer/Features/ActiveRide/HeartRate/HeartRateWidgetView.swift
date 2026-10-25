@@ -125,6 +125,11 @@ private struct HeartRateHistoryChart: View {
                 LineMark(x: .value("t", point.time), y: .value("bpm", point.value), series: .value("run", point.run))
                     .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.lineWatermark))
             }
+            ForEach(Array(history.lonePoints.enumerated()), id: \.offset) { _, point in
+                PointMark(x: .value("t", point.time), y: .value("bpm", point.value))
+                    .symbolSize(CGSize(width: Spacing.watermarkDot, height: Spacing.watermarkDot))
+                    .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.lineWatermark))
+            }
         }
         .chartXScale(domain: x)
         .chartYScale(domain: domain)
@@ -298,6 +303,15 @@ private let previewZoneSeconds = [312, 846, 702, 318, 42]
 #Preview("W4 2×1 — Sensor gap") {
     HeartRateWidget(bpm: 156, zone: 3, source: .bleStrap, history: previewGapHistory, watermarkWindow: previewWindow,
                     trend: .up, averageBPM: 148, maxBPM: 171, size: .twoByOne, metrics: { .sample })
+        .frame(width: 393, height: 96)
+}
+
+#Preview("W4 2×1 — Apple Watch, sparse") {
+    // A reading every five minutes, as HealthKit lands them with no Watch workout: all dots.
+    let sparse = previewSamples.filter { Int($0.time.timeIntervalSinceReferenceDate / 60) % 5 == 0 }
+    HeartRateWidget(bpm: 150, zone: 3, source: .healthKit,
+                    history: Watermark.points(sparse, over: previewWindow, time: \.time) { Double($0.bpm) },
+                    watermarkWindow: previewWindow, size: .twoByOne, metrics: { .sample })
         .frame(width: 393, height: 96)
 }
 

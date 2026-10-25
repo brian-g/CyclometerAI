@@ -11,7 +11,7 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
     private let canvas2x2: SwiftUISnapshotLayout = .fixed(width: 393, height: 200)
 
     // Representative speed history (20 ascending samples in m/s)
-    private let sampleHistory: [Double] = stride(from: 4.0, to: 9.5, by: 0.275).map { $0 }
+    private let sampleHistory = stride(from: 4.0, to: 9.5, by: 0.275).map { $0 }.asWatermark
 
     private func make2x2(
         speed: Double? = 7.89,         // m/s ≈ 28.4 km/h

@@ -163,22 +163,6 @@ struct SpeedFeatureTests {
         }
     }
 
-    @Test("Watermark series downsamples to at most watermarkResolution points")
-    func watermarkDownsamples() {
-        let many = (0..<200).map {
-            SpeedSample(time: Date(timeIntervalSince1970: Double($0)), mps: Double($0))
-        }
-        #expect(
-            SpeedFeature.State(speedSamples: many).watermarkSamples.count
-                == SpeedFeature.watermarkResolution
-        )
-
-        let few = (0..<10).map {
-            SpeedSample(time: Date(timeIntervalSince1970: Double($0)), mps: Double($0))
-        }
-        #expect(SpeedFeature.State(speedSamples: few).watermarkSamples.count == 10)
-    }
-
     @Test("Downsampling averages each bucket's time as well as its speed (#140)")
     func bucketAveragedKeepsTimeAxis() {
         let samples = (0..<120).map {

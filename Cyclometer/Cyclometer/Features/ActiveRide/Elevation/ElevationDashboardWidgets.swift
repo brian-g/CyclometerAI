@@ -93,7 +93,7 @@ struct RouteElevationDashboardWidget: DashboardWidget {
             routeProgress: profile == nil ? nil : store.navigation.routeProgressFraction,
             // Only W17's face reads it: a route's profile stands in for the ride's.
             history: profile == nil ? store.altitudeWatermark : [],
-            watermarkWindow: store.watermarkWindow,
+            watermarkWindow: profile == nil ? store.watermarkWindow : nil,
             unit: store.unitSystem,
             metrics: { store.elevationMetrics }
         )
