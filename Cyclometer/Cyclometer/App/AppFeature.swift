@@ -39,6 +39,9 @@ struct AppFeature {
         @Presents var startSheet: StartSheetFeature.State? = nil
         /// S10, for the ride just finished (#249).
         @Presents var rideSummary: RideSummaryFeature.State? = nil
+        /// S10 between Finish and the dashboard's cover having gone (#365), so that it rises
+        /// onto Rides once the dashboard has slid away.
+        var pendingRideSummary: RideSummaryFeature.State? = nil
         var onboarding: OnboardingFeature.State? = nil
         var isDashboardPresented: Bool = false
         var rides: RidesFeature.State = RidesFeature.State()
@@ -81,6 +84,9 @@ struct AppFeature {
         case rideSummary(PresentationAction<RideSummaryFeature.Action>)
         case onboarding(OnboardingFeature.Action)
         case dashboardDismissed
+        /// The dashboard's cover has gone, whatever closed it. Presents S10 if a Finish is
+        /// waiting on it (#365).
+        case dashboardDismissalCompleted
         case dashboardOpened
         case rides(RidesFeature.Action)
         case routes(RoutesFeature.Action)
@@ -258,6 +264,12 @@ struct AppFeature {
                 state.isDashboardPresented = false
                 return .none
 
+            case .dashboardDismissalCompleted:
+                guard let pendingRideSummary = state.pendingRideSummary else { return .none }
+                state.pendingRideSummary = nil
+                state.rideSummary = pendingRideSummary
+                return .none
+
             case .dashboardOpened:
                 if state.activeRide != nil { state.isDashboardPresented = true }
                 return .none
@@ -274,8 +286,9 @@ struct AppFeature {
                 // export → finalizeRide) is a separate effect racing this one, so the
                 // write is very often still in flight at this exact moment.
                 guard let finishedRideId else { return .none }
-                // S10 for the ride just ended (#249). It waits for that finalize itself.
-                state.rideSummary = RideSummaryFeature.State(rideId: finishedRideId)
+                // S10 for the ride just ended (#249). It waits for that finalize itself, and
+                // for the dashboard to have slid away (#365).
+                state.pendingRideSummary = RideSummaryFeature.State(rideId: finishedRideId)
                 return .send(.rides(.rideFinished(finishedRideId)))
 
             case .rideSummary(.dismiss):

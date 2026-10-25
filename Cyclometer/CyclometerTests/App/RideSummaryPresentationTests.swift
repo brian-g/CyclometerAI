@@ -47,7 +47,7 @@ struct RideSummaryPresentationTests {
         return state
     }
 
-    @Test("confirming Finish presents S10 for the ride just ended, not the bare dashboard")
+    @Test("confirming Finish presents S10 after the dashboard dismisses")
     func finishPresentsSummary() async {
         let store = makeStore(persistenceClient: .mock())
         store.exhaustivity = .off
@@ -63,9 +63,27 @@ struct RideSummaryPresentationTests {
 
         #expect(store.state.activeRide == nil)
         #expect(store.state.isDashboardPresented == false)
+        #expect(store.state.rideSummary == nil)
+        #expect(store.state.pendingRideSummary?.rideId == rideId)
+
+        await store.send(.dashboardDismissalCompleted)
+
         #expect(store.state.rideSummary?.rideId == rideId)
         #expect(store.state.rideSummary?.load == .waiting)
+        #expect(store.state.pendingRideSummary == nil)
         await store.skipInFlightEffects()
+    }
+
+    /// The cover's `onDismiss` fires for a drag down mid-ride too (#365). Only a Finish leaves S10
+    /// waiting on it.
+    @Test("minimizing the dashboard mid-ride presents no S10")
+    func minimizePresentsNoSummary() async {
+        let store = makeStore(
+            AppFeature.State(activeRide: ActiveRideFeature.State(recordingState: .active)),
+            persistenceClient: .mock()
+        )
+
+        await store.send(.dashboardDismissalCompleted)
     }
 
     @Test("the Finish Ride button dismisses S10 and saves the rider's name, refreshes S14, then rewrites the GPX")

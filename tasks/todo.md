@@ -693,3 +693,41 @@ Persist `navigation.isRouteComplete` with the ride's route progress and restore 
   SUCCEEDED`, 1,866 unique cases, 0 failed. Those two alone: 49, 0 failed.
 - **Not done.** Completion is saved only at the next checkpoint (30 s) or pause, the same as progress. A kill within
   that window after finishing still relaunches unfinished. Writing a checkpoint on completion would close it.
+
+---
+
+## #365 — Finish slides the dashboard down (on `brian/fixSafeAreas`)
+
+Mechanism, measured per frame on the sim (2026-10-25). A zoom dismissal with no source (the accessory goes at
+Finish) scales the root `_UIHostingView` to ~0.915. `UIKitTabBarController` computes its insets in that scaled frame
+(t24.3 b0) and never again. Keeping the strip up as the zoom target avoids it, but UIKit's zoom completion, and so
+`onDismiss`, lands ~0.63 s after the collapse looks done, so the strip lingers. A cover-vertical dismissal scales
+nothing. Setting the cover's `preferredTransition = .coverVertical` after it's on screen is honored.
+
+- [x] `DashboardFinishTransition`: from the Finish alert on, the cover's transition is cover-vertical. Cancel restores
+      the zoom. Re-applied after the cover opens, for an auto-end alert raised while minimized.
+- [x] Strip back to main's rule (gone at Finish); `dismissingRide` removed
+- [x] S10 still waits for `onDismiss` (`pendingRideSummary`); comments say why, without the disproved mechanism
+- [x] Reducer test updated; app and test target build
+- [x] ~~First device run~~: top safe area broken again. SwiftUI re-ran the cover's content closure (it read
+      `finishAlert`), re-applied `.navigationTransition(.zoom)` and replaced the slide a frame later
+- [x] Fix: the store is read in `DashboardFinishTransition`'s own body, so the closure never re-runs
+- [x] Sim drive on the shipped code: Finish slides, nav bar 62 before/after; Finish → Cancel → Resume → minimize
+      zooms into the strip, reopen, Finish slides, nav bar 62
+- [x] Brian ran it on device (same two flows): "Perfect". Auto-end while minimized not driven
+- [x] Tests
+
+### Review
+
+- **Root cause.** #365 is UIKit's zoom dismissal. With no source to zoom into, it scales the root host view, and the
+  tab bar controller computes its insets in that scaled frame and never again. Finish removes the accessory, so the
+  zoom has nothing to land in. Finish now dismisses cover-vertical, which scales nothing. Zoom open and drag-to-minimize
+  are unchanged.
+- **Why not the two earlier branches.** fix/365 heals the insets after the fact, so the stale frames show first: the
+  jank. The Codex branch kept the accessory as the zoom target until `onDismiss`, but UIKit's zoom completion lands
+  ~0.63 s after the collapse looks done, so the strip lingered.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST EXECUTE
+  SUCCEEDED`, 1,864 unique cases, 0 failed. Those two alone: 49, 0 failed.
+- **Not covered.** Auto-end while the dashboard is minimized (the alert is up as the cover opens) is handled by
+  re-applying after the opening, but no drive or device run has exercised it. No automated test covers the
+  transition. The sim drives were throwaway.
