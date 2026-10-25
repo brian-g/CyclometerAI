@@ -97,15 +97,15 @@ struct HeartRateMetricsTests {
         #expect(state.averageHeartRateBPM == 147)
     }
 
-    /// W4's watermark keeps at most `watermarkResolution` points, as cadence's does.
+    /// W4's watermark keeps at most `Watermark.bucketCount` points, as every watermark does.
     @Test func watermarkIsBucketed() {
         var state = ActiveRideFeature.State()
         let start = Date(timeIntervalSince1970: 0)
         state.hrSamples = (0..<30).map { HeartRateSample(time: start.addingTimeInterval(Double($0)), bpm: 100 + $0) }
-        #expect(state.hrWatermarkSamples == (0..<30).map { Double(100 + $0) })
+        #expect(state.hrWatermark.map(\.value) == (0..<30).map { Double(100 + $0) })
         state.hrSamples = (0..<600).map { HeartRateSample(time: start.addingTimeInterval(Double($0)), bpm: 120) }
-        #expect(state.hrWatermarkSamples.count == CadenceFeature.watermarkResolution)
-        #expect(state.hrWatermarkSamples.allSatisfy { $0 == 120 })
+        #expect(state.hrWatermark.count == Watermark.bucketCount)
+        #expect(state.hrWatermark.allSatisfy { $0.value == 120 })
     }
 
     private func point(bpm: Int) -> TrackPointDTO {

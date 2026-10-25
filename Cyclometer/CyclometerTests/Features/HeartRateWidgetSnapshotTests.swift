@@ -12,12 +12,12 @@ final class HeartRateWidgetSnapshotTests: XCTestCase {
     private let canvas1x1: SwiftUISnapshotLayout = .fixed(width: 196, height: 96)
 
     /// Rolling between Z1 and Z4 of the default profile.
-    private let sampleHistory: [Double] = (0..<60).map { 145 + 22 * sin(Double($0) / 7) }
+    private let sampleHistory = (0..<60).map { 145 + 22 * sin(Double($0) / 7) }.asWatermark
 
     private func widget(
         bpm: Int = 156,
         source: HRSource = .bleStrap,
-        history: [Double]? = nil,
+        history: [WatermarkPoint]? = nil,
         trend: Trend = .up,
         size: WidgetSize,
         scheme: ColorScheme = .light
@@ -58,6 +58,20 @@ final class HeartRateWidgetSnapshotTests: XCTestCase {
         assertSnapshot(
             of: widget(size: .twoByOne, scheme: .dark),
             as: .image(layout: canvas2x1, traits: .init(userInterfaceStyle: .dark))
+        )
+    }
+
+    /// Apple Watch heart rate through HealthKit, a reading every few minutes with no Watch workout:
+    /// every reading is alone in its run, so each draws as a dot rather than no trace at all.
+    func testHeartRateWidgetSparseWatchReadings() {
+        let samples = stride(from: 0, through: 3_600, by: 300).map {
+            HeartRateSample(time: Date(timeIntervalSinceReferenceDate: Double($0)), bpm: 140 + Int(20 * sin(Double($0) / 900)))
+        }
+        let window = samples.first!.time...samples.last!.time
+        let history = Watermark.points(samples, over: window, time: \.time) { Double($0.bpm) }
+        assertSnapshot(
+            of: widget(source: .healthKit, history: history, trend: .steady, size: .twoByOne),
+            as: .image(layout: canvas2x1)
         )
     }
 

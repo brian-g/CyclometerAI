@@ -172,22 +172,6 @@ struct CadenceFeatureTests {
         await expireStaleData(store, clock)
     }
 
-    @Test("Watermark series downsamples to at most watermarkResolution points")
-    func watermarkDownsamples() {
-        let many = (0..<200).map {
-            CadenceSample(time: Date(timeIntervalSince1970: Double($0)), rpm: Double($0))
-        }
-        #expect(
-            CadenceFeature.State(cadenceSamples: many).watermarkSamples.count
-                == CadenceFeature.watermarkResolution
-        )
-
-        let few = (0..<10).map {
-            CadenceSample(time: Date(timeIntervalSince1970: Double($0)), rpm: Double($0))
-        }
-        #expect(CadenceFeature.State(cadenceSamples: few).watermarkSamples.count == 10)
-    }
-
     // MARK: - Stale-data watchdog (#456)
 
     /// A live link with a reading on screen. Not recording, so readings leave the ride's

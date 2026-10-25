@@ -9,7 +9,7 @@ final class ElevationWidgetSnapshotTests: XCTestCase {
     // Grid slots: a 1×1 is half-width, a 2×1 full width, both one row of 96.
     private let oneByOne: SwiftUISnapshotLayout = .fixed(width: 196, height: 96)
     private let twoByOne: SwiftUISnapshotLayout = .fixed(width: 393, height: 96)
-    private let history = AltitudeSample.sampleHour.map(\.meters)
+    private let history = AltitudeSample.sampleHour.map(\.meters).asWatermark
 
     private func make(_ view: some View, width: CGFloat, scheme: ColorScheme = .light) -> some View {
         view

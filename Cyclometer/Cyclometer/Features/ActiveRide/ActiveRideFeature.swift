@@ -235,16 +235,36 @@ struct ActiveRideFeature {
         var hrZoneSeconds: [Int] {
             RideDetailSeries.zoneSeconds(hrSecondsTally.secondsByBPM, zoneBounds: hrZoneBounds)
         }
-        /// W4's watermark: `hrSamples` in at most `CadenceFeature.watermarkResolution` bucket means,
-        /// as `CadenceFeature.State.watermarkSamples`.
-        var hrWatermarkSamples: [Double] {
-            let values = hrSamples.map { Double($0.bpm) }
-            let count = values.count
-            let buckets = min(count, CadenceFeature.watermarkResolution)
-            return (0..<buckets).map { i in
-                let slice = values[(i * count / buckets)..<((i + 1) * count / buckets)]
-                return slice.reduce(0, +) / Double(slice.count)
-            }
+        /// The one time window W1, W4, W5 and W17/W18 plot their watermarks over, so their traces line
+        /// up: a stop sits at the same x in each, whichever sensors kept reading through it.
+        var watermarkWindow: ClosedRange<Date>? {
+            Watermark.window(
+                oldest: [speed.speedSamples.first?.time, cadence.cadenceSamples.first?.time,
+                         hrSamples.first?.time, altitudeSamples.first?.time],
+                newest: [speed.speedSamples.last?.time, cadence.cadenceSamples.last?.time,
+                         hrSamples.last?.time, altitudeSamples.last?.time],
+                span: SpeedFeature.historyWindow
+            )
+        }
+        /// W1's watermark (m/s).
+        var speedWatermark: [WatermarkPoint] {
+            guard let window = watermarkWindow else { return [] }
+            return Watermark.points(speed.speedSamples, over: window, time: \.time, value: \.mps)
+        }
+        /// W5's watermark (rpm).
+        var cadenceWatermark: [WatermarkPoint] {
+            guard let window = watermarkWindow else { return [] }
+            return Watermark.points(cadence.cadenceSamples, over: window, time: \.time, value: \.rpm)
+        }
+        /// W4's watermark (bpm).
+        var hrWatermark: [WatermarkPoint] {
+            guard let window = watermarkWindow else { return [] }
+            return Watermark.points(hrSamples, over: window, time: \.time) { Double($0.bpm) }
+        }
+        /// W17's and W18's watermark (metres).
+        var altitudeWatermark: [WatermarkPoint] {
+            guard let window = watermarkWindow else { return [] }
+            return Watermark.points(altitudeSamples, over: window, time: \.time, value: \.meters)
         }
         var hrTrend: Trend { Trend(hrSamples) }
         /// Whether this second's reading is a measurement worth writing to the track,

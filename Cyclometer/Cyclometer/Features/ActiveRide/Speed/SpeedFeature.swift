@@ -33,8 +33,8 @@ struct SpeedFeature {
     /// A time window (not a sample count) because CoreLocation does not emit at
     /// a fixed rate.
     static let historyWindow: TimeInterval = 3600   // last hour
-    /// Maximum points plotted in the watermark; raw samples are downsampled to
-    /// this many buckets so memory and render stay bounded over a full hour.
+    /// Maximum points W2 plots per series; raw samples are downsampled to this many
+    /// buckets so memory and render stay bounded over a full hour.
     static let watermarkResolution = 60
     /// How long BLE speed may go without a reading before the display falls back to GPS
     /// (PRD §8.4). Driven by data, not connection state: a flapping link restarted the old
@@ -90,12 +90,6 @@ struct SpeedFeature {
         var lastFallbackBannerAt: Date? = nil
         /// Timestamped speed samples from the last `historyWindow` seconds.
         var speedSamples: [SpeedSample] = []
-
-        /// Watermark series (m/s), downsampled to ≤ `watermarkResolution` points
-        /// by averaging contiguous buckets.
-        var watermarkSamples: [Double] {
-            speedSamples.bucketAveraged(to: SpeedFeature.watermarkResolution).map(\.mps)
-        }
     }
 
     enum Action: Equatable {
