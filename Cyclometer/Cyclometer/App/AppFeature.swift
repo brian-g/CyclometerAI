@@ -39,6 +39,12 @@ struct AppFeature {
         @Presents var startSheet: StartSheetFeature.State? = nil
         /// S10, for the ride just finished (#249).
         @Presents var rideSummary: RideSummaryFeature.State? = nil
+        /// Prepared when a ride ends, then presented only after the dashboard's
+        /// full-screen cover has completed its dismissal.
+        var pendingRideSummary: RideSummaryFeature.State? = nil
+        /// Keeps the zoom transition's source alive while the dashboard finishes
+        /// collapsing after a ride ends. It is cleared with the cover's dismissal.
+        var dismissingRide: ActiveRideFeature.State? = nil
         var onboarding: OnboardingFeature.State? = nil
         var isDashboardPresented: Bool = false
         var rides: RidesFeature.State = RidesFeature.State()
@@ -81,6 +87,9 @@ struct AppFeature {
         case rideSummary(PresentationAction<RideSummaryFeature.Action>)
         case onboarding(OnboardingFeature.Action)
         case dashboardDismissed
+        /// The dashboard cover has finished dismissing. This serializes S10 behind
+        /// the zoom transition so UIKit does not lay out two presentations at once.
+        case dashboardDismissalCompleted
         case dashboardOpened
         case rides(RidesFeature.Action)
         case routes(RoutesFeature.Action)
@@ -258,12 +267,20 @@ struct AppFeature {
                 state.isDashboardPresented = false
                 return .none
 
+            case .dashboardDismissalCompleted:
+                state.dismissingRide = nil
+                guard let pendingRideSummary = state.pendingRideSummary else { return .none }
+                state.pendingRideSummary = nil
+                state.rideSummary = pendingRideSummary
+                return .none
+
             case .dashboardOpened:
                 if state.activeRide != nil { state.isDashboardPresented = true }
                 return .none
 
             case .activeRide(.finishAlert(.presented(.confirmFinish))):
                 let finishedRideId = state.activeRide?.rideId
+                let dismissingRide = state.activeRide
                 state.activeRide = nil
                 state.isDashboardPresented = false
                 // The Rides tab only loads on its own `.task`, which fires once when it
@@ -274,8 +291,15 @@ struct AppFeature {
                 // export → finalizeRide) is a separate effect racing this one, so the
                 // write is very often still in flight at this exact moment.
                 guard let finishedRideId else { return .none }
-                // S10 for the ride just ended (#249). It waits for that finalize itself.
-                state.rideSummary = RideSummaryFeature.State(rideId: finishedRideId)
+                // S10 for the ride just ended (#249). Keep it pending until the
+                // full-screen cover's zoom dismissal completes: presenting it in the
+                // same update as the cover's teardown can leave UIKit's safe-area
+                // layout cache stale on device.
+                state.pendingRideSummary = RideSummaryFeature.State(rideId: finishedRideId)
+                // Keep the matched transition source in the TabView until the cover
+                // has actually dismissed. Removing both in this transaction is what
+                // causes the root hosting view to retain the dashboard's top inset.
+                state.dismissingRide = dismissingRide
                 return .send(.rides(.rideFinished(finishedRideId)))
 
             case .rideSummary(.dismiss):

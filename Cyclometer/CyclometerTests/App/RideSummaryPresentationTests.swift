@@ -47,7 +47,7 @@ struct RideSummaryPresentationTests {
         return state
     }
 
-    @Test("confirming Finish presents S10 for the ride just ended, not the bare dashboard")
+    @Test("confirming Finish presents S10 after the dashboard dismisses")
     func finishPresentsSummary() async {
         let store = makeStore(persistenceClient: .mock())
         store.exhaustivity = .off
@@ -63,8 +63,16 @@ struct RideSummaryPresentationTests {
 
         #expect(store.state.activeRide == nil)
         #expect(store.state.isDashboardPresented == false)
+        #expect(store.state.rideSummary == nil)
+        #expect(store.state.pendingRideSummary?.rideId == rideId)
+        #expect(store.state.dismissingRide?.rideId == rideId)
+
+        await store.send(.dashboardDismissalCompleted)
+
         #expect(store.state.rideSummary?.rideId == rideId)
         #expect(store.state.rideSummary?.load == .waiting)
+        #expect(store.state.pendingRideSummary == nil)
+        #expect(store.state.dismissingRide == nil)
         await store.skipInFlightEffects()
     }
 

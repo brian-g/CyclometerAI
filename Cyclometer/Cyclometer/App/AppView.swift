@@ -7,12 +7,19 @@ struct AppView: View {
     /// The dashboard zooms out of the ride accessory and collapses back into it (#333).
     @Namespace private var dashboardZoom
 
-    /// The accessory strip shows only while a ride is active or paused (S05.3).
-    private var hasVisibleRide: Bool {
-        switch store.activeRide?.recordingState {
-        case .active, .paused: return true
-        default: return false
+    /// The accessory strip shows while a ride is active or paused (S05.3). When a
+    /// ride ends from the dashboard, its final appearance stays here only until the
+    /// zoom cover has completed its collapse, preserving the transition's source.
+    private var accessoryRide: ActiveRideFeature.State? {
+        if let activeRide = store.activeRide {
+            switch activeRide.recordingState {
+            case .active, .paused:
+                return activeRide
+            default:
+                return nil
+            }
         }
+        return store.dismissingRide
     }
 
     /// The dashboard's store while it's presented. `item:` rather than `isPresented:`
@@ -71,8 +78,8 @@ struct AppView: View {
             // ── Active Ride Accessory (Apple Music mini-player pattern) ──────────
             // Visible only while a ride is active or paused (S05.3), not during the
             // brief .idle window before `.task` starts the ride.
-            .tabViewBottomAccessory(isEnabled: hasVisibleRide) {
-                if let ride = store.activeRide, hasVisibleRide {
+            .tabViewBottomAccessory(isEnabled: accessoryRide != nil) {
+                if let ride = accessoryRide {
                     ActiveRideAccessoryView(
                         progress: ride.navigation.routeProgressFraction,
                         distanceMeters: ride.distanceMeters,
@@ -108,7 +115,9 @@ struct AppView: View {
             // the accessory, and a drag down anywhere collapses it back in. Hand-built
             // motion can't do this: moving a view re-flows its safe-area extension, so
             // the old overlay squished as it was dragged (#330).
-            .fullScreenCover(item: dashboardStore) { rideStore in
+            .fullScreenCover(item: dashboardStore, onDismiss: {
+                store.send(.dashboardDismissalCompleted)
+            }) { rideStore in
                 RideDashboardView(store: rideStore)
                     .navigationTransition(.zoom(sourceID: DashboardZoom.sourceID, in: dashboardZoom))
             }
