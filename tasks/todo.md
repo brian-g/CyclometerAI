@@ -691,3 +691,32 @@ Plan: `~/.claude/plans/velvet-chasing-cloud.md`. Branch `fix/365-safe-area-after
   binding (no effect); `onDismiss` as a "collapse done" signal (doesn't fire when S10 presents in the same
   update); keeping the accessory until the cover is gone (works, but the strip lingers after S10).
 - **Throwaway sim drive** (not committed): measures `navigationBars["Rides"]` and the large title's frame.
+## #406 — A resumed ride forgets it finished its route
+
+Persist `navigation.isRouteComplete` with the ride's route progress and restore it on resume (#197's path).
+
+- [x] `Ride.isRouteComplete` (declaration default), `RideSummaryUpdate`, `summarySnapshot`, `apply`
+- [x] Checkpoint writes it; `State(resuming:)` restores it
+- [x] Extend the #197 persistence, checkpoint, resume and migration tests
+- [x] Pipeline: a ride killed after finishing relaunches finished, and riding past the end isn't off route
+- [x] Pipeline: a ride killed mid-route still completes after the relaunch
+- [x] Revert check: the new pipeline test fails without the restore
+- [x] Full `CyclometerTests`
+
+### Review
+
+- **Fix.** `isRouteComplete` takes `routeProgressMeters`'s path: `Ride` (declaration default `false`, so older rows
+  migrate as unfinished), `RideSummaryUpdate`, `summarySnapshot`, `apply`, the checkpoint, and `State(resuming:)`.
+  `routeLoaded` doesn't reset it, so it survives `.task`'s reload. `nextManeuverIndex` comes back 0, but W9, its only
+  reader, shows a turn only with a distance, which is nil while complete. So nothing on screen changes.
+- **Tests.** The #197 persistence, checkpoint, resume and migration tests now cover the flag.
+  `finishedRideRelaunchesFinished` (pipeline: real store, GPX fixture) finishes 10 m short of the end, checkpoints, is
+  killed and relaunched, then rides 60 m+ past the end for six fixes. `killedRideRelaunchesStillNavigating` now also
+  checks that a ride resumed mid-route starts unfinished and still finishes (AC 3).
+- **Revert check** (restore line removed, fresh DerivedData, no compile cache): the new pipeline test failed on
+  `isRouteComplete`, `routeProgressFraction == 1` (twice) and `isOffRoute == false`. The issue's off-route claim
+  ([Likely; not reproduced]) is now reproduced. The resume unit test failed too; the mid-route test passed.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST EXECUTE
+  SUCCEEDED`, 1,866 unique cases, 0 failed. Those two alone: 49, 0 failed.
+- **Not done.** Completion is saved only at the next checkpoint (30 s) or pause, the same as progress. A kill within
+  that window after finishing still relaunches unfinished. Writing a checkpoint on completion would close it.
