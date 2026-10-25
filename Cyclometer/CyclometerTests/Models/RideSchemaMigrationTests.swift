@@ -292,6 +292,7 @@ struct RideSchemaMigrationTests {
             #expect(legacyRide.routeId == nil)
             #expect(legacyRide.routeName == nil)
             #expect(legacyRide.routeProgressMeters == nil)
+            #expect(!legacyRide.isRouteComplete)
 
             context.insert(Route(imported: ImportedRoute(
                 name: "Hanging Rock",
