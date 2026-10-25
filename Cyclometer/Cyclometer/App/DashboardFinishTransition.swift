@@ -27,7 +27,12 @@ private struct CoverTransition: UIViewRepresentable {
     /// From the Finish alert on. Cancel turns it off again, and the zoom comes back.
     let isFinishing: Bool
 
-    func makeUIView(context: Context) -> CoverView { CoverView() }
+    func makeUIView(context: Context) -> CoverView {
+        let view = CoverView()
+        // Takes no touches, as `AutoDimWindowBridge.WindowProbe`.
+        view.isUserInteractionEnabled = false
+        return view
+    }
 
     func updateUIView(_ view: CoverView, context: Context) {
         view.isFinishing = isFinishing
@@ -46,12 +51,12 @@ private struct CoverTransition: UIViewRepresentable {
             guard window != nil else { return }
             // An auto-end raises the Finish alert with the dashboard minimized, so it can be up
             // as the cover opens. SwiftUI sets the cover's transition while it opens, so the
-            // slide goes in once the opening is done.
-            if let coordinator = cover?.transitionCoordinator {
-                coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.apply() }
-            } else {
-                apply()
-            }
+            // slide goes in once the opening is done. A coordinator that can't queue the
+            // completion never calls it, so that case applies now.
+            let isQueued = cover?.transitionCoordinator?.animate(alongsideTransition: nil) { [weak self] _ in
+                self?.apply()
+            } ?? false
+            if !isQueued { apply() }
         }
 
         private func apply() {

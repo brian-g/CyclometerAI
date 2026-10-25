@@ -74,6 +74,18 @@ struct RideSummaryPresentationTests {
         await store.skipInFlightEffects()
     }
 
+    /// The cover's `onDismiss` fires for a drag down mid-ride too (#365). Only a Finish leaves S10
+    /// waiting on it.
+    @Test("minimizing the dashboard mid-ride presents no S10")
+    func minimizePresentsNoSummary() async {
+        let store = makeStore(
+            AppFeature.State(activeRide: ActiveRideFeature.State(recordingState: .active)),
+            persistenceClient: .mock()
+        )
+
+        await store.send(.dashboardDismissalCompleted)
+    }
+
     @Test("the Finish Ride button dismisses S10 and saves the rider's name, refreshes S14, then rewrites the GPX")
     func finishButtonSavesRename() async {
         let renamed = LockIsolated<[(UUID, String)]>([])
