@@ -751,3 +751,21 @@ nothing. Setting the cover's `preferredTransition = .coverVertical` after it's o
 - **Not covered.** Auto-end while the dashboard is minimized (the alert is up as the cover opens) is handled by
   re-applying after the opening, but no drive or device run has exercised it. No automated test covers the
   transition. The sim drives were throwaway.
+
+---
+
+## #439 — Extract NumericEntryRow and split SettingsView into section views
+
+Plan: `~/.claude/plans/streamed-wishing-sunbeam.md`. No visual, copy or behaviour change. Deviations from the issue's
+API sketch (approved): the row takes `text: Binding<String>` rather than `text` + `onChange`, and `errorMessage: Text?`
+so the wheel message (`LocalizedStringResource`) and the HR errors (`String`) keep their own line-wrapping (#430).
+Cadence Zones (#79, after the issue was filed) gets a section too.
+
+- [x] `NumericEntryRow` in `UI/Components/NumericEntryRow/`: owns its `@FocusState`, commit-on-blur and keyboard Done;
+      previews for placeholder, valid, error (light + dark)
+- [x] `SettingsView` is a thin `Form` of `GeneralSection`, `HRZonesSection`, `CadenceZonesSection`, `AboutSection`;
+      no `@FocusState`
+- [ ] `NumericEntryRowSnapshotTests`: placeholder, valid, error × light/dark; PNGs opened (written, not yet recorded)
+- [x] App and test target build
+- [ ] Brian runs it: one Done per field; Done and tap-elsewhere commit; out-of-range caption
+- [ ] `SettingsSnapshotTests` zero diffs (en, and `-testLanguage de`); `SettingsFeatureTests` unchanged; full suite
