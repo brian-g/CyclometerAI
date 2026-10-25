@@ -19,19 +19,25 @@ enum Watermark {
     /// Time buckets across the window: a minute each over a full hour.
     static let bucketCount = 60
 
-    /// A silence longer than this breaks the line instead of being drawn across. Longer than any
-    /// healthy source goes quiet — HealthKit heart rate lands in batches seconds apart, and a CSC
-    /// sensor's longest silence is a few seconds — and shorter than a stop with the sensors asleep.
+    /// A silence longer than this breaks the line instead of being drawn across. Longer than a live
+    /// sensor goes quiet — a CSC sensor's longest silence is a few seconds, and HealthKit heart rate
+    /// during a Watch workout lands in batches seconds apart — and shorter than a stop with the
+    /// sensors asleep. Without a Watch workout, HealthKit lands minutes apart, so each reading is a
+    /// run of its own; `lonePoints` draws those.
     static let gapSeconds: TimeInterval = 120
 
     /// The window every watermark plots over: from the oldest reading in any series to the newest,
     /// but never longer than `span`. The clamp is not redundant with each series' own trimming — a
     /// series only trims when it gains a reading, so a sensor gone quiet keeps readings older than
     /// `span`, and they would stretch everyone's axis. Nil when there are no readings at all.
+    ///
+    /// Readings are stamped with the wall clock, which can step back (a time sync), so a series' first
+    /// reading can be newer than every series' last. The window then closes up on `end` rather than
+    /// building a range whose bounds are reversed, which traps.
     static func window(oldest: [Date?], newest: [Date?], span: TimeInterval) -> ClosedRange<Date>? {
         guard let end = newest.compactMap({ $0 }).max(), let start = oldest.compactMap({ $0 }).min()
         else { return nil }
-        return max(start, end.addingTimeInterval(-span))...end
+        return min(max(start, end.addingTimeInterval(-span)), end)...end
     }
 
     /// `samples`, oldest first, as the means of `bucketCount` equal slices of `window` — keyed by run

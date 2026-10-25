@@ -36,6 +36,12 @@ struct WatermarkTests {
         #expect(window == at(1400)...at(5000))
     }
 
+    @Test("A clock stepped back mid-series closes the window on the newest reading rather than trapping")
+    func windowSurvivesClockStepBack() {
+        // One series, read at 100 s, then at 98 s once the clock stepped back 2 s.
+        #expect(Watermark.window(oldest: [at(100)], newest: [at(98)], span: 3600) == at(98)...at(98))
+    }
+
     // MARK: - Points
 
     @Test("Each point is its bucket's mean time and value")

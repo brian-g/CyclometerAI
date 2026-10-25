@@ -14,8 +14,10 @@ struct SpeedDashboardWidget: DashboardWidget {
     var body: some View {
         SpeedWidget(
             speed: store.speed.speedMPS,
-            speedHistory: store.speedWatermark,
-            watermarkWindow: store.watermarkWindow,
+            // The 1×1 draws no watermark. Reading it anyway would redraw the cell on every sensor's
+            // reading, since the shared window follows all of them.
+            speedHistory: size == .oneByOne ? [] : store.speedWatermark,
+            watermarkWindow: size == .oneByOne ? nil : store.watermarkWindow,
             activeSpeedSource: store.speed.activeSpeedSource,
             distance: store.distanceMeters,
             elapsed: store.elapsedSeconds,

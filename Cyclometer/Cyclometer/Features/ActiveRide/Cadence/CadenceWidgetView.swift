@@ -196,6 +196,8 @@ private struct CadenceHistoryChart: View {
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartLegend(.hidden)
+        // A lone reading's dot at the domain's edge would otherwise draw into the next cell.
+        .clipped()
     }
 }
 
