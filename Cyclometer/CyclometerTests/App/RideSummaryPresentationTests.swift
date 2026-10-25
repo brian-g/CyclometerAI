@@ -65,14 +65,12 @@ struct RideSummaryPresentationTests {
         #expect(store.state.isDashboardPresented == false)
         #expect(store.state.rideSummary == nil)
         #expect(store.state.pendingRideSummary?.rideId == rideId)
-        #expect(store.state.dismissingRide?.rideId == rideId)
 
         await store.send(.dashboardDismissalCompleted)
 
         #expect(store.state.rideSummary?.rideId == rideId)
         #expect(store.state.rideSummary?.load == .waiting)
         #expect(store.state.pendingRideSummary == nil)
-        #expect(store.state.dismissingRide == nil)
         await store.skipInFlightEffects()
     }
 

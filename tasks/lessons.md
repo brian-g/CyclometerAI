@@ -852,3 +852,20 @@ Before committing, check `git diff --numstat main -- tasks/todo.md`. It should s
 replaced the #411 section again. I wrongly called that "the convention", because main's own #411 commit had done the same.
 **Rule.** `lessons.md` is too long to skim the top of. At session start, `grep -n` it for every file and area the task
 will touch, `tasks/todo.md` always included.
+
+---
+
+## Ship what the probe measured, or measure what ships (2026-10-25, #365)
+
+**What happened.** A sim probe showed that setting the dashboard cover's `preferredTransition` to cover-vertical,
+from `AppView`'s `onChange`, made Finish slide down with the insets intact. I built the fix with a different
+trigger: a bridge inside the cover, whose input was read in the cover's content closure. I handed it over as
+[Likely] without re-running the probe. On device the top safe area broke again: "No, now the top safe area is
+intruded upon again." Re-running the probe on the shipped code showed why in one run. At the alert, SwiftUI re-ran
+the closure, re-applied `.navigationTransition(.zoom)`, and put a fresh zoom on the cover a frame after the bridge set
+the slide.
+
+**Rule.** When a fix rests on a probe, either ship the exact mechanism that was measured, or re-run the same drive on
+the shipped code before handing it over. Any difference in trigger, timing or lookup counts. Rate confidence for the
+code as built, not for the experiment. Where the probe checks a number (here, the Rides nav bar's y), re-running
+it is part of building the change. Brian still judges the look first.
