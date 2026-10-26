@@ -15,6 +15,7 @@ extension HealthKitClient {
         heartRateSamples: [Int] = [],
         onRequestAuthorization: @escaping @Sendable () async throws -> Void = { },
         onSaveWorkout: @escaping @Sendable (RideWorkout) async throws -> Void = { _ in },
+        onDeleteWorkout: @escaping @Sendable (UUID) async throws -> Void = { _ in },
         isWorkoutSharingAllowed: Bool = true
     ) -> HealthKitClient {
         HealthKitClient(
@@ -31,6 +32,7 @@ extension HealthKitClient {
                 }
             },
             saveWorkout: onSaveWorkout,
+            deleteWorkout: onDeleteWorkout,
             isWorkoutSharingAllowed: { isWorkoutSharingAllowed }
         )
     }

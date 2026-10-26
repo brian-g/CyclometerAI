@@ -283,4 +283,101 @@ struct RideHealthWorkoutTests {
         }
         #expect(writes.value == 1)
     }
+
+    // MARK: - Deleting (#452)
+
+    @Test("deleting a ride removes its Health workout first, then the ride")
+    func deleteRemovesWorkoutThenRide() async throws {
+        let id = UUID()
+        let calls = LockIsolated<[String]>([])
+
+        try await withDependencies {
+            $0.persistenceClient = .mock(onDeleteRide: { id in calls.withValue { $0.append("ride \(id)") } })
+            $0.healthKitClient = .mock(onDeleteWorkout: { id in calls.withValue { $0.append("workout \(id)") } })
+        } operation: {
+            try await RideHealthWorkout.deleteRide(id)
+        }
+
+        #expect(calls.value == ["workout \(id)", "ride \(id)"])
+    }
+
+    /// The other order would leave a workout in Health that no screen can reach.
+    @Test("a Health delete that throws leaves the ride undeleted, and the error reaches the caller")
+    func failedWorkoutDeleteKeepsRide() async {
+        let rideDeletes = LockIsolated(0)
+
+        await #expect(throws: WriteFailed.self) {
+            try await withDependencies {
+                $0.persistenceClient = .mock(onDeleteRide: { _ in rideDeletes.withValue { $0 += 1 } })
+                $0.healthKitClient = .mock(onDeleteWorkout: { _ in throw WriteFailed() })
+            } operation: {
+                try await RideHealthWorkout.deleteRide(UUID())
+            }
+        }
+        #expect(rideDeletes.value == 0)
+    }
+
+    /// Distance and energy have share access of their own: Workouts off doesn't mean nothing
+    /// of the ride's is left in Health. The client skips each type it can't delete.
+    @Test("without Workouts share access the delete still goes to Health, then deletes the ride")
+    func deleteWithoutWorkoutShareStillAsksHealth() async throws {
+        let id = UUID()
+        let workoutDeletes = LockIsolated(0)
+        let rideDeletes = LockIsolated<[UUID]>([])
+
+        try await withDependencies {
+            $0.persistenceClient = .mock(onDeleteRide: { id in rideDeletes.withValue { $0.append(id) } })
+            $0.healthKitClient = .mock(
+                onDeleteWorkout: { _ in workoutDeletes.withValue { $0 += 1 } },
+                isWorkoutSharingAllowed: false
+            )
+        } operation: {
+            try await RideHealthWorkout.deleteRide(id)
+        }
+
+        #expect(workoutDeletes.value == 1)
+        #expect(rideDeletes.value == [id])
+    }
+
+    /// Deleting from S10 right after Finish (#452) lands while that Finish's backfill can still
+    /// be writing the same ride's workout. The delete has to come after the write, or the write
+    /// would put back the workout the delete just removed.
+    @Test("a delete waits for a workout write in flight to finish")
+    func deleteWaitsForWriteInFlight() async throws {
+        let ride = Self.owed()
+        let owed = LockIsolated([ride])
+        let events = LockIsolated<[String]>([])
+        let (writeStarted, writeStartedContinuation) = AsyncStream<Void>.makeStream()
+        let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
+
+        try await withDependencies {
+            var client = Self.persistence(owed)
+            client.deleteRide = { id in
+                events.withValue { $0.append("ride deleted") }
+                owed.withValue { $0.removeAll { $0.rideId == id } }
+            }
+            $0.persistenceClient = client
+            $0.healthKitClient = .mock(
+                onSaveWorkout: { _ in
+                    events.withValue { $0.append("write started") }
+                    writeStartedContinuation.yield()
+                    for await _ in release { break }
+                    events.withValue { $0.append("write finished") }
+                },
+                onDeleteWorkout: { _ in events.withValue { $0.append("workout deleted") } }
+            )
+        } operation: {
+            async let backfill = RideHealthWorkout.backfill()
+            for await _ in writeStarted { break }
+            async let delete: Void = RideHealthWorkout.deleteRide(ride.rideId)
+            // Real time, as in `overlappingBackfillsRunOneAtATime`: a loaded machine can only
+            // make this pass wrongly, never fail wrongly.
+            try? await Task.sleep(for: .milliseconds(200))
+            #expect(events.value == ["write started"], "the delete ran while the write was in flight")
+            releaseContinuation.yield()
+            _ = await backfill
+            try await delete
+        }
+        #expect(events.value == ["write started", "write finished", "workout deleted", "ride deleted"])
+    }
 }

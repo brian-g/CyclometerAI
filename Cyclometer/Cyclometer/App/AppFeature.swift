@@ -317,6 +317,13 @@ struct AppFeature {
                     }
                 }
 
+            case .rideSummary(.presented(.delegate(.deleteRide))):
+                // A plain nil rather than `.dismiss`, so the rename above never runs for a ride
+                // being deleted. Deleted through the Rides tab, which drops its row at once (#452).
+                guard let id = state.rideSummary?.rideId else { return .none }
+                state.rideSummary = nil
+                return .send(.rides(.deleteRecordedRide(id)))
+
             case .rideSummary:
                 return .none
 
