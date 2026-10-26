@@ -56,6 +56,33 @@ enum RideHealthWorkout {
         return settled
     }
 
+    /// Deletes a ride and the workout written for it (#452), the one way any ride is deleted.
+    ///
+    /// Under the backfill's gate, so a delete never interleaves with a write of the same workout:
+    /// it waits out one in flight, and a backfill queued behind it reads the owed list afresh and
+    /// finds the ride gone. Health goes first, as the ride's row goes last in #261: a Health
+    /// delete that throws leaves the ride whole and in the list, to be deleted again, where the
+    /// other order would strand a workout no screen can reach. Without Workouts share access
+    /// the Health delete would throw: nothing was written, or access was revoked after it was and
+    /// the app can no longer remove it. Either way only the ride goes.
+    static func deleteRide(_ id: UUID) async throws {
+        @Dependency(\.healthWorkoutGate) var gate
+        @Dependency(\.persistenceClient) var persistenceClient
+        @Dependency(\.healthKitClient) var healthKitClient
+        // `run` doesn't throw, so the error comes out as a value.
+        try await gate.run { () async -> Result<Void, any Error> in
+            do {
+                if healthKitClient.isWorkoutSharingAllowed() {
+                    try await healthKitClient.deleteWorkout(id)
+                }
+                try await persistenceClient.deleteRide(id)
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
+        }.get()
+    }
+
     /// Writes one ride's workout, then marks it settled. `HealthKitClient.saveWorkout` returns
     /// normally both when it writes and when it skips another source's duplicate, and either
     /// way the ride is done with. A throw leaves it owed.
@@ -133,8 +160,8 @@ enum RideHealthWorkout {
     }
 
     /// A ride deleted since the owed list was read has nothing left to owe, so its missing row
-    /// is not a failure that should end the batch. Removing its workout from Health is the
-    /// deletion's decision, not this one's (#277).
+    /// is not a failure that should end the batch. Since #452 every delete waits on the gate in
+    /// `deleteRide`, so only a delete from outside it could land here.
     private static func settle(_ rideId: UUID) async throws {
         @Dependency(\.persistenceClient) var persistenceClient
         do {

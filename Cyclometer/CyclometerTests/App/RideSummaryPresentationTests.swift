@@ -13,7 +13,8 @@ struct RideSummaryPresentationTests {
 
     private func makeStore(
         _ state: AppFeature.State = AppFeature.State(),
-        persistenceClient: PersistenceClient
+        persistenceClient: PersistenceClient,
+        healthKitClient: HealthKitClient = .testValue
     ) -> TestStoreOf<AppFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -30,6 +31,7 @@ struct RideSummaryPresentationTests {
                 $0.locationClient = .testValue
                 $0.hapticsClient = .testValue
                 $0.persistenceClient = persistenceClient
+                $0.healthKitClient = healthKitClient
                 $0.defaultFileStorage = storage
             }
         }
@@ -151,5 +153,33 @@ struct RideSummaryPresentationTests {
             $0.rideSummary = nil
         }
         #expect(renamed.value == 0)
+    }
+
+    /// A rename typed before deleting must not be written to a ride that's going (#452).
+    @Test("confirming Delete closes S10 without a rename and deletes the ride and its workout through S14")
+    func confirmedDeleteDeletesRide() async {
+        let renamed = LockIsolated(0)
+        let deleted = LockIsolated<[String]>([])
+        var state = presenting(title: "Hill Repeats")
+        state.rideSummary?.alert = RideSummaryFeature.deleteAlert
+        let store = makeStore(
+            state,
+            persistenceClient: .mock(
+                onRenameRide: { _, _ in renamed.withValue { $0 += 1 } },
+                onDeleteRide: { id in deleted.withValue { $0.append("ride \(id)") } }
+            ),
+            healthKitClient: .mock(onDeleteWorkout: { id in deleted.withValue { $0.append("workout \(id)") } })
+        )
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.presented(.alert(.presented(.confirmDelete)))))
+        await store.receive(\.rideSummary.presented.delegate.deleteRide) {
+            $0.rideSummary = nil
+        }
+        await store.receive(\.rides.deleteRecordedRide)
+        await store.finish()
+
+        #expect(renamed.value == 0)
+        #expect(deleted.value == ["workout \(Self.rideId)", "ride \(Self.rideId)"])
     }
 }

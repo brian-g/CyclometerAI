@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-26 — §S10 gains a trash button to delete the ride just finished (#452). Deleting any ride, there or by §S14's swipe, now deletes its Health workout too, the decision #277 left open.  
 **Updated:** 2026-10-20 — §W5's zone bands are the rider's five cadence zones, drawn with or without readings, in the HR zone colours. §S12 gains a Cadence Zones section to set them (#79).  
 **Updated:** 2026-10-20 — §S12 wheel size is the inline picker as built, not a navigation row (#101 closed not planned, #84).  
 **Updated:** 2026-10-13 — §S12 gains Show Live Activity (#313).  
@@ -949,6 +950,7 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 - **Sensors** (#391), only when the ride flagged one. Each flagged device appears once (a combo CSC sensor lists both its roles), with "LOW BATTERY" or "UNRELIABLE CONNECTION — CHECK BATTERY OR MOUNT" under it. There is no mid-ride alert, because it would compete with radar alerts. See BLE.md §14.5
 - **Sync button** — Phase 2; taps present the Service Sync sheet (see below)
 - **Finish Ride** — a floating button that closes the sheet to the tabs, where the ride is in S14
+- **Delete** (#452) — a trash button at the leading end of the nav bar, not in the Design.sketch frame. By now the ride is saved and on its way to Apple Health, so this is how a rider throws it away. An alert confirms first: "Delete This Ride?", "It will be removed from Cyclometer and Apple Health. This can't be undone." Delete closes the sheet without saving the name, and deletes the ride as §S14's swipe does. Disabled until the stats have loaded: before then the ride's save hasn't landed
 
 > **Note:** The GPX file is written automatically at ride end and is available via the iOS Files app in the app's `Documents/Rides/` directory. No explicit export action is shown on this screen.
 
@@ -968,6 +970,8 @@ Presented as a `.sheet` when the rider taps Sync. Lists all enabled `ConnectedSe
 An outdoor cycling `HKWorkout` is written to Apple Health automatically once the ride is saved at ride end. No user action required, and the summary screen never waits on it — a failed write never costs the ride or the summary. The ride appears in the iOS Fitness app.
 
 - **Retried until it lands** (#277): a write that fails, or never ran because the app was killed or the ride was closed out at the next launch, is retried after the next Finish, and at the next launch unless that launch resumes an unfinished ride. A skipped duplicate counts as done. Without Workouts share access, nothing is attempted: rides wait and are written once it is allowed. A ride closed out as an orphan (a new ride was started before the unfinished one was found) gets no workout, since its end time is the relaunch
+
+- **Deleted with the ride** (#452), from S10 or §S14: the workout and the distance, energy and route samples written with it. It waits for any write of the same workout still in flight, and goes before the ride does, so a Health delete that fails leaves the ride in the list to delete again. Without Workouts share access only the ride goes: nothing was written, or the app can no longer remove it
 
 - **Consent** is the HealthKit share permission from S01, which the rider can revoke in iOS Settings → Health
 - **Duplicates:** if another source (e.g. an Apple Watch Outdoor Cycle) already recorded a cycling workout overlapping the ride, the write is skipped. A later rewrite of the same ride replaces its workout rather than adding one
@@ -1176,7 +1180,7 @@ but not used would be dead weight on the MVP settings screen. The section remain
 - Map thumbnail (56×56pt, rounded corners). A static image captured once after the ride ends, or at the next launch if that capture failed (#177), never a live map per row, which would be a performance issue: the recorded track in `brMapTravelPath` over a muted map with points of interest hidden, stored on the ride in light and dark. It is framed so the track fills the square, with its stroke 3pt from the edge on the longer axis (#280). A ride that barely moved is shown at least 200 m across. Place and road names can't be switched off in MapKit's standard style, so a few may show. A ride recorded before #177, or with no GPS track, shows a placeholder.
 - Ride name and date/time, relative within the previous week ("Today at 3:45 PM", "Yesterday at 2:05 PM" in the locale's own pattern; "Tuesday 9:10 AM"), absolute beyond it; the year shows only when it isn't the current one
 - Elapsed time and distance side by side on the trailing edge, each a small `HeroNumber` in the vertical layout with its label beneath (`time`, then the S12 distance unit), as Design.sketch draws them (#248). Time is hours and minutes without seconds ("0:45", "1:18"), truncated rather than rounded. The list is plain (edge to edge), as drawn, and so is S19's
-- Swipe actions: trailing — Delete (`brDestructive`). Leading — Sync (blue) and Make Route (green) are deferred: service sync is Phase 2 (§S10) and making a route from a ride has no issue yet (#248)
+- Swipe actions: trailing — Delete (`brDestructive`), which deletes the ride's Health workout too (§S10, #452). Leading — Sync (blue) and Make Route (green) are deferred: service sync is Phase 2 (§S10) and making a route from a ride has no issue yet (#248)
 
 ### Empty State
 

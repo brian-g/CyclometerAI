@@ -222,9 +222,10 @@ struct RidesFeature {
                 state.thumbnails[id] = nil
                 return .merge(
                     .cancel(id: CancelID.reload),
-                    .run { [persistenceClient] send in
+                    .run { send in
                         do {
-                            try await persistenceClient.deleteRide(id)
+                            // Its Health workout goes with it (#452).
+                            try await RideHealthWorkout.deleteRide(id)
                         } catch {
                             logger.error("deleteRide failed: \(error.localizedDescription, privacy: .public)")
                             await send(.deleteFailed)

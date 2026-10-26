@@ -817,3 +817,33 @@ caption in the row (OQ2/OQ3).
   1,888 unique cases, 0 failed. Those two alone: 50, 0 failed.
 - **Not covered.** Device behaviour. The Simulator may report a fixed location as no speed, which by design never
   arms the resume [Guessing], so walk it on a phone.
+
+---
+
+# #452 — Delete a just-finished ride from S10
+
+Plan: `~/.claude/plans/keen-bouncing-papert.md`. Decided with Brian: a trash button in the nav bar's leading slot, and
+one rule for every delete — the ride's Health workout goes with it, from S10 or S14's swipe.
+
+- [x] `HealthKitClient.deleteWorkout`: route, distance and energy samples, then the workout, by sync identifier; share-authorized types only
+- [x] `RideHealthWorkout.deleteRide`: under `healthWorkoutGate`; Health first, then `persistenceClient.deleteRide`
+- [x] `RidesFeature.deleteRecordedRide` goes through it
+- [x] `RideSummaryFeature`: `deleteTapped` (loaded only) → alert → `delegate(.deleteRide)`
+- [x] `RideSummaryView`: leading trash toolbar item, `cyDestructive`, disabled until loaded; "loading" preview
+- [x] `AppFeature`: delegate → `rideSummary = nil` (no rename) → `rides(.deleteRecordedRide)`
+- [x] UX.md §S10 / HKWorkout / §S14
+- [x] Tests written: RideHealthWorkout (order, failure, no share, gate), RideSummaryFeature, presentation, RidesFeature
+- [x] Brian runs it (sim/device): delete from S10; History swipe; Health shows no workout
+- [x] Unit tests
+
+## Review
+
+- **Build.** `build` and `build-for-testing` succeed; no new warnings in the touched files.
+- **Brian's run.** Looks good.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`: `TEST SUCCEEDED`, 1,890 unique cases, 0 failed, the
+  10 new ones among them. S10's three snapshot references passed unchanged. `PersistenceClientTests` alone: 47, 0 failed.
+- **Plan correction.** The plan said toolbar items don't render in iOS 27 snapshots. They do (memory
+  `snapshot-toolbar-not-rendered`). S10's snapshots render `RideSummaryList` without a `NavigationStack`, so the new item
+  still can't appear there and the references shouldn't move.
+- **[Likely], unverified.** `deleteObjects(of:predicate:)` succeeds with a count of 0 when nothing matches, e.g. a ride
+  whose workout was skipped as another source's duplicate. The live client logs the count for each type.

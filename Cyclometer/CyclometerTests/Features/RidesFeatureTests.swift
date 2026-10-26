@@ -62,22 +62,24 @@ struct RidesFeatureTests {
     }
 
     /// The swipe action's whole job (#261). Deleting is optimistic: the row leaves
-    /// state immediately, and persistence is told to let go of everything the ride owns.
-    @Test("Deleting a recorded ride removes it from state and asks persistence to delete it")
+    /// state immediately, and the ride's Health workout (#452), then everything persistence
+    /// holds for it, is let go of.
+    @Test("Deleting a recorded ride removes it from state and deletes its Health workout, then the ride")
     func deleteRecordedRideReachesPersistence() async {
-        let deleted = LockIsolated<[UUID]>([])
+        let deleted = LockIsolated<[String]>([])
         let ride = Self.summary()
         let store = TestStore(initialState: RidesFeature.State(rides: [ride])) {
             RidesFeature()
         } withDependencies: {
-            $0.persistenceClient = .mock(onDeleteRide: { id in deleted.withValue { $0.append(id) } })
+            $0.persistenceClient = .mock(onDeleteRide: { id in deleted.withValue { $0.append("ride \(id)") } })
+            $0.healthKitClient = .mock(onDeleteWorkout: { id in deleted.withValue { $0.append("workout \(id)") } })
         }
 
         await store.send(.deleteRecordedRide(ride.id)) {
             $0.rides = []
         }
 
-        #expect(deleted.value == [ride.id])
+        #expect(deleted.value == ["workout \(ride.id)", "ride \(ride.id)"])
     }
 
     /// The row is removed optimistically, so a failed write would otherwise leave the

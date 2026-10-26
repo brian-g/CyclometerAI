@@ -115,6 +115,20 @@ struct RideSummaryList<MapRow: View>: View {
         }
         .navigationTitle("Finish Ride")
         .navigationBarTitleDisplayMode(.inline)
+        // Not in the S10 frame (#452): the ride is already saved and in Health by now, so this is
+        // how a rider throws it away. Leading, away from Finish Ride, and behind an alert.
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(role: .destructive) {
+                    store.send(.deleteTapped)
+                } label: {
+                    Label("Delete Ride", systemImage: "trash")
+                }
+                // The app-wide tint beats the role otherwise, as in S14's swipe action.
+                .tint(Color.cyDestructive)
+                .disabled(store.load != .loaded)
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             Button("Finish Ride") { store.send(.finishTapped) }
                 .font(.headline)
@@ -216,6 +230,7 @@ struct HeartRateZonePie: View {
 /// their empty states, which is what a preview can produce without a recorded ride.
 @MainActor
 private func previewList(
+    load: RideSummaryFeature.State.Load = .loaded,
     pairedSensors: [PairedSensor] = [],
     sensorHealth: [UUID: SensorHealthReport] = [:],
     rideId: UUID = UUID()
@@ -229,7 +244,7 @@ private func previewList(
             $0.sensorHealth = sensorHealth
         }
         var state = RideSummaryFeature.State(rideId: rideId)
-        state.load = .loaded
+        state.load = load
         state.summary = RideListSummary(id: rideId, title: "", startedAt: .now,
                                         distanceMeters: 52_000, durationSeconds: 7_265)
         state.stats = RideStats(averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, averageCadenceRPM: 88)
@@ -243,6 +258,11 @@ private func previewList(
 
 #Preview("Ride Summary") {
     previewList()
+}
+
+/// Waiting on the ride's finalize: the stats show progress and Delete is disabled (#452).
+#Preview("Ride Summary — loading") {
+    previewList(load: .waiting)
 }
 
 /// The ride flagged a sagging speed sensor and a flapping radar (#391).
