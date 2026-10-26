@@ -378,11 +378,18 @@ extension HealthKitClient {
         ]
         do {
             for (type, identifier) in written where store.authorizationStatus(for: type) == .sharingAuthorized {
-                let count = try await store.deleteObjects(
-                    of: type,
-                    predicate: HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeySyncIdentifier,
-                                                           allowedValues: [identifier])
-                )
+                let count: Int
+                do {
+                    count = try await store.deleteObjects(
+                        of: type,
+                        predicate: HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeySyncIdentifier,
+                                                               allowedValues: [identifier])
+                    )
+                } catch let error as HKError where error.code == .errorNoData {
+                    // Nothing of this type to delete, which the property's contract says is no
+                    // failure. Otherwise a ride without energy (no body mass) could never be deleted.
+                    count = 0
+                }
                 logger.notice("deleted \(count, privacy: .public) \(type.identifier, privacy: .public) for ride \(rideId, privacy: .public)")
             }
         } catch {

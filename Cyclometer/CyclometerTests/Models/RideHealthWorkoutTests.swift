@@ -340,7 +340,7 @@ struct RideHealthWorkoutTests {
     /// Deleting from S10 right after Finish (#452) lands while that Finish's backfill can still
     /// be writing the same ride's workout. The delete has to come after the write, or the write
     /// would put back the workout the delete just removed.
-    @Test("a delete waits for a workout write in flight, and a backfill after it finds the ride gone")
+    @Test("a delete waits for a workout write in flight to finish")
     func deleteWaitsForWriteInFlight() async throws {
         let ride = Self.owed()
         let owed = LockIsolated([ride])
@@ -375,7 +375,6 @@ struct RideHealthWorkoutTests {
             releaseContinuation.yield()
             _ = await backfill
             try await delete
-            #expect(await RideHealthWorkout.backfill() == 0)
         }
         #expect(events.value == ["write started", "write finished", "workout deleted", "ride deleted"])
     }

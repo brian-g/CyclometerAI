@@ -77,9 +77,45 @@ struct RidesFeatureTests {
 
         await store.send(.deleteRecordedRide(ride.id)) {
             $0.rides = []
+            $0.deletingRideIds = [ride.id]
+        }
+        await store.receive(\.deleteFinished) {
+            $0.deletingRideIds = []
         }
 
         #expect(deleted.value == ["workout \(ride.id)", "ride \(ride.id)"])
+    }
+
+    /// The delete can wait behind a workout backfill (#452). A read that lands in that wait still
+    /// has the row, and must not put it back.
+    @Test("A reload while a delete is still running doesn't bring the row back")
+    func reloadDuringDeleteKeepsRowGone() async {
+        let ride = Self.summary()
+        let (deleteStarted, deleteStartedContinuation) = AsyncStream<Void>.makeStream()
+        let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
+        let store = TestStore(initialState: RidesFeature.State(rides: [ride])) {
+            RidesFeature()
+        } withDependencies: {
+            $0.persistenceClient = .mock(rides: [ride])
+            $0.healthKitClient = .mock(onDeleteWorkout: { _ in
+                deleteStartedContinuation.yield()
+                for await _ in release { break }
+            })
+        }
+
+        await store.send(.deleteRecordedRide(ride.id)) {
+            $0.rides = []
+            $0.deletingRideIds = [ride.id]
+        }
+        for await _ in deleteStarted { break }
+        await store.send(.reloadRides)
+        await store.receive(\.ridesResponse) {
+            $0.hasLoaded = true
+        }
+        releaseContinuation.yield()
+        await store.receive(\.deleteFinished) {
+            $0.deletingRideIds = []
+        }
     }
 
     /// The row is removed optimistically, so a failed write would otherwise leave the
@@ -97,6 +133,10 @@ struct RidesFeatureTests {
 
         await store.send(.deleteRecordedRide(ride.id)) {
             $0.rides = []
+            $0.deletingRideIds = [ride.id]
+        }
+        await store.receive(\.deleteFinished) {
+            $0.deletingRideIds = []
         }
         await store.receive(\.deleteFailed)
         await store.receive(\.reloadRides)
