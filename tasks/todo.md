@@ -765,7 +765,20 @@ Cadence Zones (#79, after the issue was filed) gets a section too.
       previews for placeholder, valid, error (light + dark)
 - [x] `SettingsView` is a thin `Form` of `GeneralSection`, `HRZonesSection`, `CadenceZonesSection`, `AboutSection`;
       no `@FocusState`
-- [ ] `NumericEntryRowSnapshotTests`: placeholder, valid, error × light/dark; PNGs opened (written, not yet recorded)
+- [x] `NumericEntryRowSnapshotTests`: placeholder, valid, error × light/dark; PNGs opened
 - [x] App and test target build
-- [ ] Brian runs it: one Done per field; Done and tap-elsewhere commit; out-of-range caption
-- [ ] `SettingsSnapshotTests` zero diffs (en, and `-testLanguage de`); `SettingsFeatureTests` unchanged; full suite
+- [x] Brian runs it ("never seen 2 done buttons"): one Done per field; Done and tap-elsewhere commit; out-of-range caption
+- [x] `SettingsSnapshotTests` zero diffs (en, and `-testLanguage de`); `SettingsFeatureTests` unchanged; full suite
+
+### Review
+
+- **Settings unchanged.** `SettingsSnapshotTests` 7/7 against the existing 14 references, with nothing rewritten on
+  disk, in en and under `-testLanguage de -testRegion DE`. `SettingsFeatureTests` 33/33, unchanged.
+- **New row.** `NumericEntryRowSnapshotTests` recorded 6 references, each opened (placeholder, valid, error; light and
+  dark), then 3/3 in en and de. Added to CI's snapshot skip list (review), like every other snapshot suite.
+- **Done.** Per-row keyboard toolbar gated on the row's own focus; Brian has never seen two Done buttons, so the
+  screen-level fallback wasn't needed.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST SUCCEEDED`,
+  1,884 unique cases, 0 failed. Those two alone: 50, 0 failed.
+- **Not covered.** Whether removing a focused row still sends a commit wasn't checked; it's a no-op either way (the
+  preset has already cleared the draft), and `SettingsFeature`'s comment no longer relies on it.
