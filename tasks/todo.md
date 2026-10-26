@@ -861,3 +861,22 @@ one rule for every delete — the ride's Health workout goes with it, from S10 o
   - A delete waits for a backfill's whole batch.
   - If the Health delete succeeds and the ride delete then throws, the ride comes back without its workout.
 - **Suite.** 1,891 unique cases, 0 failed. `PersistenceClientTests` alone: 47, 0 failed.
+
+---
+
+# #476 — A ride deleted mid-capture stops the map-thumbnail backfill
+
+Found in #452's review. `saveMapThumbnail` throws `rideNotFound` for a ride deleted while it rendered. The batch
+`break`s on it, so older rides missing a thumbnail wait until the next launch or Finish.
+
+- [x] `RideMapThumbnail.backfillNow`: a `rideNotFound` capture is logged and skipped, like `RideHealthWorkout.settle`;
+  any other error still ends the batch
+- [x] Test: `RideMapThumbnailTests.deletedRideDoesNotEndBatch`
+
+## Review
+
+- **Mutation check.** With the new `catch` removed, `deletedRideDoesNotEndBatch` fails. Restored, `RideMapThumbnailTests` passes 15/15.
+- **Suite.** On `main` after #452's merge: 1,892 unique cases, 0 failed. `PersistenceClientTests` alone: 47, 0 failed.
+  A plain `' passed'` count read 1,890 because two result lines were split by interleaved `IDESchemeActionSDKRecord`
+  log lines. Both cases had passed. Join lines before counting.
+- **Not covered.** Nothing visible to check on device: the bug only left placeholder rows until next launch.

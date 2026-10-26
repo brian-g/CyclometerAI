@@ -299,6 +299,32 @@ struct RideMapThumbnailTests {
         #expect(renders.value <= 2)
     }
 
+    /// #476: S10's Delete (#452) lands right after Finish, while that ride's capture renders.
+    @Test("a ride deleted while its thumbnail renders doesn't end the batch")
+    func deletedRideDoesNotEndBatch() async {
+        let deleted = UUID(), next = UUID()
+        let saved = LockIsolated<[UUID]>([])
+
+        let stored = await withDependencies {
+            var client = PersistenceClient.mock(
+                trackPoints: [deleted: Self.pausedRide, next: Self.pausedRide],
+                rideIdsMissingMapThumbnail: [deleted, next]
+            )
+            // The live actor's answer for a row that's gone.
+            client.saveRideMapThumbnail = { id, _, _ in
+                guard id != deleted else { throw PersistenceError.rideNotFound }
+                saved.withValue { $0.append(id) }
+            }
+            $0.persistenceClient = client
+            $0.mapSnapshotClient = MapSnapshotClient { _, _, _, _ in Data([1]) }
+        } operation: {
+            await RideMapThumbnail.backfill()
+        }
+
+        #expect(saved.value == [next])
+        #expect(stored == 1)
+    }
+
     /// #248 review: a Finish's capture landing while the launch backfill still renders must
     /// not render and save the same ride a second time.
     @Test("an overlapping backfill waits for the one running, then finds nothing left to do")
