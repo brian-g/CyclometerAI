@@ -1136,15 +1136,18 @@ struct ActiveRideFeature {
             case .speed:
                 // A pause auto-pause itself made is eligible to auto-resume. One the rider
                 // tapped needs a manual Resume (#102), unless Resume When Moving is on and the
-                // ride has stopped since (#267). The bar is `movingSpeedMPS`, not any speed at
-                // all: GPS noise alone used to clear `> 0` and undo the pause on the next
-                // sample (#262).
+                // ride has stopped since (#267) and no Finish alert is up: a rider at that alert
+                // didn't forget to resume, and walking the bike away from it must not restart the
+                // ride behind it. That also leaves an auto-end's pause, which always raises the
+                // alert, to the rider. The bar is `movingSpeedMPS`, not any speed at all: GPS
+                // noise alone used to clear `> 0` and undo the pause on the next sample (#262).
                 if state.recordingState == .paused, let speedMPS = state.speed.speedMPS,
                    speedMPS <= Self.stationarySpeedMPS {
                     state.hasStoppedWhilePaused = true
                 }
                 let canAutoResume = state.isAutoPaused
-                    || (state.preferences.isResumeWhenMovingEnabled && state.hasStoppedWhilePaused)
+                    || (state.preferences.isResumeWhenMovingEnabled && state.hasStoppedWhilePaused
+                        && state.finishAlert == nil)
                 var effect: Effect<Action> = .none
                 if canAutoResume, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
                     effect = resume(&state)

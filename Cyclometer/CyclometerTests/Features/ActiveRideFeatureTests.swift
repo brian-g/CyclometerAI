@@ -2308,6 +2308,26 @@ struct ActiveRideFeatureAutoPauseTests {
         #expect(store.state.hasStoppedWhilePaused == false)
         #expect(store.state.recordingState == .paused)
     }
+
+    /// A rider at the Finish alert didn't forget to resume: walking the bike away from it must not
+    /// restart the ride behind the alert. Cancel hands the pause back to Resume When Moving.
+    @Test("With Resume When Moving, a pending Finish alert holds a manual pause")
+    func finishAlertHoldsAManualPause() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .paused),
+            isResumeWhenMovingEnabled: true
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(0)))
+        await store.send(.finishTapped)
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
+        #expect(store.state.recordingState == .paused)
+
+        await store.send(.finishAlert(.dismiss))
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
+        #expect(store.state.recordingState == .active)
+    }
 }
 
 @MainActor
