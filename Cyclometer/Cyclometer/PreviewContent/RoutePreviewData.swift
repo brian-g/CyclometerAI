@@ -82,6 +82,15 @@ extension RouteSummary {
             importedDaysAgo: 25
         )
     ]
+
+    /// A paragraph of the kind the on-device model writes for "Summit Climb" (#203): no figures,
+    /// one sentence a section, and its climbs where `previewRoutes[1]` has them, early on and
+    /// midway. Nothing about what follows: this fixture's polyline only ever rises. Not in
+    /// `previewRoutes` itself, so the S19 and S20 references recorded before #203 still pin a
+    /// route without one.
+    static let previewNarrative = "It's an easy, level start. "
+        + "Early on, the road settles into a steady, moderate climb. "
+        + "Midway comes the real test, a long and sustained ascent."
 }
 
 /// Geometry for `RouteSummary.previewRoutes`.

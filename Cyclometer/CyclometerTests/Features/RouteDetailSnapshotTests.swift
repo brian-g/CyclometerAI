@@ -113,6 +113,14 @@ final class RouteDetailSnapshotTests: XCTestCase {
         assertBothSchemes(screen(RouteSummary.previewRoutes[1], rides: []), named: "elevation-no-rides")
     }
 
+    /// "Summit Climb" once the on-device model has written its paragraph (#203), under the
+    /// summary line. Without one, the section is `testWithElevationNeverRidden`'s, unchanged.
+    func testWithElevationAndNarrative() {
+        var route = RouteSummary.previewRoutes[1]
+        route.narrative = RouteSummary.previewNarrative
+        assertBothSchemes(screen(route, rides: []), named: "elevation-narrative")
+    }
+
     /// "Coffee Spin": a GPX with no `<ele>`, so the whole elevation section is absent.
     func testWithoutElevationWithPreviousRides() {
         assertBothSchemes(screen(RouteSummary.previewRoutes[3], rides: RouteRideSummary.previewRides),

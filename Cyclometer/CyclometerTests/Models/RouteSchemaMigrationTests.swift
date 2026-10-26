@@ -95,6 +95,8 @@ struct RouteSchemaMigrationTests {
             #expect(routes.allSatisfy { $0.terrainData == nil && $0.surfaceData == nil })
             // Nor the map thumbnail #273 added, which `RouteMapThumbnail.backfill` renders later.
             #expect(routes.allSatisfy { $0.mapThumbnailLight == nil && $0.mapThumbnailDark == nil })
+            // #203's column, also new to a store this old.
+            #expect(routes.allSatisfy { $0.terrainNarrative == nil })
             #expect(routes.contains { $0.name == "Pilot Mountain" && $0.coordinates == Self.hilly.coordinates })
         }
     }

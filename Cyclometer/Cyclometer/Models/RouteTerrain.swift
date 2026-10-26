@@ -140,15 +140,11 @@ enum RouteTerrain {
     /// whether a route has elevation at all.
     static func analyze(_ coordinates: [RouteCoordinate]) -> RouteTerrainAnalysis? {
         let total = RouteGeometry.distanceMeters(coordinates)
-        guard total > 0, let gain = RouteGeometry.elevationGainLoss(coordinates)?.gain else { return nil }
+        guard let gain = RouteGeometry.elevationGainLoss(coordinates)?.gain,
+              let profile = gradeProfile(coordinates)
+        else { return nil }
+        let (raw, elevation, grades, spacing) = profile
 
-        let count = Int(total / sampleSpacingMeters) + 1
-        guard let raw = RouteGeometry.elevationProfile(coordinates, sampleCount: count) else { return nil }
-        // `elevationProfile` never returns fewer than two samples, so this never divides by zero.
-        let spacing = total / Double(raw.count - 1)
-
-        let elevation = movingAverage(raw, halfWindow: Int((smoothingWindowMeters / 2 / spacing).rounded()))
-        let grades = grades(elevation, spacing: spacing)
         let rises = rises(elevation, tolerance: climbDipToleranceMeters)
             .map { trimmed($0, elevation, spacing: spacing) }
 
@@ -207,6 +203,24 @@ enum RouteTerrain {
     }
 
     // MARK: - Steps
+
+    /// The route's elevation resampled to `sampleSpacingMeters` (`raw`), smoothed over
+    /// `smoothingWindowMeters` (`elevation`), and the grade at each smoothed sample. One pipeline
+    /// for `analyze` and the narrative's grade histogram (#203), so the two cannot disagree about
+    /// how steep the road is. Nil for a route with no length or no elevation.
+    static func gradeProfile(
+        _ coordinates: [RouteCoordinate]
+    ) -> (raw: [Double], elevation: [Double], grades: [Double], spacing: Double)? {
+        let total = RouteGeometry.distanceMeters(coordinates)
+        guard total > 0 else { return nil }
+        let count = Int(total / sampleSpacingMeters) + 1
+        guard let raw = RouteGeometry.elevationProfile(coordinates, sampleCount: count) else { return nil }
+        // `elevationProfile` never returns fewer than two samples, so this never divides by zero.
+        let spacing = total / Double(raw.count - 1)
+
+        let elevation = movingAverage(raw, halfWindow: Int((smoothingWindowMeters / 2 / spacing).rounded()))
+        return (raw, elevation, grades(elevation, spacing: spacing), spacing)
+    }
 
     /// `rise` with every step shallower than `riseEndTrimGradePercent` taken off each end.
     static func trimmed(_ rise: (bottom: Int, top: Int), _ elevation: [Double],

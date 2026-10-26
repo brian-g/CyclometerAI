@@ -18,6 +18,13 @@ struct RouteSummarySection: View {
             Section("Summary") {
                 Text(RouteSummaryLine.text(for: summary, unit: unit))
                     .font(.headline)
+                // The on-device paragraph (#203). Absent without Apple Intelligence, and the
+                // section reads exactly as it did before.
+                if let narrative = summary.narrative {
+                    Text(narrative)
+                        .font(.subheadline)
+                        .foregroundStyle(Color.cyTextSecondary)
+                }
                 if let terrain = summary.terrain {
                     LabeledContent("Character", value: terrain.character.label)
                     LabeledContent("Max Grade", value: Self.percent(terrain.maxGradePercent))
@@ -55,4 +62,32 @@ struct RouteSummarySection: View {
             .map { "\(percent($0.fraction * 100)) \($0.surface.rawValue)" }
             .joined(separator: " · ")
     }
+}
+
+// MARK: - Previews
+
+private func summaryPreview(_ summary: RouteSummary, unit: UnitSystem = .imperial) -> some View {
+    List { RouteSummarySection(summary: summary, unit: unit) }
+}
+
+#Preview("Narrative") {
+    var route = RouteSummary.previewRoutes[1]
+    route.narrative = RouteSummary.previewNarrative
+    return summaryPreview(route)
+}
+
+#Preview("Narrative — metric") {
+    var route = RouteSummary.previewRoutes[1]
+    route.narrative = RouteSummary.previewNarrative
+    return summaryPreview(route, unit: .metric)
+}
+
+/// A device without Apple Intelligence, or a narrative not written yet.
+#Preview("No narrative") {
+    summaryPreview(RouteSummary.previewRoutes[1])
+}
+
+/// A flat route, with no climbs and no surface looked up yet.
+#Preview("Flat, no surface") {
+    summaryPreview(RouteSummary.previewRoutes[2])
 }

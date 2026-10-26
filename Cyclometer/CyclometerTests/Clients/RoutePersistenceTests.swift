@@ -156,6 +156,31 @@ struct RoutePersistenceTests {
         #expect(try await client.fetchRoutes().isEmpty)
     }
 
+    // MARK: Narrative (#203)
+
+    @Test("a saved narrative is on the route from then on, and nil before it")
+    func narrativeRoundTrips() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let summary = try await client.importRoute(Self.climbingRoute())
+        #expect(summary.narrative == nil)
+        let narrative = "A steady start, then the road climbs hard through the middle."
+
+        try await client.saveRouteNarrative(summary.id, narrative)
+
+        #expect(try await client.fetchRoutes().first?.narrative == narrative)
+        #expect(try await client.fetchRoute(summary.id)?.summary.narrative == narrative)
+    }
+
+    @Test("saving a narrative for a route deleted while it was written is a no-op")
+    func narrativeForADeletedRouteIsANoOp() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let summary = try await client.importRoute(Self.climbingRoute())
+        try await client.deleteRoute(summary.id)
+
+        try await client.saveRouteNarrative(summary.id, "Never read back.")
+        #expect(try await client.fetchRoutes().isEmpty)
+    }
+
     // MARK: Map thumbnail (#273)
 
     @Test("a saved map thumbnail reads back, both appearances; nil before it and for an unknown id")

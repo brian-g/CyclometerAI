@@ -56,6 +56,11 @@ final class Route {
     /// be long after import — the import never waits on the network.
     var surfaceData: Data?
 
+    /// S20's paragraph from the on-device model (#203), number-free (`RouteNarrative.validated`).
+    /// Nil until it is written, which needs Apple Intelligence and may be long after import, and
+    /// for good on a route with no terrain analysis. Optional, so an older store migrates lightly.
+    var terrainNarrative: String?
+
     var terrain: RouteTerrainAnalysis? {
         terrainData.flatMap { try? JSONDecoder().decode(RouteTerrainAnalysis.self, from: $0) }
     }
@@ -126,6 +131,7 @@ final class Route {
 
         self.terrainData = summary.terrain.flatMap { try? JSONEncoder().encode($0) }
         self.surfaceData = nil
+        self.terrainNarrative = nil
 
         // The stored blobs directly, not the computed accessors above: those are
         // unavailable until every stored property is initialised.
@@ -158,7 +164,8 @@ extension Route {
                 maxLongitude: maxLongitude
             ),
             terrain: terrain,
-            surface: surface
+            surface: surface,
+            narrative: terrainNarrative
         )
     }
 
@@ -195,6 +202,8 @@ struct RouteSummary: Sendable, Equatable, Identifiable {
     var terrain: RouteTerrainAnalysis?
     /// Nil until OpenStreetMap has been asked successfully (#252).
     var surface: RouteSurfaceBreakdown?
+    /// Nil until the on-device model has written it (#203).
+    var narrative: String? = nil
 }
 
 extension RouteSummary {
