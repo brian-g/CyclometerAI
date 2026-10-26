@@ -847,3 +847,17 @@ one rule for every delete — the ride's Health workout goes with it, from S10 o
   still can't appear there and the references shouldn't move.
 - **[Likely], unverified.** `deleteObjects(of:predicate:)` succeeds with a count of 0 when nothing matches, e.g. a ride
   whose workout was skipped as another source's duplicate. The live client logs the count for each type.
+
+### #452 review (`/code-review xhigh --fix`)
+
+- **Fixed by the review, committed as `5d71e6c`.** S14 filters rides that are mid-delete out of every read, because a delete can wait behind a
+  backfill. `deleteWorkout` treats `errorNoData` as 0 deleted. The gate comment is corrected, and an always-true check
+  was dropped.
+- **Fixed after, at Brian's call.** `deleteRide` no longer checks Workouts share before Health. The client already checks
+  share access type by type, so distance and energy samples go even with Workouts off.
+- **Skipped.**
+  - The S10 delete can race that ride's thumbnail capture, which then stops the batch. History deletes already had
+    this race, and the fix belongs in `RideMapThumbnail.backfill`.
+  - A delete waits for a backfill's whole batch.
+  - If the Health delete succeeds and the ride delete then throws, the ride comes back without its workout.
+- **Suite.** 1,891 unique cases, 0 failed. `PersistenceClientTests` alone: 47, 0 failed.

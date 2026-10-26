@@ -63,9 +63,8 @@ enum RideHealthWorkout {
     /// a backfill queued behind it reads the owed list afresh and finds the ride gone. Health goes
     /// first, as the ride's row goes last in #261: a Health delete that throws leaves the ride
     /// whole and in the list, to be deleted again, where the other order would strand a workout
-    /// no screen can reach. Without Workouts share access
-    /// the Health delete would throw: nothing was written, or access was revoked after it was and
-    /// the app can no longer remove it. Either way only the ride goes.
+    /// no screen can reach. Share access is the client's to check, type by type: a rider who
+    /// turned Workouts off can still have distance and energy samples the app may delete.
     static func deleteRide(_ id: UUID) async throws {
         @Dependency(\.healthWorkoutGate) var gate
         @Dependency(\.persistenceClient) var persistenceClient
@@ -73,9 +72,7 @@ enum RideHealthWorkout {
         // `run` doesn't throw, so the error comes out as a value.
         try await gate.run { () async -> Result<Void, any Error> in
             do {
-                if healthKitClient.isWorkoutSharingAllowed() {
-                    try await healthKitClient.deleteWorkout(id)
-                }
+                try await healthKitClient.deleteWorkout(id)
                 try await persistenceClient.deleteRide(id)
                 return .success(())
             } catch {

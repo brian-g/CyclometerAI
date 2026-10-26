@@ -317,8 +317,10 @@ struct RideHealthWorkoutTests {
         #expect(rideDeletes.value == 0)
     }
 
-    @Test("without Workouts share access the ride is deleted without touching Health")
-    func deleteWithoutShareAccessSkipsHealth() async throws {
+    /// Distance and energy have share access of their own: Workouts off doesn't mean nothing
+    /// of the ride's is left in Health. The client skips each type it can't delete.
+    @Test("without Workouts share access the delete still goes to Health, then deletes the ride")
+    func deleteWithoutWorkoutShareStillAsksHealth() async throws {
         let id = UUID()
         let workoutDeletes = LockIsolated(0)
         let rideDeletes = LockIsolated<[UUID]>([])
@@ -333,7 +335,7 @@ struct RideHealthWorkoutTests {
             try await RideHealthWorkout.deleteRide(id)
         }
 
-        #expect(workoutDeletes.value == 0)
+        #expect(workoutDeletes.value == 1)
         #expect(rideDeletes.value == [id])
     }
 
