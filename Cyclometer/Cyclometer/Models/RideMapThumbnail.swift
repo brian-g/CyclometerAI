@@ -89,8 +89,9 @@ enum RideMapThumbnail {
     /// trailhead, or suspended mid-render, is then a thumbnail late rather than never.
     ///
     /// A ride with nothing to draw is skipped and looked at again next time, which is one
-    /// empty track fetch. The first failed render ends the batch: offline, every ride would
-    /// fail the same way, each one waiting on the network first.
+    /// empty track fetch. So is a ride deleted while it rendered (#476): it has nothing left to
+    /// store. The first failed render ends the batch: offline, every ride would fail the same
+    /// way, each one waiting on the network first.
     ///
     /// One at a time (#248 review): a Finish can land while the launch backfill still waits on
     /// the network, and both would render and save the same rides. The later one waits, then
@@ -113,6 +114,9 @@ enum RideMapThumbnail {
         for rideId in rideIds {
             do {
                 if try await capture(rideId: rideId) { stored += 1 }
+            } catch PersistenceError.rideNotFound {
+                // S10's Delete lands right after Finish, while that ride is the one rendering.
+                logger.notice("ride \(rideId, privacy: .public) was deleted during its map thumbnail capture")
             } catch {
                 logger.error("Map thumbnail capture failed for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — retried next launch")
                 break
