@@ -76,6 +76,8 @@ struct SettingsFeature {
         /// `AppFeature`, which runs the dim countdown, off the same document (#110).
         var preferredUnit: UnitSystem { preferences.preferredUnit }
         var isAutoPauseEnabled: Bool { preferences.isAutoPauseEnabled }
+        /// Read by `ActiveRideFeature` on every speed reading (#267).
+        var isResumeWhenMovingEnabled: Bool { preferences.isResumeWhenMovingEnabled }
         var isAutoDimEnabled: Bool { preferences.isAutoDimEnabled }
         /// Read by S10 when it names a ride (#283).
         var isPlaceNameLookupEnabled: Bool { preferences.isPlaceNameLookupEnabled }
@@ -188,6 +190,7 @@ struct SettingsFeature {
         case customCircumferenceChanged(String)
         case customCircumferenceCommitted
         case autoPauseChanged(Bool)
+        case resumeWhenMovingChanged(Bool)
         case autoDimChanged(Bool)
         case placeNameLookupChanged(Bool)
         case liveActivityChanged(Bool)
@@ -263,6 +266,9 @@ struct SettingsFeature {
                 return apply(mm, to: &state)
             case .autoPauseChanged(let isOn):
                 state.$preferences.withLock { $0.isAutoPauseEnabled = isOn }
+                return .none
+            case .resumeWhenMovingChanged(let isOn):
+                state.$preferences.withLock { $0.isResumeWhenMovingEnabled = isOn }
                 return .none
             case .autoDimChanged(let isOn):
                 state.$preferences.withLock { $0.isAutoDimEnabled = isOn }

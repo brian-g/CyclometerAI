@@ -244,6 +244,22 @@ struct SettingsFeatureTests {
         #expect(store.state.isAutoPauseEnabled)
     }
 
+    @Test("Resume When Moving toggles persist (#267)")
+    func resumeWhenMovingTogglePersists() async {
+        let store = makeStore()
+        #expect(store.state.isResumeWhenMovingEnabled == false)
+
+        await store.send(.resumeWhenMovingChanged(true)) {
+            $0.$preferences.withLock { $0.isResumeWhenMovingEnabled = true }
+        }
+        #expect(store.state.isResumeWhenMovingEnabled)
+
+        await store.send(.resumeWhenMovingChanged(false)) {
+            $0.$preferences.withLock { $0.isResumeWhenMovingEnabled = false }
+        }
+        #expect(store.state.isResumeWhenMovingEnabled == false)
+    }
+
     @Test("Selecting a unit persists it")
     func unitSelectionPersists() async {
         let store = makeStore()

@@ -1970,7 +1970,7 @@ struct ActiveRideFeatureStateMachineTests {
 /// S12/#102: auto-pause fires at a much shorter zero-speed threshold than
 /// auto-end, so a rider stopped at a light pauses rather than waiting five
 /// minutes. Only a pause auto-pause itself triggered is eligible to auto-resume —
-/// a manual Pause tap always requires a manual Resume.
+/// a manual Pause tap requires a manual Resume unless Resume When Moving is on (#267).
 @MainActor
 @Suite("ActiveRideFeature — auto-pause")
 struct ActiveRideFeatureAutoPauseTests {
@@ -1981,6 +1981,7 @@ struct ActiveRideFeatureAutoPauseTests {
     private func makeStore(
         state: @autoclosure () -> ActiveRideFeature.State,
         isAutoPauseEnabled: Bool = true,
+        isResumeWhenMovingEnabled: Bool = false,
         clock: TestClock<Duration> = TestClock()
     ) -> TestStoreOf<ActiveRideFeature> {
         let storage = FileStorage.inMemory
@@ -1988,7 +1989,10 @@ struct ActiveRideFeatureAutoPauseTests {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.isAutoPauseEnabled = isAutoPauseEnabled }
+            $preferences.withLock {
+                $0.isAutoPauseEnabled = isAutoPauseEnabled
+                $0.isResumeWhenMovingEnabled = isResumeWhenMovingEnabled
+            }
             return TestStore(initialState: state()) {
                 ActiveRideFeature()
             } withDependencies: {
@@ -2167,14 +2171,16 @@ struct ActiveRideFeatureAutoPauseTests {
         }
     }
 
-    @Test("Motion resumes a ride that auto-pause itself paused")
-    func motionResumesAnAutoPausedRide() async {
+    @Test("Motion resumes a ride that auto-pause itself paused, whatever Resume When Moving says",
+          arguments: [false, true])
+    func motionResumesAnAutoPausedRide(isResumeWhenMovingEnabled: Bool) async {
         let store = makeStore(
             state: ActiveRideFeature.State(
                 recordingState: .paused,
                 zeroSpeedSeconds: ActiveRideFeature.autoPauseZeroSpeedSeconds,
                 isAutoPaused: true
-            )
+            ),
+            isResumeWhenMovingEnabled: isResumeWhenMovingEnabled
         )
         store.exhaustivity = .off
 
@@ -2228,6 +2234,99 @@ struct ActiveRideFeatureAutoPauseTests {
 
         #expect(store.state.recordingState == .paused)
         #expect(store.state.isAutoPaused == false)
+    }
+
+    /// With the preference off, even a stop and a ride-off leave a manual pause alone.
+    @Test("Without Resume When Moving, a manual pause holds through a stop and a ride-off")
+    func manualPauseHoldsWithoutThePreferenceAfterAStop() async {
+        let store = makeStore(state: ActiveRideFeature.State(recordingState: .paused))
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(0)))
+        await store.send(.speed(.gpsSpeedReceived(5.0)))
+
+        #expect(store.state.recordingState == .paused)
+    }
+
+    /// #267's case: the rider paused at the café and rode off without tapping Resume. Goes through
+    /// the same `resume` as `.resumeTapped`, so the map breaks at the stop (#263).
+    @Test("With Resume When Moving, a manual pause resumes once the rider stops and rides off")
+    func resumeWhenMovingResumesAManualPause() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .paused),
+            isResumeWhenMovingEnabled: true
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(0)))
+        #expect(store.state.recordingState == .paused)
+        #expect(store.state.hasStoppedWhilePaused)
+
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
+        await store.receive(\.trackRecorder.resumeRecording)
+
+        #expect(store.state.recordingState == .active)
+        #expect(store.state.hasStoppedWhilePaused == false)
+        #expect(store.state.trackSegmentIndex == 1)
+        #expect(store.state.trackSegments.count == 2)
+    }
+
+    /// The reading after a Pause tapped while coasting is still above `movingSpeedMPS`. Without the
+    /// stop in between, it would undo the pause a second after the tap.
+    @Test("With Resume When Moving, a Pause tapped while coasting holds until the ride has stopped")
+    func pauseTappedWhileCoastingHolds() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active),
+            isResumeWhenMovingEnabled: true
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(3.0)))
+        await store.send(.pauseTapped)
+        await store.send(.speed(.gpsSpeedReceived(3.0)))
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.stationarySpeedMPS + 0.1)))
+        #expect(store.state.recordingState == .paused)
+
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.stationarySpeedMPS)))
+        await store.send(.speed(.gpsSpeedReceived(3.0)))
+        #expect(store.state.recordingState == .active)
+    }
+
+    /// A negative GPS speed is an invalid fix and clears the displayed speed to nil. That says
+    /// nothing about whether the rider stopped, so it must not count as the stop.
+    @Test("An invalid GPS fix is not a stop")
+    func invalidFixDoesNotCountAsAStop() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .paused),
+            isResumeWhenMovingEnabled: true
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(-1)))
+        await store.send(.speed(.gpsSpeedReceived(5.0)))
+
+        #expect(store.state.hasStoppedWhilePaused == false)
+        #expect(store.state.recordingState == .paused)
+    }
+
+    /// A rider at the Finish alert didn't forget to resume: walking the bike away from it must not
+    /// restart the ride behind the alert. Cancel hands the pause back to Resume When Moving.
+    @Test("With Resume When Moving, a pending Finish alert holds a manual pause")
+    func finishAlertHoldsAManualPause() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .paused),
+            isResumeWhenMovingEnabled: true
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(0)))
+        await store.send(.finishTapped)
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
+        #expect(store.state.recordingState == .paused)
+
+        await store.send(.finishAlert(.dismiss))
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
+        #expect(store.state.recordingState == .active)
     }
 }
 
