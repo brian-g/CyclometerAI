@@ -751,3 +751,34 @@ nothing. Setting the cover's `preferredTransition = .coverVertical` after it's o
 - **Not covered.** Auto-end while the dashboard is minimized (the alert is up as the cover opens) is handled by
   re-applying after the opening, but no drive or device run has exercised it. No automated test covers the
   transition. The sim drives were throwaway.
+
+---
+
+## #439 — Extract NumericEntryRow and split SettingsView into section views
+
+Plan: `~/.claude/plans/streamed-wishing-sunbeam.md`. No visual, copy or behaviour change. Deviations from the issue's
+API sketch (approved): the row takes `text: Binding<String>` rather than `text` + `onChange`, and `errorMessage: Text?`
+so the wheel message (`LocalizedStringResource`) and the HR errors (`String`) keep their own line-wrapping (#430).
+Cadence Zones (#79, after the issue was filed) gets a section too.
+
+- [x] `NumericEntryRow` in `UI/Components/NumericEntryRow/`: owns its `@FocusState`, commit-on-blur and keyboard Done;
+      previews for placeholder, valid, error (light + dark)
+- [x] `SettingsView` is a thin `Form` of `GeneralSection`, `HRZonesSection`, `CadenceZonesSection`, `AboutSection`;
+      no `@FocusState`
+- [x] `NumericEntryRowSnapshotTests`: placeholder, valid, error × light/dark; PNGs opened
+- [x] App and test target build
+- [x] Brian runs it ("never seen 2 done buttons"): one Done per field; Done and tap-elsewhere commit; out-of-range caption
+- [x] `SettingsSnapshotTests` zero diffs (en, and `-testLanguage de`); `SettingsFeatureTests` unchanged; full suite
+
+### Review
+
+- **Settings unchanged.** `SettingsSnapshotTests` 7/7 against the existing 14 references, with nothing rewritten on
+  disk, in en and under `-testLanguage de -testRegion DE`. `SettingsFeatureTests` 33/33, unchanged.
+- **New row.** `NumericEntryRowSnapshotTests` recorded 6 references, each opened (placeholder, valid, error; light and
+  dark), then 3/3 in en and de. Added to CI's snapshot skip list (review), like every other snapshot suite.
+- **Done.** Per-row keyboard toolbar gated on the row's own focus; Brian has never seen two Done buttons, so the
+  screen-level fallback wasn't needed.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST SUCCEEDED`,
+  1,884 unique cases, 0 failed. Those two alone: 50, 0 failed.
+- **Not covered.** Whether removing a focused row still sends a commit wasn't checked; it's a no-op either way (the
+  preset has already cleared the draft), and `SettingsFeature`'s comment no longer relies on it.

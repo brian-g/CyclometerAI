@@ -256,9 +256,9 @@ struct SettingsFeature {
                     state.customCircumferenceDraft = nil
                     return .none
                 }
-                // Committing an unchanged value is a no-op. Picking a preset while
-                // the field has focus tears the field down, which fires a commit —
-                // without this it would push the same circumference twice.
+                // Committing an unchanged value is a no-op: the field commits on
+                // every blur, edited or not, and without this each one would push
+                // the same circumference again.
                 guard mm != state.preferences.wheelCircumferenceMM else { return .none }
                 return apply(mm, to: &state)
             case .autoPauseChanged(let isOn):
