@@ -48,6 +48,14 @@ private struct GeneralSection: View {
                 }
             }
             Toggle("Auto-pause", isOn: $store.isAutoPauseEnabled.sending(\.autoPauseChanged))
+            // The caption sits in the row, as Show Live Activity's does (#313 review), not in a footer
+            // below Sensors (#267).
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Toggle("Resume When Moving", isOn: $store.isResumeWhenMovingEnabled.sending(\.resumeWhenMovingChanged))
+                Text("Also resumes a ride you paused yourself. Walking the bike counts as moving.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Toggle("Auto-dim", isOn: $store.isAutoDimEnabled.sending(\.autoDimChanged))
             Toggle("Place Names", isOn: $store.isPlaceNameLookupEnabled.sending(\.placeNameLookupChanged))
             // Off in iOS Settings, the rider's own choice is kept but can't take effect, and the

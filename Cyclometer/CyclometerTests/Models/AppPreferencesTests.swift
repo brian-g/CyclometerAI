@@ -77,6 +77,8 @@ struct AppPreferencesTests {
         preferences.wheelCircumferenceMM = 2155
         preferences.isAutoDimEnabled = false
         preferences.isAutoPauseEnabled = false
+        // Added by #267, default false.
+        preferences.isResumeWhenMovingEnabled = true
         // Whichever unit the machine's locale is not — a literal would be the default
         // on half of all machines, and prove nothing there.
         preferences.preferredUnit = UnitSystem.system == .metric ? .imperial : .metric
@@ -121,6 +123,8 @@ struct AppPreferencesTests {
         #expect(decoded.isAutoDimEnabled)
         // Added by #94, likewise absent from an older document.
         #expect(decoded.isAutoPauseEnabled)
+        // Added by #267; motion resumes only auto-pauses, as before.
+        #expect(decoded.isResumeWhenMovingEnabled == false)
         // Compared against `.system` rather than a literal because the decode fallback
         // reads `Locale.current` and has no seam to stub — asserting `.imperial` here
         // would only pass on a US/UK machine. `UnitSystemTests` covers the mapping

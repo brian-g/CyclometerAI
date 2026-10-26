@@ -66,6 +66,11 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// stop detection the ride state machine needs lands with #102.
     var isAutoPauseEnabled: Bool = true
 
+    /// Whether motion also resumes a ride the rider paused themselves (#267, S12). Off by default:
+    /// without it only a pause auto-pause made auto-resumes. Independent of `isAutoPauseEnabled` —
+    /// forgetting to tap Resume happens whether or not auto-pause is on.
+    var isResumeWhenMovingEnabled: Bool = false
+
     static let defaultTurnLeadDistanceMeters = 100.0
 
     /// How far before a turn the rider is told about it, in metres (PRD §8.6: "at configurable
@@ -184,6 +189,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
         isAutoPauseEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isAutoPauseEnabled
         ) ?? true
+        isResumeWhenMovingEnabled = try container.decodeIfPresent(
+            Bool.self, forKey: .isResumeWhenMovingEnabled
+        ) ?? false
         hasCompletedOnboarding = try container.decodeIfPresent(
             Bool.self, forKey: .hasCompletedOnboarding
         ) ?? false

@@ -550,6 +550,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// #94. Not yet read: SettingsFeature still toggles its own copy, and the stop
     /// detection the ride state machine needs lands with #102.
     var isAutoPauseEnabled: Bool = true
+    /// #267. Whether motion also resumes a manual pause, once the ride has read as stopped since
+    /// it. Off by default; independent of auto-pause.
+    var isResumeWhenMovingEnabled: Bool = false
     /// #197. How far before a turn NavigationFeature announces it — PRD §8.6's
     /// "configurable distance from turn". No S12 row sets it yet.
     var turnLeadDistanceMeters: Double = defaultTurnLeadDistanceMeters   // 100 m

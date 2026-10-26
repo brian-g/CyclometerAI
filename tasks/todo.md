@@ -782,3 +782,38 @@ Cadence Zones (#79, after the issue was filed) gets a section too.
   1,884 unique cases, 0 failed. Those two alone: 50, 0 failed.
 - **Not covered.** Whether removing a focused row still sends a commit wasn't checked; it's a no-op either way (the
   preset has already cleared the draft), and `SettingsFeature`'s comment no longer relies on it.
+
+---
+
+## #267 — Resume When Moving: let motion resume a manually paused ride
+
+Plan: `~/.claude/plans/cached-stirring-widget.md`. Off by default. Decisions (Brian, planning): a manual pause can be
+resumed by motion only after the ride has been seen stopped (≤ `stationarySpeedMPS`) since the pause, so a Pause
+tapped while coasting holds; the toggle doesn't depend on Auto-pause (OQ1); label "Resume When Moving", with a
+caption in the row (OQ2/OQ3).
+
+- [x] `AppPreferences.isResumeWhenMovingEnabled` (default false, `decodeIfPresent`)
+- [x] `SettingsFeature` read-through + `resumeWhenMovingChanged`; `SettingsView` row with caption under Auto-pause
+- [x] `ActiveRideFeature`: `hasStoppedWhilePaused`, `.speed` guard, cleared in `resume`
+- [x] UX.md §S12, DataModel.md §3.6
+- [x] App builds
+- [ ] Brian runs it on device — not yet; no ride at 9 PM. Walking (≥ 1.0 m/s) exercises the same path
+- [x] Tests: auto-pause/resume, track segment, Settings, AppPreferences; snapshots re-recorded and opened (en + de); full suite
+
+### Review
+
+- **Targeted.** 121 unique cases across the auto-pause, auto-pause threshold/replay, track segment, Settings,
+  AppPreferences, ride-end and Live Activity suites; 0 failed. Six new cases, all found in the log by name.
+- **Mutations.** Dropping the stop check failed `pauseTappedWhileCoastingHolds` and `invalidFixDoesNotCountAsAStop`;
+  ignoring the preference failed only `manualPauseHoldsWithoutThePreferenceAfterAStop`. The old
+  `motionDoesNotResumeAManuallyPausedRide` passed under that mutation: it never stops first, so it couldn't tell.
+- **Beyond the plan.** `invalidFixDoesNotCountAsAStop`: a nil displayed speed (negative GPS speed) doesn't arm.
+  Auto-pause does count nil seconds as stopped, but it needs ten in a row. One dropout right after a Pause tapped
+  while coasting would otherwise arm the resume.
+- **Snapshots.** All 7 `SettingsSnapshotTests` (14 PNGs) moved as expected. Re-recorded with
+  `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`. Opened default, full height dark, Live Activities off, custom wheel
+  invalid dark and HR invalid light; byte check shows none flat. 7/7 in en and under `-testLanguage de`.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST SUCCEEDED`,
+  1,888 unique cases, 0 failed. Those two alone: 50, 0 failed.
+- **Not covered.** Device behaviour. The Simulator may report a fixed location as no speed, which by design never
+  arms the resume [Guessing], so walk it on a phone.

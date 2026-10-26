@@ -377,8 +377,15 @@ struct ActiveRideFeature {
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
         /// Whether the *current* pause was auto-triggered rather than a manual Pause
-        /// tap — the only kind motion is allowed to auto-resume (#102).
+        /// tap — the only kind motion is allowed to auto-resume (#102), unless the rider
+        /// has turned on Resume When Moving (#267).
         var isAutoPaused: Bool = false
+        /// Whether the ride has read as stopped since it was paused — what makes a manual
+        /// pause eligible for Resume When Moving (#267). Without it a Pause tapped while
+        /// coasting would be undone by the next reading; an auto-pause has always seen the
+        /// stop, so it never needs this. Not persisted: a ride resumed after a kill waits
+        /// for one stationary reading, which a stopped rider gives at once.
+        var hasStoppedWhilePaused: Bool = false
         /// Wheel auto-calibration stands down while the rider has something more
         /// urgent to attend to — a radar alert, or a turn announced and not yet made
         /// (#197) — and whenever the ride isn't actively recording: a paused ride still
@@ -1127,12 +1134,19 @@ struct ActiveRideFeature {
                 state.isLocationAvailable = status.isGranted
                 return .none
             case .speed:
-                // Only a pause auto-pause itself made is eligible to auto-resume — a
-                // rider who tapped Pause has to tap Resume (#102). The bar is
-                // `movingSpeedMPS`, not any speed at all: GPS noise alone used to clear
-                // `> 0` and undo the pause on the next sample (#262).
+                // A pause auto-pause itself made is eligible to auto-resume. One the rider
+                // tapped needs a manual Resume (#102), unless Resume When Moving is on and the
+                // ride has stopped since (#267). The bar is `movingSpeedMPS`, not any speed at
+                // all: GPS noise alone used to clear `> 0` and undo the pause on the next
+                // sample (#262).
+                if state.recordingState == .paused, let speedMPS = state.speed.speedMPS,
+                   speedMPS <= Self.stationarySpeedMPS {
+                    state.hasStoppedWhilePaused = true
+                }
+                let canAutoResume = state.isAutoPaused
+                    || (state.preferences.isResumeWhenMovingEnabled && state.hasStoppedWhilePaused)
                 var effect: Effect<Action> = .none
-                if state.isAutoPaused, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
+                if canAutoResume, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
                     effect = resume(&state)
                 }
                 // Every displayed reading, after the resume above so the one that resumes
@@ -1396,6 +1410,7 @@ struct ActiveRideFeature {
         state.recordingState = .active
         state.zeroSpeedSeconds = 0
         state.isAutoPaused = false
+        state.hasStoppedWhilePaused = false
         beginTrackSegment(&state)
         // After `beginTrackSegment`, so the checkpoint this resume writes already
         // carries the new segment index — a kill before the next one would
