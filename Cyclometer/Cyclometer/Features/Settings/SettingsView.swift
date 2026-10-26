@@ -57,17 +57,19 @@ private struct GeneralSection: View {
             Toggle("Auto-dim", isOn: $store.isAutoDimEnabled.sending(\.autoDimChanged))
             Toggle("Place Names", isOn: $store.isPlaceNameLookupEnabled.sending(\.placeNameLookupChanged))
             // Off in iOS Settings, the rider's own choice is kept but can't take effect, and the
-            // row says why (#313).
+            // row says why (#313), in the label's subtitle like Resume When Moving's.
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Toggle("Show Live Activity", isOn: $store.isLiveActivityEnabled.sending(\.liveActivityChanged))
+                Toggle(isOn: $store.isLiveActivityEnabled.sending(\.liveActivityChanged)) {
+                    Text("Show Live Activity")
+                    if !store.isSystemLiveActivityEnabled {
+                        Text("Live Activities are turned off for Cyclometer in iOS Settings.")
+                    }
+                }
                 .disabled(!store.isSystemLiveActivityEnabled)
                 if !store.isSystemLiveActivityEnabled {
-                    Text("Live Activities are turned off for Cyclometer in iOS Settings.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     // Borderless, or the whole row — the toggle included — becomes the button.
                     Button("Open Settings") { store.send(.liveActivitySettingsTapped) }
-                        .font(.caption)
+                        .font(.subheadline)
                         .buttonStyle(.borderless)
                 }
             }
