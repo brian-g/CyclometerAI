@@ -52,32 +52,32 @@ struct SpeedWidget: View {
 
     @ViewBuilder
     private func twoByTwoContent(_ geo: GeometryProxy) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
                 speedHero(fontSize: heroFontSize(for: geo.size.height))
                 Spacer()
-                // Distance must never truncate — it takes the width it needs and
-                // pushes Time to the right (Time yields space first).
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.lg) {
-                    distanceStat
-                        .fixedSize(horizontal: true, vertical: false)
-                        .layoutPriority(1)
-                    timeStat
+                VStack(alignment: .trailing, spacing: Spacing.lg) {
+                    avgStat
+                    maxStat
                 }
             }
-            .padding(Spacing.sm)
-            .frame(maxHeight: .infinity)
-            .overlay(alignment: .topLeading) {
-                sourceBadge
-                    .padding(.top, Spacing.sm)
-                    .padding(.leading, Spacing.sm)
+            Spacer(minLength: 0)
+            // Centred, so the ride-control buttons in the bottom corners don't cover it (#449).
+            // Distance must never truncate — it takes the width it needs and Time yields space first.
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xl) {
+                distanceStat
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
+                timeStat
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: Spacing.lg) {
-                avgStat
-                maxStat
-            }
-            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity)
+        }
+        .padding(Spacing.sm)
+        .frame(maxHeight: .infinity)
+        .overlay(alignment: .topLeading) {
+            sourceBadge
+                .padding(.top, Spacing.sm)
+                .padding(.leading, Spacing.sm)
         }
     }
 
