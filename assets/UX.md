@@ -1106,7 +1106,7 @@ a confirmation:
 - Auto-pause (toggle)
 - Resume When Moving (toggle, off) — motion also resumes a ride the rider paused themselves, once the ride has
   read as stopped since the pause, so a Pause tapped while coasting holds (#267). Independent of Auto-pause. The
-  row, under the toggle, reads "Also resumes a ride you paused yourself. Walking the bike counts as moving."
+  toggle's label carries, as a subtitle VoiceOver reads with it, "Also resumes a ride you paused yourself. Walking the bike counts as moving."
 - Auto-dim (toggle)
 - Place Names (toggle, on) — whether S10 reverse-geocodes a free ride's start for its default name (#283, §S10). Off, nothing is sent and the name is the offline one
 - Show Live Activity (toggle, on) — whether a ride shows its §S22 Live Activity (#313, PRD §8.10). Takes effect mid-ride: off ends the activity, on starts one. When iOS has Live Activities off for the app, the toggle is disabled, keeping its value, and the row itself, under the toggle, reads "Live Activities are turned off for Cyclometer in iOS Settings." with an Open Settings link (#313 review: in the row, not the section footer)
