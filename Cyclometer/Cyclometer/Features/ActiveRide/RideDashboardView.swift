@@ -62,7 +62,7 @@ struct RideDashboardView: View {
             .animation(.default, value: activeBanner?.text)
         }
         // The dots share the ride controls' row, flush with the buttons' bottom edge (#447), and
-        // sit beneath them so a long indicator never covers a button.
+        // sit beneath them: a long indicator can be drawn over, but never takes a button's touch.
         .overlay(alignment: .bottom) {
             ZStack(alignment: .bottom) {
                 pageIndicator

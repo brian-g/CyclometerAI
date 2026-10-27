@@ -881,3 +881,13 @@ and waited. Asked to commit, I committed without pushing, although I had pushed 
 **Rule.** After Brian has run the change and the test run is good, commit and open the PR without asking. When his
 `/code-review --fix` finishes, commit its fixes and push them to the same PR without asking. Report after each step.
 Findings the review skipped go in that report and don't hold up the commit and push.
+
+---
+
+## Number anything Brian might answer item by item (2026-10-27, #447)
+
+**What happened.** I reported the #447 review findings as bulleted groups ("Worth fixing", "Your call",
+"Rejecting"). Brian: "it is better use numbered lists so I can refer to them by number."
+
+**Rule.** Findings, options, open questions and check steps go in numbered lists, numbered continuously
+across groups, so a reply like "fix 1 and 3" is unambiguous.
