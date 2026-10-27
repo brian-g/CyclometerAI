@@ -46,8 +46,16 @@ struct ElevationDashboardWidgetTests {
             ],
             maneuvers: []
         ))
+        // A resumed ride, then a grade window of flat riding: every face has a number to hold.
+        state.elevation.seed(ElevationTracker.Seed(
+            ascentMeters: 120, descentMeters: 40, highestMeters: 300, lowestMeters: 250
+        ))
+        for step in 0...20 {
+            state.elevation.record(altitude: 250, distanceMeters: Double(step) * 6, source: .barometric)
+        }
         return state
     }
+    private static let primedDistance = 120.0
 
     /// Whether `mutation` re-runs `widget`'s `body` once it has rendered.
     private func invalidates(
@@ -78,6 +86,42 @@ struct ElevationDashboardWidgetTests {
     @Test func aNewSampleDoesNotRerenderTheTotals() throws {
         #expect(try !invalidates({ AscentDashboardWidget(size: .oneByOne, store: $0) }, newSample))
         #expect(try !invalidates({ GradeDashboardWidget(size: .oneByOne, store: $0) }, newSample))
+    }
+
+    /// A recorded second, checked to change the tracker so a case can't pass on a no-op.
+    private static func tick(
+        _ record: @escaping (inout ElevationTracker) -> Void
+    ) -> (inout ActiveRideFeature.State) -> Void {
+        { state in
+            let before = state.elevation
+            record(&state.elevation)
+            #expect(state.elevation != before)
+        }
+    }
+
+    /// Stopped at a light: the altitude drifts, only the tally's reference moves.
+    private static let stopped = tick {
+        $0.record(altitude: 253, distanceMeters: primedDistance, source: .barometric)
+    }
+    /// Riding on the flat: the grade window moves on, and the grade and totals stay.
+    private static let onTheFlat = tick {
+        $0.record(altitude: 250, distanceMeters: primedDistance + 6, source: .barometric)
+    }
+
+    @Test func aTickThatLeavesTheNumbersDoesNotRerenderThem() throws {
+        for (name, tick) in [("stopped", Self.stopped), ("on the flat", Self.onTheFlat)] {
+            #expect(try !invalidates({ AscentDashboardWidget(size: .oneByOne, store: $0) }, tick), "W14 \(name)")
+            #expect(try !invalidates({ DescentDashboardWidget(size: .oneByOne, store: $0) }, tick), "W15 \(name)")
+            #expect(try !invalidates({ GradeDashboardWidget(size: .oneByOne, store: $0) }, tick), "W16 \(name)")
+        }
+    }
+
+    @Test func aClimbRerendersAscentAndNotDescent() throws {
+        let climb = Self.tick {
+            $0.record(altitude: 255, distanceMeters: Self.primedDistance + 6, source: .barometric)
+        }
+        #expect(try invalidates({ AscentDashboardWidget(size: .oneByOne, store: $0) }, climb))
+        #expect(try !invalidates({ DescentDashboardWidget(size: .oneByOne, store: $0) }, climb))
     }
 
     /// With a route profile in hand, the ride's own history is W17's, not W18's.
