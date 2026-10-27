@@ -1004,3 +1004,23 @@ Plan: `~/.claude/plans/greedy-launching-spring.md`
   only changed properties are.
 - New tests failed 7 ways on the old code (every card on a stopped and a flat tick, W15 on a climb); 4/4 pass after.
 - Not yet run: `ElevationTrackerTests`, `AltitudeReanchorReplayTests`, `ActiveRideElevationTests`, AddWidgetSheet snapshot.
+
+---
+
+# #401 — W1 Speed: VoiceOver reads the trend
+
+Plan: `~/.claude/plans/greedy-launching-spring.md`
+
+- [x] Tests first: above (existing test's strings), below, even / no reading — at 1×1, 2×1, 2×2
+- [x] Confirm above/below fail and even/no-reading pass on current code
+- [x] `SpeedWidget.accessibilityValue`: "above average" / "below average" after the speed
+- [x] UX.md §W1 trend bullet
+- [x] W5 Cadence too (Brian): same words, its own trend rule; HR already reads "rising"/"falling"
+- [ ] Targeted tests; hand over for a VoiceOver check
+
+## Review
+
+- W1 and W5 read their ▲/▼ as "above average" / "below average" straight after the value, from the same `trend`
+  that draws it, so threshold and no-reading cases match by construction. W4 already read "rising"/"falling".
+- `widgetIsOneButton` hard-coded W1's old string; its live element already read the new one.
+- Above/below cases failed before the change; `WidgetAccessibilityTests` 68 passed, 0 failed after.
