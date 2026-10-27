@@ -85,6 +85,8 @@ struct PersistenceClient: Sendable {
     var fetchRouteRides: @Sendable (UUID) async throws -> [RouteRideSummary]
     /// Stores the OpenStreetMap surface looked up after import (#252).
     var saveRouteSurface: @Sendable (UUID, RouteSurfaceBreakdown) async throws -> Void
+    /// Stores S20's on-device narrative, generated after import (#203).
+    var saveRouteNarrative: @Sendable (UUID, String) async throws -> Void
     /// Analyses terrain on routes imported before #252; returns how many it filled in.
     var backfillRouteTerrain: @Sendable () async throws -> Int
     /// Stores S19's map thumbnail, light then dark, rendered after import (#273).
@@ -140,6 +142,7 @@ extension PersistenceClient: DependencyKey {
             deleteRoute: { try await routeActor.deleteRoute(id: $0) },
             fetchRouteRides: { try await rideActor.fetchRides(routeId: $0) },
             saveRouteSurface: { try await routeActor.saveRouteSurface(id: $0, surface: $1) },
+            saveRouteNarrative: { try await routeActor.saveRouteNarrative(id: $0, narrative: $1) },
             backfillRouteTerrain: { try await routeActor.backfillRouteTerrain() },
             saveRouteMapThumbnail: { try await routeActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
             fetchRouteIdsMissingMapThumbnail: { try await routeActor.routeIdsMissingMapThumbnail() },
@@ -180,6 +183,7 @@ extension PersistenceClient: DependencyKey {
         deleteRoute: { _ in },
         fetchRouteRides: { _ in [] },
         saveRouteSurface: { _, _ in },
+        saveRouteNarrative: { _, _ in },
         backfillRouteTerrain: { 0 },
         saveRouteMapThumbnail: { _, _, _ in },
         fetchRouteIdsMissingMapThumbnail: { [] },

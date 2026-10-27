@@ -1290,7 +1290,7 @@ ContentUnavailableView {
 ### Key Components
 - `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag). Route should show the direction of travel. Forcasted wind direction and vectors should be overlayed (deferred to weather integration)
 - Distance and elevation gain/loss summary (`LabeledContent`)
-- Summary section (#252), after the map: the route's summary line of at most 80 characters, then Character, Max Grade, Hardest Climb (FIETS), one row per categorized climb (category, length, average grade) and a Surface row with its shares, captioned "Surface data © OpenStreetMap contributors". Hidden for a route with neither elevation nor a surface. Values use tabular digits
+- Summary section (#252), after the map: the route's summary line of at most 80 characters, then Character, Max Grade, Hardest Climb (FIETS), one row per categorized climb (category, length, average grade) and a Surface row with its shares, captioned "Surface data © OpenStreetMap contributors". Hidden for a route with neither elevation nor a surface. Values use tabular digits. Under the summary line, where Apple Intelligence is available, the on-device route narrative (#203): one sentence per section of the route (one to five), in `textSecondary`, describing the ride's shape in riding order, with no figures. Absent without it, and the section is otherwise unchanged
 - Elevation profile: Swift Charts `AreaMark` + `LineMark` in `brPrimary`, catmullRom interpolation
 - Current weather section: temperature, wind direction (`WindDirectionView` — rotated arrow SF Symbol + compass label + degrees), wind speed
 - Strava segments: name, distance, best time, best time date

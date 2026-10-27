@@ -19,6 +19,7 @@ struct RoutesFeatureTests {
         preferredUnit: UnitSystem = .imperial,
         persistenceClient: PersistenceClient = .mock(),
         overpassClient: OverpassClient = .testValue,
+        routeNarrativeClient: RouteNarrativeClient = .testValue,
         locationClient: LocationClient = .testValue,
         locationPermission: PermissionState = .denied,
         mapSnapshotClient: MapSnapshotClient = .testValue
@@ -34,6 +35,7 @@ struct RoutesFeatureTests {
             } withDependencies: {
                 $0.persistenceClient = persistenceClient
                 $0.overpassClient = overpassClient
+                $0.routeNarrativeClient = routeNarrativeClient
                 $0.locationClient = locationClient
                 $0.permissionsClient = .mock(initial: [.locationWhenInUse: locationPermission])
                 $0.mapSnapshotClient = mapSnapshotClient
@@ -608,6 +610,239 @@ struct RoutesFeatureTests {
 
         #expect(lookups.value == 1)
         #expect(store.state.routes[0].surface == nil)
+    }
+
+    // MARK: Narrative (#203)
+
+    /// 1 km with an elevation on every point, so it has a terrain analysis to narrate.
+    private static let elevatedPath = RouteFixtures.path(legs: [(0, 1_000)], spacingMeters: 10).map {
+        var point = $0
+        point.elevationMeters = 100
+        return point
+    }
+
+    /// A route with terrain and a surface already, so the only lookup a read starts is the
+    /// narrative's.
+    private static func narratable(name: String = "River Loop") -> RouteSummary {
+        var route = summary(name: name, distanceMeters: 1_000, elevationGainMeters: 0)
+        route.terrain = RouteTerrainAnalysis(maxGradePercent: 0, climbs: [], character: .flat)
+        route.surface = RouteSurfaceBreakdown(pavedMeters: 1_000)
+        return route
+    }
+
+    private static func elevatedDetails(_ routes: RouteSummary...) -> [UUID: RouteDetail] {
+        Dictionary(uniqueKeysWithValues: routes.map {
+            ($0.id, RouteDetail(summary: $0, coordinates: elevatedPath, cuePoints: []))
+        })
+    }
+
+    /// The model, answering every route with `text` and counting what it was asked.
+    private static func narrator(
+        _ text: String = "The road stays level from start to finish.",
+        asked: LockIsolated<[RouteNarrativeInput]> = LockIsolated([])
+    ) -> RouteNarrativeClient {
+        RouteNarrativeClient(isAvailable: { true }, narrate: { input in
+            asked.withValue { $0.append(input) }
+            return text
+        })
+    }
+
+    @Test("a route with terrain and no narrative is narrated after the read, saved, and shown")
+    func narrativeIsWrittenAfterTheRead() async {
+        let route = Self.narratable()
+        let text = "The road stays level from start to finish."
+        let asked = LockIsolated<[RouteNarrativeInput]>([])
+        let saved = LockIsolated<[UUID: String]>([:])
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.elevatedDetails(route),
+                                     onSaveRouteNarrative: { id, text in saved.withValue { $0[id] = text } }),
+            routeNarrativeClient: Self.narrator(text, asked: asked)
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+            $0.narrativeRequestsStarted = [route.id]
+        }
+        await store.receive(\.narrativeResolved) { $0.routes[0].narrative = text }
+        await store.finish()
+
+        #expect(saved.value == [route.id: text])
+        // Built from the stored polyline, through the same derivation the live client is given.
+        #expect(asked.value == [RouteNarrativeInput(summary: route, coordinates: Self.elevatedPath)])
+    }
+
+    @Test("without Apple Intelligence nothing is asked, saved or shown")
+    func unavailableModelAsksNothing() async {
+        let route = Self.narratable()
+        let asked = LockIsolated(0)
+        let saved = LockIsolated(0)
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.elevatedDetails(route),
+                                     onSaveRouteNarrative: { _, _ in saved.withValue { $0 += 1 } }),
+            routeNarrativeClient: RouteNarrativeClient(isAvailable: { false }, narrate: { _ in
+                asked.withValue { $0 += 1 }
+                return "Never shown."
+            })
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+            $0.narrativeRequestsStarted = [route.id]
+        }
+        await store.finish()
+
+        #expect(asked.value == 0)
+        #expect(saved.value == 0)
+        #expect(store.state.routes[0].narrative == nil)
+    }
+
+    @Test("a route with no elevation is never narrated")
+    func noElevationIsNotNarrated() async {
+        var route = Self.summary()
+        route.surface = RouteSurfaceBreakdown(pavedMeters: 1_000)
+        let asked = LockIsolated<[RouteNarrativeInput]>([])
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route]),
+            routeNarrativeClient: Self.narrator(asked: asked)
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+        }
+        await store.finish()
+
+        #expect(asked.value.isEmpty)
+    }
+
+    @Test("a route that already has a narrative is not narrated again")
+    func narratedRouteIsNotAskedAgain() async {
+        var route = Self.narratable()
+        route.narrative = "Stored at import."
+        let asked = LockIsolated<[RouteNarrativeInput]>([])
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.elevatedDetails(route)),
+            routeNarrativeClient: Self.narrator(asked: asked)
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+        }
+        await store.finish()
+
+        #expect(asked.value.isEmpty)
+    }
+
+    @Test("a rejected paragraph is logged and skipped, and the next route is still narrated")
+    func rejectionDoesNotEndTheBatch() async {
+        let first = Self.narratable(name: "First")
+        let second = Self.narratable(name: "Second")
+        let text = "The road stays level from start to finish."
+        let calls = LockIsolated(0)
+        let store = makeStore(
+            persistenceClient: .mock(routes: [first, second], routeDetails: Self.elevatedDetails(first, second)),
+            routeNarrativeClient: RouteNarrativeClient(isAvailable: { true }, narrate: { _ in
+                let call = calls.withValue { $0 += 1; return $0 }
+                if call == 1 { throw RouteNarrativeError.rejected }
+                return text
+            })
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [first, second]
+            $0.narrativeRequestsStarted = [first.id, second.id]
+        }
+        await store.receive(\.narrativeResolved) { $0.routes[1].narrative = text }
+        await store.finish()
+
+        #expect(store.state.routes[0].narrative == nil)
+        #expect(store.state.alert == nil)
+    }
+
+    @Test("a later read neither narrates a route again nor blanks the narrative it wrote")
+    func laterReadKeepsTheNarrative() async {
+        let route = Self.narratable()
+        let text = "The road stays level from start to finish."
+        let asked = LockIsolated<[RouteNarrativeInput]>([])
+        // The mock's list never changes, so the second read is exactly a read that began before
+        // the narrative was saved.
+        let store = makeStore(
+            persistenceClient: .mock(routes: [route], routeDetails: Self.elevatedDetails(route)),
+            routeNarrativeClient: Self.narrator(text, asked: asked)
+        )
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+            $0.narrativeRequestsStarted = [route.id]
+        }
+        await store.receive(\.narrativeResolved) { $0.routes[0].narrative = text }
+
+        await store.send(.reloadRoutes)
+        await store.receive(\.routesResponse)
+        await store.finish()
+
+        #expect(store.state.routes[0].narrative == text)
+        #expect(asked.value.count == 1)
+    }
+
+    @Test("an imported route is narrated once it is saved")
+    func importedRouteIsNarrated() async throws {
+        let url = try writeGPX(Self.namedGPX, named: "river-loop.gpx")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let imported = Self.narratable()
+        let text = "The road stays level from start to finish."
+        let store = makeStore(
+            persistenceClient: .mock(routeDetails: Self.elevatedDetails(imported), importResult: imported),
+            routeNarrativeClient: Self.narrator(text)
+        )
+
+        await store.send(.fileSelected(url)) { $0.isImporting = true }
+        await store.receive(\.importResponse) {
+            $0.isImporting = false
+            $0.routes = [imported]
+            $0.narrativeRequestsStarted = [imported.id]
+        }
+        await store.receive(\.narrativeResolved) { $0.routes[0].narrative = text }
+        await store.finish()
+    }
+
+    @Test("an open route detail is given the narrative too")
+    func narrativeReachesAnOpenDetail() async {
+        var route = Self.narratable()
+        route.narrative = "Stored at import."
+        let store = makeStore(persistenceClient: .mock(routes: [route]))
+
+        await store.send(.task)
+        await store.receive(\.reloadRoutes)
+        await store.receive(\.routesResponse) {
+            $0.hasLoaded = true
+            $0.routes = [route]
+        }
+        await store.send(.path(.push(id: 0, state: .route(RouteDetailFeature.State(summary: route))))) {
+            $0.path[id: 0] = .route(RouteDetailFeature.State(summary: route))
+        }
+        await store.send(.narrativeResolved(route.id, "Written since.")) {
+            $0.routes[0].narrative = "Written since."
+            $0.path[id: 0, case: \.route]?.summary.narrative = "Written since."
+        }
+        await store.finish()
     }
 
     @Test("routes imported before #252 are backfilled with terrain, then re-read")

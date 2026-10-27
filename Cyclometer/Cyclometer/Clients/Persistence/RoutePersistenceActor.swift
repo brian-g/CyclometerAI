@@ -87,6 +87,15 @@ actor RoutePersistenceActor {
         }
     }
 
+    /// Stores S20's on-device narrative (#203), written after import like the surface.
+    /// No-op when the route was deleted while the model was writing it, like `saveRouteSurface`.
+    func saveRouteNarrative(id: UUID, narrative: String) throws {
+        guard let route = try routeRow(id: id) else { return }
+        try savingChanges("saveRouteNarrative", id: id, context: modelContext) {
+            route.terrainNarrative = narrative
+        }
+    }
+
     /// S19's map thumbnail, both appearances in one save (#273). A write of its own rather than
     /// part of `importRoute`, for the reason `RidePersistenceActor.saveMapThumbnail` gives: the
     /// render needs map tiles, and the import must not wait on them. No-op when the route was

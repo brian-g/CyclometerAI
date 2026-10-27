@@ -880,3 +880,43 @@ Found in #452's review. `saveMapThumbnail` throws `rideNotFound` for a ride dele
   A plain `' passed'` count read 1,890 because two result lines were split by interleaved `IDESchemeActionSDKRecord`
   log lines. Both cases had passed. Join lines before counting.
 - **Not covered.** Nothing visible to check on device: the bug only left placeholder rows until next launch.
+
+---
+
+# #203 — On-device route narrative (Apple Intelligence)
+
+Plan approved. S20's Summary section gets a number-free paragraph from `FoundationModels`. It's generated at import
+plus a backfill, the same way the OSM surface lookup works, and stored on `Route`. Without Apple Intelligence, S20 is unchanged.
+
+- [x] `RouteTerrain.gradeProfile` extracted; `analyze` uses it
+- [x] `RouteNarrative.swift`: input (histogram, climb positions), prompt, instructions, validator
+- [x] `RouteNarrativeClient` (live `FoundationModels`; inert test/preview)
+- [x] `Route.terrainNarrative`, `RouteSummary.narrative`, `saveRouteNarrative`
+- [x] `RoutesFeature.resolveMissingNarratives` + `.narrativeResolved`
+- [x] `RouteSummarySection` row
+- [x] Docs: UX §S20, PRD §8.6 / §12 / changelog
+- [x] Build; hand over to Brian to run
+- [x] Tests: `RouteNarrativeTests` (sections, words, answer rules), `RoutesFeatureTests` narrative cases,
+  `RoutePersistenceTests` round trip, `RouteSchemaMigrationTests` nil column, `RouteDetailSnapshotTests` reference
+
+## Notes
+
+- **The prompt shape changed after probing the real model.** I ran the on-device model from a macOS script over hilly, flat and punchy inputs.
+  - With one gradient histogram for the whole route, it invented positions ("the final third drops gently" on a flat route) and put the hardest climb in the wrong third. The input is now **per third**, put into words in code, and a route that's the same end to end is said once.
+  - Asked for a paragraph, it answered in lower case, one clause per line. The output is now `@Generable` sentences (structure only, no terrain enum), tidied and joined by `RouteNarrative.paragraph`.
+  - Sampling is the default rather than greedy, because a rejected route is asked again next launch and greedy would repeat the same rejected answer.
+- **Thirds became terrain sections (Brian's call, after a probe).** Thirds kept positions right but cut across climbs. A
+  length-based count was considered and dropped: a fixed 2–3 sentences can't carry more sections, and the model drops
+  facts when a sentence holds two. The route now splits at its climbs and the stretches between them (thirds when there
+  are none), merges alike neighbours, and caps at five sections by joining the shortest neighbouring pair with its parts
+  in order. The sentence count is exactly the section count, set per request with a `DynamicGenerationSchema`, because a
+  static `@Generable` count let the model pad one section into five sentences.
+  - End to end, with the real `RouteNarrative.swift` compiled into a macOS probe over synthetic routes (Summit Climb, back-half
+    climbs, short sting, flat, climb-then-flat, six climbs, punchy), every climb was in the right place in riding order.
+  - Six climbs ran to 457–690 characters, so the cap is 600 (4 of 5 runs passed); the other routes ran 42–410.
+  - Folding a climb into a recomputed spread ("mostly flat, including a Cat 4 climb") made the model leave out every climb, which is why
+    merged sections keep their parts.
+- **Residual risk.** Wording can still drift ("the path twists"). The validator catches figures, not invented adjectives.
+- **Verification.** The first full local run hung for 2 h 20 min on the PersistenceClientTests × MapKit deadlock (sampled:
+  main in `MapEngine::~MapEngine`, 19 pool threads in `makeLiveClient()`). The rerun with that suite skipped passed:
+  2,179 passed, 11 skipped. The suite alone then passed 47/47.

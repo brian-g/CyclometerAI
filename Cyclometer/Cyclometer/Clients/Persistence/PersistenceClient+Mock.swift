@@ -30,6 +30,7 @@ extension PersistenceClient {
         onImportRoute: @escaping @Sendable (ImportedRoute) -> Void = { _ in },
         onDeleteRoute: @escaping @Sendable (UUID) -> Void = { _ in },
         onSaveRouteSurface: @escaping @Sendable (UUID, RouteSurfaceBreakdown) -> Void = { _, _ in },
+        onSaveRouteNarrative: @escaping @Sendable (UUID, String) -> Void = { _, _ in },
         onSaveRouteMapThumbnail: @escaping @Sendable (UUID, Data, Data) -> Void = { _, _, _ in },
         backfilledRouteCount: Int = 0
     ) -> PersistenceClient {
@@ -80,6 +81,7 @@ extension PersistenceClient {
             deleteRoute: { onDeleteRoute($0) },
             fetchRouteRides: { ridesByRoute[$0] ?? [] },
             saveRouteSurface: { onSaveRouteSurface($0, $1) },
+            saveRouteNarrative: { onSaveRouteNarrative($0, $1) },
             backfillRouteTerrain: { backfilledRouteCount },
             saveRouteMapThumbnail: { onSaveRouteMapThumbnail($0, $1, $2) },
             fetchRouteIdsMissingMapThumbnail: { routeIdsMissingMapThumbnail },
