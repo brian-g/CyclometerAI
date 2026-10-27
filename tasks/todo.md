@@ -920,3 +920,25 @@ plus a backfill, the same way the OSM surface lookup works, and stored on `Route
 - **Verification.** The first full local run hung for 2 h 20 min on the PersistenceClientTests × MapKit deadlock (sampled:
   main in `MapEngine::~MapEngine`, 19 pool threads in `makeLiveClient()`). The rerun with that suite skipped passed:
   2,179 passed, 11 skipped. The suite alone then passed 47/47.
+
+---
+
+# #447 — Paging dots down to the ride controls' bottom edge
+
+Plan: `~/.claude/plans/validated-zooming-sphinx.md`
+
+- [x] `RideDashboardView`: dots and ride controls share one bottom-aligned row; the `cornerMd` offset moves onto the row
+- [x] Build; hand over to Brian to run
+- [x] Docs: UX §S05 Multiple pages, Structural Zones, Dashboard Paging
+- [x] Tests: `CyclometerTests` (no snapshot covers this view)
+
+## Review
+
+- Brian checked it on the sim: the dots sit flush with the buttons' bottom edge.
+- The `-cornerMd` bottom padding moved from `rideControls` onto the shared row. Negative padding shrinks the layout
+  frame, so leaving it on the buttons would have lined the dots up 12 pt above the visible buttons.
+- Open: there's no page cap, so about 9+ dots reach Finish while paused. The buttons draw on top and keep their
+  touches. UX §S05 says the dots show "when there are multiple pages", but the code always shows them. Flagged
+  to Brian, not changed.
+- Verification: `CyclometerTests` without PersistenceClientTests passed 2,179, 0 failed. PersistenceClientTests alone
+  passed 47/47.

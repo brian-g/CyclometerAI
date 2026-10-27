@@ -61,11 +61,14 @@ struct RideDashboardView: View {
             }
             .animation(.default, value: activeBanner?.text)
         }
+        // The dots share the ride controls' row, flush with the buttons' bottom edge (#447), and
+        // sit beneath them so a long indicator never covers a button.
         .overlay(alignment: .bottom) {
-            VStack(spacing: Spacing.xs) {
+            ZStack(alignment: .bottom) {
                 pageIndicator
                 rideControls
             }
+            .padding(.bottom, -1 * Spacing.cornerMd)
         }
         .overlay {
             if store.isEditingDashboard {
@@ -171,7 +174,6 @@ struct RideDashboardView: View {
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.isPaused)
         .padding(.horizontal, Spacing.lg)
-        .padding(.bottom, -1 * Spacing.cornerMd)
     }
 
     /// One floating glass ride-control button. The icon-only `Label` keeps its
