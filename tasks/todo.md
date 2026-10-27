@@ -938,7 +938,7 @@ Plan: `~/.claude/plans/validated-zooming-sphinx.md`
 - The `-cornerMd` bottom padding moved from `rideControls` onto the shared row. Negative padding shrinks the layout
   frame, so leaving it on the buttons would have lined the dots up 12 pt above the visible buttons.
 - Open: there's no page cap, so about 9+ dots reach Finish while paused. The buttons draw on top and keep their
-  touches. UX §S05 says the dots show "when there are multiple pages", but the code always shows them. Flagged
-  to Brian, not changed.
+  touches. UX §S05 said the dots show "when there are multiple pages", but the code always shows them. Brian:
+  code wins. UX now says always visible, one dot per page, even for one page.
 - Verification: `CyclometerTests` without PersistenceClientTests passed 2,179, 0 failed. PersistenceClientTests alone
   passed 47/47.
