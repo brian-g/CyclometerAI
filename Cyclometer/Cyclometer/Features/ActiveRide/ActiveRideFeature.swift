@@ -1353,7 +1353,13 @@ struct ActiveRideFeature {
     /// counted, and Ascent would go down across the resume.
     private func seedFromSavedTrack(rideId: UUID) -> Effect<Action> {
         .run { [persistenceClient, altimeterClient] send in
-            guard let points = try? await persistenceClient.fetchTrackPoints(rideId) else { return }
+            let points: [TrackPointDTO]
+            do {
+                points = try await persistenceClient.fetchTrackPoints(rideId)
+            } catch {
+                logger.error("Reading ride \(rideId, privacy: .public)'s saved track on resume failed: \(error.localizedDescription, privacy: .public) — Ascent and HR time in zone count from the resume")
+                return
+            }
             let source: AltitudeResolver.Source = altimeterClient.isAvailable() ? .barometric : .gps
             if let seed = ElevationTracker.Seed(savedTrack: points, source: source) {
                 await send(.elevationSeeded(seed))
