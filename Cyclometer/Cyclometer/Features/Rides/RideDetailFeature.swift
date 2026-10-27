@@ -257,4 +257,10 @@ struct HeartRateSecondsTally: Equatable, Sendable {
             secondsByBPM[bpm, default: 0] += 1
         }
     }
+
+    /// Adds a resumed ride's seconds from before the kill (#393). Summing is exact: a held Watch
+    /// reading never crosses a segment, and every point after a resume is in a newer one.
+    mutating func add(secondsByBPM seconds: [Int: Int]) {
+        secondsByBPM.merge(seconds, uniquingKeysWith: +)
+    }
 }

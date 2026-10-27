@@ -3072,6 +3072,57 @@ struct ActiveRideFeatureHRDropoutTests {
         #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(recorded))
     }
 
+    /// #393: after a kill and resume, the sheet counts the whole ride, as S10 does at finish.
+    @Test("A resumed ride's HR tally adds its saved track's seconds")
+    func hrTallySeededOnResume() async {
+        // Before the kill: a strap at 150 with a dropout, then a Watch sample held for 2 s.
+        let saved = RideSummaryFeatureTests.track(count: 6) { [150, 150, nil, 72, nil, nil][$0] }.map {
+            var point = $0
+            if point.heartRateBPM == 72 { point.heartRateSource = .appleWatch }
+            return point
+        }
+        let rideId = saved[0].rideId
+        var resumed = ActiveRideFeature.State(resuming: RideSummaryUpdate(
+            rideId: rideId, recordingState: .active,
+            durationSeconds: 6, distanceMeters: 66, averageSpeedMPS: 11, maxSpeedMPS: 11
+        ))
+        resumed.isHRPaired = true
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now, resumed)
+        store.dependencies.persistenceClient = .mock(trackPoints: [rideId: saved])
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.heartRateSeeded)
+        #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2, 72: 3])
+
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.heartRateUpdated(160))
+        await store.send(.elapsedTick)
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2, 72: 3, 160: 2])
+        #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(saved + recorded))
+    }
+
+    @Test("A resume seed that lands after the first live seconds adds to them")
+    func hrTallySeedAddsToLiveSeconds() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.heartRateUpdated(160))
+        await store.send(.elapsedTick)
+        await store.send(.heartRateSeeded([150: 2, 160: 3]))
+        await store.skipInFlightEffects(strict: false)
+
+        #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2, 160: 4])
+    }
+
     /// #145: W4's watermark and the sheet's chart are cadence's history for heart rate: every live
     /// reading, recording or not, over the last `CadenceFeature.historyWindow`.
     @Test("HR history keeps the last hour of live readings, through a pause")

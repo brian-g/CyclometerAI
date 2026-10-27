@@ -144,7 +144,7 @@ struct ActiveRideFeature {
         var maxHeartRateBPM: Int = 0
         /// Recorded seconds at each bpm, for the Heart Rate sheet's time in zone (#145). Fed the
         /// track points the recorder writes, by S10's rule, so the sheet shows what S10 will.
-        /// Starts over when a ride resumes after a crash: nothing seeds it from the saved track.
+        /// A ride resumed after a crash adds its saved track's seconds (`.heartRateSeeded`, #393).
         var hrSecondsTally = HeartRateSecondsTally()
         /// Heart-rate readings from the last `CadenceFeature.historyWindow`, behind W4's watermark,
         /// its trend and the Heart Rate sheet's chart (#145) — cadence's history, for heart rate.
@@ -484,6 +484,8 @@ struct ActiveRideFeature {
         case altimeterEnded
         /// A resumed ride's elevation before the kill, from its saved track (#387).
         case elevationSeeded(ElevationTracker.Seed)
+        /// A resumed ride's seconds at each bpm before the kill, from its saved track (#393).
+        case heartRateSeeded([Int: Int])
         /// Handled by `LiveActivityFeature` (#308).
         case liveActivity(LiveActivityAction)
 
@@ -613,7 +615,7 @@ struct ActiveRideFeature {
                         // A stream that never gave a reading leaves GPS in charge already.
                         if hadReading { await send(.altimeterEnded) }
                     },
-                    isResuming ? seedElevation(rideId: state.rideId) : .none
+                    isResuming ? seedFromSavedTrack(rideId: state.rideId) : .none
                 )
             case .dashboardPageChanged(let page):
                 state.dashboardPage = page
@@ -1130,6 +1132,9 @@ struct ActiveRideFeature {
             case .elevationSeeded(let seed):
                 state.elevation.seed(seed)
                 return .none
+            case .heartRateSeeded(let secondsByBPM):
+                state.hrSecondsTally.add(secondsByBPM: secondsByBPM)
+                return .none
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = status.isGranted
                 return .none
@@ -1339,19 +1344,30 @@ struct ActiveRideFeature {
         state.vehiclePassTracking = [:]
     }
 
-    /// A resumed ride's elevation from before the kill, read back from its saved track (#387). A
-    /// failed read leaves it at what the ride has done since the resume.
+    /// A resumed ride's elevation (#387) and heart-rate seconds (#393) from before the kill, read
+    /// back from its saved track in one fetch. A failed read leaves each at what the ride has done
+    /// since the resume.
     ///
     /// A phone with a barometer most likely recorded the track from it, and the seed counts it on
     /// the barometer's floor; GPS's coarser one would drop the short rollers the dashboard already
     /// counted, and Ascent would go down across the resume.
-    private func seedElevation(rideId: UUID) -> Effect<Action> {
+    private func seedFromSavedTrack(rideId: UUID) -> Effect<Action> {
         .run { [persistenceClient, altimeterClient] send in
+            let points: [TrackPointDTO]
+            do {
+                points = try await persistenceClient.fetchTrackPoints(rideId)
+            } catch {
+                logger.error("Reading ride \(rideId, privacy: .public)'s saved track on resume failed: \(error.localizedDescription, privacy: .public) — Ascent and HR time in zone count from the resume")
+                return
+            }
             let source: AltitudeResolver.Source = altimeterClient.isAvailable() ? .barometric : .gps
-            guard let points = try? await persistenceClient.fetchTrackPoints(rideId),
-                  let seed = ElevationTracker.Seed(savedTrack: points, source: source)
-            else { return }
-            await send(.elevationSeeded(seed))
+            if let seed = ElevationTracker.Seed(savedTrack: points, source: source) {
+                await send(.elevationSeeded(seed))
+            }
+            let secondsByBPM = RideDetailSeries.secondsByBPM(points)
+            if !secondsByBPM.isEmpty {
+                await send(.heartRateSeeded(secondsByBPM))
+            }
         }
     }
 
