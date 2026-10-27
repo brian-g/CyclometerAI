@@ -43,8 +43,10 @@ struct WidgetAccessibilityTests {
         #expect(cadence(80, .twoByOne) == "80 rpm, below average, average 88, maximum 110")
     }
 
-    /// No ▲/▼ to read: within 5 rpm of the average, coasting, or with no reading.
+    /// No ▲/▼ to read: within 5 rpm of the average, coasting, with no reading, or before any pedalling.
     @Test func cadenceReadsNoTrendWhenEvenCoastingOrWithoutAReading() {
+        let noAverage = CadenceWidget(cadence: 95, cadenceHistory: [], averageCadence: 0, maxCadence: 0, size: .oneByOne)
+        #expect(noAverage.accessibilityValue == "95 rpm")
         #expect(cadence(93, .oneByOne) == "93 rpm")
         #expect(cadence(93, .twoByOne) == "93 rpm, average 88, maximum 110")
         #expect(cadence(0, .oneByOne) == "0 rpm")
@@ -83,8 +85,13 @@ struct WidgetAccessibilityTests {
         #expect(speed(6, .twoByTwo) == "21.6 kilometers per hour, below average" + speedRest + speedRide)
     }
 
-    /// No ▲/▼ to read: within the 0.5 km/h threshold of the average, or with no reading.
+    /// No ▲/▼ to read: within the 0.5 km/h threshold of the average, with no reading, or with no average yet.
     @Test func speedReadsNoTrendWhenEvenOrWithoutAReading() {
+        let noAverage = SpeedWidget(
+            speed: 10, speedHistory: [], activeSpeedSource: .gps,
+            distance: 0, elapsed: 0, averageSpeed: 0, maxSpeed: 0, unit: .metric, size: .oneByOne
+        )
+        #expect(noAverage.accessibilityValue == "36.0 kilometers per hour")
         #expect(speed(8.1, .oneByOne) == "29.2 kilometers per hour")
         #expect(speed(8.1, .twoByOne) == "29.2 kilometers per hour" + speedRest)
         #expect(speed(8.1, .twoByTwo) == "29.2 kilometers per hour" + speedRest + speedRide)

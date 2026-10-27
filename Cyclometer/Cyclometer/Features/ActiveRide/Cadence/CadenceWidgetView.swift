@@ -144,10 +144,8 @@ struct CadenceWidget: View {
     var accessibilityValue: String {
         var parts = [cadence.map { "\($0) rpm" } ?? "No reading"]
         // The ▲/▼ on the cadence, read as W1's (#401).
-        switch Self.trend(cadence: cadence, average: averageCadence) {
-        case .up: parts.append("above average")
-        case .down: parts.append("below average")
-        case .steady: break
+        if let trend = Self.trend(cadence: cadence, average: averageCadence).spokenAgainstAverage {
+            parts.append(trend)
         }
         if size == .twoByOne {
             if averageCadence > 0 { parts.append("average \(averageCadence)") }

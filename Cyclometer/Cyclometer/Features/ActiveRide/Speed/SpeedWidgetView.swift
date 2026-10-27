@@ -192,11 +192,7 @@ struct SpeedWidget: View {
     var accessibilityValue: String {
         var parts = [speed.map(unit.spokenSpeed(fromMPS:)) ?? "No reading"]
         // The ▲/▼ on the speed (#401).
-        switch trend {
-        case .up: parts.append("above average")
-        case .down: parts.append("below average")
-        case .steady: break
-        }
+        if let trend = trend.spokenAgainstAverage { parts.append(trend) }
         if size != .oneByOne {
             parts += ["average \(displayAvg)", "maximum \(displayMax)"]
         }
