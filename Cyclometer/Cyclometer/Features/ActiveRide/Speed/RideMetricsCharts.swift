@@ -14,18 +14,12 @@ enum PaceTrace {
         var runs: [[SpeedSample]] = []
         var run: [SpeedSample] = []
         for bucket in samples.buckets(to: resolution) {
-            let moving = bucket.filter { $0.mps > ActiveRideFeature.stationarySpeedMPS }
-            guard !moving.isEmpty else {
+            guard let moving = bucket.filter({ $0.mps > ActiveRideFeature.stationarySpeedMPS }).mean else {
                 if !run.isEmpty { runs.append(run) }
                 run = []
                 continue
             }
-            let n = Double(moving.count)
-            let time = moving.reduce(0) { $0 + $1.time.timeIntervalSinceReferenceDate } / n
-            run.append(SpeedSample(
-                time: Date(timeIntervalSinceReferenceDate: time),
-                mps: moving.reduce(0) { $0 + $1.mps } / n
-            ))
+            run.append(moving)
         }
         if !run.isEmpty { runs.append(run) }
         return runs
