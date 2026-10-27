@@ -482,7 +482,7 @@ The grid always occupies the full screen height between the Dynamic Island and t
 
 **Adaptive content** Each widget is size-aware. At `1×1` it surfaces the single most critical value — the number readable in under a second. At `2×1` it adds a secondary metric or sparkline. At `2×2` it exposes the full picture: hero number, trend watermark, supporting stats, and contextual detail. The content hierarchy within each widget is defined in the widget specifications below.
 
-**Multiple pages** The dashboard supports multiple swipeable pages, each with its own independent widget layout. Pages are managed through the customisation flow (S07). The paging indicator is always visible at the bottom of the grid when there are multiple pages defined. The factory default shows two paging dots, signalling that multi-page use is a first-class pattern, not an edge case. The widgets for the second page are TBD for this document. 
+**Multiple pages** The dashboard supports multiple swipeable pages, each with its own independent widget layout. Pages are managed through the customisation flow (S07). The paging indicator is always visible, one dot per page, even when only one page is defined. It sits in the bottom toolbar's row, centred on the screen, its bottom flush with the buttons' bottom edge (#447). The factory default shows two paging dots, signalling that multi-page use is a first-class pattern, not an edge case. The widgets for the second page are TBD for this document. 
 
 **Customisation** The rider configures the dashboard by choosing which widgets to display, their sizes, and their positions. The layout must satisfy:
 - All widgets fit within the 2-column × 7-row boundary
@@ -524,8 +524,7 @@ This is the arrangement every new user sees. It demonstrates the full range of w
 **Structural Zones:**
 
 - Widgets (full screen, no intrinsic padding — widgets extend to screen edges)
-- Dashboard paging indicator
-- Bottom Toolbar
+- Bottom Toolbar, with the dashboard paging indicator in its row, centred on the screen
 
 **Widget Grid**
 
@@ -533,7 +532,7 @@ The dashboard divides the phone screen into 7 rows × 2 columns. Widget sizes fo
 
 **Dashboard Paging**
 
-Multiple dashboard pages are supported. Pages are added automatically (SpringBoard model). The paging indicator is always visible. See S07 for editing behavior.
+Multiple dashboard pages are supported. Pages are added automatically (SpringBoard model). The paging indicator is always visible. It sits in the bottom toolbar's row, centred on the screen, its bottom flush with the buttons' bottom edge. It draws beneath the buttons, so it never takes a button's touch (#447). See S07 for editing behavior.
 
 **Bottom Toolbar**
 
