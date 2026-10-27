@@ -942,3 +942,22 @@ Plan: `~/.claude/plans/validated-zooming-sphinx.md`
   code wins. UX now says always visible, one dot per page, even for one page.
 - Verification: `CyclometerTests` without PersistenceClientTests passed 2,179, 0 failed. PersistenceClientTests alone
   passed 47/47.
+
+---
+
+# #393 — Heart Rate sheet keeps time in zone across a crash resume
+
+Plan: `~/.claude/plans/functional-zooming-koala.md`
+
+- [x] `HeartRateSecondsTally.add(secondsByBPM:)` — sums a histogram; exact because a Watch hold never crosses a segment
+- [x] `ActiveRideFeature`: `seedElevation` → `seedFromSavedTrack` (one fetch); sends `.elevationSeeded` and new `.heartRateSeeded`
+- [x] Tests: resume path matches `secondsByBPM(saved + recorded)`; a seed after live seconds adds to them
+- [x] Build; hand over to Brian to run
+- [x] Tests: `ActiveRideFeatureHRDropoutTests`, `ActiveRideElevationTests`
+
+## Review
+
+- Saved and live tallies are summed rather than replayed together: exact, since a resume always opens a new segment
+  and a held Watch reading never crosses one.
+- One `fetchTrackPoints` now feeds both resume seeds (`seedFromSavedTrack`), instead of reading the track twice.
+- Verification: `ActiveRideFeatureHRDropoutTests` + `ActiveRideElevationTests` passed 23, 0 failed.
