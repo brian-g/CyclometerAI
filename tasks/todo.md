@@ -961,3 +961,46 @@ Plan: `~/.claude/plans/functional-zooming-koala.md`
   and a held Watch reading never crosses one.
 - One `fetchTrackPoints` now feeds both resume seeds (`seedFromSavedTrack`), instead of reading the track twice.
 - Verification: `ActiveRideFeatureHRDropoutTests` + `ActiveRideElevationTests` passed 23, 0 failed.
+
+---
+
+# #397 — Resume seed fetches only the columns it replays
+
+Plan: `~/.claude/plans/greedy-launching-spring.md`
+
+- [x] Measure: 18k points, full fetch vs dictionary fetch (throwaway); go only if ≥ ~1.5× faster
+- [ ] `TrackSample` protocol + `TrackSampleDTO`; `TrackPointDTO` conforms
+- [ ] `Seed(savedTrack:)`, `secondsByBPM`, `HeartRateSecondsTally.add` generic over `TrackSample`
+- [ ] `PersistenceClient.fetchTrackSamples` (live dictionary fetch, test, mock); shared sentinel helper
+- [ ] `seedFromSavedTrack` uses `fetchTrackSamples`
+- [ ] `PersistenceClientTests` case: samples == full fetch mapped; unknown id empty
+- [ ] Build; hand over to Brian to run
+- [ ] Targeted tests
+
+## Review
+
+- Stopped at the gate. Simulator, Debug, 18,000 points, median of 7, three runs: full fetch 42.7 / 44.0 / 47.8 ms,
+  dictionary fetch of the 6 columns 32.7 / 33.9 / 35.8 ms — **1.29–1.33×**, about 10 ms saved.
+- The issue's 3 columns became 6 after #393 (HR seed reads bpm, source and timestamp too), which is most of why the
+  gain is small: SQLite still reads every row, and row materialisation, not column count, dominates.
+- Recommendation: close #397 as not worth a second track-point read path. Nothing below the gate was built.
+
+---
+
+# #398 — W14–W16 re-render only when their number changes
+
+Plan: `~/.claude/plans/greedy-launching-spring.md`
+
+- [x] Tests first: stopped tick and flat moving tick leave W14–W16 un-invalidated; a climb invalidates W14
+- [x] Confirm the new negative cases fail on current code
+- [x] `ElevationTracker` → `@ObservableState`; ascent/descent stored, set by `updateTotals()`
+- [ ] Build; hand over to Brian to run
+- [ ] Targeted tests + AddWidgetSheet snapshot
+
+## Review
+
+- `ElevationTracker` is `@ObservableState`; ascent/descent are stored, set by `updateTotals()` on a recorded or
+  seeded change. An in-place mutation keeps the tracker's `_$id`, so `\.elevation` observers aren't notified;
+  only changed properties are.
+- New tests failed 7 ways on the old code (every card on a stopped and a flat tick, W15 on a climb); 4/4 pass after.
+- Not yet run: `ElevationTrackerTests`, `AltitudeReanchorReplayTests`, `ActiveRideElevationTests`, AddWidgetSheet snapshot.
