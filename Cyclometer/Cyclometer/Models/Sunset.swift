@@ -22,15 +22,23 @@ enum Sunset {
     /// Counted from the start of `now`'s minute to a sunset that is itself to the minute, so it turns
     /// over on the clock's minute and never reads 0. Yesterday's sunset counts while it is still
     /// ahead: near midsummer Reykjavik's is at 00:04.
+    ///
+    /// A day's sunset is the one whose solar noon falls on it. NOAA dates a sunset by 0h UTC, which
+    /// is a day out where the clock runs a day ahead of the sun: Samoa keeps UTC+13 at 172° W.
     static func countdown(now: Date, coordinate: Coordinate?, timeZone: TimeZone) -> Countdown {
         guard let coordinate else { return .noFix }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
         let minute = calendar.dateInterval(of: .minute, for: now)!.start
         let today = calendar.startOfDay(for: now)
         let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
         let sunsets = [yesterday, today].map { day in
-            let date = calendar.dateComponents([.year, .month, .day], from: day)
+            // The day's noon on the mean solar clock where the rider is: 4 minutes a degree of longitude.
+            let solarNoon = calendar.date(byAdding: .hour, value: 12, to: day)!
+                .addingTimeInterval(coordinate.longitude * 240)
+            let date = utc.dateComponents([.year, .month, .day], from: solarNoon)
             return sunset(year: date.year!, month: date.month!, day: date.day!, at: coordinate)
         }
         if let next = sunsets.compactMap({ $0 }).first(where: { $0 > minute }) {
@@ -73,8 +81,9 @@ enum Sunset {
         return (365.25 * (y + 4_716)).rounded(.down) + (30.6001 * (m + 1)).rounded(.down) + Double(day) + b - 1_524.5
     }
 
-    /// Sunset in minutes after 0h UTC of the day `julianDay` falls in, with the sun placed at
-    /// `julianDay` (NOAA's `calcSunriseSetUTC`). Nil when the sun never reaches the sunset zenith.
+    /// Sunset in minutes after 0h UTC of the date being worked out, with the sun placed at
+    /// `julianDay` (NOAA's `calcSunriseSetUTC`): the second pass moves the sun, not the origin. Nil
+    /// when the sun never reaches the sunset zenith.
     private static func utcMinutes(julianDay: Double, at coordinate: Coordinate) -> Double? {
         let t = (julianDay - j2000JulianDay) / daysPerJulianCentury
         let latitude = radians(coordinate.latitude)
@@ -147,7 +156,8 @@ struct SunsetFix: Equatable, Sendable {
     let coordinate: Coordinate
     let takenAt: Date
 
+    /// Two-sided, so a clock set back doesn't hold the fix until it catches up.
     func isFresh(at now: Date) -> Bool {
-        now.timeIntervalSince(takenAt) < Self.refreshInterval
+        abs(now.timeIntervalSince(takenAt)) < Self.refreshInterval
     }
 }

@@ -1009,6 +1009,8 @@ Cyclometer/
 │   │   │                                  // LiveMapCamera, MapSheetButtons
 │   │   ├── Navigation/                    // NavigationFeature, DirectionsWidgetView (W9),
 │   │   │                                  // TurnInstructionOverlay
+│   │   ├── Sunset/                        // SunsetWidgetView (W21, #462) — the NOAA sunset lives in
+│   │   │                                  // Models/Sunset
 │   │   ├── LiveActivity/                  // RideActivityAttributes, RideLockScreenView (PRD §8.10) — shared with the extension;
 │   │   │                                  // LiveActivityFeature (app only)
 │   │   ├── Recording/                     // TrackPointRecorderFeature, GPSFixFilter

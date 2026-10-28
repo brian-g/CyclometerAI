@@ -35,7 +35,7 @@ struct SunsetWidget: View {
     var accessibilityValue: String {
         switch countdown {
         case .minutesLeft(let minutes):
-            "in " + Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .wide))
+            "in " + (minutes * 60).spokenElapsed
         case .passed: "After sunset"
         case .noSunset: "No sunset today"
         case .noFix: "No location"

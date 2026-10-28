@@ -1146,3 +1146,13 @@ last in S08's Ride 1×1s; no Sketch check.
 - No other exhaustive store needed `sunsetFix`: the six that assert `coordinate` were the lot.
 - NOAA values come from NOAA's own `main.js` (`calcSunriseSetUTC`, two passes, minute-rounded), run in node.
 
+
+### #490 review (`/code-review xhigh --fix`)
+
+- [x] Fixed: a day's sunset is the one whose solar noon falls on it, so Samoa/Tonga/Kiritimati (clock a day ahead of
+      the sun) read "—" after sunset instead of counting to tomorrow's; the time-zone test used Tokyo and expected the
+      bug, now Chicago, plus Apia; `SunsetFix.isFresh` two-sided for a clock set back; `utcMinutes` doc; W21 in
+      `MapDashboardWidget`'s caller lists; VoiceOver reuses `spokenElapsed`; `Sunset/` in TCA.md §8
+- [x] `SunsetTests` 23/23 (review ran it)
+- Skipped: refresh `sunsetFix` by distance instead of time (design change, small saving); no-fix and after-sunset
+  snapshots are identical images (kept: one per state)

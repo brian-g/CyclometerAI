@@ -118,11 +118,26 @@ struct SunsetTests {
     }
 
     /// The device's time zone decides what "today" is: one instant is after the 21st's sunset in
-    /// Denver, and the afternoon of the 22nd in Tokyo.
+    /// Denver, and the first minute of the 22nd in Chicago.
     @Test func theDevicesTimeZoneDecidesToday() {
         #expect(countdown("2026-06-22T05:00:00Z") == .passed)
-        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
-        #expect(countdown("2026-06-22T05:00:00Z", in: tokyo) == .minutesLeft(21 * 60 + 34))
+        let chicago = TimeZone(identifier: "America/Chicago")!
+        #expect(countdown("2026-06-22T05:00:00Z", in: chicago) == .minutesLeft(21 * 60 + 34))
+    }
+
+    /// Samoa keeps UTC+13 at 172° W, so NOAA dates its sunset a day early. At 21:00 on the 28th the
+    /// 28th's sunset has set: "—", not a day's countdown to the 29th's.
+    @Test func aSunsetIsItsSolarNoonsDay() {
+        let apia = Coordinate(latitude: -13.8333, longitude: -171.7667)
+        let samoa = TimeZone(identifier: "Pacific/Apia")!
+        #expect(countdown("2026-10-28T08:00:00Z", at: apia, in: samoa) == .passed)
+    }
+
+    /// A clock set back retakes the fix rather than holding it until the clock catches up.
+    @Test func aClockSetBackRetakesTheFix() {
+        let fix = SunsetFix(coordinate: Self.boulder, takenAt: Self.utc("2026-06-22T01:00:00Z"))
+        #expect(fix.isFresh(at: Self.utc("2026-06-22T01:00:59Z")))
+        #expect(!fix.isFresh(at: Self.utc("2026-06-22T00:00:00Z")))
     }
 
     @Test func polarDayHasNoSunset() {
