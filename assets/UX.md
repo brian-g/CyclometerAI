@@ -845,6 +845,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 **Sizes:** 1x1
 
 - Label "TO SUNSET". Value: hours and minutes until today's sunset where the rider is, as h:mm: "1:12", and "0:08" under an hour (#462). Medium hero, no unit
+- The SF Symbol `sunset.fill` in the lower right, `title2`, `textSecondary`, inset `sm` as the label: it marks the card at a glance, so it is drawn in every state. VoiceOver doesn't read it
 - Worked out on the device from the latest fix and the date by NOAA's solar-position algorithm (zenith 90.833°, no elevation), to the minute as NOAA publishes it — no network, no WeatherKit. The fix is retaken at most once a minute
 - The countdown turns over on the clock's minute and never reads 0:00: it reads 0:01 in the minute before sunset, and "—" from sunset's minute. "Today" is the device's calendar day, so midnight starts the next day's countdown, and a time-zone change moves it. A sunset after midnight (Reykjavik's, near midsummer) still counts as the day before's while it is ahead
 - "—" with no fix yet, after sunset, and with no sunset that day (polar day or night)

@@ -3,7 +3,8 @@ import SwiftUI
 // MARK: - W21 Sunset Widget
 
 /// W21 — Sunset 1×1 (#462): hours and minutes until today's sunset where the rider is, worked out by
-/// `Sunset.countdown`. "1:12", and "0:08" under an hour. Tapping opens the map sheet, as W9 does.
+/// `Sunset.countdown`. "1:12", and "0:08" under an hour, with the sunset symbol in the lower right.
+/// Tapping opens the map sheet, as W9 does.
 ///
 /// Always on the dashboard: with no fix yet, no sunset today (polar day or night), or after sunset,
 /// it reads "—".
@@ -21,6 +22,13 @@ struct SunsetWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        // Marks the card at a glance, whatever it reads, so it is drawn in every state.
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: "sunset.fill")
+                .font(.title2)
+                .foregroundStyle(Color.cyTextSecondary)
+                .padding(Spacing.sm)
+        }
         .background(Color.cyBgSecondary)
         .widgetDetail(label: SunsetDashboardWidget.title, value: accessibilityValue, detail)
     }

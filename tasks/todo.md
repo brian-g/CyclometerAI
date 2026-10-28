@@ -1156,3 +1156,12 @@ last in S08's Ride 1×1s; no Sketch check.
 - [x] `SunsetTests` 23/23 (review ran it)
 - Skipped: refresh `sunsetFix` by distance instead of time (design change, small saving); no-fix and after-sunset
   snapshots are identical images (kept: one per state)
+
+### W21 sunset icon (Brian, after review)
+
+- [x] `sunset.fill` in the lower right, `.title2`, `cyTextSecondary`, inset `Spacing.sm`; drawn in every state, hidden
+      from VoiceOver by `widgetDetail`; UX.md §W21
+- [x] Brian ran it: "looks good"
+- [x] Re-recorded the 6 W21 snapshots and S08's catalog; the catalog's pixel diff against the last commit is only the
+      icon (73×59 pt-px box, light and dark)
+- [x] Sunset, Sunset snapshots, S08 catalog snapshot, WidgetAccessibility: 107/107, every suite non-empty
