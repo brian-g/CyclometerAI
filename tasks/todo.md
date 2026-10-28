@@ -964,6 +964,25 @@ Plan: `~/.claude/plans/functional-zooming-koala.md`
 
 ---
 
+# #399 — One bucket-average helper for the dashboard series
+
+Plan: `~/.claude/plans/greedy-launching-spring.md`
+
+- [x] `Models/TimedSample.swift`: protocol + `buckets(to:)` + `bucketAveraged(to:)`
+- [x] Conform `SpeedSample`, `AltitudeSample`, the three chart `Point`s; delete the old copies
+- [x] Move `RideSpeedChart.elevationPoints`, HR/Cadence `downsampled`, `PaceTrace.runs` onto it
+- [x] `TimedSampleTests`: partition 1…4000 × {60, 120}; means; prove it bites on the Cadence formula
+- [ ] Build; hand over to Brian to run
+- [ ] Targeted tests + chart snapshots
+
+## Review
+
+- Six copies, not four: Cadence's chart and `PaceTrace.runs` also sliced by hand. Cadence still had the #140
+  floating-point edges and dropped the newest sample at 160 counts in 1…4000 (×{60, 120}); now fixed.
+- HR and Cadence keep `downsampled` as a one-line forwarder: two call sites each, same resolution.
+- Partition test failed 160× against Cadence's old formula, then passed; `TimedSampleTests` + `SpeedFeatureTests`
+  24 passed, 0 failed.
+- Not yet run: `RideMetricsTests`, `HeartRateMetricsTests`, `ElevationMetricsTests`, chart snapshots, AddWidgetSheet.
 # #397 — Resume seed fetches only the columns it replays
 
 Plan: `~/.claude/plans/greedy-launching-spring.md`

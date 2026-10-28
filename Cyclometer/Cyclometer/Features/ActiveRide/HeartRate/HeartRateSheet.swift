@@ -212,25 +212,16 @@ struct HeartRateChart: View {
     private static let elevationHeightFraction = 0.6
     private static let minElevationSpanMeters = RouteGeometry.elevationNoiseThresholdMeters
 
-    private struct Point: Identifiable {
+    private struct Point: Identifiable, TimedSample {
         let time: Date
         let value: Double
         var id: Date { time }
     }
 
-    /// At most `RideMetricsCharts.maxPlottedPoints` bucket means (integer edges, as
-    /// `bucketAveraged(to:)`): an hour of 1 Hz readings would be thousands of marks.
+    /// At most `RideMetricsCharts.maxPlottedPoints` bucket means: an hour of 1 Hz readings would be
+    /// thousands of marks.
     private static func downsampled(_ points: [Point]) -> [Point] {
-        let count = points.count
-        let buckets = min(count, RideMetricsCharts.maxPlottedPoints)
-        return (0..<buckets).map { i in
-            let slice = points[(i * count / buckets)..<((i + 1) * count / buckets)]
-            let n = Double(slice.count)
-            return Point(
-                time: Date(timeIntervalSinceReferenceDate: slice.reduce(0) { $0 + $1.time.timeIntervalSinceReferenceDate } / n),
-                value: slice.reduce(0) { $0 + $1.value } / n
-            )
-        }
+        points.bucketAveraged(to: RideMetricsCharts.maxPlottedPoints)
     }
 
     var body: some View {

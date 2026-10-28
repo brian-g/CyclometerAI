@@ -7,24 +7,9 @@ struct SpeedSample: Equatable, Sendable {
     let mps: Double
 }
 
-extension Array where Element == SpeedSample {
-    /// At most `resolution` samples, each the mean time and speed of a contiguous bucket — so a
-    /// downsampled series still sits on the time axis it was recorded on (W2 plots two series
-    /// against one axis, #140). Returned unchanged when already within `resolution`.
-    func bucketAveraged(to resolution: Int) -> [SpeedSample] {
-        guard count > resolution else { return self }
-        return (0..<resolution).map { i in
-            // Integer edges: `Double(count) / resolution` scaled back up can land one short of
-            // `count` (e.g. 123 at 60) and drop the newest sample.
-            let slice = self[(i * count / resolution)..<((i + 1) * count / resolution)]
-            let n = Double(slice.count)
-            let time = slice.reduce(0) { $0 + $1.time.timeIntervalSinceReferenceDate } / n
-            return SpeedSample(
-                time: Date(timeIntervalSinceReferenceDate: time),
-                mps: slice.reduce(0) { $0 + $1.mps } / n
-            )
-        }
-    }
+extension SpeedSample: TimedSample {
+    var value: Double { mps }
+    init(time: Date, value: Double) { self.init(time: time, mps: value) }
 }
 
 @Reducer

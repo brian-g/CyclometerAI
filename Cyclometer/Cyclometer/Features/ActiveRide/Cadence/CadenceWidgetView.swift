@@ -228,28 +228,16 @@ private struct CadenceDetailChart: View {
 
     /// A time-stamped value with the time as its identity, so marks keep their identity as
     /// the series grows instead of being re-diffed by array offset.
-    private struct Point: Identifiable {
+    private struct Point: Identifiable, TimedSample {
         let time: Date
         let value: Double
         var id: Date { time }
     }
 
-    /// At most `maxPlottedPoints`, by averaging contiguous buckets (time and value) — the
-    /// same strategy as `SpeedSample.bucketAveraged`, keeping a full hour of 1 Hz
-    /// readings from becoming thousands of marks.
+    /// At most `maxPlottedPoints` bucket means, keeping a full hour of 1 Hz readings from
+    /// becoming thousands of marks.
     private static func downsampled(_ points: [Point]) -> [Point] {
-        guard points.count > maxPlottedPoints else { return points }
-        let bucket = Double(points.count) / Double(maxPlottedPoints)
-        return (0..<maxPlottedPoints).map { i in
-            let start = Int(Double(i) * bucket)
-            let end = min(max(start + 1, Int(Double(i + 1) * bucket)), points.count)
-            let slice = points[start..<end]
-            let meanTime = slice.map(\.time.timeIntervalSinceReferenceDate).reduce(0, +) / Double(slice.count)
-            return Point(
-                time: Date(timeIntervalSinceReferenceDate: meanTime),
-                value: slice.map(\.value).reduce(0, +) / Double(slice.count)
-            )
-        }
+        points.bucketAveraged(to: maxPlottedPoints)
     }
 
     private var cadencePoints: [Point] {
