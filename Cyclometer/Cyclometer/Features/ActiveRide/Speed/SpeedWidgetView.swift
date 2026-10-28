@@ -191,6 +191,8 @@ struct SpeedWidget: View {
     /// and time are spelled out: VoiceOver reads "1:02:33" digit by digit, and a symbol is a guess.
     var accessibilityValue: String {
         var parts = [speed.map(unit.spokenSpeed(fromMPS:)) ?? "No reading"]
+        // The ▲/▼ on the speed (#401).
+        if let trend = trend.spokenAgainstAverage { parts.append(trend) }
         if size != .oneByOne {
             parts += ["average \(displayAvg)", "maximum \(displayMax)"]
         }

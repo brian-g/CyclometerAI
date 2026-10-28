@@ -143,6 +143,10 @@ struct CadenceWidget: View {
     /// What VoiceOver reads after "Cadence" (#361): what this size shows, with no "—" read aloud.
     var accessibilityValue: String {
         var parts = [cadence.map { "\($0) rpm" } ?? "No reading"]
+        // The ▲/▼ on the cadence, read as W1's (#401).
+        if let trend = Self.trend(cadence: cadence, average: averageCadence).spokenAgainstAverage {
+            parts.append(trend)
+        }
         if size == .twoByOne {
             if averageCadence > 0 { parts.append("average \(averageCadence)") }
             if maxCadence > 0 { parts.append("maximum \(maxCadence)") }

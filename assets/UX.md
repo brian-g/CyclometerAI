@@ -583,7 +583,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 **Sizes:** 2x2, 2x1, 1x1
 
 - Primary value: `large-hero`; unit: km/h or mph (`UserProfile.preferredUnit`)
-- Trend, at every size (#81): the shared trend indicator (#402), a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the primary value, level with the tops of its digits and a quarter of their height. It shows when current speed is above or below the ride average by more than 0.5 km/h. Hidden when even or with no reading. The unit doesn't move
+- Trend, at every size (#81): the shared trend indicator (#402), a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the primary value, level with the tops of its digits and a quarter of their height. It shows when current speed is above or below the ride average by more than 0.5 km/h. Hidden when even or with no reading. VoiceOver reads it as "above average" or "below average" after the speed (#401). The unit doesn't move
 - Watermark speed history graph (area line behind the numbers)
 - 2x1, 2x2: Max speed for ride (`small-hero`, labeled "MAX")
 - 2x1, 2x2: Current average speed (`small-hero`, labeled "AVG")
@@ -652,7 +652,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 - Value: current RPM
 - Empty state: "--" 
-- Trend, at both sizes (#402): the shared trend indicator, as §W1's: a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the value, level with the tops of its digits and a quarter of their height. It shows when current cadence is above or below the ride average by more than 5 rpm. Hidden when even, while coasting (0 rpm), with no reading, or before any pedalling is recorded. The unit doesn't move
+- Trend, at both sizes (#402): the shared trend indicator, as §W1's: a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the value, level with the tops of its digits and a quarter of their height. It shows when current cadence is above or below the ride average by more than 5 rpm. Hidden when even, while coasting (0 rpm), with no reading, or before any pedalling is recorded. VoiceOver reads it as "above average" or "below average" after the cadence (#401). The unit doesn't move
 - 2x1 displays the average and max
 - A watermark graph of the historical Cadence for the ride. The horizontal bands in the chart show the cadence zones.
 - As built (#79), the bands are always drawn, even before any reading arrives: they show the rider's zones, not ride data. There are five zones, set in §S12's Cadence Zones section: Z1 Recovery, Z2 Endurance, Z3 Steady State, Z4 Race Pace and Z5 Sprint, coloured `brHRZone1`–`brHRZone5`. They default to 60–69, 70–84, 85–94, 95–109 and 110+ rpm. A pedalling reading below Z1's 60 rpm still counts as Z1, as a heart rate below resting counts as HR zone 1. The Z1 band runs from 0, so the chart has no unshaded strip. The y-axis is fixed at 0–150 rpm. Time is kept per whole rpm and sorted into zones when shown, as HR's time in zone is, so a zone change re-sorts the whole ride's time, including time recorded before it. These five zones replace #38's four efficiency bands (grinding <70, optimal 85–100, over-spinning >100)

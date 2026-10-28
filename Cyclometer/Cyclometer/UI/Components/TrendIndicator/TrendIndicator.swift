@@ -4,6 +4,16 @@ import SwiftUI
 /// W4's last 10 s of heart rate against the 20 s before, W5's cadence against the ride average.
 enum Trend: Equatable, Sendable {
     case up, steady, down
+
+    /// What VoiceOver reads for the ▲/▼ of a value against its ride average, W1's and W5's (#401);
+    /// nil when steady.
+    var spokenAgainstAverage: String? {
+        switch self {
+        case .up: "above average"
+        case .down: "below average"
+        case .steady: nil
+        }
+    }
 }
 
 /// The ▲ (`cyRatingGood`) or ▼ (`cyRatingBad`) shared by W1, W4 and W5 (#402); nothing when

@@ -29,25 +29,75 @@ struct WidgetAccessibilityTests {
         #expect(live(.twoByOne).accessibilityValue == "92 rpm, average 88, maximum 110")
     }
 
+    /// A ride averaging 88 rpm, at `rpm` now.
+    private func cadence(_ rpm: Int?, _ size: WidgetSize) -> String {
+        CadenceWidget(cadence: rpm, cadenceHistory: [], averageCadence: 88, maxCadence: 110, size: size)
+            .accessibilityValue
+    }
+
+    /// The ▲/▼ against the ride average, read as W1's is (#401).
+    @Test func cadenceReadsItsTrend() {
+        #expect(cadence(95, .oneByOne) == "95 rpm, above average")
+        #expect(cadence(95, .twoByOne) == "95 rpm, above average, average 88, maximum 110")
+        #expect(cadence(80, .oneByOne) == "80 rpm, below average")
+        #expect(cadence(80, .twoByOne) == "80 rpm, below average, average 88, maximum 110")
+    }
+
+    /// No ▲/▼ to read: within 5 rpm of the average, coasting, with no reading, or before any pedalling.
+    @Test func cadenceReadsNoTrendWhenEvenCoastingOrWithoutAReading() {
+        let noAverage = CadenceWidget(cadence: 95, cadenceHistory: [], averageCadence: 0, maxCadence: 0, size: .oneByOne)
+        #expect(noAverage.accessibilityValue == "95 rpm")
+        #expect(cadence(93, .oneByOne) == "93 rpm")
+        #expect(cadence(93, .twoByOne) == "93 rpm, average 88, maximum 110")
+        #expect(cadence(0, .oneByOne) == "0 rpm")
+        #expect(cadence(0, .twoByOne) == "0 rpm, average 88, maximum 110")
+        #expect(cadence(nil, .oneByOne) == "No reading")
+        #expect(cadence(nil, .twoByOne) == "No reading, average 88, maximum 110")
+    }
+
     @Test func cadenceNeverReadsADash() {
         let unpaired = CadenceWidget(cadence: nil, cadenceHistory: [], averageCadence: 0, maxCadence: 0, size: .twoByOne)
         #expect(unpaired.accessibilityValue == "No reading")
     }
 
+    /// A ride averaging 8 m/s (28.8 km/h), at `mps` now.
+    private func speed(_ mps: Double?, _ size: WidgetSize) -> String {
+        SpeedWidget(
+            speed: mps, speedHistory: [], activeSpeedSource: mps == nil ? .none : .gps,
+            distance: 12_400, elapsed: 3_753, averageSpeed: 8, maxSpeed: 12,
+            unit: .metric, size: size
+        ).accessibilityValue
+    }
+
+    private let speedRest = ", average 28.8, maximum 43.2"
+    private let speedRide = ", distance 12.4 kilometers, time 1 hour, 2 minutes, 33 seconds"
+
+    /// Above the average, it reads the ▲ (#401).
     @Test func speedReadsWhatEachSizeShows() {
-        let live = { (size: WidgetSize) in
-            SpeedWidget(
-                speed: 10, speedHistory: [], activeSpeedSource: .gps,
-                distance: 12_400, elapsed: 3_753, averageSpeed: 8, maxSpeed: 12,
-                unit: .metric, size: size
-            )
-        }
-        #expect(live(.oneByOne).accessibilityValue == "36.0 kilometers per hour")
-        #expect(live(.twoByOne).accessibilityValue == "36.0 kilometers per hour, average 28.8, maximum 43.2")
-        #expect(
-            live(.twoByTwo).accessibilityValue
-                == "36.0 kilometers per hour, average 28.8, maximum 43.2, distance 12.4 kilometers, time 1 hour, 2 minutes, 33 seconds"
+        #expect(speed(10, .oneByOne) == "36.0 kilometers per hour, above average")
+        #expect(speed(10, .twoByOne) == "36.0 kilometers per hour, above average" + speedRest)
+        #expect(speed(10, .twoByTwo) == "36.0 kilometers per hour, above average" + speedRest + speedRide)
+    }
+
+    @Test func speedReadsBelowAverage() {
+        #expect(speed(6, .oneByOne) == "21.6 kilometers per hour, below average")
+        #expect(speed(6, .twoByOne) == "21.6 kilometers per hour, below average" + speedRest)
+        #expect(speed(6, .twoByTwo) == "21.6 kilometers per hour, below average" + speedRest + speedRide)
+    }
+
+    /// No ▲/▼ to read: within the 0.5 km/h threshold of the average, with no reading, or with no average yet.
+    @Test func speedReadsNoTrendWhenEvenOrWithoutAReading() {
+        let noAverage = SpeedWidget(
+            speed: 10, speedHistory: [], activeSpeedSource: .gps,
+            distance: 0, elapsed: 0, averageSpeed: 0, maxSpeed: 0, unit: .metric, size: .oneByOne
         )
+        #expect(noAverage.accessibilityValue == "36.0 kilometers per hour")
+        #expect(speed(8.1, .oneByOne) == "29.2 kilometers per hour")
+        #expect(speed(8.1, .twoByOne) == "29.2 kilometers per hour" + speedRest)
+        #expect(speed(8.1, .twoByTwo) == "29.2 kilometers per hour" + speedRest + speedRide)
+        #expect(speed(nil, .oneByOne) == "No reading")
+        #expect(speed(nil, .twoByOne) == "No reading" + speedRest)
+        #expect(speed(nil, .twoByTwo) == "No reading" + speedRest + speedRide)
     }
 
     @Test func speedNeverReadsADash() {
@@ -322,7 +372,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         switch self {
         case .map: ""
         case .cadence: "92 rpm, average 88, maximum 110"
-        case .speed: "36.0 kilometers per hour, average 28.8, maximum 43.2, distance 12.4 kilometers, time 1 hour, 2 minutes, 33 seconds"
+        case .speed: "36.0 kilometers per hour, above average, average 28.8, maximum 43.2, distance 12.4 kilometers, time 1 hour, 2 minutes, 33 seconds"
         case .averageSpeed: "28.8 kilometers per hour"
         case .duration: "1 hour, 2 minutes, 33 seconds"
         case .distance: "12.4 kilometers"
