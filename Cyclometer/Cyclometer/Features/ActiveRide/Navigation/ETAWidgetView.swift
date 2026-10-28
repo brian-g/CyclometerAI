@@ -16,9 +16,7 @@ struct ETAWidget: View {
     var isTurnByTurnEnabled = true
     /// The map sheet, W8's. A closure so the dashboard never reads the (growing) track itself —
     /// only the presented sheet does (#362).
-    var detail: () -> LiveMapSheet = {
-        LiveMapSheet(trackSegments: [[]], route: [], orientation: .headingUp, onOrientationToggle: {})
-    }
+    var detail: () -> LiveMapSheet = { .placeholder }
 
     /// Follows the device's 12- or 24-hour setting, which iOS folds into the current locale.
     @Environment(\.locale) private var locale

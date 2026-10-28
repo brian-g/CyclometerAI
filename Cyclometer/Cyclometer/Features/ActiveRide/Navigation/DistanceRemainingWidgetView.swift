@@ -16,9 +16,7 @@ struct DistanceRemainingWidget: View {
     var isTurnByTurnEnabled = true
     /// The map sheet, W8's. A closure so the dashboard never reads the (growing) track itself —
     /// only the presented sheet does (#362).
-    var detail: () -> LiveMapSheet = {
-        LiveMapSheet(trackSegments: [[]], route: [], orientation: .headingUp, onOrientationToggle: {})
-    }
+    var detail: () -> LiveMapSheet = { .placeholder }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
