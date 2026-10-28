@@ -1109,3 +1109,40 @@ Stacked on `feat/461-distance-remaining-eta` (#486 is open, and W19/W20 only exi
 
 - `LiveMapSheet(` now appears three times: `store.liveMapSheet` (W9, W19, W20), `.placeholder`, and W8's own.
 - No reference image moved: the sheet is never drawn by a card, and the placeholder is the same empty sheet.
+
+---
+
+# #462 — W21 Time to Sunset
+
+Brian's answers: h:mm; "—" not "--"; VoiceOver says why it's empty; showcase row 5 right on the Elevation page;
+last in S08's Ride 1×1s; no Sketch check.
+
+- [x] `Models/Sunset.swift`: NOAA solar-position sunset (zenith 90.833°, no elevation) for a coordinate and
+      a calendar day, rounded to the minute as NOAA publishes it; nil for polar day/night
+- [x] `Sunset.countdown(now:coordinate:calendar:)`: the earliest of yesterday's and today's sunset still ahead
+      (a high-latitude sunset can fall after midnight), else `.passed`; `.noFix` without a coordinate; `.noSunset`
+      at polar day/night
+- [x] `ActiveRideFeature.State.sunsetFix`: the latest fix, taken at most once a minute in `.locationUpdated`,
+      so W21 re-renders once a minute, not once a fix
+- [x] `SunsetDashboardWidget` (id `sunset`, 1×1, `.ride`), `TimelineView(.everyMinute)` — exact because the sunset
+      is minute-rounded; tap opens `store.liveMapSheet`
+- [x] `SunsetWidget` view + previews (countdown, after sunset, no fix; light/dark)
+- [x] Catalog line; `AddWidgetSheetTests` Ride lists; factory showcase placement
+- [x] Tests written: NOAA cases (values from NOAA's own calculator JS run in node), both hemispheres, solstices/equinox,
+      polar day/night; countdown across midnight and a time-zone change; reducer throttle; accessibility; 6 snapshots
+- [x] UX.md §W21, §S08 Ride list, header line
+- [x] Build (app + tests)
+- [x] Hand over to Brian to run — "looks right"
+- [x] Record the 6 snapshots (checked: "1:12", and "—")
+- [x] Full `CyclometerTests` less `PersistenceClientTests` (#480): 2251 passed, 2 failed — fixed below; then Sunset,
+      Sunset snapshots, S08 catalog snapshot and `PersistenceClientTests` alone: 74/74, every suite non-empty
+
+## Review
+
+- The Reykjavik test was wrong, not the code: at 00:04 on the 22nd the 21st's sunset has set and the 22nd's (00:04 on
+  the 23rd) is ahead, so near midsummer it never reads "—". Test and UX.md now say so.
+- S08's catalog reference re-recorded: the only change from main is W21 beside Grade. It reads "—" there, as W19 and
+  W20 do, because the sample ride has no fix; a sample countdown would tie the reference to the wall clock.
+- No other exhaustive store needed `sunsetFix`: the six that assert `coordinate` were the lot.
+- NOAA values come from NOAA's own `main.js` (`calcSunriseSetUTC`, two passes, minute-rounded), run in node.
+
