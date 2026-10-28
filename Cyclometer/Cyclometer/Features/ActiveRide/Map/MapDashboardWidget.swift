@@ -24,9 +24,23 @@ struct MapDashboardWidget: DashboardWidget {
 }
 
 extension ActiveRideFeature.State {
-    /// The route `LiveMapSheet` draws. W8 and W9 open the same sheet (#199, #200), so both read
-    /// it here rather than each working it out.
+    /// The route `LiveMapSheet` draws. W8, W9, W19 and W20 open the same sheet (#199, #200, #461),
+    /// so all read it here rather than each working it out.
     var mapSheetRoute: [RouteCoordinate] {
         navigation.activeRoute?.coordinates ?? []
+    }
+}
+
+extension Store where State == ActiveRideFeature.State, Action == ActiveRideFeature.Action {
+    /// The map sheet W9, W19 and W20 open, built only when it presents, so a track point doesn't
+    /// re-render the card that opens it (#362, #487). W8 builds its own from the track it already
+    /// draws.
+    var liveMapSheet: LiveMapSheet {
+        LiveMapSheet(
+            trackSegments: self.trackSegments,
+            route: self.mapSheetRoute,
+            orientation: self.preferences.mapOrientation,
+            onOrientationToggle: { self.send(.mapOrientationToggled) }
+        )
     }
 }

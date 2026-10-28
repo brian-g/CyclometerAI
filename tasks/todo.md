@@ -1084,4 +1084,28 @@ Plan: `~/.claude/plans/lively-herding-pike.md`
 - [x] CI red on 387722e: `AddWidgetSheetTests` (two hardcoded Route lists) and `DashboardLayoutTests` (factory must show
       every widget at every size) didn't know W19/W20. `main` green
 - [x] Route lists updated; W19 at row 4 right and W20 at row 5 left of the Elevation showcase page (Brian chose)
-- [ ] Local run blocked: the simulator's launchd spawns nothing (even `simctl launch`), restart didn't help — CI verifies
+- [x] Local run blocked: the simulator's launchd spawned nothing until the Mac rebooted — CI verified instead: 1803
+      passed on eee5b0b, but the job hit its 30-min timeout twice (build 21 min on a slow runner)
+- [x] `timeout-minutes` 30 → 45, comment updated with today's timings (Brian, option 1)
+
+---
+
+# #487 — One map-sheet builder for W8, W9, W19 and W20
+
+Stacked on `feat/461-distance-remaining-eta` (#486 is open, and W19/W20 only exist there).
+
+- [x] Move `Store.liveMapSheet` from `RouteProgressDashboardWidgets.swift` to `MapDashboardWidget.swift`, next to
+      `mapSheetRoute`, internal
+- [x] `LiveMapSheet.placeholder` in `MapWidgetView.swift`; W9/W19/W20 `detail` defaults use it
+- [x] W9's adapter: `detail: { store.liveMapSheet }`
+- [x] W8: left as is (Brian, option 1) — `MapWidget` builds its sheet from the values it already draws; #487's AC
+      to be reworded
+- [x] Build
+- [x] `DirectionsDashboardWidgetTests`, `WidgetAccessibilityTests`, `MapWidgetAccessibilityTests`, Directions/
+      DistanceRemaining/ETA snapshots: 101/101, every suite non-empty
+- [ ] Hand over to Brian to run
+
+## Review
+
+- `LiveMapSheet(` now appears three times: `store.liveMapSheet` (W9, W19, W20), `.placeholder`, and W8's own.
+- No reference image moved: the sheet is never drawn by a card, and the placeholder is the same empty sheet.

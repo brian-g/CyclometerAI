@@ -91,16 +91,3 @@ enum RouteProgressReading {
         return "No reading"
     }
 }
-
-extension Store where State == ActiveRideFeature.State, Action == ActiveRideFeature.Action {
-    /// W8's map sheet, built only when it presents, so a track point doesn't re-render the card
-    /// that opens it (#362).
-    fileprivate var liveMapSheet: LiveMapSheet {
-        LiveMapSheet(
-            trackSegments: self.trackSegments,
-            route: self.mapSheetRoute,
-            orientation: self.preferences.mapOrientation,
-            onOrientationToggle: { self.send(.mapOrientationToggled) }
-        )
-    }
-}
