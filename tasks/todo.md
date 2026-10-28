@@ -1078,3 +1078,10 @@ Plan: `~/.claude/plans/lively-herding-pike.md`
 - [x] Map-sheet duplication filed as #487
 - 153/153 targeted. fr_CA's pattern turned out to be "HH:mm", not "HH 'h' mm" as I'd assumed; test dropped
 - Not verified: the schedule restarting when an arrival appears while stopped — needs a look on the simulator
+
+### #486 CI fix
+
+- [x] CI red on 387722e: `AddWidgetSheetTests` (two hardcoded Route lists) and `DashboardLayoutTests` (factory must show
+      every widget at every size) didn't know W19/W20. `main` green
+- [x] Route lists updated; W19 at row 4 right and W20 at row 5 left of the Elevation showcase page (Brian chose)
+- [ ] Local run blocked: the simulator's launchd spawns nothing (even `simctl launch`), restart didn't help — CI verifies
