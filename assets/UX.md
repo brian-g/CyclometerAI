@@ -820,6 +820,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - Value: the route's length less how far along it the rider is, in km or mi, to one decimal as W6 (#461). Medium hero with its unit
 - There is a value only while a route is being followed, as W18's ridden part: with no route, or turn-by-turn off, it reads "—" and stays placed. It reads 0 once the route is complete
 - Off route it holds at the last place the rider matched the route. On a loop joined near its end, coming round the start begins the lap again, so it counts down to that lap's finish
+- VoiceOver says why a "—" is empty: "No route", "Turn-by-turn off" for a route drawn on the map but not followed, or "No reading"
 - Sheet: Map, as W9
 
 ---
@@ -830,8 +831,9 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 - Value: the clock time the rider will finish the route: now, plus W19's distance at the ride's moving average (W2's) (#461). A stop moves it later on its own, since now keeps advancing while the distance and average hold
 - In the device's 12- or 24-hour format. On a 12-hour clock the day period is the unit, lowercase as every unit: "3:42 pm". On a 24-hour clock there is no unit: "15:42"
-- "—" with no route, turn-by-turn off, no moving average yet, or the route complete — there is nothing left to arrive at
-- VoiceOver reads it as "Arrival, 3:42 PM"
+- "—" with no route, turn-by-turn off, or the route complete — there is nothing left to arrive at. Also "—" until the ride has a minute of moving time: the first seconds' average is barely above walking pace, and gives an arrival hours out
+- The digits are the locale's own short time with the day period taken out, so each clock keeps its own hour digits and separator: "9:05" (US), "09:05" (UK), "9.05" (Finland)
+- VoiceOver reads it as "Arrival, 3:42 PM", and a "—" as W19's
 - Not terrain-aware (#270, Phase 3)
 - Sheet: Map, as W9
 

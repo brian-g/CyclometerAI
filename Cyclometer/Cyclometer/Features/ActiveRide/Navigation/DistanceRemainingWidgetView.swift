@@ -6,11 +6,14 @@ import SwiftUI
 /// `NavigationFeature.remainingDistanceMeters`, to one decimal like W6. Tapping opens the map sheet,
 /// as W9 does.
 ///
-/// Always on the dashboard: with no route, or turn-by-turn off, it reads "—".
+/// Always on the dashboard: with no route, turn-by-turn off, or no match on the route yet, it reads "—".
 struct DistanceRemainingWidget: View {
     /// Nil while no route is being followed; 0 once it is complete.
     let remainingMeters: Double?
     let unit: UnitSystem
+    /// What the "—" means to VoiceOver: no route, or one that isn't followed.
+    var hasRoute = true
+    var isTurnByTurnEnabled = true
     /// The map sheet, W8's. A closure so the dashboard never reads the (growing) track itself —
     /// only the presented sheet does (#362).
     var detail: () -> LiveMapSheet = {
@@ -35,7 +38,8 @@ struct DistanceRemainingWidget: View {
 
     /// What VoiceOver reads after "Distance Remaining" (#361).
     var accessibilityValue: String {
-        remainingMeters.map { unit.spokenDistance(fromMeters: $0) } ?? "No route"
+        remainingMeters.map { unit.spokenDistance(fromMeters: $0) }
+            ?? RouteProgressReading.empty(hasRoute: hasRoute, isTurnByTurnEnabled: isTurnByTurnEnabled)
     }
 }
 
@@ -57,7 +61,7 @@ struct DistanceRemainingWidget: View {
 }
 
 #Preview("No Route") {
-    DistanceRemainingWidget(remainingMeters: nil, unit: .metric)
+    DistanceRemainingWidget(remainingMeters: nil, unit: .metric, hasRoute: false)
         .frame(width: 196, height: 96)
 }
 

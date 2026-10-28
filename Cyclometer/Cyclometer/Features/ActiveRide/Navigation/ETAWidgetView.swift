@@ -7,9 +7,13 @@ import SwiftUI
 /// unit: "3:42 pm". On a 24-hour clock there is none: "15:42". Tapping opens the map sheet, as W9
 /// does.
 ///
-/// Always on the dashboard: with no route, no moving average yet, or the route complete, it reads "—".
+/// Always on the dashboard: with no route, turn-by-turn off, the moving average not yet settled, or
+/// the route complete, it reads "—".
 struct ETAWidget: View {
     let arrival: Date?
+    /// What the "—" means to VoiceOver: no route, or one that isn't followed.
+    var hasRoute = true
+    var isTurnByTurnEnabled = true
     /// The map sheet, W8's. A closure so the dashboard never reads the (growing) track itself —
     /// only the presented sheet does (#362).
     var detail: () -> LiveMapSheet = {
@@ -34,16 +38,27 @@ struct ETAWidget: View {
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Color.cyBgSecondary)
-        .widgetDetail(label: "Arrival", value: Self.spokenArrival(arrival, locale: locale, timeZone: timeZone), detail)
+        .widgetDetail(label: "Arrival", value: accessibilityValue, detail)
+    }
+
+    /// What VoiceOver reads after "Arrival" (#361).
+    private var accessibilityValue: String {
+        arrival.map { Self.spokenArrival($0, locale: locale, timeZone: timeZone) }
+            ?? RouteProgressReading.empty(hasRoute: hasRoute, isTurnByTurnEnabled: isTurnByTurnEnabled)
     }
 
     /// The hero's digits, and the day period as its unit — empty on a 24-hour clock.
+    ///
+    /// The digits are the locale's own short time with its day period taken out, so each clock keeps
+    /// its own hour digits and separator: "9:05" (US), "09:05" (UK), "9.05" (Finland).
     static func clockFace(_ date: Date, locale: Locale, timeZone: TimeZone) -> (time: String, dayPeriod: String) {
-        let isTwelveHour = locale.hourCycle == .oneToTwelve || locale.hourCycle == .zeroToEleven
-        // A 24-hour clock keeps its leading zero, "09:05", as the status bar's does; a 12-hour one
-        // doesn't, "9:05".
-        let hour: Date.FormatStyle.Symbol.Hour = isTwelveHour ? .defaultDigits(amPM: .omitted) : .twoDigits(amPM: .omitted)
-        let time = date.formatted(Date.FormatStyle(locale: locale, timeZone: timeZone).hour(hour).minute(.twoDigits))
+        let pattern = DateFormatter.dateFormat(fromTemplate: "jmm", options: 0, locale: locale) ?? "HH:mm"
+        let (digits, isTwelveHour) = withoutDayPeriod(pattern)
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.dateFormat = digits
+        let time = formatter.string(from: date)
         guard isTwelveHour else { return (time, "") }
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = locale
@@ -52,10 +67,28 @@ struct ETAWidget: View {
         return (time, symbol.lowercased(with: locale))
     }
 
-    /// What VoiceOver reads after "Arrival" (#361): "3:42 PM".
-    static func spokenArrival(_ date: Date?, locale: Locale, timeZone: TimeZone) -> String {
-        guard let date else { return "No reading" }
-        return date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, timeZone: timeZone))
+    /// A time pattern with its day period ("a", "b", "B") and the space beside it removed, and
+    /// whether its hour is a 12-hour one ("h", "K"). Quoted literals are text, not fields, and are
+    /// left alone.
+    private static func withoutDayPeriod(_ pattern: String) -> (pattern: String, isTwelveHour: Bool) {
+        var stripped = ""
+        var isQuoted = false
+        var isTwelveHour = false
+        for character in pattern {
+            if character == "'" {
+                isQuoted.toggle()
+            } else if !isQuoted {
+                if "abB".contains(character) { continue }
+                if "hK".contains(character) { isTwelveHour = true }
+            }
+            stripped.append(character)
+        }
+        return (stripped.trimmingCharacters(in: .whitespaces), isTwelveHour)
+    }
+
+    /// An arrival as VoiceOver reads it: "3:42 PM".
+    static func spokenArrival(_ date: Date, locale: Locale, timeZone: TimeZone) -> String {
+        date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, timeZone: timeZone))
     }
 }
 
@@ -83,7 +116,7 @@ private func hourCycle(_ cycle: Locale.HourCycle) -> Locale {
 }
 
 #Preview("No Route") {
-    ETAWidget(arrival: nil)
+    ETAWidget(arrival: nil, hasRoute: false)
         .frame(width: 196, height: 96)
 }
 

@@ -1068,3 +1068,13 @@ Plan: `~/.claude/plans/lively-herding-pike.md`
 - `AddWidgetSheetSnapshotTests` leaves the Route section out (live `Map`), so its references don't move.
 - 150/150 across NavigationFeature, RouteProgressWidget, WidgetAccessibility, both new snapshot suites and
   AddWidgetSheet. All 11 new PNGs checked by eye: none blank, "pm" on the digits' baseline.
+
+### #486 review follow-up
+
+- [x] W20 reads "—" until 60 moving seconds (`ETADashboardWidget.settlingSeconds`): the first seconds' average gave arrivals hours out
+- [x] W20's `TimelineView` ticks only while there is an arrival (`EverySecondSchedule`), one schedule type so the sheet's identity holds
+- [x] VoiceOver says why "—": "No route" / "Turn-by-turn off" / "No reading" (`RouteProgressReading`)
+- [x] Clock face from the locale's own `jmm` pattern, day period removed: "9:05" US, "09:05" UK, "9.05" Finland — replaces the forced two-digit hour
+- [x] Map-sheet duplication filed as #487
+- 153/153 targeted. fr_CA's pattern turned out to be "HH:mm", not "HH 'h' mm" as I'd assumed; test dropped
+- Not verified: the schedule restarting when an arrival appears while stopped — needs a look on the simulator
