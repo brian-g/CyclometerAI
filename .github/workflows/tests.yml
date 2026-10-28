@@ -46,9 +46,11 @@ jobs:
     # on PermissionsClientTests) and removed both times: a deadline inside the run is
     # subject to the same simulator contention it is meant to guard against, so it kills
     # tests that were merely delayed while a real hang on a healthy runner is obvious
-    # anyway. A job timeout has no such coupling. Successful runs take 16–20 minutes
-    # (2026-10-03, #372).
-    timeout-minutes: 30
+    # anyway. A job timeout has no such coupling. Successful runs took 16–20 minutes
+    # (2026-10-03, #372); by 2026-10-28 (#486) "Build for testing" alone took 11–22
+    # minutes with the dependency cache hit, and the 1,803 tests 6–9, so 30 cancelled
+    # runs whose tests had all passed.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4

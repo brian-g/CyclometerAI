@@ -223,6 +223,15 @@ struct NavigationFeature {
             else { return nil }
             return isRouteComplete ? 1 : min(max(progressMeters / total, 0), 1)
         }
+
+        /// Along the route to its finish, in metres: W19 and W20 (#461). Nil and 0 by
+        /// `routeProgressFraction`'s rules. Off route it holds the last match, as `progressMeters`
+        /// does; on a loop joined near its end, the wrap takes it back to the full lap.
+        var remainingDistanceMeters: Double? {
+            guard isFollowingRoute, let progressMeters, let total = activeRoute?.totalDistanceMeters, total > 0
+            else { return nil }
+            return isRouteComplete ? 0 : max(total - progressMeters, 0)
+        }
     }
 
     enum Action: Equatable {

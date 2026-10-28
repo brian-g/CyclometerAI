@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-28 — §W19 Distance Remaining and §W20 ETA added and built (#461), both 1×1 in §S08's Route section.  
 **Updated:** 2026-10-26 — §S10 gains a trash button to delete the ride just finished (#452). Deleting any ride, there or by §S14's swipe, now deletes its Health workout too, the decision #277 left open.  
 **Updated:** 2026-10-20 — §W5's zone bands are the rider's five cadence zones, drawn with or without readings, in the HR zone colours. §S12 gains a Cadence Zones section to set them (#79).  
 **Updated:** 2026-10-20 — §S12 wheel size is the inline picker as built, not a navigation row (#101 closed not planned, #84).  
@@ -812,6 +813,32 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 ---
 
+#### W19 — Distance Remaining
+
+**Sizes:** 1x1
+
+- Value: the route's length less how far along it the rider is, in km or mi, to one decimal as W6 (#461). Medium hero with its unit
+- There is a value only while a route is being followed, as W18's ridden part: with no route, or turn-by-turn off, it reads "—" and stays placed. It reads 0 once the route is complete
+- Off route it holds at the last place the rider matched the route. On a loop joined near its end, coming round the start begins the lap again, so it counts down to that lap's finish
+- VoiceOver says why a "—" is empty: "No route", "Turn-by-turn off" for a route drawn on the map but not followed, or "No reading"
+- Sheet: Map, as W9
+
+---
+
+#### W20 — ETA
+
+**Sizes:** 1x1
+
+- Value: the clock time the rider will finish the route: now, plus W19's distance at the ride's moving average (W2's) (#461). A stop moves it later on its own, since now keeps advancing while the distance and average hold
+- In the device's 12- or 24-hour format. On a 12-hour clock the day period is the unit, lowercase as every unit: "3:42 pm". On a 24-hour clock there is no unit: "15:42"
+- "—" with no route, turn-by-turn off, or the route complete — there is nothing left to arrive at. Also "—" until the ride has a minute of moving time: the first seconds' average is barely above walking pace, and gives an arrival hours out
+- The digits are the locale's own short time with the day period taken out, so each clock keeps its own hour digits and separator: "9:05" (US), "09:05" (UK), "9.05" (Finland)
+- VoiceOver reads it as "Arrival, 3:42 PM", and a "—" as W19's
+- Not terrain-aware (#270, Phase 3)
+- Sheet: Map, as W9
+
+---
+
 ### Open UX Questions
 - [x] S05.4 factory default layout resolved — see table above.
 - [x] S05.5 removed — pages beyond page 1 are rider-defined, not factory-specified.
@@ -901,7 +928,7 @@ As built (#367): a press held a quarter of a second on a widget lifts it — it 
 
 The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart Rate, Weather (future), Route, and Force (future). The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
 
-As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
+As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions, and since #461 Distance Remaining and ETA); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
 
 As built (#368): in edit mode each empty cell shows a slot: a dashed hairline `borderStrong` outline, the size and inset of a 1×1 card, with no glyph and no wiggle. Tapping it opens the sheet aimed at that cell. The tapped cell is the widget's top-left and nothing shifts to fit, so the sheet lists only the sizes that fit from there: a 1×1 always; a 2×1 from the left column with its neighbour free; a 2×2 from the left column, above the last row, with its block free. A right-hand cell therefore shows only 1×1s. The Page section is hidden. A widget already on the page is still dimmed. Picking an entry puts its top-left at the tapped cell. VoiceOver reads a slot as "Empty, row 3, left", hint "Add widget here".
 

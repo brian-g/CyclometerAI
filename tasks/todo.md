@@ -1043,3 +1043,45 @@ Plan: `~/.claude/plans/greedy-launching-spring.md`
   that draws it, so threshold and no-reading cases match by construction. W4 already read "rising"/"falling".
 - `widgetIsOneButton` hard-coded W1's old string; its live element already read the new one.
 - Above/below cases failed before the change; `WidgetAccessibilityTests` 68 passed, 0 failed after.
+
+---
+
+# #461 — W19 Distance Remaining and W20 ETA
+
+Plan: `~/.claude/plans/lively-herding-pike.md`
+
+- [x] `NavigationFeature.State.remainingDistanceMeters`, by `routeProgressFraction`'s rules
+- [x] W19/W20 adapters (`RouteProgressDashboardWidgets.swift`), views with previews, catalog
+- [x] ETA: `TimelineView` each second so a stop moves it; 12 h → "3:42" + "pm", 24 h → "15:42"; "—" once complete
+- [x] Tests: remaining (no route, TBT off, mid, off-route hold, complete, loop wrap), arrival, clock face, VoiceOver
+- [x] Snapshot suites written; UX.md §W19, §W20, §S08
+- [x] Build
+- [ ] Hand over to Brian to run
+- [x] Targeted tests; record + look at W19/W20 references
+
+## Review
+
+- The second lap of a loop is only the wrap case: `isRouteComplete` is terminal, and matching stops once it is set.
+  `total − progressMeters` counts the wrapped lap down with no extra logic.
+- The first run caught the 24-hour face reading "9:05". `.defaultDigits` drops the leading zero a 24-hour clock keeps,
+  so a 24-hour cycle now uses `.twoDigits`.
+- `AddWidgetSheetSnapshotTests` leaves the Route section out (live `Map`), so its references don't move.
+- 150/150 across NavigationFeature, RouteProgressWidget, WidgetAccessibility, both new snapshot suites and
+  AddWidgetSheet. All 11 new PNGs checked by eye: none blank, "pm" on the digits' baseline.
+
+### #486 review follow-up
+
+- [x] W20 reads "—" until 60 moving seconds (`ETADashboardWidget.settlingSeconds`): the first seconds' average gave arrivals hours out
+- [x] W20's `TimelineView` ticks only while there is an arrival (`EverySecondSchedule`), one schedule type so the sheet's identity holds
+- [x] VoiceOver says why "—": "No route" / "Turn-by-turn off" / "No reading" (`RouteProgressReading`)
+- [x] Clock face from the locale's own `jmm` pattern, day period removed: "9:05" US, "09:05" UK, "9.05" Finland — replaces the forced two-digit hour
+- [x] Map-sheet duplication filed as #487
+- 153/153 targeted. fr_CA's pattern turned out to be "HH:mm", not "HH 'h' mm" as I'd assumed; test dropped
+- Not verified: the schedule restarting when an arrival appears while stopped — needs a look on the simulator
+
+### #486 CI fix
+
+- [x] CI red on 387722e: `AddWidgetSheetTests` (two hardcoded Route lists) and `DashboardLayoutTests` (factory must show
+      every widget at every size) didn't know W19/W20. `main` green
+- [x] Route lists updated; W19 at row 4 right and W20 at row 5 left of the Elevation showcase page (Brian chose)
+- [ ] Local run blocked: the simulator's launchd spawns nothing (even `simctl launch`), restart didn't help — CI verifies

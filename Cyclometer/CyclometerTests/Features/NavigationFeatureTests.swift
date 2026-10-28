@@ -602,6 +602,39 @@ struct NavigationFeatureTests {
         #expect(makeStore(route: line, progressMeters: total + 100).state.routeProgressFraction == 1)
     }
 
+    /// W19 and W20's distance left (#461), by `routeProgressFraction`'s rules.
+    @Test("distance remaining is the route left, and nil unless a route is being followed")
+    func remainingDistance() throws {
+        let line = try route(straight, turns: [])
+        let total = line.totalDistanceMeters
+
+        #expect(makeStore(route: nil).state.remainingDistanceMeters == nil)
+        #expect(makeStore(route: line).state.remainingDistanceMeters == nil, "no position on the route yet")
+        #expect(makeStore(route: line, progressMeters: 1_000, turnByTurn: false).state.remainingDistanceMeters == nil)
+
+        #expect(makeStore(route: line, progressMeters: 1_000).state.remainingDistanceMeters == total - 1_000)
+        #expect(makeStore(route: line, progressMeters: total + 100).state.remainingDistanceMeters == 0)
+    }
+
+    @Test("off route, distance remaining holds at the last match")
+    func remainingDistanceHoldsOffRoute() async throws {
+        let line = try route(straight, turns: [])
+        let store = makeStore(route: line)
+        var second = 0.0
+        for meters in stride(from: 0.0, through: 500, by: 10) {
+            await store.send(.locationUpdated(fix(straight, at: meters, second: second)))
+            second += 1
+        }
+        let matched = try #require(store.state.remainingDistanceMeters)
+        for _ in 1...NavigationFeature.offRouteConsecutiveFixes {
+            await store.send(.locationUpdated(fix(straight, at: 600, lateral: -100, second: second)))
+            second += 1
+        }
+        try #require(store.state.isOffRoute)
+        #expect(store.state.remainingDistanceMeters == matched)
+        await store.skipInFlightEffects(strict: false)
+    }
+
     // MARK: - Route end
 
     @Test("reaching the end stops everything, and riding on past it is not off route")
@@ -616,6 +649,8 @@ struct NavigationFeatureTests {
         #expect(store.state.isRouteComplete)
         // Finished 20 m short of the end, the mini-player's ring still reads 100% (#404).
         #expect(store.state.routeProgressFraction == 1)
+        // ...and W19 nothing left (#461).
+        #expect(store.state.remainingDistanceMeters == 0)
         #expect(store.state.nextManeuverIndex == 1)
         #expect(store.state.distanceToNextTurnMeters == nil)
         #expect(!store.state.isTurnAlertActive)
@@ -772,6 +807,9 @@ struct NavigationFeatureTests {
             if let index = store.state.announcedManeuverIndex, index != before { announced.append(index) }
             if meters >= 20, meters < 1_970 {
                 #expect(abs((store.state.progressMeters ?? -1) - meters) < 2, "round the loop at \(meters) m")
+                // W19 counts down to this lap's finish, not the one the rider joined near (#461).
+                #expect(abs((store.state.remainingDistanceMeters ?? -1) - (navigation.totalDistanceMeters - meters)) < 2,
+                        "round the loop at \(meters) m")
                 #expect(!store.state.isRouteComplete, "round the loop at \(meters) m")
             }
         }

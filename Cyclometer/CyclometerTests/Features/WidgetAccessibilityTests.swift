@@ -341,6 +341,7 @@ private final class LiveRide {
 enum TappableWidget: CaseIterable, CustomTestStringConvertible {
     case map, cadence, speed, averageSpeed, duration, distance, pace, directions, heartRate, hrZones
     case ascent, descent, grade, elevation, routeElevation, routeElevationWithoutRoute
+    case distanceRemaining, eta
 
     var testDescription: String { title }
 
@@ -364,6 +365,9 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .grade: "Grade"
         case .elevation: "Elevation"
         case .routeElevation, .routeElevationWithoutRoute: "Route Elevation"
+        case .distanceRemaining: "Distance Remaining"
+        // Read as a word, not the card's "ETA" (#461).
+        case .eta: "Arrival"
         }
     }
 
@@ -385,6 +389,8 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .grade: "-3 percent"
         case .elevation: "284 meters, grade 4 percent"
         case .routeElevation, .routeElevationWithoutRoute: "284 meters, grade 4 percent"
+        case .distanceRemaining: "12.4 kilometers"
+        case .eta: "3:42\u{202F}PM"
         }
     }
 
@@ -432,6 +438,13 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
             AnyView(RouteElevationWidget(
                 altitude: 284, gradePercent: 4.4, routeProfile: nil, routeProgress: nil, history: [], unit: .metric
             ))
+        case .distanceRemaining:
+            AnyView(DistanceRemainingWidget(remainingMeters: 12_400, unit: .metric))
+        case .eta:
+            // 15:42 UTC, on a US 12-hour clock.
+            AnyView(ETAWidget(arrival: Date(timeIntervalSince1970: 15 * 3_600 + 42 * 60))
+                .environment(\.locale, Locale(identifier: "en_US"))
+                .environment(\.timeZone, TimeZone(identifier: "UTC")!))
         }
     }
 }
