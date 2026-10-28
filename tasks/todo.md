@@ -1043,3 +1043,28 @@ Plan: `~/.claude/plans/greedy-launching-spring.md`
   that draws it, so threshold and no-reading cases match by construction. W4 already read "rising"/"falling".
 - `widgetIsOneButton` hard-coded W1's old string; its live element already read the new one.
 - Above/below cases failed before the change; `WidgetAccessibilityTests` 68 passed, 0 failed after.
+
+---
+
+# #461 — W19 Distance Remaining and W20 ETA
+
+Plan: `~/.claude/plans/lively-herding-pike.md`
+
+- [x] `NavigationFeature.State.remainingDistanceMeters`, by `routeProgressFraction`'s rules
+- [x] W19/W20 adapters (`RouteProgressDashboardWidgets.swift`), views with previews, catalog
+- [x] ETA: `TimelineView` each second so a stop moves it; 12 h → "3:42" + "pm", 24 h → "15:42"; "—" once complete
+- [x] Tests: remaining (no route, TBT off, mid, off-route hold, complete, loop wrap), arrival, clock face, VoiceOver
+- [x] Snapshot suites written; UX.md §W19, §W20, §S08
+- [x] Build
+- [ ] Hand over to Brian to run
+- [x] Targeted tests; record + look at W19/W20 references
+
+## Review
+
+- The second lap of a loop is only the wrap case: `isRouteComplete` is terminal, and matching stops once it is set.
+  `total − progressMeters` counts the wrapped lap down with no extra logic.
+- The first run caught the 24-hour face reading "9:05". `.defaultDigits` drops the leading zero a 24-hour clock keeps,
+  so a 24-hour cycle now uses `.twoDigits`.
+- `AddWidgetSheetSnapshotTests` leaves the Route section out (live `Map`), so its references don't move.
+- 150/150 across NavigationFeature, RouteProgressWidget, WidgetAccessibility, both new snapshot suites and
+  AddWidgetSheet. All 11 new PNGs checked by eye: none blank, "pm" on the digits' baseline.
