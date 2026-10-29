@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-28 — §W22 Climb added and built (#463), 2×1 in §S08's Route section.  
 **Updated:** 2026-10-28 — §W21 Sunset added and built (#462), 1×1 in §S08's Ride section.  
 **Updated:** 2026-10-28 — §W19 Distance Remaining and §W20 ETA added and built (#461), both 1×1 in §S08's Route section.  
 **Updated:** 2026-10-26 — §S10 gains a trash button to delete the ride just finished (#452). Deleting any ride, there or by §S14's swipe, now deletes its Health workout too, the decision #277 left open.  
@@ -855,6 +856,20 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 ---
 
+#### W22 — Climb
+
+**Sizes:** 2x1
+
+- The route's categorized climbs (#463), as S20 lists them from the import's analysis (PRD §8.6, #252) — or, for a route imported before #252 and not yet backfilled, analysed when the ride loads it — placed by how far along the route the rider is: W19's progress, so it holds off route and starts over on a loop's next lap. W5's 2×1 arrangement, over the climb's profile drawn as W18's
+- **On a climb** (from its start to its top, inclusive): label "CLIMB · CAT 3"; medium hero, the distance to the top as W9 shows a distance (m or ft close in, so it reads 0 m at the top); on the right, small heroes "TO CLIMB" (the climb's top less the route's smoothed elevation where the rider is, whole m or ft) and "AVG" (its average grade, unsigned). The profile's ridden part is darker
+- **Between climbs:** label "NEXT CLIMB · CAT 3"; medium hero, the distance to its start; on the right, "LENGTH" and "GAIN". Its profile, nothing ridden
+- "—" with no route, turn-by-turn off, a route without elevation, no climb ahead, or the route complete
+- VoiceOver: "Climb, category 3, 1.2 kilometers to the top, 84 meters to climb, average 7 percent"; between climbs "next climb category 3 in 3.4 kilometers, 2.1 kilometers long, 140 meters of climbing". HC is "hors catégorie". A "—" says why: W19's reasons, "No elevation" or "No climbs ahead"
+- Not included: climbs on a free ride, per-100 m grade colouring, a 1×1, an alert at a climb's start
+- Sheet: Elevation, as W14–W18
+
+---
+
 ### Open UX Questions
 - [x] S05.4 factory default layout resolved — see table above.
 - [x] S05.5 removed — pages beyond page 1 are rider-defined, not factory-specified.
@@ -944,7 +959,7 @@ As built (#367): a press held a quarter of a second on a widget lifts it — it 
 
 The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart Rate, Weather (future), Route, and Force (future). The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
 
-As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace, and since #462 Sunset), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions, and since #461 Distance Remaining and ETA); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
+As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace, and since #462 Sunset), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions, and since #461 Distance Remaining and ETA, and since #463 Climb); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
 
 As built (#368): in edit mode each empty cell shows a slot: a dashed hairline `borderStrong` outline, the size and inset of a 1×1 card, with no glyph and no wiggle. Tapping it opens the sheet aimed at that cell. The tapped cell is the widget's top-left and nothing shifts to fit, so the sheet lists only the sizes that fit from there: a 1×1 always; a 2×1 from the left column with its neighbour free; a 2×2 from the left column, above the last row, with its block free. A right-hand cell therefore shows only 1×1s. The Page section is hidden. A widget already on the page is still dimmed. Picking an entry puts its top-left at the tapped cell. VoiceOver reads a slot as "Empty, row 3, left", hint "Add widget here".
 

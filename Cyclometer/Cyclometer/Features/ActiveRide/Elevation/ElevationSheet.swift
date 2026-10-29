@@ -71,7 +71,7 @@ extension ActiveRideFeature.State {
 
 // MARK: - Elevation Sheet
 
-/// The Elevation sheet, shared by W14–W18 (#387).
+/// The Elevation sheet, shared by W14–W18 (#387) and W22 (#463).
 ///
 /// `metrics` is called in this view's own `body`, not the presenter's `.sheet` builder, so the
 /// open sheet follows the ride (see `RideMetricsSheet`, #144).

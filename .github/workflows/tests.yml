@@ -226,6 +226,7 @@ jobs:
             -skip-testing:CyclometerTests/DirectionsWidgetSnapshotTests \
             -skip-testing:CyclometerTests/ElevationWidgetSnapshotTests \
             -skip-testing:CyclometerTests/ElevationSheetSnapshotTests \
+            -skip-testing:CyclometerTests/ClimbWidgetSnapshotTests \
             -skip-testing:CyclometerTests/MapWidgetAccessibilityTests
 
       - name: Summarize test failures

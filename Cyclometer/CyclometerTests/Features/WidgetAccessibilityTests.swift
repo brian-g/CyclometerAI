@@ -341,7 +341,7 @@ private final class LiveRide {
 enum TappableWidget: CaseIterable, CustomTestStringConvertible {
     case map, cadence, speed, averageSpeed, duration, distance, pace, directions, heartRate, hrZones
     case ascent, descent, grade, elevation, routeElevation, routeElevationWithoutRoute
-    case distanceRemaining, eta, sunset
+    case distanceRemaining, eta, sunset, climb
 
     var testDescription: String { title }
 
@@ -369,6 +369,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         // Read as a word, not the card's "ETA" (#461).
         case .eta: "Arrival"
         case .sunset: "Sunset"
+        case .climb: "Climb"
         }
     }
 
@@ -393,6 +394,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .distanceRemaining: "12.4 kilometers"
         case .eta: "3:42\u{202F}PM"
         case .sunset: "in 1 hour, 12 minutes"
+        case .climb: "category 3, 1.2 kilometers to the top, 84 meters to climb, average 7 percent"
         }
     }
 
@@ -449,6 +451,10 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
                 .environment(\.timeZone, TimeZone(identifier: "UTC")!))
         case .sunset:
             AnyView(SunsetWidget(countdown: .minutesLeft(72)))
+        case .climb:
+            AnyView(ClimbWidget(reading: .climbing(
+                RouteClimb.sample, metersToTop: 1_200, metersToClimb: 84, fraction: 0.43
+            ), unit: .metric))
         }
     }
 }

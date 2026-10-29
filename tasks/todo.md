@@ -1165,3 +1165,61 @@ last in S08's Ride 1×1s; no Sketch check.
 - [x] Re-recorded the 6 W21 snapshots and S08's catalog; the catalog's pixel diff against the last commit is only the
       icon (73×59 pt-px box, light and dark)
 - [x] Sunset, Sunset snapshots, S08 catalog snapshot, WidgetAccessibility: 107/107, every suite non-empty
+
+---
+
+# #463 — W22 Climb: current and next climb on the route
+
+From main (Brian), so it conflicts with #490 in the catalog, S08 lists and UX.md until that merges. Brian chose: the W5
+2×1 arrangement; climbs from stored `Route.terrain`; showcase on the Elevation page, row 5. No W22 frame in Sketch.
+
+- [x] `RouteClimb` + `ClimbReading.at(progressMeters:climbs:)` in `Models/RouteClimb.swift`
+- [x] `NavigationRoute.climbs` from `detail.summary.terrain`, profiles from `RouteTerrain.gradeProfile` at load
+- [x] `NavigationFeature.State.climbReading`
+- [x] `ClimbWidget` view + previews; `ClimbDashboardWidget` adapter (tap → Elevation sheet)
+- [x] Catalog, factory showcase (Elevation page row 5), `AddWidgetSheetTests` Route lists
+- [x] Tests: `ClimbReadingTests`, `NavigationFeatureTests`, accessibility, 10 snapshots
+- [x] UX.md §W22, §S08 Route list, header line
+- [x] Build (app + tests)
+- [x] Hand over to Brian — "looks right"
+- [x] Recorded the 10 W22 snapshots (checked: profile behind, ridden darker, stats on the baseline, "—")
+- [x] Full `CyclometerTests` less `PersistenceClientTests` (#480): 2246 passed, 0 failed, every new suite present;
+      `PersistenceClientTests` alone: 47/47
+
+## Review
+
+- The S08 catalog reference didn't move: its image ends before the Route section, so W22 there is unpinned (as W19/W20).
+- Climb distances need no conversion: `Climb.startMeters` is a sample index × the resample spacing, which is distance
+  along the same polyline `cumulativeDistances` measures; `ClimbReadingTests` pins a climb's top to the road's elevation.
+- "To climb" reaches exactly 0 at the top because the ride re-runs `RouteTerrain.gradeProfile` at load, the pipeline
+  the stored climb was found on. If that pipeline changes, stored climbs would sit on a different profile until
+  re-analysed; `RouteClimb` drops one that falls off the profile rather than misplacing it.
+
+### #493 merge with main (#490 landed)
+
+- [x] Merged `origin/main` (no rebase, so no force push). Conflicts were W21 and W22 adding a line in the same places;
+      each keeps both, W21 first: catalog, Elevation showcase page (+ its comment), `WidgetAccessibilityTests`, UX.md
+      (header lines, §W21 then §W22, S08's Ride and Route lists), and this file (#462's section, then #463's)
+- [x] Build; S08 lists, S08 catalog snapshot, DashboardLayout, WidgetAccessibility, Sunset, Climb, NavigationFeature:
+      224/224, every suite non-empty
+
+### #493 review (`/code-review xhigh --fix`)
+
+- [x] Fixed: climbing left measured from the climb's own profile top (`elevations.last`), not the stored
+      `topElevationMeters`, so it reads 0 at the top even after a pipeline change; `RouteClimb.sample` moved into
+      `ClimbWidgetView.swift` (shared by previews and tests, replacing a copy); W22 in TCA.md §8 and `ElevationSheet`'s doc
+- [x] ClimbReading 8/8, NavigationFeature 57/57, WidgetAccessibility 80/80, Climb snapshots 10/10 (review ran them)
+- Correction to the review above: `RouteClimb` drops a stored climb only when it falls *outside* the profile; one from a
+  different pipeline that still fits would be placed as stored.
+- Skipped, for Brian: analyze at load when a route has no stored terrain (pre-#252, not yet backfilled → "No climbs
+  ahead" on a hilly route); `ClimbWidgetSnapshotTests` on CI's skip list. Also skipped: a loop joined after its climb
+  reads "No climbs ahead" until the wrap (pinned by a test); keeping each climb's samples in the analysis instead of
+  re-deriving at load; the straight-route "second lap" unit test; exact float compares; S08's sample has no route
+
+### #493 review follow-ups (Brian: "#5, do it. #6, add to ci skip list")
+
+- [x] No stored analysis (pre-#252, not yet backfilled): `RouteClimb.climbs` runs `RouteTerrain.analyze` at load, so W22
+      finds the climbs instead of reading "No climbs ahead"; a stored analysis is still used as is. Test:
+      `noStoredAnalysisIsAnalysedAtLoad`; UX.md §W22 and `NavigationRoute.climbs`' doc say so
+- [x] `ClimbWidgetSnapshotTests` on CI's skip list, beside `ElevationWidgetSnapshotTests` (both draw a Swift Charts area)
+- [x] ClimbReading, NavigationFeature, NavigationPipeline, ElevationDashboardWidget: 79/79, every suite non-empty
