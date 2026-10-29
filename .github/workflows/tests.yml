@@ -228,6 +228,8 @@ jobs:
             -skip-testing:CyclometerTests/ElevationSheetSnapshotTests \
             -skip-testing:CyclometerTests/ClimbWidgetSnapshotTests \
             -skip-testing:CyclometerTests/CaloriesSheetSnapshotTests \
+            -skip-testing:CyclometerTests/SensorsButtonSnapshotTests \
+            -skip-testing:CyclometerTests/SensorsSheetSnapshotTests \
             -skip-testing:CyclometerTests/MapWidgetAccessibilityTests
 
       - name: Summarize test failures

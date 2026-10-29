@@ -545,12 +545,18 @@ Toolbar buttons shown based on ride state:
 | Button | Shown when |
 |---|---|
 | Pause | Ride is active |
-| Sensor | One or more paired sensors not found |
+| Sensors | A paired sensor isn't connected, or a connected one's battery is at or below 20% |
 | Resume | Ride is paused |
 | Finish | Ride is paused |
 | Bell | Always |
 
 All toolbar buttons use `.buttonStyle(.glass)` (iOS 26), `.labelStyle(.iconOnly)`, and a 52×52pt frame. The toolbar uses `.sharedBackgroundVisibility(.hidden)`.
+
+**Sensors** (#464, #466; Sketch "Sxx - Route overlay", group "sensor button") sits beside Bell, leading it. Its glyph is `antenna.radiowaves.left.and.right`, with a `brRatingBad` badge counting the devices that need attention: each paired device that isn't connected (never found this ride, or dropped), and each connected one whose battery reads at or below 20%, the level `SensorBatteryLabel` turns red at. A combo CSC sensor is one device and counts once, and is connected only when both its roles are. With nothing paired, or every device connected and above 20%, the button is hidden. It appears and leaves with the other controls' transition, or a fade under Reduce Motion. It is quiet: no sound, haptic or banner, because nothing mid-ride competes with radar alerts (§S10). VoiceOver reads "Sensors, 1 not found", "Sensors, low battery: Radar, 18 percent", or both joined, with the hint "Opens sensor status".
+
+The row fits its widest case, paused with Sensors showing (Resume, Finish · Sensors, Bell), with room between for about 13 page dots on a 402 pt screen. There is no overflow or priority order (#464, #466): a future toolbar button has to revisit that.
+
+**Sheet: Sensors** (#466). The Sensors button opens it, at the medium detent and expandable to large. One row per paired device, drawn as §S11's device rows are (a combo lists both its roles, "Speed & Cadence"), with its status, Connected or Searching, and while connected its battery as `SensorBatteryLabel`, so a low one shows in red. It has no pairing or forgetting actions; those stay on §S11.
 
 **Key Layout Decisions:**
 - [x] S05.4 factory default layout resolved — see table above; rider-customisable after first launch
@@ -890,7 +896,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 ### Open UX Questions
 - [x] S05.4 factory default layout resolved — see table above.
 - [x] S05.5 removed — pages beyond page 1 are rider-defined, not factory-specified.
-- [x] Should the Sensor toolbar button use a specific SF Symbol to indicate which sensor is missing? Yes, it should just use sensor.tag.radiowaves.forward.fill with a badge.
+- [x] Should the Sensor toolbar button use a specific SF Symbol to indicate which sensor is missing? Yes, it should just use `antenna.radiowaves.left.and.right` with a badge. One button covers missing sensors and low batteries (#464, #466).
 
 ---
 
@@ -1021,7 +1027,7 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 - Ride stats: total distance, total time, avg speed, average cadence (only if a cadence sensor reported), vehicle pass count (only with radar paired), route
 - Elevation profile
 - HR zone breakdown (pie chart), derived from the saved track against the rider's current zones (S12), like S15's HR chart; "No heart rate recorded" when there is none
-- **Sensors** (#391), only when the ride flagged one. Each flagged device appears once (a combo CSC sensor lists both its roles), with "LOW BATTERY" or "UNRELIABLE CONNECTION — CHECK BATTERY OR MOUNT" under it. There is no mid-ride alert, because it would compete with radar alerts. See BLE.md §14.5
+- **Sensors** (#391), only when the ride flagged one. Each flagged device appears once (a combo CSC sensor lists both its roles), with "LOW BATTERY" or "UNRELIABLE CONNECTION — CHECK BATTERY OR MOUNT" under it. There is no mid-ride alert, because it would compete with radar alerts; mid-ride, only §S05's quiet Sensors button shows a missing sensor or a low battery. See BLE.md §14.5
 - **Sync button** — Phase 2; taps present the Service Sync sheet (see below)
 - **Finish Ride** — a floating button that closes the sheet to the tabs, where the ride is in S14
 - **Delete** (#452) — a trash button at the leading end of the nav bar, not in the Design.sketch frame. By now the ride is saved and on its way to Apple Health, so this is how a rider throws it away. An alert confirms first: "Delete This Ride?", "It will be removed from Cyclometer and Apple Health. This can't be undone." Delete closes the sheet without saving the name, and deletes the ride as §S14's swipe does. Disabled until the stats have loaded: before then the ride's save hasn't landed

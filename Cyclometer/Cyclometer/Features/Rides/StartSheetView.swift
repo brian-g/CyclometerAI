@@ -121,7 +121,7 @@ struct SensorStatusRow: View {
                 subtitle: sensor.name
             ) {
                 VStack(alignment: .trailing) {
-                    statusControl
+                    SensorStatusBadge(status: sensor.status)
                     if let battery = sensor.batteryPercent, sensor.status == .connected {
                         SensorBatteryLabel(percent: battery)
                     }
@@ -133,16 +133,6 @@ struct SensorStatusRow: View {
                     .padding(.bottom, Spacing.xs)
             }
         }
-    }
-
-    private var statusControl: some View {
-        let badge = sensor.status.badge
-        return Text(badge.label)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .foregroundStyle(badge.foreground)
-            .background(badge.background, in: Capsule())
     }
 }
 

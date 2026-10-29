@@ -1168,6 +1168,10 @@ receive. The code is `Models/SensorHealth.swift` (`SensorHealthReport`, `SensorH
   so a sensor without `0x180F` is cleared by a clean ride. One that never shows up keeps its
   previous verdict, so a dead cell that never connects is not cleared.
 - It is surfaced on S05.1 (the next ride's Start sheet) and S10 (UX.md).
+- Mid-ride, `SensorHealthFeature` also keeps each role's live status (`.active`, HR: notifying) and
+  current battery, for S05's Sensors button and sheet (#464, #466): a device is missing while any
+  of its roles isn't active, and low while connected at or below 20%. The current level is the
+  client's, cleared by its `nil` on disconnect; the verdict above still uses the ride's minimum.
 
 ---
 

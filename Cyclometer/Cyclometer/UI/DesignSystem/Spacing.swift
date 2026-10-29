@@ -27,6 +27,7 @@ enum Spacing {
     static let rideMetric: CGFloat    = unit * 16 // 64 — S14 row's time and distance columns, minimum width (Sketch: 65)
     static let grabberHeight: CGFloat = unit       //  4 — sheet grabber bar height
     static let pageIndicatorDot: CGFloat = 7       //  7 — dashboard paging indicator dot
+    static let toolbarBadge: CGFloat  = unit * 5  // 20 — ride toolbar count badge (Sketch "sensor button": 22 on a 64 pt button)
     static let hrBorderWidth: CGFloat = 3          //  3 — HR zone left accent bar
     static let strokeThin: CGFloat    = 1.5        //  1.5 — thin border stroke
     static let strokeHairline: CGFloat = 1         //  1 — hairline border (turn overlay)

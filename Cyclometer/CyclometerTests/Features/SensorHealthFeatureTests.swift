@@ -22,6 +22,7 @@ struct SensorHealthFeatureTests {
     /// Recording by default: link losses only count while the ride records.
     private func makeStore(
         isRecording: Bool = true,
+        paired: [PairedSensor]? = nil,
         dependencies: @escaping (inout DependencyValues) -> Void = { _ in }
     ) -> TestStoreOf<SensorHealthFeature> {
         let storage = FileStorage.inMemory
@@ -29,7 +30,7 @@ struct SensorHealthFeatureTests {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.pairedSensors = Self.paired }
+            $preferences.withLock { $0.pairedSensors = paired ?? Self.paired }
             return TestStore(initialState: SensorHealthFeature.State(isRecording: isRecording)) {
                 SensorHealthFeature()
             } withDependencies: {
@@ -43,9 +44,18 @@ struct SensorHealthFeatureTests {
     @Test("A role's battery lands on its paired device; both CSC roles of a combo share one entry")
     func batteryMapsToPeripheral() async {
         let store = makeStore()
-        await store.send(.batteryReported(.speed, 87)) { $0.log.recordBattery(87, peripheral: Self.combo) }
-        await store.send(.batteryReported(.cadence, 10)) { $0.log.recordBattery(10, peripheral: Self.combo) }
-        await store.send(.batteryReported(.radar, 70)) { $0.log.recordBattery(70, peripheral: Self.radar) }
+        await store.send(.batteryReported(.speed, 87)) {
+            $0.batteryLevels[.speed] = 87
+            $0.log.recordBattery(87, peripheral: Self.combo)
+        }
+        await store.send(.batteryReported(.cadence, 10)) {
+            $0.batteryLevels[.cadence] = 10
+            $0.log.recordBattery(10, peripheral: Self.combo)
+        }
+        await store.send(.batteryReported(.radar, 70)) {
+            $0.batteryLevels[.radar] = 70
+            $0.log.recordBattery(70, peripheral: Self.radar)
+        }
 
         let reports = store.state.log.reports(rideId: UUID(0))
         #expect(reports.count == 2)
@@ -55,7 +65,7 @@ struct SensorHealthFeatureTests {
     @Test("An unpaired role's battery and an unpaired peripheral's link loss are ignored")
     func unpairedIgnored() async {
         let store = makeStore()
-        await store.send(.batteryReported(.heartRate, 5))
+        await store.send(.batteryReported(.heartRate, 5)) { $0.batteryLevels[.heartRate] = 5 }
         await store.send(.linkTimedOut(Self.stranger))
         #expect(store.state.log.reports(rideId: UUID(0)).isEmpty)
     }
@@ -78,12 +88,105 @@ struct SensorHealthFeatureTests {
     @Test("Connecting is enough for a verdict, so a sensor without battery reporting gets one")
     func connectedRecordsPresence() async {
         let store = makeStore()
-        await store.send(.connected(.radar)) { $0.log.recordConnected(peripheral: Self.radar) }
+        await store.send(.statusChanged(.radar, isConnected: true)) {
+            $0.connectedRoles = [.radar]
+            $0.log.recordConnected(peripheral: Self.radar)
+        }
         #expect(store.state.log.reports(rideId: UUID(0)) == [
             Self.radar: SensorHealthReport(rideId: UUID(0), minBatteryPercent: nil, maxLinkLossesPerWindow: 0)
         ])
         // An unpaired role connecting says nothing about any paired device.
-        await store.send(.connected(.heartRate))
+        await store.send(.statusChanged(.heartRate, isConnected: true)) { $0.connectedRoles = [.radar, .heartRate] }
+        #expect(store.state.log.reports(rideId: UUID(0)).count == 1)
+    }
+
+    // MARK: Live status (#464, #466)
+
+    @Test("A paired sensor never found this ride is missing; one row per device, a combo once")
+    func neverFoundIsMissing() async {
+        let store = makeStore()
+        #expect(store.state.devices.map(\.title) == ["Radar", "Speed & Cadence"])
+        #expect(store.state.devices.map(\.name) == ["Varia RTL515", "Wahoo RPM"])
+        #expect(store.state.devicesNeedingAttention.map(\.id) == [Self.radar, Self.combo])
+        #expect(store.state.devices.allSatisfy { $0.isMissing })
+    }
+
+    @Test("With nothing paired, nothing needs attention, whatever the clients say")
+    func nothingPaired() async {
+        let store = makeStore(paired: [])
+        await store.send(.statusChanged(.radar, isConnected: true)) { $0.connectedRoles = [.radar] }
+        await store.send(.batteryReported(.radar, 5)) { $0.batteryLevels[.radar] = 5 }
+        #expect(store.state.devices.isEmpty)
+        #expect(store.state.devicesNeedingAttention.isEmpty)
+    }
+
+    @Test("A combo CSC sensor is connected only once both its roles are, and reads its lower level")
+    func comboCountsOnce() async {
+        let store = makeStore()
+        await store.send(.statusChanged(.speed, isConnected: true)) {
+            $0.connectedRoles = [.speed]
+            $0.log.recordConnected(peripheral: Self.combo)
+        }
+        #expect(store.state.devices.first { $0.id == Self.combo }?.isMissing == true)
+
+        await store.send(.statusChanged(.cadence, isConnected: true)) { $0.connectedRoles = [.speed, .cadence] }
+        await store.send(.batteryReported(.speed, 60)) {
+            $0.batteryLevels[.speed] = 60
+            $0.log.recordBattery(60, peripheral: Self.combo)
+        }
+        await store.send(.batteryReported(.cadence, 40)) {
+            $0.batteryLevels[.cadence] = 40
+            $0.log.recordBattery(40, peripheral: Self.combo)
+        }
+        let combo = store.state.devices.first { $0.id == Self.combo }
+        #expect(combo?.isConnected == true)
+        #expect(combo?.batteryPercent == 40)
+        // The radar is still missing; the combo, up and healthy, no longer counts.
+        #expect(store.state.devicesNeedingAttention.map(\.id) == [Self.radar])
+    }
+
+    @Test("A connected sensor at or below 20% is low, and above it again is not")
+    func lowBatteryComesAndGoes() async {
+        let store = makeStore(paired: [Self.paired[2]])
+        await store.send(.statusChanged(.radar, isConnected: true)) {
+            $0.connectedRoles = [.radar]
+            $0.log.recordConnected(peripheral: Self.radar)
+        }
+        await store.send(.batteryReported(.radar, 21)) {
+            $0.batteryLevels[.radar] = 21
+            $0.log.recordBattery(21, peripheral: Self.radar)
+        }
+        #expect(store.state.devicesNeedingAttention.isEmpty)
+
+        await store.send(.batteryReported(.radar, 20)) {
+            $0.batteryLevels[.radar] = 20
+            $0.log.recordBattery(20, peripheral: Self.radar)
+        }
+        #expect(store.state.devicesNeedingAttention.map(\.isBatteryLow) == [true])
+
+        // A sagging cell reads high again between transmissions; the live level follows it.
+        await store.send(.batteryReported(.radar, 24)) { $0.batteryLevels[.radar] = 24 }
+        #expect(store.state.devicesNeedingAttention.isEmpty)
+    }
+
+    @Test("A low sensor that disconnects stops counting as low and counts as missing")
+    func lowThenDisconnected() async {
+        let store = makeStore(paired: [Self.paired[2]])
+        await store.send(.statusChanged(.radar, isConnected: true)) {
+            $0.connectedRoles = [.radar]
+            $0.log.recordConnected(peripheral: Self.radar)
+        }
+        await store.send(.batteryReported(.radar, 18)) {
+            $0.batteryLevels[.radar] = 18
+            $0.log.recordBattery(18, peripheral: Self.radar)
+        }
+        await store.send(.statusChanged(.radar, isConnected: false)) { $0.connectedRoles = [] }
+        let radar = store.state.devices.first
+        #expect(radar?.isMissing == true)
+        #expect(radar?.isBatteryLow == false)
+        // The client's nil on disconnect clears the level; the log keeps its minimum.
+        await store.send(.batteryReported(.radar, nil)) { $0.batteryLevels[.radar] = nil }
+        #expect(store.state.devicesNeedingAttention.count == 1)
     }
 
     @Test("Start listening subscribes to every battery stream and to link timeouts")
@@ -109,10 +212,17 @@ struct SensorHealthFeatureTests {
 
         // Only `.active` counts as showing up.
         radarStateContinuation.yield(.connecting)
+        await store.receive(.statusChanged(.radar, isConnected: false))
         radarStateContinuation.yield(.active)
-        await store.receive(.connected(.radar)) { $0.log.recordConnected(peripheral: Self.radar) }
+        await store.receive(.statusChanged(.radar, isConnected: true)) {
+            $0.connectedRoles = [.radar]
+            $0.log.recordConnected(peripheral: Self.radar)
+        }
         radarContinuation.yield(64)
-        await store.receive(.batteryReported(.radar, 64)) { $0.log.recordBattery(64, peripheral: Self.radar) }
+        await store.receive(.batteryReported(.radar, 64)) {
+            $0.batteryLevels[.radar] = 64
+            $0.log.recordBattery(64, peripheral: Self.radar)
+        }
         speedContinuation.yield(nil)
         await store.receive(.batteryReported(.speed, nil))
         eventContinuation.yield(.disconnected(id: Self.combo, error: CBError(.connectionTimeout)))
@@ -204,5 +314,50 @@ struct RideEndSensorHealthTests {
         #expect(!store.state.sensorHealth.isRecording)
         await store.send(.resumeTapped)
         #expect(store.state.sensorHealth.isRecording)
+    }
+}
+
+@MainActor
+@Suite("Sensors button VoiceOver (#464, #466)")
+struct SensorsButtonAccessibilityTests {
+    @Test("Missing sensors are counted, as #466 words it")
+    func missing() {
+        #expect(SensorsButton.accessibilityLabel(for: [.sampleRadarMissing]) == "Sensors, 1 not found")
+        #expect(SensorsButton.accessibilityLabel(for: [.sampleRadarMissing, .sampleComboMissing]) == "Sensors, 2 not found")
+    }
+
+    @Test("Low sensors are named with their level, as #464 words it")
+    func low() {
+        #expect(SensorsButton.accessibilityLabel(for: [.sampleRadarLow]) == "Sensors, low battery: Radar, 18 percent")
+        #expect(SensorsButton.accessibilityLabel(for: [.sampleRadarLow, .sampleHeartRateLow])
+                == "Sensors, low battery: Radar, 18 percent, Heart Rate, 9 percent")
+    }
+
+    @Test("Missing and low together read both")
+    func both() {
+        #expect(SensorsButton.accessibilityLabel(for: [.sampleComboMissing, .sampleHeartRateLow])
+                == "Sensors, 1 not found, low battery: Heart Rate, 9 percent")
+    }
+}
+
+@MainActor
+@Suite("Ride Sensors sheet (#464, #466)")
+struct RideSensorsSheetTests {
+    @Test("The Sensors button opens the sheet, and the sheet's dismissal closes it, with nothing else sent")
+    func buttonOpensSheet() async {
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.defaultFileStorage = storage
+            }
+        }
+
+        // Exhaustive: no haptic, sound or banner effect rides along with either.
+        await store.send(.sensorsButtonTapped) { $0.isSensorsSheetPresented = true }
+        await store.send(.sensorsSheetPresentationChanged(false)) { $0.isSensorsSheetPresented = false }
     }
 }
