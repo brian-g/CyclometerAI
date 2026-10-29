@@ -1019,7 +1019,7 @@ Cyclometer/
 │   │   ├── Recording/                     // TrackPointRecorderFeature, GPSFixFilter
 │   │   ├── Alerts/                        // AlertOrchestratorFeature, VehiclePassDetector,
 │   │   │                                  // RideBanner
-│   │   ├── SensorHealth/                  // SensorHealthFeature (#391) — records only, no widget
+│   │   ├── SensorHealth/                  // SensorHealthFeature (#391), SensorsButton + SensorsSheet (#464, #466)
 │   │   └── Calibration/                   // WheelCalibrationFeature, WheelCalibration
 │   ├── Rides/                             // RidesFeature/View, RideDetail*, RideSummary*,
 │   │                                      // StartSheet*, RoutePicker*

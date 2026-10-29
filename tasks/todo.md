@@ -1272,3 +1272,71 @@ minute, with the rider built as `RideHealthWorkout.write` builds it.
   a ride ends on its last whole minute's value, not Health's (#2); #4–#7 left
 - Not run: `ActiveRideCaloriesTests` after the #3 change (built only)
 - [x] Run after the #3 change: the #465 suites, 189/189 passed (incl. `liveMinuteWaitsForSavedTrack`); full `CyclometerTests` not run
+
+---
+
+# #464 + #466 — Sensors toolbar button and Sensors sheet
+
+Brian chose: **one** toolbar button, glyph `antenna.radiowaves.left.and.right`, shown when any paired device is missing
+*or* low (≤ `SensorHealthReport.lowBatteryPercent`, 20%); its badge counts those devices. One PR closes both issues.
+Placement follows the Design.sketch `Sxx - Route overlay` frame, group **sensor button**: trailing, left of Bell.
+
+**State: `SensorHealthFeature`** (already subscribes to every status and battery stream)
+- [x] `.connected(SensorRole)` becomes `.statusChanged(SensorRole, isConnected:)`; the log still records only the
+      first connect. Connected means `.active` (HR: notifying), the bar #391 already used, not the Start
+      sheet's `.connected`/`.active`: #464 excludes changes to the verdict
+- [x] Keep each role's live status and current battery beside the log; battery clears on the client's `nil`
+      only. Clearing on a status change would race the once-per-connection read, which can land before `.active`
+- [x] Derived `devices`: paired sensors grouped by peripheral (combo CSC is one row with both roles), each with
+      connected (every role up), battery, name; `attentionCount` = missing + connected-and-low
+- [x] TestStore: ≤20 shows / >20 hides; low then disconnect stops counting as low and counts as missing;
+      combo counts once; never-found counts; nothing paired → 0; no extra effects (no sound/haptic/banner)
+
+**UI**
+- [x] `SensorsButton` (internal, `Features/ActiveRide/SensorHealth/`): 52 pt glass circle like the other controls, red count badge
+      as in the frame. VoiceOver "Sensors, 1 not found" / "Sensors, low battery: Radar, 18 percent" / both joined;
+      hint "Opens sensor status"
+- [x] `rideControls`: `[Pause | Resume Finish] · Spacer · [Sensors] [Bell]`, `controlTransition` (fade under Reduce Motion)
+- [x] `SensorsSheet`: one row per device via `SensorListRowView` + `SensorRowStyle.device`, Connected/Searching
+      capsule, `SensorBatteryLabel` when connected. No pair/forget. Reads live state in its body (#144 lesson)
+- [x] `ActiveRideFeature`: `isSensorsSheetPresented` + tap / presentation-changed actions, as Add Widget does; TestStore
+- [x] Previews for every state; snapshots of button (1 missing, 2 missing, 1 low, missing + low) and sheet, light + dark;
+      accessibility label test
+
+**Specs**
+- [x] UX.md §S05 Bottom Toolbar row + button paragraph; Open UX Question glyph → `antenna.radiowaves.left.and.right`;
+      new "Sheet: Sensors"; §S10 "no mid-ride alert" wording points at the quiet badge
+- [x] BLE.md §14.5 "surfaced on" adds S05; TCA.md §8 tree entry; `SensorHealthFeature` header comment ("records only")
+- [x] Extracted `RideControlButton` (was a private func) and `SensorStatusBadge` (was `SensorStatusRow.statusControl`)
+      so the new button and sheet share their styling; `Spacing.toolbarBadge`
+- [x] Build (app + tests)
+- [x] Brian: no overflow (UX.md §S05 says a future button revisits it), then "complete it"
+
+**Toolbar overflow:** Brian chose none. With one button the widest row (paused + Sensors) leaves ~13 dots' room at
+402 pt and no other toolbar item is planned; UX.md §S05 says a future button has to revisit it. No issue filed.
+
+## Review
+
+- [x] Recorded 14 snapshots (button: 1/2 missing, 1/2 low, missing + low; sheet: missing + low, two missing; light +
+      dark). Opened them: the button's first recording had no glass disc offscreen, so it snapshots in the key window
+      (`drawHierarchyInKeyWindow`). Both suites on CI's skip list
+- [x] Targeted run: every ActiveRideFeature suite, SensorHealth/RideEnd/RideSensorsSheet/VoiceOver suites, StartSheet
+      (+ snapshot, unchanged after the badge extraction), both new snapshot suites: 228/228, every new test present
+- **Not snapshotted:** "none missing / none low". The button isn't drawn then; `neverFoundIsMissing`, `nothingPaired`
+  and `lowBatteryComesAndGoes` pin the empty list that hides it.
+- **Not run:** the full `CyclometerTests` locally (CI runs it).
+
+### #496 review (`/code-review --fix`)
+
+- [x] Fixed by the review: `.finishTapped` also closes the Sensors sheet, so auto-end's finish alert can show
+      (`autoEndClosesSensorsSheet`); the badge doesn't take touches (`allowsHitTesting(false)`)
+- Open, Brian's call: (3) the button can flicker on a level rebounding across 20%, which needs hysteresis or a latch;
+  (4) before the first status replay every paired device reads missing, so possibly a flash at ride start; (5) one
+  sheet enum for the dashboard; (6) device grouping and "Speed & Cadence" title duplicated with S10
+- [x] Brian: (3) latch. Low is judged on the log's ride minimum (`SensorHealthLog.minBatteryPercent(peripheral:)`), and
+      the per-role current-level map is gone. The sheet shows that minimum. Departs from #464's AC ("above it again
+      hides the indicator"), on BLE.md §14.5's evidence. `lowBatteryLatches`, `lowThenDisconnected` (reconnects low)
+- Brian: (4) leave it unless seen on a real ride; (5), (6) not done
+- [x] Run after the latch: SensorHealth, RideEnd, RideSensorsSheet (incl. `autoEndClosesSensorsSheet`), VoiceOver,
+      DashboardEdit and both Sensors snapshot suites: 52/52, the new tests present
+- Not run: tests after the review's fixes (built only)

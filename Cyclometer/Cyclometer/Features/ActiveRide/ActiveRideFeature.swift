@@ -295,7 +295,7 @@ struct ActiveRideFeature {
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
         /// Each paired sensor's battery and link over the ride, for the verdict saved at ride
-        /// end (#391).
+        /// end (#391), and its live status for the Sensors button and sheet (#464, #466).
         var sensorHealth = SensorHealthFeature.State()
         var navigation = NavigationFeature.State()
         /// The ride's Live Activity (#308), kept by `LiveActivityFeature`.
@@ -436,6 +436,9 @@ struct ActiveRideFeature {
         /// `nil` from Add, which adds in the first open spot. Read only while the sheet is up, and
         /// left set as it closes, so the sheet doesn't redraw as Add's while it slides away.
         var addWidgetCell: DashboardGrid.Cell?
+        /// The Sensors sheet (#466), from the toolbar's Sensors button. Its rows read
+        /// `sensorHealth` live, so this is the only state the sheet needs here.
+        var isSensorsSheetPresented = false
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
         /// The page the rider is on, an index into `dashboardLayout.pages`. Held here, not in
@@ -474,6 +477,9 @@ struct ActiveRideFeature {
         case addWidgetSelected(widgetID: String, size: WidgetSize)
         /// S08's "Empty page" (#142): a blank page after the one the rider is on.
         case addEmptyPageTapped
+        /// The toolbar's Sensors button (#464, #466), shown while a paired sensor is missing or low.
+        case sensorsButtonTapped
+        case sensorsSheetPresentationChanged(Bool)
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)
@@ -684,6 +690,12 @@ struct ActiveRideFeature {
             case .addWidgetPresentationChanged(let isPresented):
                 state.isAddWidgetPresented = isPresented && state.isEditingDashboard
                 return .none
+            case .sensorsButtonTapped:
+                state.isSensorsSheetPresented = true
+                return .none
+            case .sensorsSheetPresentationChanged(let isPresented):
+                state.isSensorsSheetPresented = isPresented
+                return .none
             case .addWidgetSelected(let widgetID, let size):
                 guard state.isEditingDashboard, state.isAddWidgetPresented else { return .none }
                 let page = state.dashboardLayout.pages[state.visibleDashboardPage]
@@ -736,8 +748,9 @@ struct ActiveRideFeature {
             case .finishTapped:
                 guard state.recordingState == .paused else { return .none }
                 // Auto-end sends this with no rider at the screen. SwiftUI won't show an alert
-                // from a view already showing a sheet, so the Add Widget sheet steps aside.
+                // from a view already showing a sheet, so every dashboard sheet steps aside.
                 state.isAddWidgetPresented = false
+                state.isSensorsSheetPresented = false
                 state.finishAlert = AlertState {
                     TextState("Finish Ride")
                 } actions: {

@@ -88,6 +88,9 @@ struct RideDashboardView: View {
         .sheet(isPresented: $store.isAddWidgetPresented.sending(\.addWidgetPresentationChanged)) {
             AddWidgetSheet(store: store, canvas: gridSize)
         }
+        .sheet(isPresented: $store.isSensorsSheetPresented.sending(\.sensorsSheetPresentationChanged)) {
+            SensorsSheet { store.sensorHealth.devices }
+        }
     }
 
     /// The widget grid's size: the screen, less the radar lane beside it when it shows
@@ -156,41 +159,31 @@ struct RideDashboardView: View {
     }
 
     // ── Ride Controls — floating glass buttons (S05) ───────────────────────────
+    // Sensors sits beside Bell, as in the Sketch frame "Sxx - Route overlay" (#466).
     private var rideControls: some View {
-        HStack(spacing: Spacing.sm) {
+        let sensorsNeedingAttention = store.sensorHealth.devicesNeedingAttention
+        return HStack(spacing: Spacing.sm) {
             if store.isPaused {
-                rideControlButton("Resume", systemImage: "play.fill") { store.send(.resumeTapped) }
+                RideControlButton("Resume", systemImage: "play.fill") { store.send(.resumeTapped) }
                     .transition(controlTransition)
-                rideControlButton("Finish", systemImage: "stop.fill") { store.send(.finishTapped) }
+                RideControlButton("Finish", systemImage: "stop.fill") { store.send(.finishTapped) }
                     .transition(controlTransition)
             } else {
-                rideControlButton("Pause", systemImage: "pause.fill") { store.send(.pauseTapped) }
+                RideControlButton("Pause", systemImage: "pause.fill") { store.send(.pauseTapped) }
                     .transition(controlTransition)
             }
 
             Spacer()
 
-            rideControlButton("Ring Bell", systemImage: "bell.fill") { ringBell() }
+            if !sensorsNeedingAttention.isEmpty {
+                SensorsButton(devices: sensorsNeedingAttention) { store.send(.sensorsButtonTapped) }
+                    .transition(controlTransition)
+            }
+            RideControlButton("Ring Bell", systemImage: "bell.fill") { ringBell() }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.isPaused)
+        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: sensorsNeedingAttention.isEmpty)
         .padding(.horizontal, Spacing.lg)
-    }
-
-    /// One floating glass ride-control button. The icon-only `Label` keeps its
-    /// title available to VoiceOver, so no separate `accessibilityLabel` is needed.
-    private func rideControlButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button { action() } label: {
-            Label(title, systemImage: systemImage)
-                .labelStyle(.iconOnly)
-                .font(.title3.weight(.semibold))
-                .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
-        }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
     }
 
     /// Reduce Motion swaps the scale animation for a plain fade.
@@ -241,6 +234,31 @@ struct RideDashboardView: View {
 
     private func ringBell() {
         AudioServicesPlaySystemSound(1005) // 1005 = system "Tink"; route via AudioClient later
+    }
+}
+
+/// One floating glass ride-control button (S05). The icon-only `Label` keeps its title
+/// available to VoiceOver, so no separate `accessibilityLabel` is needed.
+struct RideControlButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    init(_ title: String, systemImage: String, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.action = action
+    }
+
+    var body: some View {
+        Button { action() } label: {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+                .font(.title3.weight(.semibold))
+                .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
     }
 }
 
