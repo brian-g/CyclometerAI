@@ -44,18 +44,9 @@ struct SensorHealthFeatureTests {
     @Test("A role's battery lands on its paired device; both CSC roles of a combo share one entry")
     func batteryMapsToPeripheral() async {
         let store = makeStore()
-        await store.send(.batteryReported(.speed, 87)) {
-            $0.batteryLevels[.speed] = 87
-            $0.log.recordBattery(87, peripheral: Self.combo)
-        }
-        await store.send(.batteryReported(.cadence, 10)) {
-            $0.batteryLevels[.cadence] = 10
-            $0.log.recordBattery(10, peripheral: Self.combo)
-        }
-        await store.send(.batteryReported(.radar, 70)) {
-            $0.batteryLevels[.radar] = 70
-            $0.log.recordBattery(70, peripheral: Self.radar)
-        }
+        await store.send(.batteryReported(.speed, 87)) { $0.log.recordBattery(87, peripheral: Self.combo) }
+        await store.send(.batteryReported(.cadence, 10)) { $0.log.recordBattery(10, peripheral: Self.combo) }
+        await store.send(.batteryReported(.radar, 70)) { $0.log.recordBattery(70, peripheral: Self.radar) }
 
         let reports = store.state.log.reports(rideId: UUID(0))
         #expect(reports.count == 2)
@@ -65,7 +56,7 @@ struct SensorHealthFeatureTests {
     @Test("An unpaired role's battery and an unpaired peripheral's link loss are ignored")
     func unpairedIgnored() async {
         let store = makeStore()
-        await store.send(.batteryReported(.heartRate, 5)) { $0.batteryLevels[.heartRate] = 5 }
+        await store.send(.batteryReported(.heartRate, 5))
         await store.send(.linkTimedOut(Self.stranger))
         #expect(store.state.log.reports(rideId: UUID(0)).isEmpty)
     }
@@ -115,7 +106,7 @@ struct SensorHealthFeatureTests {
     func nothingPaired() async {
         let store = makeStore(paired: [])
         await store.send(.statusChanged(.radar, isConnected: true)) { $0.connectedRoles = [.radar] }
-        await store.send(.batteryReported(.radar, 5)) { $0.batteryLevels[.radar] = 5 }
+        await store.send(.batteryReported(.radar, 5))
         #expect(store.state.devices.isEmpty)
         #expect(store.state.devicesNeedingAttention.isEmpty)
     }
@@ -131,11 +122,9 @@ struct SensorHealthFeatureTests {
 
         await store.send(.statusChanged(.cadence, isConnected: true)) { $0.connectedRoles = [.speed, .cadence] }
         await store.send(.batteryReported(.speed, 60)) {
-            $0.batteryLevels[.speed] = 60
             $0.log.recordBattery(60, peripheral: Self.combo)
         }
         await store.send(.batteryReported(.cadence, 40)) {
-            $0.batteryLevels[.cadence] = 40
             $0.log.recordBattery(40, peripheral: Self.combo)
         }
         let combo = store.state.devices.first { $0.id == Self.combo }
@@ -145,48 +134,45 @@ struct SensorHealthFeatureTests {
         #expect(store.state.devicesNeedingAttention.map(\.id) == [Self.radar])
     }
 
-    @Test("A connected sensor at or below 20% is low, and above it again is not")
-    func lowBatteryComesAndGoes() async {
+    @Test("A connected sensor that reads 20% or less is low for the rest of the ride, whatever it reads after")
+    func lowBatteryLatches() async {
         let store = makeStore(paired: [Self.paired[2]])
         await store.send(.statusChanged(.radar, isConnected: true)) {
             $0.connectedRoles = [.radar]
             $0.log.recordConnected(peripheral: Self.radar)
         }
-        await store.send(.batteryReported(.radar, 21)) {
-            $0.batteryLevels[.radar] = 21
-            $0.log.recordBattery(21, peripheral: Self.radar)
-        }
+        await store.send(.batteryReported(.radar, 21)) { $0.log.recordBattery(21, peripheral: Self.radar) }
         #expect(store.state.devicesNeedingAttention.isEmpty)
 
-        await store.send(.batteryReported(.radar, 20)) {
-            $0.batteryLevels[.radar] = 20
-            $0.log.recordBattery(20, peripheral: Self.radar)
-        }
+        await store.send(.batteryReported(.radar, 20)) { $0.log.recordBattery(20, peripheral: Self.radar) }
         #expect(store.state.devicesNeedingAttention.map(\.isBatteryLow) == [true])
 
-        // A sagging cell reads high again between transmissions; the live level follows it.
-        await store.send(.batteryReported(.radar, 24)) { $0.batteryLevels[.radar] = 24 }
-        #expect(store.state.devicesNeedingAttention.isEmpty)
+        // A sagging cell reads high again between transmissions (BLE.md §14.5): the button stays, at
+        // the level that tripped it, rather than flicking off and on as the cell rebounds.
+        await store.send(.batteryReported(.radar, 95))
+        await store.send(.batteryReported(.radar, 21))
+        #expect(store.state.devicesNeedingAttention.map(\.batteryPercent) == [20])
     }
 
-    @Test("A low sensor that disconnects stops counting as low and counts as missing")
+    @Test("A low sensor that drops counts as missing, not low; reconnected, it is low again")
     func lowThenDisconnected() async {
         let store = makeStore(paired: [Self.paired[2]])
         await store.send(.statusChanged(.radar, isConnected: true)) {
             $0.connectedRoles = [.radar]
             $0.log.recordConnected(peripheral: Self.radar)
         }
-        await store.send(.batteryReported(.radar, 18)) {
-            $0.batteryLevels[.radar] = 18
-            $0.log.recordBattery(18, peripheral: Self.radar)
-        }
+        await store.send(.batteryReported(.radar, 18)) { $0.log.recordBattery(18, peripheral: Self.radar) }
         await store.send(.statusChanged(.radar, isConnected: false)) { $0.connectedRoles = [] }
-        let radar = store.state.devices.first
-        #expect(radar?.isMissing == true)
-        #expect(radar?.isBatteryLow == false)
-        // The client's nil on disconnect clears the level; the log keeps its minimum.
-        await store.send(.batteryReported(.radar, nil)) { $0.batteryLevels[.radar] = nil }
+        // The client's nil on disconnect means unknown, and leaves the ride's minimum alone.
+        await store.send(.batteryReported(.radar, nil))
+        let dropped = store.state.devices.first
+        #expect(dropped?.isMissing == true)
+        #expect(dropped?.isBatteryLow == false)
         #expect(store.state.devicesNeedingAttention.count == 1)
+
+        await store.send(.statusChanged(.radar, isConnected: true)) { $0.connectedRoles = [.radar] }
+        await store.send(.batteryReported(.radar, 90))
+        #expect(store.state.devices.first?.isBatteryLow == true)
     }
 
     @Test("Start listening subscribes to every battery stream and to link timeouts")
@@ -220,7 +206,6 @@ struct SensorHealthFeatureTests {
         }
         radarContinuation.yield(64)
         await store.receive(.batteryReported(.radar, 64)) {
-            $0.batteryLevels[.radar] = 64
             $0.log.recordBattery(64, peripheral: Self.radar)
         }
         speedContinuation.yield(nil)

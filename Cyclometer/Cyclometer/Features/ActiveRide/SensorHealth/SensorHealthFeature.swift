@@ -25,10 +25,6 @@ struct SensorHealthFeature {
         /// The roles whose sensor is up right now: `.active` (HR: notifying), the same bar the
         /// log counts as showing up.
         var connectedRoles: Set<SensorRole> = []
-        /// Each role's latest battery level, unlike the log's minimum. Left to the clients to
-        /// clear: each publishes nil on disconnect (BLE.md §14.3). Clearing here on a status change
-        /// would race the once-per-connection read, which can land before `.active`.
-        var batteryLevels: [SensorRole: Int] = [:]
         /// Maps a role's battery reading, and a peripheral's link loss, to a paired device.
         @SharedReader(.appPreferences) var preferences
 
@@ -39,14 +35,13 @@ struct SensorHealthFeature {
             for role in SensorHealthFeature.watchedRoles {
                 guard let record = preferences.pairedSensor(for: role) else { continue }
                 let isConnected = connectedRoles.contains(role)
-                let battery = batteryLevels[role]
                 if let index = devices.firstIndex(where: { $0.id == record.peripheralID }) {
                     devices[index].roles.append(role)
                     devices[index].isConnected = devices[index].isConnected && isConnected
-                    devices[index].batteryPercent = [devices[index].batteryPercent, battery].compactMap { $0 }.min()
                 } else {
                     devices.append(Device(id: record.peripheralID, roles: [role], name: record.displayName,
-                                          isConnected: isConnected, batteryPercent: battery))
+                                          isConnected: isConnected,
+                                          batteryPercent: log.minBatteryPercent(peripheral: record.peripheralID)))
                 }
             }
             return devices
@@ -64,13 +59,16 @@ struct SensorHealthFeature {
         let name: String?
         /// Every one of its roles is up. A combo whose cadence side dropped is missing.
         var isConnected: Bool
-        /// The lowest of its roles' current levels; nil when unknown.
+        /// The lowest level it has reported this ride, the log's minimum; nil when none yet.
+        ///
+        /// Latched, not live: a sagging cell reads high between transmissions (BLE.md §14.5), so a
+        /// live level would flick the Sensors button on and off as it rebounds across 20%.
         var batteryPercent: Int?
 
         var isMissing: Bool { !isConnected }
 
-        /// At or below the level `SensorBatteryLabel` turns red at. A missing device's level is
-        /// unknown, so it is never also low.
+        /// At or below the level `SensorBatteryLabel` turns red at, at any point this ride. Counted
+        /// only while connected: a missing device is missing, not also low.
         var isBatteryLow: Bool {
             guard isConnected, let batteryPercent else { return false }
             return batteryPercent <= SensorHealthReport.lowBatteryPercent
@@ -159,7 +157,6 @@ struct SensorHealthFeature {
                 return .none
 
             case .batteryReported(let role, let level):
-                state.batteryLevels[role] = level
                 guard let peripheral = state.preferences.pairedSensor(for: role)?.peripheralID else { return .none }
                 state.log.recordBattery(level, peripheral: peripheral)
                 return .none

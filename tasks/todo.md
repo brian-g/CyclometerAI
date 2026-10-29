@@ -1333,4 +1333,10 @@ Placement follows the Design.sketch `Sxx - Route overlay` frame, group **sensor 
 - Open, Brian's call: (3) the button can flicker on a level rebounding across 20%, which needs hysteresis or a latch;
   (4) before the first status replay every paired device reads missing, so possibly a flash at ride start; (5) one
   sheet enum for the dashboard; (6) device grouping and "Speed & Cadence" title duplicated with S10
+- [x] Brian: (3) latch. Low is judged on the log's ride minimum (`SensorHealthLog.minBatteryPercent(peripheral:)`), and
+      the per-role current-level map is gone. The sheet shows that minimum. Departs from #464's AC ("above it again
+      hides the indicator"), on BLE.md §14.5's evidence. `lowBatteryLatches`, `lowThenDisconnected` (reconnects low)
+- Brian: (4) leave it unless seen on a real ride; (5), (6) not done
+- [x] Run after the latch: SensorHealth, RideEnd, RideSensorsSheet (incl. `autoEndClosesSensorsSheet`), VoiceOver,
+      DashboardEdit and both Sensors snapshot suites: 52/52, the new tests present
 - Not run: tests after the review's fixes (built only)

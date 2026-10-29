@@ -545,18 +545,18 @@ Toolbar buttons shown based on ride state:
 | Button | Shown when |
 |---|---|
 | Pause | Ride is active |
-| Sensors | A paired sensor isn't connected, or a connected one's battery is at or below 20% |
+| Sensors | A paired sensor isn't connected, or a connected one's battery has read at or below 20% this ride |
 | Resume | Ride is paused |
 | Finish | Ride is paused |
 | Bell | Always |
 
 All toolbar buttons use `.buttonStyle(.glass)` (iOS 26), `.labelStyle(.iconOnly)`, and a 52×52pt frame. The toolbar uses `.sharedBackgroundVisibility(.hidden)`.
 
-**Sensors** (#464, #466; Sketch "Sxx - Route overlay", group "sensor button") sits beside Bell, leading it. Its glyph is `antenna.radiowaves.left.and.right`, with a `brRatingBad` badge counting the devices that need attention: each paired device that isn't connected (never found this ride, or dropped), and each connected one whose battery reads at or below 20%, the level `SensorBatteryLabel` turns red at. A combo CSC sensor is one device and counts once, and is connected only when both its roles are. With nothing paired, or every device connected and above 20%, the button is hidden. It appears and leaves with the other controls' transition, or a fade under Reduce Motion. It is quiet: no sound, haptic or banner, because nothing mid-ride competes with radar alerts (§S10). VoiceOver reads "Sensors, 1 not found", "Sensors, low battery: Radar, 18 percent", or both joined, with the hint "Opens sensor status".
+**Sensors** (#464, #466; Sketch "Sxx - Route overlay", group "sensor button") sits beside Bell, leading it. Its glyph is `antenna.radiowaves.left.and.right`, with a `brRatingBad` badge counting the devices that need attention: each paired device that isn't connected (never found this ride, or dropped), and each connected one whose battery has read at or below 20% this ride, the level `SensorBatteryLabel` turns red at. Low latches for the ride: a sagging cell reads high again between transmissions (BLE.md §14.5), and a live level would flick the button on and off as it rebounds. A combo CSC sensor is one device and counts once, and is connected only when both its roles are. With nothing paired, or every device connected and never at or below 20% this ride, the button is hidden. It appears and leaves with the other controls' transition, or a fade under Reduce Motion. It is quiet: no sound, haptic or banner, because nothing mid-ride competes with radar alerts (§S10). VoiceOver reads "Sensors, 1 not found", "Sensors, low battery: Radar, 18 percent", or both joined, with the hint "Opens sensor status".
 
 The row fits its widest case, paused with Sensors showing (Resume, Finish · Sensors, Bell), with room between for about 13 page dots on a 402 pt screen. There is no overflow or priority order (#464, #466): a future toolbar button has to revisit that.
 
-**Sheet: Sensors** (#466). The Sensors button opens it, at the medium detent and expandable to large. One row per paired device, drawn as §S11's device rows are (a combo lists both its roles, "Speed & Cadence"), with its status, Connected or Searching, and while connected its battery as `SensorBatteryLabel`, so a low one shows in red. It has no pairing or forgetting actions; those stay on §S11.
+**Sheet: Sensors** (#466). The Sensors button opens it, at the medium detent and expandable to large. One row per paired device, drawn as §S11's device rows are (a combo lists both its roles, "Speed & Cadence"), with its status, Connected or Searching, and while connected its lowest battery level this ride as `SensorBatteryLabel`, so a low one shows in red at the level that tripped the button. It has no pairing or forgetting actions; those stay on §S11.
 
 **Key Layout Decisions:**
 - [x] S05.4 factory default layout resolved — see table above; rider-customisable after first launch
