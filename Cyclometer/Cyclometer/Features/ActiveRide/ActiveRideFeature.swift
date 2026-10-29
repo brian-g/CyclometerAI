@@ -344,6 +344,19 @@ struct ActiveRideFeature {
         /// `coordinate` as W21 reads it (#462): taken at most once a minute, so the card doesn't
         /// re-render on every fix.
         var sunsetFix: SunsetFix? = nil
+        /// Every point the recorder has been handed this ride, in order (#465): what the ride's
+        /// Health workout will read back from the store, so W23's estimate runs on the same track.
+        /// Kept here rather than fetched, since a fetch could land while a flush has the newest
+        /// points out of the buffer. A resumed ride's saved track is put in front of it
+        /// (`.calorieTrackSeeded`).
+        var calorieTrack: [TrackPointDTO] = []
+        /// The rider W23 estimates for: Health's body mass, date of birth and sex, read at start.
+        var energyRider: EnergyRiderStatus = .loading
+        /// W23's series, one point a minute of recording time (#465). The last is the estimate.
+        var calories: [CaloriePoint] = []
+        /// A resumed ride's saved track hasn't been read back yet: until it is, an estimate would
+        /// cover only the minutes since the resume (#465). Set by `State(resuming:)`.
+        var isSavedTrackPending = false
         /// The recorded track, one sub-array per continuous stretch of riding (#263).
         /// A pause ends the current segment and a resume opens the next, so the map draws
         /// a break where the rider stopped instead of a straight chord across it. Never
@@ -489,6 +502,14 @@ struct ActiveRideFeature {
         case elevationSeeded(ElevationTracker.Seed)
         /// A resumed ride's seconds at each bpm before the kill, from its saved track (#393).
         case heartRateSeeded([Int: Int])
+        /// Health's rider for W23, nil without a body mass (#465).
+        case energyRiderFetched(RideEnergy.Rider?)
+        /// One minute's estimate (#465).
+        case caloriesEstimated(CaloriePoint)
+        /// A resumed ride's saved track (#465), empty if it couldn't be read.
+        case calorieTrackSeeded([TrackPointDTO])
+        /// The minutes before a resume, or before Health answered, worked out afresh (#465).
+        case caloriesRebuilt([CaloriePoint])
         /// Handled by `LiveActivityFeature` (#308).
         case liveActivity(LiveActivityAction)
 
@@ -581,8 +602,14 @@ struct ActiveRideFeature {
                         async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
                         async let dob = try? healthKitClient.fetchDateOfBirth()
                         async let zoneCeilings = try? healthKitClient.fetchHeartRateZoneCeilings()
+                        async let kilograms = try? healthKitClient.fetchBodyMass()
+                        async let sex = try? healthKitClient.fetchBiologicalSex()
                         let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
                         await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM, zoneCeilingsBPM: await zoneCeilings))
+                        // Built as the ride's Health workout builds it, so W23 ends on its value (#465).
+                        await send(.energyRiderFetched(RideEnergy.Rider(
+                            kilograms: await kilograms, dateOfBirth: await dob, sex: await sex, on: startedAt
+                        )))
                     },
                     .run { [healthKitClient] send in
                         for await bpm in healthKitClient.heartRateStream() {
@@ -961,7 +988,26 @@ struct ActiveRideFeature {
                         state.recordedHealthKitSampleAt = state.healthKitHRSample?.receivedAt
                     }
                     state.hrSecondsTally.add(point)
+                    state.calorieTrack.append(point)
                     effects.append(.send(.trackRecorder(.timerTick(point))))
+                }
+
+                // W23 (#465): once a minute, the estimate the ride's Health workout would get if it
+                // ended now. Only while active, under the guard above, so a pause holds it.
+                if state.elapsedSeconds % CalorieSeries.intervalSeconds == 0,
+                   let rider = state.energyRider.rider, !state.isSavedTrackPending {
+                    let track = state.calorieTrack
+                    let seconds = state.elapsedSeconds
+                    let distanceMeters = state.distanceMeters
+                    effects.append(.run { send in
+                        let estimate = RideEnergy.activeKilocalories(
+                            trackPoints: track, movingSeconds: TimeInterval(seconds),
+                            distanceMeters: distanceMeters, rider: rider
+                        )
+                        await send(.caloriesEstimated(CaloriePoint(
+                            rideSeconds: seconds, kilocalories: estimate.kilocalories, method: estimate.method
+                        )))
+                    })
                 }
 
                 // DataModel.md §1 Checkpoint Policy: SwiftData Ride summary update
@@ -1140,6 +1186,25 @@ struct ActiveRideFeature {
                 return .none
             case .heartRateSeeded(let secondsByBPM):
                 state.hrSecondsTally.add(secondsByBPM: secondsByBPM)
+                return .none
+            case .energyRiderFetched(let rider):
+                state.energyRider = EnergyRiderStatus(rider)
+                return rebuildCaloriesIfReady(state)
+            case .caloriesEstimated(let point):
+                // A rebuild still in flight may finish after this; it keeps this point.
+                guard point.rideSeconds > (state.calories.last?.rideSeconds ?? 0) else { return .none }
+                state.calories.append(point)
+                return .none
+            case .calorieTrackSeeded(let savedTrack):
+                // The points recorded since the resume, after the saved ones; any the store already
+                // had, from a flush since the resume, appear once.
+                let savedEnd = savedTrack.last?.timestamp ?? .distantPast
+                state.calorieTrack = savedTrack + state.calorieTrack.filter { $0.timestamp > savedEnd }
+                state.isSavedTrackPending = false
+                return rebuildCaloriesIfReady(state)
+            case .caloriesRebuilt(let points):
+                let rebuiltEnd = points.last?.rideSeconds ?? 0
+                state.calories = points + state.calories.filter { $0.rideSeconds > rebuiltEnd }
                 return .none
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = status.isGranted
@@ -1350,9 +1415,9 @@ struct ActiveRideFeature {
         state.vehiclePassTracking = [:]
     }
 
-    /// A resumed ride's elevation (#387) and heart-rate seconds (#393) from before the kill, read
-    /// back from its saved track in one fetch. A failed read leaves each at what the ride has done
-    /// since the resume.
+    /// A resumed ride's elevation (#387), heart-rate seconds (#393) and track for W23 (#465) from
+    /// before the kill, read back from its saved track in one fetch. A failed read leaves each at
+    /// what the ride has done since the resume.
     ///
     /// A phone with a barometer most likely recorded the track from it, and the seed counts it on
     /// the barometer's floor; GPS's coarser one would drop the short rollers the dashboard already
@@ -1363,7 +1428,9 @@ struct ActiveRideFeature {
             do {
                 points = try await persistenceClient.fetchTrackPoints(rideId)
             } catch {
-                logger.error("Reading ride \(rideId, privacy: .public)'s saved track on resume failed: \(error.localizedDescription, privacy: .public) — Ascent and HR time in zone count from the resume")
+                logger.error("Reading ride \(rideId, privacy: .public)'s saved track on resume failed: \(error.localizedDescription, privacy: .public) — Ascent, HR time in zone and active calories count from the resume")
+                // W23 goes on from the resume rather than waiting for a track that won't come.
+                await send(.calorieTrackSeeded([]))
                 return
             }
             let source: AltitudeResolver.Source = altimeterClient.isAvailable() ? .barometric : .gps
@@ -1374,6 +1441,21 @@ struct ActiveRideFeature {
             if !secondsByBPM.isEmpty {
                 await send(.heartRateSeeded(secondsByBPM))
             }
+            await send(.calorieTrackSeeded(points))
+        }
+    }
+
+    /// W23's minutes so far, worked out from the track once the rider and any saved track are in
+    /// (#465): a resumed ride's minutes before the kill, or a fresh ride's first minute when Health
+    /// answered after it. Only for an empty series, so it runs once; the minute tick adds the rest.
+    private func rebuildCaloriesIfReady(_ state: State) -> Effect<Action> {
+        guard let rider = state.energyRider.rider, !state.isSavedTrackPending, state.calories.isEmpty,
+              state.elapsedSeconds >= CalorieSeries.intervalSeconds
+        else { return .none }
+        let track = state.calorieTrack
+        let seconds = state.elapsedSeconds
+        return .run { send in
+            await send(.caloriesRebuilt(CalorieSeries.rebuild(track: track, through: seconds, rider: rider)))
         }
     }
 
@@ -1556,6 +1638,8 @@ extension ActiveRideFeature.State {
         trackSegmentIndex = summary.trackSegmentIndex + (recordingState == .active ? 1 : 0)
         elapsedSeconds = Int(summary.durationSeconds)
         distanceMeters = summary.distanceMeters
+        // W23 waits for the saved track before estimating anything (#465).
+        isSavedTrackPending = true
         maxSpeedMPS = summary.maxSpeedMPS
         // The running averages are seeded from their *real* persisted sample
         // counts, not a fabricated weight — `average * count` reconstructs the

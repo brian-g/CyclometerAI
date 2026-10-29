@@ -1956,17 +1956,23 @@ struct ActiveRideFeatureStateMachineTests {
             $0.calibration.lastFixTimestamp = update.timestamp
         }
 
+        // The recorded point also joins W23's track (#465), and its id is a fresh `UUID()` no
+        // expectation can name. So this one step skips that field, and the point is checked after.
+        // Assignments, not appends: a non-exhaustive closure runs on the new state.
+        store.exhaustivity = .off(showSkippedAssertions: false)
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 8.0
             $0.zeroSpeedSeconds = 0
             // Avg/Max speed are sampled here, not from the fix above (#381).
             $0.speedSampleCount = 1
-            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 8.0))
+            $0.averageSpeedSamples = [SpeedSample(time: testDate, mps: 8.0)]
             // The fix's altitude, sampled once a recorded second (#387).
             $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
             $0.elevation.record(altitude: 280.0, distanceMeters: 8.0, source: .gps)
         }
+        store.exhaustivity = .on
+        #expect(store.state.calorieTrack.map(\.speedMPS) == [8.0])
         await store.receive(\.trackRecorder.timerTick)
     }
 

@@ -108,12 +108,9 @@ enum RideHealthWorkout {
         // No body mass, no energy (#276): a guessed weight would be written to Health as if
         // it were measured.
         var energy: RideEnergy.Estimate?
-        if let kilograms = await riderKilograms {
-            let rider = RideEnergy.Rider(
-                kilograms: kilograms,
-                age: RiderProfile.age(fromDateOfBirth: await dateOfBirth, on: ride.startedAt),
-                sex: await sex
-            )
+        if let rider = RideEnergy.Rider(
+            kilograms: await riderKilograms, dateOfBirth: await dateOfBirth, sex: await sex, on: ride.startedAt
+        ) {
             let estimate = RideEnergy.activeKilocalories(
                 trackPoints: trackPoints,
                 movingSeconds: ride.movingSeconds,

@@ -1223,3 +1223,41 @@ From main (Brian), so it conflicts with #490 in the catalog, S08 lists and UX.md
       `noStoredAnalysisIsAnalysedAtLoad`; UX.md §W22 and `NavigationRoute.climbs`' doc say so
 - [x] `ClimbWidgetSnapshotTests` on CI's skip list, beside `ElevationWidgetSnapshotTests` (both draw a Swift Charts area)
 - [x] ClimbReading, NavigationFeature, NavigationPipeline, ElevationDashboardWidget: 79/79, every suite non-empty
+
+---
+
+# #465 — W23 Active Calories widget and Calories sheet
+
+Brian chose: showcase page 3 row 4 left; the sheet's average rate over W3 Moving Time; the chart over elapsed ride time,
+whole ride. The live estimate is `RideEnergy.activeKilocalories` over an in-memory copy of the recorded track, once a
+minute, with the rider built as `RideHealthWorkout.write` builds it.
+
+- [x] `RideEnergy.Rider.init?(kilograms:dateOfBirth:sex:on:)`, used by `RideHealthWorkout.write`
+- [x] `CaloriePoint`, `CalorieSeries.rebuild(track:through:rider:)` + `CalorieSeriesTests`
+- [x] `ActiveRideFeature`: calorie track, rider status, minute recompute, resume seed + rebuild; TestStore tests
+- [x] `CaloriesWidget` + adapter, `CaloriesSheet` + `CaloriesMetrics`, previews
+- [x] Catalog, factory showcase (page 3 row 4 left), S08 sample, `AddWidgetSheetTests` Ride lists
+- [x] Accessibility test; widget + sheet snapshots (sheet on CI's skip list)
+- [x] UX.md §W23, "Sheet: Calories", S08 Ride list, S10 calories line, header; TCA.md §8
+- [x] Build (app + tests)
+- [x] Hand over to Brian. He asked for `bolt.fill` in the lower right (W21's treatment), and for the sheet's rows to
+      become small hero columns, Total and Average, with the model in the section footer. Both done, and UX.md matches
+- [x] Recorded 12 Calories snapshots (widget + sheet: no body mass, early, long; light + dark) and re-recorded the S08
+      catalog. Opened them: none flat, W23 at the end of the catalog's Ride section
+- [x] Targeted suites: Calorie/ActiveRideCalories/RideEnergy/RideHealthWorkout/RideEndFailure, WidgetAccessibility,
+      AddWidgetSheet (+ snapshot), DashboardLayout, both Calories snapshot suites and every ActiveRideFeature suite:
+      369/369, every suite present, no host restarts
+- [x] #494 filed: the other widget sheets to the same hero columns
+
+## Review
+
+- **Same inputs as Health.** The live estimate runs on `calorieTrack`, filled in the same tick as the recorder, and
+  `minuteSeriesMatchesHealthWorkout` runs `RideHealthWorkout.write` on what the recorder flushed and gets the same kcal.
+  The CoreData round trip is exact: a negative GPS speed is already nil before it reaches the track.
+- **The host crash was mine.** `ActiveRideCaloriesTests` lacked `@MainActor`, so `TestStore.init` tripped the runtime
+  isolation check (SIGTRAP) and every suite running in parallel reported 0.000 s failures. Every sibling suite has it.
+- **Sample fixed.** `CaloriesMetrics.sampleLong` multiplied a varying rate by elapsed minutes, so the chart dipped;
+  calories never fall. It now rises everywhere and still steps where physics hands over to heart rate.
+- **One existing test touched.** `zeroSpeedCounterResetsOnSpeed` is exhaustive and its tick now appends a point with a
+  random `UUID()` id to `calorieTrack`. That one step runs non-exhaustive and the point's speed is checked after.
+- **Not covered.** Rebuild time for a 4 h ride after a kill (≈240 recomputes, off the main thread) isn't measured.

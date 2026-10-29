@@ -378,6 +378,7 @@ extension DashboardLayout {
             WidgetPlacement(DistanceDashboardWidget.self, size: .oneByOne, row: 1, column: 1),
             WidgetPlacement(HeartRateDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
             WidgetPlacement(HRZonesDashboardWidget.self, size: .twoByOne, row: 3, column: 0),
+            WidgetPlacement(CaloriesDashboardWidget.self, size: .oneByOne, row: 4, column: 0),
         ]),
         // Elevation (#387): page 3 has six cells free, one short. W19 and W20 (#461) join it, and
         // W21 (#462) and W22 (#463).
