@@ -71,6 +71,12 @@ struct CaloriesWidget: View {
         .preferredColorScheme(.dark)
 }
 
+#Preview("Early ride — Dark") {
+    CaloriesWidget(kilocalories: CaloriesMetrics.sampleEarly.latest?.kilocalories, rider: CaloriesMetrics.sampleEarly.rider)
+        .frame(width: 196, height: 96)
+        .preferredColorScheme(.dark)
+}
+
 #Preview("No body mass — Dark") {
     CaloriesWidget(kilocalories: nil, rider: .noBodyMass)
         .frame(width: 196, height: 96)

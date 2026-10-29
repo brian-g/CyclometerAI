@@ -380,8 +380,8 @@ extension DashboardLayout {
             WidgetPlacement(HRZonesDashboardWidget.self, size: .twoByOne, row: 3, column: 0),
             WidgetPlacement(CaloriesDashboardWidget.self, size: .oneByOne, row: 4, column: 0),
         ]),
-        // Elevation (#387): page 3 has six cells free, one short. W19 and W20 (#461) join it, and
-        // W21 (#462) and W22 (#463).
+        // Elevation (#387): page 3 had six cells free, one short (five since W23, #465). W19 and
+        // W20 (#461) join it, and W21 (#462) and W22 (#463).
         DashboardPage(placements: [
             WidgetPlacement(ElevationDashboardWidget.self, size: .twoByOne, row: 0, column: 0),
             WidgetPlacement(RouteElevationDashboardWidget.self, size: .twoByOne, row: 1, column: 0),

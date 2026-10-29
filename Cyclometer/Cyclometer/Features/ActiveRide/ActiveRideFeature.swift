@@ -998,6 +998,7 @@ struct ActiveRideFeature {
                    let rider = state.energyRider.rider, !state.isSavedTrackPending {
                     let track = state.calorieTrack
                     let seconds = state.elapsedSeconds
+                    let movingSeconds = state.speedSampleCount
                     let distanceMeters = state.distanceMeters
                     effects.append(.run { send in
                         let estimate = RideEnergy.activeKilocalories(
@@ -1005,7 +1006,8 @@ struct ActiveRideFeature {
                             distanceMeters: distanceMeters, rider: rider
                         )
                         await send(.caloriesEstimated(CaloriePoint(
-                            rideSeconds: seconds, kilocalories: estimate.kilocalories, method: estimate.method
+                            rideSeconds: seconds, movingSeconds: movingSeconds,
+                            kilocalories: estimate.kilocalories, method: estimate.method
                         )))
                     })
                 }

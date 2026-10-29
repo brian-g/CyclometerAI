@@ -4,6 +4,9 @@ import Foundation
 /// W23's series, behind the Calories sheet's chart (#465).
 struct CaloriePoint: Equatable, Sendable {
     var rideSeconds: Int
+    /// W3's moving seconds by `rideSeconds`, so the sheet's average divides this point's energy by
+    /// the moving time it covers, not by the moving time since.
+    var movingSeconds: Int
     var kilocalories: Double
     var method: RideEnergy.Estimate.Method
 }
@@ -36,19 +39,21 @@ enum CalorieSeries {
     ///
     /// The track has no recording clock of its own, so a point's recording second is worked out
     /// from its timestamp within its segment, after the earlier segments' spans: a pause is a
-    /// segment boundary and adds nothing. The distance by each minute is the odometer's (#262), its
-    /// points' speeds above the stationary threshold, a second each. Past the track's end, as when
-    /// the fix dropped out, a minute takes the whole track, and `activeKilocalories` costs the
-    /// seconds it misses at the average speed, as it does at finish.
+    /// segment boundary and adds nothing. The distance and moving time by each minute are the
+    /// odometer's (#262): its points above the stationary threshold, a second each. Past the
+    /// track's end, as when the fix dropped out, a minute takes the whole track, and
+    /// `activeKilocalories` costs the seconds it misses at the average speed, as it does at finish.
     static func rebuild(track: [TrackPointDTO], through seconds: Int, rider: RideEnergy.Rider) -> [CaloriePoint] {
         let offsets = recordingOffsets(track)
         var points: [CaloriePoint] = []
         var end = 0
         var distanceMeters = 0.0
+        var movingSeconds = 0
         for minute in stride(from: intervalSeconds, through: seconds, by: intervalSeconds) {
             while end < track.count, offsets[end] < minute {
                 if let speed = track[end].speedMPS, speed > ActiveRideFeature.stationarySpeedMPS {
                     distanceMeters += speed
+                    movingSeconds += 1
                 }
                 end += 1
             }
@@ -58,7 +63,10 @@ enum CalorieSeries {
                 distanceMeters: distanceMeters,
                 rider: rider
             )
-            points.append(CaloriePoint(rideSeconds: minute, kilocalories: estimate.kilocalories, method: estimate.method))
+            points.append(CaloriePoint(
+                rideSeconds: minute, movingSeconds: movingSeconds,
+                kilocalories: estimate.kilocalories, method: estimate.method
+            ))
         }
         return points
     }

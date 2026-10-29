@@ -8,8 +8,6 @@ import SwiftUI
 struct CaloriesMetrics: Equatable {
     var rider: EnergyRiderStatus = .loading
     var series: [CaloriePoint] = []
-    /// W3's Duration: seconds moving, for the average rate.
-    var movingSeconds: Int = 0
     /// W1's Time: recording seconds, where the chart's ride-time axis ends.
     var rideSeconds: Int = 0
 
@@ -30,9 +28,9 @@ struct CaloriesMetrics: Equatable {
         return MetricReading(shown: name, spoken: name)
     }
 
-    /// kcal per hour of W3's moving time.
+    /// kcal per hour of W3's moving time, both as of the latest estimate.
     var averagePerHour: Double? {
-        latest.flatMap { CalorieSeries.kilocaloriesPerHour($0.kilocalories, movingSeconds: movingSeconds) }
+        latest.flatMap { CalorieSeries.kilocaloriesPerHour($0.kilocalories, movingSeconds: $0.movingSeconds) }
     }
 
     var average: MetricReading {
@@ -68,7 +66,7 @@ struct CaloriesMetrics: Equatable {
 extension ActiveRideFeature.State {
     /// The Calories sheet's inputs.
     var caloriesMetrics: CaloriesMetrics {
-        CaloriesMetrics(rider: energyRider, series: calories, movingSeconds: speedSampleCount, rideSeconds: elapsedSeconds)
+        CaloriesMetrics(rider: energyRider, series: calories, rideSeconds: elapsedSeconds)
     }
 }
 
@@ -201,11 +199,10 @@ extension CaloriesMetrics {
     static let sampleEarly = CaloriesMetrics(
         rider: .rider(RideEnergy.Rider(kilograms: 75)),
         series: [
-            CaloriePoint(rideSeconds: 60, kilocalories: 9, method: .physics),
-            CaloriePoint(rideSeconds: 120, kilocalories: 21, method: .physics),
-            CaloriePoint(rideSeconds: 180, kilocalories: 34, method: .physics),
+            CaloriePoint(rideSeconds: 60, movingSeconds: 57, kilocalories: 9, method: .physics),
+            CaloriePoint(rideSeconds: 120, movingSeconds: 114, kilocalories: 21, method: .physics),
+            CaloriePoint(rideSeconds: 180, movingSeconds: 170, kilocalories: 34, method: .physics),
         ],
-        movingSeconds: 170,
         rideSeconds: 205
     )
 
@@ -219,15 +216,18 @@ extension CaloriesMetrics {
             let t = Double(minute)
             return CaloriePoint(
                 rideSeconds: minute * 60,
+                movingSeconds: minute * 10_140 / 180,
                 kilocalories: minute < 20 ? 7 * t : 9 * t - 22.5 * cos(t / 15),
                 method: minute < 20 ? .physics : .heartRate
             )
         },
-        movingSeconds: 10_140,
         rideSeconds: 10_830
     )
 
-    static let sampleNoBodyMass = CaloriesMetrics(rider: .noBodyMass, movingSeconds: 1_200, rideSeconds: 1_260)
+    static let sampleNoBodyMass = CaloriesMetrics(rider: .noBodyMass, rideSeconds: 1_260)
+
+    /// Inside the first minute: a rider, but no estimate yet.
+    static let sampleNoEstimate = CaloriesMetrics(rider: .rider(RideEnergy.Rider(kilograms: 75)), rideSeconds: 40)
 }
 
 #Preview("Long ride") {
@@ -242,6 +242,10 @@ extension CaloriesMetrics {
     CaloriesList(metrics: .sampleNoBodyMass)
 }
 
+#Preview("No estimate yet") {
+    CaloriesList(metrics: .sampleNoEstimate)
+}
+
 #Preview("Long ride — Dark") {
     CaloriesList(metrics: .sampleLong)
         .preferredColorScheme(.dark)
@@ -254,5 +258,10 @@ extension CaloriesMetrics {
 
 #Preview("No body mass — Dark") {
     CaloriesList(metrics: .sampleNoBodyMass)
+        .preferredColorScheme(.dark)
+}
+
+#Preview("No estimate yet — Dark") {
+    CaloriesList(metrics: .sampleNoEstimate)
         .preferredColorScheme(.dark)
 }
