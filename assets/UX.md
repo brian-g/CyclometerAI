@@ -860,7 +860,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 **Sizes:** 2x1
 
-- The route's categorized climbs (#463), as S20 lists them from the import's analysis (PRD §8.6, #252), placed by how far along the route the rider is: W19's progress, so it holds off route and starts over on a loop's next lap. W5's 2×1 arrangement, over the climb's profile drawn as W18's
+- The route's categorized climbs (#463), as S20 lists them from the import's analysis (PRD §8.6, #252) — or, for a route imported before #252 and not yet backfilled, analysed when the ride loads it — placed by how far along the route the rider is: W19's progress, so it holds off route and starts over on a loop's next lap. W5's 2×1 arrangement, over the climb's profile drawn as W18's
 - **On a climb** (from its start to its top, inclusive): label "CLIMB · CAT 3"; medium hero, the distance to the top as W9 shows a distance (m or ft close in, so it reads 0 m at the top); on the right, small heroes "TO CLIMB" (the climb's top less the route's smoothed elevation where the rider is, whole m or ft) and "AVG" (its average grade, unsigned). The profile's ridden part is darker
 - **Between climbs:** label "NEXT CLIMB · CAT 3"; medium hero, the distance to its start; on the right, "LENGTH" and "GAIN". Its profile, nothing ridden
 - "—" with no route, turn-by-turn off, a route without elevation, no climb ahead, or the route complete

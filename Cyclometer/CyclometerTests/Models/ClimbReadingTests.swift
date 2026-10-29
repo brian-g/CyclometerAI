@@ -45,6 +45,15 @@ struct ClimbReadingTests {
         }
     }
 
+    /// A route imported before #252 has no stored analysis until the Routes tab backfills it.
+    @Test("With no stored analysis, the route's climbs are found at load")
+    func noStoredAnalysisIsAnalysedAtLoad() throws {
+        let (route, terrain) = try route()
+        let unanalysed = try #require(NavigationRoute(coordinates: route.coordinates, maneuvers: [], terrain: nil))
+        #expect(unanalysed.climbs.map(\.climb) == terrain.climbs)
+        #expect(unanalysed.climbs == route.climbs)
+    }
+
     @Test("Before the first climb, it is next")
     func beforeTheFirstClimb() throws {
         let climbs = try route().route.climbs

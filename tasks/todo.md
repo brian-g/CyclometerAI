@@ -1215,3 +1215,11 @@ From main (Brian), so it conflicts with #490 in the catalog, S08 lists and UX.md
   ahead" on a hilly route); `ClimbWidgetSnapshotTests` on CI's skip list. Also skipped: a loop joined after its climb
   reads "No climbs ahead" until the wrap (pinned by a test); keeping each climb's samples in the analysis instead of
   re-deriving at load; the straight-route "second lap" unit test; exact float compares; S08's sample has no route
+
+### #493 review follow-ups (Brian: "#5, do it. #6, add to ci skip list")
+
+- [x] No stored analysis (pre-#252, not yet backfilled): `RouteClimb.climbs` runs `RouteTerrain.analyze` at load, so W22
+      finds the climbs instead of reading "No climbs ahead"; a stored analysis is still used as is. Test:
+      `noStoredAnalysisIsAnalysedAtLoad`; UX.md §W22 and `NavigationRoute.climbs`' doc say so
+- [x] `ClimbWidgetSnapshotTests` on CI's skip list, beside `ElevationWidgetSnapshotTests` (both draw a Swift Charts area)
+- [x] ClimbReading, NavigationFeature, NavigationPipeline, ElevationDashboardWidget: 79/79, every suite non-empty

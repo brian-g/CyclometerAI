@@ -29,9 +29,13 @@ struct RouteClimb: Equatable, Sendable {
     }
 
     /// The climbs of `analysis` on the route `coordinates` describes, through the same pipeline
-    /// `RouteTerrain.analyze` used. Empty with no analysis or no elevation.
+    /// `RouteTerrain.analyze` used. Empty with no elevation.
+    ///
+    /// With no stored analysis, the route is analysed here: one imported before #252 has none until
+    /// `backfillRouteTerrain` runs, which only the Routes tab triggers, and a ride started from
+    /// elsewhere would otherwise read "No climbs ahead" on a hilly route.
     static func climbs(of analysis: RouteTerrainAnalysis?, on coordinates: [RouteCoordinate]) -> [RouteClimb] {
-        guard let climbs = analysis?.climbs, !climbs.isEmpty,
+        guard let climbs = (analysis ?? RouteTerrain.analyze(coordinates))?.climbs, !climbs.isEmpty,
               let profile = RouteTerrain.gradeProfile(coordinates)
         else { return [] }
         return climbs.compactMap { RouteClimb($0, smoothed: profile.elevation, spacing: profile.spacing) }

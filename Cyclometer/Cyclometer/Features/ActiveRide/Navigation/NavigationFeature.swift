@@ -558,7 +558,8 @@ struct NavigationRoute: Equatable, Sendable {
     /// The route's elevation at `elevationProfileSamples` even distances, start to finish — W18's
     /// profile (#387) — or nil for a file with no `<ele>`. Here so no frame pays for it.
     let elevationProfile: [Double]?
-    /// The route's categorized climbs in ride order (#463), from the analysis S20 shows: W22's.
+    /// The route's categorized climbs in ride order (#463), from the analysis S20 shows, or found at
+    /// load for a route that has none stored yet: W22's.
     let climbs: [RouteClimb]
 
     var totalDistanceMeters: Double { cumulativeDistances.last ?? 0 }
