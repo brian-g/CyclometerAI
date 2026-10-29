@@ -224,7 +224,7 @@ struct ActiveRideCaloriesTests {
         await store.skipInFlightEffects(strict: false)
     }
 
-    @Test("A resumed ride's minute waits for its saved track")
+    @Test("A resumed ride's minute waits for its saved track, and none means no minutes before the resume")
     func liveMinuteWaitsForSavedTrack() async {
         let resumed = ActiveRideFeature.State(resuming: RideSummaryUpdate(
             rideId: UUID(), recordingState: .active,
@@ -239,12 +239,19 @@ struct ActiveRideCaloriesTests {
         await store.skipInFlightEffects(strict: false)
         #expect(store.state.calories.isEmpty)
 
-        // The read failed: the estimate goes on from what the ride has since the resume.
+        // The read failed: no made-up minutes before the resume, even when Health answers after it.
         await store.send(.calorieTrackSeeded([])) {
             $0.isSavedTrackPending = false
+            $0.isSavedTrackMissing = true
         }
-        await store.receive(\.caloriesRebuilt)
-        #expect(store.state.calories.map(\.rideSeconds) == [60])
+        await store.send(.energyRiderFetched(Self.rider))
+        await store.skipInFlightEffects(strict: false)
+        #expect(store.state.calories.isEmpty)
+
+        // The series starts at the resume's next minute.
+        await ride(store, now: now, seconds: 60)
+        await store.receive(\.caloriesEstimated)
+        #expect(store.state.calories.map(\.rideSeconds) == [120])
         await store.skipInFlightEffects(strict: false)
     }
 }

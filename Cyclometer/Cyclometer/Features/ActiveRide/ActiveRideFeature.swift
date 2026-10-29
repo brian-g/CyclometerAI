@@ -357,6 +357,10 @@ struct ActiveRideFeature {
         /// A resumed ride's saved track hasn't been read back yet: until it is, an estimate would
         /// cover only the minutes since the resume (#465). Set by `State(resuming:)`.
         var isSavedTrackPending = false
+        /// A resumed ride's saved track came back empty or couldn't be read, so there is nothing to
+        /// rebuild its minutes before the resume from: the series starts at the resume rather than
+        /// at minutes of made-up zeros (#465).
+        var isSavedTrackMissing = false
         /// The recorded track, one sub-array per continuous stretch of riding (#263).
         /// A pause ends the current segment and a resume opens the next, so the map draws
         /// a break where the rider stopped instead of a straight chord across it. Never
@@ -1203,6 +1207,7 @@ struct ActiveRideFeature {
                 let savedEnd = savedTrack.last?.timestamp ?? .distantPast
                 state.calorieTrack = savedTrack + state.calorieTrack.filter { $0.timestamp > savedEnd }
                 state.isSavedTrackPending = false
+                state.isSavedTrackMissing = savedTrack.isEmpty
                 return rebuildCaloriesIfReady(state)
             case .caloriesRebuilt(let points):
                 let rebuiltEnd = points.last?.rideSeconds ?? 0
@@ -1431,7 +1436,7 @@ struct ActiveRideFeature {
                 points = try await persistenceClient.fetchTrackPoints(rideId)
             } catch {
                 logger.error("Reading ride \(rideId, privacy: .public)'s saved track on resume failed: \(error.localizedDescription, privacy: .public) — Ascent, HR time in zone and active calories count from the resume")
-                // W23 goes on from the resume rather than waiting for a track that won't come.
+                // W23 starts its series at the resume rather than waiting for a track that won't come.
                 await send(.calorieTrackSeeded([]))
                 return
             }
@@ -1450,9 +1455,10 @@ struct ActiveRideFeature {
     /// W23's minutes so far, worked out from the track once the rider and any saved track are in
     /// (#465): a resumed ride's minutes before the kill, or a fresh ride's first minute when Health
     /// answered after it. Only for an empty series, so it runs once; the minute tick adds the rest.
+    /// Not for a resumed ride with no saved track, whose minutes before the resume are unknown.
     private func rebuildCaloriesIfReady(_ state: State) -> Effect<Action> {
-        guard let rider = state.energyRider.rider, !state.isSavedTrackPending, state.calories.isEmpty,
-              state.elapsedSeconds >= CalorieSeries.intervalSeconds
+        guard let rider = state.energyRider.rider, !state.isSavedTrackPending, !state.isSavedTrackMissing,
+              state.calories.isEmpty, state.elapsedSeconds >= CalorieSeries.intervalSeconds
         else { return .none }
         let track = state.calorieTrack
         let seconds = state.elapsedSeconds

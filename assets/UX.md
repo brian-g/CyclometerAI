@@ -879,7 +879,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - The SF Symbol `bolt.fill` in the lower right, `title2`, `textSecondary`, inset `sm` as the label, as W21's: drawn in every state. VoiceOver doesn't read it
 - The estimate is §S10's active energy (#276): `RideEnergy.activeKilocalories` over the track recorded so far, with the rider's body mass, date of birth and sex read from Health once at the start. Recomputed once a minute of recording time, so the ride's last value is the one written to its Health workout, and there is no second calorie model
 - The model moves from physics to heart rate once a strap's readings cover half the moving time, so the series can step there. Earlier minutes keep the value they were computed with
-- A pause holds the value; it goes on after the resume. A ride resumed after a kill rebuilds its earlier minutes from its saved track
+- A pause holds the value; it goes on after the resume. A ride resumed after a kill rebuilds its earlier minutes from its saved track; if that track is empty or can't be read, the series starts at the resume
 - "—" with no body mass in Health (a guessed weight is never shown as measured), and before the first minute's estimate
 - VoiceOver reads it as "Active calories, 412 kilocalories", and a "—" as "No weight in Health" or "No estimate yet"
 - Not included: total (active plus resting) calories; kilojoules of work, which needs a power meter (Phase 3); §S15's calories row (#460)

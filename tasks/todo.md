@@ -1261,3 +1261,13 @@ minute, with the rider built as `RideHealthWorkout.write` builds it.
 - **One existing test touched.** `zeroSpeedCounterResetsOnSpeed` is exhaustive and its tick now appends a point with a
   random `UUID()` id to `calorieTrack`. That one step runs non-exhaustive and the point's speed is checked after.
 - **Not covered.** Rebuild time for a 4 h ride after a kill (≈240 recomputes, off the main thread) isn't measured.
+
+### #495 review (`/code-review --fix`)
+
+- [x] Fixed by the review: the sheet's Average divides each point's energy by its own moving time (`CaloriePoint.movingSeconds`);
+      "No estimate yet" previews; DashboardLayout's free-cell comment
+- [x] Brian: "#3 do as recommended": a resumed ride whose saved track is empty or unreadable doesn't rebuild its minutes
+      before the resume (`isSavedTrackMissing`); the series starts at the resume. UX.md §W23 says so
+- Not done, Brian's call: the total can fall when the model drops back to physics (#1); no extra estimate at a pause, so
+  a ride ends on its last whole minute's value, not Health's (#2); #4–#7 left
+- Not run: `ActiveRideCaloriesTests` after the #3 change (built only)
