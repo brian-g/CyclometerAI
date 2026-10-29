@@ -1325,3 +1325,12 @@ Placement follows the Design.sketch `Sxx - Route overlay` frame, group **sensor 
 - **Not snapshotted:** "none missing / none low". The button isn't drawn then; `neverFoundIsMissing`, `nothingPaired`
   and `lowBatteryComesAndGoes` pin the empty list that hides it.
 - **Not run:** the full `CyclometerTests` locally (CI runs it).
+
+### #496 review (`/code-review --fix`)
+
+- [x] Fixed by the review: `.finishTapped` also closes the Sensors sheet, so auto-end's finish alert can show
+      (`autoEndClosesSensorsSheet`); the badge doesn't take touches (`allowsHitTesting(false)`)
+- Open, Brian's call: (3) the button can flicker on a level rebounding across 20%, which needs hysteresis or a latch;
+  (4) before the first status replay every paired device reads missing, so possibly a flash at ride start; (5) one
+  sheet enum for the dashboard; (6) device grouping and "Speed & Cadence" title duplicated with S10
+- Not run: tests after the review's fixes (built only)

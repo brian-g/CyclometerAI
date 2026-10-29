@@ -748,8 +748,9 @@ struct ActiveRideFeature {
             case .finishTapped:
                 guard state.recordingState == .paused else { return .none }
                 // Auto-end sends this with no rider at the screen. SwiftUI won't show an alert
-                // from a view already showing a sheet, so the Add Widget sheet steps aside.
+                // from a view already showing a sheet, so every dashboard sheet steps aside.
                 state.isAddWidgetPresented = false
+                state.isSensorsSheetPresented = false
                 state.finishAlert = AlertState {
                     TextState("Finish Ride")
                 } actions: {

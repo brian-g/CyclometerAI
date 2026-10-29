@@ -14,7 +14,8 @@ struct SensorsButton: View {
     var body: some View {
         RideControlButton("Sensors", systemImage: "antenna.radiowaves.left.and.right", action: action)
             .overlay(alignment: .topTrailing) {
-                badge.accessibilityHidden(true)
+                // A tap on the badge, the part a rider's eye goes to, must still reach the button.
+                badge.accessibilityHidden(true).allowsHitTesting(false)
             }
             .accessibilityLabel(Self.accessibilityLabel(for: devices))
             .accessibilityHint("Opens sensor status")

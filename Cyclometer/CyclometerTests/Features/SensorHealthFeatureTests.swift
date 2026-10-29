@@ -360,4 +360,28 @@ struct RideSensorsSheetTests {
         await store.send(.sensorsButtonTapped) { $0.isSensorsSheetPresented = true }
         await store.send(.sensorsSheetPresentationChanged(false)) { $0.isSensorsSheetPresented = false }
     }
+
+    /// SwiftUI won't show the finish alert from a dashboard already showing a sheet, and auto-end
+    /// fires only once — as `autoEndClosesPicker` pins for the Add Widget sheet (#142 review).
+    @Test("Auto-end closes the Sensors sheet so its finish alert can show")
+    func autoEndClosesSensorsSheet() async {
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
+                ActiveRideFeature()
+            } withDependencies: {
+                $0.defaultFileStorage = storage
+            }
+        }
+
+        await store.send(.sensorsButtonTapped) { $0.isSensorsSheetPresented = true }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.autoEndTriggered)
+        await store.receive(\.finishTapped) {
+            $0.isSensorsSheetPresented = false
+        }
+        #expect(store.state.finishAlert != nil)
+    }
 }
