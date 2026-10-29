@@ -208,6 +208,15 @@ extension ActiveRideFeature.State {
             state.elevation.record(altitude: sample.meters, distanceMeters: Double(minute) * 200, source: .barometric)
         }
         state.altitudeResolver.barometer(.absolute(meters: AltitudeSample.sampleHour.last?.meters ?? 0, accuracy: 1))
+        // W23 (#465): a steady burn to 412 kcal over the ride's 39 minutes, from heart rate.
+        state.energyRider = .rider(RideEnergy.Rider(kilograms: 75, age: 45, sex: .male))
+        state.calories = (1...39).map { minute in
+            // Moving 40 s a minute, as `speedSampleCount` over `elapsedSeconds` above.
+            CaloriePoint(
+                rideSeconds: minute * 60, movingSeconds: minute * 40,
+                kilocalories: Double(minute) * 412 / 39, method: .heartRate
+            )
+        }
         return state
     }
 }

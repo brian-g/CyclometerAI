@@ -1012,6 +1012,8 @@ Cyclometer/
 │   │   │                                  // TurnInstructionOverlay
 │   │   ├── Sunset/                        // SunsetWidgetView (W21, #462) — the NOAA sunset lives in
 │   │   │                                  // Models/Sunset
+│   │   ├── Calories/                      // CaloriesWidgetView (W23, #465), CaloriesSheet — the series
+│   │   │                                  // lives on ActiveRideFeature; rebuilds in Models/CalorieSeries
 │   │   ├── LiveActivity/                  // RideActivityAttributes, RideLockScreenView (PRD §8.10) — shared with the extension;
 │   │   │                                  // LiveActivityFeature (app only)
 │   │   ├── Recording/                     // TrackPointRecorderFeature, GPSFixFilter

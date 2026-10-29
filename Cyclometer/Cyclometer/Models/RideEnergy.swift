@@ -241,3 +241,13 @@ enum RideEnergy {
         }
     }
 }
+
+extension RideEnergy.Rider {
+    /// The rider from what Health returned, built one way for the dashboard's live estimate (#465)
+    /// and the ride's workout (#276), so the two estimate from the same inputs. Nil without a body
+    /// mass: a guessed weight would be shown, or written to Health, as if it were measured.
+    init?(kilograms: Double?, dateOfBirth: DateComponents?, sex: RideEnergy.Sex?, on date: Date) {
+        guard let kilograms else { return nil }
+        self.init(kilograms: kilograms, age: RiderProfile.age(fromDateOfBirth: dateOfBirth, on: date), sex: sex)
+    }
+}

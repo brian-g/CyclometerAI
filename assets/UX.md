@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-29 — §W23 Active Calories and "Sheet: Calories" added and built (#465), 1×1 in §S08's Ride section. §S10's active energy is now shown live, on W23.  
 **Updated:** 2026-10-28 — §W22 Climb added and built (#463), 2×1 in §S08's Route section.  
 **Updated:** 2026-10-28 — §W21 Sunset added and built (#462), 1×1 in §S08's Ride section.  
 **Updated:** 2026-10-28 — §W19 Distance Remaining and §W20 ETA added and built (#461), both 1×1 in §S08's Route section.  
@@ -870,6 +871,22 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 ---
 
+#### W23 — Active Calories
+
+**Sizes:** 1x1
+
+- Label "ACTIVE CALORIES". Value: the ride's active energy so far, in whole kcal (#465). Medium hero, unit "kcal"
+- The SF Symbol `bolt.fill` in the lower right, `title2`, `textSecondary`, inset `sm` as the label, as W21's: drawn in every state. VoiceOver doesn't read it
+- The estimate is §S10's active energy (#276): `RideEnergy.activeKilocalories` over the track recorded so far, with the rider's body mass, date of birth and sex read from Health once at the start. Recomputed once a minute of recording time, so the ride's last value is the one written to its Health workout, and there is no second calorie model
+- The model moves from physics to heart rate once a strap's readings cover half the moving time, so the series can step there. Earlier minutes keep the value they were computed with
+- A pause holds the value; it goes on after the resume. A ride resumed after a kill rebuilds its earlier minutes from its saved track; if that track is empty or can't be read, the series starts at the resume
+- "—" with no body mass in Health (a guessed weight is never shown as measured), and before the first minute's estimate
+- VoiceOver reads it as "Active calories, 412 kilocalories", and a "—" as "No weight in Health" or "No estimate yet"
+- Not included: total (active plus resting) calories; kilojoules of work, which needs a power meter (Phase 3); §S15's calories row (#460)
+- Sheet: Calories. W23 opens it, at the medium detent and expandable to large: a chart of calories accumulating over ride time, from 0:00 to now with a pause taking no room, then two small heroes side by side, **Total** and **Average** (kcal per hour of W3's Moving Time), each over its label. The section's footer names the model, "Model: Heart rate" (or Physics, or MET). With no estimate both read "—" and the footer says why instead: "Add your weight in the Health app to estimate active calories." or "The first estimate comes after a minute of riding."
+
+---
+
 ### Open UX Questions
 - [x] S05.4 factory default layout resolved — see table above.
 - [x] S05.5 removed — pages beyond page 1 are rider-defined, not factory-specified.
@@ -959,7 +976,7 @@ As built (#367): a press held a quarter of a second on a widget lifts it — it 
 
 The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart Rate, Weather (future), Route, and Force (future). The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
 
-As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace, and since #462 Sunset), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions, and since #461 Distance Remaining and ETA, and since #463 Climb); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
+As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace, since #462 Sunset, and since #465 Active Calories), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions, and since #461 Distance Remaining and ETA, and since #463 Climb); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
 
 As built (#368): in edit mode each empty cell shows a slot: a dashed hairline `borderStrong` outline, the size and inset of a 1×1 card, with no glyph and no wiggle. Tapping it opens the sheet aimed at that cell. The tapped cell is the widget's top-left and nothing shifts to fit, so the sheet lists only the sizes that fit from there: a 1×1 always; a 2×1 from the left column with its neighbour free; a 2×2 from the left column, above the last row, with its block free. A right-hand cell therefore shows only 1×1s. The Page section is hidden. A widget already on the page is still dimmed. Picking an entry puts its top-left at the tapped cell. VoiceOver reads a slot as "Empty, row 3, left", hint "Add widget here".
 
@@ -1033,7 +1050,7 @@ An outdoor cycling `HKWorkout` is written to Apple Health automatically once the
 - **Consent** is the HealthKit share permission from S01, which the rider can revoke in iOS Settings → Health
 - **Duplicates:** if another source (e.g. an Apple Watch Outdoor Cycle) already recorded a cycling workout overlapping the ride, the write is skipped. A later rewrite of the same ride replaces its workout rather than adding one
 - **Carries** start, end, distance, route, estimated active energy and, when the rider has overridden Health in S12, the app's HR zones (#238). Otherwise the workout keeps Health's preferred zones Pause intervals are not marked, so Fitness shows elapsed time
-- **Active energy** (#276) comes from heart rate when a strap recorded at least half the ride and Health has the rider's weight, date of birth and sex (Male or Female): the Keytel (2005) equation at the ride's mean heart rate, less resting metabolism. Otherwise it is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. Calories are not shown in the app
+- **Active energy** (#276) comes from heart rate when a strap recorded at least half the ride and Health has the rider's weight, date of birth and sex (Male or Female): the Keytel (2005) equation at the ride's mean heart rate, less resting metabolism. Otherwise it is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. W23 shows the same estimate live (#465); §S10 and §S15 don't show calories (#460)
 
 ### Open UX Questions
 - [x] Zone breakdown chart type? Pie chart

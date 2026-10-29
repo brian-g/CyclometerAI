@@ -63,6 +63,7 @@ enum DashboardWidgetCatalog {
         ETADashboardWidget.self,
         SunsetDashboardWidget.self,
         ClimbDashboardWidget.self,
+        CaloriesDashboardWidget.self,
     ]
 
     private static let byID = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
