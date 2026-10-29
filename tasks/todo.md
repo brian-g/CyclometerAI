@@ -1271,3 +1271,4 @@ minute, with the rider built as `RideHealthWorkout.write` builds it.
 - Not done, Brian's call: the total can fall when the model drops back to physics (#1); no extra estimate at a pause, so
   a ride ends on its last whole minute's value, not Health's (#2); #4–#7 left
 - Not run: `ActiveRideCaloriesTests` after the #3 change (built only)
+- [x] Run after the #3 change: the #465 suites, 189/189 passed (incl. `liveMinuteWaitsForSavedTrack`); full `CyclometerTests` not run
