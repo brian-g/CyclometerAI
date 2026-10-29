@@ -61,6 +61,7 @@ enum DashboardWidgetCatalog {
         RouteElevationDashboardWidget.self,
         DistanceRemainingDashboardWidget.self,
         ETADashboardWidget.self,
+        SunsetDashboardWidget.self,
         ClimbDashboardWidget.self,
     ]
 

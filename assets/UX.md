@@ -3,6 +3,7 @@
 **Date:** 2026-09-17
 
 **Updated:** 2026-10-28 — §W22 Climb added and built (#463), 2×1 in §S08's Route section.  
+**Updated:** 2026-10-28 — §W21 Sunset added and built (#462), 1×1 in §S08's Ride section.  
 **Updated:** 2026-10-28 — §W19 Distance Remaining and §W20 ETA added and built (#461), both 1×1 in §S08's Route section.  
 **Updated:** 2026-10-26 — §S10 gains a trash button to delete the ride just finished (#452). Deleting any ride, there or by §S14's swipe, now deletes its Health workout too, the decision #277 left open.  
 **Updated:** 2026-10-20 — §W5's zone bands are the rider's five cadence zones, drawn with or without readings, in the HR zone colours. §S12 gains a Cadence Zones section to set them (#79).  
@@ -840,6 +841,21 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 ---
 
+#### W21 — Sunset
+
+**Sizes:** 1x1
+
+- Label "TO SUNSET". Value: hours and minutes until today's sunset where the rider is, as h:mm: "1:12", and "0:08" under an hour (#462). Medium hero, no unit
+- The SF Symbol `sunset.fill` in the lower right, `title2`, `textSecondary`, inset `sm` as the label: it marks the card at a glance, so it is drawn in every state. VoiceOver doesn't read it
+- Worked out on the device from the latest fix and the date by NOAA's solar-position algorithm (zenith 90.833°, no elevation), to the minute as NOAA publishes it — no network, no WeatherKit. The fix is retaken at most once a minute
+- The countdown turns over on the clock's minute and never reads 0:00: it reads 0:01 in the minute before sunset, and "—" from sunset's minute. "Today" is the device's calendar day, so midnight starts the next day's countdown, and a time-zone change moves it. A sunset after midnight (Reykjavik's, near midsummer) still counts as the day before's while it is ahead
+- "—" with no fix yet, after sunset, and with no sunset that day (polar day or night)
+- VoiceOver reads it as "Sunset, in 1 hour, 12 minutes", and a "—" as "No location", "After sunset" or "No sunset today"
+- Not included: sunrise, civil twilight, a low-light alert
+- Sheet: Map, as W9
+
+---
+
 #### W22 — Climb
 
 **Sizes:** 2x1
@@ -943,7 +959,7 @@ As built (#367): a press held a quarter of a second on a widget lifts it — it 
 
 The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart Rate, Weather (future), Route, and Force (future). The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
 
-As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions, and since #461 Distance Remaining and ETA, and since #463 Climb); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
+As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace, and since #462 Sunset), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions, and since #461 Distance Remaining and ETA, and since #463 Climb); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
 
 As built (#368): in edit mode each empty cell shows a slot: a dashed hairline `borderStrong` outline, the size and inset of a 1×1 card, with no glyph and no wiggle. Tapping it opens the sheet aimed at that cell. The tapped cell is the widget's top-left and nothing shifts to fit, so the sheet lists only the sizes that fit from there: a 1×1 always; a 2×1 from the left column with its neighbour free; a 2×2 from the left column, above the last row, with its block free. A right-hand cell therefore shows only 1×1s. The Page section is hidden. A widget already on the page is still dimmed. Picking an entry puts its top-left at the tapped cell. VoiceOver reads a slot as "Empty, row 3, left", hint "Add widget here".
 

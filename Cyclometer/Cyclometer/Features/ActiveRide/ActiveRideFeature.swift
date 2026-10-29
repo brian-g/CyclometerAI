@@ -341,6 +341,9 @@ struct ActiveRideFeature {
         /// radar" — rather than a 0 that claims a measurement nobody made (#285).
         var vehiclePassCount: Int? = nil
         var coordinate: Coordinate? = nil
+        /// `coordinate` as W21 reads it (#462): taken at most once a minute, so the card doesn't
+        /// re-render on every fix.
+        var sunsetFix: SunsetFix? = nil
         /// The recorded track, one sub-array per continuous stretch of riding (#263).
         /// A pause ends the current segment and a resume opens the next, so the map draws
         /// a break where the rider stopped instead of a straight chord across it. Never
@@ -1086,6 +1089,9 @@ struct ActiveRideFeature {
                 // not do is enter the recorded track: no polyline vertex here, and no
                 // track point at the next tick (#210).
                 state.coordinate = update.coordinate
+                if state.sunsetFix?.isFresh(at: date.now) != true {
+                    state.sunsetFix = SunsetFix(coordinate: update.coordinate, takenAt: date.now)
+                }
                 state.horizontalAccuracy = update.horizontalAccuracy
                 let sinceRecorded = date.now.timeIntervalSince(
                     state.lastRecordablePositionAt ?? date.now
