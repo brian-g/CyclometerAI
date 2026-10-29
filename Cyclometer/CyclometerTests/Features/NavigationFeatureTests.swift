@@ -635,6 +635,85 @@ struct NavigationFeatureTests {
         await store.skipInFlightEffects(strict: false)
     }
 
+    // MARK: - W22 climb (#463)
+
+    /// `legs` with an elevation along it, and the climbs `RouteTerrain.analyze` finds on it, as
+    /// import would have stored them.
+    private func climbingRoute(_ legs: [RouteFixtures.Leg], elevation: (Double) -> Double) throws -> NavigationRoute {
+        let coordinates = RouteFixtures.withElevation(RouteFixtures.path(legs: legs), elevation)
+        return try #require(NavigationRoute(coordinates: coordinates, maneuvers: [], terrain: RouteTerrain.analyze(coordinates)))
+    }
+
+    /// 3 km north: level to 500 m, 1.5 km up at 8%, then level.
+    private func oneClimbRoute() throws -> NavigationRoute {
+        try climbingRoute(straight) { 100 + (min(max($0, 500), 2_000) - 500) * 0.08 }
+    }
+
+    @Test("the climb reading is nil unless a route is being followed, and none once complete")
+    func climbReadingRules() throws {
+        let line = try oneClimbRoute()
+        try #require(line.climbs.count == 1)
+
+        #expect(makeStore(route: nil).state.climbReading == nil)
+        #expect(makeStore(route: line).state.climbReading == nil, "no position on the route yet")
+        #expect(makeStore(route: line, progressMeters: 100, turnByTurn: false).state.climbReading == nil)
+
+        #expect(makeStore(route: line, progressMeters: 100).state.climbReading
+            == .next(line.climbs[0], metersToStart: line.climbs[0].startMeters - 100))
+        var complete = makeStore(route: line, progressMeters: 100).state
+        complete.isRouteComplete = true
+        #expect(complete.climbReading == .noClimbAhead)
+    }
+
+    @Test("off route, the climb reading holds at the last match")
+    func climbReadingHoldsOffRoute() async throws {
+        let line = try oneClimbRoute()
+        let store = makeStore(route: line)
+        var second = 0.0
+        for meters in stride(from: 0.0, through: 1_000, by: 10) {
+            await store.send(.locationUpdated(fix(straight, at: meters, second: second)))
+            second += 1
+        }
+        let matched = try #require(store.state.climbReading)
+        guard case .climbing = matched else { Issue.record("not on the climb at 1,000 m: \(matched)"); return }
+        for _ in 1...NavigationFeature.offRouteConsecutiveFixes {
+            await store.send(.locationUpdated(fix(straight, at: 1_100, lateral: -100, second: second)))
+            second += 1
+        }
+        try #require(store.state.isOffRoute)
+        #expect(store.state.climbReading == matched)
+        await store.skipInFlightEffects(strict: false)
+    }
+
+    /// Joined after the loop's climb, there is none ahead; round past the start, the wrap puts it
+    /// ahead again.
+    @Test("on a loop's second lap, its climb is ahead again")
+    func climbReadingOnALoopsSecondLap() async throws {
+        // Level to 200 m, 1 km up at 10%, then back down to the start.
+        let navigation = try climbingRoute(loop) { d in
+            d < 200 ? 100 : d < 1_200 ? 100 + (d - 200) * 0.1 : 200 - (d - 1_200) * 0.125
+        }
+        try #require(navigation.isLoop)
+        let climb = try #require(navigation.climbs.first)
+        let store = makeStore(route: navigation)
+        var second = 0.0
+        for meters in stride(from: 1_800.0, through: 1_990, by: 10) {
+            await store.send(.locationUpdated(fix(loop, at: meters, second: second)))
+            second += 1
+        }
+        #expect(store.state.climbReading == .noClimbAhead)
+        for meters in stride(from: 0.0, through: 100, by: 10) {
+            await store.send(.locationUpdated(fix(loop, at: meters, second: second)))
+            second += 1
+        }
+        guard case .next(let next, let metersToStart) = store.state.climbReading else {
+            Issue.record("no next climb after the wrap: \(String(describing: store.state.climbReading))"); return
+        }
+        #expect(next == climb)
+        #expect(abs(metersToStart - (climb.startMeters - 100)) < 2)
+        await store.skipInFlightEffects(strict: false)
+    }
+
     // MARK: - Route end
 
     @Test("reaching the end stops everything, and riding on past it is not off route")

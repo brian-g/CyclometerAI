@@ -341,7 +341,7 @@ private final class LiveRide {
 enum TappableWidget: CaseIterable, CustomTestStringConvertible {
     case map, cadence, speed, averageSpeed, duration, distance, pace, directions, heartRate, hrZones
     case ascent, descent, grade, elevation, routeElevation, routeElevationWithoutRoute
-    case distanceRemaining, eta
+    case distanceRemaining, eta, climb
 
     var testDescription: String { title }
 
@@ -368,6 +368,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .distanceRemaining: "Distance Remaining"
         // Read as a word, not the card's "ETA" (#461).
         case .eta: "Arrival"
+        case .climb: "Climb"
         }
     }
 
@@ -391,6 +392,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .routeElevation, .routeElevationWithoutRoute: "284 meters, grade 4 percent"
         case .distanceRemaining: "12.4 kilometers"
         case .eta: "3:42\u{202F}PM"
+        case .climb: "category 3, 1.2 kilometers to the top, 84 meters to climb, average 7 percent"
         }
     }
 
@@ -445,6 +447,10 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
             AnyView(ETAWidget(arrival: Date(timeIntervalSince1970: 15 * 3_600 + 42 * 60))
                 .environment(\.locale, Locale(identifier: "en_US"))
                 .environment(\.timeZone, TimeZone(identifier: "UTC")!))
+        case .climb:
+            AnyView(ClimbWidget(reading: .climbing(
+                RouteClimb.sample, metersToTop: 1_200, metersToClimb: 84, fraction: 0.43
+            ), unit: .metric))
         }
     }
 }
@@ -585,4 +591,16 @@ private extension NSObject {
     /// Through a plain `Bool`: `#expect(!element.accessibilityTraits.contains(.button))` failed while
     /// its own expansion showed `contains → false`, so the macro's reading of the traits can't be trusted.
     var isButton: Bool { accessibilityTraits.contains(.button) }
+}
+
+extension RouteClimb {
+    /// A Cat 3: 2.1 km at 6.7%, from 120 m to 260 m, every 10 m (#463).
+    static let sample = RouteClimb(
+        Climb(
+            startMeters: 0, lengthMeters: 2_100, gainMeters: 140, averageGradePercent: 6.7, maxGradePercent: 9,
+            topElevationMeters: 260, category: .cat3
+        ),
+        smoothed: (0...210).map { 120 + 140 * sin(Double($0) / 210 * .pi / 2) },
+        spacing: 10
+    )!
 }

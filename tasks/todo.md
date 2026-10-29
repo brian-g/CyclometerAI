@@ -1109,3 +1109,32 @@ Stacked on `feat/461-distance-remaining-eta` (#486 is open, and W19/W20 only exi
 
 - `LiveMapSheet(` now appears three times: `store.liveMapSheet` (W9, W19, W20), `.placeholder`, and W8's own.
 - No reference image moved: the sheet is never drawn by a card, and the placeholder is the same empty sheet.
+
+---
+
+# #463 — W22 Climb: current and next climb on the route
+
+From main (Brian), so it conflicts with #490 in the catalog, S08 lists and UX.md until that merges. Brian chose: the W5
+2×1 arrangement; climbs from stored `Route.terrain`; showcase on the Elevation page, row 5. No W22 frame in Sketch.
+
+- [x] `RouteClimb` + `ClimbReading.at(progressMeters:climbs:)` in `Models/RouteClimb.swift`
+- [x] `NavigationRoute.climbs` from `detail.summary.terrain`, profiles from `RouteTerrain.gradeProfile` at load
+- [x] `NavigationFeature.State.climbReading`
+- [x] `ClimbWidget` view + previews; `ClimbDashboardWidget` adapter (tap → Elevation sheet)
+- [x] Catalog, factory showcase (Elevation page row 5), `AddWidgetSheetTests` Route lists
+- [x] Tests: `ClimbReadingTests`, `NavigationFeatureTests`, accessibility, 10 snapshots
+- [x] UX.md §W22, §S08 Route list, header line
+- [x] Build (app + tests)
+- [x] Hand over to Brian — "looks right"
+- [x] Recorded the 10 W22 snapshots (checked: profile behind, ridden darker, stats on the baseline, "—")
+- [x] Full `CyclometerTests` less `PersistenceClientTests` (#480): 2246 passed, 0 failed, every new suite present;
+      `PersistenceClientTests` alone: 47/47
+
+## Review
+
+- The S08 catalog reference didn't move: its image ends before the Route section, so W22 there is unpinned (as W19/W20).
+- Climb distances need no conversion: `Climb.startMeters` is a sample index × the resample spacing, which is distance
+  along the same polyline `cumulativeDistances` measures; `ClimbReadingTests` pins a climb's top to the road's elevation.
+- "To climb" reaches exactly 0 at the top because the ride re-runs `RouteTerrain.gradeProfile` at load, the pipeline
+  the stored climb was found on. If that pipeline changes, stored climbs would sit on a different profile until
+  re-analysed; `RouteClimb` drops one that falls off the profile rather than misplacing it.

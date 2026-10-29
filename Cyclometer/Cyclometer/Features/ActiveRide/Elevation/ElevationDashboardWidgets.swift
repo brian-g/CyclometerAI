@@ -99,3 +99,25 @@ struct RouteElevationDashboardWidget: DashboardWidget {
         )
     }
 }
+
+/// W22 Climb on the dashboard (#463): the route's climb the rider is on, or the next one.
+struct ClimbDashboardWidget: DashboardWidget {
+    static let id = "climb"
+    static let title = "Climb"
+    static let supportedSizes: [WidgetSize] = [.twoByOne]
+    static let category = WidgetCategory.route
+
+    let size: WidgetSize
+    let store: StoreOf<ActiveRideFeature>
+
+    var body: some View {
+        ClimbWidget(
+            reading: store.navigation.climbReading,
+            hasRoute: store.navigation.activeRoute != nil,
+            isTurnByTurnEnabled: store.navigation.preferences.isTurnByTurnEnabled,
+            hasElevation: store.navigation.activeRoute?.elevationProfile != nil,
+            unit: store.unitSystem,
+            metrics: { store.elevationMetrics }
+        )
+    }
+}
