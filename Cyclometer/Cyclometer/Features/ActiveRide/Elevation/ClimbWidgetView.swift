@@ -154,18 +154,20 @@ struct ClimbWidget: View {
 
 // MARK: - Previews
 
-/// A Cat 3: 2.1 km at 6.7%, from 120 m to 260 m, every 10 m.
-private let previewClimb = RouteClimb(
-    Climb(
-        startMeters: 0, lengthMeters: 2_100, gainMeters: 140, averageGradePercent: 6.7, maxGradePercent: 9,
-        topElevationMeters: 260, category: .cat3
-    ),
-    smoothed: (0...210).map { 120 + 140 * sin(Double($0) / 210 * .pi / 2) },
-    spacing: 10
-)!
+extension RouteClimb {
+    /// A Cat 3: 2.1 km at 6.7%, from 120 m to 260 m, every 10 m — W22's previews and tests.
+    static let sample = RouteClimb(
+        Climb(
+            startMeters: 0, lengthMeters: 2_100, gainMeters: 140, averageGradePercent: 6.7, maxGradePercent: 9,
+            topElevationMeters: 260, category: .cat3
+        ),
+        smoothed: (0...210).map { 120 + 140 * sin(Double($0) / 210 * .pi / 2) },
+        spacing: 10
+    )!
+}
 
-private let previewClimbing = ClimbReading.climbing(previewClimb, metersToTop: 1_200, metersToClimb: 84, fraction: 0.43)
-private let previewNext = ClimbReading.next(previewClimb, metersToStart: 3_400)
+private let previewClimbing = ClimbReading.climbing(.sample, metersToTop: 1_200, metersToClimb: 84, fraction: 0.43)
+private let previewNext = ClimbReading.next(.sample, metersToStart: 3_400)
 
 #Preview("On a Climb — Metric") {
     ClimbWidget(reading: previewClimbing, unit: .metric)

@@ -1202,3 +1202,16 @@ From main (Brian), so it conflicts with #490 in the catalog, S08 lists and UX.md
       (header lines, §W21 then §W22, S08's Ride and Route lists), and this file (#462's section, then #463's)
 - [x] Build; S08 lists, S08 catalog snapshot, DashboardLayout, WidgetAccessibility, Sunset, Climb, NavigationFeature:
       224/224, every suite non-empty
+
+### #493 review (`/code-review xhigh --fix`)
+
+- [x] Fixed: climbing left measured from the climb's own profile top (`elevations.last`), not the stored
+      `topElevationMeters`, so it reads 0 at the top even after a pipeline change; `RouteClimb.sample` moved into
+      `ClimbWidgetView.swift` (shared by previews and tests, replacing a copy); W22 in TCA.md §8 and `ElevationSheet`'s doc
+- [x] ClimbReading 8/8, NavigationFeature 57/57, WidgetAccessibility 80/80, Climb snapshots 10/10 (review ran them)
+- Correction to the review above: `RouteClimb` drops a stored climb only when it falls *outside* the profile; one from a
+  different pipeline that still fits would be placed as stored.
+- Skipped, for Brian: analyze at load when a route has no stored terrain (pre-#252, not yet backfilled → "No climbs
+  ahead" on a hilly route); `ClimbWidgetSnapshotTests` on CI's skip list. Also skipped: a loop joined after its climb
+  reads "No climbs ahead" until the wrap (pinned by a test); keeping each climb's samples in the analysis instead of
+  re-deriving at load; the straight-route "second lap" unit test; exact float compares; S08's sample has no route

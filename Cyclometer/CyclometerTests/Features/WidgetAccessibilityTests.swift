@@ -596,15 +596,3 @@ private extension NSObject {
     /// its own expansion showed `contains → false`, so the macro's reading of the traits can't be trusted.
     var isButton: Bool { accessibilityTraits.contains(.button) }
 }
-
-extension RouteClimb {
-    /// A Cat 3: 2.1 km at 6.7%, from 120 m to 260 m, every 10 m (#463).
-    static let sample = RouteClimb(
-        Climb(
-            startMeters: 0, lengthMeters: 2_100, gainMeters: 140, averageGradePercent: 6.7, maxGradePercent: 9,
-            topElevationMeters: 260, category: .cat3
-        ),
-        smoothed: (0...210).map { 120 + 140 * sin(Double($0) / 210 * .pi / 2) },
-        spacing: 10
-    )!
-}

@@ -64,7 +64,9 @@ enum ClimbReading: Equatable, Sendable {
     /// The top counts as on the climb, so both distances read 0 there before it turns to the next.
     static func at(progressMeters progress: Double, climbs: [RouteClimb]) -> ClimbReading {
         if let climb = climbs.first(where: { $0.startMeters <= progress && progress <= $0.topMeters }) {
-            let left = climb.climb.topElevationMeters - climb.elevation(atMeters: progress)
+            // The top from the profile itself rather than the stored `topElevationMeters`, so it reads
+            // 0 at the top even if the analysis came from an earlier run of the pipeline.
+            let left = climb.elevations[climb.elevations.count - 1] - climb.elevation(atMeters: progress)
             return .climbing(
                 climb,
                 metersToTop: climb.topMeters - progress,

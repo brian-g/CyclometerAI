@@ -1003,8 +1003,9 @@ Cyclometer/
 │   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12), HeartRateSheet — HR state lives
 │   │   │                                  // on ActiveRideFeature (§3)
 │   │   ├── Cadence/                       // CadenceFeature, CadenceWidgetView (W5)
-│   │   ├── Elevation/                     // ElevationWidgetView (W14–W18), ElevationSheet (#387) —
-│   │   │                                  // altitude and ElevationTracker live on ActiveRideFeature
+│   │   ├── Elevation/                     // ElevationWidgetView (W14–W18), ElevationSheet (#387),
+│   │   │                                  // ClimbWidgetView (W22, #463) — altitude and ElevationTracker
+│   │   │                                  // live on ActiveRideFeature; the route's climbs in Models/RouteClimb
 │   │   ├── Map/                           // MapWidgetView (W8), ActiveRideMapView,
 │   │   │                                  // LiveMapCamera, MapSheetButtons
 │   │   ├── Navigation/                    // NavigationFeature, DirectionsWidgetView (W9),
