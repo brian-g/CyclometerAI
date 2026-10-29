@@ -14,6 +14,7 @@ struct AddWidgetSheetTests {
             "speed twoByOne", "cadence twoByOne", "elevation twoByOne",
             "speed oneByOne", "averageSpeed oneByOne", "duration oneByOne", "distance oneByOne",
             "cadence oneByOne", "pace oneByOne", "ascent oneByOne", "descent oneByOne", "grade oneByOne",
+            "sunset oneByOne",
         ])
         #expect(names(AddWidgetEntry.entries(in: .heartRate)) == [
             "heartRate twoByOne", "hrZones twoByOne", "heartRate oneByOne", "hrZones oneByOne",
@@ -45,7 +46,7 @@ struct AddWidgetSheetTests {
             ["duration oneByOne", "distance oneByOne"],
             ["cadence oneByOne", "pace oneByOne"],
             ["ascent oneByOne", "descent oneByOne"],
-            ["grade oneByOne"],
+            ["grade oneByOne", "sunset oneByOne"],
         ])
         #expect(AddWidgetEntry.rows(AddWidgetEntry.entries(in: .route)).map(names) == [
             ["map twoByTwo"],

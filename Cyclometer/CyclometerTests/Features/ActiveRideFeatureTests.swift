@@ -408,6 +408,7 @@ struct ActiveRideFeatureLocationTests {
         let store = makeStore()
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
@@ -464,6 +465,7 @@ struct ActiveRideFeatureLocationTests {
 
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
@@ -500,6 +502,7 @@ struct ActiveRideFeatureLocationTests {
             // Live position still follows the freshest fix — but no polyline vertex, and
             // `isFixRecordable` false means `.elapsedTick` writes no track point either.
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.horizontalAccuracy = 13.2
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.heading = 192.0
@@ -516,6 +519,35 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
         await store.receive(\.calibration.locationUpdated)
+    }
+
+    /// #462: W21 reads `sunsetFix`, so it re-renders once a minute rather than on every fix.
+    @Test("W21's fix is the latest, taken at most once a minute")
+    func sunsetFixIsTakenOnceAMinute() async {
+        let store = makeStore()
+        store.exhaustivity = .off
+        let here = Coordinate(latitude: 43.0731, longitude: -89.4012)
+        let there = Coordinate(latitude: 43.0800, longitude: -89.4100)
+        func fix(_ coordinate: Coordinate) -> LocationUpdate {
+            LocationUpdate(
+                coordinate: coordinate, altitude: 280, speed: 8.5, horizontalAccuracy: 5, heading: 0, timestamp: testDate
+            )
+        }
+
+        await store.send(.locationUpdated(fix(here)))
+        #expect(store.state.sunsetFix == SunsetFix(coordinate: here, takenAt: testDate))
+
+        let almost = testDate.addingTimeInterval(SunsetFix.refreshInterval - 1)
+        store.dependencies.date.now = almost
+        await store.send(.locationUpdated(fix(there)))
+        #expect(store.state.coordinate == there)
+        #expect(store.state.sunsetFix == SunsetFix(coordinate: here, takenAt: testDate))
+
+        let minute = testDate.addingTimeInterval(SunsetFix.refreshInterval)
+        store.dependencies.date.now = minute
+        await store.send(.locationUpdated(fix(there)))
+        #expect(store.state.sunsetFix == SunsetFix(coordinate: there, takenAt: minute))
+        await store.skipReceivedActions(strict: false)
     }
 
     @Test("Altitude samples older than the history window are pruned")
@@ -569,6 +601,7 @@ struct ActiveRideFeatureLocationTests {
         let store = makeStore()
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
@@ -649,6 +682,7 @@ struct ActiveRideFeatureLocationTests {
 
         await store.send(.locationUpdated(invalidUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
@@ -1902,6 +1936,7 @@ struct ActiveRideFeatureStateMachineTests {
         )
         await store.send(.locationUpdated(update)) {
             $0.coordinate = Coordinate(latitude: 43.0, longitude: -89.0)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0, longitude: -89.0), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0, longitude: -89.0)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
