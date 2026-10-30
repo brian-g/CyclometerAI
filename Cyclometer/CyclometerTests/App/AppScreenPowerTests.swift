@@ -257,6 +257,8 @@ struct AppScreenPowerTests {
 
         await store.send(.scenePhaseChanged(isActive: false)) { $0.isForeground = false }
         await store.receive(\.settings.dimPreviewEnded)
+        // The ride writes its buffered track points on the way out (#505).
+        await store.receive(\.activeRide.trackRecorder.appResignedActive)
         await store.receive(\.screenVisibilityChanged) {
             $0.isDimmed = false
             $0.preDimBrightness = nil

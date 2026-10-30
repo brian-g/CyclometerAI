@@ -3074,6 +3074,10 @@ struct ActiveRideFeatureHRDropoutTests {
         let now = LockIsolated(Self.fixedNow)
         let store = makeStore(now: now)
         store.exhaustivity = .off
+        // The pause writes the buffer out (#505), so the recorded track is what was written plus
+        // whatever is still buffered.
+        let written = LockIsolated<[TrackPointDTO]>([])
+        store.dependencies.persistenceClient = .mock(onFlush: { batch in written.withValue { $0 += batch } })
 
         await store.send(.trackRecorder(.startRecording))
         await store.send(.locationUpdated(Self.goodFix))
@@ -3087,7 +3091,7 @@ struct ActiveRideFeatureHRDropoutTests {
         await store.send(.elapsedTick)
         await store.skipInFlightEffects(strict: false)
 
-        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        let recorded = written.value + (await store.dependencies.rideDataBuffer.drainForFlush())
         #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2])
         #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(recorded))
     }

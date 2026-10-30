@@ -1483,3 +1483,9 @@ the app goes `.inactive` and is then SIGKILLed, so the flush has to happen on le
       relaunch at once, walk on, finish. Expected: the GPX gap ≈ the time the app wasn't running, not up to 30 s more.
 - [ ] Then: `TrackPointRecorderFeatureTests`, `ActiveRideFeatureTests`, `LiveActivityFeatureTests`, `AppScreenPowerTests`.
 - [ ] Commit + PR.
+
+**CI fix.** Two older tests didn't account for the new flushes: `hrTallyMatchesRecordedTrack` read the track from the
+buffer after a pause, which now writes it out (it now counts written + buffered points), and the exhaustive
+`backgroundingRestoresEverything` didn't expect `.activeRide(.trackRecorder(.appResignedActive))`. The
+`ActiveRideFeature*`, `AppScreenPowerTests`, `AppFeatureTests`, `TrackPointRecorderFeatureTests`,
+`LiveActivityFeatureTests`, `RideRecordingTests` and `TrackSegmentTests` suites: 236 passed, 0 failed.
