@@ -1422,3 +1422,13 @@ the configuration is dead code that only costs the hop. `.shared` pays it too, f
   recorded before the delayed `start` resumes, but its own comment says the recording client doesn't queue, so the
   order is a race. No CoreData involved; it passed in the other 11 full runs (6 on main).
 - **Logs:** `Cyclometer/.build/480-*.log`; the deadlock sample is `Cyclometer/.build/480-hang-main-sample.txt`.
+- [x] **(2) fixed, on Brian's call.** Cause: S12 "off" cancels `CancelID.start`, and the test's delayed start slept
+      with `try? await clock.sleep(...)`. A cancelled `TestClock` sleep returns at once (swift-clocks: the stream
+      ends on cancellation, then `checkCancellation()` throws), so the "late" answer was recorded right away and raced
+      the setting's `end`. A probe showed it: the start was recorded with the clock never advanced. The test's start
+      now waits on a gate outside the cancellation (`Task { for await … }`), as ActivityKit's request isn't cancelled
+      with the effect, and the test releases it once the `end` is recorded, so the order is causal. Not a
+      shielded clock sleep: one registered after `advance` would never fire. 200/200 iterations; mutation (drop the
+      reducer's `.cancel(id: CancelID.start)`, own DerivedData) fails it; `LiveActivityFeatureTests` 25/25. The
+      sibling `settingOffAndOnWhileStartingTakesTheSecondAnswer` uses the same sleep but its answer order is fixed
+      (the first is released by the cancel, the second only by `advance`), so it's unchanged
