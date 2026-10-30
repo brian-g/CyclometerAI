@@ -392,7 +392,13 @@ struct AppFeature {
             case .scenePhaseChanged(let isActive):
                 state.isForeground = isActive
                 // A S12 dim preview cut off by leaving the app gives the rider's brightness back (#471).
-                guard isActive else { return .send(.settings(.dimPreviewEnded)) }
+                // A ride writes its buffered track points: a swipe-kill from the app switcher
+                // goes no further than `.inactive` (#505).
+                guard isActive else {
+                    let dimPreviewEnded = Effect<Action>.send(.settings(.dimPreviewEnded))
+                    guard state.activeRide != nil else { return dimPreviewEnded }
+                    return .merge(dimPreviewEnded, .send(.activeRide(.trackRecorder(.appResignedActive))))
+                }
                 // S12 rereads the system's Live Activities setting, which the rider may just have
                 // changed in iOS Settings (#313).
                 let settings = Effect<Action>.send(.settings(.appBecameActive))

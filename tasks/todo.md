@@ -1463,3 +1463,23 @@ the configuration is dead code that only costs the hop. `.shared` pays it too, f
       reducer's `.cancel(id: CancelID.start)`, own DerivedData) fails it; `LiveActivityFeatureTests` 25/25. The
       sibling `settingOffAndOnWhileStartingTakesTheSecondAnswer` uses the same sleep but its answer order is fixed
       (the first is released by the cancel, the second only by `advance`), so it's unchanged
+
+---
+
+## #505 — Flush buffered track points on pause and when the app leaves the foreground
+
+Cause (ride 2026-10-30): `RideDataBuffer` is written to CoreData only every 30 s of active riding and at Finish,
+so a kill loses whatever is buffered — up to 30 s. A swipe-kill from the app switcher never reaches the background:
+the app goes `.inactive` and is then SIGKILLed, so the flush has to happen on leaving `.active`.
+
+- [x] Branch `505-flush-track-points-on-pause-and-background` from `main`.
+- [x] `TrackPointRecorderFeature`: `.pauseRecording` also returns `flushEffect()`. New `.appResignedActive` →
+      `flushEffect()`. Update the type's doc comment (flushes every 30 s, on pause, on leaving the foreground, at end).
+- [x] `AppFeature.scenePhaseChanged(isActive: false)`: with a ride in progress, also send
+      `.activeRide(.trackRecorder(.appResignedActive))` — the pattern `.liveActivity(.appBecameActive)` already uses.
+- [x] Tests (`TrackPointRecorderFeatureTests`): pause flushes the buffered points; `appResignedActive` flushes them;
+      an empty buffer writes nothing. AppFeature: leaving `.active` mid-ride flushes; with no ride, nothing changes.
+- [ ] Brian runs it on device (walking works): start a ride, walk ~1 min, open the app switcher, swipe the app away,
+      relaunch at once, walk on, finish. Expected: the GPX gap ≈ the time the app wasn't running, not up to 30 s more.
+- [ ] Then: `TrackPointRecorderFeatureTests`, `ActiveRideFeatureTests`, `LiveActivityFeatureTests`, `AppScreenPowerTests`.
+- [ ] Commit + PR.

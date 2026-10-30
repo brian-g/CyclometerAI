@@ -138,6 +138,37 @@ struct TrackPointRecorderFeatureTests {
         #expect(flushed.value.map(\.speedMPS) == [1])
     }
 
+    /// A kill while paused would otherwise lose the points since the last checkpoint (#505).
+    @Test("pauseRecording flushes the buffered points")
+    func pauseRecordingFlushes() async {
+        let flushed = LockIsolated<[TrackPointDTO]>([])
+        let store = makeStore(
+            initialState: TrackPointRecorderFeature.State(isRecording: true),
+            persistenceClient: .mock(onFlush: { flushed.setValue($0) })
+        )
+
+        await store.send(.timerTick(Self.point(1)))
+        await store.send(.pauseRecording) {
+            $0.isRecording = false
+        }
+
+        #expect(flushed.value.map(\.speedMPS) == [1])
+    }
+
+    /// A swipe-kill from the app switcher passes through `.inactive` and no further (#505).
+    @Test("appResignedActive flushes the buffered points and keeps recording")
+    func appResignedActiveFlushes() async {
+        let flushed = LockIsolated<[TrackPointDTO]>([])
+        let store = makeStore(
+            initialState: TrackPointRecorderFeature.State(isRecording: true),
+            persistenceClient: .mock(onFlush: { flushed.setValue($0) })
+        )
+
+        await store.send(.timerTick(Self.point(1)))
+        await store.send(.appResignedActive)
+
+        #expect(flushed.value.map(\.speedMPS) == [1])
+    }
 
     @Test("a checkpoint whose write fails keeps its points, and the next checkpoint writes them once, in order (#345)")
     func failedCheckpointRetriesOnTheNext() async {
