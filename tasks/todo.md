@@ -1489,3 +1489,8 @@ buffer after a pause, which now writes it out (it now counts written + buffered 
 `backgroundingRestoresEverything` didn't expect `.activeRide(.trackRecorder(.appResignedActive))`. The
 `ActiveRideFeature*`, `AppScreenPowerTests`, `AppFeatureTests`, `TrackPointRecorderFeatureTests`,
 `LiveActivityFeatureTests`, `RideRecordingTests` and `TrackSegmentTests` suites: 236 passed, 0 failed.
+
+**CI fix 2.** `RideEndFailureTests` counted ride-end flush attempts: the pause's flush is now the first. The all-fail
+test expects 3 attempts (pause, ride end, its retry). The fail-once test now fails the first two, so the ride end's
+retry is still what it exercises. Full `CyclometerTests`: 2,104 passed, 0 failed. The first CI fix ran only the suites
+I expected to be touched and missed this one.
