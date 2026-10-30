@@ -1369,3 +1369,66 @@ default 10%, sun icons), and dragging previews it on the real backlight.
       anti-aliasing inside unmoved text
 - [x] Full `CyclometerTests` locally without `PersistenceClientTests` (MapKit deadlock): 2340 passed; then
       `PersistenceClientTests` alone: green
+
+---
+
+# #480 — PersistenceClientTests × MapKit deadlock
+
+Root cause (from code + the issue's samples): `CoreDataStack.load` sets `automaticallyMergesChangesFromParent` and
+`mergePolicy` on `viewContext`, a main-queue context. Set from any other thread, CoreData runs each setter through
+`performBlockAndWait` on main. `makeLiveClient()` builds a stack per test on the cooperative pool, so every parallel
+persistence test parks a pool thread on main. Nothing reads `viewContext` — every read and write goes through
+`newBackgroundContext()` or batch requests, and `batchDeleteTrackPoints` documents that nothing merges into it — so
+the configuration is dead code that only costs the hop. `.shared` pays it too, from whichever thread first resolves
+`\.persistenceClient`.
+
+- [x] Regression test first: a `@MainActor` test builds `CoreDataStack(inMemory: true)` on a separate thread while
+      main waits on a semaphore. On main's code it failed at the timeout (5.008 s), so the build waits for main.
+      With the fix it passed in 1.8 s alongside the other suites, so the timeout is now 30 s, as headroom against a
+      spurious failure under load
+- [x] `CoreDataStack`: drop the two `viewContext` setters and the unused `viewContext` accessor; `load` keeps
+      `loadPersistentStores` and its `fatalError`, so `.shared`'s launch behaviour is unchanged. The fixed binary has
+      no `setAutomaticallyMergesChangesFromParent:` reference; main's has one
+- [x] Run the new test, `PersistenceClientTests`, `RoutePersistenceTests`, `TimeSeriesMigrationTests` (plus the other
+      `CoreDataStack(inMemory:)` users: RideDataBuffer, RideDeletion, RideRename, RoutesImportIntegration,
+      NavigationPipeline): 105 passed, 0 failed
+- [x] Deadlock question: see Review
+- [x] Three consecutive full `CyclometerTests` runs with no `-skip-testing`: all three completed; see Review
+- [x] Update the `persistence-tests-mapkit-deadlock` memory and drop the skip advice
+
+## Review
+
+- **Reproducing it.** Six unloaded full runs on main's code (`test-without-building`, ~2.5 min each) never hung.
+  With all 18 cores held by busy loops, the first run hung. Its sample had the issue's exact signature: main in
+  `-[VKMapView dealloc]` → `MapEngine::~MapEngine` → `flushTileDecodeQueues` → `dispatch_sync` onto the tile-decode
+  queue; that queue's task in `dispatch_semaphore_wait`; all 18 cooperative-pool threads (the pool is 18 wide here)
+  in `makeLiveClient()` → `CoreDataStack.load:45` → `setAutomaticallyMergesChangesFromParent:` →
+  `performBlockAndWait` on main. A second loaded run of main didn't hang: it's a race even under load.
+- **Is it a true deadlock?** [Likely] yes. No thread was running whatever would signal the tile-decode semaphore, so
+  its work was queued somewhere that couldn't run. The sample can't show where. It can't be main alone: then the hang
+  wouldn't need the persistence tests, but every run recorded in this file that skipped only
+  `PersistenceClientTests` (six, MapKit suites included) completed. So it's waiting on a worker thread that the 18 blocked pool threads keep from
+  running, whether that's a Swift concurrency job or a GCD worker under the same thread limit.
+- **The fix under the same load.** Three loaded full runs on the fix: none showed the signature (sampled each time
+  the log went quiet). Two completed green (2,389 cases passed). The third was killed after an hour, with 2,388 cases
+  passed: the one still in flight was `PermissionsClientTests/liveHealthStatus()`.
+- **Found, not fixed (1): the load starves HealthKit.** `liveHealthStatus()` asks the simulator's HealthKit for a
+  status. Unloaded it takes 2.7–5.6 s; with every core busy it took 351 s, 1,318 s, and over an hour. It hit main's
+  second loaded run too, so it isn't from this change. It only shows under artificial load.
+- **Plain full runs on the fix, back to back:** 1) 2,389 passed, 0 failed; 2) 2,388 passed, 1 failed; 3) 2,389
+  passed, 0 failed (cases, counted across split log lines, as the 2340 above). None hung.
+- **Found, not fixed (2): `LiveActivityFeatureTests/settingOffWhileStartingSendsNothingMore()` is flaky.** It
+  failed once (plain run 2): "nothing after the start, got [start, end]". The test assumes the setting's `end` is
+  recorded before the delayed `start` resumes, but its own comment says the recording client doesn't queue, so the
+  order is a race. No CoreData involved; it passed in the other 11 full runs (6 on main).
+- **Logs:** `Cyclometer/.build/480-*.log`; the deadlock sample is `Cyclometer/.build/480-hang-main-sample.txt`.
+- [x] **(2) fixed, on Brian's call.** Cause: S12 "off" cancels `CancelID.start`, and the test's delayed start slept
+      with `try? await clock.sleep(...)`. A cancelled `TestClock` sleep returns at once (swift-clocks: the stream
+      ends on cancellation, then `checkCancellation()` throws), so the "late" answer was recorded right away and raced
+      the setting's `end`. A probe showed it: the start was recorded with the clock never advanced. The test's start
+      now waits on a gate outside the cancellation (`Task { for await … }`), as ActivityKit's request isn't cancelled
+      with the effect, and the test releases it once the `end` is recorded, so the order is causal. Not a
+      shielded clock sleep: one registered after `advance` would never fire. 200/200 iterations; mutation (drop the
+      reducer's `.cancel(id: CancelID.start)`, own DerivedData) fails it; `LiveActivityFeatureTests` 25/25. The
+      sibling `settingOffAndOnWhileStartingTakesTheSecondAnswer` uses the same sleep but its answer order is fixed
+      (the first is released by the cancel, the second only by `advance`), so it's unchanged
