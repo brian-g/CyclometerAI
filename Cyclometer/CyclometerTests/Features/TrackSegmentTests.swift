@@ -105,6 +105,23 @@ struct TrackSegmentTests {
         #expect(afterResume?.segmentIndex == 1)
     }
 
+    /// The saved track arrives from a fetch, so fixes can reach the map first (#503).
+    @Test("A resumed ride's saved track goes in front of what the map drew since the resume")
+    func savedTrackGoesInFrontOfLivePoints() async {
+        let live = Coordinate(latitude: 36.0943, longitude: -79.5313)
+        var restored = ActiveRideFeature.State(resuming: Self.persistedRide(recordingState: .active))
+        restored.trackSegments = [[live]]
+        let store = makeStore(restored)
+
+        let beforePause = [Coordinate(latitude: 36.0831, longitude: -79.5416),
+                           Coordinate(latitude: 36.0900, longitude: -79.5400)]
+        let afterPause = [Coordinate(latitude: 36.1046, longitude: -79.5398),
+                          Coordinate(latitude: 36.0946, longitude: -79.5301)]
+        await store.send(.trackSegmentsSeeded([beforePause, afterPause])) {
+            $0.trackSegments = [beforePause, afterPause, [live]]
+        }
+    }
+
     /// Receives the next `.trackRecorder(.timerTick)` and hands back the point it carried —
     /// matching on the case rather than on an expected value, since `TrackPointDTO.id` is a
     /// fresh UUID per point and no equality assertion could name it.

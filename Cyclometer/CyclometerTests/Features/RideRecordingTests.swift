@@ -186,11 +186,20 @@ struct RideRecordingTests {
         await secondStore.send(.task)
         #expect(secondStore.state.rideId == rideId)
         #expect(secondStore.state.recordingState == .active)
+        // The map redraws the points flushed before the kill (#503), then an empty segment for
+        // the resume. The unflushed ones died with the first store.
+        await secondStore.receive(\.trackSegmentsSeeded)
+        let seeded = secondStore.state.trackSegments
+        #expect(seeded.count == 2)
+        #expect(!seeded[0].isEmpty && seeded[0].allSatisfy { $0 == coordinateA })
+        #expect(seeded.last == [])
 
         await secondStore.send(.locationUpdated(LocationUpdate(
             coordinate: coordinateB, altitude: 12, speed: 6, horizontalAccuracy: 5,
             heading: 90, timestamp: Self.testDate.addingTimeInterval(60)
         )))
+        // The resume's own segment, so the map breaks at the kill rather than joining A to B.
+        #expect(secondStore.state.trackSegments.last == [coordinateB])
         for _ in 1...5 {
             await secondStore.send(.elapsedTick)
         }
@@ -214,6 +223,40 @@ struct RideRecordingTests {
         let contents = try String(contentsOf: gpxURL, encoding: .utf8)
         #expect(contents.contains(String(format: "lat=\"%.7f\" lon=\"%.7f\"", coordinateA.latitude, coordinateA.longitude)))
         #expect(contents.contains(String(format: "lat=\"%.7f\" lon=\"%.7f\"", coordinateB.latitude, coordinateB.longitude)))
+    }
+
+    /// #503: the map's seed shares W23's fetch, so a failed read has to leave the map as it was.
+    @Test("a relaunched ride whose saved track can't be read draws only what it records from here")
+    func unreadableSavedTrackLeavesTheMapLive() async throws {
+        var persistenceClient = PersistenceClient.testValue
+        persistenceClient.fetchTrackPoints = { _ in throw CocoaError(.fileReadCorruptFile) }
+        let resumable = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .active, durationSeconds: 600, distanceMeters: 4000,
+            averageSpeedMPS: 6, maxSpeedMPS: 12, averageHeartRateBPM: nil, maxHeartRateBPM: nil,
+            averageCadenceRPM: nil, maxCadenceRPM: nil, vehiclePassCount: 0
+        )
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(resuming: resumable)
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
+            $0.continuousClock = TestClock()
+            $0.date = .constant(Self.testDate)
+            $0.uuid = .incrementing
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = persistenceClient
+        }
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        // The failed read's own answer, sent once the fetch has thrown.
+        await store.receive(\.calorieTrackSeeded)
+        #expect(store.state.trackSegments == [[]])
+        await store.skipInFlightEffects(strict: false)
     }
 
     @Test("an .ended ride is never returned as resumable")
