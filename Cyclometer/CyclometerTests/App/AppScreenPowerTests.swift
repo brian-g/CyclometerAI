@@ -40,14 +40,18 @@ struct AppScreenPowerTests {
         clock: TestClock<Duration>,
         calls: LockIsolated<[ScreenCall]>,
         brightness: Double = 0.8,
-        isAutoDimEnabled: Bool = true
+        isAutoDimEnabled: Bool = true,
+        autoDimBrightness: Double = 0.1
     ) -> TestStoreOf<AppFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.isAutoDimEnabled = isAutoDimEnabled }
+            $preferences.withLock {
+                $0.isAutoDimEnabled = isAutoDimEnabled
+                $0.autoDimBrightness = autoDimBrightness
+            }
             return TestStore(
                 initialState: AppFeature.State(
                     activeRide: ActiveRideFeature.State(recordingState: .active),
@@ -155,7 +159,7 @@ struct AppScreenPowerTests {
         }
         await store.finish()
 
-        #expect(calls.value.contains(.setBrightness(AppFeature.dimBrightness)))
+        #expect(calls.value.contains(.setBrightness(0.1)))
         // Restores what the rider had, not an app-chosen constant.
         #expect(calls.value.contains(.setBrightness(0.8)))
     }
@@ -252,6 +256,7 @@ struct AppScreenPowerTests {
         }
 
         await store.send(.scenePhaseChanged(isActive: false)) { $0.isForeground = false }
+        await store.receive(\.settings.dimPreviewEnded)
         await store.receive(\.screenVisibilityChanged) {
             $0.isDimmed = false
             $0.preDimBrightness = nil
@@ -291,6 +296,32 @@ struct AppScreenPowerTests {
         #expect(calls.value == [.idleTimerDisabled(true), .idleTimerDisabled(false)])
     }
 
+    /// The level the dim drops to is the rider's S12 slider (#471), not a constant.
+    @Test("Dim drops to the rider's chosen level")
+    func dimUsesChosenLevel() async {
+        let clock = TestClock()
+        let calls = LockIsolated<[ScreenCall]>([])
+        let store = Self.makeStore(clock: clock, calls: calls, autoDimBrightness: 0.3)
+
+        await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
+        await store.receive(\.screenVisibilityChanged)
+        await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
+        await store.receive(\.dimTimerFired)
+        await store.receive(\.preDimBrightnessCaptured) {
+            $0.isDimmed = true
+            $0.preDimBrightness = 0.8
+        }
+
+        await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
+        await store.receive(\.screenVisibilityChanged) {
+            $0.isDimmed = false
+            $0.preDimBrightness = nil
+        }
+        await store.finish()
+        #expect(calls.value.contains(.setBrightness(0.3)))
+        #expect(calls.value.contains(.setBrightness(0.8)))
+    }
+
     /// Dimming caps the backlight, it doesn't set it. A rider already riding at 5%
     /// in the dark must not be *brightened* to the dim level.
     @Test("Dim clamps rather than overrides a brightness already below the target")
@@ -309,7 +340,7 @@ struct AppScreenPowerTests {
         }
 
         #expect(calls.value.contains(.setBrightness(0.05)))
-        #expect(!calls.value.contains(.setBrightness(AppFeature.dimBrightness)))
+        #expect(!calls.value.contains(.setBrightness(0.1)))
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged) {

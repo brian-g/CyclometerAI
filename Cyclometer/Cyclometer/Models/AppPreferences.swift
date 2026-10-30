@@ -39,6 +39,20 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// blanks mid-ride is broken, not configurable.
     var isAutoDimEnabled: Bool = true
 
+    /// Backlight level the dim drops to, 0…1 (#471, S12's slider). 10% by default, the
+    /// fixed level #110 shipped with.
+    var autoDimBrightness: Double = 0.1
+
+    /// The S12 slider's range. Above half, a dim would barely save anything.
+    static let autoDimBrightnessRange: ClosedRange<Double> = 0...0.5
+
+    /// What a dim sets the backlight to from the rider's own `level`. Clamped, so a rider
+    /// already riding darker than the dim level is left there rather than *brightened*.
+    /// The real dim and S12's preview both go through this, so the preview shows the dim.
+    func dimmedBrightness(from level: Double) -> Double {
+        min(level, autoDimBrightness)
+    }
+
     /// Whether S10 looks up the town a free ride started in for its default name (#283) —
     /// "Fargo Morning Loop" rather than "Morning Loop". On by default; off, the start
     /// coordinate is never sent to Apple's geocoder (PRD §12, Privacy).
@@ -177,6 +191,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
         isAutoDimEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isAutoDimEnabled
         ) ?? true
+        autoDimBrightness = try container.decodeIfPresent(
+            Double.self, forKey: .autoDimBrightness
+        ) ?? 0.1
         isPlaceNameLookupEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isPlaceNameLookupEnabled
         ) ?? true

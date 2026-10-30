@@ -28,7 +28,8 @@ struct SettingsFeatureTests {
         cadenceZones: CadenceZoneBoundaries = .default,
         bleCSCClient: BLECSCClient = .testValue,
         healthKitClient: HealthKitClient = .testValue,
-        liveActivityClient: LiveActivityClient = .testValue
+        liveActivityClient: LiveActivityClient = .testValue,
+        screenClient: ScreenClient = .testValue
     ) -> TestStoreOf<SettingsFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -47,6 +48,7 @@ struct SettingsFeatureTests {
                 $0.bleCSCClient = bleCSCClient
                 $0.healthKitClient = healthKitClient
                 $0.liveActivityClient = liveActivityClient
+                $0.screenClient = screenClient
                 $0.date = .constant(Date(timeIntervalSince1970: 1_800_000_000))
                 $0.defaultFileStorage = storage
             }
@@ -169,6 +171,86 @@ struct SettingsFeatureTests {
             $0.$preferences.withLock { $0.isAutoDimEnabled = true }
         }
         #expect(store.state.isAutoDimEnabled)
+    }
+
+    // MARK: - Auto-dim level (#471)
+
+    /// A `ScreenClient` reporting the rider's backlight as `brightness` and recording every write.
+    private func backlightClient(brightness: Double, writes: LockIsolated<[Double]>) -> ScreenClient {
+        var client = ScreenClient.testValue
+        client.brightness = { brightness }
+        client.setBrightness = { level in writes.withValue { $0.append(level) } }
+        return client
+    }
+
+    @Test("The dim level persists, and moving it outside a drag leaves the backlight alone")
+    func autoDimBrightnessPersists() async {
+        let writes = LockIsolated<[Double]>([])
+        let store = makeStore(screenClient: backlightClient(brightness: 0.8, writes: writes))
+        #expect(store.state.autoDimBrightness == 0.1)
+
+        await store.send(.autoDimBrightnessChanged(0.3)) {
+            $0.$preferences.withLock { $0.autoDimBrightness = 0.3 }
+        }
+        #expect(writes.value.isEmpty)
+    }
+
+    /// A drag shows the dim on the real backlight, through the same clamp a ride's dim uses,
+    /// follows the slider, and gives the rider's own level back when it ends.
+    @Test("Dragging previews the dim and the end restores the rider's brightness")
+    func dragPreviewsAndRestores() async {
+        let writes = LockIsolated<[Double]>([])
+        let store = makeStore(screenClient: backlightClient(brightness: 0.8, writes: writes))
+
+        await store.send(.dimPreviewBegan)
+        await store.receive(\.dimPreviewBrightnessCaptured) { $0.dimPreviewRestoreBrightness = 0.8 }
+        await store.send(.autoDimBrightnessChanged(0.4)) {
+            $0.$preferences.withLock { $0.autoDimBrightness = 0.4 }
+        }
+        await store.send(.dimPreviewEnded) { $0.dimPreviewRestoreBrightness = nil }
+        await store.finish()
+
+        #expect(writes.value == [0.1, 0.4, 0.8])
+    }
+
+    /// As a ride's dim (`AppScreenPowerTests.dimNeverBrightens`): a rider darker than the
+    /// level isn't brightened by the preview either.
+    @Test("The preview never brightens a rider already below the level")
+    func previewNeverBrightens() async {
+        let writes = LockIsolated<[Double]>([])
+        let store = makeStore(screenClient: backlightClient(brightness: 0.05, writes: writes))
+
+        await store.send(.dimPreviewBegan)
+        await store.receive(\.dimPreviewBrightnessCaptured) { $0.dimPreviewRestoreBrightness = 0.05 }
+        await store.send(.autoDimBrightnessChanged(0.3)) {
+            $0.$preferences.withLock { $0.autoDimBrightness = 0.3 }
+        }
+        await store.send(.dimPreviewEnded) { $0.dimPreviewRestoreBrightness = nil }
+        await store.finish()
+
+        #expect(writes.value == [0.05, 0.05, 0.05])
+    }
+
+    /// The backlight read is async. A drag ending before it lands cancels it, so no preview
+    /// starts after its drag, and with nothing to restore the end writes nothing.
+    @Test("A drag that ends before the backlight read never dims")
+    func endBeforeCaptureNeverDims() async {
+        let writes = LockIsolated<[Double]>([])
+        var client = backlightClient(brightness: 0.8, writes: writes)
+        // A read that hasn't landed when the drag ends. Cancelling the effect ends the sleep,
+        // and a cancelled effect's send is dropped.
+        client.brightness = {
+            try? await Task.sleep(for: .seconds(60))
+            return 0.8
+        }
+        let store = makeStore(screenClient: client)
+
+        await store.send(.dimPreviewBegan)
+        await store.send(.dimPreviewEnded)
+        await store.finish()
+
+        #expect(store.state.dimPreviewRestoreBrightness == nil)
+        #expect(writes.value.isEmpty)
     }
 
     /// Read by S10 off the same document when it names a ride (#283).

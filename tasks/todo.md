@@ -1340,3 +1340,32 @@ Placement follows the Design.sketch `Sxx - Route overlay` frame, group **sensor 
 - [x] Run after the latch: SensorHealth, RideEnd, RideSensorsSheet (incl. `autoEndClosesSensorsSheet`), VoiceOver,
       DashboardEdit and both Sensors snapshot suites: 52/52, the new tests present
 - Not run: tests after the review's fixes (built only)
+
+---
+
+# #471 — Auto-dim brightness slider (S12)
+
+Plan: `~/.claude/plans/wiggly-finding-phoenix.md`. Brian chose: the slider sets the dimmed brightness (0–50%,
+default 10%, sun icons), and dragging previews it on the real backlight.
+
+- [x] `AppPreferences.autoDimBrightness` (+ decode fallback 0.1, range, shared `dimmedBrightness(from:)` clamp)
+- [x] `AppFeature` dims to the preference; `AppFeature.dimBrightness` removed; leaving the app ends a S12 preview
+- [x] `SettingsFeature` preview: capture → clamped write per tick → restore on end; the read is cancelled if the drag
+      ends first; the restore isn't cancellable (a fresh drag would otherwise capture the dim as the rider's level)
+- [x] `SettingsView` slider row under the toggle (bare `if`), `onDisappear` backstop, "Auto-dim off" preview
+- [x] Tests: SettingsFeature (4 new), AppScreenPower (`dimUsesChosenLevel`, backgrounding receives the preview end),
+      AppPreferences (round-trip + legacy decode)
+- [x] `UX.md` §S12 row + Auto-dim paragraph
+- [x] Brian runs it on device (the simulator's brightness doesn't move): "works good on initial go"
+- [x] Re-record `SettingsSnapshotTests` (General gains the row), compare against main, add `autoDimOff`
+
+## Review
+
+- [x] Targeted run: SettingsFeature, AppScreenPower, AppPreferences, LiveActivityFeature, CadenceZone: all green, every
+      new test present
+- [x] Snapshots: all 14 re-recorded + `autoDimOff` (light/dark). Pixel-compared with main: `autoDimOff` differs from
+      main's `default` only in the Auto-dim switch; every other reference gains one 61 pt row (183 px), with the content
+      below shifted by exactly that and the HR Zones header gap unchanged. The only other differences are glyph
+      anti-aliasing inside unmoved text
+- [x] Full `CyclometerTests` locally without `PersistenceClientTests` (MapKit deadlock): 2340 passed; then
+      `PersistenceClientTests` alone: green

@@ -15,6 +15,8 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .task { await store.send(.task).finish() }
+        // A dim preview the slider never ended gives the rider's brightness back (#471).
+        .onDisappear { store.send(.dimPreviewEnded) }
     }
 }
 
@@ -55,6 +57,22 @@ private struct GeneralSection: View {
                 Text("Also resumes a ride you paused yourself. Walking the bike counts as moving.")
             }
             Toggle("Auto-dim", isOn: $store.isAutoDimEnabled.sending(\.autoDimChanged))
+            if store.isAutoDimEnabled {
+                // The level the dim drops to (#471). Dragging shows it on the real backlight.
+                Slider(
+                    value: $store.autoDimBrightness.sending(\.autoDimBrightnessChanged),
+                    in: AppPreferences.autoDimBrightnessRange
+                ) {
+                    Text("Dimmed Brightness")
+                } minimumValueLabel: {
+                    Image(systemName: "sun.min")
+                } maximumValueLabel: {
+                    Image(systemName: "sun.max")
+                } onEditingChanged: { isEditing in
+                    store.send(isEditing ? .dimPreviewBegan : .dimPreviewEnded)
+                }
+                .accessibilityValue(store.autoDimBrightness.formatted(.percent.precision(.fractionLength(0))))
+            }
             Toggle("Place Names", isOn: $store.isPlaceNameLookupEnabled.sending(\.placeNameLookupChanged))
             // Off in iOS Settings, the rider's own choice is kept but can't take effect, and the
             // row says why (#313), in the label's subtitle like Resume When Moving's.
@@ -191,9 +209,11 @@ private struct PrivacyPolicyView: View {
 // MARK: - Previews
 
 // HealthKit and ActivityKit are stubbed: neither has a `previewValue`, and `.task` reads both.
-// The CSC client is too: committing a circumference pushes it to the sensor.
+// The CSC client is too: committing a circumference pushes it to the sensor. And the screen
+// client: dragging the Auto-dim slider sets the backlight.
 private func previewStore(
     isSystemLiveActivityEnabled: Bool = true,
+    isAutoDimEnabled: Bool = true,
     isCustomWheel: Bool = false,
     customCircumferenceDraft: String? = nil,
     restingOverrideDraft: String? = nil,
@@ -201,6 +221,7 @@ private func previewStore(
 ) -> StoreOf<SettingsFeature> {
     var state = SettingsFeature.State()
     state.isSystemLiveActivityEnabled = isSystemLiveActivityEnabled
+    state.$preferences.withLock { $0.isAutoDimEnabled = isAutoDimEnabled }
     state.userChoseCustom = isCustomWheel
     state.customCircumferenceDraft = customCircumferenceDraft
     state.restingOverrideDraft = restingOverrideDraft
@@ -213,6 +234,7 @@ private func previewStore(
         var liveActivity = LiveActivityClient.testValue
         liveActivity.isEnabled = { isSystemLiveActivityEnabled }
         $0.liveActivityClient = liveActivity
+        $0.screenClient = .testValue
     }
 }
 
@@ -222,6 +244,10 @@ private func previewStore(
 
 #Preview("Live Activities off in iOS") {
     NavigationStack { SettingsView(store: previewStore(isSystemLiveActivityEnabled: false)) }
+}
+
+#Preview("Auto-dim off") {
+    NavigationStack { SettingsView(store: previewStore(isAutoDimEnabled: false)) }
 }
 
 #Preview("Custom wheel size") {
