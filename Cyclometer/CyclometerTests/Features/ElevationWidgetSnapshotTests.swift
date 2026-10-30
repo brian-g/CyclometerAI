@@ -29,22 +29,22 @@ final class ElevationWidgetSnapshotTests: XCTestCase {
     // MARK: - 1×1
 
     func testAscentMetric() {
-        assertSnapshot(of: make(ElevationTotalWidget(title: "Ascent", meters: 412, unit: .metric), width: 196),
+        assertSnapshot(of: make(ElevationTotalWidget(title: "Ascent", symbol: "arrow.up.forward", meters: 412, unit: .metric), width: 196),
                        as: .image(layout: oneByOne))
     }
 
     func testAscentImperial() {
-        assertSnapshot(of: make(ElevationTotalWidget(title: "Ascent", meters: 412, unit: .imperial), width: 196),
+        assertSnapshot(of: make(ElevationTotalWidget(title: "Ascent", symbol: "arrow.up.forward", meters: 412, unit: .imperial), width: 196),
                        as: .image(layout: oneByOne))
     }
 
     func testDescentRideStart() {
-        assertSnapshot(of: make(ElevationTotalWidget(title: "Descent", meters: 0, unit: .metric), width: 196),
+        assertSnapshot(of: make(ElevationTotalWidget(title: "Descent", symbol: "arrow.down.forward", meters: 0, unit: .metric), width: 196),
                        as: .image(layout: oneByOne))
     }
 
     func testAscentDark() {
-        assertDark(ElevationTotalWidget(title: "Ascent", meters: 412, unit: .metric), width: 196, layout: oneByOne)
+        assertDark(ElevationTotalWidget(title: "Ascent", symbol: "arrow.up.forward", meters: 412, unit: .metric), width: 196, layout: oneByOne)
     }
 
     func testGradeClimb() {

@@ -30,6 +30,7 @@ struct DistanceRemainingWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .widgetSymbol("point.bottomleft.forward.to.arrow.triangle.scurvepath")
         .background(Color.cyBgSecondary)
         .widgetDetail(label: DistanceRemainingDashboardWidget.title, value: accessibilityValue, detail)
     }

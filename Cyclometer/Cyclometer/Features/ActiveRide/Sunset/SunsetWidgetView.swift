@@ -22,13 +22,7 @@ struct SunsetWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        // Marks the card at a glance, whatever it reads, so it is drawn in every state.
-        .overlay(alignment: .bottomTrailing) {
-            Image(systemName: "sunset.fill")
-                .font(.title2)
-                .foregroundStyle(Color.cyTextSecondary)
-                .padding(Spacing.sm)
-        }
+        .widgetSymbol("sunset.fill")
         .background(Color.cyBgSecondary)
         .widgetDetail(label: SunsetDashboardWidget.title, value: accessibilityValue, detail)
     }

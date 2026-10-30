@@ -20,6 +20,7 @@ struct DistanceWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .widgetSymbol("ruler")
         .background(Color.cyBgSecondary)
         .widgetDetail(label: DistanceDashboardWidget.title, value: unit.spokenDistance(fromMeters: distance)) {
             RideMetricsSheet(metrics: metrics)

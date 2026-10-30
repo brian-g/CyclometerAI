@@ -56,6 +56,7 @@ struct CadenceWidget: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .widgetSymbol(size == .oneByOne ? "tire" : nil)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: CadenceDashboardWidget.title, value: accessibilityValue) {
             CadenceDetailSheet(

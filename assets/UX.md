@@ -191,6 +191,28 @@ Widget sizes are expressed as **WxH** (width × height) in grid units. The dashb
 
 This convention matches the frame naming in `Design.sketch`.
 
+### Widget Symbol Convention
+
+A 1x1 widget carries an SF Symbol in its lower right (#491): `title2`, `textSecondary`, inset `sm` as the label. It marks the card at a glance, so it is drawn in every state, empty ones included. VoiceOver doesn't read it. A widget that also comes in larger sizes draws it at 1x1 only.
+
+| Widget | Symbol |
+|---|---|
+| W1 Speed | `gauge.open.with.lines.needle.33percent` |
+| W3 Duration | `stopwatch` |
+| W4 Heart Rate | `heart.fill` |
+| W5 Cadence | `tire` |
+| W6 Distance | `ruler` |
+| W11 Pace | `hare.fill` |
+| W14 Ascent | `arrow.up.forward` |
+| W15 Descent | `arrow.down.forward` |
+| W16 Grade | `mountain.2` |
+| W19 Distance Remaining | `point.bottomleft.forward.to.arrow.triangle.scurvepath` |
+| W20 ETA | `alarm` |
+| W21 Sunset | `sunset.fill` |
+| W23 Active Calories | `bolt.fill` |
+
+W9 Directions has none: its turn arrow already marks it. W2 Average Speed and W12 HR Zones have none yet, until a suitable symbol is found.
+
 ### Safe Area Handling
 - [x] Dynamic Island behavior on active ride dashboard. If the map is at the top or at the bottom in a 2x2 configuration, the map will bleed into the safe area.
 - [x] Home indicator avoidance on metric tiles
@@ -853,7 +875,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 **Sizes:** 1x1
 
 - Label "TO SUNSET". Value: hours and minutes until today's sunset where the rider is, as h:mm: "1:12", and "0:08" under an hour (#462). Medium hero, no unit
-- The SF Symbol `sunset.fill` in the lower right, `title2`, `textSecondary`, inset `sm` as the label: it marks the card at a glance, so it is drawn in every state. VoiceOver doesn't read it
+- The SF Symbol `sunset.fill` in the lower right (Widget Symbol Convention)
 - Worked out on the device from the latest fix and the date by NOAA's solar-position algorithm (zenith 90.833°, no elevation), to the minute as NOAA publishes it — no network, no WeatherKit. The fix is retaken at most once a minute
 - The countdown turns over on the clock's minute and never reads 0:00: it reads 0:01 in the minute before sunset, and "—" from sunset's minute. "Today" is the device's calendar day, so midnight starts the next day's countdown, and a time-zone change moves it. A sunset after midnight (Reykjavik's, near midsummer) still counts as the day before's while it is ahead
 - "—" with no fix yet, after sunset, and with no sunset that day (polar day or night)
@@ -882,7 +904,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 **Sizes:** 1x1
 
 - Label "ACTIVE CALORIES". Value: the ride's active energy so far, in whole kcal (#465). Medium hero, unit "kcal"
-- The SF Symbol `bolt.fill` in the lower right, `title2`, `textSecondary`, inset `sm` as the label, as W21's: drawn in every state. VoiceOver doesn't read it
+- The SF Symbol `bolt.fill` in the lower right (Widget Symbol Convention)
 - The estimate is §S10's active energy (#276): `RideEnergy.activeKilocalories` over the track recorded so far, with the rider's body mass, date of birth and sex read from Health once at the start. Recomputed once a minute of recording time, so the ride's last value is the one written to its Health workout, and there is no second calorie model
 - The model moves from physics to heart rate once a strap's readings cover half the moving time, so the series can step there. Earlier minutes keep the value they were computed with
 - A pause holds the value; it goes on after the resume. A ride resumed after a kill rebuilds its earlier minutes from its saved track; if that track is empty or can't be read, the series starts at the resume

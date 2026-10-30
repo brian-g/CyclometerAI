@@ -27,13 +27,7 @@ struct CaloriesWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        // Marks the card at a glance, whatever it reads, so it is drawn in every state — W21's.
-        .overlay(alignment: .bottomTrailing) {
-            Image(systemName: "bolt.fill")
-                .font(.title2)
-                .foregroundStyle(Color.cyTextSecondary)
-                .padding(Spacing.sm)
-        }
+        .widgetSymbol("bolt.fill")
         .background(Color.cyBgSecondary)
         .widgetDetail(label: CaloriesDashboardWidget.title, value: accessibilityValue) {
             CaloriesSheet(metrics: metrics)

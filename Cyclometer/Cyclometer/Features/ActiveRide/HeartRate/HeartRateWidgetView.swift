@@ -64,6 +64,7 @@ struct HeartRateWidget: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .widgetSymbol(size == .oneByOne ? "heart.fill" : nil)
         .background(Color.cyBgSecondary)
         .overlay(alignment: .leading) {
             Rectangle()

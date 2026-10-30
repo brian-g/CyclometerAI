@@ -35,6 +35,7 @@ struct ETAWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .widgetSymbol("alarm")
         .background(Color.cyBgSecondary)
         .widgetDetail(label: "Arrival", value: accessibilityValue, detail)
     }

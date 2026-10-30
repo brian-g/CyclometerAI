@@ -156,7 +156,7 @@ struct WidgetAccessibilityTests {
     }
 
     @Test func elevationReadsInWordsWithNoDash() {
-        #expect(ElevationTotalWidget(title: "Ascent", meters: 412, unit: .imperial).accessibilityValue == "1,352 feet")
+        #expect(ElevationTotalWidget(title: "Ascent", symbol: "arrow.up.forward", meters: 412, unit: .imperial).accessibilityValue == "1,352 feet")
         #expect(GradeWidget(percent: 4.4).accessibilityValue == "4 percent")
         #expect(GradeWidget(percent: nil).accessibilityValue == "No reading")
         #expect(ElevationWidget(altitude: nil, gradePercent: nil, history: [], unit: .metric).accessibilityValue
@@ -427,9 +427,9 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .hrZones:
             AnyView(HRZonesWidget(zone: 3, source: .bleStrap))
         case .ascent:
-            AnyView(ElevationTotalWidget(title: "Ascent", meters: 412, unit: .metric))
+            AnyView(ElevationTotalWidget(title: "Ascent", symbol: "arrow.up.forward", meters: 412, unit: .metric))
         case .descent:
-            AnyView(ElevationTotalWidget(title: "Descent", meters: 368, unit: .metric))
+            AnyView(ElevationTotalWidget(title: "Descent", symbol: "arrow.down.forward", meters: 368, unit: .metric))
         case .grade:
             AnyView(GradeWidget(percent: -3.2))
         case .elevation:

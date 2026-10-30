@@ -42,6 +42,7 @@ struct SpeedWidget: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .widgetSymbol(size == .oneByOne ? "gauge.open.with.lines.needle.33percent" : nil)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: SpeedDashboardWidget.title, value: accessibilityValue) {
             RideMetricsSheet(metrics: metrics)

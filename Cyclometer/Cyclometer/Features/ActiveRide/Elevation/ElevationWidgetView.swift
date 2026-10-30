@@ -26,6 +26,8 @@ enum Grade {
 /// W14 Ascent and W15 Descent (#387): the ride's total climb or drop. Real at zero, as distance is.
 struct ElevationTotalWidget: View {
     let title: String
+    /// W14's or W15's lower-right symbol (#491).
+    let symbol: String
     let meters: Double
     let unit: UnitSystem
     /// The Elevation sheet's data. A closure so the card never reads it; only the open sheet does,
@@ -41,6 +43,7 @@ struct ElevationTotalWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .widgetSymbol(symbol)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: title, value: accessibilityValue) {
             ElevationSheet(metrics: metrics)
@@ -66,6 +69,7 @@ struct GradeWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .widgetSymbol("mountain.2")
         .background(Color.cyBgSecondary)
         .widgetDetail(label: GradeDashboardWidget.title, value: accessibilityValue) {
             ElevationSheet(metrics: metrics)
@@ -310,7 +314,7 @@ private let previewGapHistory = Watermark.points(
 
 #Preview("W14–W16") {
     HStack(spacing: Spacing.xs) {
-        ElevationTotalWidget(title: "Ascent", meters: 412, unit: .metric)
+        ElevationTotalWidget(title: "Ascent", symbol: "arrow.up.forward", meters: 412, unit: .metric)
         GradeWidget(percent: 4.4)
     }
     .frame(height: 96)
