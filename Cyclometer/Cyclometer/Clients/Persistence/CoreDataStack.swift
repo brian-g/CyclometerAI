@@ -38,15 +38,17 @@ final class CoreDataStack {
     /// optional, needs a *new* model version (#263's `segmentIndex`, #303's optional
     /// `altitudeMeters`); changing a default value does not, since default values are
     /// not part of an entity's version hash (#211). `TimeSeriesMigrationTests` covers it.
+    ///
+    /// Nothing configures `viewContext`, deliberately: nothing reads it — every read and write
+    /// goes through a background context or a batch request — and it is a main-queue context,
+    /// so each setter called off main is a `performBlockAndWait` onto main. Tests build stacks
+    /// on the cooperative pool, and those waits once filled the pool while a MapKit teardown
+    /// on main waited on work that needed it (#480). `CoreDataStackTests` pins this.
     private static func load(_ container: NSPersistentContainer) {
         container.loadPersistentStores { _, error in
             if let error { fatalError("CoreData load failed: \(error)") }
         }
-        container.viewContext.automaticallyMergesChangesFromParent = true
-        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
     }
-
-    var viewContext: NSManagedObjectContext { container.viewContext }
 
     func newBackgroundContext() -> NSManagedObjectContext {
         container.newBackgroundContext()
