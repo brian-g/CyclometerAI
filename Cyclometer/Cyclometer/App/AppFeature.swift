@@ -14,12 +14,9 @@ struct AppFeature {
 
     /// Idle time on the dashboard before the display dims (#110). iOS exposes no
     /// public API for the system Auto-Lock interval, so this is a fixed value rather
-    /// than a mirror of it. Moves to `AppPreferences` when it becomes a rider setting.
+    /// than a mirror of it. Moves to `AppPreferences` when it becomes a rider setting,
+    /// beside the level the dim drops to (`autoDimBrightness`, #471).
     static let dimAfterSeconds = 30
-
-    /// Backlight level the dim drops to, 0…1 — the "amount to dim", and the other
-    /// half of the future `AppPreferences` pair.
-    static let dimBrightness: Double = 0.1
 
     @Dependency(\.bleCSCClient) var bleCSCClient
     @Dependency(\.variaRadarClient) var variaRadarClient
@@ -394,7 +391,8 @@ struct AppFeature {
 
             case .scenePhaseChanged(let isActive):
                 state.isForeground = isActive
-                guard isActive else { return .none }
+                // A S12 dim preview cut off by leaving the app gives the rider's brightness back (#471).
+                guard isActive else { return .send(.settings(.dimPreviewEnded)) }
                 // S12 rereads the system's Live Activities setting, which the rider may just have
                 // changed in iOS Settings (#313).
                 let settings = Effect<Action>.send(.settings(.appBecameActive))
@@ -461,11 +459,8 @@ struct AppFeature {
                 guard state.isDashboardVisible, !state.isDimmed else { return .none }
                 state.isDimmed = true
                 state.preDimBrightness = level
-                return .run { [screenClient] _ in
-                    // Clamped, so a rider already riding at 5% is left at 5% rather
-                    // than being *brightened* to the dim level.
-                    await screenClient.setBrightness(min(level, Self.dimBrightness))
-                }
+                let dimmed = state.preferences.dimmedBrightness(from: level)
+                return .run { [screenClient] _ in await screenClient.setBrightness(dimmed) }
 
             case .onboarding(.delegate(.completed)):
                 // The two preference writes happen inside `OnboardingFeature`, which owns

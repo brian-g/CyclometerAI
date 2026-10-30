@@ -46,6 +46,7 @@ final class SettingsSnapshotTests: XCTestCase {
         pairedSensors: [PairedSensor] = [],
         riderProfile profile: RiderProfile = RiderProfile(),
         isSystemLiveActivityEnabled: Bool = true,
+        isAutoDimEnabled: Bool = true,
         customCircumferenceDraft: String? = nil,
         restingOverrideDraft: String? = nil,
         maxOverrideDraft: String? = nil
@@ -64,6 +65,7 @@ final class SettingsSnapshotTests: XCTestCase {
                 $0.preferredUnit = .imperial
                 $0.wheelCircumferenceMM = wheelCircumferenceMM
                 $0.pairedSensors = pairedSensors
+                $0.isAutoDimEnabled = isAutoDimEnabled
             }
             @Shared(.riderProfile) var riderProfile
             $riderProfile.withLock { $0 = profile }
@@ -176,6 +178,11 @@ final class SettingsSnapshotTests: XCTestCase {
     /// Cadence Zones section (#79): the issue's default ranges, steppers on Z1–Z4, and Reset.
     func testSettingsFullHeight() {
         assertBothSchemes(screen(), named: "fullHeight", on: fullHeightDevice)
+    }
+
+    /// Auto-dim off: the Dimmed Brightness slider under its toggle is gone (#471).
+    func testAutoDimOff() {
+        assertBothSchemes(screen(isAutoDimEnabled: false), named: "autoDimOff")
     }
 
     /// Live Activities turned off for the app in iOS Settings (#313): the Show Live Activity

@@ -15,6 +15,9 @@ struct SettingsFeature {
     @Dependency(\.liveActivityClient) var liveActivityClient
     @Dependency(\.openURL) var openURL
     @Dependency(\.date) var date
+    @Dependency(\.screenClient) var screenClient
+
+    private enum CancelID { case dimPreview }
 
     /// One row of the S12 HR Zones table — what `SettingsView` reads to build the
     /// section. Rows 1-4 carry a working `Stepper` on that row's upper boundary;
@@ -69,16 +72,22 @@ struct SettingsFeature {
         /// whenever the app comes forward, since the rider changes it in iOS Settings. Starts
         /// true so the explainer doesn't flash before the first read.
         var isSystemLiveActivityEnabled = true
+        /// The rider's own backlight level while the Auto-dim slider is being dragged (#471),
+        /// captured when the drag starts and given back when it ends. Non-nil means the
+        /// backlight is showing the dim.
+        var dimPreviewRestoreBrightness: Double? = nil
 
         /// Read through to storage rather than mirrored in feature state: both have
         /// to survive a relaunch, and `preferredUnit` also has to agree with whatever
         /// `ActiveRideFeature` eventually reads (#8). `isAutoDimEnabled` is read by
-        /// `AppFeature`, which runs the dim countdown, off the same document (#110).
+        /// `AppFeature`, which runs the dim countdown, off the same document (#110), as is
+        /// `autoDimBrightness` (#471).
         var preferredUnit: UnitSystem { preferences.preferredUnit }
         var isAutoPauseEnabled: Bool { preferences.isAutoPauseEnabled }
         /// Read by `ActiveRideFeature` on every speed reading (#267).
         var isResumeWhenMovingEnabled: Bool { preferences.isResumeWhenMovingEnabled }
         var isAutoDimEnabled: Bool { preferences.isAutoDimEnabled }
+        var autoDimBrightness: Double { preferences.autoDimBrightness }
         /// Read by S10 when it names a ride (#283).
         var isPlaceNameLookupEnabled: Bool { preferences.isPlaceNameLookupEnabled }
         /// Read by `LiveActivityFeature` (#313).
@@ -192,6 +201,12 @@ struct SettingsFeature {
         case autoPauseChanged(Bool)
         case resumeWhenMovingChanged(Bool)
         case autoDimChanged(Bool)
+        case autoDimBrightnessChanged(Double)
+        /// The Auto-dim slider's drag starting and ending (#471). While it runs, the backlight
+        /// shows the dim the slider's level would give.
+        case dimPreviewBegan
+        case dimPreviewBrightnessCaptured(Double)
+        case dimPreviewEnded
         case placeNameLookupChanged(Bool)
         case liveActivityChanged(Bool)
         case liveActivitySettingsTapped
@@ -273,6 +288,34 @@ struct SettingsFeature {
             case .autoDimChanged(let isOn):
                 state.$preferences.withLock { $0.isAutoDimEnabled = isOn }
                 return .none
+            case .autoDimBrightnessChanged(let level):
+                state.$preferences.withLock { $0.autoDimBrightness = level }
+                guard let restore = state.dimPreviewRestoreBrightness else { return .none }
+                return setPreviewBrightness(state.preferences.dimmedBrightness(from: restore))
+            case .dimPreviewBegan:
+                // As `AppFeature`'s dim: the read is async, so the preview starts in the next
+                // action, and under the preview's ID, so a drag that ends first cancels it.
+                return .run { [screenClient] send in
+                    await send(.dimPreviewBrightnessCaptured(screenClient.brightness()))
+                }
+                .cancellable(id: CancelID.dimPreview, cancelInFlight: true)
+            case .dimPreviewBrightnessCaptured(let level):
+                guard state.dimPreviewRestoreBrightness == nil else { return .none }
+                state.dimPreviewRestoreBrightness = level
+                return setPreviewBrightness(state.preferences.dimmedBrightness(from: level))
+            case .dimPreviewEnded:
+                // A no-op when no preview is showing, so leaving the screen or the app can send it
+                // regardless. Cancels a read still in flight, so a preview never starts after its drag.
+                guard let restore = state.dimPreviewRestoreBrightness else {
+                    return .cancel(id: CancelID.dimPreview)
+                }
+                state.dimPreviewRestoreBrightness = nil
+                // The restore itself isn't cancellable: a drag starting straight after would
+                // cancel it, then capture the dim as the rider's own level.
+                return .merge(
+                    .cancel(id: CancelID.dimPreview),
+                    .run { [screenClient] _ in await screenClient.setBrightness(restore) }
+                )
             case .placeNameLookupChanged(let isOn):
                 state.$preferences.withLock { $0.isPlaceNameLookupEnabled = isOn }
                 return .none
@@ -357,6 +400,13 @@ struct SettingsFeature {
     /// Single funnel for every circumference change — persisting and pushing to
     /// the CSC client happen together so the stored value and the value driving
     /// the speed derivation cannot drift apart.
+    /// Under the preview's ID with `cancelInFlight`, so an earlier slider tick's write that
+    /// hasn't run yet is dropped rather than racing the later one.
+    private func setPreviewBrightness(_ level: Double) -> Effect<Action> {
+        .run { [screenClient] _ in await screenClient.setBrightness(level) }
+            .cancellable(id: CancelID.dimPreview, cancelInFlight: true)
+    }
+
     private func apply(_ mm: Int, to state: inout State) -> Effect<Action> {
         state.$preferences.withLock { $0.wheelCircumferenceMM = mm }
         state.customCircumferenceDraft = nil

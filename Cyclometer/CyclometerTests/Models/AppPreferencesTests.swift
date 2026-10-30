@@ -76,6 +76,8 @@ struct AppPreferencesTests {
         var preferences = AppPreferences()
         preferences.wheelCircumferenceMM = 2155
         preferences.isAutoDimEnabled = false
+        // Added by #471.
+        preferences.autoDimBrightness = 0.3
         preferences.isAutoPauseEnabled = false
         // Added by #267, default false.
         preferences.isResumeWhenMovingEnabled = true
@@ -121,6 +123,8 @@ struct AppPreferencesTests {
         #expect(decoded.pairedSensors.isEmpty)
         // Added by #110, so an older document has no key — auto-dim starts on.
         #expect(decoded.isAutoDimEnabled)
+        // Added by #471; dims to #110's fixed 10%.
+        #expect(decoded.autoDimBrightness == 0.1)
         // Added by #94, likewise absent from an older document.
         #expect(decoded.isAutoPauseEnabled)
         // Added by #267; motion resumes only auto-pauses, as before.
