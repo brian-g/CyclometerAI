@@ -1494,3 +1494,32 @@ buffer after a pause, which now writes it out (it now counts written + buffered 
 test expects 3 attempts (pause, ride end, its retry). The fail-once test now fails the first two, so the ride end's
 retry is still what it exercises. Full `CyclometerTests`: 2,104 passed, 0 failed. The first CI fix ran only the suites
 I expected to be touched and missed this one.
+## #503 — A ride resumed after a kill redraws its saved track on the map
+
+Cause: `State(resuming:)` leaves `trackSegments` at `[[]]` by design ("a resumed ride redraws its map from empty"),
+though `seedFromSavedTrack` already fetches every saved `TrackPoint` on resume for elevation, HR and W23.
+
+- [x] Branch `503-resumed-ride-redraws-saved-track` from `main` (#505 is on its own branch, PR #507).
+- [x] `seedFromSavedTrack(rideId:resumedAt:)`: from the points it already fetches, keep those timestamped before the
+      resume (`.task`'s `startedAt`) — exactly the pre-kill track; any flushed since the resume are already drawn —
+      split them with `TrackPointDTO.segments(of:)`, drop empty ones, send `.trackSegmentsSeeded([[Coordinate]])`.
+- [x] `.trackSegmentsSeeded`: `trackSegments = seeded + trackSegments`, so live fixes that landed first stay after.
+      The kill gap stays a break: the live segment has its own index (active resume bumps it; a paused resume's
+      live segment is empty until `resume()` opens the next).
+- [x] Update the `trackSegments` / `trackSegmentIndex` doc comments that describe the empty redraw.
+- [x] Tests: reducer — seeded segments go in front of live ones; `RideRecordingTests` — kill-and-relaunch against
+      live persistence: the relaunched ride's `trackSegments` hold the pre-kill track, then the post-resume one;
+      a failed or empty fetch leaves `trackSegments` as the live points only.
+- [ ] Brian runs it on device (walking works): start a ride, walk, kill from the app switcher, relaunch, open the
+      map. Expected: the whole track so far, with a break at the kill.
+- [x] Then `ActiveRideFeatureTests`, `TrackSegmentTests`, `RideRecordingTests`; commit + PR.
+
+**Review.** The 14 `ActiveRideFeature*` suites, `TrackSegmentTests` and `RideRecordingTests`: 176 passed, 0 failed.
+Device check not done before the PR, at Brian's call.
+
+**Code review (`/code-review --fix`).** Fixed: the live-CoreData `receive` in `killAndRelaunchResumesRide` uses
+`effectDrainTimeout`; new `savedTrackSeedStopsAtTheResume` pins the before-the-resume filter; the failed-read test now
+draws a fix after the read; two stale `State(resuming:)` comments. Skipped: the wall-clock split (`timestamp <
+resumedAt`) assumes the clock doesn't step back across a kill — splitting by segment index instead loses points when a
+resume's checkpoint write fails, so it stays a design call; reusing `RideMapThumbnail.drawableSegments` (different
+types). Review's run: `TrackSegmentTests` + the two `RideRecordingTests` cases, 11 passed, 0 failed.

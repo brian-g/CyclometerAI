@@ -364,13 +364,14 @@ struct ActiveRideFeature {
         /// The recorded track, one sub-array per continuous stretch of riding (#263).
         /// A pause ends the current segment and a resume opens the next, so the map draws
         /// a break where the rider stopped instead of a straight chord across it. Never
-        /// empty: there is always a segment in progress to append to.
+        /// empty: there is always a segment in progress to append to. A ride resumed after a
+        /// kill gets the segments from before it back from its saved track (#503).
         var trackSegments: [[Coordinate]] = [[]]
         /// Which segment `makeTrackPoint` stamps onto the points it records: how many times
         /// this ride has been resumed. Its own field rather than `trackSegments.count - 1`
         /// because it is the half that survives a kill (`Ride.trackSegmentIndex`) — the
-        /// coordinates are transient and a resumed ride redraws its map from empty, so
-        /// after a resume the two deliberately disagree.
+        /// coordinates are transient, and a resumed ride's map is rebuilt from the saved track,
+        /// which holds only the segments that recorded a point — so the two can disagree.
         var trackSegmentIndex: Int = 0
         /// The barometer where there is one, GPS where there isn't (#387): what `altitude` reads.
         var altitudeResolver = AltitudeResolver()
@@ -512,6 +513,8 @@ struct ActiveRideFeature {
         case elevationSeeded(ElevationTracker.Seed)
         /// A resumed ride's seconds at each bpm before the kill, from its saved track (#393).
         case heartRateSeeded([Int: Int])
+        /// A resumed ride's map before the kill, from its saved track (#503).
+        case trackSegmentsSeeded([[Coordinate]])
         /// Health's rider for W23, nil without a body mass (#465).
         case energyRiderFetched(RideEnergy.Rider?)
         /// One minute's estimate (#465).
@@ -655,7 +658,7 @@ struct ActiveRideFeature {
                         // A stream that never gave a reading leaves GPS in charge already.
                         if hadReading { await send(.altimeterEnded) }
                     },
-                    isResuming ? seedFromSavedTrack(rideId: state.rideId) : .none
+                    isResuming ? seedFromSavedTrack(rideId: state.rideId, resumedAt: startedAt) : .none
                 )
             case .dashboardPageChanged(let page):
                 state.dashboardPage = page
@@ -1206,6 +1209,10 @@ struct ActiveRideFeature {
             case .heartRateSeeded(let secondsByBPM):
                 state.hrSecondsTally.add(secondsByBPM: secondsByBPM)
                 return .none
+            case .trackSegmentsSeeded(let savedSegments):
+                // In front: any fix that reached the map while the fetch ran came after them.
+                state.trackSegments = savedSegments + state.trackSegments
+                return .none
             case .energyRiderFetched(let rider):
                 state.energyRider = EnergyRiderStatus(rider)
                 return rebuildCaloriesIfReady(state)
@@ -1435,20 +1442,20 @@ struct ActiveRideFeature {
         state.vehiclePassTracking = [:]
     }
 
-    /// A resumed ride's elevation (#387), heart-rate seconds (#393) and track for W23 (#465) from
-    /// before the kill, read back from its saved track in one fetch. A failed read leaves each at
-    /// what the ride has done since the resume.
+    /// A resumed ride's elevation (#387), heart-rate seconds (#393), track for W23 (#465) and map
+    /// (#503) from before the kill, read back from its saved track in one fetch. A failed read leaves
+    /// each at what the ride has done since the resume.
     ///
     /// A phone with a barometer most likely recorded the track from it, and the seed counts it on
     /// the barometer's floor; GPS's coarser one would drop the short rollers the dashboard already
     /// counted, and Ascent would go down across the resume.
-    private func seedFromSavedTrack(rideId: UUID) -> Effect<Action> {
+    private func seedFromSavedTrack(rideId: UUID, resumedAt: Date) -> Effect<Action> {
         .run { [persistenceClient, altimeterClient] send in
             let points: [TrackPointDTO]
             do {
                 points = try await persistenceClient.fetchTrackPoints(rideId)
             } catch {
-                logger.error("Reading ride \(rideId, privacy: .public)'s saved track on resume failed: \(error.localizedDescription, privacy: .public) — Ascent, HR time in zone and active calories count from the resume")
+                logger.error("Reading ride \(rideId, privacy: .public)'s saved track on resume failed: \(error.localizedDescription, privacy: .public) — the map, Ascent, HR time in zone and active calories count from the resume")
                 // W23 starts its series at the resume rather than waiting for a track that won't come.
                 await send(.calorieTrackSeeded([]))
                 return
@@ -1460,6 +1467,13 @@ struct ActiveRideFeature {
             let secondsByBPM = RideDetailSeries.secondsByBPM(points)
             if !secondsByBPM.isEmpty {
                 await send(.heartRateSeeded(secondsByBPM))
+            }
+            // Only the points from before the resume: any flushed since are already on the map.
+            let savedSegments = TrackPointDTO.segments(of: points.filter { $0.timestamp < resumedAt })
+                .filter { !$0.isEmpty }
+                .map { $0.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) } }
+            if !savedSegments.isEmpty {
+                await send(.trackSegmentsSeeded(savedSegments))
             }
             await send(.calorieTrackSeeded(points))
         }
@@ -1615,8 +1629,9 @@ extension ActiveRideFeature.State {
     /// checkpoint (#175, `PersistenceClient.fetchResumableRide`). Transient
     /// UI/sensor fields (coordinate, trackSegments, radar/BLE connection state,
     /// etc.) are left at `State()`'s defaults — `.task`'s existing scan/reconnect
-    /// effects repopulate those naturally, same as a fresh ride; rebuilding them is
-    /// explicitly out of scope for #175.
+    /// effects repopulate those naturally, same as a fresh ride, and its read of the
+    /// saved track puts the map's segments from before the kill back (#503); rebuilding
+    /// them was explicitly out of scope for #175.
     ///
     /// An extension initializer rather than one declared inside `State` itself —
     /// the latter would suppress the synthesized memberwise initializer that every
@@ -1644,10 +1659,10 @@ extension ActiveRideFeature.State {
         // field here — worst case, the auto-pause/auto-end grace period runs a
         // little longer than it would have, never a little shorter.
         zeroSpeedSeconds = summary.zeroSpeedSeconds
-        // The coordinates themselves are transient and are not restored (see above), but
-        // the *index* has to be: resuming at 0 would stamp the rest of the ride with the
-        // first segment's index, and the export would merge every earlier stretch of riding
-        // into the last one.
+        // The coordinates aren't restored here — `.task` reads them back from the saved
+        // track (#503) — but the *index* has to be: resuming at 0 would stamp the rest of
+        // the ride with the first segment's index, and the export would merge every earlier
+        // stretch of riding into the last one.
         //
         // And a ride that comes back `.active` continues into the *next* segment, not the
         // one it was killed in. The app was not running for the gap, so no points exist for
