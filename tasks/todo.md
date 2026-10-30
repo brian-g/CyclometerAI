@@ -1380,7 +1380,7 @@ Root cause (from code + the issue's samples): `CoreDataStack.load` sets `automat
 persistence test parks a pool thread on main. Nothing reads `viewContext` — every read and write goes through
 `newBackgroundContext()` or batch requests, and `batchDeleteTrackPoints` documents that nothing merges into it — so
 the configuration is dead code that only costs the hop. `.shared` pays it too, from whichever thread first resolves
-`\.persistence`.
+`\.persistenceClient`.
 
 - [x] Regression test first: a `@MainActor` test builds `CoreDataStack(inMemory: true)` on a separate thread while
       main waits on a semaphore. On main's code it failed at the timeout (5.008 s), so the build waits for main.
@@ -1410,13 +1410,13 @@ the configuration is dead code that only costs the hop. `.shared` pays it too, f
   `PersistenceClientTests` (six, MapKit suites included) completed. So it's waiting on a worker thread that the 18 blocked pool threads keep from
   running, whether that's a Swift concurrency job or a GCD worker under the same thread limit.
 - **The fix under the same load.** Three loaded full runs on the fix: none showed the signature (sampled each time
-  the log went quiet). Two completed green (2,102 passed). The third was killed after an hour, with 2,100 cases
+  the log went quiet). Two completed green (2,389 cases passed). The third was killed after an hour, with 2,388 cases
   passed: the one still in flight was `PermissionsClientTests/liveHealthStatus()`.
 - **Found, not fixed (1): the load starves HealthKit.** `liveHealthStatus()` asks the simulator's HealthKit for a
   status. Unloaded it takes 2.7–5.6 s; with every core busy it took 351 s, 1,318 s, and over an hour. It hit main's
   second loaded run too, so it isn't from this change. It only shows under artificial load.
-- **Plain full runs on the fix, back to back:** 1) 2,100 passed, 0 failed; 2) completed, with 1 failure; 3) 2,102
-  passed, 0 failed. None hung.
+- **Plain full runs on the fix, back to back:** 1) 2,389 passed, 0 failed; 2) 2,388 passed, 1 failed; 3) 2,389
+  passed, 0 failed (cases, counted across split log lines, as the 2340 above). None hung.
 - **Found, not fixed (2): `LiveActivityFeatureTests/settingOffWhileStartingSendsNothingMore()` is flaky.** It
   failed once (plain run 2): "nothing after the start, got [start, end]". The test assumes the setting's `end` is
   recorded before the delayed `start` resumes, but its own comment says the recording client doesn't queue, so the

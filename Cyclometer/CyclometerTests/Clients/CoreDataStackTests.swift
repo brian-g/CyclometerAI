@@ -12,15 +12,19 @@ struct CoreDataStackTests {
 
     /// Main is held for the whole build, as the MapKit teardown held it. A stack that needs
     /// main can't finish until the wait times out, however long that is, so the timeout is
-    /// generous: a build alongside the rest of the suite has taken ~2 s.
+    /// generous: alongside the rest of the suite this case has taken 1.8–7.6 s. The build runs
+    /// at main's QoS because a semaphore doesn't donate priority, and every other suite is
+    /// stalled on main until it finishes.
     @MainActor
     @Test("building a stack off the main thread doesn't wait on main")
     func buildsWithoutMainThread() {
         let built = DispatchSemaphore(value: 0)
-        Thread {
+        let builder = Thread {
             _ = CoreDataStack(inMemory: true)
             built.signal()
-        }.start()
+        }
+        builder.qualityOfService = .userInteractive
+        builder.start()
         #expect(built.wait(timeout: .now() + 30) == .success)
     }
 }
