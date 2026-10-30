@@ -1372,6 +1372,37 @@ default 10%, sun icons), and dragging previews it on the real backlight.
 
 ---
 
+# #491 — Symbols in the lower right of 1×1 widgets
+
+The issue's list, as W21 Sunset and W23 Active Calories already do it (`UX.md` §W21, §W23): an SF Symbol in the lower
+right, `title2`, `cyTextSecondary`, inset `Spacing.sm`, drawn in every state. VoiceOver doesn't read it:
+`.widgetDetail` makes the card one element with `children: .ignore`. All 12 names exist (checked against the macOS
+SF Symbols catalog).
+
+- [x] `View.widgetSymbol(_ systemName:)` in `UI/Components/WidgetSymbol/`: W21's overlay, once. W21 and W23 move onto it.
+      It takes an optional name; a multi-size widget passes nil for its other sizes. `TCA.md` §8 lists it
+- [x] Applied inside each 1×1 view, before `.background`, as W21's is: W3 `stopwatch`, W6 `ruler`, W11 `hare.fill`,
+      W14 `arrow.up.forward`, W15 `arrow.down.forward` (`ElevationTotalWidget` takes the symbol, as it takes the
+      title), W16 `mountain.2`, W19 `point.bottomleft.forward.to.arrow.triangle.scurvepath`, W20 `alarm`
+- [x] Multi-size widgets, at 1×1 only: W1 `gauge.open.with.lines.needle.33percent`, W4 `heart.fill`, W5 `tire`
+- Brian: W9 skipped (its turn arrow already marks it); W2 and W12 tabled until a suitable symbol is found; W4 and W5
+  draw it over their zone bands, to be judged on device
+- [x] `UX.md`: the corner symbol as a widget convention with the symbol per widget; §W21 and §W23 point at it
+- [x] Brian looks on device: W19 to `point.bottomleft.forward.to.arrow.triangle.scurvepath`; W6 to `ruler` (his edit)
+- [x] Snapshots: re-record the 1×1 references that move, the Add Widget catalog and the dashboard showcase pages;
+      pixel-compare with main, expecting only the lower-right corner to differ
+
+## Review
+
+- **First full run:** 44 failures, all snapshot tests of 1×1 cards, the Add Widget catalog, and Dashboard Edit chrome.
+  No 2×1/2×2 reference moved. W21's and W23's 12 references passed unchanged, so moving them onto `widgetSymbol`
+  draws exactly what their own overlays did.
+- **Re-recorded** the 11 suites with `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`: 47 PNGs. A separate run of the same
+  suites: 72 passed.
+- **Against main:** every single-card reference (588×288) differs only inside x ≥ 443, rows ≥ 185, the lower-right
+  corner. The catalog and the three Dashboard Edit references differ only at 1×1 cards' corners; opened, the 2×1
+  Cadence and W2 Average Speed carry no symbol.
+- **Final full run:** 2,101 passed, 0 failed, 11 skipped (`LiveActivityClientTests`, as on main).
 # #480 — PersistenceClientTests × MapKit deadlock
 
 Root cause (from code + the issue's samples): `CoreDataStack.load` sets `automaticallyMergesChangesFromParent` and

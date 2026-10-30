@@ -13,7 +13,7 @@ struct AscentDashboardWidget: DashboardWidget {
 
     var body: some View {
         ElevationTotalWidget(
-            title: Self.title, meters: store.elevation.ascentMeters, unit: store.unitSystem,
+            title: Self.title, symbol: "arrow.up.forward", meters: store.elevation.ascentMeters, unit: store.unitSystem,
             metrics: { store.elevationMetrics }
         )
     }
@@ -31,7 +31,7 @@ struct DescentDashboardWidget: DashboardWidget {
 
     var body: some View {
         ElevationTotalWidget(
-            title: Self.title, meters: store.elevation.descentMeters, unit: store.unitSystem,
+            title: Self.title, symbol: "arrow.down.forward", meters: store.elevation.descentMeters, unit: store.unitSystem,
             metrics: { store.elevationMetrics }
         )
     }

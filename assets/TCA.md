@@ -1042,7 +1042,7 @@ Cyclometer/
 │   ├── DesignSystem/                      // Color+Cyclometer, AppFonts, Typography,
 │   │                                      // Spacing, Opacity, WidgetSize
 │   └── Components/                        // HeroNumber, WidgetLabel, SensorListRow,
-│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, DonutChart,
+│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, WidgetSymbol, DonutChart,
 │                                          // OpenRingProgressView (S05.3 ring), …
 ├── PreviewContent/
 └── Resources/Fonts/                       // D-DIN
