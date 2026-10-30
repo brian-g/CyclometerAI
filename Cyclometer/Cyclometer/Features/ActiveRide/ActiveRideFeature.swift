@@ -1629,8 +1629,9 @@ extension ActiveRideFeature.State {
     /// checkpoint (#175, `PersistenceClient.fetchResumableRide`). Transient
     /// UI/sensor fields (coordinate, trackSegments, radar/BLE connection state,
     /// etc.) are left at `State()`'s defaults — `.task`'s existing scan/reconnect
-    /// effects repopulate those naturally, same as a fresh ride; rebuilding them is
-    /// explicitly out of scope for #175.
+    /// effects repopulate those naturally, same as a fresh ride, and its read of the
+    /// saved track puts the map's segments from before the kill back (#503); rebuilding
+    /// them was explicitly out of scope for #175.
     ///
     /// An extension initializer rather than one declared inside `State` itself —
     /// the latter would suppress the synthesized memberwise initializer that every
@@ -1658,10 +1659,10 @@ extension ActiveRideFeature.State {
         // field here — worst case, the auto-pause/auto-end grace period runs a
         // little longer than it would have, never a little shorter.
         zeroSpeedSeconds = summary.zeroSpeedSeconds
-        // The coordinates themselves are transient and are not restored (see above), but
-        // the *index* has to be: resuming at 0 would stamp the rest of the ride with the
-        // first segment's index, and the export would merge every earlier stretch of riding
-        // into the last one.
+        // The coordinates aren't restored here — `.task` reads them back from the saved
+        // track (#503) — but the *index* has to be: resuming at 0 would stamp the rest of
+        // the ride with the first segment's index, and the export would merge every earlier
+        // stretch of riding into the last one.
         //
         // And a ride that comes back `.active` continues into the *next* segment, not the
         // one it was killed in. The app was not running for the gap, so no points exist for

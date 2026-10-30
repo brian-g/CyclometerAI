@@ -27,7 +27,8 @@ struct TrackSegmentTests {
     }
 
     private func makeStore(
-        _ state: ActiveRideFeature.State
+        _ state: ActiveRideFeature.State,
+        persistenceClient: PersistenceClient = .testValue
     ) -> TestStoreOf<ActiveRideFeature> {
         let store = TestStore(initialState: state) {
             ActiveRideFeature()
@@ -38,7 +39,7 @@ struct TrackSegmentTests {
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
             $0.locationClient = .testValue
-            $0.persistenceClient = .testValue
+            $0.persistenceClient = persistenceClient
         }
         // These tests are about the track, not about the effects every pause and resume
         // already fans out — `ActiveRideFeatureTests` asserts those exhaustively.
@@ -120,6 +121,41 @@ struct TrackSegmentTests {
         await store.send(.trackSegmentsSeeded([beforePause, afterPause])) {
             $0.trackSegments = [beforePause, afterPause, [live]]
         }
+    }
+
+    /// The fetch can land after a flush since the resume, and those points are on the map
+    /// already, from the fixes they were made from (#503).
+    @Test("A resumed ride's map gets back only the saved points from before the resume")
+    func savedTrackSeedStopsAtTheResume() async {
+        let persisted = Self.persistedRide(recordingState: .active)
+        func saved(_ latitude: Double, secondsBeforeResume: TimeInterval, segment: Int) -> TrackPointDTO {
+            TrackPointDTO(
+                rideId: persisted.rideId, timestamp: Self.segmentTestDate.addingTimeInterval(-secondsBeforeResume),
+                latitude: latitude, longitude: -79.54, altitudeMeters: nil, horizontalAccuracyMeters: 5,
+                speedMPS: 6, speedSource: .gps, heartRateBPM: nil, heartRateSource: .none,
+                cadenceRPM: nil, powerWatts: nil, segmentIndex: segment
+            )
+        }
+        let track = [
+            saved(36.0831, secondsBeforeResume: 600, segment: 0),
+            saved(36.0900, secondsBeforeResume: 599, segment: 0),
+            saved(36.1046, secondsBeforeResume: 300, segment: 1),
+            // Recorded since the resume, which `.task` stamps at `segmentTestDate`.
+            saved(36.0946, secondsBeforeResume: 0, segment: 2),
+        ]
+        let store = makeStore(
+            ActiveRideFeature.State(resuming: persisted),
+            persistenceClient: .mock(trackPoints: [persisted.rideId: track])
+        )
+
+        await store.send(.task)
+        await store.receive(\.trackSegmentsSeeded)
+        #expect(store.state.trackSegments == [
+            [Coordinate(latitude: 36.0831, longitude: -79.54), Coordinate(latitude: 36.0900, longitude: -79.54)],
+            [Coordinate(latitude: 36.1046, longitude: -79.54)],
+            [],
+        ])
+        await store.skipInFlightEffects(strict: false)
     }
 
     /// Receives the next `.trackRecorder(.timerTick)` and hands back the point it carried —

@@ -188,7 +188,8 @@ struct RideRecordingTests {
         #expect(secondStore.state.recordingState == .active)
         // The map redraws the points flushed before the kill (#503), then an empty segment for
         // the resume. The unflushed ones died with the first store.
-        await secondStore.receive(\.trackSegmentsSeeded)
+        // A live CoreData read, so the drain deadline rather than `receive`'s 1 s default.
+        await secondStore.receive(\.trackSegmentsSeeded, timeout: effectDrainTimeout)
         let seeded = secondStore.state.trackSegments
         #expect(seeded.count == 2)
         #expect(!seeded[0].isEmpty && seeded[0].allSatisfy { $0 == coordinateA })
@@ -256,6 +257,12 @@ struct RideRecordingTests {
         // The failed read's own answer, sent once the fetch has thrown.
         await store.receive(\.calorieTrackSeeded)
         #expect(store.state.trackSegments == [[]])
+        let live = Coordinate(latitude: 37.0, longitude: -122.0)
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: live, altitude: 10, speed: 5, horizontalAccuracy: 5,
+            heading: 90, timestamp: Self.testDate
+        )))
+        #expect(store.state.trackSegments == [[live]])
         await store.skipInFlightEffects(strict: false)
     }
 

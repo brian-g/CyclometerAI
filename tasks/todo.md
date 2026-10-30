@@ -1488,3 +1488,10 @@ though `seedFromSavedTrack` already fetches every saved `TrackPoint` on resume f
 
 **Review.** The 14 `ActiveRideFeature*` suites, `TrackSegmentTests` and `RideRecordingTests`: 176 passed, 0 failed.
 Device check not done before the PR, at Brian's call.
+
+**Code review (`/code-review --fix`).** Fixed: the live-CoreData `receive` in `killAndRelaunchResumesRide` uses
+`effectDrainTimeout`; new `savedTrackSeedStopsAtTheResume` pins the before-the-resume filter; the failed-read test now
+draws a fix after the read; two stale `State(resuming:)` comments. Skipped: the wall-clock split (`timestamp <
+resumedAt`) assumes the clock doesn't step back across a kill — splitting by segment index instead loses points when a
+resume's checkpoint write fails, so it stays a design call; reusing `RideMapThumbnail.drawableSegments` (different
+types). Review's run: `TrackSegmentTests` + the two `RideRecordingTests` cases, 11 passed, 0 failed.
