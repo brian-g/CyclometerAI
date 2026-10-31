@@ -193,7 +193,7 @@ This convention matches the frame naming in `Design.sketch`.
 
 ### Widget Symbol Convention
 
-A 1x1 widget carries an SF Symbol in its lower right (#491): `title2`, `textSecondary`, inset `sm` as the label. It marks the card at a glance, so it is drawn in every state, empty ones included. VoiceOver doesn't read it. A widget that also comes in larger sizes draws it at 1x1 only.
+A 1x1 widget carries an SF Symbol in its lower right (#491): `footnote` (#501: `title2` was too big), `textSecondary`, inset `sm` as the label. It marks the card at a glance, so it is drawn in every state, empty ones included. VoiceOver doesn't read it. A widget that also comes in larger sizes draws it at 1x1 only.
 
 | Widget | Symbol |
 |---|---|

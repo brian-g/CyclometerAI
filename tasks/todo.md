@@ -1523,3 +1523,25 @@ draws a fix after the read; two stale `State(resuming:)` comments. Skipped: the 
 resumedAt`) assumes the clock doesn't step back across a kill — splitting by segment index instead loses points when a
 resume's checkpoint write fails, so it stays a design call; reusing `RideMapThumbnail.drawableSegments` (different
 types). Review's run: `TrackSegmentTests` + the two `RideRecordingTests` cases, 11 passed, 0 failed.
+
+---
+
+## #501 — Newly added icons to 1x1 widgets are too big
+
+The issue says "reduce the size by 80%". I read that as 80% of the current size, because cutting it to 20% would
+make the symbols unreadable at about 4 pt. `widgetSymbol(_:)` draws all of them at `.title2` (22 pt). The nearest
+Dynamic Type style is `.body` (17 pt, 77%), so it doesn't hardcode a size.
+
+- [x] Branch `501-widget-symbol-size` from `main`.
+- [x] `WidgetSymbol.swift`: `.title2` → `.body`; UX.md Widget Symbol Convention updated.
+- [x] Brian: "Go smaller" → `.subheadline` (15 pt, 68%). `.callout` (16 pt) was too small a step to notice.
+- [x] Brian: semantically a footnote → `.footnote` (13 pt, 59%).
+- [x] Brian looks at it on device.
+- [x] Re-record the 1×1 snapshot references (#500's 47 plus W21/W23's), check that only the lower-right corners
+      moved, then run the full widget snapshot suites and `AddWidgetSheet`; commit + PR.
+
+**Review.** Re-recorded 13 suites with `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`: 59 PNGs, #500's 47 plus the
+six each for W21 Sunset and W23 Active Calories. A separate verification run passed 83 tests with 0 failures. A
+pixel diff against main found one changed region in each single-widget reference, in its lower-right corner. The
+catalog has 9 regions, one for each 1×1 symbol it shows, and the edit-chrome references have one per 1×1 card.
+Nothing else moved.

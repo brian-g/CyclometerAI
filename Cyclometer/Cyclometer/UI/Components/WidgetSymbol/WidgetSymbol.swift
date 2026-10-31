@@ -9,7 +9,7 @@ extension View {
         overlay(alignment: .bottomTrailing) {
             if let systemName {
                 Image(systemName: systemName)
-                    .font(.title2)
+                    .font(.footnote)
                     .foregroundStyle(Color.cyTextSecondary)
                     .padding(Spacing.sm)
             }
