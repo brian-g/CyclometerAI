@@ -31,6 +31,48 @@ extension MapProxy {
     }
 }
 
+extension View {
+    /// Keeps `metersPerPoint` measured from the map `proxy` reads: when the map is laid out, and on
+    /// every camera frame, so the direction arrows hold their size through a pinch (#341). Applied
+    /// to the `Map` itself, on S19, S20 and the live map.
+    ///
+    /// Written only when the snapped scale changes by a step (`quantizedScale`), so panning and
+    /// following redraw nothing and a pinch redraws only as often as the arrows' size visibly
+    /// changes. A failed measurement keeps the last good scale: arrows a frame stale beat arrows
+    /// that blink out. While `isEnabled` is false nothing is measured — the live map with no route
+    /// to draw arrows on.
+    func measuresMapScale(_ proxy: MapProxy, into metersPerPoint: Binding<Double?>,
+                          isEnabled: Bool = true) -> some View {
+        modifier(MapScaleMeasurement(proxy: proxy, metersPerPoint: metersPerPoint, isEnabled: isEnabled))
+    }
+}
+
+private struct MapScaleMeasurement: ViewModifier {
+    let proxy: MapProxy
+    @Binding var metersPerPoint: Double?
+    let isEnabled: Bool
+    /// The map's size on screen: its centre is where the scale is measured.
+    @State private var mapSize = CGSize.zero
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                mapSize = size
+                measure()
+            }
+            .onMapCameraChange(frequency: .continuous) { _ in measure() }
+            .onMapCameraChange(frequency: .onEnd) { _ in measure() }
+            .onChange(of: isEnabled) { measure() }
+    }
+
+    private func measure() {
+        guard isEnabled, let measured = proxy.metersPerPoint(mapSize: mapSize),
+              measured != metersPerPoint
+        else { return }
+        metersPerPoint = measured
+    }
+}
+
 private extension RouteCoordinate {
     init(_ coordinate: CLLocationCoordinate2D) {
         self.init(latitude: coordinate.latitude, longitude: coordinate.longitude, elevationMeters: nil)

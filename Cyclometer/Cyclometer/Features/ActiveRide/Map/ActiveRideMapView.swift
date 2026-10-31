@@ -37,12 +37,10 @@ struct ActiveRideMapView: View {
     /// MapKit turns and tilts them with the camera.
     @State private var arrows = RouteDirectionMarkers.Arrows.none
     @State private var arrowBounds: RouteBounds?
-    /// The map's size on screen: its centre, where the rider is followed, is where the scale is
-    /// measured.
-    @State private var mapSize = CGSize.zero
-    /// What one screen point covers on the ground, measured from the map on every camera frame,
-    /// so the arrows hold their size through a pinch (#341). Snapped to 2 % steps, so following
-    /// without zooming writes nothing, and the track polyline is not rebuilt every frame.
+    /// What one screen point covers on the ground, measured at the map's centre, where the rider is
+    /// followed, on every camera frame, so the arrows hold their size through a pinch (#341).
+    /// Snapped to 2 % steps, so following without zooming writes nothing, and the track polyline is
+    /// not rebuilt every frame. Only while there is a route to draw arrows on.
     @State private var metersPerPoint: Double?
     @Namespace private var mapScope
 
@@ -159,13 +157,9 @@ struct ActiveRideMapView: View {
         // No default controls on either surface. The widget must have none, since a compass tap was
         // the way out of heading-up (#62); the sheet places its own column.
         .mapControls {}
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-            mapSize = size
-            measureScale(proxy)
-        }
+        .measuresMapScale(proxy, into: $metersPerPoint, isEnabled: route.count > 1)
         .onMapCameraChange(frequency: .onEnd) { context in
             camera = context.camera
-            measureScale(proxy)
             placeArrows(for: context)
             if pendingFollow != nil {
                 completeSeed()
@@ -173,25 +167,15 @@ struct ActiveRideMapView: View {
                 engage()
             }
         }
-        // Every frame, the scale, so the arrows hold their size through a pinch. And a following
-        // widget can ride a long way without the camera ever settling, so the arrows are re-placed
-        // from here once the rider leaves the viewport they were placed for. Both only while there
-        // is a route to draw arrows on.
+        // A following widget can ride a long way without the camera ever settling, so the arrows
+        // are re-placed from here once the rider leaves the viewport they were placed for — only
+        // while there is a route to draw arrows on.
         .onMapCameraChange(frequency: .continuous) { context in
             guard route.count > 1 else { return }
-            measureScale(proxy)
             if LiveMapCamera.needsArrowRefresh(camera: context.camera, placedFor: arrowBounds) {
                 placeArrows(for: context)
             }
         }
-    }
-
-    /// Writes the map's scale only when it has changed by a step (`quantizedScale`), so following
-    /// and panning redraw nothing and a pinch redraws only as often as the arrows' size visibly
-    /// changes.
-    private func measureScale(_ proxy: MapProxy) {
-        let measured = proxy.metersPerPoint(mapSize: mapSize)
-        if measured != metersPerPoint { metersPerPoint = measured }
     }
 
     /// Where the arrows go for the camera `context` reports.

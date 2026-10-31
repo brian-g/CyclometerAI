@@ -563,8 +563,6 @@ private struct RoutesMapView: View {
     /// the captured viewport with the rider's own region, changing the filter with no gesture.
     @State private var position: MapCameraPosition?
     @State private var visibleBounds: RouteBounds?
-    /// The map's size on screen: its centre is where the scale is measured.
-    @State private var mapSize = CGSize.zero
     /// What one screen point covers on the ground, measured from the map on every camera frame,
     /// so the arrows hold their size through a pinch (#341).
     @State private var metersPerPoint: Double?
@@ -646,22 +644,10 @@ private struct RoutesMapView: View {
         .mapControls {
             MapUserLocationButton(); MapCompass(); MapScaleView()
         }
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-            mapSize = size
-            measureScale(proxy)
-        }
-        .onMapCameraChange(frequency: .continuous) { _ in measureScale(proxy) }
+        .measuresMapScale(proxy, into: $metersPerPoint)
         .onMapCameraChange(frequency: .onEnd) { context in
-            measureScale(proxy)
             report(context.region)
         }
-    }
-
-    /// Writes the map's scale only when it has changed by a step (`quantizedScale`), so a pan
-    /// redraws nothing and a pinch redraws only as often as the arrows' size visibly changes.
-    private func measureScale(_ proxy: MapProxy) {
-        let measured = proxy.metersPerPoint(mapSize: mapSize)
-        if measured != metersPerPoint { metersPerPoint = measured }
     }
 
     private func placeArrows() {
