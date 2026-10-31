@@ -564,7 +564,7 @@ private struct RoutesMapView: View {
     @State private var position: MapCameraPosition?
     @State private var visibleBounds: RouteBounds?
     /// The map's width on screen, which sizes the arrows on the ground (#341).
-    @State private var mapWidth: Double?
+    @State private var mapWidth = 0.0
     @State private var restoredStoredViewport = false
     @State private var hasCenteredOnRider = false
     /// What `onAppear` framed. A late rider fix re-centres only while the camera is still

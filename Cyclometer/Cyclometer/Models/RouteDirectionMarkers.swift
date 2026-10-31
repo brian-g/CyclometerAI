@@ -116,12 +116,12 @@ enum RouteDirectionMarkers {
 
     /// The arrows to draw on a route, and the spacing they were drawn at.
     ///
-    /// The spacing comes back because it is what sizes the glyph — see
+    /// The spacing comes back because it is what sizes the arrow — see
     /// `arrowPoints(forSpacingMeters:)`. Density and size are two readings of one number, so they
     /// cannot disagree.
     struct Arrows: Equatable, Sendable {
         var placements: [Placement]
-        /// The rung the climb settled at. Per route, so it says nothing about the glyph.
+        /// The rung the climb settled at. Per route, so it says nothing about the arrow's size.
         var spacingMeters: Double
         /// How big to draw each one. Derived from the *viewport*, not from `spacingMeters`, so
         /// two routes on one screen are drawn with the same arrow even when a long one and a
@@ -200,7 +200,7 @@ enum RouteDirectionMarkers {
 
     /// The same, starting the climb at `spacingMeters` rather than at the finest rung — what a
     /// test uses to pin one rung, and what a caller with a reason to start coarse would use.
-    /// `visibleBounds` culls: off-screen arrows cost annotations for nothing.
+    /// `visibleBounds` culls: off-screen arrows cost overlays for nothing.
     ///
     /// **Too many in view is answered by climbing the ladder, not by dropping arrows.** A route
     /// that doubles back inside one viewport — a criterium lap, a switchback climb — can put far

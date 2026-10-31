@@ -62,9 +62,10 @@ enum RouteGeometry {
 
     /// The point `north` and `east` metres from `origin` — `tangentPlaneOffset` run backwards.
     ///
-    /// For offsets of metres to tens of metres, which is what it is for: the corners of a direction
-    /// arrow drawn on the map plane (#341). The radii are taken at the origin rather than at the
-    /// pair's mean latitude, which over that distance differs by far less than a centimetre.
+    /// For the corners of a direction arrow drawn on the map plane (#341): metres across at street
+    /// zoom, kilometres at S19's browsing zoom. The radii are taken at the origin rather than at the
+    /// pair's mean latitude, which over a few kilometres moves a corner by a metre or two — a
+    /// fraction of a point at the zoom that draws an arrow that big.
     static func coordinate(offsetFrom origin: RouteCoordinate, north: Double, east: Double) -> RouteCoordinate {
         let radii = metersPerRadian(atLatitude: origin.latitude)
         return RouteCoordinate(

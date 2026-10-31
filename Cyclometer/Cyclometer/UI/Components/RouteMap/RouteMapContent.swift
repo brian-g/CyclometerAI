@@ -28,8 +28,8 @@ struct RouteMapContent: MapContent {
     /// two screens.
     var visibleBounds: RouteBounds?
     /// The map's width on screen, which with `visibleBounds` sizes the arrows on the ground
-    /// (#341). Nil, before layout, means no arrows.
-    var mapWidthPoints: Double?
+    /// (#341). Zero, before layout, means no arrows.
+    var mapWidthPoints: Double = 0
     var arrowLimit: Int = RouteDirectionMarkers.targetArrowsInView
 
     /// Start and finish closer together than this is a loop, and a loop has no finish to mark.
@@ -45,8 +45,10 @@ struct RouteMapContent: MapContent {
         }
 
         if let metersPerPoint = RouteDirectionMarkers.metersPerPoint(
-            visibleBounds: visibleBounds, mapWidthPoints: mapWidthPoints ?? 0
+            visibleBounds: visibleBounds, mapWidthPoints: mapWidthPoints
         ) {
+            // Read once: `arrows` walks the whole route, and S19 draws every saved route.
+            let arrows = self.arrows
             RouteDirectionArrows(
                 placements: arrows.placements,
                 pointSize: arrows.pointSize,

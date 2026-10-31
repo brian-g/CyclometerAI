@@ -257,7 +257,7 @@ struct RouteDirectionMarkersTests {
         for bearing in [0.0, 37.0, 90.0, 215.0] {
             let vertices = triangle(bearing: bearing, size: size)
             #expect(vertices.count == 3)
-            let (tip, left, right) = (vertices[0], vertices[1], vertices[2])
+            let (tip, right, left) = (vertices[0], vertices[1], vertices[2])
             let baseMidpoint = coordinate((left.latitude + right.latitude) / 2,
                                           (left.longitude + right.longitude) / 2)
             #expect(abs(RouteGeometry.segmentMeters(from: tip, to: baseMidpoint) - size) < meterTolerance)

@@ -134,7 +134,7 @@ struct RouteDetailMap: View {
     /// What the camera shows. The arrows space themselves from it, and nil means none at all.
     @State private var visibleBounds: RouteBounds?
     /// The map's width on screen, which sizes the arrows on the ground (#341).
-    @State private var mapWidth: Double?
+    @State private var mapWidth = 0.0
 
     /// Padded and floored around the route's stored bounds, so it is ready before the polyline is.
     private var framing: MKCoordinateRegion {
