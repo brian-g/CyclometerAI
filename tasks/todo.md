@@ -1545,3 +1545,43 @@ six each for W21 Sunset and W23 Active Calories. A separate verification run pas
 pixel diff against main found one changed region in each single-widget reference, in its lower-right corner. The
 catalog has 9 regions, one for each 1×1 symbol it shows, and the edit-chrome references have one per 1×1 card.
 Nothing else moved.
+
+---
+
+## #414 — Hero numbers in the large are being clipped
+
+The snapshot named in the issue (`testCadenceOneByOneTrendUp`) is a **medium** hero (68 pt), not large. Its 6 ends in a
+hard edge at x=161 px: black to background, no anti-aliasing, while its left edge is anti-aliased. Cause: SwiftUI clips
+text to its frame, and with `.tracking(-4)` the frame counts the tracking after the last glyph too. At 68 pt D-DIN's
+right side bearing is 3.2 pt (advance 26.86, ink to 23.66), so the frame ends ~0.8 pt (2.4 px) inside the last digit.
+At 136 pt the bearing is 6.4 pt, so large doesn't clip. Small (34 pt) has no tracking.
+
+- [x] Branch `414-hero-digit-clipping` from `main`.
+- [x] `AppFonts.swift` `dDINCondensed`: where tracking applies (≥50 pt), a `TextRenderer` whose `displayPadding` lets
+      the text draw 4 pt past its trailing edge. Layout unchanged. Below 50 pt nothing changes, so the Lock Screen's
+      `Text(timerInterval:)` (small) keeps the system renderer.
+- [x] Re-record the snapshot references; pixel-diff against main.
+- [ ] Brian looks at it on device (skipped for now; he asked for the snapshots and the Lock Screen first).
+- [x] Lock Screen drive: the Live Activity's medium speed still renders.
+
+**Review.** Ran all 41 snapshot suites with `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`. 128 tests re-recorded 131
+PNGs in 20 suites; no other errors. A separate verification run passed 251 tests, and the full `CyclometerTests` run
+passed 2406 with 0 failures.
+
+Pixel diff against main:
+- The issue's `testCadenceOneByOneTrendUp`: one column (x=162, 42 px tall) changed. It was background (237) and is now
+  the 6's anti-aliased edge (85, 1, 1, 34), which mirrors its left edge. The real cut was ~1 px, not the 2.4 px I
+  estimated.
+- Most references: one narrow strip, 1–5 px wide, at the right edge of a value's last glyph; or, at ≤2 levels, nothing
+  visible (27 PNGs).
+- The large empty-state dash (`HeroNumberSnapshotTests/testEmptyState`) had lost a full 4 pt (12 px): an em dash has
+  no side bearing. It now draws at its true length and ends right above where the unit starts; they don't touch.
+- Speed 1×1/2×1 (the heroes with `minimumScaleFactor(0.5)`) have hundreds of faint anti-aliasing differences across
+  their digits. Ink runs match main to within 1 px and the unit doesn't move: the scaled glyphs rasterize slightly
+  differently through the renderer.
+- Catalog and edit-chrome references: the same changes, once per widget they draw.
+
+Lock Screen drive (throwaway XCUITest, deleted): the card draws, the elapsed timer (small, system renderer) counts,
+and the 17.9 mph speed (medium, through the renderer) has an anti-aliased right edge. The first two drives showed no
+card at all, because the sim still held an earlier drive's resumed ride and Live Activity state. A fresh install
+fixed that.

@@ -118,13 +118,29 @@ private struct DDINCapAccessory<A: View>: ViewModifier {
 
 extension View {
     /// Applies D-DIN Condensed at the given point size with appropriate tracking.
+    @ViewBuilder
     func dDINCondensed(size: CGFloat, relativeTo textStyle: Font.TextStyle = .body) -> some View {
-        let tracking: CGFloat = size >= AppFonts.dDINCondensedTrackingMinSize
-            ? AppFonts.dDINCondensedTracking
-            : 0
-        return self
-            .font(.dDINCondensed(size: size, relativeTo: textStyle))
-            .fontDesign(nil)
-            .tracking(tracking)
+        let text = font(.dDINCondensed(size: size, relativeTo: textStyle)).fontDesign(nil)
+        if size >= AppFonts.dDINCondensedTrackingMinSize {
+            text
+                .tracking(AppFonts.dDINCondensedTracking)
+                .textRenderer(TrailingOverhangRenderer(overhang: -AppFonts.dDINCondensedTracking))
+        } else {
+            text
+        }
+    }
+}
+
+/// SwiftUI clips text to its frame, and the frame counts the tracking after the last glyph too, so
+/// negative tracking ends it short of that glyph's advance. At 68 pt D-DIN leaves 3.2 pt right of a
+/// digit's ink, less than the 4 pt of tracking, so the last digit lost ~0.8 pt of its right edge
+/// (#414). The padding lets it draw there without moving anything.
+private struct TrailingOverhangRenderer: TextRenderer {
+    let overhang: CGFloat
+
+    var displayPadding: EdgeInsets { EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: overhang) }
+
+    func draw(layout: Text.Layout, in ctx: inout GraphicsContext) {
+        for line in layout { ctx.draw(line) }
     }
 }
