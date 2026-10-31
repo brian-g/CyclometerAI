@@ -67,29 +67,51 @@ enum RouteDirectionMarkers {
         return min(baseArrowPoints + rungs * arrowPointsPerRung, maximumArrowPoints)
     }
 
-    /// The on-screen angle an arrow must be drawn at to point along `bearingDegrees`, on a map
-    /// turned to `headingDegrees` and tilted to `pitchDegrees` (#258).
+    /// How much of an arrow's point size its triangle spans, tip to base and side to side.
     ///
-    /// `Annotation` content is screen-space: MapKit neither turns it with the map nor lays it in
-    /// the map plane. S19 and S20 dodge this by refusing rotation and pitch (`RoutesView`), but
-    /// the live map is heading-up and tilted by design, so the angle is computed instead.
+    /// The arrows were an SF Symbol, `arrowtriangle.up.fill`, whose ink is 16 × 16 pt at 20 pt
+    /// bold. Drawing the triangle at this fraction of `arrowPoints` keeps the size #258's review
+    /// settled on.
+    static let arrowInkFraction = 0.8
+
+    /// How many metres one screen point covers, for a map `mapWidthPoints` wide showing
+    /// `visibleBounds`. What turns an arrow's point size into a size on the ground.
     ///
-    /// Two corrections, in order: the map's heading turns the world under the glyph, and the tilt
-    /// foreshortens the screen's vertical axis by `cos(pitch)` while leaving the horizontal one
-    /// alone. A due-north bearing on a heading-up map pointing north is screen-up either way; a
-    /// bearing at 45° to the camera is drawn nearer the horizontal the more the map is tilted.
-    static func screenAngleDegrees(
-        bearingDegrees: Double,
-        headingDegrees: Double,
-        pitchDegrees: Double
-    ) -> Double {
-        guard bearingDegrees.isFinite, headingDegrees.isFinite else { return 0 }
-        let relative = (bearingDegrees - headingDegrees) * .pi / 180
-        // A pitch MapKit has not reported yet, or one outside the range it can draw, is treated
-        // as flat rather than allowed to flip or collapse the glyph.
-        let pitch = pitchDegrees.isFinite ? min(max(pitchDegrees, 0), 89) * .pi / 180 : 0
-        let angle = atan2(sin(relative), cos(relative) * cos(pitch)) * 180 / .pi
-        return angle < 0 ? angle + 360 : angle
+    /// Nil until both are known: no viewport means no arrows anyway, and a map that has not been
+    /// laid out has no width to divide by.
+    static func metersPerPoint(visibleBounds: RouteBounds?, mapWidthPoints: Double) -> Double? {
+        guard let visibleBounds, mapWidthPoints.isFinite, mapWidthPoints > 0,
+              let width = viewportWidthMeters(visibleBounds), width > 0
+        else { return nil }
+        return width / mapWidthPoints
+    }
+
+    /// The triangle an arrow is drawn as: centred on `placement`, its tip `sizeMeters / 2` ahead
+    /// along the bearing, its base as wide as the arrow is long (#341).
+    ///
+    /// On the map plane rather than on screen, which is the point. An `Annotation` draws above
+    /// every overlay *and* can draw above the rider's location dot, and SwiftUI's `Map` has no way
+    /// to order annotations. An overlay always draws beneath annotations. Lying in the map plane
+    /// also means MapKit turns and tilts the arrow with the map, so a heading-up, tilted camera
+    /// needs no correction.
+    static func arrowTriangle(for placement: Placement, sizeMeters: Double) -> [RouteCoordinate] {
+        let bearing = placement.bearingDegrees * .pi / 180
+        let half = sizeMeters / 2
+        // Unit vectors along the bearing and to its right, as (north, east).
+        let ahead = (north: cos(bearing), east: sin(bearing))
+        let right = (north: -sin(bearing), east: cos(bearing))
+        func point(along: Double, across: Double) -> RouteCoordinate {
+            RouteGeometry.coordinate(
+                offsetFrom: placement.coordinate,
+                north: ahead.north * along + right.north * across,
+                east: ahead.east * along + right.east * across
+            )
+        }
+        return [
+            point(along: half, across: 0),
+            point(along: -half, across: half),
+            point(along: -half, across: -half),
+        ]
     }
 
     /// The arrows to draw on a route, and the spacing they were drawn at.
@@ -121,9 +143,17 @@ enum RouteDirectionMarkers {
     /// Snapped up to a rung of the ladder, because the climb starts here and every rung above it
     /// must stay a multiple of the base for the nesting to hold.
     static func spacingFloor(for visibleBounds: RouteBounds) -> Double {
-        // The viewport's east-west extent, measured on the tangent plane at its own middle
-        // latitude — the same primitive every other distance in this app is built on, so the
-        // floor cannot disagree with the route lengths it is drawn against.
+        guard let width = viewportWidthMeters(visibleBounds) else { return baseSpacingMeters }
+        let wanted = width / Double(targetArrowsInView)
+        guard wanted > baseSpacingMeters else { return baseSpacingMeters }
+        return baseSpacingMeters * pow(2, log2(wanted / baseSpacingMeters).rounded(.up))
+    }
+
+    /// The viewport's east-west extent, measured on the tangent plane at its own middle latitude —
+    /// the same primitive every other distance in this app is built on, so neither the spacing
+    /// floor nor the arrow size can disagree with the route lengths they are drawn against.
+    /// Nil when the bounds give no finite width.
+    private static func viewportWidthMeters(_ visibleBounds: RouteBounds) -> Double? {
         let centerLatitude = visibleBounds.center.latitude
         let width = RouteGeometry.tangentPlaneOffset(
             from: RouteCoordinate(latitude: centerLatitude,
@@ -133,10 +163,7 @@ enum RouteDirectionMarkers {
                                 longitude: visibleBounds.maxLongitude,
                                 elevationMeters: nil)
         ).east
-        guard width.isFinite else { return baseSpacingMeters }
-        let wanted = abs(width) / Double(targetArrowsInView)
-        guard wanted > baseSpacingMeters else { return baseSpacingMeters }
-        return baseSpacingMeters * pow(2, log2(wanted / baseSpacingMeters).rounded(.up))
+        return width.isFinite ? abs(width) : nil
     }
 
     /// Arrows along `coordinates`, as many as `limit` allows, for the viewport `visibleBounds`.

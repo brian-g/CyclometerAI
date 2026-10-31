@@ -27,6 +27,9 @@ struct RouteMapContent: MapContent {
     /// and guessing it from the route's own length would make one route read differently on
     /// two screens.
     var visibleBounds: RouteBounds?
+    /// The map's width on screen, which with `visibleBounds` sizes the arrows on the ground
+    /// (#341). Nil, before layout, means no arrows.
+    var mapWidthPoints: Double?
     var arrowLimit: Int = RouteDirectionMarkers.targetArrowsInView
 
     /// Start and finish closer together than this is a loop, and a loop has no finish to mark.
@@ -41,13 +44,16 @@ struct RouteMapContent: MapContent {
                 .stroke(Color.cyPrimary, lineWidth: strokeWidth)
         }
 
-        // No heading or pitch: both screens hold their maps north-up and flat, which is what
-        // lets a screen-space annotation be rotated by the bearing alone (`RoutesView`).
-        RouteDirectionArrows(
-            placements: arrows.placements,
-            pointSize: arrows.pointSize,
-            tint: .cyPrimary
-        )
+        if let metersPerPoint = RouteDirectionMarkers.metersPerPoint(
+            visibleBounds: visibleBounds, mapWidthPoints: mapWidthPoints ?? 0
+        ) {
+            RouteDirectionArrows(
+                placements: arrows.placements,
+                pointSize: arrows.pointSize,
+                metersPerPoint: metersPerPoint,
+                tint: .cyPrimary
+            )
+        }
 
         if let start = coordinates.first {
             Marker(startTitle, systemImage: "flag.fill", coordinate: start.coordinate2D)

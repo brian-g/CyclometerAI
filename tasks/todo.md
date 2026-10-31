@@ -1585,3 +1585,26 @@ Lock Screen drive (throwaway XCUITest, deleted): the card draws, the elapsed tim
 and the 17.9 mph speed (medium, through the renderer) has an anti-aliased right edge. The first two drives showed no
 card at all, because the sim still held an earlier drive's resumed ride and Live Activity state. A fresh install
 fixed that.
+
+---
+
+## #341 — Route arrows draw over the user's location
+
+**Plan (approved 2026-10-31).** Arrows were SwiftUI `Annotation`s, and the iOS 27 SDK has no annotation z-order control
+(`_MapKit_SwiftUI.swiftinterface`). Moving `UserAnnotation()` last failed on device. Arrows become `MapPolygon`
+triangles on the map plane, because overlays always draw beneath annotations, the rider's dot included.
+
+- [x] Revert the failed `UserAnnotation()` reorder (live map, S19)
+- [x] `RouteGeometry.coordinate(offsetFrom:north:east:)`: the inverse of `tangentPlaneOffset`, sharing one radii helper
+- [x] `RouteDirectionMarkers`: delete `screenAngleDegrees`; add `arrowInkFraction` (0.8, the glyph's measured ink),
+      `metersPerPoint(visibleBounds:mapWidthPoints:)` and `arrowTriangle(for:sizeMeters:)`
+- [x] `RouteDirectionArrows` draws `MapPolygon`s; `cyMapAnnotation` font deleted
+- [x] S19, S20 and the live map track their width with `onGeometryChange`; live map drops `ArrowPose`
+- [x] Tests: four `screenAngle*` tests replaced by triangle/`metersPerPoint` tests; geometry round-trip test
+- [x] Brian checked on device: happy
+- [x] Full `CyclometerTests` green (1869 tests, 166 suites) → commit + PR
+
+**Review.**
+- The dot now draws above the arrows on every map.
+- On the tilted live map, arrows lie flat on the road.
+- Live-map arrow size rests on `LiveMapCamera.visibleBounds`, which is approximate; Brian accepted it on device.

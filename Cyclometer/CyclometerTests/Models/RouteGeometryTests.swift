@@ -55,6 +55,21 @@ struct RouteGeometryTests {
 
     // MARK: - Elevation
 
+    @Test("an offset from a point measures back as that offset (#341)")
+    func offsetRoundTripsThroughTheTangentPlane() {
+        // Arrow-sized offsets, at the equator, mid-latitudes and far north, where the parallel's
+        // scale is changing fastest.
+        for latitude in [0.0, 37.0, -45.0, 70.0] {
+            let origin = coordinate(latitude, -122.0)
+            for (north, east) in [(12.0, 0.0), (0.0, -12.0), (8.5, 8.5), (-30.0, 20.0)] {
+                let moved = RouteGeometry.coordinate(offsetFrom: origin, north: north, east: east)
+                let measured = RouteGeometry.tangentPlaneOffset(from: origin, to: moved)
+                #expect(abs(measured.north - north) < 0.01, "lat \(latitude): \(measured)")
+                #expect(abs(measured.east - east) < 0.01, "lat \(latitude): \(measured)")
+            }
+        }
+    }
+
     @Test("a route where no point carries an elevation reports nil, not zero")
     func elevationIsNilWhenNoCoordinateCarriesElevation() {
         let result = RouteGeometry.elevationGainLoss([

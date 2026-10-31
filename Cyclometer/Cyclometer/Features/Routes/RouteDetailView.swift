@@ -124,16 +124,17 @@ extension RouteDetailList where MapRow == RouteDetailMap {
 /// S20's map: the route with its start and finish flags and direction-of-travel arrows, framed
 /// on the route.
 ///
-/// Pan and zoom only, for the arrows' sake, as on S19's map: `Annotation` content is
-/// screen-space and does not counter-rotate, so under rotation every arrow would point wrong, and
-/// a pitched camera's region runs to the horizon and would space them for the wrong viewport.
-/// That is why the prototype's `MapPitchToggle` is gone.
+/// Pan and zoom only, for the arrows' sake, as on S19's map: a pitched or rotated camera's region
+/// is wider than the screen — pitched, it runs to the horizon — and would space and size them for
+/// the wrong viewport. That is why the prototype's `MapPitchToggle` is gone.
 struct RouteDetailMap: View {
     let summary: RouteSummary
     let coordinates: [RouteCoordinate]
 
     /// What the camera shows. The arrows space themselves from it, and nil means none at all.
     @State private var visibleBounds: RouteBounds?
+    /// The map's width on screen, which sizes the arrows on the ground (#341).
+    @State private var mapWidth: Double?
 
     /// Padded and floored around the route's stored bounds, so it is ready before the polyline is.
     private var framing: MKCoordinateRegion {
@@ -143,13 +144,14 @@ struct RouteDetailMap: View {
     var body: some View {
         Map(initialPosition: .region(framing), interactionModes: [.pan, .zoom]) {
             RouteMapContent(coordinates: coordinates, startTitle: "Start", finishTitle: "Finish",
-                            visibleBounds: visibleBounds)
+                            visibleBounds: visibleBounds, mapWidthPoints: mapWidth)
         }
         .mapStyle(.standard(elevation: .realistic))
         .mapControls {
             MapCompass()
             MapScaleView()
         }
+        .onGeometryChange(for: Double.self) { $0.size.width } action: { mapWidth = $0 }
         // Seeded, because `.onMapCameraChange` is not guaranteed to fire on the first settle —
         // without this the route would open with no direction shown until the rider panned.
         // S19's map seeds for the same reason.

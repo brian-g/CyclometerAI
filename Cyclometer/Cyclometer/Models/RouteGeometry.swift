@@ -53,18 +53,37 @@ enum RouteGeometry {
         from start: RouteCoordinate,
         to end: RouteCoordinate
     ) -> (north: Double, east: Double) {
-        let meanLatitude = ((start.latitude + end.latitude) / 2) * .pi / 180
-        let sinLatitude = sin(meanLatitude)
-        let w = 1 - eccentricitySquared * sinLatitude * sinLatitude
+        let radii = metersPerRadian(atLatitude: (start.latitude + end.latitude) / 2)
+        return (
+            north: radii.north * (end.latitude - start.latitude) * .pi / 180,
+            east: radii.east * (end.longitude - start.longitude) * .pi / 180
+        )
+    }
 
-        // Radius of curvature along the meridian (north-south) and the prime vertical (east-west).
+    /// The point `north` and `east` metres from `origin` — `tangentPlaneOffset` run backwards.
+    ///
+    /// For offsets of metres to tens of metres, which is what it is for: the corners of a direction
+    /// arrow drawn on the map plane (#341). The radii are taken at the origin rather than at the
+    /// pair's mean latitude, which over that distance differs by far less than a centimetre.
+    static func coordinate(offsetFrom origin: RouteCoordinate, north: Double, east: Double) -> RouteCoordinate {
+        let radii = metersPerRadian(atLatitude: origin.latitude)
+        return RouteCoordinate(
+            latitude: origin.latitude + north / radii.north * 180 / .pi,
+            longitude: origin.longitude + east / radii.east * 180 / .pi,
+            elevationMeters: nil
+        )
+    }
+
+    /// Metres per radian of latitude (north) and of longitude (east) at `latitude` degrees: the
+    /// radius of curvature along the meridian, and the prime vertical's scaled by the parallel's
+    /// cosine. One flattening of the ellipsoid, shared by both directions of the tangent plane.
+    private static func metersPerRadian(atLatitude latitude: Double) -> (north: Double, east: Double) {
+        let radians = latitude * .pi / 180
+        let sinLatitude = sin(radians)
+        let w = 1 - eccentricitySquared * sinLatitude * sinLatitude
         let meridional = equatorialRadiusMeters * (1 - eccentricitySquared) / (w * w.squareRoot())
         let normal = equatorialRadiusMeters / w.squareRoot()
-
-        return (
-            north: meridional * (end.latitude - start.latitude) * .pi / 180,
-            east: normal * cos(meanLatitude) * (end.longitude - start.longitude) * .pi / 180
-        )
+        return (north: meridional, east: normal * cos(radians))
     }
 
     /// Straight-line distance between two points — `distanceMeters` for a pair, without building

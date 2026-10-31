@@ -563,6 +563,8 @@ private struct RoutesMapView: View {
     /// the captured viewport with the rider's own region, changing the filter with no gesture.
     @State private var position: MapCameraPosition?
     @State private var visibleBounds: RouteBounds?
+    /// The map's width on screen, which sizes the arrows on the ground (#341).
+    @State private var mapWidth: Double?
     @State private var restoredStoredViewport = false
     @State private var hasCenteredOnRider = false
     /// What `onAppear` framed. A late rider fix re-centres only while the camera is still
@@ -578,12 +580,11 @@ private struct RoutesMapView: View {
     var body: some View {
         Map(
             position: Binding(get: { position ?? .region(seedRegion) }, set: { position = $0 }),
-            // Pitch and rotation are both off, and both for the filter's sake.
-            // `MapCameraUpdateContext.region` is the axis-aligned box around the visible
-            // *frustum*: pitched, it runs to the horizon and would match nearly every saved
-            // route while the screen showed a narrow wedge. Rotation is the arrows' problem —
-            // `Annotation` content is screen-space and does not counter-rotate, so every arrow
-            // would point wrong. A route-browsing map loses nothing by dropping them.
+            // Pitch and rotation are both off. `MapCameraUpdateContext.region` is the
+            // axis-aligned box around the visible *frustum*: pitched, it runs to the horizon and
+            // would match nearly every saved route while the screen showed a narrow wedge, and
+            // rotated, it is wider than the screen. Either way the filter and the arrow spacing
+            // would read the wrong viewport. A route-browsing map loses nothing by dropping them.
             interactionModes: [.pan, .zoom]
         ) {
             UserAnnotation()
@@ -591,7 +592,8 @@ private struct RoutesMapView: View {
                 if let coordinates = polylines[route.id], !coordinates.isEmpty {
                     RouteMapContent(coordinates: coordinates,
                                     startTitle: route.name,
-                                    visibleBounds: visibleBounds)
+                                    visibleBounds: visibleBounds,
+                                    mapWidthPoints: mapWidth)
                 } else {
                     // Geometry arrives after the routes do, so a pin stands in until it lands.
                     Marker(route.name, systemImage: "flag.fill",
@@ -604,6 +606,7 @@ private struct RoutesMapView: View {
         .mapControls {
             MapUserLocationButton(); MapCompass(); MapScaleView()
         }
+        .onGeometryChange(for: Double.self) { $0.size.width } action: { mapWidth = $0 }
         .onAppear {
             guard position == nil else { return }
             restoredStoredViewport = storedViewport != nil
