@@ -23,14 +23,13 @@ struct RouteMapContent: MapContent {
     /// Empty on S19, where a second label per route is noise. "Finish" on S20.
     var finishTitle: String = ""
     var strokeWidth: CGFloat = 5
-    /// The current viewport. Nil means no arrows: spacing is derived from what is on screen,
-    /// and guessing it from the route's own length would make one route read differently on
-    /// two screens.
-    var visibleBounds: RouteBounds?
-    /// The map's width on screen, which with `visibleBounds` sizes the arrows on the ground
-    /// (#341). Zero, before layout, means no arrows.
-    var mapWidthPoints: Double = 0
-    var arrowLimit: Int = RouteDirectionMarkers.targetArrowsInView
+    /// The direction arrows, placed by the caller for its viewport. Placed there rather than here
+    /// because placing walks the whole route, and this body is redrawn whenever the map's scale
+    /// changes — on every few frames of a pinch (#341).
+    var arrows: RouteDirectionMarkers.Arrows = .none
+    /// What one screen point covers on the ground, measured from the map. Nil, before the map has
+    /// reported a camera, means no arrows.
+    var metersPerPoint: Double?
 
     /// Start and finish closer together than this is a loop, and a loop has no finish to mark.
     /// Without this every loop route stacks a checkered flag on top of its start flag, which
@@ -44,11 +43,7 @@ struct RouteMapContent: MapContent {
                 .stroke(Color.cyPrimary, lineWidth: strokeWidth)
         }
 
-        if let metersPerPoint = RouteDirectionMarkers.metersPerPoint(
-            visibleBounds: visibleBounds, mapWidthPoints: mapWidthPoints
-        ) {
-            // Read once: `arrows` walks the whole route, and S19 draws every saved route.
-            let arrows = self.arrows
+        if let metersPerPoint {
             RouteDirectionArrows(
                 placements: arrows.placements,
                 pointSize: arrows.pointSize,
@@ -71,14 +66,6 @@ struct RouteMapContent: MapContent {
             Marker(finishTitle, systemImage: "flag.checkered", coordinate: finish.coordinate2D)
                 .tint(Color.cyTextPrimary)
         }
-    }
-
-    private var arrows: RouteDirectionMarkers.Arrows {
-        RouteDirectionMarkers.arrows(
-            coordinates: coordinates,
-            visibleBounds: visibleBounds,
-            limit: arrowLimit
-        )
     }
 
     private var isLoop: Bool {

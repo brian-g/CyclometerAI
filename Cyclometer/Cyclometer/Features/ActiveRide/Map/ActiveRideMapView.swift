@@ -37,8 +37,13 @@ struct ActiveRideMapView: View {
     /// MapKit turns and tilts them with the camera.
     @State private var arrows = RouteDirectionMarkers.Arrows.none
     @State private var arrowBounds: RouteBounds?
-    /// The map's width on screen, which with `arrowBounds` sizes the arrows on the ground (#341).
-    @State private var mapWidth = 0.0
+    /// The map's size on screen: its centre, where the rider is followed, is where the scale is
+    /// measured.
+    @State private var mapSize = CGSize.zero
+    /// What one screen point covers on the ground, measured from the map on every camera frame,
+    /// so the arrows hold their size through a pinch (#341). Snapped to 2 % steps, so following
+    /// without zooming writes nothing, and the track polyline is not rebuilt every frame.
+    @State private var metersPerPoint: Double?
     @Namespace private var mapScope
 
     init(
@@ -117,6 +122,12 @@ struct ActiveRideMapView: View {
     }
 
     private func map(scope: Namespace.ID?) -> some View {
+        MapReader { proxy in
+            map(scope: scope, proxy: proxy)
+        }
+    }
+
+    private func map(scope: Namespace.ID?, proxy: MapProxy) -> some View {
         Map(position: $position, interactionModes: surface.interactionModes, scope: scope) {
             UserAnnotation()
             // Declared before the track so it draws beneath it: the route ahead, and the track over
@@ -135,9 +146,7 @@ struct ActiveRideMapView: View {
             // Which way the route goes (#258). A route that doubles back over the same road is
             // one ambiguous line without them. Declared after both polylines so they draw above
             // the track already ridden; as overlays they stay beneath the rider's dot (#341).
-            if let metersPerPoint = RouteDirectionMarkers.metersPerPoint(
-                visibleBounds: arrowBounds, mapWidthPoints: mapWidth
-            ) {
+            if let metersPerPoint {
                 RouteDirectionArrows(
                     placements: arrows.placements,
                     pointSize: arrows.pointSize,
@@ -150,9 +159,13 @@ struct ActiveRideMapView: View {
         // No default controls on either surface. The widget must have none, since a compass tap was
         // the way out of heading-up (#62); the sheet places its own column.
         .mapControls {}
-        .onGeometryChange(for: Double.self) { $0.size.width } action: { mapWidth = $0 }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+            mapSize = size
+            measureScale(proxy)
+        }
         .onMapCameraChange(frequency: .onEnd) { context in
             camera = context.camera
+            measureScale(proxy)
             placeArrows(for: context)
             if pendingFollow != nil {
                 completeSeed()
@@ -160,15 +173,25 @@ struct ActiveRideMapView: View {
                 engage()
             }
         }
-        // A following widget can ride a long way without the camera ever settling, so the arrows
-        // are re-placed from here once the rider leaves the viewport they were placed for — and
-        // only then, and only while there is a route to draw arrows on.
+        // Every frame, the scale, so the arrows hold their size through a pinch. And a following
+        // widget can ride a long way without the camera ever settling, so the arrows are re-placed
+        // from here once the rider leaves the viewport they were placed for. Both only while there
+        // is a route to draw arrows on.
         .onMapCameraChange(frequency: .continuous) { context in
             guard route.count > 1 else { return }
+            measureScale(proxy)
             if LiveMapCamera.needsArrowRefresh(camera: context.camera, placedFor: arrowBounds) {
                 placeArrows(for: context)
             }
         }
+    }
+
+    /// Writes the map's scale only when it has changed by a step (`quantizedScale`), so following
+    /// and panning redraw nothing and a pinch redraws only as often as the arrows' size visibly
+    /// changes.
+    private func measureScale(_ proxy: MapProxy) {
+        let measured = proxy.metersPerPoint(mapSize: mapSize)
+        if measured != metersPerPoint { metersPerPoint = measured }
     }
 
     /// Where the arrows go for the camera `context` reports.

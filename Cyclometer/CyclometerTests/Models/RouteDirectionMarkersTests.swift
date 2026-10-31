@@ -269,27 +269,50 @@ struct RouteDirectionMarkersTests {
         }
     }
 
-    @Test("metres per point divide the viewport's width by the map's")
-    func metersPerPointIsViewportOverWidth() throws {
-        let perPoint = try #require(RouteDirectionMarkers.metersPerPoint(
-            visibleBounds: zigzagViewport, mapWidthPoints: 400
-        ))
-        // The zigzag viewport is 0.03° of longitude at 37° N: about 2.67 km.
-        let width = RouteGeometry.tangentPlaneOffset(
-            from: coordinate(37.0, zigzagViewport.minLongitude),
-            to: coordinate(37.0, zigzagViewport.maxLongitude)
-        ).east
-        #expect(abs(perPoint - width / 400) < 1e-9)
-        #expect(perPoint > 6 && perPoint < 7)
+    @Test("metres per point are the ground distance over the screen distance")
+    func metersPerPointIsGroundOverScreen() throws {
+        let start = coordinate(37.0, -122.0)
+        let end = RouteGeometry.coordinate(offsetFrom: start, north: 0, east: 1_000)
+        let perPoint = try #require(RouteDirectionMarkers.metersPerPoint(from: start, to: end,
+                                                                         pointsApart: 100))
+        #expect(abs(perPoint - 10) < meterTolerance)
     }
 
-    @Test("no viewport, or no laid-out map, means no size and so no arrows")
-    func metersPerPointNeedsBothInputs() {
-        #expect(RouteDirectionMarkers.metersPerPoint(visibleBounds: nil, mapWidthPoints: 400) == nil)
-        for width in [0.0, -1.0, .nan, .infinity] {
-            #expect(RouteDirectionMarkers.metersPerPoint(visibleBounds: zigzagViewport,
-                                                         mapWidthPoints: width) == nil)
+    @Test("no distance on screen or on the ground means no scale, and so no arrows")
+    func metersPerPointNeedsADistance() {
+        let start = coordinate(37.0, -122.0)
+        let end = coordinate(37.0, -121.99)
+        for points in [0.0, -1.0, .nan, .infinity] {
+            #expect(RouteDirectionMarkers.metersPerPoint(from: start, to: end,
+                                                         pointsApart: points) == nil)
         }
+        #expect(RouteDirectionMarkers.metersPerPoint(from: start, to: start, pointsApart: 50) == nil)
+    }
+
+    @Test("the scale snaps to within half a step, and snapping again changes nothing")
+    func quantizedScaleSnapsWithinHalfAStep() {
+        let halfStep = (1 + RouteDirectionMarkers.scaleStep).squareRoot()
+        for scale in [0.05, 0.7, 1.0, 3.3, 47.0, 2_500.0] {
+            let snapped = RouteDirectionMarkers.quantizedScale(scale)
+            #expect(snapped / scale <= halfStep * (1 + 1e-12) && scale / snapped <= halfStep * (1 + 1e-12))
+            #expect(abs(RouteDirectionMarkers.quantizedScale(snapped) - snapped) < snapped * 1e-12)
+        }
+    }
+
+    @Test("small changes in scale write nothing; a step's worth does")
+    func quantizedScaleIgnoresSubStepChanges() {
+        // A following map whose scale wobbles by a fraction of a step must not redraw.
+        let snapped = RouteDirectionMarkers.quantizedScale(10)
+        #expect(RouteDirectionMarkers.quantizedScale(snapped * 1.001) == snapped)
+        #expect(RouteDirectionMarkers.quantizedScale(snapped / 1.001) == snapped)
+        // And it never runs backwards: a bigger scale never snaps smaller.
+        var previous = 0.0
+        for scale in stride(from: 5.0, through: 20.0, by: 0.01) {
+            let next = RouteDirectionMarkers.quantizedScale(scale)
+            #expect(next >= previous)
+            previous = next
+        }
+        #expect(RouteDirectionMarkers.quantizedScale(snapped * 1.05) > snapped)
     }
 
     // MARK: - #258 review: the arrows shifted on zoom and pointed the wrong way

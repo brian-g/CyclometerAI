@@ -22,7 +22,7 @@ struct RouteDirectionArrows: MapContent {
     /// to the map as the camera pulls back (#258 review).
     let pointSize: Double
     /// What one of those points covers on the ground, from
-    /// `RouteDirectionMarkers.metersPerPoint(visibleBounds:mapWidthPoints:)`.
+    /// `MapProxy.metersPerPoint(mapSize:)`, measured from the map on every camera frame.
     let metersPerPoint: Double
     var tint: Color = .cyPrimary
 

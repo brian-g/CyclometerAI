@@ -563,8 +563,15 @@ private struct RoutesMapView: View {
     /// the captured viewport with the rider's own region, changing the filter with no gesture.
     @State private var position: MapCameraPosition?
     @State private var visibleBounds: RouteBounds?
-    /// The map's width on screen, which sizes the arrows on the ground (#341).
-    @State private var mapWidth = 0.0
+    /// The map's size on screen: its centre is where the scale is measured.
+    @State private var mapSize = CGSize.zero
+    /// What one screen point covers on the ground, measured from the map on every camera frame,
+    /// so the arrows hold their size through a pinch (#341).
+    @State private var metersPerPoint: Double?
+    /// Each shown route's arrows, placed for `visibleBounds`. Kept here rather than placed in the
+    /// map's content because placing walks every route, and the content is redrawn whenever
+    /// `metersPerPoint` changes.
+    @State private var arrowsByRoute: [UUID: RouteDirectionMarkers.Arrows] = [:]
     @State private var restoredStoredViewport = false
     @State private var hasCenteredOnRider = false
     /// What `onAppear` framed. A late rider fix re-centres only while the camera is still
@@ -578,6 +585,39 @@ private struct RoutesMapView: View {
     }
 
     var body: some View {
+        MapReader { proxy in
+            map(proxy: proxy)
+        }
+        .onAppear {
+            guard position == nil else { return }
+            restoredStoredViewport = storedViewport != nil
+            let region = seedRegion
+            position = .region(region)
+            seededBounds = RoutesMapCamera.bounds(for: region)
+            // Reported explicitly rather than waiting on `.onMapCameraChange`: if that does not
+            // fire on the first settle, the captured viewport would be nil and the map filter
+            // would silently never apply.
+            report(region)
+        }
+        .onChange(of: riderCoordinate) { _, fix in
+            // Only on a first-ever open, and only once: after this the camera belongs to the
+            // rider's gestures, and a restored viewport outranks a late-arriving fix.
+            guard let fix, !restoredStoredViewport, !hasCenteredOnRider,
+                  visibleBounds == seededBounds
+            else { return }
+            hasCenteredOnRider = true
+            let region = RoutesMapCamera.region(riderCoordinate: fix, routes: allRoutes)
+            position = .region(region)
+            report(region)
+        }
+        // Placed when the viewport settles, when geometry lands, or when the filter changes what
+        // is shown — never per frame.
+        .onChange(of: visibleBounds, initial: true) { placeArrows() }
+        .onChange(of: polylines) { placeArrows() }
+        .onChange(of: routes.map(\.id)) { placeArrows() }
+    }
+
+    private func map(proxy: MapProxy) -> some View {
         Map(
             position: Binding(get: { position ?? .region(seedRegion) }, set: { position = $0 }),
             // Pitch and rotation are both off. `MapCameraUpdateContext.region` is the
@@ -592,8 +632,8 @@ private struct RoutesMapView: View {
                 if let coordinates = polylines[route.id], !coordinates.isEmpty {
                     RouteMapContent(coordinates: coordinates,
                                     startTitle: route.name,
-                                    visibleBounds: visibleBounds,
-                                    mapWidthPoints: mapWidth)
+                                    arrows: arrowsByRoute[route.id] ?? .none,
+                                    metersPerPoint: metersPerPoint)
                 } else {
                     // Geometry arrives after the routes do, so a pin stands in until it lands.
                     Marker(route.name, systemImage: "flag.fill",
@@ -606,32 +646,32 @@ private struct RoutesMapView: View {
         .mapControls {
             MapUserLocationButton(); MapCompass(); MapScaleView()
         }
-        .onGeometryChange(for: Double.self) { $0.size.width } action: { mapWidth = $0 }
-        .onAppear {
-            guard position == nil else { return }
-            restoredStoredViewport = storedViewport != nil
-            let region = seedRegion
-            position = .region(region)
-            seededBounds = RoutesMapCamera.bounds(for: region)
-            // Reported explicitly rather than waiting on `.onMapCameraChange`: if that does not
-            // fire on the first settle, the captured viewport would be nil and the map filter
-            // would silently never apply.
-            report(region)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+            mapSize = size
+            measureScale(proxy)
         }
+        .onMapCameraChange(frequency: .continuous) { _ in measureScale(proxy) }
         .onMapCameraChange(frequency: .onEnd) { context in
+            measureScale(proxy)
             report(context.region)
         }
-        .onChange(of: riderCoordinate) { _, fix in
-            // Only on a first-ever open, and only once: after this the camera belongs to the
-            // rider's gestures, and a restored viewport outranks a late-arriving fix.
-            guard let fix, !restoredStoredViewport, !hasCenteredOnRider,
-                  visibleBounds == seededBounds
-            else { return }
-            hasCenteredOnRider = true
-            let region = RoutesMapCamera.region(riderCoordinate: fix, routes: allRoutes)
-            position = .region(region)
-            report(region)
+    }
+
+    /// Writes the map's scale only when it has changed by a step (`quantizedScale`), so a pan
+    /// redraws nothing and a pinch redraws only as often as the arrows' size visibly changes.
+    private func measureScale(_ proxy: MapProxy) {
+        let measured = proxy.metersPerPoint(mapSize: mapSize)
+        if measured != metersPerPoint { metersPerPoint = measured }
+    }
+
+    private func placeArrows() {
+        var placed: [UUID: RouteDirectionMarkers.Arrows] = [:]
+        for route in routes {
+            guard let coordinates = polylines[route.id], !coordinates.isEmpty else { continue }
+            placed[route.id] = RouteDirectionMarkers.arrows(coordinates: coordinates,
+                                                            visibleBounds: visibleBounds)
         }
+        arrowsByRoute = placed
     }
 
     /// The arrows need the raw viewport whatever it holds; the filter is absent when the

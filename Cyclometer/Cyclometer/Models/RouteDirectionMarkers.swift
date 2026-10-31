@@ -74,16 +74,35 @@ enum RouteDirectionMarkers {
     /// settled on.
     static let arrowInkFraction = 0.8
 
-    /// How many metres one screen point covers, for a map `mapWidthPoints` wide showing
-    /// `visibleBounds`. What turns an arrow's point size into a size on the ground.
+    /// How many metres one screen point covers, given two points `pointsApart` on screen that the
+    /// map reports at `start` and `end`. What turns an arrow's point size into a size on the ground.
     ///
-    /// Nil until both are known: no viewport means no arrows anyway, and a map that has not been
-    /// laid out has no width to divide by.
-    static func metersPerPoint(visibleBounds: RouteBounds?, mapWidthPoints: Double) -> Double? {
-        guard let visibleBounds, mapWidthPoints.isFinite, mapWidthPoints > 0,
-              let width = viewportWidthMeters(visibleBounds), width > 0
+    /// Measured from the map rather than estimated from a viewport (#341 review): a camera's
+    /// distance, or the region a map was asked to show, says little about the scale it actually
+    /// draws at once tilt, field of view and the map's shape are involved. Nil when there is
+    /// nothing to divide: no distance on screen, or no distance on the ground.
+    static func metersPerPoint(from start: RouteCoordinate, to end: RouteCoordinate,
+                               pointsApart: Double) -> Double? {
+        let perPoint = RouteGeometry.segmentMeters(from: start, to: end) / pointsApart
+        guard pointsApart.isFinite, pointsApart > 0, perPoint.isFinite, perPoint > 0
         else { return nil }
-        return width / mapWidthPoints
+        return perPoint
+    }
+
+    /// The smallest change in scale worth redrawing the arrows for: 2 %, which on a 22 pt arrow
+    /// is under half a point.
+    static let scaleStep = 0.02
+
+    /// `metersPerPoint` snapped to a power of `1 + scaleStep`.
+    ///
+    /// The scale is re-measured on every camera frame so the arrows hold their size through a
+    /// pinch, and each new value redraws the map's content. Snapping means it changes only when
+    /// the arrow's size visibly would, so a map that pans or follows without zooming redraws
+    /// nothing at all.
+    static func quantizedScale(_ metersPerPoint: Double) -> Double {
+        guard metersPerPoint.isFinite, metersPerPoint > 0 else { return metersPerPoint }
+        let step = log(1 + scaleStep)
+        return exp((log(metersPerPoint) / step).rounded() * step)
     }
 
     /// The triangle an arrow is drawn as: centred on `placement`, its tip `sizeMeters / 2` ahead
@@ -143,17 +162,9 @@ enum RouteDirectionMarkers {
     /// Snapped up to a rung of the ladder, because the climb starts here and every rung above it
     /// must stay a multiple of the base for the nesting to hold.
     static func spacingFloor(for visibleBounds: RouteBounds) -> Double {
-        guard let width = viewportWidthMeters(visibleBounds) else { return baseSpacingMeters }
-        let wanted = width / Double(targetArrowsInView)
-        guard wanted > baseSpacingMeters else { return baseSpacingMeters }
-        return baseSpacingMeters * pow(2, log2(wanted / baseSpacingMeters).rounded(.up))
-    }
-
-    /// The viewport's east-west extent, measured on the tangent plane at its own middle latitude —
-    /// the same primitive every other distance in this app is built on, so neither the spacing
-    /// floor nor the arrow size can disagree with the route lengths they are drawn against.
-    /// Nil when the bounds give no finite width.
-    private static func viewportWidthMeters(_ visibleBounds: RouteBounds) -> Double? {
+        // The viewport's east-west extent, measured on the tangent plane at its own middle
+        // latitude — the same primitive every other distance in this app is built on, so the
+        // floor cannot disagree with the route lengths it is drawn against.
         let centerLatitude = visibleBounds.center.latitude
         let width = RouteGeometry.tangentPlaneOffset(
             from: RouteCoordinate(latitude: centerLatitude,
@@ -163,7 +174,10 @@ enum RouteDirectionMarkers {
                                 longitude: visibleBounds.maxLongitude,
                                 elevationMeters: nil)
         ).east
-        return width.isFinite ? abs(width) : nil
+        guard width.isFinite else { return baseSpacingMeters }
+        let wanted = abs(width) / Double(targetArrowsInView)
+        guard wanted > baseSpacingMeters else { return baseSpacingMeters }
+        return baseSpacingMeters * pow(2, log2(wanted / baseSpacingMeters).rounded(.up))
     }
 
     /// Arrows along `coordinates`, as many as `limit` allows, for the viewport `visibleBounds`.

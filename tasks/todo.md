@@ -1608,3 +1608,25 @@ triangles on the map plane, because overlays always draw beneath annotations, th
 - The dot now draws above the arrows on every map.
 - On the tilted live map, arrows lie flat on the road.
 - Live-map arrow size rests on `LiveMapCamera.visibleBounds`, which is approximate; Brian accepted it on device.
+
+---
+
+## #341 follow-up — Arrows measured with MapProxy, constant size through gestures
+
+**Plan (approved 2026-10-31).** On device the settled sheet drew arrows ~7× too big: the scale was estimated from
+`camera.distance` (live map) or the requested region (S19/S20), and metre-sized triangles grew with a pinch. Brian chose
+to measure the scale with `MapProxy` and hold the arrows' on-screen size during gestures too.
+
+- [x] `RouteDirectionMarkers.metersPerPoint(from:to:pointsApart:)` replaces the bounds-based estimate; `quantizedScale`
+      snaps to 2 % steps so only a visible size change redraws
+- [x] New `MapProxy.metersPerPoint(mapSize:)`: converts two points 50 pt apart across the map's centre
+- [x] `RouteMapContent` takes placed `arrows` + `metersPerPoint`; no longer walks the route per redraw
+- [x] S19, S20 and the live map wrap their `Map` in `MapReader`, re-measure on every camera frame, and place arrows only
+      when the viewport settles or geometry lands
+- [x] Tests: bounds `metersPerPoint` tests replaced by coordinate-pair and `quantizedScale` tests
+- [x] Brian checked on device: good
+- [x] Full `CyclometerTests` green (1871 tests, 166 suites, 2 known issues) → commit + push to PR #511
+
+**Review.**
+- Arrows draw at 16–22 pt at rest and mid-pinch on all three maps.
+- The live map measures the scale only while a route is loaded, so a free ride writes nothing.
