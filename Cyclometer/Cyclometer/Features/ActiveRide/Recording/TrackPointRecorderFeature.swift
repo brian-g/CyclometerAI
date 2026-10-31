@@ -6,7 +6,8 @@ import os
 private let logger = Logger.cyclometer(.recording)
 
 /// Buffers one `TrackPointDTO` per elapsed second (fed by `ActiveRideFeature.elapsedTick`)
-/// into `RideDataBuffer` and flushes it to CoreData every 30s and again at ride end (#170).
+/// into `RideDataBuffer` and flushes it to CoreData every 30s and again at ride end (#170) — and on
+/// every pause and whenever the app stops being active, so a kill loses only what came after (#505).
 @Reducer
 struct TrackPointRecorderFeature {
     @ObservableState
@@ -20,6 +21,9 @@ struct TrackPointRecorderFeature {
         case resumeRecording
         case timerTick(TrackPointDTO)
         case checkpointFired
+        /// The app stopped being active. A swipe-kill from the app switcher goes no further than
+        /// `.inactive` before the SIGKILL, so this is the last chance to write the buffer.
+        case appResignedActive
         case stopRecording
     }
 
@@ -35,7 +39,7 @@ struct TrackPointRecorderFeature {
 
             case .pauseRecording:
                 state.isRecording = false
-                return .none
+                return flushEffect()
 
             case .resumeRecording:
                 state.isRecording = true
@@ -47,7 +51,7 @@ struct TrackPointRecorderFeature {
                     await rideDataBuffer.append(point)
                 }
 
-            case .checkpointFired:
+            case .checkpointFired, .appResignedActive:
                 return flushEffect()
 
             case .stopRecording:

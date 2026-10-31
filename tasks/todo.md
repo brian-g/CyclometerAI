@@ -1466,6 +1466,34 @@ the configuration is dead code that only costs the hop. `.shared` pays it too, f
 
 ---
 
+## #505 — Flush buffered track points on pause and when the app leaves the foreground
+
+Cause (ride 2026-10-30): `RideDataBuffer` is written to CoreData only every 30 s of active riding and at Finish,
+so a kill loses whatever is buffered — up to 30 s. A swipe-kill from the app switcher never reaches the background:
+the app goes `.inactive` and is then SIGKILLed, so the flush has to happen on leaving `.active`.
+
+- [x] Branch `505-flush-track-points-on-pause-and-background` from `main`.
+- [x] `TrackPointRecorderFeature`: `.pauseRecording` also returns `flushEffect()`. New `.appResignedActive` →
+      `flushEffect()`. Update the type's doc comment (flushes every 30 s, on pause, on leaving the foreground, at end).
+- [x] `AppFeature.scenePhaseChanged(isActive: false)`: with a ride in progress, also send
+      `.activeRide(.trackRecorder(.appResignedActive))` — the pattern `.liveActivity(.appBecameActive)` already uses.
+- [x] Tests (`TrackPointRecorderFeatureTests`): pause flushes the buffered points; `appResignedActive` flushes them;
+      an empty buffer writes nothing. AppFeature: leaving `.active` mid-ride flushes; with no ride, nothing changes.
+- [ ] Brian runs it on device (walking works): start a ride, walk ~1 min, open the app switcher, swipe the app away,
+      relaunch at once, walk on, finish. Expected: the GPX gap ≈ the time the app wasn't running, not up to 30 s more.
+- [ ] Then: `TrackPointRecorderFeatureTests`, `ActiveRideFeatureTests`, `LiveActivityFeatureTests`, `AppScreenPowerTests`.
+- [ ] Commit + PR.
+
+**CI fix.** Two older tests didn't account for the new flushes: `hrTallyMatchesRecordedTrack` read the track from the
+buffer after a pause, which now writes it out (it now counts written + buffered points), and the exhaustive
+`backgroundingRestoresEverything` didn't expect `.activeRide(.trackRecorder(.appResignedActive))`. The
+`ActiveRideFeature*`, `AppScreenPowerTests`, `AppFeatureTests`, `TrackPointRecorderFeatureTests`,
+`LiveActivityFeatureTests`, `RideRecordingTests` and `TrackSegmentTests` suites: 236 passed, 0 failed.
+
+**CI fix 2.** `RideEndFailureTests` counted ride-end flush attempts: the pause's flush is now the first. The all-fail
+test expects 3 attempts (pause, ride end, its retry). The fail-once test now fails the first two, so the ride end's
+retry is still what it exercises. Full `CyclometerTests`: 2,104 passed, 0 failed. The first CI fix ran only the suites
+I expected to be touched and missed this one.
 ## #503 — A ride resumed after a kill redraws its saved track on the map
 
 Cause: `State(resuming:)` leaves `trackSegments` at `[[]]` by design ("a resumed ride redraws its map from empty"),

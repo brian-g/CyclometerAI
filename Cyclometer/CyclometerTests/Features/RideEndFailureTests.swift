@@ -217,8 +217,9 @@ struct RideEndFailureTests {
             fetchRideIfPresent($0, from: swiftDataStack)?.recordingState == .ended
         }
 
-        // Retried once, with the same points, and then recorded for S10 to tell the rider (#345).
-        #expect(attempts.value.count == 2)
+        // The pause's flush (#505) puts its batch back; the ride end then tries it and retries once,
+        // with the same points, and records it for S10 to tell the rider (#345).
+        #expect(attempts.value.count == 3)
         let batch = try #require(attempts.value.first)
         #expect(!batch.isEmpty)
         #expect(attempts.value.last == batch)
@@ -245,9 +246,10 @@ struct RideEndFailureTests {
         let (liveClient, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         var client = liveClient
         let attempts = LockIsolated<[Int]>([])
+        // The pause's flush (#505) fails too, so the ride end gets the points and must retry them.
         client.flushTrackPoints = { batch in
-            let isFirst = attempts.withValue { $0.append(batch.count); return $0.count == 1 }
-            if isFirst { throw WriteFailed() }
+            let fails = attempts.withValue { $0.append(batch.count); return $0.count <= 2 }
+            if fails { throw WriteFailed() }
             try await liveClient.flushTrackPoints(batch)
         }
 
@@ -258,7 +260,7 @@ struct RideEndFailureTests {
             fetchRideIfPresent($0, from: swiftDataStack)?.recordingState == .ended
         }
 
-        #expect(attempts.value.count == 2)
+        #expect(attempts.value.count == 3)
         let recorded = try #require(attempts.value.first)
         #expect(recorded > 0)
         let stored = try await client.fetchTrackPoints(rideId)
