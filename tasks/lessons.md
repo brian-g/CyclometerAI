@@ -891,3 +891,19 @@ Findings the review skipped go in that report and don't hold up the commit and p
 
 **Rule.** Findings, options, open questions and check steps go in numbered lists, numbered continuously
 across groups, so a reply like "fix 1 and 3" is unambiguous.
+
+---
+
+## Check the SDK before trusting a framework behaviour you "know" (2026-10-31, #341)
+
+**What happened.** For "route arrows draw over the user's location" I moved `UserAnnotation()` last in both maps,
+on the belief that SwiftUI `Map` stacks annotations in declaration order, and rated it [Likely]. Brian ran it:
+"No, the route arrow is still drawn on top of the current location."
+
+**Why I was wrong.** The belief was never checked. One grep of the SDK's `_MapKit_SwiftUI` interface shows no
+z-order control at all for `Annotation`/`UserAnnotation` (no priority, no zIndex); `mapOverlayLevel` is for overlays only.
+Declaration order is not a documented contract, and it did not hold.
+
+**Rule.** When a fix rests on an undocumented framework behaviour, grep the SDK's `.swiftinterface` first
+(SwiftUI MapKit lives in `_MapKit_SwiftUI.framework`, not `MapKit.framework`). If the behaviour isn't an API,
+say so when handing it over, and rate it [Guessing], not [Likely].

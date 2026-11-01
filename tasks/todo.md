@@ -1585,3 +1585,60 @@ Lock Screen drive (throwaway XCUITest, deleted): the card draws, the elapsed tim
 and the 17.9 mph speed (medium, through the renderer) has an anti-aliased right edge. The first two drives showed no
 card at all, because the sim still held an earlier drive's resumed ride and Live Activity state. A fresh install
 fixed that.
+
+---
+
+## #341 — Route arrows draw over the user's location
+
+**Plan (approved 2026-10-31).** Arrows were SwiftUI `Annotation`s, and the iOS 27 SDK has no annotation z-order control
+(`_MapKit_SwiftUI.swiftinterface`). Moving `UserAnnotation()` last failed on device. Arrows become `MapPolygon`
+triangles on the map plane, because overlays always draw beneath annotations, the rider's dot included.
+
+- [x] Revert the failed `UserAnnotation()` reorder (live map, S19)
+- [x] `RouteGeometry.coordinate(offsetFrom:north:east:)`: the inverse of `tangentPlaneOffset`, sharing one radii helper
+- [x] `RouteDirectionMarkers`: delete `screenAngleDegrees`; add `arrowInkFraction` (0.8, the glyph's measured ink),
+      `metersPerPoint(visibleBounds:mapWidthPoints:)` and `arrowTriangle(for:sizeMeters:)`
+- [x] `RouteDirectionArrows` draws `MapPolygon`s; `cyMapAnnotation` font deleted
+- [x] S19, S20 and the live map track their width with `onGeometryChange`; live map drops `ArrowPose`
+- [x] Tests: four `screenAngle*` tests replaced by triangle/`metersPerPoint` tests; geometry round-trip test
+- [x] Brian checked on device: happy
+- [x] Full `CyclometerTests` green (1869 tests, 166 suites) → commit + PR
+
+**Review.**
+- The dot now draws above the arrows on every map.
+- On the tilted live map, arrows lie flat on the road.
+- Live-map arrow size rests on `LiveMapCamera.visibleBounds`, which is approximate; Brian accepted it on device.
+
+---
+
+## #341 follow-up — Arrows measured with MapProxy, constant size through gestures
+
+**Plan (approved 2026-10-31).** On device the settled sheet drew arrows ~7× too big: the scale was estimated from
+`camera.distance` (live map) or the requested region (S19/S20), and metre-sized triangles grew with a pinch. Brian chose
+to measure the scale with `MapProxy` and hold the arrows' on-screen size during gestures too.
+
+- [x] `RouteDirectionMarkers.metersPerPoint(from:to:pointsApart:)` replaces the bounds-based estimate; `quantizedScale`
+      snaps to 2 % steps so only a visible size change redraws
+- [x] New `MapProxy.metersPerPoint(mapSize:)`: converts two points 50 pt apart across the map's centre
+- [x] `RouteMapContent` takes placed `arrows` + `metersPerPoint`; no longer walks the route per redraw
+- [x] S19, S20 and the live map wrap their `Map` in `MapReader`, re-measure on every camera frame, and place arrows only
+      when the viewport settles or geometry lands
+- [x] Tests: bounds `metersPerPoint` tests replaced by coordinate-pair and `quantizedScale` tests
+- [x] Brian checked on device: good
+- [x] Full `CyclometerTests` green (1871 tests, 166 suites, 2 known issues) → commit + push to PR #511
+
+**Review.**
+- Arrows draw at 16–22 pt at rest and mid-pinch on all three maps.
+- The live map measures the scale only while a route is loaded, so a free ride writes nothing.
+
+---
+
+## #341 follow-up — No arrows when zoomed out
+
+Brian: at a 50-mile radius the arrows are just blocky triangles over the route.
+
+- [x] `RouteDirectionMarkers.maximumArrowMetersPerPoint` (50 m/pt, ~20 km across a phone) + `drawsArrows(atMetersPerPoint:)`
+- [x] `RouteDirectionArrows` draws nothing past it, checked against the per-frame scale, so all three maps share it
+- [x] Test: `arrowsStopAtTheCutoffScale`
+- [x] Brian checked on device: good
+- [x] Full `CyclometerTests` green (1872 tests, 166 suites, 2 known issues) → commit + push to PR #511

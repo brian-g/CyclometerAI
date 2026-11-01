@@ -724,6 +724,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - MapKit view embedded in the widget
 - Current position dot in `brPrimary`; heading indicator
 - Route polyline in `brMapRoute` when a route is loaded, drawn beneath the travelled track in `brMapTravelPath` (#199)
+- Direction arrows on the route, beneath the position dot, by S20's rules (#341)
 - Always heading-up and following the rider (#199). The widget takes no gestures and shows no map controls, so nothing
   on it can take the map out of follow (#62). A tap opens the sheet
 - While a route is loaded, the map tilts into a 3D navigation view. MapKit limits the tilt to what its follow distance
@@ -1370,7 +1371,7 @@ ContentUnavailableView {
 ### Key Components
 - List / map toggle (`list.bullet` / `map` SF Symbol): a glass circle floating on the trailing edge at the bottom of the screen, just above the tab bar and clear of a minimised ride's accessory, styled like the map sheet's buttons — not in the toolbar (#331). The toolbar keeps Import, Filter and Start Ride
 - List view: route rows map thumbnail, name, distance, and the route's summary line without its distance (#252) — gain, the hardest climbs, max grade, character and surface, two lines at most. A route with neither elevation nor a surface falls back to the file's own `<desc>`
-- Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls. The map can act as a filter. When switching back to the list will show only those routes displayed on the map. Map will initially zoom to a 50 mile radius around the user's current location. 
+- Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls. The map can act as a filter. When switching back to the list will show only those routes displayed on the map. Map will initially zoom to a 50 mile radius around the user's current location. Direction arrows follow S20's rules, so the 50-mile opening view shows none until the rider zooms in (#341)
 - Tap a route → navigates to S20
 - Swipe a route row left to right → "Use Route" (`play.fill`, a full swipe allowed): opens the Start Sheet with that route in S05.1's Route row, as S20's CTA does. Absent while a ride is recording.
 - Empty state: `ContentUnavailableView` with "No Routes" label and import action
@@ -1394,6 +1395,9 @@ ContentUnavailableView {
 
 ### Key Components
 - `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag). Route should show the direction of travel. Forcasted wind direction and vectors should be overlayed (deferred to weather integration)
+- Direction-of-travel arrows (#341), the same on S19, S20 and W8 and its sheet: filled triangles in the line's own colour, lying flat on the map and drawn beneath the rider's location dot. They are sized in screen points, not on the ground, so a pinch never grows them: about 16 pt at street level, stepping up a point at a time to about 22 pt as the view widens. They are spaced so about a dozen are in view
+  - Zoomed out past 50 m per point (about 20 km across a phone-width map), no arrows draw. The cutoff is one map scale for every route on screen, so routes side by side show or hide their arrows together, never route by route
+  - **Accepted gap (#341):** S20's 220 pt map frames any route more than about 7 km north to south past the cutoff, so a large route opens with no arrows until the rider zooms in. The live sheet's route overview does the same for a large route
 - Distance and elevation gain/loss summary (`LabeledContent`)
 - Summary section (#252), after the map: the route's summary line of at most 80 characters, then Character, Max Grade, Hardest Climb (FIETS), one row per categorized climb (category, length, average grade) and a Surface row with its shares, captioned "Surface data © OpenStreetMap contributors". Hidden for a route with neither elevation nor a surface. Values use tabular digits. Under the summary line, where Apple Intelligence is available, the on-device route narrative (#203): one sentence per section of the route (one to five), in `textSecondary`, describing the ride's shape in riding order, with no figures. Absent without it, and the section is otherwise unchanged
 - Elevation profile: Swift Charts `AreaMark` + `LineMark` in `brPrimary`, catmullRom interpolation

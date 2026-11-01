@@ -563,6 +563,13 @@ private struct RoutesMapView: View {
     /// the captured viewport with the rider's own region, changing the filter with no gesture.
     @State private var position: MapCameraPosition?
     @State private var visibleBounds: RouteBounds?
+    /// What one screen point covers on the ground, measured from the map on every camera frame,
+    /// so the arrows hold their size through a pinch (#341).
+    @State private var metersPerPoint: Double?
+    /// Each shown route's arrows, placed for `visibleBounds`. Kept here rather than placed in the
+    /// map's content because placing walks every route, and the content is redrawn whenever
+    /// `metersPerPoint` changes.
+    @State private var arrowsByRoute: [UUID: RouteDirectionMarkers.Arrows] = [:]
     @State private var restoredStoredViewport = false
     @State private var hasCenteredOnRider = false
     /// What `onAppear` framed. A late rider fix re-centres only while the camera is still
@@ -576,33 +583,8 @@ private struct RoutesMapView: View {
     }
 
     var body: some View {
-        Map(
-            position: Binding(get: { position ?? .region(seedRegion) }, set: { position = $0 }),
-            // Pitch and rotation are both off, and both for the filter's sake.
-            // `MapCameraUpdateContext.region` is the axis-aligned box around the visible
-            // *frustum*: pitched, it runs to the horizon and would match nearly every saved
-            // route while the screen showed a narrow wedge. Rotation is the arrows' problem —
-            // `Annotation` content is screen-space and does not counter-rotate, so every arrow
-            // would point wrong. A route-browsing map loses nothing by dropping them.
-            interactionModes: [.pan, .zoom]
-        ) {
-            UserAnnotation()
-            ForEach(routes) { route in
-                if let coordinates = polylines[route.id], !coordinates.isEmpty {
-                    RouteMapContent(coordinates: coordinates,
-                                    startTitle: route.name,
-                                    visibleBounds: visibleBounds)
-                } else {
-                    // Geometry arrives after the routes do, so a pin stands in until it lands.
-                    Marker(route.name, systemImage: "flag.fill",
-                           coordinate: markerCoordinate(for: route))
-                        .tint(.cyPrimary)
-                }
-            }
-        }
-        .mapStyle(.standard(elevation: .realistic))
-        .mapControls {
-            MapUserLocationButton(); MapCompass(); MapScaleView()
+        MapReader { proxy in
+            map(proxy: proxy)
         }
         .onAppear {
             guard position == nil else { return }
@@ -615,9 +597,6 @@ private struct RoutesMapView: View {
             // would silently never apply.
             report(region)
         }
-        .onMapCameraChange(frequency: .onEnd) { context in
-            report(context.region)
-        }
         .onChange(of: riderCoordinate) { _, fix in
             // Only on a first-ever open, and only once: after this the camera belongs to the
             // rider's gestures, and a restored viewport outranks a late-arriving fix.
@@ -629,6 +608,56 @@ private struct RoutesMapView: View {
             position = .region(region)
             report(region)
         }
+        // Placed when the viewport settles, when geometry lands, or when the filter changes what
+        // is shown — never per frame.
+        .onChange(of: visibleBounds, initial: true) { placeArrows() }
+        .onChange(of: polylines) { placeArrows() }
+        .onChange(of: routes.map(\.id)) { placeArrows() }
+    }
+
+    private func map(proxy: MapProxy) -> some View {
+        Map(
+            position: Binding(get: { position ?? .region(seedRegion) }, set: { position = $0 }),
+            // Pitch and rotation are both off. `MapCameraUpdateContext.region` is the
+            // axis-aligned box around the visible *frustum*: pitched, it runs to the horizon and
+            // would match nearly every saved route while the screen showed a narrow wedge, and
+            // rotated, it is wider than the screen. Either way the filter and the arrow spacing
+            // would read the wrong viewport. A route-browsing map loses nothing by dropping them.
+            interactionModes: [.pan, .zoom]
+        ) {
+            UserAnnotation()
+            ForEach(routes) { route in
+                if let coordinates = polylines[route.id], !coordinates.isEmpty {
+                    RouteMapContent(coordinates: coordinates,
+                                    startTitle: route.name,
+                                    arrows: arrowsByRoute[route.id] ?? .none,
+                                    metersPerPoint: metersPerPoint)
+                } else {
+                    // Geometry arrives after the routes do, so a pin stands in until it lands.
+                    Marker(route.name, systemImage: "flag.fill",
+                           coordinate: markerCoordinate(for: route))
+                        .tint(.cyPrimary)
+                }
+            }
+        }
+        .mapStyle(.standard(elevation: .realistic))
+        .mapControls {
+            MapUserLocationButton(); MapCompass(); MapScaleView()
+        }
+        .measuresMapScale(proxy, into: $metersPerPoint)
+        .onMapCameraChange(frequency: .onEnd) { context in
+            report(context.region)
+        }
+    }
+
+    private func placeArrows() {
+        var placed: [UUID: RouteDirectionMarkers.Arrows] = [:]
+        for route in routes {
+            guard let coordinates = polylines[route.id], !coordinates.isEmpty else { continue }
+            placed[route.id] = RouteDirectionMarkers.arrows(coordinates: coordinates,
+                                                            visibleBounds: visibleBounds)
+        }
+        arrowsByRoute = placed
     }
 
     /// The arrows need the raw viewport whatever it holds; the filter is absent when the

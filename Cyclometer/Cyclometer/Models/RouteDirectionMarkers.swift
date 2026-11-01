@@ -67,39 +67,92 @@ enum RouteDirectionMarkers {
         return min(baseArrowPoints + rungs * arrowPointsPerRung, maximumArrowPoints)
     }
 
-    /// The on-screen angle an arrow must be drawn at to point along `bearingDegrees`, on a map
-    /// turned to `headingDegrees` and tilted to `pitchDegrees` (#258).
+    /// How much of an arrow's point size its triangle spans, tip to base and side to side.
     ///
-    /// `Annotation` content is screen-space: MapKit neither turns it with the map nor lays it in
-    /// the map plane. S19 and S20 dodge this by refusing rotation and pitch (`RoutesView`), but
-    /// the live map is heading-up and tilted by design, so the angle is computed instead.
+    /// The arrows were an SF Symbol, `arrowtriangle.up.fill`, whose ink is 16 × 16 pt at 20 pt
+    /// bold. Drawing the triangle at this fraction of `arrowPoints` keeps the size #258's review
+    /// settled on.
+    static let arrowInkFraction = 0.8
+
+    /// The most ground one screen point may cover for arrows to draw at all: about 20 km across
+    /// a phone-width map (#341 review).
     ///
-    /// Two corrections, in order: the map's heading turns the world under the glyph, and the tilt
-    /// foreshortens the screen's vertical axis by `cos(pitch)` while leaving the horizontal one
-    /// alone. A due-north bearing on a heading-up map pointing north is screen-up either way; a
-    /// bearing at 45° to the camera is drawn nearer the horizontal the more the map is tilted.
-    static func screenAngleDegrees(
-        bearingDegrees: Double,
-        headingDegrees: Double,
-        pitchDegrees: Double
-    ) -> Double {
-        guard bearingDegrees.isFinite, headingDegrees.isFinite else { return 0 }
-        let relative = (bearingDegrees - headingDegrees) * .pi / 180
-        // A pitch MapKit has not reported yet, or one outside the range it can draw, is treated
-        // as flat rather than allowed to flip or collapse the glyph.
-        let pitch = pitchDegrees.isFinite ? min(max(pitchDegrees, 0), 89) * .pi / 180 : 0
-        let angle = atan2(sin(relative), cos(relative) * cos(pitch)) * 180 / .pi
-        return angle < 0 ? angle + 360 : angle
+    /// Zoomed out further, a route is a scribble a few points across, and arrows sized for the
+    /// screen bury it in blocky triangles instead of showing which way it runs.
+    static let maximumArrowMetersPerPoint = 50.0
+
+    /// Whether the map, at `metersPerPoint`, is zoomed in far enough to draw arrows.
+    static func drawsArrows(atMetersPerPoint metersPerPoint: Double) -> Bool {
+        metersPerPoint.isFinite && metersPerPoint > 0 && metersPerPoint <= maximumArrowMetersPerPoint
+    }
+
+    /// How many metres one screen point covers, given two points `pointsApart` on screen that the
+    /// map reports at `start` and `end`. What turns an arrow's point size into a size on the ground.
+    ///
+    /// Measured from the map rather than estimated from a viewport (#341 review): a camera's
+    /// distance, or the region a map was asked to show, says little about the scale it actually
+    /// draws at once tilt, field of view and the map's shape are involved. Nil when there is
+    /// nothing to divide: no distance on screen, or no distance on the ground.
+    static func metersPerPoint(from start: RouteCoordinate, to end: RouteCoordinate,
+                               pointsApart: Double) -> Double? {
+        let perPoint = RouteGeometry.segmentMeters(from: start, to: end) / pointsApart
+        guard pointsApart.isFinite, pointsApart > 0, perPoint.isFinite, perPoint > 0
+        else { return nil }
+        return perPoint
+    }
+
+    /// The smallest change in scale worth redrawing the arrows for: 2 %, which on a 22 pt arrow
+    /// is under half a point.
+    static let scaleStep = 0.02
+
+    /// `metersPerPoint` snapped to a power of `1 + scaleStep`.
+    ///
+    /// The scale is re-measured on every camera frame so the arrows hold their size through a
+    /// pinch, and each new value redraws the map's content. Snapping means it changes only when
+    /// the arrow's size visibly would, so a map that pans or follows without zooming redraws
+    /// nothing at all.
+    static func quantizedScale(_ metersPerPoint: Double) -> Double {
+        guard metersPerPoint.isFinite, metersPerPoint > 0 else { return metersPerPoint }
+        let step = log(1 + scaleStep)
+        return exp((log(metersPerPoint) / step).rounded() * step)
+    }
+
+    /// The triangle an arrow is drawn as: centred on `placement`, its tip `sizeMeters / 2` ahead
+    /// along the bearing, its base as wide as the arrow is long (#341).
+    ///
+    /// On the map plane rather than on screen, which is the point. An `Annotation` draws above
+    /// every overlay *and* can draw above the rider's location dot, and SwiftUI's `Map` has no way
+    /// to order annotations. An overlay always draws beneath annotations. Lying in the map plane
+    /// also means MapKit turns and tilts the arrow with the map, so a heading-up, tilted camera
+    /// needs no correction.
+    static func arrowTriangle(for placement: Placement, sizeMeters: Double) -> [RouteCoordinate] {
+        let bearing = placement.bearingDegrees * .pi / 180
+        let half = sizeMeters / 2
+        // Unit vectors along the bearing and to its right, as (north, east).
+        let ahead = (north: cos(bearing), east: sin(bearing))
+        let right = (north: -sin(bearing), east: cos(bearing))
+        func point(along: Double, across: Double) -> RouteCoordinate {
+            RouteGeometry.coordinate(
+                offsetFrom: placement.coordinate,
+                north: ahead.north * along + right.north * across,
+                east: ahead.east * along + right.east * across
+            )
+        }
+        return [
+            point(along: half, across: 0),
+            point(along: -half, across: half),
+            point(along: -half, across: -half),
+        ]
     }
 
     /// The arrows to draw on a route, and the spacing they were drawn at.
     ///
-    /// The spacing comes back because it is what sizes the glyph — see
+    /// The spacing comes back because it is what sizes the arrow — see
     /// `arrowPoints(forSpacingMeters:)`. Density and size are two readings of one number, so they
     /// cannot disagree.
     struct Arrows: Equatable, Sendable {
         var placements: [Placement]
-        /// The rung the climb settled at. Per route, so it says nothing about the glyph.
+        /// The rung the climb settled at. Per route, so it says nothing about the arrow's size.
         var spacingMeters: Double
         /// How big to draw each one. Derived from the *viewport*, not from `spacingMeters`, so
         /// two routes on one screen are drawn with the same arrow even when a long one and a
@@ -173,7 +226,7 @@ enum RouteDirectionMarkers {
 
     /// The same, starting the climb at `spacingMeters` rather than at the finest rung — what a
     /// test uses to pin one rung, and what a caller with a reason to start coarse would use.
-    /// `visibleBounds` culls: off-screen arrows cost annotations for nothing.
+    /// `visibleBounds` culls: off-screen arrows cost overlays for nothing.
     ///
     /// **Too many in view is answered by climbing the ladder, not by dropping arrows.** A route
     /// that doubles back inside one viewport — a criterium lap, a switchback climb — can put far
