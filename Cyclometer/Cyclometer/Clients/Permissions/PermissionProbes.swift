@@ -91,7 +91,7 @@ extension PermissionProbes {
                 AsyncStream { continuation in
                     let task = Task {
                         let notifications = NotificationCenter.default.notifications(
-                            named: await UIApplication.didBecomeActiveNotification
+                            named: UIApplication.didBecomeActiveNotification
                         )
                         for await _ in notifications { continuation.yield(()) }
                         continuation.finish()

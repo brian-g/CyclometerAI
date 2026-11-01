@@ -202,35 +202,37 @@ extension DependencyValues {
 
 private func batchInsertTrackPoints(_ points: [TrackPointDTO], container: NSPersistentContainer) async throws {
     let context = container.newBackgroundContext()
-    var index = 0
-    let request = NSBatchInsertRequest(entityName: "TrackPoint", managedObjectHandler: { managedObject in
-        guard index < points.count else { return true }
-        let point = points[index]
-        let mo = managedObject as! TrackPointMO
-        mo.id = point.id
-        mo.rideId = point.rideId
-        mo.timestamp = point.timestamp
-        mo.latitude = point.latitude
-        mo.longitude = point.longitude
-        mo.altitudeMeters = point.altitudeMeters.map(NSNumber.init(value:))
-        mo.horizontalAccuracyMeters = point.horizontalAccuracyMeters
-        // Every optional sensor field stores "no reading" as a negative sentinel, because
-        // the attributes are non-optional scalars. It has to be negative, not 0: a
-        // coasting rider genuinely reads 0 rpm and a stopped rider 0 m/s, and 0 as the
-        // sentinel silently erased those readings on the way back out (#211).
-        mo.speedMPS = point.speedMPS ?? -1.0
-        mo.speedSourceRaw = point.speedSource.rawValue
-        mo.heartRateBPM = Int16(clamping: point.heartRateBPM ?? -1)
-        mo.heartRateSourceRaw = point.heartRateSource.rawValue
-        mo.cadenceRPM = Int16(clamping: point.cadenceRPM ?? -1)
-        mo.powerWatts = Int16(clamping: point.powerWatts ?? -1)
-        // Not a sensor reading, so no sentinel: 0 is the first segment (#263).
-        mo.segmentIndex = Int16(clamping: point.segmentIndex)
-        index += 1
-        return false
-    })
-    request.resultType = .statusOnly
+    // Built inside `perform`, on the context's queue: the request isn't Sendable, so it
+    // can't be made out here and carried in.
     try await context.perform {
+        var index = 0
+        let request = NSBatchInsertRequest(entityName: "TrackPoint", managedObjectHandler: { managedObject in
+            guard index < points.count else { return true }
+            let point = points[index]
+            let mo = managedObject as! TrackPointMO
+            mo.id = point.id
+            mo.rideId = point.rideId
+            mo.timestamp = point.timestamp
+            mo.latitude = point.latitude
+            mo.longitude = point.longitude
+            mo.altitudeMeters = point.altitudeMeters.map(NSNumber.init(value:))
+            mo.horizontalAccuracyMeters = point.horizontalAccuracyMeters
+            // Every optional sensor field stores "no reading" as a negative sentinel, because
+            // the attributes are non-optional scalars. It has to be negative, not 0: a
+            // coasting rider genuinely reads 0 rpm and a stopped rider 0 m/s, and 0 as the
+            // sentinel silently erased those readings on the way back out (#211).
+            mo.speedMPS = point.speedMPS ?? -1.0
+            mo.speedSourceRaw = point.speedSource.rawValue
+            mo.heartRateBPM = Int16(clamping: point.heartRateBPM ?? -1)
+            mo.heartRateSourceRaw = point.heartRateSource.rawValue
+            mo.cadenceRPM = Int16(clamping: point.cadenceRPM ?? -1)
+            mo.powerWatts = Int16(clamping: point.powerWatts ?? -1)
+            // Not a sensor reading, so no sentinel: 0 is the first segment (#263).
+            mo.segmentIndex = Int16(clamping: point.segmentIndex)
+            index += 1
+            return false
+        })
+        request.resultType = .statusOnly
         let result = try context.execute(request) as! NSBatchInsertResult
         guard result.result as? Bool == true else { throw PersistenceError.batchInsertFailed }
     }
