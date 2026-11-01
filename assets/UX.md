@@ -179,6 +179,8 @@ The dashboard is sparse, so an empty grid item will not get auto-filled by if on
 
 With the exception of the dashboard, all sheets should have a close button in the upper left (or a back button if there is a nested sheet). 
 
+As built (#335): the close is the system `Button(role: .close)` at `.cancellationAction`, so it sits in the sheet's corner and moves with the detent. S10 is the one exception: Delete keeps its upper-left slot (#452), and Finish Ride or a swipe down closes the sheet.
+
 ### Widget Size Convention
 
 Widget sizes are expressed as **WxH** (width × height) in grid units. The dashboard grid is 2 columns × 7 rows. Cell dimensions are approximately 201×96pt on iPhone 17 Pro.
@@ -733,7 +735,8 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
   allows, about 35°
 - When positioned in the first or last row of the grid, the map extends into the safe area
 - Sheet: Full-screen map. It takes pinch-zoom, pan, rotate and tilt, and has re-centre, 2D/3D, compass and scale
-  controls, plus two of its own (#199):
+  controls, plus two of its own (#199). Its close sits upper-left in a bar with no background, and the controls sit
+  below that bar (#335):
   - **Orientation:** heading-up or north-up. The sheet opens in the rider's last choice, remembered across rides and
     relaunches (`AppPreferences.mapOrientation`). While the map is following, a tap switches orientation. After the
     rider has panned away, a tap returns to following in the saved orientation

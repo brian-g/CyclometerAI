@@ -46,13 +46,11 @@ struct StartSheetView: View {
             .navigationTitle("New Ride")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
+                // The system close every sheet carries (#335), not a hand-drawn xmark.
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) {
                         store.send(.cancelButtonTapped)
-                    } label: {
-                        Image(systemName: "xmark")
                     }
-                    .accessibilityLabel("Cancel")
                     .disabled(store.isStarting)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
