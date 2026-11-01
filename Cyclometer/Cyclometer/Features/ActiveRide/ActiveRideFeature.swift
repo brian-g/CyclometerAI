@@ -121,6 +121,7 @@ struct ActiveRideFeature {
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.rideDataBuffer) var rideDataBuffer
     @Dependency(\.rideEndIntentClient) var rideEndIntentClient
+    @Dependency(\.audioClient) var audioClient
 
     @ObservableState
     struct State: Equatable {
@@ -481,6 +482,8 @@ struct ActiveRideFeature {
         /// The toolbar's Sensors button (#464, #466), shown while a paired sensor is missing or low.
         case sensorsButtonTapped
         case sensorsSheetPresentationChanged(Bool)
+        /// The toolbar's Bell button (#492).
+        case bellTapped
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)
@@ -696,6 +699,13 @@ struct ActiveRideFeature {
             case .sensorsButtonTapped:
                 state.isSensorsSheetPresented = true
                 return .none
+            case .bellTapped:
+                // Straight to the speaker, not through AlertOrchestratorFeature: the bell is the
+                // rider's, not an alert. A sounding radar tone still keeps the speaker — the engine
+                // has the bell yield to it (`ToneKind.yields(to:)`).
+                return .run(priority: .high) { [audioClient] _ in
+                    await audioClient.playBell()
+                }
             case .sensorsSheetPresentationChanged(let isPresented):
                 state.isSensorsSheetPresented = isPresented
                 return .none

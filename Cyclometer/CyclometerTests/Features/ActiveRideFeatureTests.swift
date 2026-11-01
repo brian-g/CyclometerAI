@@ -4412,3 +4412,24 @@ struct ActiveRideFeatureDashboardEditTests {
         await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 7, column: 0)))
     }
 }
+
+@MainActor
+@Suite("ActiveRideFeature — bell (#492)")
+struct ActiveRideBellTests {
+
+    @Test("The Bell button rings the bell once and changes nothing else")
+    func bellTappedRingsTheBell() async {
+        let rings = LockIsolated(0)
+        var audio = AudioClient.testValue
+        audio.playBell = { rings.withValue { $0 += 1 } }
+        let store = TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.audioClient = audio
+        }
+
+        await store.send(.bellTapped)
+        await store.finish()
+        #expect(rings.value == 1)
+    }
+}
