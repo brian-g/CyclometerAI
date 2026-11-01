@@ -179,7 +179,7 @@ The dashboard is sparse, so an empty grid item will not get auto-filled by if on
 
 With the exception of the dashboard, all sheets should have a close button in the upper left (or a back button if there is a nested sheet). 
 
-As built (#335): the close is the system `Button(role: .close)` at `.cancellationAction`, so it sits in the sheet's corner and moves with the detent. S10 is the one exception: Delete keeps its upper-left slot (#452), and Finish Ride or a swipe down closes the sheet.
+As built (#335): the close is the system `Button(role: .close)` at `.cancellationAction`, so it sits in the sheet's corner and moves with the detent. S10 is the only other exception: Delete keeps its upper-left slot (#452), and Finish Ride or a swipe down closes the sheet.
 
 ### Widget Size Convention
 

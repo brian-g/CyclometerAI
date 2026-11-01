@@ -59,7 +59,7 @@ struct LiveMapSheet: View {
                     Button(role: .close) { dismiss() }
                 }
             }
-            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)

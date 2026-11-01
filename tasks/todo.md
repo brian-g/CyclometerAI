@@ -1688,4 +1688,5 @@ map sheet gets a transparent nav bar with the system close, so its scale and con
 
 **Review.** Seven sheets already used the system close; three outliers now match. S10 is the one exception, by
 Brian's call. The map sheet's bar has no background, so the map still bleeds to the top edge; its controls move down
-below the bar. Snapshot references didn't move (toolbars don't render in hosted snapshots on iOS 27).
+below the bar. Snapshot references didn't move because no snapshot draws these toolbars: Routes pins
+`RouteFilterSheetBody`, Start pins rows, and the live map isn't snapshotted. iOS 27 does render toolbar items.
