@@ -391,11 +391,7 @@ private struct RouteFilterSheet: View {
             RouteFilterSheetBody(store: store)
                 .navigationTitle("Filter Routes")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(role: .close) { store.send(.filterSheetPresentationChanged(false)) }
-                    }
-                }
+                .sheetCloseButton { store.send(.filterSheetPresentationChanged(false)) }
         }
     }
 }

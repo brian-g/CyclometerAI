@@ -41,8 +41,6 @@ struct LiveMapSheet: View {
     let orientation: MapOrientation
     let onOrientationToggle: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
-
     var body: some View {
         // A bar only for the close every sheet carries (#335). It has no background, so the map
         // still runs to the sheet's top edge, and the map's controls sit below it.
@@ -54,11 +52,7 @@ struct LiveMapSheet: View {
                 orientation: orientation,
                 onOrientationToggle: onOrientationToggle
             )
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .close) { dismiss() }
-                }
-            }
+            .sheetCloseButton()
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         }
         .presentationDetents([.large])

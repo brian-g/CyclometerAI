@@ -79,7 +79,6 @@ extension ActiveRideFeature.State {
 struct CaloriesSheet: View {
     var metrics: () -> CaloriesMetrics = { CaloriesMetrics() }
 
-    @Environment(\.dismiss) private var dismiss
     @State private var detent = PresentationDetent.medium
 
     var body: some View {
@@ -88,11 +87,7 @@ struct CaloriesSheet: View {
             CaloriesList(metrics: metrics)
                 .navigationTitle("Active Calories")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(role: .close) { dismiss() }
-                    }
-                }
+                .sheetCloseButton()
         }
         .presentationDetents([.medium, .large], selection: $detent)
     }

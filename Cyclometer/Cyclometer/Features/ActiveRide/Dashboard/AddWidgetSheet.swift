@@ -11,8 +11,6 @@ struct AddWidgetSheet: View {
     /// each preview's proportions.
     let canvas: CGSize
 
-    @Environment(\.dismiss) private var dismiss
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -26,11 +24,7 @@ struct AddWidgetSheet: View {
             }
             .navigationTitle("Add Widget")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .close) { dismiss() }
-                }
-            }
+            .sheetCloseButton()
         }
     }
 }

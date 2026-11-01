@@ -320,7 +320,6 @@ private struct CadenceDetailSheet: View {
     let zones: CadenceZoneBoundaries
     let detail: CadenceDetail
 
-    @Environment(\.dismiss) private var dismiss
     @State private var detent = PresentationDetent.medium
 
     private static let chartHeight: CGFloat = 140
@@ -363,11 +362,7 @@ private struct CadenceDetailSheet: View {
             }
             .navigationTitle("Cadence")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .close) { dismiss() }
-                }
-            }
+            .sheetCloseButton()
         }
         .presentationDetents([.medium, .large], selection: $detent)
     }

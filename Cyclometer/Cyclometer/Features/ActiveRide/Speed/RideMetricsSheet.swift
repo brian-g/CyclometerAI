@@ -103,7 +103,6 @@ extension ActiveRideFeature.State {
 struct RideMetricsSheet: View {
     var metrics: () -> RideMetrics = { RideMetrics() }
 
-    @Environment(\.dismiss) private var dismiss
     @State private var detent = PresentationDetent.medium
 
     var body: some View {
@@ -112,11 +111,7 @@ struct RideMetricsSheet: View {
             RideMetricsList(metrics: metrics)
                 .navigationTitle("Ride Metrics")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(role: .close) { dismiss() }
-                    }
-                }
+                .sheetCloseButton()
         }
         .presentationDetents([.medium, .large], selection: $detent)
     }

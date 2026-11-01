@@ -97,7 +97,6 @@ extension ActiveRideFeature.State {
 struct HeartRateSheet: View {
     var metrics: () -> HeartRateMetrics = { HeartRateMetrics() }
 
-    @Environment(\.dismiss) private var dismiss
     @State private var detent = PresentationDetent.medium
 
     var body: some View {
@@ -106,11 +105,7 @@ struct HeartRateSheet: View {
             HeartRateList(metrics: metrics)
                 .navigationTitle("Heart Rate")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(role: .close) { dismiss() }
-                    }
-                }
+                .sheetCloseButton()
         }
         .presentationDetents([.medium, .large], selection: $detent)
     }

@@ -1690,3 +1690,10 @@ map sheet gets a transparent nav bar with the system close, so its scale and con
 Brian's call. The map sheet's bar has no background, so the map still bleeds to the top edge; its controls move down
 below the bar. Snapshot references didn't move because no snapshot draws these toolbars: Routes pins
 `RouteFilterSheetBody`, Start pins rows, and the live map isn't snapshotted. iOS 27 does render toolbar items.
+
+**Shared close (Brian asked, after review).**
+- [x] `UI/Components/SheetCloseButton/SheetCloseButton.swift`: `.sheetCloseButton(disabled:action:)` adds the
+      `.cancellationAction` `Button(role: .close)`; `dismiss` unless an action is given. Previews: Sheet, Disabled.
+- [x] All 10 sheets use it; each widget sheet's now-unused `@Environment(\.dismiss)` removed. CLAUDE.md + UX.md name it.
+- [x] Brian runs it: every sheet's X still closes (the helper reads `dismiss` at the stack's root, not outside it).
+- [x] Full `CyclometerTests`: 2417 passed, 0 failed → commit + push to PR #514.
