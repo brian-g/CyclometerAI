@@ -315,6 +315,18 @@ struct RouteDirectionMarkersTests {
         #expect(RouteDirectionMarkers.quantizedScale(snapped * 1.05) > snapped)
     }
 
+    @Test("zoomed out past the cutoff, no arrows draw")
+    func arrowsStopAtTheCutoffScale() {
+        let cutoff = RouteDirectionMarkers.maximumArrowMetersPerPoint
+        #expect(RouteDirectionMarkers.drawsArrows(atMetersPerPoint: 2))
+        #expect(RouteDirectionMarkers.drawsArrows(atMetersPerPoint: cutoff))
+        #expect(!RouteDirectionMarkers.drawsArrows(atMetersPerPoint: cutoff * 1.02))
+        // A 50-mile radius on a 400 pt map: ~400 m a point.
+        #expect(!RouteDirectionMarkers.drawsArrows(atMetersPerPoint: 400))
+        #expect(!RouteDirectionMarkers.drawsArrows(atMetersPerPoint: .nan))
+        #expect(!RouteDirectionMarkers.drawsArrows(atMetersPerPoint: 0))
+    }
+
     // MARK: - #258 review: the arrows shifted on zoom and pointed the wrong way
 
     /// A road bending through a quarter circle — a suburban curve, the shape that made the first

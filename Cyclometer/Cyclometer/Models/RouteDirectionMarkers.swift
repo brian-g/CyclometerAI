@@ -74,6 +74,18 @@ enum RouteDirectionMarkers {
     /// settled on.
     static let arrowInkFraction = 0.8
 
+    /// The most ground one screen point may cover for arrows to draw at all: about 20 km across
+    /// a phone-width map (#341 review).
+    ///
+    /// Zoomed out further, a route is a scribble a few points across, and arrows sized for the
+    /// screen bury it in blocky triangles instead of showing which way it runs.
+    static let maximumArrowMetersPerPoint = 50.0
+
+    /// Whether the map, at `metersPerPoint`, is zoomed in far enough to draw arrows.
+    static func drawsArrows(atMetersPerPoint metersPerPoint: Double) -> Bool {
+        metersPerPoint.isFinite && metersPerPoint > 0 && metersPerPoint <= maximumArrowMetersPerPoint
+    }
+
     /// How many metres one screen point covers, given two points `pointsApart` on screen that the
     /// map reports at `start` and `end`. What turns an arrow's point size into a size on the ground.
     ///

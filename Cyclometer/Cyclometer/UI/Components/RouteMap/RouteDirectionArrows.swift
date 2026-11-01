@@ -26,14 +26,18 @@ struct RouteDirectionArrows: MapContent {
     let metersPerPoint: Double
     var tint: Color = .cyPrimary
 
+    /// None when zoomed out past `RouteDirectionMarkers.maximumArrowMetersPerPoint`. Checked here,
+    /// against the scale measured every frame, so arrows go as soon as a pinch passes it.
     @MapContentBuilder
     var body: some MapContent {
-        ForEach(Array(placements.enumerated()), id: \.offset) { _, placement in
-            MapPolygon(coordinates: RouteDirectionMarkers.arrowTriangle(
-                for: placement,
-                sizeMeters: pointSize * RouteDirectionMarkers.arrowInkFraction * metersPerPoint
-            ).map(\.coordinate2D))
-            .foregroundStyle(tint)
+        if RouteDirectionMarkers.drawsArrows(atMetersPerPoint: metersPerPoint) {
+            ForEach(Array(placements.enumerated()), id: \.offset) { _, placement in
+                MapPolygon(coordinates: RouteDirectionMarkers.arrowTriangle(
+                    for: placement,
+                    sizeMeters: pointSize * RouteDirectionMarkers.arrowInkFraction * metersPerPoint
+                ).map(\.coordinate2D))
+                .foregroundStyle(tint)
+            }
         }
     }
 }

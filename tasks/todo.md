@@ -1630,3 +1630,15 @@ to measure the scale with `MapProxy` and hold the arrows' on-screen size during 
 **Review.**
 - Arrows draw at 16–22 pt at rest and mid-pinch on all three maps.
 - The live map measures the scale only while a route is loaded, so a free ride writes nothing.
+
+---
+
+## #341 follow-up — No arrows when zoomed out
+
+Brian: at a 50-mile radius the arrows are just blocky triangles over the route.
+
+- [x] `RouteDirectionMarkers.maximumArrowMetersPerPoint` (50 m/pt, ~20 km across a phone) + `drawsArrows(atMetersPerPoint:)`
+- [x] `RouteDirectionArrows` draws nothing past it, checked against the per-frame scale, so all three maps share it
+- [x] Test: `arrowsStopAtTheCutoffScale`
+- [x] Brian checked on device: good
+- [x] Full `CyclometerTests` green (1872 tests, 166 suites, 2 known issues) → commit + push to PR #511
