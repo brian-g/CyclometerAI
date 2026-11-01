@@ -321,6 +321,7 @@ private struct CadenceDetailSheet: View {
     let detail: CadenceDetail
 
     @Environment(\.dismiss) private var dismiss
+    @State private var detent = PresentationDetent.medium
 
     private static let chartHeight: CGFloat = 140
     private static let donutHeight: CGFloat = 120
@@ -368,7 +369,7 @@ private struct CadenceDetailSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large], selection: $detent)
     }
 
     private var pedalingVsCoastingRow: some View {
