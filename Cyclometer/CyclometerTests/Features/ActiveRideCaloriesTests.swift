@@ -9,7 +9,7 @@ import Testing
 @Suite("ActiveRideFeature — active calories")
 struct ActiveRideCaloriesTests {
 
-    private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
+    nonisolated private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
     private static let dateOfBirth = DateComponents(year: 1980, month: 6, day: 1)
     private static let rider = RideEnergy.Rider(kilograms: 75, dateOfBirth: dateOfBirth, sex: .male, on: fixedNow)
 

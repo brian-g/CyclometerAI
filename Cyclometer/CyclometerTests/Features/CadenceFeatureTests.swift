@@ -7,7 +7,7 @@ import ComposableArchitecture
 @Suite("CadenceFeature")
 struct CadenceFeatureTests {
 
-    private static let testDate = Date(timeIntervalSince1970: 1_000_000)
+    nonisolated private static let testDate = Date(timeIntervalSince1970: 1_000_000)
 
     /// Recording by default: a reading only reaches the average and max while the ride is
     /// recording (#379), which is what most of these tests are about.

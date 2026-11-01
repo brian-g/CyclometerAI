@@ -479,8 +479,8 @@ private final class Host {
     init<V: View>(_ view: V) throws {
         try #require(AccessibilityAutomation.isAvailable, AccessibilityAutomation.missingSymbol)
         AccessibilityAutomation.acquire()
-        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        window = scene.map(UIWindow.init(windowScene:)) ?? UIWindow()
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 400)
         controller = UIHostingController(rootView: AnyView(view.frame(width: 393, height: 200)))
         window.rootViewController = controller

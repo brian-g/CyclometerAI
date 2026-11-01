@@ -21,11 +21,11 @@ final class SettingsSnapshotTests: XCTestCase {
     private let device = ViewImageConfig(
         safeArea: UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0),
         size: CGSize(width: 402, height: 874),
-        traits: UITraitCollection(traitsFrom: [
-            UITraitCollection(horizontalSizeClass: .compact),
-            UITraitCollection(verticalSizeClass: .regular),
-            UITraitCollection(displayScale: 3)
-        ])
+        traits: UITraitCollection { traits in
+            traits.horizontalSizeClass = .compact
+            traits.verticalSizeClass = .regular
+            traits.displayScale = 3
+        }
     )
 
     /// The same device stretched tall enough to hold the whole list, so sections below the

@@ -19,7 +19,7 @@ import UIKit
 @Suite("Ride end — failure paths")
 struct RideEndFailureTests {
 
-    private static let testDate = Date(timeIntervalSince1970: 1_000_000)
+    nonisolated private static let testDate = Date(timeIntervalSince1970: 1_000_000)
     private static let coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
 
     private static func fetchRide(_ id: UUID, from swiftDataStack: SwiftDataStack) throws -> Ride {
