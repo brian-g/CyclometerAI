@@ -1657,14 +1657,14 @@ Plan: `~/.claude/plans/transient-stargazing-map.md`. Brian chose: synthesized, a
       "Tink" and `AudioToolbox`).
 - [x] Tests written: renderer (length, peak, no clicks, dip between flicks, band, silent-mode), yields, reducer.
 - [x] `Audio.md` §Bell + acceptance criteria; `UX.md` §S05 toolbar line.
-- [ ] Device checks not yet confirmed: silent switch on, music playing, repeated taps.
+- [x] Brian checked on device: rings with the silent switch on, and music keeps playing under it.
 - [x] Tune by ear until approved.
   - Round 1 (Brian: rings too long, too high): fundamental 2.4 → 1.7 kHz; decay time constants halved
     (300/200/120/70 → 150/100/60/35 ms); 1,300 → 1,050 ms. Beat partner kept at ~4 Hz (×1.0024).
 - [x] Run tests: full `CyclometerTests` 2412 passed, 0 failed (before rebasing onto #511/#512, which touch no
       audio or ride code). Swapped `.userInteractive` (deprecated) for `.high`, its alias.
 
-**Review.** Brian approved the sound after round 1. The silent-switch and music-mixing behaviour rests on the
-`.playback` + `.mixWithOthers` category and is unverified on device. Found, not fixed: Danger's silent-mode override
+**Review.** Brian approved the sound after round 1, and confirmed on device that it rings through the silent
+switch with music playing under it. Found, not fixed: Danger's silent-mode override
 calls `overrideOutputAudioPort(.speaker)` under `.playback`, which only applies to `.playAndRecord`; the override is
 unreachable in MVP. With earphones connected the bell plays in them (noted in `Audio.md`).
