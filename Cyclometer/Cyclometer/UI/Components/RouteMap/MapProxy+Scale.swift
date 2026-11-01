@@ -17,7 +17,8 @@ extension MapProxy {
     /// map foreshortens only the vertical. The centre because that is where a following map keeps
     /// the rider. Nil before the map can convert, or before it has a size.
     func metersPerPoint(mapSize: CGSize) -> Double? {
-        guard mapSize.width > Self.scaleProbePoints else { return nil }
+        // Wide enough that the probe, half the width from the centre at most, lands on the map.
+        guard mapSize.width >= 2 * Self.scaleProbePoints else { return nil }
         let center = CGPoint(x: mapSize.width / 2, y: mapSize.height / 2)
         let probe = CGPoint(x: center.x + Self.scaleProbePoints, y: center.y)
         guard let start = convert(center, from: .local),
@@ -70,11 +71,5 @@ private struct MapScaleMeasurement: ViewModifier {
               measured != metersPerPoint
         else { return }
         metersPerPoint = measured
-    }
-}
-
-private extension RouteCoordinate {
-    init(_ coordinate: CLLocationCoordinate2D) {
-        self.init(latitude: coordinate.latitude, longitude: coordinate.longitude, elevationMeters: nil)
     }
 }

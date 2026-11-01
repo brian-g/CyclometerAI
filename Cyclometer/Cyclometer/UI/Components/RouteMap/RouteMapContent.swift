@@ -43,14 +43,12 @@ struct RouteMapContent: MapContent {
                 .stroke(Color.cyPrimary, lineWidth: strokeWidth)
         }
 
-        if let metersPerPoint {
-            RouteDirectionArrows(
-                placements: arrows.placements,
-                pointSize: arrows.pointSize,
-                metersPerPoint: metersPerPoint,
-                tint: .cyPrimary
-            )
-        }
+        RouteDirectionArrows(
+            placements: arrows.placements,
+            pointSize: arrows.pointSize,
+            metersPerPoint: metersPerPoint,
+            tint: .cyPrimary
+        )
 
         if let start = coordinates.first {
             Marker(startTitle, systemImage: "flag.fill", coordinate: start.coordinate2D)
@@ -82,5 +80,10 @@ struct RouteMapContent: MapContent {
 extension RouteCoordinate {
     var coordinate2D: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    /// The way back, for a point MapKit reports: `MapProxy.metersPerPoint(mapSize:)` (#341).
+    init(_ coordinate: CLLocationCoordinate2D) {
+        self.init(latitude: coordinate.latitude, longitude: coordinate.longitude, elevationMeters: nil)
     }
 }

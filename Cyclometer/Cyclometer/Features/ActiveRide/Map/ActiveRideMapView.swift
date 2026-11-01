@@ -144,14 +144,12 @@ struct ActiveRideMapView: View {
             // Which way the route goes (#258). A route that doubles back over the same road is
             // one ambiguous line without them. Declared after both polylines so they draw above
             // the track already ridden; as overlays they stay beneath the rider's dot (#341).
-            if let metersPerPoint {
-                RouteDirectionArrows(
-                    placements: arrows.placements,
-                    pointSize: arrows.pointSize,
-                    metersPerPoint: metersPerPoint,
-                    tint: .cyMapRoute
-                )
-            }
+            RouteDirectionArrows(
+                placements: arrows.placements,
+                pointSize: arrows.pointSize,
+                metersPerPoint: metersPerPoint,
+                tint: .cyMapRoute
+            )
         }
         .mapStyle(.standard(elevation: .realistic))
         // No default controls on either surface. The widget must have none, since a compass tap was

@@ -22,15 +22,17 @@ struct RouteDirectionArrows: MapContent {
     /// to the map as the camera pulls back (#258 review).
     let pointSize: Double
     /// What one of those points covers on the ground, from
-    /// `MapProxy.metersPerPoint(mapSize:)`, measured from the map on every camera frame.
-    let metersPerPoint: Double
+    /// `MapProxy.metersPerPoint(mapSize:)`, measured from the map on every camera frame. Nil,
+    /// before the map has been measured, means no arrows.
+    let metersPerPoint: Double?
     var tint: Color = .cyPrimary
 
-    /// None when zoomed out past `RouteDirectionMarkers.maximumArrowMetersPerPoint`. Checked here,
-    /// against the scale measured every frame, so arrows go as soon as a pinch passes it.
+    /// None before the map is measured, or when zoomed out past
+    /// `RouteDirectionMarkers.maximumArrowMetersPerPoint`. Checked here, against the scale
+    /// measured every frame, so arrows go as soon as a pinch passes it.
     @MapContentBuilder
     var body: some MapContent {
-        if RouteDirectionMarkers.drawsArrows(atMetersPerPoint: metersPerPoint) {
+        if let metersPerPoint, RouteDirectionMarkers.drawsArrows(atMetersPerPoint: metersPerPoint) {
             ForEach(Array(placements.enumerated()), id: \.offset) { _, placement in
                 MapPolygon(coordinates: RouteDirectionMarkers.arrowTriangle(
                     for: placement,
