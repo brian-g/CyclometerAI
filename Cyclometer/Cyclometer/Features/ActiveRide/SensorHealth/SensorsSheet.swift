@@ -10,19 +10,13 @@ import SwiftUI
 struct SensorsSheet: View {
     var devices: () -> [SensorHealthFeature.Device]
 
-    @Environment(\.dismiss) private var dismiss
-
     var body: some View {
         let devices = devices()
         NavigationStack {
             SensorsList(devices: devices)
                 .navigationTitle("Sensors")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(role: .close) { dismiss() }
-                    }
-                }
+                .sheetCloseButton()
         }
         .presentationDetents([.medium, .large])
     }

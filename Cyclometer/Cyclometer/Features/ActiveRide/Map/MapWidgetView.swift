@@ -42,13 +42,19 @@ struct LiveMapSheet: View {
     let onOrientationToggle: () -> Void
 
     var body: some View {
-        ActiveRideMapView(
-            trackSegments: trackSegments,
-            route: route,
-            surface: .sheet,
-            orientation: orientation,
-            onOrientationToggle: onOrientationToggle
-        )
+        // A bar only for the close every sheet carries (#335). It has no background, so the map
+        // still runs to the sheet's top edge, and the map's controls sit below it.
+        NavigationStack {
+            ActiveRideMapView(
+                trackSegments: trackSegments,
+                route: route,
+                surface: .sheet,
+                orientation: orientation,
+                onOrientationToggle: onOrientationToggle
+            )
+            .sheetCloseButton()
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+        }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
@@ -73,6 +79,13 @@ private let previewRoute: [RouteCoordinate] = [
     RouteCoordinate(latitude: 37.3349, longitude: -122.0090, elevationMeters: nil),
     RouteCoordinate(latitude: 37.3400, longitude: -121.9990, elevationMeters: nil)
 ]
+
+#Preview("Sheet") {
+    Color.cyBgSecondary
+        .sheet(isPresented: .constant(true)) {
+            LiveMapSheet(trackSegments: [previewTrack], route: previewRoute, orientation: .headingUp, onOrientationToggle: {})
+        }
+}
 
 #Preview("2×2 — With Track") {
     MapWidget(trackSegments: [previewTrack])

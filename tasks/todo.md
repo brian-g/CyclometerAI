@@ -1668,3 +1668,32 @@ Plan: `~/.claude/plans/transient-stargazing-map.md`. Brian chose: synthesized, a
 switch with music playing under it. Found, not fixed: Danger's silent-mode override
 calls `overrideOutputAudioPort(.speaker)` under `.playback`, which only applies to `.playAndRecord`; the override is
 unreachable in MVP. With earphones connected the bell plays in them (noted in `Audio.md`).
+
+---
+
+## #335 — All sheets should have close in the upper-left corner of the sheet
+
+Plan: `~/.claude/plans/temporal-chasing-dragonfly.md`. Brian chose: S10 is exempt (Delete keeps leading, #452); the
+map sheet gets a transparent nav bar with the system close, so its scale and controls drop below the bar.
+
+- [x] Branch `feat/335-sheet-close` from `main`.
+- [x] Start sheet: hand-made `xmark` → `Button(role: .close)` at `.cancellationAction`.
+- [x] Route filter sheet: trailing "Done" → `Button(role: .close)` at `.cancellationAction`.
+- [x] `LiveMapSheet`: `NavigationStack` + `.cancellationAction` close, hidden bar background; `#Preview("Sheet")`.
+- [x] `UX.md` Sheet standards S10 exception; §S05 map sheet close.
+- [x] Brian runs it: Start sheet, Route filter, map sheet from W8 and a "Sheet: Map" widget.
+- [x] Tests: StartSheetFeatureTests, WidgetAccessibilityTests, RoutesSnapshotTests; full `CyclometerTests` before push.
+  - Targeted: StartSheetFeatureTests 20, WidgetAccessibilityTests 83, RoutesSnapshotTests 6, all passed.
+  - Full `CyclometerTests`: 2417 passed, 0 failed.
+
+**Review.** Seven sheets already used the system close; three outliers now match. S10 is the one exception, by
+Brian's call. The map sheet's bar has no background, so the map still bleeds to the top edge; its controls move down
+below the bar. Snapshot references didn't move because no snapshot draws these toolbars: Routes pins
+`RouteFilterSheetBody`, Start pins rows, and the live map isn't snapshotted. iOS 27 does render toolbar items.
+
+**Shared close (Brian asked, after review).**
+- [x] `UI/Components/SheetCloseButton/SheetCloseButton.swift`: `.sheetCloseButton(disabled:action:)` adds the
+      `.cancellationAction` `Button(role: .close)`; `dismiss` unless an action is given. Previews: Sheet, Disabled.
+- [x] All 10 sheets use it; each widget sheet's now-unused `@Environment(\.dismiss)` removed. CLAUDE.md + UX.md name it.
+- [x] Brian runs it: every sheet's X still closes (the helper reads `dismiss` at the stack's root, not outside it).
+- [x] Full `CyclometerTests`: 2417 passed, 0 failed → commit + push to PR #514.

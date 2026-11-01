@@ -45,16 +45,8 @@ struct StartSheetView: View {
             }
             .navigationTitle("New Ride")
             .navigationBarTitleDisplayMode(.inline)
+            .sheetCloseButton(disabled: store.isStarting) { store.send(.cancelButtonTapped) }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        store.send(.cancelButtonTapped)
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Cancel")
-                    .disabled(store.isStarting)
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         store.send(.startRideButtonTapped)

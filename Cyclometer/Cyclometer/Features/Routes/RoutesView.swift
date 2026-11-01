@@ -381,10 +381,8 @@ func distanceLabel(_ meters: Double, _ unit: UnitSystem) -> String {
 
 // MARK: - Filter sheet
 
-/// Wrapper only. The content is `RouteFilterSheetBody` because a sheet carrying
-/// `.topBarLeading`/`.topBarTrailing` toolbar items renders blank inside a
-/// `UIHostingController`, which is what a snapshot test uses
-/// (`StartSheetSnapshotTests.swift:6-13`).
+/// Wrapper only: the navigation chrome and its close (#335). The content is
+/// `RouteFilterSheetBody`, apart from the chrome so a snapshot can pin it.
 private struct RouteFilterSheet: View {
     @Bindable var store: StoreOf<RoutesFeature>
 
@@ -393,11 +391,7 @@ private struct RouteFilterSheet: View {
             RouteFilterSheetBody(store: store)
                 .navigationTitle("Filter Routes")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { store.send(.filterSheetPresentationChanged(false)) }
-                    }
-                }
+                .sheetCloseButton { store.send(.filterSheetPresentationChanged(false)) }
         }
     }
 }

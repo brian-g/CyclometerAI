@@ -78,7 +78,6 @@ extension ActiveRideFeature.State {
 struct ElevationSheet: View {
     var metrics: () -> ElevationMetrics = { ElevationMetrics() }
 
-    @Environment(\.dismiss) private var dismiss
     @State private var detent = PresentationDetent.medium
 
     var body: some View {
@@ -87,11 +86,7 @@ struct ElevationSheet: View {
             ElevationList(metrics: metrics)
                 .navigationTitle("Elevation")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(role: .close) { dismiss() }
-                    }
-                }
+                .sheetCloseButton()
         }
         .presentationDetents([.medium, .large], selection: $detent)
     }
