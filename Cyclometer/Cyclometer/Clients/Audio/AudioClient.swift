@@ -401,15 +401,6 @@ private final class AudioEngineState: @unchecked Sendable {
             cachedBuffers[kind] = rendered
             return rendered
         }
-        let overrideSilentMode = lock.withLock { silentModeOverrideEnabled }
-
-        do {
-            try configureSession(for: kind, overrideSilentMode: overrideSilentMode)
-            try ensureEngineRunning()
-        } catch {
-            logger.error("audio session/engine setup failed for \(String(describing: kind)): \(error)")
-            return
-        }
 
         // Tones are interruptible (Audio.md acceptance criteria) — a new tone takes
         // priority over whatever is currently scheduled/sounding, except that a turn tone
@@ -429,14 +420,21 @@ private final class AudioEngineState: @unchecked Sendable {
         // twice. Started first, a failure leaves nothing scheduled, and the catch resumes
         // exactly once. `sounding` is cleared after `stop()`, which has silenced it, so a
         // failed start doesn't leave a turn tone yielding to a Warning that isn't sounding.
+        //
+        // The session and engine are set up under `lock` too, after the hold check. Since the bell
+        // the category is per tone, `.playback` for it and `.ambient` for the rest (#492), so it is
+        // shared state like the node. Set before the check, a held bell would switch a sounding
+        // Warning to `.playback` and play it through the Silent switch; set outside the lock, a
+        // concurrent tone's category could land between another tone's setup and its start.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let heldBy: ToneKind?
             do {
                 heldBy = try lock.withLock { () throws -> ToneKind? in
-                    let now = ContinuousClock.now
-                    if let sounding, now < sounding.until, kind.yields(to: sounding.kind) {
+                    if let sounding, ContinuousClock.now < sounding.until, kind.yields(to: sounding.kind) {
                         return sounding.kind
                     }
+                    try configureSession(for: kind, overrideSilentMode: silentModeOverrideEnabled)
+                    try ensureEngineRunning()
                     player.volume = kind.volume
                     player.stop()
                     sounding = nil
@@ -444,11 +442,11 @@ private final class AudioEngineState: @unchecked Sendable {
                     player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in
                         continuation.resume()
                     }
-                    sounding = (kind: kind, until: now + .seconds(kind.duration))
+                    sounding = (kind: kind, until: ContinuousClock.now + .seconds(kind.duration))
                     return nil
                 }
             } catch {
-                logger.error("player failed to start for \(String(describing: kind)): \(error)")
+                logger.error("\(String(describing: kind)) failed to start: \(error)")
                 continuation.resume()
                 return
             }

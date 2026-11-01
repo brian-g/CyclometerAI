@@ -169,7 +169,7 @@ These values are a starting point, as OQA5 says of the others; validation at spe
 | Silent Mode | Always rings: `.playback` with `.mixWithOthers`, so music keeps playing under it |
 | Interruption | Gives way to a sounding Warning or Danger, as a turn tone does. Cuts off a turn tone, All Clear, or a bell still ringing, so a second tap rings again |
 
-**Design note:** The dome keeps ringing through the clatter and between the flicks, which is why the bell is one overlapping ring rather than notes and rests. Its timbre, a struck metal ring, is nothing like the radar tones' plain waves, so it can't pass for an alert. A silent bell would be a broken button: a rider who presses it means to be heard by someone else right away, so it ignores the Ring/Silent switch, which no other tone does. The values above are a starting point, tuned by ear on device.
+**Design note:** The dome keeps ringing through the clatter and between the flicks, which is why the bell is one overlapping ring rather than notes and rests. Its timbre, a struck metal ring, is nothing like the radar tones' plain waves, so it can't pass for an alert. A silent bell would be a broken button: a rider who presses it means to be heard by someone else right away, so it ignores the Ring/Silent switch, which no other tone does unless the rider opts in (Danger's override). The values above are a starting point, tuned by ear on device.
 
 **Limitation:** With earphones connected, the bell plays in the earphones, where nobody ahead can hear it. Routing it to the loudspeaker regardless needs the `.playAndRecord` category, which is out of scope.
 

@@ -699,6 +699,9 @@ struct ActiveRideFeature {
             case .sensorsButtonTapped:
                 state.isSensorsSheetPresented = true
                 return .none
+            case .sensorsSheetPresentationChanged(let isPresented):
+                state.isSensorsSheetPresented = isPresented
+                return .none
             case .bellTapped:
                 // Straight to the speaker, not through AlertOrchestratorFeature: the bell is the
                 // rider's, not an alert. A sounding radar tone still keeps the speaker — the engine
@@ -706,9 +709,6 @@ struct ActiveRideFeature {
                 return .run(priority: .high) { [audioClient] _ in
                     await audioClient.playBell()
                 }
-            case .sensorsSheetPresentationChanged(let isPresented):
-                state.isSensorsSheetPresented = isPresented
-                return .none
             case .addWidgetSelected(let widgetID, let size):
                 guard state.isEditingDashboard, state.isAddWidgetPresented else { return .none }
                 let page = state.dashboardLayout.pages[state.visibleDashboardPage]
