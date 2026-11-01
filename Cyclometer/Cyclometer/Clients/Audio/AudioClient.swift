@@ -6,12 +6,13 @@ import os
 private let logger = Logger.cyclometer(.audio)
 
 /// TCA dependency for the app's synthesized tones (per Audio.md spec): the three radar safety
-/// alerts, and the turn tones navigation announces (#198).
+/// alerts, the turn tones navigation announces (#198), and the rider's bell (#492).
 ///
 ///   L0 All Clear : 880→587 Hz sine, descending, ~680 ms — jersey-pocket audible
 ///   L2 Warning   : 1,400 Hz triangle, double staccato pulse, ~480 ms
 ///   L3 Danger    : 2,100 Hz square, triple burst, ~580 ms — overrides Silent Mode (user opt-in, unwired in MVP)
 ///   Turns        : C6–E6–G♯6 triangle — rising for right, falling for left, up and back for a U-turn
+///   Bell         : a rotary bicycle bell, brrring-brrring, ~1 s — rings through Silent Mode
 struct AudioClient {
     var playAllClear:           @Sendable () async -> Void
     var playWarning:            @Sendable () async -> Void
@@ -19,6 +20,8 @@ struct AudioClient {
     /// Its own closure, not a case of the safety tones': a setting that silences radar warnings
     /// must not silence turns with them (#198).
     var playTurn:               @Sendable (Maneuver.Direction) async -> Void
+    /// The toolbar's Bell button (#492). For the people ahead of the rider, not the rider.
+    var playBell:               @Sendable () async -> Void
     var setOverridesSilentMode: @Sendable (Bool) async -> Void
 }
 
@@ -30,6 +33,7 @@ extension AudioClient: DependencyKey {
             playWarning:            { await state.play(.warning) },
             playDanger:              { await state.play(.danger) },
             playTurn:               { direction in await state.play(ToneKind(turn: direction)) },
+            playBell:               { await state.play(.bell) },
             setOverridesSilentMode: { enabled in state.setOverridesSilentMode(enabled) }
         )
     }()
@@ -39,6 +43,7 @@ extension AudioClient: DependencyKey {
         playWarning:            { },
         playDanger:              { },
         playTurn:               { _ in },
+        playBell:               { },
         setOverridesSilentMode: { _ in }
     )
 }
@@ -54,10 +59,11 @@ extension DependencyValues {
 
 /// One tone's identity. The radar alerts are the escalation levels `AlertOrchestratorFeature`
 /// drives — no case for L1 advisory: Audio.md specifies haptic-only for L1, no tone. The turn
-/// tones are navigation's (#198), and stand for no alert level.
+/// tones are navigation's (#198), and stand for no alert level. The bell is the rider's (#492).
 enum ToneKind: CaseIterable, Sendable {
     case allClear, warning, danger
     case turnLeft, turnRight, uTurn
+    case bell
 
     /// The tone for a turn. A slight turn is still a turn to its side: the rider needs the side,
     /// and the turn instruction's arrow says how sharp. A U-turn has no side to give — at 180° the
@@ -80,7 +86,17 @@ enum ToneKind: CaseIterable, Sendable {
         // Warning's, not All Clear's: a turn tone missed at speed is a missed turn. All Clear
         // alone is quieter, because it asks nothing of the rider.
         case .turnLeft, .turnRight, .uTurn: 0.8
+        // Full: it is for the people ahead, who aren't listening for it.
+        case .bell: 1.0
         }
+    }
+
+    /// Whether this tone sounds with the Ring/Silent switch on silent. Only the bell does (#492): a
+    /// rider who presses it means to be heard by someone else right now, and a silent bell would
+    /// be a broken button. Every other tone respects the switch — Danger's opt-in override is
+    /// separate, and unreachable in MVP.
+    var ringsThroughSilentMode: Bool {
+        self == .bell
     }
 
     /// How long the tone sounds, start to finish.
@@ -89,12 +105,13 @@ enum ToneKind: CaseIterable, Sendable {
     }
 
     /// Whether this tone, started while `sounding` is still sounding, gives way rather than cut it
-    /// off. Only a turn tone does, and only to a Warning or a Danger: radar keeps the speaker
-    /// (#198). Every other tone cuts off whatever is sounding — Audio.md: tones are interruptible.
+    /// off. Only a turn tone or the bell does, and only to a Warning or a Danger: radar keeps the
+    /// speaker (#198, #492). Every other tone cuts off whatever is sounding — Audio.md: tones are
+    /// interruptible — and so does a bell rung over a turn tone, or over another bell.
     func yields(to sounding: ToneKind) -> Bool {
         switch self {
         case .allClear, .warning, .danger: false
-        case .turnLeft, .turnRight, .uTurn: sounding == .warning || sounding == .danger
+        case .turnLeft, .turnRight, .uTurn, .bell: sounding == .warning || sounding == .danger
         }
     }
 
@@ -137,8 +154,42 @@ enum ToneKind: CaseIterable, Sendable {
         case .uTurn:
             // Up, and back down: out, and round.
             Self.turnFigure(1_047, 1_319, 1_661, 1_319, 1_047)
+        case .bell:
+            [Self.rotaryBell]
         }
     }
+
+    /// A rotary bicycle bell (#492): a thumb flick spins two hammers against a thin steel dome,
+    /// which clatter on it about 25 times a second. Two flicks are the brrring-brrring. The dome
+    /// keeps ringing through the clatter and between the flicks, so this is one `.ring` — the
+    /// strikes overlap — rather than notes and rests.
+    ///
+    /// The dome's modes are inharmonic, as a struck plate's are, around a 1.7 kHz fundamental
+    /// inside Audio.md's 1–4 kHz band; the higher modes are quieter and die sooner, so the clatter
+    /// is bright and the ring-out mellow. A second fundamental 4 Hz above the first beats against
+    /// it — the shimmer of a real bell, whose dome is never perfectly round.
+    private static let rotaryBell: ToneSegment = {
+        // A flick's hammer hits: unevenly spaced around 40 ms, and softening as the spin slows.
+        // Fixed, not random, so the bell sounds the same every time and tests can pin it.
+        let flick: [(ms: Double, strength: Double)] = [
+            (0, 1.0), (37, 0.85), (81, 0.95), (118, 0.8), (160, 0.85), (197, 0.7), (241, 0.75), (279, 0.6)
+        ]
+        let flickStarts: [Double] = [0, 450]
+        return .ring(
+            fundamental: 1_700,
+            partials: [
+                BellPartial(ratio: 1.0, amplitude: 1.0, decayMs: 150),
+                BellPartial(ratio: 1.0024, amplitude: 0.6, decayMs: 150),
+                BellPartial(ratio: 2.32, amplitude: 0.5, decayMs: 100),
+                BellPartial(ratio: 4.25, amplitude: 0.25, decayMs: 60),
+                BellPartial(ratio: 6.63, amplitude: 0.12, decayMs: 35)
+            ],
+            strikes: flickStarts.flatMap { start in
+                flick.map { BellStrike(atMs: start + $0.ms, strength: $0.strength) }
+            },
+            ms: 1_050
+        )
+    }()
 
     /// A turn tone: quick notes stepping through `frequencies`, the last one held — where the figure
     /// lands, and so the note that says which way it went. Triangle for presence in wind, as Warning,
@@ -178,10 +229,27 @@ enum Waveform: Sendable {
 
 enum DecayShape: Sendable { case linear, exponential }
 
+/// One mode of a struck bell: its pitch as a multiple of the fundamental, how loud a strike makes
+/// it, and its decay time constant — the time it takes to fall to 1/e (about −9 dB).
+struct BellPartial: Sendable {
+    let ratio: Double
+    let amplitude: Double
+    let decayMs: Double
+}
+
+/// One hammer hit on a bell, `atMs` from the start of its `.ring` segment.
+struct BellStrike: Sendable {
+    let atMs: Double
+    let strength: Double
+}
+
 struct ToneSegment: Sendable {
     enum Kind: Sendable {
         case tone(frequency: Double, waveform: Waveform, attackMs: Double, decayMs: Double, decayShape: DecayShape)
         case silence
+        /// A struck bell (#492): every partial rings from each strike and decays on its own,
+        /// and a strike adds to whatever is still ringing.
+        case ring(fundamental: Double, partials: [BellPartial], strikes: [BellStrike])
     }
     let kind: Kind
     let durationMs: Double
@@ -195,6 +263,10 @@ struct ToneSegment: Sendable {
 
     static func silence(ms: Double) -> ToneSegment {
         ToneSegment(kind: .silence, durationMs: ms)
+    }
+
+    static func ring(fundamental: Double, partials: [BellPartial], strikes: [BellStrike], ms: Double) -> ToneSegment {
+        ToneSegment(kind: .ring(fundamental: fundamental, partials: partials, strikes: strikes), durationMs: ms)
     }
 
     func frameCount(sampleRate: Double) -> Int {
@@ -234,10 +306,55 @@ enum ToneRenderer {
                     )
                     channel[offset + i] = Float(raw * envelope)
                 }
+            case .ring(let fundamental, let partials, let strikes):
+                let samples = ring(fundamental: fundamental, partials: partials, strikes: strikes, frameCount: frameCount)
+                for i in 0..<frameCount { channel[offset + i] = samples[i] }
             }
             offset += frameCount
         }
         return buffer
+    }
+
+    /// How long a bell strike takes to reach full strength: long enough not to click, short
+    /// enough to stay a hit.
+    static let ringAttackMs: Double = 1
+    /// The fade over a `.ring`'s last stretch, so the ring-out ends at silence rather than a cut.
+    static let ringFadeMs: Double = 120
+    /// A `.ring`'s loudest sample. Strikes pile up while the bell still rings, so the sum is
+    /// scaled to this rather than left to clip.
+    static let ringPeak: Float = 0.9
+
+    /// Each partial's envelope runs as a one-pole decay, `e = e·d + drive`, so a strike adds to
+    /// what is still ringing and the cost is one multiply per partial per frame — the bell renders
+    /// on the first tap, which must not wait. A strike's drive is spread over `ringAttackMs`.
+    private static func ring(fundamental: Double, partials: [BellPartial], strikes: [BellStrike], frameCount: Int) -> [Float] {
+        let attackFrames = max(Int((ringAttackMs / 1_000) * sampleRate), 1)
+        var drive = [Double](repeating: 0, count: frameCount)
+        for strike in strikes {
+            let start = Int((strike.atMs / 1_000) * sampleRate)
+            for i in start..<min(start + attackFrames, frameCount) {
+                drive[i] += strike.strength / Double(attackFrames)
+            }
+        }
+
+        var mixed = [Double](repeating: 0, count: frameCount)
+        for partial in partials {
+            let frequency = fundamental * partial.ratio
+            let decayPerFrame = exp(-1 / ((partial.decayMs / 1_000) * sampleRate))
+            var envelope = 0.0
+            for i in 0..<frameCount {
+                envelope = envelope * decayPerFrame + drive[i]
+                mixed[i] += partial.amplitude * envelope * sin(2 * .pi * frequency * Double(i) / sampleRate)
+            }
+        }
+
+        let fadeFrames = min(Int((ringFadeMs / 1_000) * sampleRate), frameCount)
+        for i in (frameCount - fadeFrames)..<frameCount {
+            mixed[i] *= Double(frameCount - 1 - i) / Double(max(fadeFrames - 1, 1))
+        }
+        let peak = mixed.reduce(0) { max($0, abs($1)) }
+        let scale = peak > 0 ? Double(ringPeak) / peak : 0
+        return mixed.map { Float($0 * scale) }
     }
 
     private static func envelope(at i: Int, frameCount: Int, attackFrames: Int, decayFrames: Int, shape: DecayShape) -> Double {
@@ -284,15 +401,6 @@ private final class AudioEngineState: @unchecked Sendable {
             cachedBuffers[kind] = rendered
             return rendered
         }
-        let overrideSilentMode = lock.withLock { silentModeOverrideEnabled }
-
-        do {
-            try configureSession(for: kind, overrideSilentMode: overrideSilentMode)
-            try ensureEngineRunning()
-        } catch {
-            logger.error("audio session/engine setup failed for \(String(describing: kind)): \(error)")
-            return
-        }
 
         // Tones are interruptible (Audio.md acceptance criteria) — a new tone takes
         // priority over whatever is currently scheduled/sounding, except that a turn tone
@@ -312,14 +420,21 @@ private final class AudioEngineState: @unchecked Sendable {
         // twice. Started first, a failure leaves nothing scheduled, and the catch resumes
         // exactly once. `sounding` is cleared after `stop()`, which has silenced it, so a
         // failed start doesn't leave a turn tone yielding to a Warning that isn't sounding.
+        //
+        // The session and engine are set up under `lock` too, after the hold check. Since the bell
+        // the category is per tone, `.playback` for it and `.ambient` for the rest (#492), so it is
+        // shared state like the node. Set before the check, a held bell would switch a sounding
+        // Warning to `.playback` and play it through the Silent switch; set outside the lock, a
+        // concurrent tone's category could land between another tone's setup and its start.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let heldBy: ToneKind?
             do {
                 heldBy = try lock.withLock { () throws -> ToneKind? in
-                    let now = ContinuousClock.now
-                    if let sounding, now < sounding.until, kind.yields(to: sounding.kind) {
+                    if let sounding, ContinuousClock.now < sounding.until, kind.yields(to: sounding.kind) {
                         return sounding.kind
                     }
+                    try configureSession(for: kind, overrideSilentMode: silentModeOverrideEnabled)
+                    try ensureEngineRunning()
                     player.volume = kind.volume
                     player.stop()
                     sounding = nil
@@ -327,11 +442,11 @@ private final class AudioEngineState: @unchecked Sendable {
                     player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in
                         continuation.resume()
                     }
-                    sounding = (kind: kind, until: now + .seconds(kind.duration))
+                    sounding = (kind: kind, until: ContinuousClock.now + .seconds(kind.duration))
                     return nil
                 }
             } catch {
-                logger.error("player failed to start for \(String(describing: kind)): \(error)")
+                logger.error("\(String(describing: kind)) failed to start: \(error)")
                 continuation.resume()
                 return
             }
@@ -344,7 +459,12 @@ private final class AudioEngineState: @unchecked Sendable {
 
     private func configureSession(for kind: ToneKind, overrideSilentMode: Bool) throws {
         let session = AVAudioSession.sharedInstance()
-        if kind == .danger, overrideSilentMode {
+        if kind.ringsThroughSilentMode {
+            // .playback ignores the Ring/Silent switch; .mixWithOthers keeps the rider's music
+            // playing under the bell instead of interrupting it (#492).
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } else if kind == .danger, overrideSilentMode {
             try session.setCategory(.playback, options: [.duckOthers])
             try session.setActive(true)
             try session.overrideOutputAudioPort(.speaker)

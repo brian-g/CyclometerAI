@@ -27,6 +27,8 @@ Three more tones announce the turns of a route being followed (`PRD.md §8.6`, #
 | **Turn Right** | A right or slight-right turn, announced at the rider's lead distance | Never overrides |
 | **U-turn** | A U-turn, announced at the rider's lead distance | Never overrides |
 
+One more is the rider's own: the **Bell** (#492), rung from the dashboard toolbar's Bell button (`UX.md §S05`). It is for the people ahead, not the rider, so it is the one tone that **always rings through Silent Mode**. A sounding Warning or Danger keeps the speaker, as with turn tones (see [Bell](#bell)).
+
 ---
 
 ## Design Criteria
@@ -153,6 +155,24 @@ Every note sits in the 1–4 kHz audibility band, and none is a pitch Warning (1
 
 These values are a starting point, as OQA5 says of the others; validation at speed is OQ16 (M11).
 
+### Bell
+
+**Purpose:** A bicycle bell for pedestrians and other riders ahead (#492). It is a rotary bell's brrring-brrring: a thumb flick spins two hammers against a thin steel dome, and they clatter on it about 25 times a second.
+
+| Parameter | Bell |
+|---|---|
+| Pattern | Two flicks of 8 hammer strikes each, unevenly spaced around 40 ms and softening through the flick; the second flick starts 450 ms after the first |
+| Modes | Inharmonic partials of a 1,700 Hz fundamental: ×1, ×2.32, ×4.25, ×6.63, decaying with time constants of 150, 100, 60 and 35 ms, plus a second fundamental 4 Hz higher that beats against the first |
+| Total duration | 1,050 ms, the last 120 ms a fade to silence |
+| Synthesis | One `.ring` segment: the strikes overlap, each adding to what is still ringing; scaled to a 0.9 peak so stacked strikes never clip |
+| Volume | 100% of system volume |
+| Silent Mode | Always rings: `.playback` with `.mixWithOthers`, so music keeps playing under it |
+| Interruption | Gives way to a sounding Warning or Danger, as a turn tone does. Cuts off a turn tone, All Clear, or a bell still ringing, so a second tap rings again |
+
+**Design note:** The dome keeps ringing through the clatter and between the flicks, which is why the bell is one overlapping ring rather than notes and rests. Its timbre, a struck metal ring, is nothing like the radar tones' plain waves, so it can't pass for an alert. A silent bell would be a broken button: a rider who presses it means to be heard by someone else right away, so it ignores the Ring/Silent switch, which no other tone does unless the rider opts in (Danger's override). The values above are a starting point, tuned by ear on device.
+
+**Limitation:** With earphones connected, the bell plays in the earphones, where nobody ahead can hear it. Routing it to the loudspeaker regardless needs the `.playAndRecord` category, which is out of scope.
+
 ---
 
 ## Tone Relationships and Progression
@@ -232,6 +252,9 @@ If synthesis proves difficult to tune in context, short `.caf` (Core Audio Forma
 // For Warning, All Clear and turn tones (respect Silent Mode):
 try AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default)
 
+// For the Bell (always rings through Silent Mode; mixes over the rider's music):
+try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+
 // For Danger tone when overrideSilentModeForL3 is enabled:
 try AVAudioSession.sharedInstance().setCategory(
     .playback,
@@ -264,6 +287,9 @@ try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
 - [ ] A turn tone plays at L0, L1 and through a sustained L2; it is held at L3 and while a Warning is sounding
 - [ ] A turn tone never changes the alert level
 - [ ] Turning off the All Clear/Warning or Danger tones does not silence turn tones
+- [ ] Bell: two rotary flicks, recognisable as a bicycle bell
+- [ ] Bell rings with the phone on silent, and music keeps playing under it
+- [ ] Bell gives way to a sounding Warning or Danger, and a second tap rings it again
 
 ---
 

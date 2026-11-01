@@ -1,6 +1,5 @@
 import SwiftUI
 import ComposableArchitecture
-import AudioToolbox
 
 /// Full-screen active ride dashboard — a fullScreenCover that zooms out of the ride
 /// accessory and collapses back into it on a drag down (#333).
@@ -179,7 +178,7 @@ struct RideDashboardView: View {
                 SensorsButton(devices: sensorsNeedingAttention) { store.send(.sensorsButtonTapped) }
                     .transition(controlTransition)
             }
-            RideControlButton("Ring Bell", systemImage: "bell.fill") { ringBell() }
+            RideControlButton("Ring Bell", systemImage: "bell.fill") { store.send(.bellTapped) }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.isPaused)
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: sensorsNeedingAttention.isEmpty)
@@ -230,10 +229,6 @@ struct RideDashboardView: View {
         if let calibration { return (calibration, "ruler") }
         if isOffRoute { return (NavigationFeature.offRouteBannerText, "exclamationmark.triangle") }
         return nil
-    }
-
-    private func ringBell() {
-        AudioServicesPlaySystemSound(1005) // 1005 = system "Tink"; route via AudioClient later
     }
 }
 
