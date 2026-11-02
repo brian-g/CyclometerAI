@@ -26,7 +26,6 @@ struct RideMetricsTests {
         #expect(metrics.rideTime.shown == "1:05:00")
     }
 
-    /// VoiceOver reads units and times in words, as the widgets do (#361).
     /// Value and unit apart, as `ReadingColumn` shows them (#494); times have no unit.
     @Test func readingsSplitValueFromUnit() {
         let metrics = live(.metric)
@@ -37,6 +36,7 @@ struct RideMetricsTests {
         #expect(RideMetrics().currentSpeed.unit.isEmpty)
     }
 
+    /// VoiceOver reads units and times in words, as the widgets do (#361).
     @Test func rowsSpeakInWords() {
         let metrics = live(.metric)
         #expect(metrics.currentSpeed.spoken == "36.0 kilometers per hour")

@@ -225,6 +225,9 @@ private struct CadenceDetailChart: View {
     /// Marks plotted per series. A cap, not a target: a short ride has fewer.
     private static let maxPlottedPoints = 120
 
+    @Environment(\.timeZone) private var timeZone
+    @Environment(\.locale) private var locale
+
     private var timeRange: ClosedRange<Date>? {
         guard let first = cadenceSamples.first?.time, let last = cadenceSamples.last?.time,
               first < last else { return nil }
@@ -302,7 +305,9 @@ private struct CadenceDetailChart: View {
         }
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) {
-                AxisValueLabel(format: .dateTime.hour().minute())
+                // In the environment's zone and locale, as `RideTimeAxis` labels: the default style
+                // formats in the device's, so a snapshot couldn't pin it.
+                AxisValueLabel(format: Date.FormatStyle(locale: locale, timeZone: timeZone).hour().minute())
             }
         }
         .chartLegend(.hidden)
@@ -482,9 +487,9 @@ private let demoGapHistory = Watermark.points(
 
 private let demoStart = Date(timeIntervalSince1970: 1_000_000)
 
-/// One reading every 10 s for 30 min: rpm climbs through the zones with a coasting gap.
+/// One reading every 10 s for 30 min: rpm climbs through the zones, coasting (0 rpm) from 20 to 26 min.
 private let demoCadenceSamples: [CadenceSample] = (0..<180).map { i in
-    let rpm = (70...74).contains(i / 6 % 30) ? 0 : 60 + 45 * abs(sin(Double(i) / 25))
+    let rpm = (20...25).contains(i / 6) ? 0 : 60 + 45 * abs(sin(Double(i) / 25))
     return CadenceSample(time: demoStart.addingTimeInterval(Double(i) * 10), rpm: rpm)
 }
 

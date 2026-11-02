@@ -14,7 +14,7 @@ final class CadenceSheetSnapshotTests: XCTestCase {
 
     private func assertSheet(
         averageCadence: Int, maxCadence: Int, detail: CadenceDetail, scheme: ColorScheme,
-        testName: String = #function
+        file: StaticString = #filePath, testName: String = #function, line: UInt = #line
     ) {
         assertSnapshot(
             of: CadenceList(averageCadence: averageCadence, maxCadence: maxCadence, zones: .default, detail: detail)
@@ -24,7 +24,7 @@ final class CadenceSheetSnapshotTests: XCTestCase {
                 .environment(\.timeZone, TimeZone(identifier: "America/Chicago")!)
                 .preferredColorScheme(scheme),
             as: .image(layout: canvas, traits: .init(userInterfaceStyle: scheme == .dark ? .dark : .light)),
-            testName: testName
+            file: file, testName: testName, line: line
         )
     }
 

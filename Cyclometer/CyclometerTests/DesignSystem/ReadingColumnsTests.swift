@@ -31,4 +31,9 @@ struct ReadingColumnsTests {
         #expect(columns(100, [140]) == 1)
         #expect(columns(100, [140, 40]) == 1)
     }
+
+    /// A stack measures a child's flexibility with an infinite width; `Int(_:)` would trap on it.
+    @Test func anInfiniteWidthFitsThemAll() {
+        #expect(columns(.infinity, [80, 60, 90]) == 3)
+    }
 }

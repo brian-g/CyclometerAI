@@ -1739,3 +1739,21 @@ Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-co
   pixel-identical (the shared layout reproduces its HStack); Cadence ×3 new (added to CI's skip list).
 - Targeted run (5 sheet snapshot suites, metrics suites, `ReadingColumnsTests`, `WidgetAccessibilityTests`, AddWidgetSheet): TEST SUCCEEDED.
 - Full `CyclometerTests`: TEST SUCCEEDED, 2426 passed, 0 failures.
+
+### #494 review (`/code-review xhigh --fix`)
+
+- [x] Fixed: the Cadence chart's axis labels format in the environment's zone and locale, as `RideTimeAxis` does,
+      so `CadenceSheetSnapshotTests`' Chicago pin holds (its reference read 9:01 AM, the Mac's New York time; now
+      8:01 AM); `ReadingColumns.columns` clamps before `Int(_:)`, which trapped on a stack's infinite width
+      (`anInfiniteWidthFitsThemAll`), and measures natural widths once in `sizeThatFits`; the cadence demo's
+      coasting predicate never matched (`i / 6 % 30` is 0–29), so `CadenceDetail.sample` now coasts from 20 to 26 min;
+      the #361 doc comment back on `rowsSpeakInWords`; the Cadence snapshot helper forwards file/line
+- [x] Re-recorded Cadence Active + Active Dark (opened: 8:01 AM, the coasting drop). Then the 5 sheet snapshot suites
+      (the other 4 unchanged by the layout change), CadenceWidget snapshots, ReadingColumns, RideMetrics,
+      WidgetAccessibility: 74/74, every suite non-empty
+- Skipped, for Brian: (3) at accessibility sizes the small hero's digits overflow its fixed `frameSize` onto the label
+  and the wrapped row below, where the old rows scaled (#499's open follow-up, in `HeroNumber`); (4) the zone dot sits
+  ~4 pt above the digits' drawn baseline (`heroAccessory` aligns to the un-offset guide; moving it moves W9 too);
+  (7) `MetricReading.shown` puts a space before "%" ("+4 %", was "+4%"), unread today; (8) Grade's wrapped readings are
+  leading-aligned, against UX.md §Alignment's right-aligned rule for stacked numbers of one unit; (9) with no HR source
+  VoiceOver hears "No HR source" twice, on the reading and in the footer

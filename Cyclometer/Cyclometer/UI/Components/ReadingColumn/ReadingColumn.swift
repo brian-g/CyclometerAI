@@ -47,18 +47,23 @@ struct ReadingColumns: Layout {
     /// How many columns of `widths` fit across `width`: as many as the widest allows, at least one.
     static func columns(fitting width: CGFloat, widths: [CGFloat], spacing: CGFloat) -> Int {
         guard let widest = widths.max() else { return 0 }
-        let fit = Int(((width + spacing) / (widest + spacing)).rounded(.down))
-        return min(widths.count, max(fit, 1))
+        let fit = ((width + spacing) / (widest + spacing)).rounded(.down)
+        // Clamped before `Int(_:)`, which traps on the infinite width a stack proposes to measure
+        // its children's flexibility.
+        return fit.isNaN ? 1 : Int(min(max(fit, 1), CGFloat(widths.count)))
     }
 
     private struct Grid {
+        let width: CGFloat
         let columns: Int
         let columnWidth: CGFloat
         let rowHeights: [CGFloat]
     }
 
-    private func grid(width: CGFloat, subviews: Subviews) -> Grid {
+    /// `width` nil lays the readings out side by side, each at its natural width.
+    private func grid(width proposed: CGFloat?, subviews: Subviews) -> Grid {
         let widths = subviews.map { $0.sizeThatFits(.unspecified).width }
+        let width = proposed ?? widths.reduce(0, +) + spacing * CGFloat(max(widths.count - 1, 0))
         let columns = Self.columns(fitting: width, widths: widths, spacing: spacing)
         let columnWidth = columns == 0 ? 0 : (width - spacing * CGFloat(columns - 1)) / CGFloat(columns)
         let proposal = ProposedViewSize(width: columnWidth, height: nil)
@@ -67,15 +72,13 @@ struct ReadingColumns: Layout {
                 .map { $0.sizeThatFits(proposal).height }
                 .max() ?? 0
         }
-        return Grid(columns: columns, columnWidth: columnWidth, rowHeights: rowHeights)
+        return Grid(width: width, columns: columns, columnWidth: columnWidth, rowHeights: rowHeights)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let ideal = subviews.map { $0.sizeThatFits(.unspecified).width }
-        let width = proposal.width ?? (ideal.reduce(0, +) + spacing * CGFloat(max(ideal.count - 1, 0)))
-        let grid = grid(width: width, subviews: subviews)
+        let grid = grid(width: proposal.width, subviews: subviews)
         let height = grid.rowHeights.reduce(0, +) + spacing * CGFloat(max(grid.rowHeights.count - 1, 0))
-        return CGSize(width: width, height: height)
+        return CGSize(width: grid.width, height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
