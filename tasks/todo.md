@@ -1709,6 +1709,8 @@ Range form `.dynamicTypeSize(...DynamicTypeSize.x)` caps the size. The single-va
 - [x] `widgetSymbol`: the 1×1 corner SF Symbol capped at `.xxxLarge` (Brian, after the first hand-over).
 - [x] `SpeedWidget`: its own hero's unit is capped at `.xxxLarge`, and the GPS/BLE source badge at `.xLarge`.
 - [x] `HeroNumberSnapshotTests`: added `testLargeAccessibilityDynamicTypeWithLabel` (AX5 with a label).
-- [ ] Brian runs it at the largest text size and at the default size.
-- [ ] Re-record the AX5 HeroNumber snapshots, then verify; `AddWidgetSheetTests` unchanged; full `CyclometerTests`.
-- [ ] Commit + PR (M10.5, closes #499).
+- [x] Brian runs it at the largest text size and at the default size.
+- [x] Re-recorded the AX5 HeroNumber snapshot and added one with a label. Full `CyclometerTests`: TEST SUCCEEDED, 0 failures;
+      `testAddWidgetCatalog` unchanged.
+- [ ] Follow-up: at AX5 the hero digits overflow their fixed `frameSize` and draw over the label (see the WithLabel reference).
+- [x] Commit + PR #518 (M10.5, closes #499).
