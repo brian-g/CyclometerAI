@@ -13,6 +13,7 @@ struct WidgetLabel: View {
             .font(.caption)
             .textCase(.uppercase)
             .foregroundStyle(.secondary)
+            .dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
     }
 }
 

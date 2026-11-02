@@ -10,6 +10,7 @@ extension View {
             if let systemName {
                 Image(systemName: systemName)
                     .font(.footnote)
+                    .dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
                     .foregroundStyle(Color.cyTextSecondary)
                     .padding(Spacing.sm)
             }

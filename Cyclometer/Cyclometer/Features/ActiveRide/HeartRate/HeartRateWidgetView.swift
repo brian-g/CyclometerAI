@@ -8,6 +8,7 @@ private struct NoHRSourceLabel: View {
     var body: some View {
         Text("No HR Source")
             .font(.caption)
+            .dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
             .foregroundStyle(.cyTextTertiary)
     }
 }

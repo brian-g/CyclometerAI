@@ -145,7 +145,8 @@ struct HeroNumber<Label: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            label.textCase(.uppercase)
+            // Label and unit stop growing at `cyCaptionMax`; the digits keep scaling (#499).
+            label.textCase(.uppercase).dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
             if alignment == .vertical {
                 VStack(alignment: .trailing, spacing: 0) {
                     HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
@@ -191,7 +192,7 @@ struct HeroNumber<Label: View>: View {
     }
 
     private var unitLabel: some View {
-        Text(unit).textCase(.lowercase).font(.footnote)
+        Text(unit).textCase(.lowercase).font(.footnote).dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
     }
 }
 

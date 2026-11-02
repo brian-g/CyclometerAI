@@ -46,7 +46,7 @@ for i in $(seq 1 "$RUNS"); do
   xcodebuild test \
     -project Cyclometer.xcodeproj \
     -scheme Cyclometer \
-    -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+    -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' \
     -skipMacroValidation \
     -parallel-testing-enabled NO \
     -only-testing:CyclometerTests \

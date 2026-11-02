@@ -47,12 +47,12 @@ Labels: **ALL CAPS** · Units: *lowercase* · Units: baseline-aligned to their c
 
 Requires **Xcode 27**. TCA 1.25 and earlier don't compile on it, and `Package.resolved` pins Xcode 27's dependency graph. CI runs on the `xcode-27` runner to match.
 
-Build and test from `Cyclometer/`:
+Build and test from `Cyclometer/`. The destination is pinned on purpose: snapshot references are recorded on iPhone 17 Pro, iOS 27.0 (`.claude/rules/testing.md`), and without `OS=` xcodebuild looks only at the newest runtime, which has no iPhone 17 Pro. CI resolves its own simulator (`.github/scripts/resolve-simulator.sh`).
 ```
 xcodebuild build -project Cyclometer.xcodeproj -scheme Cyclometer \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0'
 xcodebuild test  -project Cyclometer.xcodeproj -scheme Cyclometer \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:CyclometerTests
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' -only-testing:CyclometerTests
 ```
 
 ## General Claude Rules

@@ -124,6 +124,7 @@ struct SpeedWidget: View {
             if speed != nil {
                 Text(unit.speedLabel)
                     .font(.footnote)
+                    .dynamicTypeSize(...DynamicTypeSize.cyCaptionMax) // As HeroNumber's unit.
                     .textCase(.lowercase)
             }
         }
@@ -166,6 +167,8 @@ struct SpeedWidget: View {
         }
         return Text(label)
             .font(.caption2.weight(.bold))
+            // Stays badge-sized beside the 2×1's title and on the 2×2 hero's corner at any size (#499).
+            .dynamicTypeSize(...DynamicTypeSize.xLarge)
             .padding(.horizontal, Spacing.xs)
             .padding(.vertical, 2)
             .foregroundStyle(fg)
