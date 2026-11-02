@@ -65,8 +65,8 @@ Two files, mirroring `CadenceFeatureTests.swift` and `CadenceWidgetSnapshotTests
 
 ```
 xcodebuild build -project Cyclometer.xcodeproj -scheme Cyclometer \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0'
 xcodebuild test  -project Cyclometer.xcodeproj -scheme Cyclometer \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:CyclometerTests
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' -only-testing:CyclometerTests
 ```
 Run from `Cyclometer/`. Snapshot tests need a first local recording pass before they can assert — `swift-snapshot-testing` records on first run when no reference exists; re-run once to confirm the second run is green against the recorded reference, and open the recorded PNGs to confirm they're not blank.
