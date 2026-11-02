@@ -2,18 +2,8 @@ import SwiftUI
 
 // MARK: - Ride Metrics
 
-/// One row's value: as shown, and as VoiceOver reads it — units and times in words, and "No
-/// reading" for "—" (UX.md §Widget Details, #361).
-struct MetricReading: Equatable {
-    let shown: String
-    let spoken: String
-
-    static let missing = MetricReading(shown: "—", spoken: "No reading")
-}
-
-/// What UX.md's "Sheet: Ride metrics" shows (#144): display strings for its rows, and the
-/// histories behind its charts. Every row reads "—" until it has a source; distance and the two
-/// times are real at zero.
+/// What UX.md's "Sheet: Ride metrics" shows (#144): its readings, and the histories behind its
+/// charts. Every reading is "—" until it has a source; distance and the two times are real at zero.
 struct RideMetrics: Equatable {
     var speedMPS: Double? = nil      // displayed speed; nil → no source
     var averageSpeedMPS: Double = 0  // 0 → no moving second yet
@@ -40,7 +30,8 @@ struct RideMetrics: Equatable {
 
     var distance: MetricReading {
         MetricReading(
-            shown: "\(oneDecimal(unit.distance(fromMeters: distanceMeters))) \(unit.distanceLabel)",
+            value: oneDecimal(unit.distance(fromMeters: distanceMeters)),
+            unit: unit.distanceLabel,
             spoken: unit.spokenDistance(fromMeters: distanceMeters)
         )
     }
@@ -57,16 +48,16 @@ struct RideMetrics: Equatable {
     }
 
     private func speed(_ mps: Double) -> MetricReading {
-        MetricReading(shown: "\(oneDecimal(unit.speed(fromMPS: mps))) \(unit.speedLabel)", spoken: unit.spokenSpeed(fromMPS: mps))
+        MetricReading(value: oneDecimal(unit.speed(fromMPS: mps)), unit: unit.speedLabel, spoken: unit.spokenSpeed(fromMPS: mps))
     }
 
     private func pace(_ mps: Double) -> MetricReading? {
         guard let shown = unit.formattedPace(fromMPS: mps), let spoken = unit.spokenPace(fromMPS: mps) else { return nil }
-        return MetricReading(shown: "\(shown) \(unit.paceLabel)", spoken: spoken)
+        return MetricReading(value: shown, unit: unit.paceLabel, spoken: spoken)
     }
 
     private func time(_ seconds: Int) -> MetricReading {
-        MetricReading(shown: seconds.formattedElapsed, spoken: seconds.spokenElapsed)
+        MetricReading(value: seconds.formattedElapsed, spoken: seconds.spokenElapsed)
     }
 
     private func oneDecimal(_ value: Double) -> String {
@@ -117,7 +108,7 @@ struct RideMetricsSheet: View {
     }
 }
 
-/// The sheet's charts and rows, apart from its navigation chrome so a snapshot can pin them.
+/// The sheet's charts and readings, apart from its navigation chrome so a snapshot can pin them.
 struct RideMetricsList: View {
     let metrics: RideMetrics
 
@@ -131,7 +122,7 @@ struct RideMetricsList: View {
             .filter { $0.count > 1 }
         List {
             Section {
-                row("Distance", metrics.distance)
+                ReadingColumns { ReadingColumn("Distance", metrics.distance) }
             }
             Section("Speed") {
                 if let range {
@@ -143,17 +134,21 @@ struct RideMetricsList: View {
                     )
                     .frame(height: Self.chartHeight)
                 }
-                row("Current", metrics.currentSpeed)
-                row("Average", metrics.averageSpeed)
-                row("Max", metrics.maxSpeed)
+                ReadingColumns {
+                    ReadingColumn("Current", metrics.currentSpeed)
+                    ReadingColumn("Average", metrics.averageSpeed)
+                    ReadingColumn("Max", metrics.maxSpeed)
+                }
             }
             Section("Pace") {
                 if let range, !paceRuns.isEmpty {
                     RidePaceChart(runs: paceRuns, range: range, unit: metrics.unit)
                         .frame(height: Self.chartHeight)
                 }
-                row("Current", metrics.currentPace)
-                row("Average", metrics.averagePace)
+                ReadingColumns {
+                    ReadingColumn("Current", metrics.currentPace)
+                    ReadingColumn("Average", metrics.averagePace)
+                }
             }
             Section("Time") {
                 if metrics.rideSeconds > 0 {
@@ -164,17 +159,12 @@ struct RideMetricsList: View {
                     .frame(height: Self.donutHeight)
                     .frame(maxWidth: .infinity)
                 }
-                row("Moving Time", metrics.movingTime)
-                row("Ride Time", metrics.rideTime)
+                ReadingColumns {
+                    ReadingColumn("Moving Time", metrics.movingTime)
+                    ReadingColumn("Ride Time", metrics.rideTime)
+                }
             }
         }
-    }
-
-    private func row(_ label: String, _ reading: MetricReading) -> some View {
-        LabeledContent(label, value: reading.shown)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(label)
-            .accessibilityValue(reading.spoken)
     }
 }
 

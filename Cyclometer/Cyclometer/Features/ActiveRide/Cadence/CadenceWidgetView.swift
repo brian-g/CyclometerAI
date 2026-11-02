@@ -311,9 +311,9 @@ private struct CadenceDetailChart: View {
 
 // MARK: - Cadence Detail Sheet
 
-/// W5 "Ride metrics" sheet (UX.md §W5): cadence chart over elevation, average and max
-/// cadence, pedalling vs coasting, and time in each cadence zone, all from ride state.
-/// Cadence smoothness is not shown — no spec defines it.
+/// W5's Cadence sheet (UX.md §W5, #147): cadence chart over elevation, average and max cadence,
+/// pedalling vs coasting, and time in each cadence zone, all from ride state. Cadence smoothness is
+/// not shown — no spec defines it.
 private struct CadenceDetailSheet: View {
     let averageCadence: Int
     let maxCadence: Int
@@ -321,6 +321,25 @@ private struct CadenceDetailSheet: View {
     let detail: CadenceDetail
 
     @State private var detent = PresentationDetent.medium
+
+    var body: some View {
+        NavigationStack {
+            CadenceList(averageCadence: averageCadence, maxCadence: maxCadence, zones: zones, detail: detail)
+                .navigationTitle("Cadence")
+                .navigationBarTitleDisplayMode(.inline)
+                .sheetCloseButton()
+        }
+        .presentationDetents([.medium, .large], selection: $detent)
+    }
+}
+
+/// The Cadence sheet's chart, readings and zones, apart from its navigation chrome so a snapshot
+/// can pin them.
+struct CadenceList: View {
+    let averageCadence: Int
+    let maxCadence: Int
+    let zones: CadenceZoneBoundaries
+    let detail: CadenceDetail
 
     private static let chartHeight: CGFloat = 140
     private static let donutHeight: CGFloat = 120
@@ -331,40 +350,41 @@ private struct CadenceDetailSheet: View {
     private var pedalingSeconds: TimeInterval { zoneSeconds.values.reduce(0, +) }
 
     var body: some View {
-        NavigationStack {
-            List {
-                if detail.cadenceSamples.count > 1 {
-                    Section {
-                        CadenceDetailChart(
-                            cadenceSamples: detail.cadenceSamples,
-                            altitudeSamples: detail.altitudeSamples,
-                            zones: zones
-                        )
-                            .frame(height: Self.chartHeight)
-                    }
-                }
-                metricRow("Avg Cadence", averageCadence > 0 ? "\(averageCadence) rpm" : "—")
-                metricRow("Max Cadence", maxCadence > 0 ? "\(maxCadence) rpm" : "—")
-                pedalingVsCoastingRow
-                Section("Time in Cadence Zones") {
-                    if pedalingSeconds > 0 {
-                        DonutChart(slices: CadenceZone.allCases.map {
-                            DonutSlice(id: $0.displayName, value: zoneSeconds[$0] ?? 0, color: $0.color)
-                        })
-                        .frame(height: Self.donutHeight)
-                        .frame(maxWidth: .infinity)
-                    }
-                    ForEach(CadenceZone.allCases, id: \.self) { zone in
-                        metricRow("Z\(zone.rawValue) \(zone.displayName) · \(zones.rangeText(for: zone)) rpm",
-                                  Self.duration(zoneSeconds[zone] ?? 0))
-                    }
+        List {
+            if detail.cadenceSamples.count > 1 {
+                Section {
+                    CadenceDetailChart(
+                        cadenceSamples: detail.cadenceSamples,
+                        altitudeSamples: detail.altitudeSamples,
+                        zones: zones
+                    )
+                        .frame(height: Self.chartHeight)
                 }
             }
-            .navigationTitle("Cadence")
-            .navigationBarTitleDisplayMode(.inline)
-            .sheetCloseButton()
+            ReadingColumns {
+                ReadingColumn("Avg Cadence", Self.reading(averageCadence))
+                ReadingColumn("Max Cadence", Self.reading(maxCadence))
+            }
+            pedalingVsCoastingRow
+            Section("Time in Cadence Zones") {
+                if pedalingSeconds > 0 {
+                    DonutChart(slices: CadenceZone.allCases.map {
+                        DonutSlice(id: $0.displayName, value: zoneSeconds[$0] ?? 0, color: $0.color)
+                    })
+                    .frame(height: Self.donutHeight)
+                    .frame(maxWidth: .infinity)
+                }
+                ForEach(CadenceZone.allCases, id: \.self) { zone in
+                    LabeledContent("Z\(zone.rawValue) \(zone.displayName) · \(zones.rangeText(for: zone)) rpm",
+                                   value: Self.duration(zoneSeconds[zone] ?? 0))
+                }
+            }
         }
-        .presentationDetents([.medium, .large], selection: $detent)
+    }
+
+    /// "88 rpm"; "—" before any pedalling.
+    static func reading(_ rpm: Int) -> MetricReading {
+        rpm > 0 ? MetricReading(value: "\(rpm)", unit: "rpm", spoken: "\(rpm) rpm") : .missing
     }
 
     private var pedalingVsCoastingRow: some View {
@@ -391,10 +411,6 @@ private struct CadenceDetailSheet: View {
 
     private static func duration(_ seconds: TimeInterval) -> String {
         Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1)))
-    }
-
-    private func metricRow(_ label: String, _ value: String) -> some View {
-        LabeledContent(label, value: value)
     }
 }
 
@@ -477,18 +493,23 @@ private let demoAltitudeSamples: [AltitudeSample] = (0..<180).map { i in
     AltitudeSample(time: demoStart.addingTimeInterval(Double(i) * 10), meters: 120 + 80 * sin(Double(i) / 57))
 }
 
-#Preview("Detail Sheet — Active") {
-    CadenceDetailSheet(
-        averageCadence: 88,
-        maxCadence: 104,
-        zones: .default,
-        detail: CadenceDetail(
-            cadenceSamples: demoCadenceSamples,
-            altitudeSamples: demoAltitudeSamples,
-            zoneSeconds: [.zone1: 95, .zone2: 210, .zone3: 1_260, .zone4: 300, .zone5: 42],
-            coastingSeconds: 380
-        )
+extension CadenceDetail {
+    /// 30 minutes through the zones, with a coasting gap, over a climb and a descent.
+    static let sample = CadenceDetail(
+        cadenceSamples: demoCadenceSamples,
+        altitudeSamples: demoAltitudeSamples,
+        zoneSeconds: [.zone1: 95, .zone2: 210, .zone3: 1_260, .zone4: 300, .zone5: 42],
+        coastingSeconds: 380
     )
+}
+
+#Preview("Detail Sheet — Active") {
+    CadenceDetailSheet(averageCadence: 88, maxCadence: 104, zones: .default, detail: .sample)
+}
+
+#Preview("Detail Sheet — Active Dark") {
+    CadenceDetailSheet(averageCadence: 88, maxCadence: 104, zones: .default, detail: .sample)
+        .preferredColorScheme(.dark)
 }
 
 #Preview("Detail Sheet — No Data") {

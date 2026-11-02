@@ -8,19 +8,22 @@ struct HeartRateMetricsTests {
 
     @Test func currentReading() {
         let metrics = HeartRateMetrics.sample
-        #expect(metrics.current == MetricReading(shown: "156 bpm", spoken: "156 beats per minute"))
-        #expect(metrics.currentZone == MetricReading(shown: "Z3 Aerobic", spoken: "Zone 3, Aerobic"))
+        #expect(metrics.current == MetricReading(value: "156", unit: "bpm", spoken: "156 beats per minute"))
+        #expect(metrics.currentZone == MetricReading(value: "3", spoken: "Zone 3, Aerobic"))
     }
 
-    /// The widgets' empty states: no source at all reads as such; a source with no reading is "—".
+    /// The widgets' empty states: "—" either way (#494). No source at all says so in the footer,
+    /// and VoiceOver still reads it on the reading; a source with no reading is plain "—".
     @Test func emptyStatesMatchTheWidgets() {
         let noSource = HeartRateMetrics()
-        #expect(noSource.current.shown == "No HR Source")
+        #expect(noSource.current == MetricReading(value: "—", spoken: "No HR source"))
         #expect(noSource.currentZone == .missing)
+        #expect(noSource.footer == "No HR Source")
 
         let silent = HeartRateMetrics(bpm: 0, zone: 0, source: .bleStrap)
         #expect(silent.current == .missing)
         #expect(silent.currentZone == .missing)
+        #expect(silent.footer == nil)
     }
 
     /// S12's names and ranges, against the default profile (resting 60, max 190).
@@ -32,7 +35,7 @@ struct HeartRateMetricsTests {
         #expect(rows.map(\.range.shown) == [
             "60–137 bpm", "138–150 bpm", "151–163 bpm", "164–176 bpm", "177–190 bpm"
         ])
-        #expect(rows[2].time == MetricReading(shown: "0:11:42", spoken: "11 minutes, 42 seconds"))
+        #expect(rows[2].time == MetricReading(value: "0:11:42", spoken: "11 minutes, 42 seconds"))
         #expect(rows[0].range.spoken == "60 to 137 beats per minute")
     }
 

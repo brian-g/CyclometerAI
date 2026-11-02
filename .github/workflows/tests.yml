@@ -218,6 +218,7 @@ jobs:
             -skip-testing:CyclometerTests/PaceWidgetSnapshotTests \
             -skip-testing:CyclometerTests/RideMetricsSheetSnapshotTests \
             -skip-testing:CyclometerTests/HeartRateSheetSnapshotTests \
+            -skip-testing:CyclometerTests/CadenceSheetSnapshotTests \
             -skip-testing:CyclometerTests/HeartRateWidgetSnapshotTests \
             -skip-testing:CyclometerTests/HRZonesWidgetSnapshotTests \
             -skip-testing:CyclometerTests/SensorBatteryLabelSnapshotTests \

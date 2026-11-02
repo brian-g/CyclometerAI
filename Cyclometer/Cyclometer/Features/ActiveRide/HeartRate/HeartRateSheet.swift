@@ -31,19 +31,21 @@ struct HeartRateMetrics: Equatable {
         var id: Int { zone }
     }
 
+    /// "—" with no source too, the reason in `footer`; VoiceOver still reads it there (#494).
     var current: MetricReading {
-        if source == .none { return MetricReading(shown: "No HR Source", spoken: "No HR source") }
+        if source == .none { return MetricReading(value: MetricReading.missing.value, spoken: "No HR source") }
         guard bpm > 0 else { return .missing }
-        return MetricReading(shown: "\(bpm) bpm", spoken: "\(bpm) beats per minute")
+        return MetricReading(value: "\(bpm)", unit: "bpm", spoken: "\(bpm) beats per minute")
     }
 
+    /// The zone's number; its name is spoken, and its colour is the dot beside it.
     var currentZone: MetricReading {
         guard source != .none, let zone = HeartRateZone(rawValue: zone) else { return .missing }
-        return MetricReading(
-            shown: "Z\(zone.rawValue) \(zone.s12DisplayName)",
-            spoken: "Zone \(zone.rawValue), \(zone.s12DisplayName)"
-        )
+        return MetricReading(value: "\(zone.rawValue)", spoken: "Zone \(zone.rawValue), \(zone.s12DisplayName)")
     }
+
+    /// Under the readings: why there are none, as the cards' empty state says it.
+    var footer: String? { source == .none ? "No HR Source" : nil }
 
     var hasZoneTime: Bool { zoneSeconds.contains { $0 > 0 } }
 
@@ -60,12 +62,13 @@ struct HeartRateMetrics: Equatable {
                 zone: zone.rawValue,
                 name: "Z\(zone.rawValue) \(zone.s12DisplayName)",
                 range: MetricReading(
-                    shown: "\(bounds.lowerBound)–\(bounds.upperBound) bpm",
+                    value: "\(bounds.lowerBound)–\(bounds.upperBound)",
+                    unit: "bpm",
                     spoken: "\(bounds.lowerBound) to \(bounds.upperBound) beats per minute"
                 ),
                 seconds: seconds,
                 time: MetricReading(
-                    shown: Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1))),
+                    value: Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1))),
                     spoken: seconds.spokenElapsed
                 )
             )
@@ -111,7 +114,7 @@ struct HeartRateSheet: View {
     }
 }
 
-/// The sheet's rows, apart from its navigation chrome so a snapshot can pin them.
+/// The sheet's chart, readings and zones, apart from its navigation chrome so a snapshot can pin them.
 struct HeartRateList: View {
     let metrics: HeartRateMetrics
 
@@ -131,18 +134,18 @@ struct HeartRateList: View {
                     )
                         .frame(height: Self.chartHeight)
                 }
-                row("Heart Rate", metrics.current)
-                LabeledContent("Zone") {
-                    HStack(spacing: Spacing.sm) {
+                ReadingColumns {
+                    ReadingColumn("Heart Rate", metrics.current)
+                    ReadingColumn("Zone", metrics.currentZone) {
                         if metrics.currentZone != .missing {
                             zoneDot(metrics.zone)
                         }
-                        Text(metrics.currentZone.shown)
                     }
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Zone")
-                .accessibilityValue(metrics.currentZone.spoken)
+            } footer: {
+                if let footer = metrics.footer {
+                    Text(footer)
+                }
             }
             Section("Time in Zones") {
                 if metrics.hasZoneTime {
@@ -155,13 +158,6 @@ struct HeartRateList: View {
                 ForEach(zoneRows) { zoneRow($0) }
             }
         }
-    }
-
-    private func row(_ label: String, _ reading: MetricReading) -> some View {
-        LabeledContent(label, value: reading.shown)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(label)
-            .accessibilityValue(reading.spoken)
     }
 
     private func zoneRow(_ zone: HeartRateMetrics.ZoneRow) -> some View {

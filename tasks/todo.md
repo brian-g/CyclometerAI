@@ -1714,3 +1714,28 @@ Range form `.dynamicTypeSize(...DynamicTypeSize.x)` caps the size. The single-va
       `testAddWidgetCatalog` unchanged.
 - [ ] Follow-up: at AX5 the hero digits overflow their fixed `frameSize` and draw over the label (see the WithLabel reference).
 - [x] Commit + PR #518 (M10.5, closes #499).
+
+---
+
+## #494 — Widget sheets: readings as small hero columns
+
+Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-columns`.
+
+- [x] `MetricReading` → value / unit / spoken (`shown` computed), moved to `UI/Components/ReadingColumn/`
+- [x] `ReadingColumn` + `ReadingColumns` (equal-width, wrapping `Layout`) with previews
+- [x] Calories sheet on the shared component
+- [x] Ride metrics sheet: Distance · Speed (Current/Average/Max) · Pace (Current/Average) · Time (Moving/Ride)
+- [x] Heart rate sheet: Heart Rate + Zone (number + dot); "No HR Source" in the footer
+- [x] Elevation sheet: Current/Highest/Lowest · Ascent/Descent · Grade (3)
+- [x] Cadence sheet: `CadenceList` split out; Avg/Max Cadence columns
+- [x] App + test target build clean (0 warnings); test sources updated, not yet run
+- [x] Brian runs each sheet — "Looks great" (Grade wraps 2 + 1, zone as number + dot, accepted)
+- [x] Tests: metrics tests updated, `ReadingColumnsTests`, snapshots re-recorded (+ new Cadence suite), full suite
+- [x] UX.md: the four sheet texts + W5's sheet line + Updated line
+- [x] Commit + PR
+
+### Review
+- Snapshots re-recorded with record mode `failed`: Ride metrics ×3, Heart rate ×3, Elevation ×3 changed; Calories ×6
+  pixel-identical (the shared layout reproduces its HStack); Cadence ×3 new (added to CI's skip list).
+- Targeted run (5 sheet snapshot suites, metrics suites, `ReadingColumnsTests`, `WidgetAccessibilityTests`, AddWidgetSheet): TEST SUCCEEDED.
+- Full `CyclometerTests`: TEST SUCCEEDED, 2426 passed, 0 failures.

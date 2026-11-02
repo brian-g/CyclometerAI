@@ -15,7 +15,7 @@ struct CaloriesMetrics: Equatable {
 
     var total: MetricReading {
         guard let latest else { return .missing }
-        return MetricReading(shown: "\(Self.whole(latest.kilocalories)) kcal", spoken: Self.spoken(latest.kilocalories))
+        return MetricReading(value: Self.whole(latest.kilocalories), unit: "kcal", spoken: Self.spoken(latest.kilocalories))
     }
 
     var model: MetricReading {
@@ -25,7 +25,7 @@ struct CaloriesMetrics: Equatable {
         case .physics: "Physics"
         case .met: "MET"
         }
-        return MetricReading(shown: name, spoken: name)
+        return MetricReading(value: name, spoken: name)
     }
 
     /// kcal per hour of W3's moving time, both as of the latest estimate.
@@ -35,7 +35,7 @@ struct CaloriesMetrics: Equatable {
 
     var average: MetricReading {
         guard let averagePerHour else { return .missing }
-        return MetricReading(shown: "\(Self.whole(averagePerHour)) kcal/h", spoken: "\(Self.spoken(averagePerHour)) per hour")
+        return MetricReading(value: Self.whole(averagePerHour), unit: "kcal/h", spoken: "\(Self.spoken(averagePerHour)) per hour")
     }
 
     /// Why there is no estimate, or nil with one.
@@ -106,26 +106,14 @@ struct CaloriesList: View {
                     CaloriesChart(series: metrics.series, rideSeconds: metrics.rideSeconds)
                         .frame(height: Self.chartHeight)
                 }
-                HStack(alignment: .top, spacing: Spacing.md) {
-                    stat("Total", metrics.latest?.kilocalories, unit: "kcal", metrics.total)
-                    stat("Average", metrics.averagePerHour, unit: "kcal/h", metrics.average)
+                ReadingColumns {
+                    ReadingColumn("Total", metrics.total)
+                    ReadingColumn("Average", metrics.average)
                 }
             } footer: {
                 Text(metrics.footer)
             }
         }
-    }
-
-    /// One column: a small hero over its label, "—" with no estimate.
-    private func stat(_ label: String, _ value: Double?, unit: String, _ reading: MetricReading) -> some View {
-        HeroNumber(value.map(CaloriesMetrics.whole) ?? "—", unit: value == nil ? "" : unit) {
-            Text(label).font(.caption)
-        }
-        .heroNumberSize(.small)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
-        .accessibilityValue(reading.spoken)
     }
 }
 

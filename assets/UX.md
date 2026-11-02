@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-11-02 — Widget sheets show their readings as small-hero columns, as "Sheet: Calories" does (#494): "Sheet: Ride metrics", "Sheet: Heart rate", "Sheet: Elevation", §W5's Cadence sheet and §Widget Details' new **Sheet readings**. "No HR Source" moves to the Heart rate sheet's footer.  
 **Updated:** 2026-10-29 — §W23 Active Calories and "Sheet: Calories" added and built (#465), 1×1 in §S08's Ride section. §S10's active energy is now shown live, on W23.  
 **Updated:** 2026-10-28 — §W22 Climb added and built (#463), 2×1 in §S08's Route section.  
 **Updated:** 2026-10-28 — §W21 Sunset added and built (#462), 1×1 in §S08's Ride section.  
@@ -611,6 +612,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 - Each widget exposes a label modifier; the label is hidden on 2x2 widgets
 - Tapping any widget opens a detail sheet for that metric category
 - VoiceOver reads each tappable widget as one button: its title, then what the card shows in words ("Cadence, 92 rpm, average 88, maximum 110"); units and time are spelled out ("36.0 kilometers per hour", "1 hour, 2 minutes"), and "—" is read as "No reading". A double-tap opens the same sheet (#361). In S07 edit mode the card's own element, with its Move actions, replaces it (#367)
+- **Sheet readings** (#494): a detail sheet shows each reading as a `small-hero` over its label, in columns that share the row's width equally, as the dashboard shows numbers. A row too narrow for its readings at their natural width wraps onto a second line, keeping the same columns, rather than wrapping a label: at 402 pt, **Grade**'s three wrap to two and one. A missing reading reads "—" with no unit, and any reason for it goes in the section's footer. VoiceOver reads each column as one element, its label then the reading in words. The per-zone lists, donuts and charts stay as they are. Built as `ReadingColumn` / `ReadingColumns`, which every widget sheet uses
 
 ---
 
@@ -625,7 +627,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 - 2x1, 2x2: Current average speed (`small-hero`, labeled "AVG")
 - 2x2 only: Ride duration (`medium-hero`)
 - 2x2 only: Ride distance (`medium-hero`)
-- Sheet: Ride metrics. As built (#144), W1, W2, W3, W6 and W11 open the one sheet, at the medium detent and expandable to large. **Distance** comes first, on its own. **Speed:** a chart of the last hour's speed over a faint elevation area (the Cadence sheet's treatment), then current, average and max. **Pace:** a chart of the same hour, faster plotted higher, with a gap wherever the rider stopped, then current and average. **Time:** a moving vs stopped donut, then Moving Time (W3's) and Ride Time (W1's Time). A value with no source reads "—", including pace, where W11's own card shows "--:--". W5 is tagged the same but keeps its own Cadence sheet (#147), whose content is cadence-specific
+- Sheet: Ride metrics. As built (#144), W1, W2, W3, W6 and W11 open the one sheet, at the medium detent and expandable to large. **Distance** comes first, a column on its own. **Speed:** a chart of the last hour's speed over a faint elevation area (the Cadence sheet's treatment), then Current, Average and Max as columns. **Pace:** a chart of the same hour, faster plotted higher, with a gap wherever the rider stopped, then Current and Average as columns. **Time:** a moving vs stopped donut, then Moving Time (W3's) and Ride Time (W1's Time) as columns. A value with no source reads "—", including pace, where W11's own card shows "--:--". W5 is tagged the same but keeps its own Cadence sheet (#147), whose content is cadence-specific
 
 
 
@@ -678,7 +680,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - A watermark graph of the historical HR for the ride. The horizontal bands in the chart should show the zones (`brHRZone1`–`brHRZone5`)
 - As built (#145), W4 matches W5 Cadence. Behind the number, the last hour of heart rate is a faint line on the rider's zone bands. The y-axis is fixed from resting to max HR, so the bands don't move. The trend is the shared trend indicator (#402), as §W1's: a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the value, level with the tops of its digits and a quarter of their height, not over the unit as Design.sketch "W4 - Heart Rate" draws it. It compares the last 10 s of readings against the 20 s before, by 3 bpm or more. Hidden when steady or with no reading. The unit doesn't move. At 2×1 the hero has Avg and Max beside it, as W5's does. The left border shows the current zone's colour
 - Zone label: "Z1 Recovery/Light", "Z2 Endurance", "Z3 Aerobic", "Z4 Threshold", "Z5 Anaerobic" — §S12's names, so the dashboard and Settings use the same words (#145)
-- Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. The first section is the Cadence sheet's chart for heart rate (the last hour on zone bands over a faint elevation area, its y-axis fixed from resting to max), on the Ride Metrics charts' time axis; then current heart rate and zone, matching the cards' empty states: "No HR Source" with nothing connected, "—" with no reading. Then **Time in Zones**: a donut in the zone colours, and one row per zone giving its name, its bpm range as §S12 resolves it, and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
+- Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. The first section is the Cadence sheet's chart for heart rate (the last hour on zone bands over a faint elevation area, its y-axis fixed from resting to max), on the Ride Metrics charts' time axis; then Heart Rate and Zone as columns, the zone as its number with its zone-colour dot before it (its name is read by VoiceOver). Both read "—" with no reading; with nothing connected the section's footer says "No HR Source", the cards' empty state, and VoiceOver reads it on Heart Rate. Then **Time in Zones**: a donut in the zone colours, and one row per zone giving its name, its bpm range as §S12 resolves it, and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
 
 ---
 
@@ -692,7 +694,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - 2x1 displays the average and max
 - A watermark graph of the historical Cadence for the ride. The horizontal bands in the chart show the cadence zones.
 - As built (#79), the bands are always drawn, even before any reading arrives: they show the rider's zones, not ride data. There are five zones, set in §S12's Cadence Zones section: Z1 Recovery, Z2 Endurance, Z3 Steady State, Z4 Race Pace and Z5 Sprint, coloured `brHRZone1`–`brHRZone5`. They default to 60–69, 70–84, 85–94, 95–109 and 110+ rpm. A pedalling reading below Z1's 60 rpm still counts as Z1, as a heart rate below resting counts as HR zone 1. The Z1 band runs from 0, so the chart has no unshaded strip. The y-axis is fixed at 0–150 rpm. Time is kept per whole rpm and sorted into zones when shown, as HR's time in zone is, so a zone change re-sorts the whole ride's time, including time recorded before it. These five zones replace #38's four efficiency bands (grinding <70, optimal 85–100, over-spinning >100)
-- Sheet: Ride metrics
+- Sheet: Cadence. W5 opens its own sheet (#147), at the medium detent and expandable to large: a chart of cadence on the zone bands over a faint elevation area; then Avg Cadence and Max Cadence as columns ("—" before any pedalling); Pedaling vs Coasting, with a small donut; and **Time in Cadence Zones**: a donut in the zone colours and one row per zone giving its name, rpm range and the ride's time in it
 
 ---
 
@@ -846,7 +848,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - Watermark: the whole route's elevation profile by distance, the part ridden darker than the part ahead (#387). With turn-by-turn off the route isn't matched, so nothing is marked ridden
 - The same heroes as W17
 - With no route, or a route whose file has no `<ele>`, it is W17
-- Sheet: Elevation. As built (#387), W14–W18 open the one sheet, at the medium detent and expandable to large: the last hour's elevation on the Ride Metrics time axis, then Current, Highest and Lowest; **Climbing**: Ascent and Descent; **Grade**: Current, Steepest Climb, Steepest Descent; and **Route**, with a route that has elevation: W18's profile
+- Sheet: Elevation. As built (#387), W14–W18 open the one sheet, at the medium detent and expandable to large: the last hour's elevation on the Ride Metrics time axis, then Current, Highest and Lowest as columns; **Climbing**: Ascent and Descent; **Grade**: Current, Steepest Climb, Steepest Descent, which wrap to two and one at 402 pt; and **Route**, with a route that has elevation: W18's profile
 
 ---
 
@@ -917,7 +919,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - "—" with no body mass in Health (a guessed weight is never shown as measured), and before the first minute's estimate
 - VoiceOver reads it as "Active calories, 412 kilocalories", and a "—" as "No weight in Health" or "No estimate yet"
 - Not included: total (active plus resting) calories; kilojoules of work, which needs a power meter (Phase 3); §S15's calories row (#460)
-- Sheet: Calories. W23 opens it, at the medium detent and expandable to large: a chart of calories accumulating over ride time, from 0:00 to now with a pause taking no room, then two small heroes side by side, **Total** and **Average** (kcal per hour of W3's Moving Time), each over its label. The section's footer names the model, "Model: Heart rate" (or Physics, or MET). With no estimate both read "—" and the footer says why instead: "Add your weight in the Health app to estimate active calories." or "The first estimate comes after a minute of riding."
+- Sheet: Calories. W23 opens it, at the medium detent and expandable to large: a chart of calories accumulating over ride time, from 0:00 to now with a pause taking no room, then **Total** and **Average** (kcal per hour of W3's Moving Time) as columns, the layout every widget sheet's readings now share (§Widget Details, #494). The section's footer names the model, "Model: Heart rate" (or Physics, or MET). With no estimate both read "—" and the footer says why instead: "Add your weight in the Health app to estimate active calories." or "The first estimate comes after a minute of riding."
 
 ---
 

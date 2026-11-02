@@ -39,12 +39,12 @@ struct ElevationMetrics: Equatable {
     private func elevation(_ meters: Double?) -> MetricReading {
         guard let meters else { return .missing }
         let value = unit.elevation(fromMeters: meters).formatted(.number.precision(.fractionLength(0)))
-        return MetricReading(shown: "\(value) \(unit.elevationLabel)", spoken: unit.spokenElevation(fromMeters: meters))
+        return MetricReading(value: value, unit: unit.elevationLabel, spoken: unit.spokenElevation(fromMeters: meters))
     }
 
     private func gradeReading(_ percent: Double?) -> MetricReading {
         guard percent != nil else { return .missing }
-        return MetricReading(shown: "\(Grade.value(percent))\(Grade.unit)", spoken: Grade.spoken(percent))
+        return MetricReading(value: Grade.value(percent), unit: Grade.unit, spoken: Grade.spoken(percent))
     }
 }
 
@@ -92,7 +92,7 @@ struct ElevationSheet: View {
     }
 }
 
-/// The sheet's charts and rows, apart from its navigation chrome so a snapshot can pin them.
+/// The sheet's charts and readings, apart from its navigation chrome so a snapshot can pin them.
 struct ElevationList: View {
     let metrics: ElevationMetrics
 
@@ -105,18 +105,24 @@ struct ElevationList: View {
                     ElevationChart(history: metrics.history, range: range, unit: metrics.unit)
                         .frame(height: Self.chartHeight)
                 }
-                row("Current", metrics.current)
-                row("Highest", metrics.highest)
-                row("Lowest", metrics.lowest)
+                ReadingColumns {
+                    ReadingColumn("Current", metrics.current)
+                    ReadingColumn("Highest", metrics.highest)
+                    ReadingColumn("Lowest", metrics.lowest)
+                }
             }
             Section("Climbing") {
-                row("Ascent", metrics.ascent)
-                row("Descent", metrics.descent)
+                ReadingColumns {
+                    ReadingColumn("Ascent", metrics.ascent)
+                    ReadingColumn("Descent", metrics.descent)
+                }
             }
             Section("Grade") {
-                row("Current", metrics.grade)
-                row("Steepest Climb", metrics.steepestClimb)
-                row("Steepest Descent", metrics.steepestDescent)
+                ReadingColumns {
+                    ReadingColumn("Current", metrics.grade)
+                    ReadingColumn("Steepest Climb", metrics.steepestClimb)
+                    ReadingColumn("Steepest Descent", metrics.steepestDescent)
+                }
             }
             if let profile = metrics.routeProfile {
                 Section("Route") {
@@ -126,13 +132,6 @@ struct ElevationList: View {
                 }
             }
         }
-    }
-
-    private func row(_ label: String, _ reading: MetricReading) -> some View {
-        LabeledContent(label, value: reading.shown)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(label)
-            .accessibilityValue(reading.spoken)
     }
 }
 
