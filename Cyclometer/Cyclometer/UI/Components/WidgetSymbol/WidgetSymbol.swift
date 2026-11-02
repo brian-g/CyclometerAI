@@ -10,6 +10,7 @@ extension View {
             if let systemName {
                 Image(systemName: systemName)
                     .font(.footnote)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge) // As the widget's title (#499).
                     .foregroundStyle(Color.cyTextSecondary)
                     .padding(Spacing.sm)
             }

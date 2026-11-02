@@ -145,7 +145,9 @@ struct HeroNumber<Label: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            label.textCase(.uppercase)
+            // Label and unit stop growing at xxxLarge so accessibility sizes can't push them out of
+            // a widget's cell; the digits keep scaling (#499).
+            label.textCase(.uppercase).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             if alignment == .vertical {
                 VStack(alignment: .trailing, spacing: 0) {
                     HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
@@ -191,7 +193,7 @@ struct HeroNumber<Label: View>: View {
     }
 
     private var unitLabel: some View {
-        Text(unit).textCase(.lowercase).font(.footnote)
+        Text(unit).textCase(.lowercase).font(.footnote).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 }
 

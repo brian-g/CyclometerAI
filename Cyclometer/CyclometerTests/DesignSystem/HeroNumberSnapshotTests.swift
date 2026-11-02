@@ -126,4 +126,15 @@ final class HeroNumberSnapshotTests: XCTestCase {
             as: .image(layout: accessibilityCanvas)
         )
     }
+
+    /// The label and unit stop at xxxLarge while the digits keep scaling (#499).
+    func testLargeAccessibilityDynamicTypeWithLabel() {
+        assertSnapshot(
+            of: wrap(
+                HeroNumber(28.4, unit: "mph") { Text("Speed").font(.caption) },
+                sizeCategory: .accessibilityExtraExtraExtraLarge
+            ),
+            as: .image(layout: accessibilityCanvas)
+        )
+    }
 }

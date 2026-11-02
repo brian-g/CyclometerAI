@@ -1697,3 +1697,18 @@ below the bar. Snapshot references didn't move because no snapshot draws these t
 - [x] All 10 sheets use it; each widget sheet's now-unused `@Environment(\.dismiss)` removed. CLAUDE.md + UX.md name it.
 - [x] Brian runs it: every sheet's X still closes (the helper reads `dismiss` at the stack's root, not outside it).
 - [x] Full `CyclometerTests`: 2417 passed, 0 failed → commit + push to PR #514.
+
+---
+
+# #499 — Cap Dynamic Type on dashboard captions, units and badges
+
+Range form `.dynamicTypeSize(...DynamicTypeSize.x)` caps the size. The single-value form would pin it, and pinned text grows even at the default Large.
+
+- [x] `WidgetLabel`: capped at `.xxxLarge`. This covers every widget title.
+- [x] `HeroNumber`: label and unit capped at `.xxxLarge`, inside the component, so no call sites change. The digits are uncapped (out of scope).
+- [x] `widgetSymbol`: the 1×1 corner SF Symbol capped at `.xxxLarge` (Brian, after the first hand-over).
+- [x] `SpeedWidget`: its own hero's unit is capped at `.xxxLarge`, and the GPS/BLE source badge at `.xLarge`.
+- [x] `HeroNumberSnapshotTests`: added `testLargeAccessibilityDynamicTypeWithLabel` (AX5 with a label).
+- [ ] Brian runs it at the largest text size and at the default size.
+- [ ] Re-record the AX5 HeroNumber snapshots, then verify; `AddWidgetSheetTests` unchanged; full `CyclometerTests`.
+- [ ] Commit + PR (M10.5, closes #499).

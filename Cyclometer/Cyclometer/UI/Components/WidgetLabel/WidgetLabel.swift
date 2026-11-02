@@ -13,6 +13,7 @@ struct WidgetLabel: View {
             .font(.caption)
             .textCase(.uppercase)
             .foregroundStyle(.secondary)
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge) // Fits the widget's cell at any size (#499).
     }
 }
 
