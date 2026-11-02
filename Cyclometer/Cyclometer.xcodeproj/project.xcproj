@@ -51,6 +51,7 @@
             "UI/DesignSystem/AppFonts.swift",
             "UI/DesignSystem/Opacity.swift",
             "UI/DesignSystem/Spacing.swift",
+            "UI/DesignSystem/Typography.swift",
           ],
         },
       ],

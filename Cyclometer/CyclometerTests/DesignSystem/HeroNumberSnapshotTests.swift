@@ -127,7 +127,9 @@ final class HeroNumberSnapshotTests: XCTestCase {
         )
     }
 
-    /// The label and unit stop at xxxLarge while the digits keep scaling (#499).
+    /// The label and unit stop at xxxLarge while the digits keep scaling (#499). Known bug: the
+    /// reference shows the digits drawn over "SPEED", because they outgrow the fixed `frameSize`.
+    /// Re-record it when that follow-up lands.
     func testLargeAccessibilityDynamicTypeWithLabel() {
         assertSnapshot(
             of: wrap(

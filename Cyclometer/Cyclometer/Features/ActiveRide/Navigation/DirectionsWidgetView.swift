@@ -70,6 +70,7 @@ struct DirectionsWidget: View {
         } else {
             Text("No Route")
                 .font(.caption)
+                .dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
                 .foregroundStyle(.cyTextTertiary)
         }
     }
