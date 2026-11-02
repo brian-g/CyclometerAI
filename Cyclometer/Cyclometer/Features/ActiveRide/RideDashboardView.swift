@@ -232,6 +232,31 @@ struct RideDashboardView: View {
     }
 }
 
+private func rideDashboardPreviewStore(
+    initialState: ActiveRideFeature.State,
+    reducer: () -> ActiveRideFeature
+) -> StoreOf<ActiveRideFeature> {
+    let initialState = initialState
+    initialState.$preferences.withLock { preferences in
+        preferences.dashboardLayout = .rideDashboardPreview
+    }
+    return Store(initialState: initialState, reducer: reducer)
+}
+
+private extension DashboardLayout {
+    /// A representative, map-free page keeps the interactive canvas responsive.
+    static let rideDashboardPreview = DashboardLayout(pages: [
+        DashboardPage(placements: [
+            WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 0, column: 0),
+            WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
+            WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 3, column: 0),
+            WidgetPlacement(HRZonesDashboardWidget.self, size: .oneByOne, row: 3, column: 1),
+            WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 4, column: 0),
+            WidgetPlacement(DirectionsDashboardWidget.self, size: .oneByOne, row: 4, column: 1)
+        ])
+    ])
+}
+
 /// One floating glass ride-control button (S05). The icon-only `Label` keeps its title
 /// available to VoiceOver, so no separate `accessibilityLabel` is needed.
 struct RideControlButton: View {
@@ -299,7 +324,7 @@ private struct EditModeButton: View {
         $0.persistenceClient = .mock()
     } operation: {
         RideDashboardView(
-            store: Store(
+            store: rideDashboardPreviewStore(
                 initialState: ActiveRideFeature.State(
                     recordingState: .active,
                     elapsedSeconds: 2340,
@@ -332,7 +357,7 @@ private struct EditModeButton: View {
         $0.persistenceClient = .mock()
     } operation: {
         RideDashboardView(
-            store: Store(
+            store: rideDashboardPreviewStore(
                 initialState: ActiveRideFeature.State(
                     recordingState: .active,
                     elapsedSeconds: 2340,
@@ -359,7 +384,7 @@ private struct EditModeButton: View {
         $0.defaultFileStorage = .inMemory
         $0.persistenceClient = .mock()
     } operation: {
-        let store = Store(
+        let store = rideDashboardPreviewStore(
             initialState: ActiveRideFeature.State(
                 recordingState: .active,
                 elapsedSeconds: 2340,
@@ -386,7 +411,7 @@ private struct EditModeButton: View {
         $0.persistenceClient = .mock()
     } operation: {
         RideDashboardView(
-            store: Store(
+            store: rideDashboardPreviewStore(
                 initialState: ActiveRideFeature.State(
                     recordingState: .paused,
                     elapsedSeconds: 1230,

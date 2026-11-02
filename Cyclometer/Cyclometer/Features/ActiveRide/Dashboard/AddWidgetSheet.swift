@@ -10,6 +10,8 @@ struct AddWidgetSheet: View {
     /// The dashboard grid's size — the screen, less the radar lane when it shows — which sets
     /// each preview's proportions.
     let canvas: CGSize
+    /// Categories to show in the picker. Production uses the complete catalog; previews use a focused sample.
+    var categories = WidgetCategory.allCases
 
     var body: some View {
         NavigationStack {
@@ -18,6 +20,7 @@ struct AddWidgetSheet: View {
                     page: store.dashboardLayout.pages[store.visibleDashboardPage],
                     cell: store.addWidgetCell,
                     canvas: canvas,
+                    categories: categories,
                     onEmptyPage: { store.send(.addEmptyPageTapped, animation: .default) },
                     onAdd: { store.send(.addWidgetSelected(widgetID: $0.widget.id, size: $0.size), animation: .default) }
                 )
@@ -239,16 +242,28 @@ extension SpeedSample {
     }
 }
 
-#Preview {
+private func addWidgetPreviewStore() -> StoreOf<ActiveRideFeature> {
+    let state = ActiveRideFeature.State(recordingState: .active)
+    state.$preferences.withLock { preferences in
+        preferences.dashboardLayout = DashboardLayout(pages: [DashboardPage(placements: [])])
+    }
+    return Store(initialState: state) {
+        ActiveRideFeature()
+    }
+}
+
+#Preview("Ride Widgets") {
     withDependencies {
         $0.defaultFileStorage = .inMemory
         $0.persistenceClient = .mock()
     } operation: {
-        let store = Store(initialState: ActiveRideFeature.State(recordingState: .active)) {
-            ActiveRideFeature()
-        }
+        let store = addWidgetPreviewStore()
         store.send(.dashboardLongPressed)
         store.send(.addWidgetTapped)
-        return AddWidgetSheet(store: store, canvas: CGSize(width: 402, height: 874))
+        return AddWidgetSheet(
+            store: store,
+            canvas: CGSize(width: 402, height: 874),
+            categories: [.ride]
+        )
     }
 }
