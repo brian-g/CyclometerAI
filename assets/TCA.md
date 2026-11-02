@@ -520,7 +520,7 @@ struct AlertOrchestratorFeature {
                 state.previousAlertLevel = previous
                 state.currentAlertLevel = level
 
-                return .run(priority: .userInteractive) { [level, previous, silentOverride = state.silentModeOverrideEnabled] send in
+                return .run(priority: .high) { [level, previous, silentOverride = state.silentModeOverrideEnabled] send in
                     // Haptic first — tightest latency requirement
                     switch level {
                     case .clear:
@@ -556,7 +556,7 @@ struct AlertOrchestratorFeature {
 }
 ```
 
-> **Note:** `priority: .userInteractive` ensures the haptic/audio Effect is not starved by lower-priority Effects. The L3 danger haptic and audio tone are guaranteed to fire within the 200ms budget.
+> **Note:** `priority: .high` (`.userInteractive` is deprecated as of the Xcode 27 SDK) ensures the haptic/audio Effect is not starved by lower-priority Effects. The L3 danger haptic and audio tone are guaranteed to fire within the 200ms budget.
 
 ---
 
@@ -903,7 +903,7 @@ RadarFeature.reduce(.alertReceived(payload))
     ▼
 AlertOrchestratorFeature.reduce(.radarAlertChanged(.danger))
     │
-    │ .run(priority: .userInteractive)
+    │ .run(priority: .high)
     ├──▶ HapticClient.fireL3Danger()        ← < 200ms budget
     │        (Core Haptics: 3× 0.14s burst)
     └──▶ AudioAlertClient.playDanger()      ← < 200ms budget
@@ -1134,7 +1134,7 @@ func testL3AlertFiresHapticAndAudio() async {
 | `CadenceFeature` | BLE, CSC crank calc; "--" when no source; shared-peripheral with SpeedFeature |
 | `TrackPointRecorderFeature` | 30s checkpoint flush; ride end flush; paused intervals excluded |
 | `WheelCalibrationFeature` | 2% trigger over two consecutive windows; correction averaged across the confirming windows; ±10% cap; out-of-range rejection; GPS accuracy gating; calibration suspension during L3 |
-| `AlertOrchestratorFeature` | Effect dispatched at `userInteractive` priority; < 200ms mock latency |
+| `AlertOrchestratorFeature` | Effect dispatched at `.high` priority; < 200ms mock latency |
 | `GPXExporter` | Schema validation; absent fields (not zero) for missing sensors; vehicle pass waypoints |
 | `VehiclePassDetection` | Overtake vs. turn-off discrimination; 2s minimum tracking |
 | Full ride state machine | `idle → active → paused → active → ended`; crash recovery from checkpoint |

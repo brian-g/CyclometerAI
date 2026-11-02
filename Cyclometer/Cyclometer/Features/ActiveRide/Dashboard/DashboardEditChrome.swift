@@ -163,9 +163,9 @@ private struct DashboardWiggle: ViewModifier {
 
     /// How far a widget's corners swing either way, whatever its size. A fixed angle swung a
     /// full-width widget's corners three times as far as a 1×1's, into the cells around it.
-    private static let cornerTravel: CGFloat = 1.5
+    nonisolated private static let cornerTravel: CGFloat = 1.5
     /// One full swing and back, in seconds.
-    private static let period = 0.26
+    nonisolated private static let period = 0.26
 
     private var isWiggling: Bool { isEditing && !reduceMotion && !isHeld }
 

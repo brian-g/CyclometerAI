@@ -140,7 +140,7 @@ struct AlertOrchestratorFeature {
         if !isNoOpTransition && !isReTriggerGuarded {
             state.lastAlertDispatchAt[level] = now
 
-            effects.append(.run(priority: .userInteractive) { [hapticsClient] _ in
+            effects.append(.run(priority: .high) { [hapticsClient] _ in
                 switch level {
                 case .clear: break
                 case .advisory: await hapticsClient.playAdvisory()
@@ -155,11 +155,11 @@ struct AlertOrchestratorFeature {
             case (.caution, .danger):
                 break  // downgrade — Audio.md: "Warning tone does NOT play"
             case (.caution, _):
-                effects.append(.run(priority: .userInteractive) { [audioClient] _ in
+                effects.append(.run(priority: .high) { [audioClient] _ in
                     await audioClient.playWarning()
                 })
             case (.clear, .caution), (.clear, .danger):
-                effects.append(.run(priority: .userInteractive) { [audioClient] _ in
+                effects.append(.run(priority: .high) { [audioClient] _ in
                     await audioClient.playAllClear()
                 })
             case (.danger, _):
@@ -168,7 +168,7 @@ struct AlertOrchestratorFeature {
                 // AudioEngineState.play, which stop()s the node on entry, glitching
                 // whichever call loses the race).
                 effects.append(
-                    .run(priority: .userInteractive) { [audioClient, clock] _ in
+                    .run(priority: .high) { [audioClient, clock] _ in
                         while true {
                             await audioClient.playDanger()
                             try await clock.sleep(for: .milliseconds(800))

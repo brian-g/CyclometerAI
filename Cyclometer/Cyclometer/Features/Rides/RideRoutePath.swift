@@ -7,11 +7,14 @@ import SwiftUI
 /// rows open S15, and S15's Route row opens S20. TCA's `NavigationLink(state:)` reports an issue
 /// unless the link's state type is the enclosing stack's element type, so a link built inside
 /// `RouteDetailList` can only push on a stack of the same type whichever tab it is shown in.
-@Reducer(state: .equatable, action: .equatable)
+@Reducer
 enum RideRoutePath {
     case ride(RideDetailFeature)
     case route(RouteDetailFeature)
 }
+
+extension RideRoutePath.State: Equatable {}
+extension RideRoutePath.Action: Equatable {}
 
 /// The `destination:` of both tabs' stacks.
 struct RideRoutePathView: View {
