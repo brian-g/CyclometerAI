@@ -39,13 +39,14 @@ struct ElevationDashboardWidgetTests {
 
     private func withRoute() throws -> ActiveRideFeature.State {
         var state = ActiveRideFeature.State(recordingState: .active)
-        state.navigation.activeRoute = try #require(NavigationRoute(
+        let route = try #require(NavigationRoute(
             coordinates: [
                 RouteCoordinate(latitude: 0, longitude: 0, elevationMeters: 250),
                 RouteCoordinate(latitude: 0, longitude: 0.02, elevationMeters: 300)
             ],
             maneuvers: []
         ))
+        state.navigation.activeRoute = route
         // A resumed ride, then a grade window of flat riding: every face has a number to hold.
         state.elevation.seed(ElevationTracker.Seed(
             ascentMeters: 120, descentMeters: 40, highestMeters: 300, lowestMeters: 250

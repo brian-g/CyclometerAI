@@ -40,7 +40,7 @@ struct SensorPairingFeatureTests {
     func embeddedDeviceManagementActionReachesSharedState() async {
         let id = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
         let storage = FileStorage.inMemory
-        let store = await withDependencies {
+        let store = withDependencies {
             $0.defaultFileStorage = storage
         } operation: { () -> TestStoreOf<SensorPairingFeature> in
             @Shared(.appPreferences) var preferences

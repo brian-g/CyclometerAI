@@ -89,10 +89,8 @@ struct NavigationPipelineTests {
             await expectStoreClosed(at: storeURL)
             let container = try openStore(at: storeURL)
             var client = PersistenceClient.live(coreDataContainer: coreData.container, modelContainer: container)
-            launched.setValue((
-                container,
-                PersistenceClient.live(coreDataContainer: coreData.container, modelContainer: container)
-            ))
+            let reader = PersistenceClient.live(coreDataContainer: coreData.container, modelContainer: container)
+            launched.setValue((container, reader))
             // Map thumbnails (#273) aren't this pipeline's subject, and their backfill reads each
             // route back at launch and after import, on its own schedule — which would make
             // `routeFetches` count something other than navigation. With none missing, it never

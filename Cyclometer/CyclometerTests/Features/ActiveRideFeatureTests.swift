@@ -2376,7 +2376,7 @@ struct ActiveRideFeatureAutoPauseTests {
 struct ActiveRideFeatureHeartRateTests {
 
     /// The fixed `@Dependency(\.date)` every store in this suite is built with.
-    private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
+    nonisolated private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
 
     /// Storage is quarantined per store because the zone now derives from the shared
     /// `RiderProfile` (#96) — without this the assertions would depend on whatever
@@ -2772,7 +2772,7 @@ struct ActiveRideFeatureHeartRateTests {
 @Suite("ActiveRideFeature — HR dropout handling")
 struct ActiveRideFeatureHRDropoutTests {
 
-    private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
+    nonisolated private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
 
     /// An empty profile resolves to maxHR 190 / restingHR 60 → HRR 130, so
     /// (150 − 60) / 130 = 0.692 → zone 2. Every reading below is read against that.
@@ -3789,7 +3789,7 @@ struct ActiveRideFeatureUnitsTests {
 @MainActor
 @Suite("ActiveRideFeature — vehicle pass persistence")
 struct ActiveRideFeatureVehiclePassPersistenceTests {
-    private static let coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+    nonisolated private static let coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
 
     /// 4 m — inside `VehiclePassDetector.passProximityMetres`, so `sendOvertake` below
     /// describes a vehicle that actually reached the rider. At the 40 m this used to

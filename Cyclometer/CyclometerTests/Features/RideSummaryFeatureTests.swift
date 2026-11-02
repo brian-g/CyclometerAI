@@ -12,13 +12,13 @@ struct RideSummaryFeatureTests {
     // MARK: Harness
 
     /// 08:00 UTC — a morning ride under `calendar` below.
-    private static let startedAt = Date(timeIntervalSince1970: 1_700_035_200)
+    nonisolated private static let startedAt = Date(timeIntervalSince1970: 1_700_035_200)
 
-    private static let summary = RideListSummary(
+    nonisolated private static let summary = RideListSummary(
         id: UUID(), title: "", startedAt: startedAt, distanceMeters: 1_100, durationSeconds: 100
     )
 
-    private static let stats = RideStats(
+    nonisolated private static let stats = RideStats(
         averageSpeedMPS: 6, maxSpeedMPS: 11, averageCadenceRPM: 90, maxCadenceRPM: 104, vehiclePassCount: 2
     )
 

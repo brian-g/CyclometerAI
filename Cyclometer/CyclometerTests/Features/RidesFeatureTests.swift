@@ -238,7 +238,7 @@ struct RidesFeatureTests {
     }
 
     /// A PNG that decodes, so the row's images are real rather than a stand-in `Data`.
-    private static let png: Data = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { context in
+    nonisolated private static let png: Data = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { context in
         UIColor.gray.setFill()
         context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
     }

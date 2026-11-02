@@ -401,8 +401,8 @@ struct RoutesFeatureTests {
 
     // MARK: Terrain and surface (#252)
 
-    private static let surveyedPath = RouteFixtures.path(legs: [(0, 1_000)], spacingMeters: 10)
-    private static let asphalt = OSMWay(id: 1, tags: ["highway": "residential", "surface": "asphalt"],
+    nonisolated private static let surveyedPath = RouteFixtures.path(legs: [(0, 1_000)], spacingMeters: 10)
+    nonisolated private static let asphalt = OSMWay(id: 1, tags: ["highway": "residential", "surface": "asphalt"],
                                         geometry: [surveyedPath[0], surveyedPath[surveyedPath.count - 1]])
 
     private static func surveyedDetail(_ route: RouteSummary) -> [UUID: RouteDetail] {
@@ -869,7 +869,7 @@ struct RoutesFeatureTests {
     // MARK: Map thumbnail (#273)
 
     /// A PNG that decodes, so a row's images are real rather than a stand-in `Data`.
-    private static let png: Data = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { context in
+    nonisolated private static let png: Data = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).pngData { context in
         UIColor.gray.setFill()
         context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
     }
@@ -1127,7 +1127,7 @@ struct RoutesFeatureReviewTests {
         badSummary.surface = RouteSurfaceBreakdown(pavedMeters: 1)
         let fetches = LockIsolated<[UUID]>([])
         var client = PersistenceClient.mock(routes: [goodSummary, badSummary])
-        client.fetchRoute = { id in
+        client.fetchRoute = { [goodSummary] id in
             fetches.withValue { $0.append(id) }
             guard id == good else { return nil }
             return RouteDetail(summary: goodSummary, coordinates: Self.coordinates(), cuePoints: [])

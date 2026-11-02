@@ -151,18 +151,19 @@ struct RideDeletionTests {
     /// This pins the cross-context propagation a deletion depends on — a main-context
     /// fetch no longer finds the ride.
     @Test("A delete on the actor's context is visible to the container's main context")
+    @MainActor
     func deleteIsVisibleToTheMainContext() async throws {
         let fixture = try await Self.makeRide()
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
-        let mainContext = await fixture.swiftDataStack.container.mainContext
+        let mainContext = fixture.swiftDataStack.container.mainContext
         let descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.endedAt != nil })
         // Fetched before the delete, so the row is one this context has already seen —
         // a context that never knew about it could report absence for the wrong reason.
-        #expect(try await MainActor.run { try mainContext.fetch(descriptor) }.count == 1)
+        #expect(try mainContext.fetch(descriptor).count == 1)
 
         try await fixture.client.deleteRide(fixture.rideId)
 
-        #expect(try await MainActor.run { try mainContext.fetch(descriptor) }.isEmpty)
+        #expect(try mainContext.fetch(descriptor).isEmpty)
     }
 
     /// What the launch sweep keeps (#346): a finalized ride's export, until the ride is deleted.

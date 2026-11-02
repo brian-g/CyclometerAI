@@ -7,7 +7,7 @@ import ComposableArchitecture
 @Suite("SpeedFeature")
 struct SpeedFeatureTests {
 
-    private static let testDate = Date(timeIntervalSince1970: 1_000_000)
+    nonisolated private static let testDate = Date(timeIntervalSince1970: 1_000_000)
 
     private func makeStore(
         initialState: SpeedFeature.State = SpeedFeature.State(),
