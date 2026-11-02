@@ -95,8 +95,10 @@ struct HeroNumber<Label: View>: View {
     }
 
     /// Optional view shown immediately before the value, baseline-aligned with
-    /// it (e.g. W9's turn arrow). Lives inside HeroNumber so callers don't have
-    /// to re-derive the value's baseline.
+    /// it (e.g. W9's turn arrow, a sheet's zone dot). Lives inside HeroNumber so
+    /// callers don't have to re-derive the value's baseline: `.baselineOffset`
+    /// lowers the digits' glyphs but not the baseline the row aligns on, so the
+    /// accessory takes the same offset to sit on the digits, not above them (#494).
     func heroAccessory<A: View>(@ViewBuilder _ make: () -> A) -> Self {
         var copy = self
         copy.accessory = AnyView(make())
@@ -150,7 +152,7 @@ struct HeroNumber<Label: View>: View {
             if alignment == .vertical {
                 VStack(alignment: .trailing, spacing: 0) {
                     HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
-                        if let accessory { accessory }
+                        if let accessory { accessory.offset(y: -offset) }
                         scaledValue
                     }
                     .digitBaselines(offset)
@@ -158,7 +160,7 @@ struct HeroNumber<Label: View>: View {
                 }
             } else {
                 HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
-                    if let accessory { accessory }
+                    if let accessory { accessory.offset(y: -offset) }
                     scaledValue
                     if !unit.isEmpty { unitLabel.baselineOffset(offset) }
                 }
