@@ -12,11 +12,11 @@ struct HeartRateMetricsTests {
         #expect(metrics.currentZone == MetricReading(value: "3", spoken: "Zone 3, Aerobic"))
     }
 
-    /// The widgets' empty states: "—" either way (#494). No source at all says so in the footer,
-    /// and VoiceOver still reads it on the reading; a source with no reading is plain "—".
+    /// The widgets' empty states: "—" either way (#494). No source at all says so in the footer
+    /// alone, so VoiceOver doesn't read it twice; a source with no reading has no footer.
     @Test func emptyStatesMatchTheWidgets() {
         let noSource = HeartRateMetrics()
-        #expect(noSource.current == MetricReading(value: "—", spoken: "No HR source"))
+        #expect(noSource.current == .missing)
         #expect(noSource.currentZone == .missing)
         #expect(noSource.footer == "No HR Source")
 

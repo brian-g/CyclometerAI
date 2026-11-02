@@ -31,10 +31,9 @@ struct HeartRateMetrics: Equatable {
         var id: Int { zone }
     }
 
-    /// "—" with no source too, the reason in `footer`; VoiceOver still reads it there (#494).
+    /// "—" with no source too: the reason is `footer`'s, so VoiceOver reads it once (#494).
     var current: MetricReading {
-        if source == .none { return MetricReading(value: MetricReading.missing.value, spoken: "No HR source") }
-        guard bpm > 0 else { return .missing }
+        guard source != .none, bpm > 0 else { return .missing }
         return MetricReading(value: "\(bpm)", unit: "bpm", spoken: "\(bpm) beats per minute")
     }
 

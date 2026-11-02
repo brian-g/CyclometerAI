@@ -210,7 +210,7 @@ struct WidgetAccessibilityTests {
 
         #expect(try host.onlyElement().accessibilityActivate())
         host.settle()
-        #expect(host.presentedText().contains("Heart Rate No HR source"))
+        #expect(host.presentedText().contains("Heart Rate No reading"))
 
         ride.heartRate = .sample
         host.settle { host.presentedText().contains("156 beats per minute") }
