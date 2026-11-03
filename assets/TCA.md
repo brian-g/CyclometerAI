@@ -1038,6 +1038,8 @@ Cyclometer/
 │
 ├── Models/                                // value types and SwiftData @Models (Ride, Route, …)
 ├── Export/                                // GPXExporter, GPXParsing, GPXRouteImporter
+├── Intents/                               // App Intents (PRD §8.11): RideEntity, RouteEntity,
+│                                          // the intents, CyclometerShortcuts, IntentCommandCenter
 ├── UI/
 │   ├── DesignSystem/                      // Color+Cyclometer, AppFonts, Typography,
 │   │                                      // Spacing, Opacity, WidgetSize
