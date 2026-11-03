@@ -417,7 +417,8 @@ struct ActiveRideFeature {
         /// have passed, a manual pause is eligible without a stop, so a rider who paused
         /// while riding and rode on isn't left paused until they next stop (#504). Not
         /// persisted, like `hasStoppedWhilePaused`: a ride resumed paused after a kill times
-        /// its grace from the first speed reading the relaunched app sees.
+        /// its grace from the first `.speed` action the relaunched app sees — `.task`'s
+        /// `.startListening`, so from the relaunch rather than the first GPS fix.
         var pausedAt: Date? = nil
         /// Wheel auto-calibration stands down while the rider has something more
         /// urgent to attend to — a radar alert, or a turn announced and not yet made

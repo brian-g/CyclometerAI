@@ -2347,8 +2347,9 @@ struct ActiveRideFeatureAutoPauseTests {
     }
 
     /// The reading after a Pause tapped while coasting is still above `movingSpeedMPS`. Without the
-    /// stop in between, it would undo the pause a second after the tap.
-    @Test("With Resume When Moving, a Pause tapped while coasting holds until the ride has stopped")
+    /// stop in between, it would undo the pause a second after the tap. The clock never moves here,
+    /// so `manualPauseGraceSeconds` (#504) never passes.
+    @Test("With Resume When Moving, a Pause tapped while coasting holds, within the grace, until the ride has stopped")
     func pauseTappedWhileCoastingHolds() async {
         let store = makeStore(
             state: ActiveRideFeature.State(recordingState: .active),
@@ -2429,7 +2430,8 @@ struct ActiveRideFeatureAutoPauseTests {
     }
 
     /// `pausedAt` isn't persisted: a ride brought back paused after a kill times its grace from the
-    /// first reading the relaunched app sees.
+    /// first `.speed` action the relaunched app sees. In the app that is `.task`'s `.startListening`;
+    /// here it is a reading.
     @Test("With Resume When Moving, a ride restored paused times its grace from the first reading")
     func restoredPausedRideTimesTheGraceFromTheFirstReading() async {
         let date = ManualDate()
