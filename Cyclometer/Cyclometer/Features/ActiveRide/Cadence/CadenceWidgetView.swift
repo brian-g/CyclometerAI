@@ -384,7 +384,9 @@ struct CadenceList: View {
                         color: zone.color,
                         name: "Z\(zone.rawValue) \(zone.displayName)",
                         range: range(of: zone),
-                        time: Self.time(zoneSeconds[zone] ?? 0)
+                        // Rounded once: the tally is fractional BLE intervals, and the shown time
+                        // rounds while `Int(_:)` would truncate the spoken one.
+                        time: .zoneTime(seconds: Int((zoneSeconds[zone] ?? 0).rounded()))
                     )
                 }
             }
@@ -425,14 +427,6 @@ struct CadenceList: View {
             value: zones.rangeText(for: zone),
             unit: "rpm",
             spoken: zones.upperBound(of: zone).map { "\(lower) to \($0) rpm" } ?? "\(lower) rpm or more"
-        )
-    }
-
-    /// "0:21:00", as the Heart rate sheet's zone times read.
-    private static func time(_ seconds: TimeInterval) -> MetricReading {
-        MetricReading(
-            value: Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1))),
-            spoken: Int(seconds).spokenElapsed
         )
     }
 }

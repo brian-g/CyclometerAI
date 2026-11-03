@@ -40,7 +40,7 @@ struct ReadingColumn<Accessory: View>: View {
                 first
                 ForEach(Array(readings.dropFirst().enumerated()), id: \.offset) { _, reading in
                     // A separator, not a number: set as small as the units, on the digits' baseline.
-                    Text(verbatim: "/").font(.footnote).dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
+                    Text(verbatim: "/").heroUnit()
                     HeroNumber(reading.value, unit: reading.unit).heroNumberSize(.small)
                 }
             }
@@ -51,11 +51,13 @@ struct ReadingColumn<Accessory: View>: View {
         .accessibilityValue(spoken)
     }
 
-    /// The first reading, which carries any accessory.
+    /// The first reading, which carries any accessory. An empty one takes no room, as the Zone
+    /// column's absent dot doesn't.
     private var first: HeroNumber<EmptyView> {
         let reading = readings[0]
-        let hero = HeroNumber(reading.value, unit: reading.unit).heroNumberSize(.small)
-        return Accessory.self == EmptyView.self ? hero : hero.heroAccessory(.capCenter) { accessory }
+        return HeroNumber(reading.value, unit: reading.unit)
+            .heroNumberSize(.small)
+            .heroAccessory(.capCenter) { accessory }
     }
 }
 
@@ -83,12 +85,14 @@ struct ReadingColumns: Layout {
         let rowHeights: [CGFloat]
     }
 
-    /// `width` nil lays the readings out side by side, each at its natural width.
+    /// `width` nil lays the readings out side by side, each column as wide as the widest. Fitting
+    /// them to their summed width instead stacked any two of unequal width.
     private func grid(width proposed: CGFloat?, subviews: Subviews) -> Grid {
         let widths = subviews.map { $0.sizeThatFits(.unspecified).width }
-        let width = proposed ?? widths.reduce(0, +) + spacing * CGFloat(max(widths.count - 1, 0))
-        let columns = Self.columns(fitting: width, widths: widths, spacing: spacing)
-        let columnWidth = columns == 0 ? 0 : (width - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+        let columns = proposed.map { Self.columns(fitting: $0, widths: widths, spacing: spacing) } ?? widths.count
+        let gaps = spacing * CGFloat(max(columns - 1, 0))
+        let width = proposed ?? (widths.max() ?? 0) * CGFloat(columns) + gaps
+        let columnWidth = columns == 0 ? 0 : (width - gaps) / CGFloat(columns)
         let proposal = ProposedViewSize(width: columnWidth, height: nil)
         let rowHeights = stride(from: 0, to: subviews.count, by: max(columns, 1)).map { start in
             subviews[start..<min(start + columns, subviews.count)]
@@ -105,7 +109,9 @@ struct ReadingColumns: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let grid = grid(width: bounds.width, subviews: subviews)
+        // As `sizeThatFits` measured: with no width proposed, side by side, rather than refitting
+        // to a width summed from the readings', which float error can leave a hair short.
+        let grid = grid(width: proposal.width == nil ? nil : bounds.width, subviews: subviews)
         let proposal = ProposedViewSize(width: grid.columnWidth, height: nil)
         var y = bounds.minY
         for (row, height) in grid.rowHeights.enumerated() {
@@ -167,7 +173,7 @@ private struct ReadingColumnsPreview: View {
                 ReadingColumns {
                     ReadingColumn("Heart Rate", MetricReading(value: "156", unit: "bpm", spoken: "156 beats per minute"))
                     ReadingColumn("Zone", MetricReading(value: "3", spoken: "Zone 3, Aerobic")) {
-                        Circle().fill(Color.hrZone(3)).frame(width: Spacing.sm, height: Spacing.sm)
+                        ZoneDot(color: .hrZone(3))
                     }
                 }
             }

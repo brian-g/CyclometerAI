@@ -88,7 +88,7 @@ struct CadenceZoneBoundaries: Codable, Equatable, Sendable {
         zone == .zone5 ? nil : lowerBoundsRPM[zone.rawValue - 1] - 1
     }
 
-    /// "60-69", or "110+" for Z5 — S12's and the detail sheet's range, written as S12's HR rows are.
+    /// "60–69" (an en dash), or "110+" for Z5 — S12's and the detail sheet's range, written as S12's HR rows are.
     func rangeText(for zone: CadenceZone) -> String {
         upperBound(of: zone).map { "\(lowerBound(of: zone))–\($0)" } ?? "\(lowerBound(of: zone))+"
     }

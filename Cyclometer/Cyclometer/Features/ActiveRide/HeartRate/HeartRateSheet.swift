@@ -66,10 +66,7 @@ struct HeartRateMetrics: Equatable {
                     spoken: "\(bounds.lowerBound) to \(bounds.upperBound) beats per minute"
                 ),
                 seconds: seconds,
-                time: MetricReading(
-                    value: Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1))),
-                    spoken: seconds.spokenElapsed
-                )
+                time: .zoneTime(seconds: seconds)
             )
         }
     }

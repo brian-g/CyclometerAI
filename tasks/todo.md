@@ -1772,3 +1772,23 @@ Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-co
 - [x] Re-recorded HR live ×2, Elevation ×3, Cadence ×3, Settings ×2 (full-suite record run: only those moved);
       UX.md (Steepest pair, centred dot, zone rows with dots, en dash)
 - [ ] Full suite verify, commit + push
+
+---
+
+### #494 second review (`/code-review xhigh --fix`, 2026-11-02)
+
+- [x] Fixed: Cadence zone times read aloud truncated (`Int(seconds)`) while the row rounds, so 59.6 s showed
+      "0:01:00" and read "59 seconds"; now rounded once through a shared `MetricReading.zoneTime(seconds:)`, which
+      the HR rows use too
+- [x] Fixed: `ReadingColumns` with no width proposed stacked any two readings of unequal width (it fitted them to
+      their own summed width) and proposed the average width to each; now side by side at the widest, and
+      `placeSubviews` follows the same path
+- [x] Cleanups: `ReadingColumn` drops the `Accessory == EmptyView` type check (an empty accessory takes no room, as
+      HR's absent dot shows); the "/" and the units share `heroUnit()`; the preview uses `ZoneDot`; the stale "60-69"
+      in `rangeText`'s doc comment
+- [x] App + test targets build clean; tests not run (Brian runs first)
+- Skipped, for Brian: (2) AX-size digit overflow (#499 follow-up, known); (4) a live value gaining a digit can re-flow
+  a row 3 ↔ 2+1; (5) `heartRateSheetFollowsTheRideWhileOpen` no longer checks the "No HR Source" footer reaches
+  VoiceOver; (6) `.capCenter` sizes from Dynamic Type, so it would mis-centre under `minimumScaleFactor`;
+  (7) "Pedaling vs Coasting" still reads "—" aloud; (8) zone rows read "Z1 …", the Zone column "Zone 3, …";
+  (9) per-sibling `.offset` patches for the digits' `.baselineOffset`; (15) `ReadingColumns` re-measures with no cache

@@ -227,7 +227,7 @@ struct HeroNumber<Label: View>: View {
     }
 
     private var unitLabel: some View {
-        Text(unit).textCase(.lowercase).font(.footnote).dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
+        Text(unit).textCase(.lowercase).heroUnit()
     }
 }
 
@@ -236,6 +236,12 @@ extension View {
     /// label set above several heroes, as `ReadingColumn` does (#494).
     func heroLabel() -> some View {
         textCase(.uppercase).dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
+    }
+
+    /// A hero's unit size, held at `cyCaptionMax` (#499). For text set beside a hero as small as
+    /// its unit, as `ReadingColumn`'s "/" (#494).
+    func heroUnit() -> some View {
+        font(.footnote).dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
     }
 }
 

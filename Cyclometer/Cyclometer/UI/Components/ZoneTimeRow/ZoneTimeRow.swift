@@ -31,6 +31,17 @@ struct ZoneTimeRow: View {
     }
 }
 
+extension MetricReading {
+    /// A zone row's time, "0:21:00", read "21 minutes". Whole seconds, so what VoiceOver reads is
+    /// what the row shows.
+    static func zoneTime(seconds: Int) -> MetricReading {
+        MetricReading(
+            value: Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1))),
+            spoken: seconds.spokenElapsed
+        )
+    }
+}
+
 // MARK: - Zone Dot
 
 /// A zone's colour as a small dot, keying a row or reading to the chart's band and donut's slice.
