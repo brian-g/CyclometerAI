@@ -294,9 +294,10 @@ struct ActiveRideFeature {
         /// to 190/55 before #96, which disagreed with the 60 that DataModel.md §3.5
         /// has always specified as the resting default.
         @SharedReader(.riderProfile) var riderProfile
-        /// Consulted for `isAutoPauseEnabled`. Written only for `mapOrientation`, from
-        /// the map sheet's orientation button (#199), and `dashboardLayout`, from S07 edit
-        /// mode (#141); Settings owns every other field (#102), and `calibration` writes the
+        /// Consulted for `isAutoPauseEnabled`. Written for `mapOrientation`, from the map
+        /// sheet's orientation button (#199); `dashboardLayout`, from S07 edit mode (#141);
+        /// `collapsedWidgetCategories`, from S08's sections (#517); and `sensorHealth`, at ride
+        /// end (#391). Settings owns every other field (#102), and `calibration` writes the
         /// wheel circumference through its own reference.
         @Shared(.appPreferences) var preferences
         var speed = SpeedFeature.State()
@@ -450,6 +451,8 @@ struct ActiveRideFeature {
         /// `nil` from Add, which adds in the first open spot. Read only while the sheet is up, and
         /// left set as it closes, so the sheet doesn't redraw as Add's while it slides away.
         var addWidgetCell: DashboardGrid.Cell?
+        /// S08's collapsed sections (#517), saved so the picker reopens as the rider left it.
+        var collapsedWidgetCategories: Set<WidgetCategory> { preferences.collapsedWidgetCategories }
         /// The Sensors sheet (#466), from the toolbar's Sensors button. Its rows read
         /// `sensorHealth` live, so this is the only state the sheet needs here.
         var isSensorsSheetPresented = false
@@ -491,6 +494,8 @@ struct ActiveRideFeature {
         case addWidgetSelected(widgetID: String, size: WidgetSize)
         /// S08's "Empty page" (#142): a blank page after the one the rider is on.
         case addEmptyPageTapped
+        /// S08 (#517): the rider expanded or collapsed a section.
+        case addWidgetCollapsedCategoriesChanged(Set<WidgetCategory>)
         /// The toolbar's Sensors button (#464, #466), shown while a paired sensor is missing or low.
         case sensorsButtonTapped
         case sensorsSheetPresentationChanged(Bool)
@@ -742,6 +747,9 @@ struct ActiveRideFeature {
                 else { return .none }
                 state.dashboardPage = index + 1
                 state.isAddWidgetPresented = false
+                return .none
+            case .addWidgetCollapsedCategoriesChanged(let collapsed):
+                state.$preferences.withLock { $0.collapsedWidgetCategories = collapsed }
                 return .none
             case .dashboardEditingDoneTapped:
                 guard state.isEditingDashboard else { return .none }

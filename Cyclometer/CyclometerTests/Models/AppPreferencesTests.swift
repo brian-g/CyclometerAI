@@ -105,6 +105,8 @@ struct AppPreferencesTests {
         preferences.dashboardLayout = DashboardLayout(pages: [
             DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 6, column: 1)])
         ])
+        // Added by #517, default empty.
+        preferences.collapsedWidgetCategories = [.route, .heartRate]
 
         let data = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
@@ -147,6 +149,8 @@ struct AppPreferencesTests {
         #expect(decoded.mapOrientation == .headingUp)
         // Added by #139; the dashboard starts on the factory layout.
         #expect(decoded.dashboardLayout == .factory)
+        // Added by #517; every Add Widget section starts expanded.
+        #expect(decoded.collapsedWidgetCategories.isEmpty)
     }
 
     /// A layout naming a widget this build doesn't have — written by a newer version, or holding
@@ -176,6 +180,18 @@ struct AppPreferencesTests {
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
 
         #expect(decoded.dashboardLayout == .factory)
+        #expect(decoded.wheelCircumferenceMM == 2155)
+    }
+
+    /// A collapsed section this build doesn't have (#517) is dropped alone: the known ones stay
+    /// collapsed, and no other preference resets.
+    @Test("An unknown collapsed category is dropped; the rest are kept")
+    func unknownCollapsedCategoryFallsBack() throws {
+        let json = Data(#"{"wheelCircumferenceMM":2155,"collapsedWidgetCategories":["route","force"]}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+
+        #expect(decoded.collapsedWidgetCategories == [.route])
         #expect(decoded.wheelCircumferenceMM == 2155)
     }
 

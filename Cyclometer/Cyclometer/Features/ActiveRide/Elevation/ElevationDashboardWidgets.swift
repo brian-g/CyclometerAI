@@ -6,7 +6,7 @@ struct AscentDashboardWidget: DashboardWidget {
     static let id = "ascent"
     static let title = "Ascent"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
-    static let category = WidgetCategory.ride
+    static let category = WidgetCategory.elevation
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>
@@ -24,7 +24,7 @@ struct DescentDashboardWidget: DashboardWidget {
     static let id = "descent"
     static let title = "Descent"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
-    static let category = WidgetCategory.ride
+    static let category = WidgetCategory.elevation
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>
@@ -42,7 +42,7 @@ struct GradeDashboardWidget: DashboardWidget {
     static let id = "grade"
     static let title = "Grade"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
-    static let category = WidgetCategory.ride
+    static let category = WidgetCategory.elevation
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>
@@ -57,7 +57,7 @@ struct ElevationDashboardWidget: DashboardWidget {
     static let id = "elevation"
     static let title = "Elevation"
     static let supportedSizes: [WidgetSize] = [.twoByOne]
-    static let category = WidgetCategory.ride
+    static let category = WidgetCategory.elevation
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>

@@ -1807,6 +1807,36 @@ Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-co
 
 ---
 
+## #517 — Add Widget sheet: categories as remembered disclosure groups (2026-11-03)
+
+Branch `feat/517-add-widget-categories`. Plan approved (Brian): Ride, Heart, Power, Fitness, Elevation, Weather, Route;
+empty categories hidden; Cadence listed only with a paired cadence sensor (power widgets will gate the same way);
+Heart always shows (Watch HR has no pairing record).
+
+- [x] `WidgetCategory`: String/Codable, 7 cases, new titles
+- [x] `DashboardWidget.requiredSensor` + `isListed(pairedRoles:)`; Cadence → `.cadence`
+- [x] Recategorise: Ascent/Descent/Grade/Elevation → Elevation; Calories → Fitness
+- [x] `AppPreferences.collapsedWidgetCategories` (decodeIfPresent); ActiveRide computed state + action
+- [x] `AddWidgetCatalog`: DisclosureGroups, heading style (headline, uppercase, cyPrimary), sensor filter, previews
+- [x] Tests written: entries, sensor gate, prefs decode, TestStore action, snapshots (collapsed variant added, re-recorded; canvas 1400 → 2100 pt to fit Fitness and Elevation)
+- [x] Docs: UX.md §S08, DataModel.md §3.6
+- [x] App + test targets build clean
+- [x] Snapshot check: the default chevron ignores `.tint` (draws `textPrimary`), so the modifier was dropped and UX.md
+      says "system chevron"
+- [x] Full `CyclometerTests`: 2431 passed, 1 failed — `rowsPairOneByOnes` still held the old Ride list (missed when
+      updating `entriesLargestFirst`); fixed, `AddWidgetSheetTests` 4/4
+
+### #517 review (`/code-review --fix`, 2026-11-03; Brian: "fix 3, 5, 6, 7, 8, 9")
+- [x] (3) Collapsed categories decode as names and drop only unknown ones (`["route","force"]` keeps Route)
+- [x] (5) `ActiveRideFeature.preferences` doc comment lists every write, #517 and #391 included
+- [x] (6) Collapse test moved into the S07 suite, on its `makeStore()`
+- [x] (7) UX.md's #142 paragraph points to the #517 categories
+- [x] (8) "Ride Widgets" preview in production order
+- [x] (9) Collapsed snapshot on its own 1400 pt canvas, re-recorded
+- [x] Full `CyclometerTests`: 2432 passed, 0 failed
+- Deferred (Brian, 2026-11-03: "leave 1, 2, 3, 4"): (1) 52 pt tap target on category headings; (2) `cyPrimary`
+  headings at 2.4:1 in light mode; (4) VoiceOver heading trait inside the disclosure label; (10) sensor gate in
+  `entries(in:)`
 # #504 — Resume When Moving doesn't resume a ride paused while moving
 
 Rule (Brian): a manual pause is eligible for Resume When Moving once the ride has read as stopped **or** 15 s have

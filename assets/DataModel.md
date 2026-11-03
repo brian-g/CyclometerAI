@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-10-20 (#79) — §3.1: W5's four efficiency-zone columns are replaced by `cadenceSecondsByRPMData`, which holds seconds pedalling at each whole rpm. Cadence zones are now the rider's own, set in S12, so #340's "fixed thresholds" reason no longer holds. Like HR's zones (#284), they resolve at read time, so a zone change re-sorts time already recorded. §3.6: `AppPreferences` gains `cadenceZones`. §9 records the migration
+**Updated:** 2026-11-03 (#517) — §3.6: `AppPreferences` gains `collapsedWidgetCategories`, the S08 picker sections the rider has collapsed.
+**Previously:** 2026-10-20 (#79) — §3.1: W5's four efficiency-zone columns are replaced by `cadenceSecondsByRPMData`, which holds seconds pedalling at each whole rpm. Cadence zones are now the rider's own, set in S12, so #340's "fixed thresholds" reason no longer holds. Like HR's zones (#284), they resolve at read time, so a zone change re-sorts time already recorded. §3.6: `AppPreferences` gains `cadenceZones`. §9 records the migration
 **Previously:** 2026-10-03 (#340) — §3.1: `Ride` gains five defaulted `TimeInterval` columns holding W5's time in each cadence zone and coasting time, written at every checkpoint and read back by `State(resuming:)`. They don't contradict #284: cadence zones are fixed rpm thresholds, so a stored tally cannot go stale. §9 records the migration
 **Previously:** 2026-09-26 (#284) — §3.1: `Ride` drops `elevationGainMeters`, `elevationDropMeters` and `hrZoneDurations`, which were declared but never written. S10 and S15 derive elevation and zone time from the saved track, and zones resolve at read time. §9 records the migration
 **Previously:** 2026-08-17 (#96) — §3.5 revised: RiderProfile leaves SwiftData for a `@Shared(.fileStorage)` JSON document, and stores HR *overrides* rather than values, since resting HR and date of birth are HealthKit's to own and max HR has no HealthKit type at all. `heartRateSourceIsAppleHealth` becomes derived; `dateOfBirth` is not stored. §8 gains the worked example it was already cited for, plus the zone → bpm inverse and the `minimumHRReserve` floor it requires. SwiftData now lands with M7's Ride
@@ -568,6 +569,10 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// Cadence Zones steppers; read live by CadenceFeature and W5. An invalid stored value
     /// decodes as the defaults rather than resetting the document.
     var cadenceZones: CadenceZoneBoundaries = .default   // [70, 85, 95, 110]
+    /// #517. The S08 Add Widget sections the rider has collapsed, so the sheet reopens as left.
+    /// The collapsed set, not the expanded one, so every section — a new one too — starts
+    /// expanded. A name this build doesn't have decodes as empty rather than resetting the document.
+    var collapsedWidgetCategories: Set<WidgetCategory> = []   // enum WidgetCategory: String, Codable
 
     func pairedSensor(for role: SensorRole) -> PairedSensor?
     /// CSC-role records only (#93). The collection also holds radar and HR records,
@@ -595,7 +600,8 @@ Consumed by `SettingsFeature` (read/write, pushing each change to
 `BLECSCClient.setPairedSensors`), `AppFeature` (`@SharedReader`, pushing the assignments once at
 launch so paired sensors reconnect without the Sensors screen being open), `NavigationFeature`
 (`@SharedReader`, the turn lead distance on every fix — #197) and `ActiveRideFeature` (`@Shared`:
-reads auto-pause, and writes `mapOrientation` from the map sheet's orientation button — #199).
+reads auto-pause, writes `mapOrientation` from the map sheet's orientation button — #199 — and
+`collapsedWidgetCategories` from S08's sections — #517).
 
 > **`mapOrientation` deferred at #94 (2026-08-16), landed at #199 (2026-09-14).** It was deferred
 > because it had no consumer: nothing would have written or read it. It landed with the issue that

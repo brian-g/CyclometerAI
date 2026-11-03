@@ -7,6 +7,8 @@ struct CadenceDashboardWidget: DashboardWidget {
     static let title = "Cadence"
     static let supportedSizes: [WidgetSize] = [.oneByOne, .twoByOne]
     static let category = WidgetCategory.ride
+    /// Only a crank sensor reads cadence, so S08 lists W5 only with one paired (#517).
+    static let requiredSensor: SensorRole? = .cadence
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>

@@ -4526,6 +4526,20 @@ struct ActiveRideFeatureDashboardEditTests {
         await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 1, column: 0)))
         await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 7, column: 0)))
     }
+
+    /// S08's sections reopen as the rider left them (#517): collapsing one writes the preference,
+    /// so the next sheet, ride and launch see it too.
+    @Test("Collapsing or expanding an Add Widget section writes the saved preference")
+    func addWidgetCollapsedCategoriesWritePreference() async {
+        let store = makeStore()
+
+        await store.send(.addWidgetCollapsedCategoriesChanged([.route])) {
+            $0.$preferences.withLock { $0.collapsedWidgetCategories = [.route] }
+        }
+        await store.send(.addWidgetCollapsedCategoriesChanged([])) {
+            $0.$preferences.withLock { $0.collapsedWidgetCategories = [] }
+        }
+    }
 }
 
 @MainActor
