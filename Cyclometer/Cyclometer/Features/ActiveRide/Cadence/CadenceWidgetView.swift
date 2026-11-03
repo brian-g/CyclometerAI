@@ -380,8 +380,12 @@ struct CadenceList: View {
                     .frame(maxWidth: .infinity)
                 }
                 ForEach(CadenceZone.allCases, id: \.self) { zone in
-                    LabeledContent("Z\(zone.rawValue) \(zone.displayName) · \(zones.rangeText(for: zone)) rpm",
-                                   value: Self.duration(zoneSeconds[zone] ?? 0))
+                    ZoneTimeRow(
+                        color: zone.color,
+                        name: "Z\(zone.rawValue) \(zone.displayName)",
+                        range: range(of: zone),
+                        time: Self.time(zoneSeconds[zone] ?? 0)
+                    )
                 }
             }
         }
@@ -414,8 +418,22 @@ struct CadenceList: View {
         return "\(pedalingPercent)% / \(100 - pedalingPercent)%"
     }
 
-    private static func duration(_ seconds: TimeInterval) -> String {
-        Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1)))
+    /// "60–69 rpm", read "60 to 69 rpm"; Z5 "110+ rpm", read "110 rpm or more".
+    private func range(of zone: CadenceZone) -> MetricReading {
+        let lower = zones.lowerBound(of: zone)
+        return MetricReading(
+            value: zones.rangeText(for: zone),
+            unit: "rpm",
+            spoken: zones.upperBound(of: zone).map { "\(lower) to \($0) rpm" } ?? "\(lower) rpm or more"
+        )
+    }
+
+    /// "0:21:00", as the Heart rate sheet's zone times read.
+    private static func time(_ seconds: TimeInterval) -> MetricReading {
+        MetricReading(
+            value: Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1))),
+            spoken: Int(seconds).spokenElapsed
+        )
     }
 }
 

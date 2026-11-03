@@ -1757,3 +1757,18 @@ Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-co
   (7) `MetricReading.shown` puts a space before "%" ("+4 %", was "+4%"), unread today; (8) Grade's wrapped readings are
   leading-aligned, against UX.md §Alignment's right-aligned rule for stacked numbers of one unit; (9) with no HR source
   VoiceOver hears "No HR source" twice, on the reading and in the footer
+
+### Follow-ups from review (Brian, 2026-11-02)
+- [x] "No HR source" read once, in the footer; UX.md alignment exception for sheet readings (pushed)
+- [x] `HeroNumber` leading accessory on the digits' baseline: W9's arrow stays there (pushed)
+- [x] Zone dot centred on the digits: `heroAccessory(.capCenter)`; `ReadingColumn` uses it. The cap height comes
+      from the Dynamic Type-scaled point size, not a post-layout measurement, which a single-pass snapshot left at 0
+- [x] Grade: "Steepest" one column, "+9 % / -8 %" (`ReadingColumn` with several readings), read "climb …, descent …"
+- [x] Cadence zone rows as HR's: shared `ZoneTimeRow` + `ZoneDot` (UI/Components/ZoneTimeRow)
+- [x] Steepest's label lifted over the row (`heroLabel()`), so it no longer widens the first number; "/" as small as
+      the units (Brian)
+- [x] Cadence ranges use an en dash, in `CadenceZone.rangeText`: Cadence sheet and Settings both (Brian)
+- [x] Brian reviewed the renders: approved
+- [x] Re-recorded HR live ×2, Elevation ×3, Cadence ×3, Settings ×2 (full-suite record run: only those moved);
+      UX.md (Steepest pair, centred dot, zone rows with dots, en dash)
+- [ ] Full suite verify, commit + push

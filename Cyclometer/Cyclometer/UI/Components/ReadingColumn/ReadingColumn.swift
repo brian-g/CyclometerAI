@@ -7,13 +7,15 @@ import SwiftUI
 /// value". Lay several out with `ReadingColumns`.
 struct ReadingColumn<Accessory: View>: View {
     let label: String
-    let reading: MetricReading
+    let readings: [MetricReading]
+    let spoken: String
     let accessory: Accessory
 
-    /// `accessory` sits before the value, on its baseline (e.g. the heart-rate zone's dot).
+    /// `accessory` sits before the value, centred on its digits (e.g. the heart-rate zone's dot).
     init(_ label: String, _ reading: MetricReading, @ViewBuilder accessory: () -> Accessory) {
         self.label = label
-        self.reading = reading
+        self.readings = [reading]
+        self.spoken = reading.spoken
         self.accessory = accessory()
     }
 
@@ -21,18 +23,39 @@ struct ReadingColumn<Accessory: View>: View {
         self.init(label, reading) { EmptyView() }
     }
 
-    var body: some View {
-        hero
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(label)
-            .accessibilityValue(reading.spoken)
+    /// Readings of one kind read together, each with its unit: "+9 % / -8 %". A single "—" when
+    /// none has a value; `spoken` tells VoiceOver which is which.
+    init(_ label: String, _ readings: [MetricReading], spoken: String) where Accessory == EmptyView {
+        self.label = label
+        self.readings = readings.allSatisfy { $0 == .missing } ? [.missing] : readings
+        self.spoken = spoken
+        self.accessory = EmptyView()
     }
 
-    private var hero: HeroNumber<Text> {
-        let hero = HeroNumber(reading.value, unit: reading.unit) { Text(label).font(.caption) }
-            .heroNumberSize(.small)
-        return Accessory.self == EmptyView.self ? hero : hero.heroAccessory { accessory }
+    var body: some View {
+        // The label sits over the readings, not in the first hero, so it doesn't widen that one.
+        VStack(alignment: .leading, spacing: 0) {
+            Text(label).font(.caption).heroLabel()
+            HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
+                first
+                ForEach(Array(readings.dropFirst().enumerated()), id: \.offset) { _, reading in
+                    // A separator, not a number: set as small as the units, on the digits' baseline.
+                    Text(verbatim: "/").font(.footnote).dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
+                    HeroNumber(reading.value, unit: reading.unit).heroNumberSize(.small)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(spoken)
+    }
+
+    /// The first reading, which carries any accessory.
+    private var first: HeroNumber<EmptyView> {
+        let reading = readings[0]
+        let hero = HeroNumber(reading.value, unit: reading.unit).heroNumberSize(.small)
+        return Accessory.self == EmptyView.self ? hero : hero.heroAccessory(.capCenter) { accessory }
     }
 }
 
@@ -122,11 +145,22 @@ private struct ReadingColumnsPreview: View {
                     ReadingColumn("Max", .missing)
                 }
             }
-            Section("Wrapping") {
+            Section("Pair") {
                 ReadingColumns {
                     ReadingColumn("Current", previewGrade)
-                    ReadingColumn("Steepest Climb", previewGrade)
-                    ReadingColumn("Steepest Descent", MetricReading(value: "-8", unit: "%", spoken: "-8 percent"))
+                    ReadingColumn(
+                        "Steepest",
+                        [MetricReading(value: "+9", unit: "%", spoken: "9 percent"), MetricReading(value: "-8", unit: "%", spoken: "-8 percent")],
+                        spoken: "climb 9 percent, descent -8 percent"
+                    )
+                }
+            }
+            Section("Wrapping") {
+                ReadingColumns {
+                    ReadingColumn("Moving Time", previewTime)
+                    ReadingColumn("Stopped Time", previewTime)
+                    ReadingColumn("Paused Time", previewTime)
+                    ReadingColumn("Ride Time", previewTime)
                 }
             }
             Section("Accessory") {

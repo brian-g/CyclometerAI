@@ -115,7 +115,7 @@ The design should be aligned with Apple HIG and use standard SwiftUI components 
 ## Alignment
 
 - Numbers arranged vertically and of the same unit must always be aligned to the right
-  - Exception: a widget sheet's readings (§Widget Details, **Sheet readings**, #494) are left-aligned columns, each under its label, and stay left-aligned where a row wraps (Grade's third reading under its first)
+  - Exception: a widget sheet's readings (§Widget Details, **Sheet readings**, #494) are left-aligned columns, each under its label, and stay left-aligned where a row wraps
 - Horizontal text should always be baseline aligned unless otherwise noted
 
 ### Typography Scale
@@ -613,7 +613,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 - Each widget exposes a label modifier; the label is hidden on 2x2 widgets
 - Tapping any widget opens a detail sheet for that metric category
 - VoiceOver reads each tappable widget as one button: its title, then what the card shows in words ("Cadence, 92 rpm, average 88, maximum 110"); units and time are spelled out ("36.0 kilometers per hour", "1 hour, 2 minutes"), and "—" is read as "No reading". A double-tap opens the same sheet (#361). In S07 edit mode the card's own element, with its Move actions, replaces it (#367)
-- **Sheet readings** (#494): a detail sheet shows each reading as a `small-hero` over its label, in columns that share the row's width equally, as the dashboard shows numbers. A row too narrow for its readings at their natural width wraps onto a second line, keeping the same columns, rather than wrapping a label: at 402 pt, **Grade**'s three wrap to two and one. A missing reading reads "—" with no unit, and any reason for it goes in the section's footer. VoiceOver reads each column as one element, its label then the reading in words. The per-zone lists, donuts and charts stay as they are. Built as `ReadingColumn` / `ReadingColumns`, which every widget sheet uses
+- **Sheet readings** (#494): a detail sheet shows each reading as a `small-hero` over its label, in columns that share the row's width equally, as the dashboard shows numbers. A row too narrow for its readings at their natural width wraps onto a second line, keeping the same columns, rather than wrapping a label. Two readings of one kind can share a column, each with its unit and a small "/" between them (Grade's Steepest, "+9 % / -8 %"), reading "—" once when neither has a value. A marker before a reading (the Heart rate sheet's zone dot) is centred on its digits. A missing reading reads "—" with no unit, and any reason for it goes in the section's footer. VoiceOver reads each column as one element, its label then the reading in words. The per-zone lists, donuts and charts stay as they are. Built as `ReadingColumn` / `ReadingColumns`, which every widget sheet uses
 
 ---
 
@@ -681,7 +681,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - A watermark graph of the historical HR for the ride. The horizontal bands in the chart should show the zones (`brHRZone1`–`brHRZone5`)
 - As built (#145), W4 matches W5 Cadence. Behind the number, the last hour of heart rate is a faint line on the rider's zone bands. The y-axis is fixed from resting to max HR, so the bands don't move. The trend is the shared trend indicator (#402), as §W1's: a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the value, level with the tops of its digits and a quarter of their height, not over the unit as Design.sketch "W4 - Heart Rate" draws it. It compares the last 10 s of readings against the 20 s before, by 3 bpm or more. Hidden when steady or with no reading. The unit doesn't move. At 2×1 the hero has Avg and Max beside it, as W5's does. The left border shows the current zone's colour
 - Zone label: "Z1 Recovery/Light", "Z2 Endurance", "Z3 Aerobic", "Z4 Threshold", "Z5 Anaerobic" — §S12's names, so the dashboard and Settings use the same words (#145)
-- Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. The first section is the Cadence sheet's chart for heart rate (the last hour on zone bands over a faint elevation area, its y-axis fixed from resting to max), on the Ride Metrics charts' time axis; then Heart Rate and Zone as columns, the zone as its number with its zone-colour dot before it (its name is read by VoiceOver). Both read "—" with no reading; with nothing connected the section's footer says "No HR Source", the cards' empty state, and VoiceOver reads it there once, Heart Rate reading "No reading". Then **Time in Zones**: a donut in the zone colours, and one row per zone giving its name, its bpm range as §S12 resolves it, and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
+- Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. The first section is the Cadence sheet's chart for heart rate (the last hour on zone bands over a faint elevation area, its y-axis fixed from resting to max), on the Ride Metrics charts' time axis; then Heart Rate and Zone as columns, the zone as its number with its zone-colour dot before it, centred on the digit (its name is read by VoiceOver). Both read "—" with no reading; with nothing connected the section's footer says "No HR Source", the cards' empty state, and VoiceOver reads it there once, Heart Rate reading "No reading". Then **Time in Zones**: a donut in the zone colours, and one row per zone: a dot in its colour, keying it to the chart's band and the donut's slice; its name over its bpm range as §S12 resolves it; and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
 
 ---
 
@@ -695,7 +695,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - 2x1 displays the average and max
 - A watermark graph of the historical Cadence for the ride. The horizontal bands in the chart show the cadence zones.
 - As built (#79), the bands are always drawn, even before any reading arrives: they show the rider's zones, not ride data. There are five zones, set in §S12's Cadence Zones section: Z1 Recovery, Z2 Endurance, Z3 Steady State, Z4 Race Pace and Z5 Sprint, coloured `brHRZone1`–`brHRZone5`. They default to 60–69, 70–84, 85–94, 95–109 and 110+ rpm. A pedalling reading below Z1's 60 rpm still counts as Z1, as a heart rate below resting counts as HR zone 1. The Z1 band runs from 0, so the chart has no unshaded strip. The y-axis is fixed at 0–150 rpm. Time is kept per whole rpm and sorted into zones when shown, as HR's time in zone is, so a zone change re-sorts the whole ride's time, including time recorded before it. These five zones replace #38's four efficiency bands (grinding <70, optimal 85–100, over-spinning >100)
-- Sheet: Cadence. W5 opens its own sheet (#147), at the medium detent and expandable to large: a chart of cadence on the zone bands over a faint elevation area; then Avg Cadence and Max Cadence as columns ("—" before any pedalling); Pedaling vs Coasting, with a small donut; and **Time in Cadence Zones**: a donut in the zone colours and one row per zone giving its name, rpm range and the ride's time in it
+- Sheet: Cadence. W5 opens its own sheet (#147), at the medium detent and expandable to large: a chart of cadence on the zone bands over a faint elevation area; then Avg Cadence and Max Cadence as columns ("—" before any pedalling); Pedaling vs Coasting, with a small donut; and **Time in Cadence Zones**: a donut in the zone colours and one row per zone laid out as the Heart rate sheet's (#494): its colour dot, its name over its rpm range ("60–69 rpm"), and the ride's time in it
 
 ---
 
@@ -849,7 +849,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - Watermark: the whole route's elevation profile by distance, the part ridden darker than the part ahead (#387). With turn-by-turn off the route isn't matched, so nothing is marked ridden
 - The same heroes as W17
 - With no route, or a route whose file has no `<ele>`, it is W17
-- Sheet: Elevation. As built (#387), W14–W18 open the one sheet, at the medium detent and expandable to large: the last hour's elevation on the Ride Metrics time axis, then Current, Highest and Lowest as columns; **Climbing**: Ascent and Descent; **Grade**: Current, Steepest Climb, Steepest Descent, which wrap to two and one at 402 pt; and **Route**, with a route that has elevation: W18's profile
+- Sheet: Elevation. As built (#387), W14–W18 open the one sheet, at the medium detent and expandable to large: the last hour's elevation on the Ride Metrics time axis, then Current, Highest and Lowest as columns; **Climbing**: Ascent and Descent; **Grade**: Current, and Steepest as the climb and descent together ("+9 % / -8 %"); and **Route**, with a route that has elevation: W18's profile
 
 ---
 
@@ -1245,7 +1245,7 @@ a confirmation:
   accurate only from M5 onward
 
 **Cadence Zones** (#79)
-- Five rows: Recovery, Endurance, Steady State, Race Pace, Sprint. Each shows its rpm range ("60-69 rpm", and "110+ rpm" for Sprint)
+- Five rows: Recovery, Endurance, Steady State, Race Pace, Sprint. Each shows its rpm range ("60–69 rpm", and "110+ rpm" for Sprint)
 - Rows 1–4 carry a Stepper on that zone's upper boundary, 1 rpm per step, as the HR Zones rows do. Sprint is display-only
 - A step that would empty a zone, take Recovery's upper boundary below 60, or take Sprint's lower boundary up to 150 (the §W5 chart's ceiling) does nothing
 - Reset Cadence Zones to Defaults restores 60–69 / 70–84 / 85–94 / 95–109 / 110+

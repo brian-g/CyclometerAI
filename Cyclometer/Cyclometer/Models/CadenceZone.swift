@@ -90,7 +90,7 @@ struct CadenceZoneBoundaries: Codable, Equatable, Sendable {
 
     /// "60-69", or "110+" for Z5 — S12's and the detail sheet's range, written as S12's HR rows are.
     func rangeText(for zone: CadenceZone) -> String {
-        upperBound(of: zone).map { "\(lowerBound(of: zone))-\($0)" } ?? "\(lowerBound(of: zone))+"
+        upperBound(of: zone).map { "\(lowerBound(of: zone))–\($0)" } ?? "\(lowerBound(of: zone))+"
     }
 
     /// Half-open chart band for `zone`: Z1 runs from 0 so the chart has no unshaded strip, and

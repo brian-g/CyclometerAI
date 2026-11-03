@@ -30,6 +30,13 @@ struct ElevationMetrics: Equatable {
     var steepestClimb: MetricReading { gradeReading(steepestClimbPercent) }
     var steepestDescent: MetricReading { gradeReading(steepestDescentPercent) }
 
+    /// The Grade section's "Steepest" column, "+9 % / -8 %", as VoiceOver reads it: which is the
+    /// climb and which the descent, or "No reading" with neither (#494).
+    var steepestSpoken: String {
+        guard steepestClimbPercent != nil || steepestDescentPercent != nil else { return MetricReading.missing.spoken }
+        return "climb \(steepestClimb.spoken.lowercased()), descent \(steepestDescent.spoken.lowercased())"
+    }
+
     /// The chart's span, first sample to last. `nil` with nothing to plot.
     var historyRange: ClosedRange<Date>? {
         guard let first = history.first?.time, let last = history.last?.time, first < last else { return nil }
@@ -120,8 +127,7 @@ struct ElevationList: View {
             Section("Grade") {
                 ReadingColumns {
                     ReadingColumn("Current", metrics.grade)
-                    ReadingColumn("Steepest Climb", metrics.steepestClimb)
-                    ReadingColumn("Steepest Descent", metrics.steepestDescent)
+                    ReadingColumn("Steepest", [metrics.steepestClimb, metrics.steepestDescent], spoken: metrics.steepestSpoken)
                 }
             }
             if let profile = metrics.routeProfile {

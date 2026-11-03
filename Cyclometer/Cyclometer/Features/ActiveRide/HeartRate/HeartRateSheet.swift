@@ -137,7 +137,7 @@ struct HeartRateList: View {
                     ReadingColumn("Heart Rate", metrics.current)
                     ReadingColumn("Zone", metrics.currentZone) {
                         if metrics.currentZone != .missing {
-                            zoneDot(metrics.zone)
+                            ZoneDot(color: .hrZone(metrics.zone))
                         }
                     }
                 }
@@ -154,34 +154,9 @@ struct HeartRateList: View {
                     .frame(height: Self.donutHeight)
                     .frame(maxWidth: .infinity)
                 }
-                ForEach(zoneRows) { zoneRow($0) }
+                ForEach(zoneRows) { ZoneTimeRow(color: .hrZone($0.zone), name: $0.name, range: $0.range, time: $0.time) }
             }
         }
-    }
-
-    private func zoneRow(_ zone: HeartRateMetrics.ZoneRow) -> some View {
-        HStack(spacing: Spacing.sm) {
-            zoneDot(zone.zone)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(zone.name)
-                Text(zone.range.shown)
-                    .font(.footnote)
-                    .foregroundStyle(Color.cyTextSecondary)
-            }
-            Spacer(minLength: Spacing.sm)
-            Text(zone.time.shown)
-                .monospacedDigit()
-                .foregroundStyle(Color.cyTextSecondary)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(zone.name)
-        .accessibilityValue("\(zone.range.spoken), \(zone.time.spoken)")
-    }
-
-    private func zoneDot(_ zone: Int) -> some View {
-        Circle()
-            .fill(Color.hrZone(zone))
-            .frame(width: Spacing.sm, height: Spacing.sm)
     }
 }
 
