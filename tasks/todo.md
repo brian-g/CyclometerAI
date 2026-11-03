@@ -1834,5 +1834,6 @@ Heart always shows (Watch HR has no pairing record).
 - [x] (8) "Ride Widgets" preview in production order
 - [x] (9) Collapsed snapshot on its own 1400 pt canvas, re-recorded
 - [x] Full `CyclometerTests`: 2432 passed, 0 failed
-- Not done, Brian's call: (1) 52 pt tap target on category headings; (2) `cyPrimary` headings at 2.4:1 in light mode;
-  (4) VoiceOver heading trait inside the disclosure label; (10) sensor gate in `entries(in:)`
+- Deferred (Brian, 2026-11-03: "leave 1, 2, 3, 4"): (1) 52 pt tap target on category headings; (2) `cyPrimary`
+  headings at 2.4:1 in light mode; (4) VoiceOver heading trait inside the disclosure label; (10) sensor gate in
+  `entries(in:)`
