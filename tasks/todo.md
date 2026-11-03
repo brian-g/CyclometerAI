@@ -1822,7 +1822,7 @@ passed since the pause. A Pause tapped while coasting still holds for 15 s (#267
 - [x] Full `CyclometerTests`: 2432 passed, 0 failed. The first run caught 7 tests whose stores lacked a `date` override
       (`pause` now reads it) or asserted a resume without `pausedAt = nil`; fixed in the tests.
 - [x] Commit + PR
-- [ ] Verified on a real ride
+- [x] Verified on a real ride (Brian)
 
 **Review.** The 15 s grace runs from the pause, stamped in `pause()`. A ride restored paused starts it at the first
 reading. A stop still arms the pause immediately, so #267's behaviour after a stop is unchanged.
