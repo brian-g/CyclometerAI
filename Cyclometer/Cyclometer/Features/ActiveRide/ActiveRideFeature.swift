@@ -76,6 +76,12 @@ struct ActiveRideFeature {
     /// moving, not one being nudged in a queue.
     static let movingSpeedMPS: Double = 1.0
 
+    /// How long after a manual pause Resume When Moving may undo it without the ride having read
+    /// as stopped (#504). Long enough for a bike to roll to a stop after a Pause tapped while
+    /// coasting (#267); short enough that a rider who paused while riding and rode on loses at
+    /// most this much of the ride — ride 2026-10-30 lost 6.5 minutes waiting for a stop.
+    static let manualPauseGraceSeconds: TimeInterval = 15
+
     /// How old a HealthKit HR sample can be and still count as "live" (#161).
     /// `HealthKitClient.heartRateStream()`'s own doc comment: outside an active workout
     /// the Watch's HR writes land minutes apart, so this can't be tight enough to
@@ -402,12 +408,17 @@ struct ActiveRideFeature {
         /// tap — the only kind motion is allowed to auto-resume (#102), unless the rider
         /// has turned on Resume When Moving (#267).
         var isAutoPaused: Bool = false
-        /// Whether the ride has read as stopped since it was paused — what makes a manual
-        /// pause eligible for Resume When Moving (#267). Without it a Pause tapped while
-        /// coasting would be undone by the next reading; an auto-pause has always seen the
-        /// stop, so it never needs this. Not persisted: a ride resumed after a kill waits
-        /// for one stationary reading, which a stopped rider gives at once.
+        /// Whether the ride has read as stopped since it was paused — one of the two things
+        /// that make a manual pause eligible for Resume When Moving (#267). Without it or
+        /// `pausedAt`'s grace, a Pause tapped while coasting would be undone by the next
+        /// reading; an auto-pause has always seen the stop, so it never needs either.
         var hasStoppedWhilePaused: Bool = false
+        /// When the current pause began — the other thing: once `manualPauseGraceSeconds`
+        /// have passed, a manual pause is eligible without a stop, so a rider who paused
+        /// while riding and rode on isn't left paused until they next stop (#504). Not
+        /// persisted, like `hasStoppedWhilePaused`: a ride resumed paused after a kill times
+        /// its grace from the first speed reading the relaunched app sees.
+        var pausedAt: Date? = nil
         /// Wheel auto-calibration stands down while the rider has something more
         /// urgent to attend to — a radar alert, or a turn announced and not yet made
         /// (#197) — and whenever the ride isn't actively recording: a paused ride still
@@ -1248,18 +1259,23 @@ struct ActiveRideFeature {
                 return .none
             case .speed:
                 // A pause auto-pause itself made is eligible to auto-resume. One the rider
-                // tapped needs a manual Resume (#102), unless Resume When Moving is on and the
-                // ride has stopped since (#267) and no Finish alert is up: a rider at that alert
-                // didn't forget to resume, and walking the bike away from it must not restart the
-                // ride behind it. That also leaves an auto-end's pause, which always raises the
-                // alert, to the rider. The bar is `movingSpeedMPS`, not any speed at all: GPS
-                // noise alone used to clear `> 0` and undo the pause on the next sample (#262).
-                if state.recordingState == .paused, let speedMPS = state.speed.speedMPS,
-                   speedMPS <= Self.stationarySpeedMPS {
-                    state.hasStoppedWhilePaused = true
+                // tapped needs a manual Resume (#102), unless Resume When Moving is on, the ride
+                // has stopped since (#267) or `manualPauseGraceSeconds` have passed (#504), and
+                // no Finish alert is up: a rider at that alert didn't forget to resume, and
+                // walking the bike away from it must not restart the ride behind it. That also
+                // leaves an auto-end's pause, which always raises the alert, to the rider. The bar
+                // is `movingSpeedMPS`, not any speed at all: GPS noise alone used to clear `> 0`
+                // and undo the pause on the next sample (#262).
+                if state.recordingState == .paused {
+                    state.pausedAt = state.pausedAt ?? date.now
+                    if let speedMPS = state.speed.speedMPS, speedMPS <= Self.stationarySpeedMPS {
+                        state.hasStoppedWhilePaused = true
+                    }
                 }
+                let isManualPauseArmed = state.hasStoppedWhilePaused
+                    || state.pausedAt.map { date.now.timeIntervalSince($0) >= Self.manualPauseGraceSeconds } == true
                 let canAutoResume = state.isAutoPaused
-                    || (state.preferences.isResumeWhenMovingEnabled && state.hasStoppedWhilePaused
+                    || (state.preferences.isResumeWhenMovingEnabled && isManualPauseArmed
                         && state.finishAlert == nil)
                 var effect: Effect<Action> = .none
                 if canAutoResume, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
@@ -1547,6 +1563,7 @@ struct ActiveRideFeature {
     /// leaves the recorder off for a ride resumed paused (#392).
     private func pause(_ state: inout State) -> Effect<Action> {
         state.recordingState = .paused
+        state.pausedAt = date.now
         let update = makeRideSummaryUpdate(from: state)
         return .merge(
             .send(.trackRecorder(.pauseRecording)),
@@ -1563,6 +1580,7 @@ struct ActiveRideFeature {
         state.zeroSpeedSeconds = 0
         state.isAutoPaused = false
         state.hasStoppedWhilePaused = false
+        state.pausedAt = nil
         beginTrackSegment(&state)
         // After `beginTrackSegment`, so the checkpoint this resume writes already
         // carries the new segment index — a kill before the next one would

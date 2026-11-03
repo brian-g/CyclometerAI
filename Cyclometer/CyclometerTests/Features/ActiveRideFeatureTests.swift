@@ -622,6 +622,7 @@ struct ActiveRideFeatureLocationTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -744,6 +745,7 @@ struct ActiveRideFeatureLocationTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -816,6 +818,7 @@ struct ActiveRideFeatureTimerTests {
         let store = makeStore()
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -861,6 +864,7 @@ struct ActiveRideFeatureTimerTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -902,6 +906,7 @@ struct ActiveRideFeatureTimerTests {
         let store = makeStore(speedMPS: 10.0)
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -931,6 +936,7 @@ struct ActiveRideFeatureTimerTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -939,6 +945,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick)
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+            $0.pausedAt = nil
             $0.cadence.isRecording = true
             $0.sensorHealth.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
@@ -1016,6 +1023,7 @@ struct ActiveRideFeatureTimerTests {
         ))
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -1164,6 +1172,7 @@ struct ActiveRideFeatureStateMachineTests {
                 ActiveRideFeature()
             } withDependencies: {
                 $0.continuousClock = TestClock()
+                $0.date = .constant(testDate)
                 $0.hapticsClient = .testValue
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
@@ -1599,6 +1608,7 @@ struct ActiveRideFeatureStateMachineTests {
         let store = makeStore(recordingState: .active)
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -1616,6 +1626,7 @@ struct ActiveRideFeatureStateMachineTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -1624,6 +1635,7 @@ struct ActiveRideFeatureStateMachineTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -1863,6 +1875,7 @@ struct ActiveRideFeatureStateMachineTests {
         }
         await store.receive(.autoEndTriggered) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         // .autoEndTriggered's own effects (the pause, then .finishTapped) are merged ahead of
         // the suspension notice that `onChange` appends for the same state change.
@@ -2023,7 +2036,8 @@ struct ActiveRideFeatureAutoPauseTests {
         state: @autoclosure () -> ActiveRideFeature.State,
         isAutoPauseEnabled: Bool = true,
         isResumeWhenMovingEnabled: Bool = false,
-        clock: TestClock<Duration> = TestClock()
+        clock: TestClock<Duration> = TestClock(),
+        date: DateGenerator = .constant(testDate)
     ) -> TestStoreOf<ActiveRideFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -2038,13 +2052,30 @@ struct ActiveRideFeatureAutoPauseTests {
                 ActiveRideFeature()
             } withDependencies: {
                 $0.continuousClock = clock
-                $0.date = .constant(testDate)
+                $0.date = date
                 $0.hapticsClient = .testValue
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
                 $0.locationClient = .testValue
                 $0.defaultFileStorage = storage
             }
+        }
+    }
+
+    /// A wall clock the test moves by hand, for the grace that times a manual pause (#504).
+    private final class ManualDate: Sendable {
+        let now = LockIsolated(testDate)
+        var generator: DateGenerator { DateGenerator { [now] in now.value } }
+        func advance(by seconds: TimeInterval) { now.withValue { $0.addTimeInterval(seconds) } }
+    }
+
+    /// Sends one GPS reading a second, `seconds` times, moving `date` along with them.
+    private func ride(
+        _ store: TestStoreOf<ActiveRideFeature>, at speedMPS: Double, for seconds: Int, date: ManualDate
+    ) async {
+        for _ in 0..<seconds {
+            date.advance(by: 1)
+            await store.send(.speed(.gpsSpeedReceived(speedMPS)))
         }
     }
 
@@ -2061,6 +2092,7 @@ struct ActiveRideFeatureAutoPauseTests {
         }
         await store.receive(.autoPauseTriggered) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
             $0.isAutoPaused = true
         }
         await store.receive(\.trackRecorder.pauseRecording)
@@ -2146,6 +2178,7 @@ struct ActiveRideFeatureAutoPauseTests {
         }
         await store.receive(.autoPauseTriggered) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
             $0.isAutoPaused = true
         }
         await store.receive(\.trackRecorder.pauseRecording)
@@ -2204,6 +2237,7 @@ struct ActiveRideFeatureAutoPauseTests {
         }
         await store.receive(.autoPauseTriggered) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
             $0.isAutoPaused = true
         }
         await store.receive(\.trackRecorder.pauseRecording)
@@ -2368,6 +2402,84 @@ struct ActiveRideFeatureAutoPauseTests {
         await store.send(.finishAlert(.dismiss))
         await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
         #expect(store.state.recordingState == .active)
+    }
+
+    /// Ride 2026-10-30 (#504): a Pause at 3.2 m/s, and the rider rode on for 6.5 minutes with the
+    /// ride paused, because a manual pause waited for a stop the rider never made.
+    @Test("With Resume When Moving, a Pause tapped while riding resumes once the grace has passed")
+    func pauseTappedWhileRidingResumesAfterTheGrace() async {
+        let date = ManualDate()
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active),
+            isResumeWhenMovingEnabled: true,
+            date: date.generator
+        )
+        store.exhaustivity = .off
+        let grace = Int(ActiveRideFeature.manualPauseGraceSeconds)
+
+        await store.send(.speed(.gpsSpeedReceived(3.2)))
+        await store.send(.pauseTapped)
+        await ride(store, at: 3.2, for: grace - 1, date: date)
+        #expect(store.state.recordingState == .paused)
+
+        await ride(store, at: 3.2, for: 1, date: date)
+        await store.receive(\.trackRecorder.resumeRecording)
+        #expect(store.state.recordingState == .active)
+        #expect(store.state.pausedAt == nil)
+    }
+
+    /// `pausedAt` isn't persisted: a ride brought back paused after a kill times its grace from the
+    /// first reading the relaunched app sees.
+    @Test("With Resume When Moving, a ride restored paused times its grace from the first reading")
+    func restoredPausedRideTimesTheGraceFromTheFirstReading() async {
+        let date = ManualDate()
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .paused),
+            isResumeWhenMovingEnabled: true,
+            date: date.generator
+        )
+        store.exhaustivity = .off
+        let grace = Int(ActiveRideFeature.manualPauseGraceSeconds)
+
+        await store.send(.speed(.gpsSpeedReceived(3.2)))
+        #expect(store.state.pausedAt == testDate)
+        await ride(store, at: 3.2, for: grace - 1, date: date)
+        #expect(store.state.recordingState == .paused)
+
+        await ride(store, at: 3.2, for: 1, date: date)
+        #expect(store.state.recordingState == .active)
+    }
+
+    @Test("With Resume When Moving, a pending Finish alert holds a manual pause past the grace")
+    func finishAlertHoldsPastTheGrace() async {
+        let date = ManualDate()
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active),
+            isResumeWhenMovingEnabled: true,
+            date: date.generator
+        )
+        store.exhaustivity = .off
+
+        await store.send(.pauseTapped)
+        await store.send(.finishTapped)
+        await ride(store, at: 3.2, for: Int(ActiveRideFeature.manualPauseGraceSeconds) * 4, date: date)
+
+        #expect(store.state.recordingState == .paused)
+    }
+
+    @Test("Without Resume When Moving, a manual pause holds past the grace")
+    func manualPauseHoldsPastTheGraceWithoutThePreference() async {
+        let date = ManualDate()
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active),
+            date: date.generator
+        )
+        store.exhaustivity = .off
+
+        await store.send(.pauseTapped)
+        await ride(store, at: 3.2, for: Int(ActiveRideFeature.manualPauseGraceSeconds) * 4, date: date)
+
+        #expect(store.state.recordingState == .paused)
     }
 }
 
@@ -4000,6 +4112,7 @@ struct ActiveRideFeatureDashboardEditTests {
                 ActiveRideFeature()
             } withDependencies: {
                 $0.defaultFileStorage = storage
+                $0.date = .constant(testDate)
                 $0.uuid = .incrementing
             }
         }
