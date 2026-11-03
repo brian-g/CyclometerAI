@@ -1792,3 +1792,11 @@ Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-co
   VoiceOver; (6) `.capCenter` sizes from Dynamic Type, so it would mis-centre under `minimumScaleFactor`;
   (7) "Pedaling vs Coasting" still reads "—" aloud; (8) zone rows read "Z1 …", the Zone column "Zone 3, …";
   (9) per-sibling `.offset` patches for the digits' `.baselineOffset`; (15) `ReadingColumns` re-measures with no cache
+
+### #494 review follow-ups (Brian: "Do as recommended")
+- [x] (6) `heartRateSheetFollowsTheRideWhileOpen` checks "No HR Source" is read with no source and gone once one
+      connects. That second check failed 3/3: the List keeps the dropped footer, hidden, for reuse
+      (`ListCollectionViewHeaderFooter hidden=true`), and the test's tree walker read hidden views. The walker now
+      skips hidden views, as VoiceOver does; the app was right. `WidgetAccessibilityTests` 83/83
+- Left, as recommended: (5) columns reflowing as values change width; (9) `.capCenter` vs shrunk digits, per-element
+  offsets. Not done, Brian's call: (4) accessibility sizes (#499), (7) "Pedaling vs Coasting, —", (8) "Z3" vs "Zone 3"
