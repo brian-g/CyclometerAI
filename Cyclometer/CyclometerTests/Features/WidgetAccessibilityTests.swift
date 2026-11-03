@@ -203,6 +203,7 @@ struct WidgetAccessibilityTests {
     }
 
     /// #145: the same for the Heart Rate sheet, opened from W12, whose card here never changes.
+    /// With no source, the reason is read once, in the section's footer (#494).
     @Test func heartRateSheetFollowsTheRideWhileOpen() throws {
         let ride = LiveRide()
         let host = try Host(HRZonesWidget(zone: 0, source: .none, metrics: { ride.heartRate }))
@@ -210,11 +211,13 @@ struct WidgetAccessibilityTests {
 
         #expect(try host.onlyElement().accessibilityActivate())
         host.settle()
-        #expect(host.presentedText().contains("Heart Rate No HR source"))
+        #expect(host.presentedText().contains("Heart Rate No reading"))
+        #expect(host.presentedText().contains("No HR Source"), "read \(host.presentedText())")
 
         ride.heartRate = .sample
         host.settle { host.presentedText().contains("156 beats per minute") }
         #expect(host.presentedText().contains("Heart Rate 156 beats per minute"))
+        #expect(!host.presentedText().contains("No HR Source"), "read \(host.presentedText())")
     }
 
     /// #389: the same for the Cadence sheet, whose card here never changes, as while coasting. W5
@@ -526,6 +529,9 @@ private final class Host {
     }
 
     private static func elements(in node: NSObject) -> [NSObject] {
+        // VoiceOver skips a hidden view's elements, and so does this: a List keeps a footer it has
+        // dropped, hidden, for reuse, with its old text still in it (#494).
+        if let view = node as? UIView, view.isHidden || view.accessibilityElementsHidden { return [] }
         if node.isAccessibilityElement { return [node] }
         let children: [NSObject]
         if let listed = node.accessibilityElements as? [NSObject] {

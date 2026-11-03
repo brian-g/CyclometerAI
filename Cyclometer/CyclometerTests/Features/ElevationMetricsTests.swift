@@ -10,16 +10,23 @@ struct ElevationMetricsTests {
 
     @Test func readsInTheRidersUnits() {
         let metric = ElevationMetrics.sample(.metric)
-        #expect(metric.current == MetricReading(shown: "284 m", spoken: "284 meters"))
+        #expect(metric.current == MetricReading(value: "284", unit: "m", spoken: "284 meters"))
         #expect(metric.ascent.shown == "412 m")
         let imperial = ElevationMetrics.sample(.imperial)
-        #expect(imperial.ascent == MetricReading(shown: "1,352 ft", spoken: "1,352 feet"))
+        #expect(imperial.ascent == MetricReading(value: "1,352", unit: "ft", spoken: "1,352 feet"))
     }
 
     @Test func gradesAreSigned() {
         let metrics = ElevationMetrics.sample()
-        #expect(metrics.grade == MetricReading(shown: "+4%", spoken: "4 percent"))
-        #expect(metrics.steepestDescent == MetricReading(shown: "-8%", spoken: "-8 percent"))
+        #expect(metrics.grade == MetricReading(value: "+4", unit: "%", spoken: "4 percent"))
+        #expect(metrics.steepestDescent == MetricReading(value: "-8", unit: "%", spoken: "-8 percent"))
+    }
+
+    /// Grade's "Steepest" column reads the pair, saying which is which (#494).
+    @Test func steepestIsReadAsAPair() {
+        #expect(ElevationMetrics.sample().steepestSpoken == "climb 9 percent, descent -8 percent")
+        #expect(ElevationMetrics(steepestClimbPercent: 3).steepestSpoken == "climb 3 percent, descent no reading")
+        #expect(ElevationMetrics().steepestSpoken == "No reading")
     }
 
     @Test func noReadingIsADashNotAZero() {

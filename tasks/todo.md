@@ -1714,3 +1714,93 @@ Range form `.dynamicTypeSize(...DynamicTypeSize.x)` caps the size. The single-va
       `testAddWidgetCatalog` unchanged.
 - [ ] Follow-up: at AX5 the hero digits overflow their fixed `frameSize` and draw over the label (see the WithLabel reference).
 - [x] Commit + PR #518 (M10.5, closes #499).
+
+---
+
+## #494 — Widget sheets: readings as small hero columns
+
+Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-columns`.
+
+- [x] `MetricReading` → value / unit / spoken (`shown` computed), moved to `UI/Components/ReadingColumn/`
+- [x] `ReadingColumn` + `ReadingColumns` (equal-width, wrapping `Layout`) with previews
+- [x] Calories sheet on the shared component
+- [x] Ride metrics sheet: Distance · Speed (Current/Average/Max) · Pace (Current/Average) · Time (Moving/Ride)
+- [x] Heart rate sheet: Heart Rate + Zone (number + dot); "No HR Source" in the footer
+- [x] Elevation sheet: Current/Highest/Lowest · Ascent/Descent · Grade (3)
+- [x] Cadence sheet: `CadenceList` split out; Avg/Max Cadence columns
+- [x] App + test target build clean (0 warnings); test sources updated, not yet run
+- [x] Brian runs each sheet — "Looks great" (Grade wraps 2 + 1, zone as number + dot, accepted)
+- [x] Tests: metrics tests updated, `ReadingColumnsTests`, snapshots re-recorded (+ new Cadence suite), full suite
+- [x] UX.md: the four sheet texts + W5's sheet line + Updated line
+- [x] Commit + PR
+
+### Review
+- Snapshots re-recorded with record mode `failed`: Ride metrics ×3, Heart rate ×3, Elevation ×3 changed; Calories ×6
+  pixel-identical (the shared layout reproduces its HStack); Cadence ×3 new (added to CI's skip list).
+- Targeted run (5 sheet snapshot suites, metrics suites, `ReadingColumnsTests`, `WidgetAccessibilityTests`, AddWidgetSheet): TEST SUCCEEDED.
+- Full `CyclometerTests`: TEST SUCCEEDED, 2426 passed, 0 failures.
+
+### #494 review (`/code-review xhigh --fix`)
+
+- [x] Fixed: the Cadence chart's axis labels format in the environment's zone and locale, as `RideTimeAxis` does,
+      so `CadenceSheetSnapshotTests`' Chicago pin holds (its reference read 9:01 AM, the Mac's New York time; now
+      8:01 AM); `ReadingColumns.columns` clamps before `Int(_:)`, which trapped on a stack's infinite width
+      (`anInfiniteWidthFitsThemAll`), and measures natural widths once in `sizeThatFits`; the cadence demo's
+      coasting predicate never matched (`i / 6 % 30` is 0–29), so `CadenceDetail.sample` now coasts from 20 to 26 min;
+      the #361 doc comment back on `rowsSpeakInWords`; the Cadence snapshot helper forwards file/line
+- [x] Re-recorded Cadence Active + Active Dark (opened: 8:01 AM, the coasting drop). Then the 5 sheet snapshot suites
+      (the other 4 unchanged by the layout change), CadenceWidget snapshots, ReadingColumns, RideMetrics,
+      WidgetAccessibility: 74/74, every suite non-empty
+- Skipped, for Brian: (3) at accessibility sizes the small hero's digits overflow its fixed `frameSize` onto the label
+  and the wrapped row below, where the old rows scaled (#499's open follow-up, in `HeroNumber`); (4) the zone dot sits
+  ~4 pt above the digits' drawn baseline (`heroAccessory` aligns to the un-offset guide; moving it moves W9 too);
+  (7) `MetricReading.shown` puts a space before "%" ("+4 %", was "+4%"), unread today; (8) Grade's wrapped readings are
+  leading-aligned, against UX.md §Alignment's right-aligned rule for stacked numbers of one unit; (9) with no HR source
+  VoiceOver hears "No HR source" twice, on the reading and in the footer
+
+### Follow-ups from review (Brian, 2026-11-02)
+- [x] "No HR source" read once, in the footer; UX.md alignment exception for sheet readings (pushed)
+- [x] `HeroNumber` leading accessory on the digits' baseline: W9's arrow stays there (pushed)
+- [x] Zone dot centred on the digits: `heroAccessory(.capCenter)`; `ReadingColumn` uses it. The cap height comes
+      from the Dynamic Type-scaled point size, not a post-layout measurement, which a single-pass snapshot left at 0
+- [x] Grade: "Steepest" one column, "+9 % / -8 %" (`ReadingColumn` with several readings), read "climb …, descent …"
+- [x] Cadence zone rows as HR's: shared `ZoneTimeRow` + `ZoneDot` (UI/Components/ZoneTimeRow)
+- [x] Steepest's label lifted over the row (`heroLabel()`), so it no longer widens the first number; "/" as small as
+      the units (Brian)
+- [x] Cadence ranges use an en dash, in `CadenceZone.rangeText`: Cadence sheet and Settings both (Brian)
+- [x] Brian reviewed the renders: approved
+- [x] Re-recorded HR live ×2, Elevation ×3, Cadence ×3, Settings ×2 (full-suite record run: only those moved);
+      UX.md (Steepest pair, centred dot, zone rows with dots, en dash)
+- [ ] Full suite verify, commit + push
+
+---
+
+### #494 second review (`/code-review xhigh --fix`, 2026-11-02)
+
+- [x] Fixed: Cadence zone times read aloud truncated (`Int(seconds)`) while the row rounds, so 59.6 s showed
+      "0:01:00" and read "59 seconds"; now rounded once through a shared `MetricReading.zoneTime(seconds:)`, which
+      the HR rows use too
+- [x] Fixed: `ReadingColumns` with no width proposed stacked any two readings of unequal width (it fitted them to
+      their own summed width) and proposed the average width to each; now side by side at the widest, and
+      `placeSubviews` follows the same path
+- [x] Cleanups: `ReadingColumn` drops the `Accessory == EmptyView` type check (an empty accessory takes no room, as
+      HR's absent dot shows); the "/" and the units share `heroUnit()`; the preview uses `ZoneDot`; the stale "60-69"
+      in `rangeText`'s doc comment
+- [x] App + test targets build clean; tests not run (Brian runs first)
+- Skipped, for Brian: (2) AX-size digit overflow (#499 follow-up, known); (4) a live value gaining a digit can re-flow
+  a row 3 ↔ 2+1; (5) `heartRateSheetFollowsTheRideWhileOpen` no longer checks the "No HR Source" footer reaches
+  VoiceOver; (6) `.capCenter` sizes from Dynamic Type, so it would mis-centre under `minimumScaleFactor`;
+  (7) "Pedaling vs Coasting" still reads "—" aloud; (8) zone rows read "Z1 …", the Zone column "Zone 3, …";
+  (9) per-sibling `.offset` patches for the digits' `.baselineOffset`; (15) `ReadingColumns` re-measures with no cache
+
+### #494 review follow-ups (Brian: "Do as recommended")
+- [x] (6) `heartRateSheetFollowsTheRideWhileOpen` checks "No HR Source" is read with no source and gone once one
+      connects. That second check failed 3/3: the List keeps the dropped footer, hidden, for reuse
+      (`ListCollectionViewHeaderFooter hidden=true`), and the test's tree walker read hidden views. The walker now
+      skips hidden views, as VoiceOver does; the app was right. `WidgetAccessibilityTests` 83/83
+- Left, as recommended: (5) columns reflowing as values change width; (9) `.capCenter` vs shrunk digits, per-element
+  offsets. Not done, Brian's call: (4) accessibility sizes (#499), (7) "Pedaling vs Coasting, —", (8) "Z3" vs "Zone 3"
+- Deferred (Brian, 2026-11-03: "leave all of them for now"): (4) accessibility sizes (#499's `HeroNumber` rework),
+  (7) "Pedaling vs Coasting, —" read as a dash, (8) zone rows "Z3 Aerobic" vs the Zone column's "Zone 3, Aerobic"
+- [x] Cadence sheet: chart, Avg/Max Cadence and Pedaling vs Coasting in one section, as Heart rate's (Brian);
+      re-recorded Cadence Active ×2 (No Data unchanged); UX.md; Cadence snapshots + WidgetAccessibility 86/86

@@ -75,6 +75,9 @@ extension AppFonts {
     /// D-DIN's cap height as a share of its line: the digits' height from a hero's rendered height.
     fileprivate static let dDINCapHeightToLineHeight = dDINMetricsFont.capHeight
         / (dDINMetricsFont.ascender - dDINMetricsFont.descender)
+
+    /// D-DIN's cap height as a share of its point size: the digits' height from the size they're set at.
+    static let dDINCapHeightToPointSize = dDINMetricsFont.capHeight / dDINMetricsFont.pointSize
 }
 
 private extension VerticalAlignment {

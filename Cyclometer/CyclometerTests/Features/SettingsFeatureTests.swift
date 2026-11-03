@@ -470,7 +470,7 @@ struct SettingsFeatureTests {
             "Recovery", "Endurance", "Steady State", "Race Pace", "Sprint"
         ])
         #expect(store.state.cadenceZoneRows.map(\.rangeText) == [
-            "60-69 rpm", "70-84 rpm", "85-94 rpm", "95-109 rpm", "110+ rpm"
+            "60–69 rpm", "70–84 rpm", "85–94 rpm", "95–109 rpm", "110+ rpm"
         ])
         #expect(store.state.cadenceZoneRows.map(\.isSteppable) == [true, true, true, true, false])
     }
@@ -483,8 +483,8 @@ struct SettingsFeatureTests {
             $0.$preferences.withLock { $0.cadenceZones = CadenceZoneBoundaries(lowerBoundsRPM: [70, 86, 95, 110])! }
         }
 
-        #expect(store.state.cadenceZoneRows[1].rangeText == "70-85 rpm")
-        #expect(store.state.cadenceZoneRows[2].rangeText == "86-94 rpm")
+        #expect(store.state.cadenceZoneRows[1].rangeText == "70–85 rpm")
+        #expect(store.state.cadenceZoneRows[2].rangeText == "86–94 rpm")
     }
 
     @Test("Stepping a cadence boundary into its neighbour is a no-op")
