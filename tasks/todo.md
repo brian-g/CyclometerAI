@@ -1804,3 +1804,25 @@ Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-co
   (7) "Pedaling vs Coasting, —" read as a dash, (8) zone rows "Z3 Aerobic" vs the Zone column's "Zone 3, Aerobic"
 - [x] Cadence sheet: chart, Avg/Max Cadence and Pedaling vs Coasting in one section, as Heart rate's (Brian);
       re-recorded Cadence Active ×2 (No Data unchanged); UX.md; Cadence snapshots + WidgetAccessibility 86/86
+
+---
+
+# #504 — Resume When Moving doesn't resume a ride paused while moving
+
+Rule (Brian): a manual pause is eligible for Resume When Moving once the ride has read as stopped **or** 15 s have
+passed since the pause. A Pause tapped while coasting still holds for 15 s (#267).
+
+- [x] Field-case TestStore test (pause at 3.2 m/s, keep riding) — red before the fix
+- [x] `ActiveRideFeature`: `manualPauseGraceSeconds = 15`, `pausedAt` set in `pause`, cleared in `resume`, lazily set in `.speed` for a restored ride
+- [x] Tests: restored paused ride, Finish alert past the grace, preference off past the grace
+- [x] UX.md §S12 Resume When Moving line
+- [x] Field case red before the fix (with `pausedAt` declared but unused), `ActiveRideFeatureAutoPauseTests` 19/19 green after.
+- [x] 13 exhaustive pause assertions in `ActiveRideFeatureTests` gain `$0.pausedAt = testDate`.
+- [x] Brian runs it (walking check)
+- [x] Full `CyclometerTests`: 2432 passed, 0 failed. The first run caught 7 tests whose stores lacked a `date` override
+      (`pause` now reads it) or asserted a resume without `pausedAt = nil`; fixed in the tests.
+- [x] Commit + PR
+- [x] Verified on a real ride (Brian)
+
+**Review.** The 15 s grace runs from the pause, stamped in `pause()`. A ride restored paused starts it at the first
+reading. A stop still arms the pause immediately, so #267's behaviour after a stop is unchanged.

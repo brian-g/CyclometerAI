@@ -1220,7 +1220,8 @@ a confirmation:
   more controls in place
 - Auto-pause (toggle)
 - Resume When Moving (toggle, off) — motion also resumes a ride the rider paused themselves, once the ride has
-  read as stopped since the pause, so a Pause tapped while coasting holds (#267). Independent of Auto-pause. The
+  read as stopped since the pause or 15 s have passed, so a Pause tapped while coasting holds while the bike rolls
+  to a stop (#267, #504). Independent of Auto-pause. The
   toggle's label carries, as a subtitle VoiceOver reads with it, "Also resumes a ride you paused yourself. Walking the bike counts as moving."
 - Auto-dim (toggle)
 - Dimmed Brightness (slider, only while Auto-dim is on) — the backlight level the dim drops to, 0–50%, default 10%,
