@@ -221,11 +221,6 @@ struct ToneKindBellTests {
         #expect((1_000...4_000).contains(fundamental))
     }
 
-    @Test("Only the bell rings through Silent Mode")
-    func onlyTheBellRingsThroughSilentMode() {
-        #expect(ToneKind.allCases.filter(\.ringsThroughSilentMode) == [.bell])
-    }
-
     /// Root mean square of the samples between `ms`, in milliseconds from the start.
     private func rms(_ ms: Range<Int>) -> Float {
         let channel = buffer.floatChannelData![0]

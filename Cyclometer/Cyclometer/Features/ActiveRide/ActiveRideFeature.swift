@@ -321,7 +321,8 @@ struct ActiveRideFeature {
         }
         /// `averageSpeedMPS` after each moving tick, for W2's trend line (#140) — the only ticks
         /// that change it. Kept over `SpeedFeature.historyWindow`, the speed watermark's own
-        /// window, so the two share a time axis. Not persisted, like the watermark.
+        /// window, so the two share a time axis. Not persisted, like the watermark; a resumed ride
+        /// rebuilds both from its saved track (`.speedHistorySeeded`).
         var averageSpeedSamples: [SpeedSample] = []
         /// The displayed speed, for surfaces outside the dashboard (the mini-player): `SpeedFeature`'s
         /// pick, so a wheel sensor wins over GPS here as it does on the dashboard (#383).
@@ -535,6 +536,8 @@ struct ActiveRideFeature {
         case heartRateSeeded([Int: Int])
         /// A resumed ride's map before the kill, from its saved track (#503).
         case trackSegmentsSeeded([[Coordinate]])
+        /// A resumed ride's W2 speed watermark and average line before the kill, from its saved track.
+        case speedHistorySeeded(SpeedHistorySeed)
         /// Health's rider for W23, nil without a body mass (#465).
         case energyRiderFetched(RideEnergy.Rider?)
         /// One minute's estimate (#465).
@@ -1243,6 +1246,11 @@ struct ActiveRideFeature {
                 // In front: any fix that reached the map while the fetch ran came after them.
                 state.trackSegments = savedSegments + state.trackSegments
                 return .none
+            case .speedHistorySeeded(let seed):
+                // In front, as the map's: every sample since the resume came after them.
+                state.speed.speedSamples = seed.speed + state.speed.speedSamples
+                state.averageSpeedSamples = seed.average + state.averageSpeedSamples
+                return .none
             case .energyRiderFetched(let rider):
                 state.energyRider = EnergyRiderStatus(rider)
                 return rebuildCaloriesIfReady(state)
@@ -1502,6 +1510,9 @@ struct ActiveRideFeature {
             let secondsByBPM = RideDetailSeries.secondsByBPM(points)
             if !secondsByBPM.isEmpty {
                 await send(.heartRateSeeded(secondsByBPM))
+            }
+            if let speedHistory = SpeedHistorySeed(savedTrack: points, resumedAt: resumedAt) {
+                await send(.speedHistorySeeded(speedHistory))
             }
             // Only the points from before the resume: any flushed since are already on the map.
             let savedSegments = TrackPointDTO.segments(of: points.filter { $0.timestamp < resumedAt })

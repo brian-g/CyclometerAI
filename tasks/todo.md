@@ -1856,3 +1856,38 @@ passed since the pause. A Pause tapped while coasting still holds for 15 s (#267
 
 **Review.** The 15 s grace runs from the pause, stamped in `pause()`. A ride restored paused starts it at the first
 reading. A stop still arms the pause immediately, so #267's behaviour after a stop is unchanged.
+
+---
+
+# 2026-11-03 ride (Gibsonville 23, app killed at 14:05) — two fixes
+
+Brian, 2026-11-03: "fix both 1 and 2 (yes). Leave #3." Tone category: "Always .playback".
+
+## A. Radar, All Clear and turn tones are silent while the app is backgrounded
+Evidence: 42 × `failed to start … 561015905`, all inside the two background spells after the relaunch;
+audiomxd: "AmbientSound … does not have background entitlement". `audio` was dropped from
+`UIBackgroundModes` in cc3529d (#329); `.ambient` would stay silenced on lock even with it (BLE.md §13.2 Q4).
+- [x] `Info.plist`: `audio` back in `UIBackgroundModes`
+- [x] `AudioClient.configureSession`: every tone on `.playback` + `.mixWithOthers` (mixable, so it may start from the
+      background); the Danger override branch (`.duckOthers` + speaker) unchanged
+- [x] `ToneKind.ringsThroughSilentMode` goes (every tone now rings through); its test goes with it
+- [x] Docs: Audio.md Silent Mode column, session code sample and acceptance items; BLE.md §13.2 Q4 resolved;
+      PRD §2/§8.3 Silent Mode lines and OQ5 superseded
+- [x] App builds
+- [ ] Brian runs it: lock the phone, trigger a radar alert / turn tone, hear it (music keeps playing under it)
+
+## B. A ride resumed after a kill loses W2's speed watermark and average line
+`speed.speedSamples` and `averageSpeedSamples` are in-memory only; `seedFromSavedTrack` reseeds elevation, HR,
+map and calories but not these, so after a kill W2 covers only the time since the relaunch.
+- [x] `SpeedHistorySeed` (`Features/ActiveRide/Speed/`): from the saved track before the resume, the last
+      `SpeedFeature.historyWindow` of speeds, and the running average replayed the way the tick computes it
+      (distance += speed and count += 1 on points above `stationarySpeedMPS`, sample = distance / count)
+- [x] `.speedHistorySeeded(SpeedHistorySeed)`: sent from `seedFromSavedTrack`; prepends to both series
+- [x] Tests: seed replay (stationary points skipped from the average, window cut, only pre-resume points);
+      TestStore resume test that both series come back in front of live samples
+- [x] `SpeedHistorySeedTests` 5/5 and `TrackSegmentTests` 9/9 green
+- [ ] Brian runs it: kill mid-ride, relaunch, W2 keeps its pre-kill shape
+
+## Then
+- [x] Targeted suites, then full `CyclometerTests`: 2439 passed, 0 failed
+- [ ] Branch `fix/background-tones-and-resumed-speed-history`, commit, PR

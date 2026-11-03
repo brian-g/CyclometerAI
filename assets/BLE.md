@@ -1029,6 +1029,11 @@ not play backgrounded. The resolution requires an M4 decision about the L2 categ
 no API to read the silent-switch position, so "respect the switch" and "play while backgrounded" cannot
 both be satisfied by category choice alone. **Handed to M4 (#33) as an open design question.**
 
+> **Resolved 2026-11-03.** Every tone plays on `.playback` with `.mixWithOthers` and rings through the
+> Silent switch (`Audio.md §AVAudioSession Configuration`). The `audio` key had been dropped from
+> `UIBackgroundModes` in #329, and that day's ride logged 42 radar tones refused while backgrounded
+> ("does not have background entitlement"); it is back.
+
 ### 13.3 Decisions
 
 **1. Adopt `bluetooth-central`. — Done, this issue.**

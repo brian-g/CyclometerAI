@@ -10,9 +10,11 @@ private let logger = Logger.cyclometer(.audio)
 ///
 ///   L0 All Clear : 880→587 Hz sine, descending, ~680 ms — jersey-pocket audible
 ///   L2 Warning   : 1,400 Hz triangle, double staccato pulse, ~480 ms
-///   L3 Danger    : 2,100 Hz square, triple burst, ~580 ms — overrides Silent Mode (user opt-in, unwired in MVP)
+///   L3 Danger    : 2,100 Hz square, triple burst, ~580 ms — ducks music to the speaker (user opt-in, unwired in MVP)
 ///   Turns        : C6–E6–G♯6 triangle — rising for right, falling for left, up and back for a U-turn
-///   Bell         : a rotary bicycle bell, brrring-brrring, ~1 s — rings through Silent Mode
+///   Bell         : a rotary bicycle bell, brrring-brrring, ~1 s
+///
+/// Every tone rings through the Ring/Silent switch and with the screen locked (`configureSession`).
 struct AudioClient {
     var playAllClear:           @Sendable () async -> Void
     var playWarning:            @Sendable () async -> Void
@@ -89,14 +91,6 @@ enum ToneKind: CaseIterable, Sendable {
         // Full: it is for the people ahead, who aren't listening for it.
         case .bell: 1.0
         }
-    }
-
-    /// Whether this tone sounds with the Ring/Silent switch on silent. Only the bell does (#492): a
-    /// rider who presses it means to be heard by someone else right now, and a silent bell would
-    /// be a broken button. Every other tone respects the switch — Danger's opt-in override is
-    /// separate, and unreachable in MVP.
-    var ringsThroughSilentMode: Bool {
-        self == .bell
     }
 
     /// How long the tone sounds, start to finish.
@@ -421,11 +415,11 @@ private final class AudioEngineState: @unchecked Sendable {
         // exactly once. `sounding` is cleared after `stop()`, which has silenced it, so a
         // failed start doesn't leave a turn tone yielding to a Warning that isn't sounding.
         //
-        // The session and engine are set up under `lock` too, after the hold check. Since the bell
-        // the category is per tone, `.playback` for it and `.ambient` for the rest (#492), so it is
-        // shared state like the node. Set before the check, a held bell would switch a sounding
-        // Warning to `.playback` and play it through the Silent switch; set outside the lock, a
-        // concurrent tone's category could land between another tone's setup and its start.
+        // The session and engine are set up under `lock` too, after the hold check. The session's
+        // options are per tone — an overriding Danger ducks the music and takes the speaker — so
+        // they are shared state like the node. Set before the check, a held tone would change a
+        // sounding one's options; set outside the lock, a concurrent tone's options could land
+        // between another tone's setup and its start.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let heldBy: ToneKind?
             do {
@@ -459,19 +453,19 @@ private final class AudioEngineState: @unchecked Sendable {
 
     private func configureSession(for kind: ToneKind, overrideSilentMode: Bool) throws {
         let session = AVAudioSession.sharedInstance()
-        if kind.ringsThroughSilentMode {
-            // .playback ignores the Ring/Silent switch; .mixWithOthers keeps the rider's music
-            // playing under the bell instead of interrupting it (#492).
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-        } else if kind == .danger, overrideSilentMode {
+        if kind == .danger, overrideSilentMode {
             try session.setCategory(.playback, options: [.duckOthers])
             try session.setActive(true)
             try session.overrideOutputAudioPort(.speaker)
         } else {
-            // .ambient respects the Ring/Silent switch — the default for every tone,
-            // and for Danger too unless the (currently unreachable) override is on.
-            try session.setCategory(.ambient, mode: .default)
+            // .playback for every tone, because it is the only category that sounds with the
+            // screen locked: `.ambient` is silenced by the lock as well as the Ring/Silent switch,
+            // and a ride's phone is locked in a pocket or asleep on the bars. The 2026-11-03 ride
+            // lost every radar tone while backgrounded (BLE.md §13.2 Q4). iOS can't read the
+            // switch, so obeying it and playing while locked can't both be had; the alerts win.
+            // .mixWithOthers keeps the rider's music playing under the tone, and is what lets a
+            // backgrounded app start the session at all — with the `audio` background mode.
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
         }
     }
