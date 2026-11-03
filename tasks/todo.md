@@ -1802,3 +1802,5 @@ Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-co
   offsets. Not done, Brian's call: (4) accessibility sizes (#499), (7) "Pedaling vs Coasting, —", (8) "Z3" vs "Zone 3"
 - Deferred (Brian, 2026-11-03: "leave all of them for now"): (4) accessibility sizes (#499's `HeroNumber` rework),
   (7) "Pedaling vs Coasting, —" read as a dash, (8) zone rows "Z3 Aerobic" vs the Zone column's "Zone 3, Aerobic"
+- [x] Cadence sheet: chart, Avg/Max Cadence and Pedaling vs Coasting in one section, as Heart rate's (Brian);
+      re-recorded Cadence Active ×2 (No Data unchanged); UX.md; Cadence snapshots + WidgetAccessibility 86/86

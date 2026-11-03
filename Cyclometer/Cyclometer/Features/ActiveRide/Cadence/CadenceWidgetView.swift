@@ -356,8 +356,9 @@ struct CadenceList: View {
 
     var body: some View {
         List {
-            if detail.cadenceSamples.count > 1 {
-                Section {
+            // The chart and the readings it explains share one section, as the Heart rate sheet's do.
+            Section {
+                if detail.cadenceSamples.count > 1 {
                     CadenceDetailChart(
                         cadenceSamples: detail.cadenceSamples,
                         altitudeSamples: detail.altitudeSamples,
@@ -365,12 +366,12 @@ struct CadenceList: View {
                     )
                         .frame(height: Self.chartHeight)
                 }
+                ReadingColumns {
+                    ReadingColumn("Avg Cadence", Self.reading(averageCadence))
+                    ReadingColumn("Max Cadence", Self.reading(maxCadence))
+                }
+                pedalingVsCoastingRow
             }
-            ReadingColumns {
-                ReadingColumn("Avg Cadence", Self.reading(averageCadence))
-                ReadingColumn("Max Cadence", Self.reading(maxCadence))
-            }
-            pedalingVsCoastingRow
             Section("Time in Cadence Zones") {
                 if pedalingSeconds > 0 {
                     DonutChart(slices: CadenceZone.allCases.map {
