@@ -4,16 +4,17 @@ import SwiftUI
 import ComposableArchitecture
 @testable import Cyclometer
 
-/// S08's picker content (#142), in imperial units: the Page row, then the Ride and Heart Rate sections — widgets at
-/// every size, 2×2 first, 1×1s paired, every edge aligned. Pace is already on the page, so its entry
-/// is dimmed. Route is left out: its Map entry is a live `Map`, which doesn't snapshot stably.
+/// S08's picker content (#142), in imperial units: the Page row, then the Ride, Heart, Fitness and Elevation
+/// sections (#517) — widgets at every size, 2×2 first, 1×1s paired, every edge aligned. Pace is already
+/// on the page, so its entry is dimmed. Route is left out: its Map entry is a live `Map`, which doesn't
+/// snapshot stably. "collapsed" shows the Heart and Elevation sections collapsed.
 ///
 /// The sheet's toolbar isn't part of this: toolbars don't render in a hosted snapshot.
 final class AddWidgetSheetSnapshotTests: XCTestCase {
 
-    private let canvas: SwiftUISnapshotLayout = .fixed(width: 402, height: 1400)
+    private let canvas: SwiftUISnapshotLayout = .fixed(width: 402, height: 2100)
 
-    private func makeCatalog(scheme: ColorScheme) -> some View {
+    private func makeCatalog(scheme: ColorScheme, collapsed: Set<WidgetCategory> = []) -> some View {
         withDependencies {
             $0.defaultFileStorage = .inMemory
         } operation: {
@@ -25,12 +26,14 @@ final class AddWidgetSheetSnapshotTests: XCTestCase {
                 AddWidgetCatalog(
                     page: DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)]),
                     canvas: CGSize(width: 402, height: 874),
-                    categories: [.ride, .heartRate],
+                    categories: [.ride, .heartRate, .fitness, .elevation],
+                    collapsed: .constant(collapsed),
+                    pairedRoles: Set(SensorRole.allCases),
                     onEmptyPage: {},
                     onAdd: { _ in }
                 )
             }
-            .frame(width: 402, height: 1400)
+            .frame(width: 402, height: 2100)
             .background(Color.cyBgPrimary)
             .preferredColorScheme(scheme)
         }
@@ -46,6 +49,14 @@ final class AddWidgetSheetSnapshotTests: XCTestCase {
             of: makeCatalog(scheme: .dark),
             as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark)),
             named: "dark"
+        )
+    }
+
+    func testAddWidgetCatalogCollapsed() {
+        assertSnapshot(
+            of: makeCatalog(scheme: .light, collapsed: [.heartRate, .elevation]),
+            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light)),
+            named: "light"
         )
     }
 }

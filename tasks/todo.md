@@ -1804,3 +1804,24 @@ Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-co
   (7) "Pedaling vs Coasting, —" read as a dash, (8) zone rows "Z3 Aerobic" vs the Zone column's "Zone 3, Aerobic"
 - [x] Cadence sheet: chart, Avg/Max Cadence and Pedaling vs Coasting in one section, as Heart rate's (Brian);
       re-recorded Cadence Active ×2 (No Data unchanged); UX.md; Cadence snapshots + WidgetAccessibility 86/86
+
+---
+
+## #517 — Add Widget sheet: categories as remembered disclosure groups (2026-11-03)
+
+Branch `feat/517-add-widget-categories`. Plan approved (Brian): Ride, Heart, Power, Fitness, Elevation, Weather, Route;
+empty categories hidden; Cadence listed only with a paired cadence sensor (power widgets will gate the same way);
+Heart always shows (Watch HR has no pairing record).
+
+- [x] `WidgetCategory`: String/Codable, 7 cases, new titles
+- [x] `DashboardWidget.requiredSensor` + `isListed(pairedRoles:)`; Cadence → `.cadence`
+- [x] Recategorise: Ascent/Descent/Grade/Elevation → Elevation; Calories → Fitness
+- [x] `AppPreferences.collapsedWidgetCategories` (decodeIfPresent); ActiveRide computed state + action
+- [x] `AddWidgetCatalog`: DisclosureGroups, heading style (headline, uppercase, cyPrimary), sensor filter, previews
+- [x] Tests written: entries, sensor gate, prefs decode, TestStore action, snapshots (collapsed variant added, re-recorded; canvas 1400 → 2100 pt to fit Fitness and Elevation)
+- [x] Docs: UX.md §S08, DataModel.md §3.6
+- [x] App + test targets build clean
+- [x] Snapshot check: the default chevron ignores `.tint` (draws `textPrimary`), so the modifier was dropped and UX.md
+      says "system chevron"
+- [x] Full `CyclometerTests`: 2431 passed, 1 failed — `rowsPairOneByOnes` still held the old Ride list (missed when
+      updating `entriesLargestFirst`); fixed, `AddWidgetSheetTests` 4/4

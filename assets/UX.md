@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-11-03 — §S08's categories are now collapsible sections (#517): Ride, Heart, Power, Fitness, Elevation, Weather, Route, with uppercase `brPrimary` headline headings. Each starts expanded and reopens as the rider left it. A section with nothing to list isn't shown, and Cadence is listed only with a cadence sensor paired.  
 **Updated:** 2026-11-02 — Widget sheets show their readings as small-hero columns, as "Sheet: Calories" does (#494): "Sheet: Ride metrics", "Sheet: Heart rate", "Sheet: Elevation", §W5's Cadence sheet and §Widget Details' new **Sheet readings**. "No HR Source" moves to the Heart rate sheet's footer.  
 **Updated:** 2026-10-29 — §W23 Active Calories and "Sheet: Calories" added and built (#465), 1×1 in §S08's Ride section. §S10's active energy is now shown live, on W23.  
 **Updated:** 2026-10-28 — §W22 Climb added and built (#463), 2×1 in §S08's Route section.  
@@ -1011,11 +1012,22 @@ As built (#367): a press held a quarter of a second on a widget lifts it — it 
 
 ### Interaction
 
-The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart Rate, Weather (future), Route, and Force (future). The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
+The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart, Power (future), Fitness, Elevation, Weather (future), and Route. The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
 
 As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace, since #462 Sunset, and since #465 Active Calories), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions, and since #461 Distance Remaining and ETA, and since #463 Climb); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
 
 As built (#368): in edit mode each empty cell shows a slot: a dashed hairline `borderStrong` outline, the size and inset of a 1×1 card, with no glyph and no wiggle. Tapping it opens the sheet aimed at that cell. The tapped cell is the widget's top-left and nothing shifts to fit, so the sheet lists only the sizes that fit from there: a 1×1 always; a 2×1 from the left column with its neighbour free; a 2×2 from the left column, above the last row, with its block free. A right-hand cell therefore shows only 1×1s. The Page section is hidden. A widget already on the page is still dimmed. Picking an entry puts its top-left at the tapped cell. VoiceOver reads a slot as "Empty, row 3, left", hint "Add widget here".
+
+As built (#517): every heading — Page and each category — is `.headline`, uppercase, in `brPrimary`. Each category is a disclosure group with the system chevron. All start expanded. What the rider collapses is saved in `AppPreferences.collapsedWidgetCategories`, so the sheet reopens as they left it: after closing it, on the next ride, and after a relaunch. Opening it from an empty cell uses the same saved state. The categories, in order:
+- **Ride:** Speed, Avg Speed, Duration, Distance, Cadence, Pace, Sunset
+- **Heart:** Heart Rate, HR Zones
+- **Power:** no widgets yet
+- **Fitness:** Active Calories
+- **Elevation:** Elevation, Ascent, Descent, Grade
+- **Weather:** no widgets yet
+- **Route:** Map, Directions, Route Elevation, Climb, Distance Remaining, ETA
+
+A category with nothing to list isn't drawn, so Power and Weather are hidden for now. A widget that needs a sensor is listed only while one is paired for that role. Today that is Cadence, which needs a cadence sensor, and Power's widgets will be gated on a power meter in the same way. Heart always shows, because Watch heart rate arrives through HealthKit and has no pairing record. A widget already on a page stays there if its sensor is unpaired.
 
 ### Open UX Questions
 

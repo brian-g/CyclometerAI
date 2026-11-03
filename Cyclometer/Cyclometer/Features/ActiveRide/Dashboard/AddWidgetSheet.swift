@@ -4,9 +4,10 @@ import ComposableArchitecture
 /// S08 — Add Widget (#142), opened from S07 edit mode's Add. Every widget at every size it supports,
 /// by category; an entry adds that widget to the page the rider is on, in its first open spot.
 /// Opened from an empty cell instead (#368), it lists only the sizes that fit with that cell as
-/// their top-left, and adds there.
+/// their top-left, and adds there. Each category is a section the rider can collapse, and the sheet
+/// reopens as they left it (#517).
 struct AddWidgetSheet: View {
-    let store: StoreOf<ActiveRideFeature>
+    @Bindable var store: StoreOf<ActiveRideFeature>
     /// The dashboard grid's size — the screen, less the radar lane when it shows — which sets
     /// each preview's proportions.
     let canvas: CGSize
@@ -21,6 +22,8 @@ struct AddWidgetSheet: View {
                     cell: store.addWidgetCell,
                     canvas: canvas,
                     categories: categories,
+                    collapsed: $store.collapsedWidgetCategories.sending(\.addWidgetCollapsedCategoriesChanged),
+                    pairedRoles: Set(store.preferences.pairedSensors.map(\.role)),
                     onEmptyPage: { store.send(.addEmptyPageTapped, animation: .default) },
                     onAdd: { store.send(.addWidgetSelected(widgetID: $0.widget.id, size: $0.size), animation: .default) }
                 )
@@ -68,6 +71,10 @@ struct AddWidgetCatalog: View {
     var cell: DashboardGrid.Cell? = nil
     let canvas: CGSize
     var categories = WidgetCategory.allCases
+    /// The sections the rider has collapsed (#517).
+    @Binding var collapsed: Set<WidgetCategory>
+    /// The sensor roles paired: a widget that needs an unpaired one isn't listed (#517).
+    let pairedRoles: Set<SensorRole>
     let onEmptyPage: () -> Void
     let onAdd: (AddWidgetEntry) -> Void
 
@@ -81,7 +88,8 @@ struct AddWidgetCatalog: View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
             // A page isn't something a cell can hold.
             if cell == nil {
-                section("Page") {
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    heading("Page")
                     Button(action: onEmptyPage) {
                         Label("Empty page", systemImage: "text.rectangle.page")
                             .foregroundStyle(Color.cyTextPrimary)
@@ -96,12 +104,15 @@ struct AddWidgetCatalog: View {
                 }
             }
             ForEach(categories, id: \.self) { category in
-                // From a cell, only the sizes that fit with it as their top-left.
+                // From a cell, only the sizes that fit with it as their top-left; and only widgets
+                // whose sensor is paired.
                 let entries = AddWidgetEntry.entries(in: category).filter { entry in
-                    cell.map { page.fits(entry.size, at: $0) } ?? true
+                    entry.widget.isListed(pairedRoles: pairedRoles)
+                        && (cell.map { page.fits(entry.size, at: $0) } ?? true)
                 }
+                // A category with nothing to list — Power without a power meter — isn't drawn.
                 if !entries.isEmpty {
-                    section(category.title) {
+                    DisclosureGroup(isExpanded: isExpanded(category)) {
                         VStack(spacing: Spacing.md) {
                             ForEach(AddWidgetEntry.rows(entries), id: \.first?.id) { row in
                                 HStack(spacing: Spacing.md) {
@@ -113,6 +124,9 @@ struct AddWidgetCatalog: View {
                                 }
                             }
                         }
+                        .padding(.top, Spacing.md)
+                    } label: {
+                        heading(category.title)
                     }
                 }
             }
@@ -121,14 +135,21 @@ struct AddWidgetCatalog: View {
         .padding(.vertical, Spacing.lg)
     }
 
-    private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            Text(title)
-                .font(.title3)
-                .foregroundStyle(Color.cyTextPrimary)
-                .accessibilityAddTraits(.isHeader)
-            content()
+    /// `category`'s section is expanded unless the rider collapsed it.
+    private func isExpanded(_ category: WidgetCategory) -> Binding<Bool> {
+        Binding {
+            !collapsed.contains(category)
+        } set: { isExpanded in
+            if isExpanded { collapsed.remove(category) } else { collapsed.insert(category) }
         }
+    }
+
+    private func heading(_ title: String) -> some View {
+        Text(title)
+            .font(.headline)
+            .textCase(.uppercase)
+            .foregroundStyle(Color.cyPrimary)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private func entryButton(_ entry: AddWidgetEntry) -> some View {
@@ -242,10 +263,17 @@ extension SpeedSample {
     }
 }
 
-private func addWidgetPreviewStore() -> StoreOf<ActiveRideFeature> {
+// MARK: - Previews
+
+private func addWidgetPreviewStore(
+    collapsed: Set<WidgetCategory> = [],
+    pairedRoles: [SensorRole] = SensorRole.allCases
+) -> StoreOf<ActiveRideFeature> {
     let state = ActiveRideFeature.State(recordingState: .active)
     state.$preferences.withLock { preferences in
         preferences.dashboardLayout = DashboardLayout(pages: [DashboardPage(placements: [])])
+        preferences.collapsedWidgetCategories = collapsed
+        preferences.pairedSensors = pairedRoles.map { PairedSensor(peripheralID: UUID(), role: $0) }
     }
     return Store(initialState: state) {
         ActiveRideFeature()
@@ -258,6 +286,34 @@ private func addWidgetPreviewStore() -> StoreOf<ActiveRideFeature> {
         $0.persistenceClient = .mock()
     } operation: {
         let store = addWidgetPreviewStore()
+        store.send(.dashboardLongPressed)
+        store.send(.addWidgetTapped)
+        return AddWidgetSheet(
+            store: store,
+            canvas: CGSize(width: 402, height: 874),
+            categories: [.ride, .elevation, .fitness, .heartRate]
+        )
+    }
+}
+
+#Preview("Collapsed Route") {
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
+    } operation: {
+        let store = addWidgetPreviewStore(collapsed: [.route])
+        store.send(.dashboardLongPressed)
+        store.send(.addWidgetTapped)
+        return AddWidgetSheet(store: store, canvas: CGSize(width: 402, height: 874))
+    }
+}
+
+#Preview("No Cadence Sensor") {
+    withDependencies {
+        $0.defaultFileStorage = .inMemory
+        $0.persistenceClient = .mock()
+    } operation: {
+        let store = addWidgetPreviewStore(pairedRoles: [.heartRate])
         store.send(.dashboardLongPressed)
         store.send(.addWidgetTapped)
         return AddWidgetSheet(

@@ -124,6 +124,10 @@ struct AppPreferences: Codable, Equatable, Sendable {
         set { dashboardLayoutOverride = newValue.isFactory ? nil : newValue }
     }
 
+    /// The S08 picker sections the rider has collapsed (#517). The collapsed set rather than the
+    /// expanded one, so every section — a newly added one too — starts expanded.
+    var collapsedWidgetCategories: Set<WidgetCategory> = []
+
     /// Whether the rider has finished onboarding (S01→S02) at least once (#105). Gates
     /// `AppFeature`'s launch presentation — once true, onboarding never reappears, even
     /// if a permission it once checked is later revoked.
@@ -245,6 +249,11 @@ struct AppPreferences: Codable, Equatable, Sendable {
         ))
         .map { $0.keepingValidPlacements().prunedEmptyPages() }
         .flatMap { DashboardLayoutValidator.isValid($0) && !$0.isFactory ? $0 : nil }
+        // `try?`: a category this build no longer has only reopens the sections, rather than
+        // resetting every other preference.
+        collapsedWidgetCategories = (try? container.decodeIfPresent(
+            Set<WidgetCategory>.self, forKey: .collapsedWidgetCategories
+        )) ?? []
     }
 }
 

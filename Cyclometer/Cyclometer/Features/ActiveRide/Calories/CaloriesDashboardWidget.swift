@@ -6,7 +6,7 @@ struct CaloriesDashboardWidget: DashboardWidget {
     static let id = "activeCalories"
     static let title = "Active Calories"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
-    static let category = WidgetCategory.ride
+    static let category = WidgetCategory.fitness
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>

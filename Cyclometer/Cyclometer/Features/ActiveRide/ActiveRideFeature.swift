@@ -438,6 +438,8 @@ struct ActiveRideFeature {
         /// `nil` from Add, which adds in the first open spot. Read only while the sheet is up, and
         /// left set as it closes, so the sheet doesn't redraw as Add's while it slides away.
         var addWidgetCell: DashboardGrid.Cell?
+        /// S08's collapsed sections (#517), saved so the picker reopens as the rider left it.
+        var collapsedWidgetCategories: Set<WidgetCategory> { preferences.collapsedWidgetCategories }
         /// The Sensors sheet (#466), from the toolbar's Sensors button. Its rows read
         /// `sensorHealth` live, so this is the only state the sheet needs here.
         var isSensorsSheetPresented = false
@@ -479,6 +481,8 @@ struct ActiveRideFeature {
         case addWidgetSelected(widgetID: String, size: WidgetSize)
         /// S08's "Empty page" (#142): a blank page after the one the rider is on.
         case addEmptyPageTapped
+        /// S08 (#517): the rider expanded or collapsed a section.
+        case addWidgetCollapsedCategoriesChanged(Set<WidgetCategory>)
         /// The toolbar's Sensors button (#464, #466), shown while a paired sensor is missing or low.
         case sensorsButtonTapped
         case sensorsSheetPresentationChanged(Bool)
@@ -730,6 +734,9 @@ struct ActiveRideFeature {
                 else { return .none }
                 state.dashboardPage = index + 1
                 state.isAddWidgetPresented = false
+                return .none
+            case .addWidgetCollapsedCategoriesChanged(let collapsed):
+                state.$preferences.withLock { $0.collapsedWidgetCategories = collapsed }
                 return .none
             case .dashboardEditingDoneTapped:
                 guard state.isEditingDashboard else { return .none }
