@@ -1800,3 +1800,5 @@ Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-co
       skips hidden views, as VoiceOver does; the app was right. `WidgetAccessibilityTests` 83/83
 - Left, as recommended: (5) columns reflowing as values change width; (9) `.capCenter` vs shrunk digits, per-element
   offsets. Not done, Brian's call: (4) accessibility sizes (#499), (7) "Pedaling vs Coasting, —", (8) "Z3" vs "Zone 3"
+- Deferred (Brian, 2026-11-03: "leave all of them for now"): (4) accessibility sizes (#499's `HeroNumber` rework),
+  (7) "Pedaling vs Coasting, —" read as a dash, (8) zone rows "Z3 Aerobic" vs the Zone column's "Zone 3, Aerobic"
