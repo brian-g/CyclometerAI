@@ -291,7 +291,7 @@ private func addWidgetPreviewStore(
         return AddWidgetSheet(
             store: store,
             canvas: CGSize(width: 402, height: 874),
-            categories: [.ride, .elevation, .fitness, .heartRate]
+            categories: [.ride, .heartRate, .fitness, .elevation]
         )
     }
 }

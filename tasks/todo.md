@@ -1825,3 +1825,14 @@ Heart always shows (Watch HR has no pairing record).
       says "system chevron"
 - [x] Full `CyclometerTests`: 2431 passed, 1 failed — `rowsPairOneByOnes` still held the old Ride list (missed when
       updating `entriesLargestFirst`); fixed, `AddWidgetSheetTests` 4/4
+
+### #517 review (`/code-review --fix`, 2026-11-03; Brian: "fix 3, 5, 6, 7, 8, 9")
+- [x] (3) Collapsed categories decode as names and drop only unknown ones (`["route","force"]` keeps Route)
+- [x] (5) `ActiveRideFeature.preferences` doc comment lists every write, #517 and #391 included
+- [x] (6) Collapse test moved into the S07 suite, on its `makeStore()`
+- [x] (7) UX.md's #142 paragraph points to the #517 categories
+- [x] (8) "Ride Widgets" preview in production order
+- [x] (9) Collapsed snapshot on its own 1400 pt canvas, re-recorded
+- [x] Full `CyclometerTests`: 2432 passed, 0 failed
+- Not done, Brian's call: (1) 52 pt tap target on category headings; (2) `cyPrimary` headings at 2.4:1 in light mode;
+  (4) VoiceOver heading trait inside the disclosure label; (10) sensor gate in `entries(in:)`

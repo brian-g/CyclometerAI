@@ -288,9 +288,10 @@ struct ActiveRideFeature {
         /// to 190/55 before #96, which disagreed with the 60 that DataModel.md §3.5
         /// has always specified as the resting default.
         @SharedReader(.riderProfile) var riderProfile
-        /// Consulted for `isAutoPauseEnabled`. Written only for `mapOrientation`, from
-        /// the map sheet's orientation button (#199), and `dashboardLayout`, from S07 edit
-        /// mode (#141); Settings owns every other field (#102), and `calibration` writes the
+        /// Consulted for `isAutoPauseEnabled`. Written for `mapOrientation`, from the map
+        /// sheet's orientation button (#199); `dashboardLayout`, from S07 edit mode (#141);
+        /// `collapsedWidgetCategories`, from S08's sections (#517); and `sensorHealth`, at ride
+        /// end (#391). Settings owns every other field (#102), and `calibration` writes the
         /// wheel circumference through its own reference.
         @Shared(.appPreferences) var preferences
         var speed = SpeedFeature.State()

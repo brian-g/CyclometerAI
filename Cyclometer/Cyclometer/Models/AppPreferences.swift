@@ -249,11 +249,10 @@ struct AppPreferences: Codable, Equatable, Sendable {
         ))
         .map { $0.keepingValidPlacements().prunedEmptyPages() }
         .flatMap { DashboardLayoutValidator.isValid($0) && !$0.isFactory ? $0 : nil }
-        // `try?`: a category this build no longer has only reopens the sections, rather than
-        // resetting every other preference.
-        collapsedWidgetCategories = (try? container.decodeIfPresent(
-            Set<WidgetCategory>.self, forKey: .collapsedWidgetCategories
-        )) ?? []
+        // Decoded as names, so one this build doesn't have — from a newer build, or renamed — is
+        // dropped alone: the rest stay collapsed, and nothing throws to reset other preferences.
+        let collapsedNames = (try? container.decodeIfPresent([String].self, forKey: .collapsedWidgetCategories)) ?? []
+        collapsedWidgetCategories = Set(collapsedNames.compactMap(WidgetCategory.init(rawValue:)))
     }
 }
 

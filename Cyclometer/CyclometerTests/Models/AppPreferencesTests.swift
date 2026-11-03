@@ -183,14 +183,15 @@ struct AppPreferencesTests {
         #expect(decoded.wheelCircumferenceMM == 2155)
     }
 
-    /// A collapsed section this build doesn't have (#517) reopens the sections, and keeps the rest.
-    @Test("An unknown collapsed category doesn't reset other preferences")
+    /// A collapsed section this build doesn't have (#517) is dropped alone: the known ones stay
+    /// collapsed, and no other preference resets.
+    @Test("An unknown collapsed category is dropped; the rest are kept")
     func unknownCollapsedCategoryFallsBack() throws {
         let json = Data(#"{"wheelCircumferenceMM":2155,"collapsedWidgetCategories":["route","force"]}"#.utf8)
 
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
 
-        #expect(decoded.collapsedWidgetCategories.isEmpty)
+        #expect(decoded.collapsedWidgetCategories == [.route])
         #expect(decoded.wheelCircumferenceMM == 2155)
     }
 

@@ -12,9 +12,15 @@ import ComposableArchitecture
 /// The sheet's toolbar isn't part of this: toolbars don't render in a hosted snapshot.
 final class AddWidgetSheetSnapshotTests: XCTestCase {
 
-    private let canvas: SwiftUISnapshotLayout = .fixed(width: 402, height: 2100)
+    /// Tall enough for the whole catalog expanded, or with Heart and Elevation collapsed.
+    private static let expandedHeight: CGFloat = 2100
+    private static let collapsedHeight: CGFloat = 1400
 
-    private func makeCatalog(scheme: ColorScheme, collapsed: Set<WidgetCategory> = []) -> some View {
+    private func makeCatalog(
+        scheme: ColorScheme,
+        collapsed: Set<WidgetCategory> = [],
+        height: CGFloat = expandedHeight
+    ) -> some View {
         withDependencies {
             $0.defaultFileStorage = .inMemory
         } operation: {
@@ -33,7 +39,7 @@ final class AddWidgetSheetSnapshotTests: XCTestCase {
                     onAdd: { _ in }
                 )
             }
-            .frame(width: 402, height: 2100)
+            .frame(width: 402, height: height)
             .background(Color.cyBgPrimary)
             .preferredColorScheme(scheme)
         }
@@ -42,20 +48,20 @@ final class AddWidgetSheetSnapshotTests: XCTestCase {
     func testAddWidgetCatalog() {
         assertSnapshot(
             of: makeCatalog(scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light)),
+            as: .image(layout: .fixed(width: 402, height: Self.expandedHeight), traits: .init(userInterfaceStyle: .light)),
             named: "light"
         )
         assertSnapshot(
             of: makeCatalog(scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(layout: .fixed(width: 402, height: Self.expandedHeight), traits: .init(userInterfaceStyle: .dark)),
             named: "dark"
         )
     }
 
     func testAddWidgetCatalogCollapsed() {
         assertSnapshot(
-            of: makeCatalog(scheme: .light, collapsed: [.heartRate, .elevation]),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light)),
+            of: makeCatalog(scheme: .light, collapsed: [.heartRate, .elevation], height: Self.collapsedHeight),
+            as: .image(layout: .fixed(width: 402, height: Self.collapsedHeight), traits: .init(userInterfaceStyle: .light)),
             named: "light"
         )
     }
