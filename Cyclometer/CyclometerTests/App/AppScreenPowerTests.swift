@@ -61,6 +61,7 @@ struct AppScreenPowerTests {
                 AppFeature()
             } withDependencies: {
                 $0.continuousClock = clock
+                $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
                 $0.screenClient = recordingClient(brightness: brightness, into: calls)
                 $0.defaultFileStorage = storage
             }

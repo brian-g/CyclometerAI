@@ -358,6 +358,7 @@ struct RideSensorsSheetTests {
                 ActiveRideFeature()
             } withDependencies: {
                 $0.defaultFileStorage = storage
+                $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
             }
         }
 
