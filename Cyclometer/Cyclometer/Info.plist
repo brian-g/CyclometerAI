@@ -39,17 +39,17 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Cyclometer uses Bluetooth to connect to your cycling sensors including, heart rate sensor, speed, cadence, power, and radar.</string>
+	<string>Acme Ride uses Bluetooth to connect to your cycling sensors including, heart rate sensor, speed, cadence, power, and radar.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Cyclometer reads your heart rate data to display accurate training zones, your weight, age and sex to estimate the calories each ride burns, and your workouts so a ride already saved by another app or your Apple Watch isn't saved twice.</string>
+	<string>Acme Ride reads your heart rate data to display accurate training zones, your weight, age and sex to estimate the calories each ride burns, and your workouts so a ride already saved by another app or your Apple Watch isn't saved twice.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Cyclometer saves each finished ride to Apple Health as a workout with its route, so it appears in the Fitness app and counts toward your Activity rings.</string>
+	<string>Acme Ride saves each finished ride to Apple Health as a workout with its route, so it appears in the Fitness app and counts toward your Activity rings.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Cyclometer records your route in the background during an active ride. Unless you are recording the GPS is not active.</string>
+	<string>Acme Ride records your route in the background during an active ride. Unless you are recording the GPS is not active.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Cyclometer uses your location to record your route. GPS is not active unless you are recording a ride.</string>
+	<string>Acme Ride uses your location to record your route. GPS is not active unless you are recording a ride.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>Cyclometer uses motion and fitness activity to tell riding from stopping, so it can pause and resume your ride automatically.</string>
+	<string>Acme Ride uses motion and fitness activity to tell riding from stopping, so it can pause and resume your ride automatically.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIAppFonts</key>
