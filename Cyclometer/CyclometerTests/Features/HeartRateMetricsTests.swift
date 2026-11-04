@@ -100,6 +100,22 @@ struct HeartRateMetricsTests {
         #expect(state.averageHeartRateBPM == 147)
     }
 
+    /// #531: the sheet's Average and Max are W4's 2×1 figures, "—" before the first reading. They
+    /// outlast the source, as the ride's record of it does.
+    @Test func averageAndMaxReadTheRide() {
+        var state = ActiveRideFeature.State()
+        #expect(state.heartRateMetrics.average == .missing)
+        #expect(state.heartRateMetrics.maximum == .missing)
+
+        state.hrSampleCount = 3
+        state.hrSampleSum = 140 + 150 + 151
+        state.maxHeartRateBPM = 151
+        let metrics = state.heartRateMetrics
+        #expect(metrics.source == .none)
+        #expect(metrics.average == MetricReading(value: "147", unit: "bpm", spoken: "147 beats per minute"))
+        #expect(metrics.maximum == MetricReading(value: "151", unit: "bpm", spoken: "151 beats per minute"))
+    }
+
     /// W4's watermark keeps at most `Watermark.bucketCount` points, as every watermark does.
     @Test func watermarkIsBucketed() {
         var state = ActiveRideFeature.State()
