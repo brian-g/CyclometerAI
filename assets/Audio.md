@@ -13,9 +13,9 @@ Cyclometer uses three distinct audio tones to communicate radar threat state. Un
 
 | Tone | Alert Level | Trigger | Silent Mode |
 |---|---|---|---|
-| **All Clear** | L0 | Threat has resolved (radar returns to clear after L2 or L3) | Never overrides |
-| **Warning** | L2 — Caution | Moderate threat: 3+ vehicles, or moderate closing speed | Never overrides |
-| **Danger** | L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Overrides if user opt-in |
+| **All Clear** | L0 | Threat has resolved (radar returns to clear after L2 or L3) | Rings through |
+| **Warning** | L2 — Caution | Moderate threat: 3+ vehicles, or moderate closing speed | Rings through |
+| **Danger** | L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Rings through; ducks music to the speaker if user opt-in |
 
 > **L1 Advisory**: No audio tone. Haptic only. Audio would be too disruptive for minor advisory-level events that may occur frequently on busy roads.
 
@@ -23,11 +23,11 @@ Three more tones announce the turns of a route being followed (`PRD.md §8.6`, #
 
 | Tone | Trigger | Silent Mode |
 |---|---|---|
-| **Turn Left** | A left or slight-left turn, announced at the rider's lead distance | Never overrides |
-| **Turn Right** | A right or slight-right turn, announced at the rider's lead distance | Never overrides |
-| **U-turn** | A U-turn, announced at the rider's lead distance | Never overrides |
+| **Turn Left** | A left or slight-left turn, announced at the rider's lead distance | Rings through |
+| **Turn Right** | A right or slight-right turn, announced at the rider's lead distance | Rings through |
+| **U-turn** | A U-turn, announced at the rider's lead distance | Rings through |
 
-One more is the rider's own: the **Bell** (#492), rung from the dashboard toolbar's Bell button (`UX.md §S05`). It is for the people ahead, not the rider, so it is the one tone that **always rings through Silent Mode**. A sounding Warning or Danger keeps the speaker, as with turn tones (see [Bell](#bell)).
+One more is the rider's own: the **Bell** (#492), rung from the dashboard toolbar's Bell button (`UX.md §S05`). It is for the people ahead, not the rider. A sounding Warning or Danger keeps the speaker, as with turn tones (see [Bell](#bell)).
 
 ---
 
@@ -67,7 +67,7 @@ Each tone must be instantly distinguishable from the others and from iOS system 
 ### 4. User Control
 
 - All Clear and Warning tones: on/off toggle in Settings (S12), default **on**
-- Danger tone: separate on/off toggle, default **on**; Silent Mode override is a third independent setting, default **off**
+- Danger tone: separate on/off toggle, default **on**; the speaker override (`overrideSilentModeForL3`, which since 2026-11-03 only ducks the rider's music and takes the speaker, because every tone already rings through Silent Mode) is a third independent setting, default **off**
 - Turn tones: no toggle of their own. They follow the Turn-by-Turn toggle on S05.1, which turns turn notifications off as a whole, and no radar tone toggle silences them — muting radar warnings never mutes turns
 - Volume: follows system volume at the time of alert (no separate in-app volume control in MVP)
 
@@ -128,7 +128,7 @@ Each tone must be instantly distinguishable from the others and from iOS system 
 | Waveform | Square wave — maximum harmonic content, most penetrating through noise |
 | Volume | 100% of system volume; overrides AVAudioSession if user opt-in enabled |
 | Repeat | Continuous until alert level drops below L3 threshold |
-| Silent Mode | Uses `AVAudioSession` category `.playback` with speaker route override. Activates only when `UserProfile.overrideSilentModeForL3 == true`. |
+| Silent Mode | Rings through, like every tone. With `UserProfile.overrideSilentModeForL3 == true` it also ducks the rider's music and overrides the route to the speaker. |
 
 **Design note:** The triple burst is a universally recognized urgency pattern (SOS-adjacent, rapid alarm cycles). 2,100 Hz is the frequency range where the square wave's harmonic content creates maximum auditory penetration. The square waveform is intentionally harsh — this is appropriate for a life-safety alert. The 800 ms pause between bursts prevents continuous tone fatigue and allows the rider to process the alert.
 
@@ -166,10 +166,10 @@ These values are a starting point, as OQA5 says of the others; validation at spe
 | Total duration | 1,050 ms, the last 120 ms a fade to silence |
 | Synthesis | One `.ring` segment: the strikes overlap, each adding to what is still ringing; scaled to a 0.9 peak so stacked strikes never clip |
 | Volume | 100% of system volume |
-| Silent Mode | Always rings: `.playback` with `.mixWithOthers`, so music keeps playing under it |
+| Silent Mode | Rings through, like every tone; music keeps playing under it |
 | Interruption | Gives way to a sounding Warning or Danger, as a turn tone does. Cuts off a turn tone, All Clear, or a bell still ringing, so a second tap rings again |
 
-**Design note:** The dome keeps ringing through the clatter and between the flicks, which is why the bell is one overlapping ring rather than notes and rests. Its timbre, a struck metal ring, is nothing like the radar tones' plain waves, so it can't pass for an alert. A silent bell would be a broken button: a rider who presses it means to be heard by someone else right away, so it ignores the Ring/Silent switch, which no other tone does unless the rider opts in (Danger's override). The values above are a starting point, tuned by ear on device.
+**Design note:** The dome keeps ringing through the clatter and between the flicks, which is why the bell is one overlapping ring rather than notes and rests. Its timbre, a struck metal ring, is nothing like the radar tones' plain waves, so it can't pass for an alert. A silent bell would be a broken button: a rider who presses it means to be heard by someone else right away, so it must ring whatever the Ring/Silent switch says. The values above are a starting point, tuned by ear on device.
 
 **Limitation:** With earphones connected, the bell plays in the earphones, where nobody ahead can hear it. Routing it to the loudspeaker regardless needs the `.playAndRecord` category, which is out of scope.
 
@@ -248,11 +248,10 @@ If synthesis proves difficult to tune in context, short `.caf` (Core Audio Forma
 
 ### AVAudioSession Configuration
 
-```swift
-// For Warning, All Clear and turn tones (respect Silent Mode):
-try AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default)
+**Every tone rings through Silent Mode (2026-11-03).** `.ambient` obeys the Ring/Silent switch, but iOS also silences it when the screen locks, and a ride's phone is locked in a pocket or asleep on the bars. On the 2026-11-03 ride every radar tone failed while the app was backgrounded. iOS can't read the switch, so a tone can't both obey it and play while locked, and the alerts win. `.mixWithOthers` keeps the rider's music playing, and together with the `audio` background mode it is what lets a backgrounded app start a tone at all (`BLE.md §13.2 Q4`).
 
-// For the Bell (always rings through Silent Mode; mixes over the rider's music):
+```swift
+// For every tone (rings through Silent Mode and with the screen locked; mixes over the rider's music):
 try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
 
 // For Danger tone when overrideSilentModeForL3 is enabled:
@@ -274,21 +273,19 @@ try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
 - [ ] All three tones are immediately distinguishable from each other in a blind listening test
 - [ ] No tone resembles any stock iOS system sound (test on current iOS release)
 - [ ] Danger tone plays through speaker when phone is face-down in jersey pocket (validate with `overrideOutputAudioPort(.speaker)`)
-- [ ] Warning and All Clear tones respect Silent Mode (do not play when phone is on silent)
-- [ ] Danger tone respects Silent Mode when override setting is OFF (default)
-- [ ] Danger tone overrides Silent Mode when override setting is ON
+- [ ] Every tone plays with the screen locked and the app in the background
+- [ ] Every tone plays with the phone on silent, and music keeps playing under it
+- [ ] Danger tone ducks music and takes the speaker when override setting is ON
 - [ ] All tones fully testable via mock radar data in `AudioAlertClient` without hardware
 - [ ] Tone volume does not exceed system volume setting
 - [ ] Tones are interruptible — if threat level changes mid-tone, the new tone takes priority
 - [ ] Turn Left, Turn Right and U-turn tones are immediately distinguishable from each other and from All Clear, Warning and Danger in a blind listening test
 - [ ] No turn tone resembles any stock iOS system sound (test on current iOS release)
 - [ ] Turn tones perceptible from jersey pocket at 30 km/h riding speed
-- [ ] Turn tones respect Silent Mode
 - [ ] A turn tone plays at L0, L1 and through a sustained L2; it is held at L3 and while a Warning is sounding
 - [ ] A turn tone never changes the alert level
 - [ ] Turning off the All Clear/Warning or Danger tones does not silence turn tones
 - [ ] Bell: two rotary flicks, recognisable as a bicycle bell
-- [ ] Bell rings with the phone on silent, and music keeps playing under it
 - [ ] Bell gives way to a sounding Warning or Danger, and a second tap rings it again
 
 ---

@@ -207,7 +207,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - **Persistence:** SwiftData (iOS 27+ minimum target; raised from iOS 26 on 2026-09-15 for HealthKit's cycling-specific HR, cadence and power zone tracking)
 - **Platform:** iPhone only; no iPad support
 - **Audio alerts:** Three tones — All Clear, Warning, Danger. Full spec in `Audio.md`.
-- **Silent Mode:** Danger tone overrides with user opt-in; Warning and All Clear always respect Silent Mode
+- **Silent Mode:** ~~Danger tone overrides with user opt-in; Warning and All Clear always respect Silent Mode~~ Every tone rings through Silent Mode and with the screen locked (2026-11-03, `Audio.md §AVAudioSession Configuration`)
 - **App name:** Cyclometer
 - **Apple Watch:** Deferred to Phase 2
 - **HR zone formula:** Karvonen only in MVP
@@ -358,14 +358,14 @@ A 24pt-wide vertical strip on the right edge of the active ride dashboard repres
 |---|---|---|---|
 | L1 — Advisory | 1–2 vehicles, low closing speed | Single tap — `UIImpactFeedbackGenerator` `.light` | None |
 | L2 — Caution | Moderate closing speed OR 3+ vehicles | Double tap `.medium`, 0.5s interval | Warning tone (see `Audio.md`) |
-| L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Core Haptics pattern: three 0.14s `HapticContinuous` bursts at full intensity and sharpness — pattern defined in `UX.md §S06` | Danger tone — overrides Silent Mode if user opt-in |
+| L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Core Haptics pattern: three 0.14s `HapticContinuous` bursts at full intensity and sharpness — pattern defined in `UX.md §S06` | Danger tone — ~~overrides Silent Mode if user opt-in~~ rings through Silent Mode, like every tone |
 | L0 — Clear | Threat resolves after L2 or L3 | None | All Clear tone (see `Audio.md`) |
 
 #### Alert Rules
 - Minimum 3 seconds between same-level re-triggers to prevent alert fatigue
 - L3 alert persists until threat recedes; it is not dismissible by the rider
-- Danger tone: uses `AVAudioSession` category `.playback` with route override to force audio through speaker. **User must opt in to Silent Mode override in Settings (S12) before this behavior activates.** Default is silent-mode-respectful.
-- Warning and All Clear tones always respect Silent Mode (never override)
+- Every tone uses `AVAudioSession` category `.playback` with `.mixWithOthers`, so it plays with the screen locked and rings through Silent Mode (2026-11-03). `.ambient` would obey the switch but is silenced by the lock, and iOS can't read the switch to choose. ~~Danger tone: uses `.playback` with route override to force audio through speaker. User must opt in to Silent Mode override in Settings (S12) before this behavior activates. Default is silent-mode-respectful.~~
+- ~~Warning and All Clear tones always respect Silent Mode (never override)~~
 - Phase 2: Mirror haptic pattern on Apple Watch wrist
 
 ---
@@ -400,7 +400,7 @@ Wrist haptics are significantly more noticeable than pocket haptics. The same pa
 - [ ] Warning tone fires within 500ms of L2 threshold crossing (see `Audio.md`)
 - [ ] Danger tone fires within 200ms of L3 threshold crossing (see `Audio.md`)
 - [ ] All Clear tone fires within 300ms of threat resolving (see `Audio.md`)
-- [ ] Silent Mode override only activates when user has explicitly enabled it in S12
+- [ ] Every tone plays with the screen locked and the phone on silent
 - [ ] All three haptic levels and all four audio states fully testable with mock BLE data (no hardware required)
 
 ---
@@ -1549,7 +1549,7 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detec
 | OQ2 | Does Garmin's mobile SDK provide a cleaner Varia BLE path than raw CoreBluetooth? Evaluate in M2 spike. | Engineering | High | ✅ **Resolved: Combined approach. Use CoreBluetooth and apply for Garmin developer program** |
 | OQ3 | iPad support? | Product | Low | ✅ **Resolved: No iPad** |
 | OQ4 | Audio alert delivery: tones vs synthesized voice? | Design | Medium | ✅ **Resolved: Tones — three-tone system (All Clear, Warning, Danger). Spec in `Audio.md`.** |
-| OQ5 | Override Silent Mode for L3 danger alerts? | Design | High | ✅ **Resolved: Yes, user opt-in. Warning and All Clear respect Silent Mode always.** |
+| OQ5 | Override Silent Mode for L3 danger alerts? | Design | High | ✅ **Resolved: Yes, user opt-in. Warning and All Clear respect Silent Mode always.** Superseded 2026-11-03: every tone rings through, because `.ambient` can't play with the screen locked |
 | OQ6 | App name for App Store? | Product | Medium | ✅ **Resolved: Cyclometer** |
 | OQ7 | Minimum Varia RTL515 / RCT715 firmware version required for BLE characteristic support? | Engineering | High | ✅ **Resolved: v2.00 or v3.00 depending on the production run** |
 | OQ8 | Include basic Apple Watch complication in Phase 1? | Product | Medium | ✅ **Resolved: Defer to Phase 2** |

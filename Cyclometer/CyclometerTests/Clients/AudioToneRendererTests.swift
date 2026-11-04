@@ -221,16 +221,25 @@ struct ToneKindBellTests {
         #expect((1_000...4_000).contains(fundamental))
     }
 
-    @Test("Only the bell rings through Silent Mode")
-    func onlyTheBellRingsThroughSilentMode() {
-        #expect(ToneKind.allCases.filter(\.ringsThroughSilentMode) == [.bell])
-    }
-
     /// Root mean square of the samples between `ms`, in milliseconds from the start.
     private func rms(_ ms: Range<Int>) -> Float {
         let channel = buffer.floatChannelData![0]
         let frames = Int(Double(ms.lowerBound) * ToneRenderer.sampleRate / 1_000)..<Int(Double(ms.upperBound) * ToneRenderer.sampleRate / 1_000)
         let sum = frames.reduce(Float(0)) { $0 + channel[$1] * channel[$1] }
         return (sum / Float(frames.count)).squareRoot()
+    }
+}
+
+// MARK: - Background audio
+
+@Suite("Tones while backgrounded")
+struct ToneBackgroundModeTests {
+    /// Without the `audio` background mode a locked phone can't start a tone at all. It was dropped from
+    /// Info.plist once without anyone noticing (#329), and the 2026-11-03 ride lost every radar tone while
+    /// backgrounded (BLE.md §13.2 Q4). The test host is the app, so `Bundle.main` is its Info.plist.
+    @Test("The app declares the audio background mode")
+    func declaresAudioBackgroundMode() throws {
+        let modes = try #require(Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])
+        #expect(modes.contains("audio"))
     }
 }

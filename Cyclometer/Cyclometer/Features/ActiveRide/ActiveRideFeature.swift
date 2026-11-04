@@ -321,7 +321,8 @@ struct ActiveRideFeature {
         }
         /// `averageSpeedMPS` after each moving tick, for W2's trend line (#140) — the only ticks
         /// that change it. Kept over `SpeedFeature.historyWindow`, the speed watermark's own
-        /// window, so the two share a time axis. Not persisted, like the watermark.
+        /// window, so the two share a time axis. Not persisted, like the watermark; a resumed ride
+        /// rebuilds both from its saved track (`.watermarksSeeded`).
         var averageSpeedSamples: [SpeedSample] = []
         /// The displayed speed, for surfaces outside the dashboard (the mini-player): `SpeedFeature`'s
         /// pick, so a wheel sensor wins over GPS here as it does on the dashboard (#383).
@@ -535,6 +536,8 @@ struct ActiveRideFeature {
         case heartRateSeeded([Int: Int])
         /// A resumed ride's map before the kill, from its saved track (#503).
         case trackSegmentsSeeded([[Coordinate]])
+        /// A resumed ride's chart watermarks and W2's average line before the kill, from its saved track.
+        case watermarksSeeded(WatermarkSeed)
         /// Health's rider for W23, nil without a body mass (#465).
         case energyRiderFetched(RideEnergy.Rider?)
         /// One minute's estimate (#465).
@@ -893,11 +896,13 @@ struct ActiveRideFeature {
                         // which waits for the finalize above to land and refreshes the list after
                         // it (#248).
                     },
-                    .run { [bleHRClient, variaRadarClient, locationClient] _ in
+                    .run { [bleHRClient, variaRadarClient, locationClient, audioClient] _ in
                         async let hr: Void = bleHRClient.disconnect()
                         async let radar: Void = variaRadarClient.disconnect()
                         async let loc: Void = locationClient.stopUpdates()
-                        _ = await (hr, radar, loc)
+                        // Or the engine holds the app awake in the background (`AudioClient.stop`).
+                        async let audio: Void = audioClient.stop()
+                        _ = await (hr, radar, loc, audio)
                     }
                 )
             case .finishAlert:
@@ -1243,6 +1248,14 @@ struct ActiveRideFeature {
                 // In front: any fix that reached the map while the fetch ran came after them.
                 state.trackSegments = savedSegments + state.trackSegments
                 return .none
+            case .watermarksSeeded(let seed):
+                // In front, as the map's: every sample since the resume came after them.
+                state.speed.speedSamples = seed.speed + state.speed.speedSamples
+                state.averageSpeedSamples = seed.averageSpeed + state.averageSpeedSamples
+                state.cadence.cadenceSamples = seed.cadence + state.cadence.cadenceSamples
+                state.hrSamples = seed.heartRate + state.hrSamples
+                state.altitudeSamples = seed.altitude + state.altitudeSamples
+                return .none
             case .energyRiderFetched(let rider):
                 state.energyRider = EnergyRiderStatus(rider)
                 return rebuildCaloriesIfReady(state)
@@ -1502,6 +1515,9 @@ struct ActiveRideFeature {
             let secondsByBPM = RideDetailSeries.secondsByBPM(points)
             if !secondsByBPM.isEmpty {
                 await send(.heartRateSeeded(secondsByBPM))
+            }
+            if let watermarks = WatermarkSeed(savedTrack: points, resumedAt: resumedAt) {
+                await send(.watermarksSeeded(watermarks))
             }
             // Only the points from before the resume: any flushed since are already on the map.
             let savedSegments = TrackPointDTO.segments(of: points.filter { $0.timestamp < resumedAt })
