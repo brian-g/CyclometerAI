@@ -1969,3 +1969,13 @@ Not drawn: the thin horizontal rule across the mock's chart (it is in the W2 art
 ### Review
 AddWidgetSheet snapshots re-recorded (3 references, viewed): the gauge's row pushed Ascent/Descent/Grade off the
 fixed canvas, so `expandedHeight` 2100 → 2340, `collapsedHeight` 1400 → 1640. Full `CyclometerTests`: 2453 passed, 0 failed.
+
+## #534 review follow-ups (`/code-review high`, 2026-11-04; Brian: "fix 1-4, 5b")
+- [x] (1) `SpeedGaugeScale.top` rounds half-to-even, as the corner's number format does
+- [x] (2) `Spacing.gaugeMarker` (3 pt) replaces the literal
+- [x] (3) `Trend.speed(_:against:)` moved beside `Trend` in TrendIndicator.swift
+- [x] (4) `SpeedWidget.spokenReading(…, size:)` + `SpeedWidget.oneDecimal` shared by W1 and the gauge
+- [x] (5b) Filed #540 (M11): implausible speed readings become the ride max
+- [x] (8) #350 scope extended to `plottedSeries` (W2 + gauge)
+- [x] Build-for-testing green
+- [x] Full `CyclometerTests`: 2453 passed, 0 failed

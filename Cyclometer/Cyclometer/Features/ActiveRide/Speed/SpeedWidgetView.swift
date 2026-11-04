@@ -177,10 +177,12 @@ struct SpeedWidget: View {
 
     // MARK: - Computed Display Values
 
-    /// One-decimal number format shared by every value in the widget.
-    private func oneDecimal(_ value: Double) -> String {
+    /// One-decimal number format shared by every value in the widget, and by its speed gauge (#534).
+    static func oneDecimal(_ value: Double) -> String {
         value.formatted(.number.precision(.fractionLength(1)))
     }
+
+    private func oneDecimal(_ value: Double) -> String { Self.oneDecimal(value) }
 
     private var displaySpeed: String {
         guard let s = speed else { return "—" }
@@ -194,11 +196,25 @@ struct SpeedWidget: View {
     /// What VoiceOver reads after "Speed" (#361): what this size shows, with no "—" read aloud. Units
     /// and time are spelled out: VoiceOver reads "1:02:33" digit by digit, and a symbol is a guess.
     var accessibilityValue: String {
+        Self.spokenReading(
+            speed: speed, averageSpeed: averageSpeed, maxSpeed: maxSpeed,
+            distance: distance, elapsed: elapsed, unit: unit, size: size
+        )
+    }
+
+    /// `accessibilityValue` at `size`. The speed gauge (#534) reads the 2×2's, so the two can't drift.
+    static func spokenReading(
+        speed: Double?, averageSpeed: Double, maxSpeed: Double,
+        distance: Double, elapsed: Int, unit: UnitSystem, size: WidgetSize
+    ) -> String {
         var parts = [speed.map(unit.spokenSpeed(fromMPS:)) ?? "No reading"]
         // The ▲/▼ on the speed (#401).
-        if let trend = trend.spokenAgainstAverage { parts.append(trend) }
+        if let trend = Trend.speed(speed, against: averageSpeed).spokenAgainstAverage { parts.append(trend) }
         if size != .oneByOne {
-            parts += ["average \(displayAvg)", "maximum \(displayMax)"]
+            parts += [
+                "average \(oneDecimal(unit.speed(fromMPS: averageSpeed)))",
+                "maximum \(oneDecimal(unit.speed(fromMPS: maxSpeed)))",
+            ]
         }
         if size == .twoByTwo {
             parts += ["distance \(unit.spokenDistance(fromMeters: distance))", "time \(elapsed.spokenElapsed)"]
@@ -211,25 +227,6 @@ struct SpeedWidget: View {
     // Scale the large-hero font proportionally to the available slot height.
     private func heroFontSize(for height: CGFloat) -> CGFloat {
         max(Self.heroMinFont, Self.heroNominalFont * (height / Self.heroNominalHeight))
-    }
-}
-
-// MARK: - Trend
-
-extension Trend {
-    /// Minimum delta from the ride average before the trend indicator shows
-    /// ▲/▼. Compared in canonical m/s (≈0.5 km/h) so sensitivity is
-    /// identical regardless of the display unit.
-    private static let speedThresholdMPS = 0.14
-
-    /// W1's ▲/▼, shared by its speed gauge (#534): current speed against the ride average;
-    /// steady when even or with no reading.
-    static func speed(_ speed: Double?, against average: Double) -> Trend {
-        guard let speed, average > 0 else { return .steady }
-        let diff = speed - average
-        if diff > speedThresholdMPS { return .up }
-        if diff < -speedThresholdMPS { return .down }
-        return .steady
     }
 }
 

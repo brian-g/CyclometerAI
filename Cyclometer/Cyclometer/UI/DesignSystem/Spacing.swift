@@ -37,6 +37,7 @@ enum Spacing {
     static let strokeMapThumbnail: CGFloat = 3     //  3 — ride thumbnail: the recorded track at 56pt
     static let mapThumbnailMargin: CGFloat = 3     //  3 — ride thumbnail: gap from the track's stroke to the image edge (#280)
     static let watermarkDot: CGFloat = unit        //  4 — dashboard watermark: a reading alone in its run, which a line can't draw
+    static let gaugeMarker: CGFloat = 3            //  3 — speed gauge: the average and max ticks across its arc (Sketch "W1 - Speed (2x2) option b", #534)
 
     // Corner radii
     static let cornerSm: CGFloat = unit      //  4

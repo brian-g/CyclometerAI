@@ -16,6 +16,23 @@ enum Trend: Equatable, Sendable {
     }
 }
 
+extension Trend {
+    /// Minimum delta from the ride average before the trend indicator shows
+    /// ▲/▼. Compared in canonical m/s (≈0.5 km/h) so sensitivity is
+    /// identical regardless of the display unit.
+    private static let speedThresholdMPS = 0.14
+
+    /// W1's ▲/▼, shared by its speed gauge (#534): current speed against the ride average;
+    /// steady when even or with no reading.
+    static func speed(_ speed: Double?, against average: Double) -> Trend {
+        guard let speed, average > 0 else { return .steady }
+        let diff = speed - average
+        if diff > speedThresholdMPS { return .up }
+        if diff < -speedThresholdMPS { return .down }
+        return .steady
+    }
+}
+
 /// The ▲ (`cyRatingGood`) or ▼ (`cyRatingBad`) shared by W1, W4 and W5 (#402); nothing when
 /// steady. A quarter of the digits' height, as in the #81 mock (16 of 63 px). Place it on a hero
 /// with `.trendIndicator(_:)` or `HeroNumber.heroTrend(_:)`.
