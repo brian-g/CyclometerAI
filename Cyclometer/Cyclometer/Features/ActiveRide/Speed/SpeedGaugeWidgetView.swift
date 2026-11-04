@@ -78,9 +78,7 @@ struct SpeedGaugeWidget: View {
 
     // MARK: - Computed Display Values
 
-    private func oneDecimal(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(1)))
-    }
+    private func oneDecimal(_ value: Double) -> String { SpeedWidget.oneDecimal(value) }
 
     private var displaySpeed: String {
         speed.map { oneDecimal(unit.speed(fromMPS: $0)) } ?? "—"
@@ -90,15 +88,12 @@ struct SpeedGaugeWidget: View {
     private var displayMax: String { oneDecimal(unit.speed(fromMPS: maxSpeed)) }
     private var displayDistance: String { oneDecimal(unit.distance(fromMeters: distance)) }
 
-    /// What VoiceOver reads after the title (#361): W1's 2×2 reading, with no "—" read aloud.
+    /// What VoiceOver reads after the title (#361): W1's 2×2 reading.
     var accessibilityValue: String {
-        var parts = [speed.map(unit.spokenSpeed(fromMPS:)) ?? "No reading"]
-        if let trend = Trend.speed(speed, against: averageSpeed).spokenAgainstAverage { parts.append(trend) }
-        parts += [
-            "average \(displayAvg)", "maximum \(displayMax)",
-            "distance \(unit.spokenDistance(fromMeters: distance))", "time \(elapsed.spokenElapsed)",
-        ]
-        return parts.joined(separator: ", ")
+        SpeedWidget.spokenReading(
+            speed: speed, averageSpeed: averageSpeed, maxSpeed: maxSpeed,
+            distance: distance, elapsed: elapsed, unit: unit, size: .twoByTwo
+        )
     }
 }
 
@@ -120,9 +115,10 @@ enum SpeedGaugeScale {
     }
 
     /// The top of the scale, in display units. Taken from the max as the corner shows it, to one
-    /// decimal, so a max that reads 60.0 doesn't grow the scale.
+    /// decimal and rounded as the number format rounds (half to even), so a max that reads 60.0
+    /// doesn't grow the scale.
     static func top(maxSpeedMPS: Double, unit: UnitSystem) -> Double {
-        let max = (unit.speed(fromMPS: maxSpeedMPS) * 10).rounded() / 10
+        let max = (unit.speed(fromMPS: maxSpeedMPS) * 10).rounded(.toNearestOrEven) / 10
         return Swift.max(baseTop(unit), (max / growthStep).rounded(.up) * growthStep)
     }
 
@@ -154,7 +150,6 @@ private struct SpeedGaugeDial<Center: View>: View {
     private static var tickLengthToRadius: CGFloat { 0.07 }
     /// How far the average and max ticks reach past both edges of the arc.
     private static var markerOverhangToRadius: CGFloat { 0.05 }
-    private static var markerWidth: CGFloat { 3 }
     /// The gauge's widest share of the cell, so the corners keep their room (Sketch: 212 of 402 pt).
     private static var widthFraction: CGFloat { 0.53 }
 
@@ -221,7 +216,7 @@ private struct SpeedGaugeDial<Center: View>: View {
             guard let fraction else { continue }
             context.stroke(
                 radial(at: fraction, from: radius - stroke - overhang, to: radius + overhang, center: center),
-                with: .color(color), lineWidth: Self.markerWidth
+                with: .color(color), lineWidth: Spacing.gaugeMarker
             )
         }
     }
