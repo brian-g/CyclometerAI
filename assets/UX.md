@@ -3,6 +3,7 @@
 **Date:** 2026-09-17
 
 **Updated:** 2026-11-04 — "Sheet: Heart rate" gains Average and Max under Heart Rate and Zone (#531), as §W5's Cadence sheet has.  
+**Updated:** 2026-10-23 — Ride metrics pass. New widgets, none built yet: §W19 Distance Remaining and §W20 ETA (#461), §W21 Sunset (#462), §W22 Climb (#463), §W23 Active Calories with its Calories sheet (#465). §S05's Bottom Toolbar gains the Sensors sheet that the Sensor button (#466) and a new quiet Low Battery indicator (#464) both open. §S10 points to that indicator. §S15's Stats gain average and max HR, ascent, descent and calories (#460).  
 **Updated:** 2026-11-03 — §S08's categories are now collapsible sections (#517): Ride, Heart, Power, Fitness, Elevation, Weather, Route, with uppercase `brPrimary` headline headings. Each starts expanded and reopens as the rider left it. A section with nothing to list isn't shown, and Cadence is listed only with a cadence sensor paired.  
 **Updated:** 2026-11-02 — Widget sheets show their readings as small-hero columns, as "Sheet: Calories" does (#494): "Sheet: Ride metrics", "Sheet: Heart rate", "Sheet: Elevation", §W5's Cadence sheet and §Widget Details' new **Sheet readings**. "No HR Source" moves to the Heart rate sheet's footer.  
 **Updated:** 2026-10-29 — §W23 Active Calories and "Sheet: Calories" added and built (#465), 1×1 in §S08's Ride section. §S10's active energy is now shown live, on W23.  
@@ -239,8 +240,7 @@ W9 Directions has none: its turn arrow already marks it. W2 Average Speed and W1
 - Motion and Fitness (required for activity detection, *where the hardware exists* — see the
   availability note below)
 - HealthKit (read: HR, resting HR, max HR, date of birth, body weight and biological sex — the last
-  three for the workout's energy estimate — and workouts — only to avoid saving a ride twice; write: the `HKWorkout` recorded at ride
-  end per §S10, with its cycling distance and active energy — both are requested together so the rider
+  three for the workout's energy estimate — and workouts — only to avoid saving a ride twice; write: the `HKWorkout` recorded at ride end per §S10, with its cycling distance and active energy — both are requested together so the rider
   answers one sheet)
 
 > **Revised 2026-08-14 (M10).** Two corrections to the list this screen used to show.
@@ -917,14 +917,72 @@ As built (#534): **Speed Gauge** in S08's Ride section, after Speed; W1 itself i
 **Sizes:** 1x1
 
 - Label "ACTIVE CALORIES". Value: the ride's active energy so far, in whole kcal (#465). Medium hero, unit "kcal"
-- The SF Symbol `bolt.fill` in the lower right (Widget Symbol Convention)
+- The SF Symbol `figure` in the lower right (Widget Symbol Convention)
 - The estimate is §S10's active energy (#276): `RideEnergy.activeKilocalories` over the track recorded so far, with the rider's body mass, date of birth and sex read from Health once at the start. Recomputed once a minute of recording time, so the ride's last value is the one written to its Health workout, and there is no second calorie model
 - The model moves from physics to heart rate once a strap's readings cover half the moving time, so the series can step there. Earlier minutes keep the value they were computed with
 - A pause holds the value; it goes on after the resume. A ride resumed after a kill rebuilds its earlier minutes from its saved track; if that track is empty or can't be read, the series starts at the resume
 - "—" with no body mass in Health (a guessed weight is never shown as measured), and before the first minute's estimate
 - VoiceOver reads it as "Active calories, 412 kilocalories", and a "—" as "No weight in Health" or "No estimate yet"
-- Not included: total (active plus resting) calories; kilojoules of work, which needs a power meter (Phase 3); §S15's calories row (#460)
+- Not included: total (active plus resting) calories; kilojoules of work, which needs a power meter (Phase 3);
 - Sheet: Calories. W23 opens it, at the medium detent and expandable to large: a chart of calories accumulating over ride time, from 0:00 to now with a pause taking no room, then **Total** and **Average** (kcal per hour of W3's Moving Time) as columns, the layout every widget sheet's readings now share (§Widget Details, #494). The section's footer names the model, "Model: Heart rate" (or Physics, or MET). With no estimate both read "—" and the footer says why instead: "Add your weight in the Health app to estimate active calories." or "The first estimate comes after a minute of riding."
+
+---
+
+#### W19 — Distance Remaining
+
+**Sizes:** 1x1 · **Category:** Route
+
+- Value: the route's length less the rider's progress along it, in km or mi to one decimal, as W6 (#461)
+- A value only while a route is being followed, as W18's ridden part: with turn-by-turn off the route isn't matched. Off route it holds the last matched progress. Once the route is complete it reads 0. On a loop's second lap it counts down to that lap's finish
+- Empty state: "--" with no route, or with turn-by-turn off
+- Sheet: Map, as W9
+
+---
+
+#### W20 — ETA
+
+**Sizes:** 1x1 · **Category:** Route
+
+- Value: the clock time the rider will arrive: now, plus W19's distance divided by W2's moving average speed, in the device's 12- or 24-hour format (#461). A stop pushes it later on its own, because "now" keeps advancing
+- Empty state: "--" when W19 has no value, or before the first moving second
+- Not terrain-aware. A projection from the route's climbs needs power and the rider model (#270, Phase 3)
+- Sheet: Map, as W9
+
+---
+
+#### W21 — Sunset
+
+**Sizes:** 1x1 · **Category:** Ride
+
+- Value: hours and minutes until today's sunset at the rider's location, labelled "TO SUNSET" (#462)
+- Computed on the phone from the latest fix and the date (NOAA solar position). No network and no WeatherKit, so it works offline. Recomputed at most once a minute
+- Empty state: "--" before a fix, after sunset, and on a day with no sunset (polar day or night)
+- Sheet: Map, as W9
+
+---
+
+#### W22 — Climb
+
+**Sizes:** 2x1 · **Category:** Route
+
+- Reads the route's climbs, which import already finds and categorises (§S20, `RouteTerrain`). Nothing is detected live (#463)
+- **On a climb:** distance to the top, climbing left (the climb's top less the route's elevation where the rider is), its category and average grade, and the climb's profile with the rider's place on it
+- **Between climbs:** the next climb's category, the distance to its start, and its length and gain
+- Off route it holds the last matched progress, as W19 does
+- Empty state: "--" with no route, turn-by-turn off, a route without elevation, or no climbs ahead
+- Sheet: Elevation
+
+---
+
+#### W23 — Active Calories
+
+**Sizes:** 1x1 · **Category:** Ride
+
+- Value: the ride's active energy so far in kcal, labelled "ACTIVE CALORIES" (#465)
+- The same estimate §S10's Health workout carries (#276), recomputed once a minute over the track recorded so far, so the ride's last value is the one written to Health. It uses heart rate when HR covers half the moving time and the rider's age and sex are known; otherwise physics along the track, or MET without a usable track
+- Empty state: "--" with no body weight in Health (a guessed weight is never shown as measured), and before the first estimate
+- Holds while paused. A ride resumed after a kill rebuilds its calories from the saved track
+- **Sheet: Calories.** A chart of calories accumulating over ride time, a point a minute. Under it: the total, which model produced it (heart rate, physics or MET), and the average rate in kcal per hour of moving time. When the estimate switches from physics to heart rate, the line can step; earlier points stay as they were computed. With no body weight the sheet says Health has none
 
 ---
 
@@ -1102,7 +1160,7 @@ An outdoor cycling `HKWorkout` is written to Apple Health automatically once the
 - **Consent** is the HealthKit share permission from S01, which the rider can revoke in iOS Settings → Health
 - **Duplicates:** if another source (e.g. an Apple Watch Outdoor Cycle) already recorded a cycling workout overlapping the ride, the write is skipped. A later rewrite of the same ride replaces its workout rather than adding one
 - **Carries** start, end, distance, route, estimated active energy and, when the rider has overridden Health in S12, the app's HR zones (#238). Otherwise the workout keeps Health's preferred zones Pause intervals are not marked, so Fitness shows elapsed time
-- **Active energy** (#276) comes from heart rate when a strap recorded at least half the ride and Health has the rider's weight, date of birth and sex (Male or Female): the Keytel (2005) equation at the ride's mean heart rate, less resting metabolism. Otherwise it is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. W23 shows the same estimate live (#465); §S10 and §S15 don't show calories (#460)
+- **Active energy** (#276) comes from heart rate when a strap recorded at least half the ride and Health has the rider's weight, date of birth and sex (Male or Female): the Keytel (2005) equation at the ride's mean heart rate, less resting metabolism. Otherwise it is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. W23 shows the same estimate live (#465), and §S15 shows the one stored on the `Ride` at the finish (#460); §S10 doesn't show calories
 
 ### Open UX Questions
 - [x] Zone breakdown chart type? Pie chart
@@ -1337,20 +1395,37 @@ ContentUnavailableView {
 **Phase:** MVP  
 **Purpose:** Deep view of a completed ride — map, HR over time, cadence, elevation, Strava segments. Lots of the same information as the S10 - Ride Summary.
 
+2026-11-4: These changes supercede the current implementation.
+
 ### Layout
-> *Standard detail view. The content is the king.*
+> *Custom detail view*
 
 ### Key Components
-- Full-width MapKit view (240pt height, rounded corners, inset to list edges). Tap to open full screen map as a sheet with full map controls. 
-- Route section, after the map: the route the ride followed, a link to its S20. A route deleted since shows its name with no link; a free ride has no section (#426)
-- Elevation profile chart (Swift Charts, AreaMark + LineMark in `brPrimary`)
-- Stats section: avg/max speed, avg/max cadence
-- HR zone graph over elapsed time
-- Strava segments list: name, distance, best time + date
-- GPX re-export action
-- Create route action
+Sections appear on screen in the order listed below.
 
-> **Built (#251):** map (recorded track, per-pass markers with the vehicle's speed), elevation profile, stats (plus vehicle-pass count), HR over elapsed time on S12's zone bands (`cyHRZone1`–`5`, y-axis fitted to the ride). The Route section and its link to S20 (#426). **Not yet:** the full-screen map sheet (follow-up); Strava segments (Phase 2, shown as Coming Soon); GPX re-export and Create Route (each needs its own issue).
+- Toolbar: The toolbar has a back button on the leading, the ride name in the title area when scrolled, the .trailing should have a share button (export to GPX) using the standard share sheet, a button to make the ride a route, and an edit button (change title, notes in a sheet). The details of these are TBD. 
+- Full-width MapKit view that goes under the safe area on top. The map covers to 50% of the screen, but starts to fade to transparent at 80pt from the bottom of the map. The map does not allow panning or zooming. It should only show the route. Tap to open full screen map as a sheet with full map controls. At the start of the transparency area, the title of the ride is shown in .title1 font, wraps, and overlays the map when it is starting to fade in a linear fashion with the scroll and stretches when the rider pulls down past the top. The date (start date) and time range of the ride is below it in .headline. Following that in small hero numbers are the total distance, and the moving time. On scroll, the map fades away, and the ride title is added to the toolbar as the text scrolls under. See Apple Fitness workout details for the model). The route has to fit between the safe area on top and the start of the title area.  
+  - Map Details (sheet not navigation): These are all abilities in the sheet. Ability to switch to different basemaps, ability to show different events: vehicle passes, show wind direction and speed on route, stops (manual and auto pauses). Also the route coloring should have different options to color: speed, grade, cadence (hidden without the data), heart rate (hidden without the data). 
+- Weather summary (not implemented until M10.6): The weather summary should list the temperature range of the ride, the humidity range, and the wind over the route ridden. It might be appropriate to summarize the weather with iOS foundation models. The weather should be captured at intervals during the ride. A capture that fails, such as with no data connection, is skipped silently: the ride never waits on it and the rider is never told.
+- Summary: This shows some at a glance metrics in hero numbers. Ascent, Descent, Average Speed, Average Heart Rate, Average Cadence, Average Power (hidden until Phase 3), Calories.
+  - Each value is hidden when the ride recorded no data for it (no "—").
+  - Ascent and Descent are stored on the `Ride` at the finish, not recounted from the track on open. Today the `Ride` stores no elevation (#284 removed the fields); storing it is a separate change.
+  - Calories are the active energy stored on the `Ride` at the finish (§S10's estimate), not recomputed on open, so a later change of Health body weight doesn't move an old ride's number.
+- The next sections are detailed metrics that are the same as the dashboard metric sheets but show the entire ride and not just the last hour. Items are hidden when there is no sensor or data recorded for an item. They should be displayed in this order: 
+  - Speed
+  - Pace
+  - Time
+  - Active Calories (Total / Average)
+  - Cadence
+  - Cadence Zones
+  - Heart Rate
+  - Heart Rate Zones
+  - Elevation
+  - Climbing
+  - Grade
+- Route section: the route the ride followed, a link to its S20. A route deleted since shows its name with no link; a free ride has no section (#426)
+- Strava segments list: name, distance, best time + date
+- Vehicle pass summary: Show count of vehicle passes, with the ability to navigate to show the details of each pass. The time of the pass, the speed of the vehicle at time of pass. Shown as a sheet. No tap on a pass. This section is hidden with no radar. 
 
 ---
 
