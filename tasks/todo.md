@@ -1930,3 +1930,18 @@ The barometer on the ridden route (1 m floor) read 853 ft at 17.1 mi and ~1,100 
 - [ ] Brian runs it: re-import Gibsonville 23 → ~1,010 ft, Max 6% grade
 - [x] Full `CyclometerTests`: first run 2444/2445 — `filledDipsFillsValleysNotHills` caught clamped windows levelling
       a route's first/last 50 m; windows now hang off the ends (−∞ padding). Rerun: 2445 passed, 0 failed
+
+---
+
+## #531 — Heart Rate sheet missing Average / Max (2026-11-04)
+Brian chose: a second row, AVERAGE | MAX, under HEART RATE | ZONE in the chart's section.
+- [x] `HeartRateMetrics.averageBPM` / `maxBPM` + `average` / `maximum` readings ("—" at 0), fed from `averageHeartRateBPM` / `maxHeartRateBPM`
+- [x] `HeartRateList`: second `ReadingColumns` row
+- [x] `HeartRateMetricsTests.averageAndMaxReadTheRide`
+- [x] UX.md "Sheet: Heart rate" + header line
+- [x] Brian runs it (approved)
+- [x] Re-record `HeartRateSheetSnapshotTests` (3 references, viewed), run `HeartRateMetricsTests` + `WidgetAccessibilityTests`
+- [x] Branch `fix/531-hr-sheet-avg-max`, commit, PR
+
+### Review
+HR snapshots + `HeartRateMetricsTests` + `WidgetAccessibilityTests`: 97 passed, 0 failed.

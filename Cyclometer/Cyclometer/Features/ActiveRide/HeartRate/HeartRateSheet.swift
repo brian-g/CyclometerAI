@@ -11,6 +11,9 @@ struct HeartRateMetrics: Equatable {
     /// `displayHRZone`, 1–5; 0 → no reading.
     var zone: Int = 0
     var source: HRSource = .none
+    /// The ride's mean and highest reading, as W4 shows them at 2×1 (#531); 0 → none yet.
+    var averageBPM: Int = 0
+    var maxBPM: Int = 0
     /// Each zone's bpm range, zone 1 first, as S12's table shows them.
     var zoneBounds: [ClosedRange<Int>] = HeartRateZone.allCases.map { RiderProfile().bounds(for: $0) }
     /// Recorded seconds in each zone, zone 1 first, as S10 will count them.
@@ -35,6 +38,14 @@ struct HeartRateMetrics: Equatable {
     var current: MetricReading {
         guard source != .none, bpm > 0 else { return .missing }
         return MetricReading(value: "\(bpm)", unit: "bpm", spoken: "\(bpm) beats per minute")
+    }
+
+    /// The ride's figures outlast its source: a strap that drops keeps what it recorded.
+    var average: MetricReading { Self.reading(averageBPM) }
+    var maximum: MetricReading { Self.reading(maxBPM) }
+
+    private static func reading(_ bpm: Int) -> MetricReading {
+        bpm > 0 ? MetricReading(value: "\(bpm)", unit: "bpm", spoken: "\(bpm) beats per minute") : .missing
     }
 
     /// The zone's number; its name is spoken, and its colour is the dot beside it.
@@ -79,6 +90,8 @@ extension ActiveRideFeature.State {
             bpm: displayHeartRateBPM,
             zone: displayHRZone,
             source: hrSource,
+            averageBPM: averageHeartRateBPM,
+            maxBPM: maxHeartRateBPM,
             zoneBounds: hrZoneBounds,
             zoneSeconds: hrZoneSeconds,
             history: hrSamples,
@@ -137,6 +150,10 @@ struct HeartRateList: View {
                             ZoneDot(color: .hrZone(metrics.zone))
                         }
                     }
+                }
+                ReadingColumns {
+                    ReadingColumn("Average", metrics.average)
+                    ReadingColumn("Max", metrics.maximum)
                 }
             } footer: {
                 if let footer = metrics.footer {
@@ -237,6 +254,8 @@ extension HeartRateMetrics {
         bpm: 156,
         zone: 3,
         source: .bleStrap,
+        averageBPM: 148,
+        maxBPM: 171,
         zoneSeconds: [312, 846, 702, 318, 42],
         history: (0..<468).map { i in
             let warmUp = min(Double(i) / 60, 1)
