@@ -229,3 +229,17 @@ struct ToneKindBellTests {
         return (sum / Float(frames.count)).squareRoot()
     }
 }
+
+// MARK: - Background audio
+
+@Suite("Tones while backgrounded")
+struct ToneBackgroundModeTests {
+    /// Without the `audio` background mode a locked phone can't start a tone at all. It was dropped from
+    /// Info.plist once without anyone noticing (#329), and the 2026-11-03 ride lost every radar tone while
+    /// backgrounded (BLE.md §13.2 Q4). The test host is the app, so `Bundle.main` is its Info.plist.
+    @Test("The app declares the audio background mode")
+    func declaresAudioBackgroundMode() throws {
+        let modes = try #require(Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])
+        #expect(modes.contains("audio"))
+    }
+}

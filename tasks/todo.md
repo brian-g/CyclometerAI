@@ -1890,4 +1890,4 @@ map and calories but not these, so after a kill W2 covers only the time since th
 
 ## Then
 - [x] Targeted suites, then full `CyclometerTests`: 2439 passed, 0 failed
-- [ ] Branch `fix/background-tones-and-resumed-speed-history`, commit, PR
+- [x] Branch `fix/background-tones-and-resumed-speed-history`, commit, PR (#532)

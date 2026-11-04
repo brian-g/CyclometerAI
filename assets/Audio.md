@@ -67,7 +67,7 @@ Each tone must be instantly distinguishable from the others and from iOS system 
 ### 4. User Control
 
 - All Clear and Warning tones: on/off toggle in Settings (S12), default **on**
-- Danger tone: separate on/off toggle, default **on**; Silent Mode override is a third independent setting, default **off**
+- Danger tone: separate on/off toggle, default **on**; the speaker override (`overrideSilentModeForL3`, which since 2026-11-03 only ducks the rider's music and takes the speaker, because every tone already rings through Silent Mode) is a third independent setting, default **off**
 - Turn tones: no toggle of their own. They follow the Turn-by-Turn toggle on S05.1, which turns turn notifications off as a whole, and no radar tone toggle silences them — muting radar warnings never mutes turns
 - Volume: follows system volume at the time of alert (no separate in-app volume control in MVP)
 
