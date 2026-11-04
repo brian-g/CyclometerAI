@@ -1945,3 +1945,27 @@ Brian chose: a second row, AVERAGE | MAX, under HEART RATE | ZONE in the chart's
 
 ### Review
 HR snapshots + `HeartRateMetricsTests` + `WidgetAccessibilityTests`: 97 passed, 0 failed.
+
+---
+
+## #534 — W1 Speed option B: speed gauge 2×2 (2026-11-04)
+Source: Design.sketch "W1 - Speed (2x2) option b" (`ED1F5CFC-…`), UX.md "W1 — Speed option B". A second catalog entry; W1 is unchanged.
+Brian chose: (1) the scale is fixed at 0–60 km/h or 0–40 mph, with a tick every 5, and grows to the next 10 once the ride's max passes the top; (2) dark tick = average (`cyTextPrimary`), orange tick = max (`cyRatingOkay`);
+(3) unit + W1's ▲/▼ trend on the hero; (4) the factory showcase gets a new page 5, with the gauge at rows 1–2.
+- [x] `SpeedGaugeDashboardWidget` — id `speedGauge`, title "Speed Gauge", `[.twoByTwo]`, `.ride`; registered in `DashboardWidgetCatalog.all` after Speed
+- [x] `SpeedGaugeWidget` view — corners: avg (TL), max (TR) as `HeroNumber` small with unit "avg"/"max" as drawn; distance (BL), time (BR).
+      Centre: 270° arc (track `cyBgTertiary`, fill `cyPrimary`, scale ticks `cyTextTertiary`, avg/max ticks), `HeroNumber` .large + speed unit + `heroTrend`
+- [x] Background: W2's speed-area + rising/falling average chart (`AverageSpeedHistoryChart`, made internal) in the lower part of the cell, as drawn
+- [x] `SpeedGaugeScale` (pure enum): top of scale, tick values, fraction clamped 0…1 — unit-tested
+- [x] Opens the Ride Metrics sheet; VoiceOver value as W1's 2×2
+- [x] Previews: active, no reading, imperial, dark, over-scale
+- [x] Factory page 5; update `AddWidgetSheetTests` Ride lists; `DashboardLayoutTests` factory coverage
+- [x] UX.md "W1 — Speed option B": as built
+- [x] Build-for-testing green (no tests run yet)
+- [x] Brian runs it (asked for tests, commit, PR)
+- [x] Tests: `SpeedGaugeScaleTests`, `AddWidgetSheetTests`, `DashboardLayoutTests`, `WidgetAccessibilityTests`, AddWidgetSheet snapshot
+Not drawn: the thin horizontal rule across the mock's chart (it is in the W2 artboard too and looks like a stray image edge).
+
+### Review
+AddWidgetSheet snapshots re-recorded (3 references, viewed): the gauge's row pushed Ascent/Descent/Grade off the
+fixed canvas, so `expandedHeight` 2100 → 2340, `collapsedHeight` 1400 → 1640. Full `CyclometerTests`: 2453 passed, 0 failed.

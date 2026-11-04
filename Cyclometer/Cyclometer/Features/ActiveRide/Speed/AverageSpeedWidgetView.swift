@@ -103,7 +103,8 @@ enum AverageSpeedTrend {
 
 // MARK: - History Chart
 
-private struct AverageSpeedHistoryChart: View {
+/// W2's speed watermark with its rising/falling average, also drawn behind W1's speed gauge (#534).
+struct AverageSpeedHistoryChart: View {
     let speedHistory: [SpeedSample]
     let averageHistory: [SpeedSample]
     let unit: UnitSystem

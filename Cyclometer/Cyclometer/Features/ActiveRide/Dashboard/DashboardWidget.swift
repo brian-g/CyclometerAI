@@ -60,6 +60,7 @@ enum WidgetCategory: String, Codable, CaseIterable, Sendable {
 enum DashboardWidgetCatalog {
     static let all: [any DashboardWidget.Type] = [
         SpeedDashboardWidget.self,
+        SpeedGaugeDashboardWidget.self,
         AverageSpeedDashboardWidget.self,
         DurationDashboardWidget.self,
         DistanceDashboardWidget.self,
