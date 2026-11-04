@@ -206,25 +206,30 @@ struct SpeedWidget: View {
         return parts.joined(separator: ", ")
     }
 
-    // MARK: - Trend
-
-    /// Minimum delta from the ride average before the trend indicator shows
-    /// ▲/▼. Compared in canonical m/s (≈0.5 km/h) so sensitivity is
-    /// identical regardless of the display unit.
-    private static let trendThresholdMPS = 0.14
-
-    /// Current speed against the ride average; steady when even or with no reading.
-    private var trend: Trend {
-        guard let s = speed, averageSpeed > 0 else { return .steady }
-        let diff = s - averageSpeed
-        if diff > Self.trendThresholdMPS { return .up }
-        if diff < -Self.trendThresholdMPS { return .down }
-        return .steady
-    }
+    private var trend: Trend { .speed(speed, against: averageSpeed) }
 
     // Scale the large-hero font proportionally to the available slot height.
     private func heroFontSize(for height: CGFloat) -> CGFloat {
         max(Self.heroMinFont, Self.heroNominalFont * (height / Self.heroNominalHeight))
+    }
+}
+
+// MARK: - Trend
+
+extension Trend {
+    /// Minimum delta from the ride average before the trend indicator shows
+    /// ▲/▼. Compared in canonical m/s (≈0.5 km/h) so sensitivity is
+    /// identical regardless of the display unit.
+    private static let speedThresholdMPS = 0.14
+
+    /// W1's ▲/▼, shared by its speed gauge (#534): current speed against the ride average;
+    /// steady when even or with no reading.
+    static func speed(_ speed: Double?, against average: Double) -> Trend {
+        guard let speed, average > 0 else { return .steady }
+        let diff = speed - average
+        if diff > speedThresholdMPS { return .up }
+        if diff < -speedThresholdMPS { return .down }
+        return .steady
     }
 }
 

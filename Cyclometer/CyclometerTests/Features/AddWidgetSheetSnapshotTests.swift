@@ -13,8 +13,8 @@ import ComposableArchitecture
 final class AddWidgetSheetSnapshotTests: XCTestCase {
 
     /// Tall enough for the whole catalog expanded, or with Heart and Elevation collapsed.
-    private static let expandedHeight: CGFloat = 2100
-    private static let collapsedHeight: CGFloat = 1400
+    private static let expandedHeight: CGFloat = 2340
+    private static let collapsedHeight: CGFloat = 1640
 
     private func makeCatalog(
         scheme: ColorScheme,

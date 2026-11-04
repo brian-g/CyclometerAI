@@ -650,6 +650,8 @@ Sizes: 2x2
 
 Similar to option A of the speed widget uses a speedometer like dial to visualize the current speed. The avg/max/distance/duration are in the quadrants around the gauge.
 
+As built (#534): **Speed Gauge** in S08's Ride section, after Speed; W1 itself is unchanged. The arc is 270°, open at the bottom. The scale is 0–60 km/h or 0–40 mph, with a tick every 5 between the ends; once the ride's max (to one decimal, as shown) passes the top, the scale grows to the next 10 and stays there for the ride. The fill (`brPrimary`, on a `brBgTertiary` track) runs to the current speed. A dark tick (`brTextPrimary`) marks the ride average and an amber tick (`brRatingOkay`) the max. In the centre: the speed (`large-hero`) with its unit and §W1's trend ▲/▼, scaled down to fit inside the arc. Corners: `13.9 avg` top left, `13.9 max` top right, distance bottom left, time bottom right (`small-hero`, "avg"/"max" as units, as drawn). Behind it, W2's chart (speed area and rising/falling average) fills the lower 55% of the cell. Opens the Ride metrics sheet; VoiceOver reads it as W1's 2×2. The thin horizontal rule across the mock's chart isn't drawn. Placed at the bottom of a page, the ride controls cover the distance and time corners.
+
 ![image-20261004152326754](/Users/brian/Library/Application Support/typora-user-images/image-20261004152326754.png)
 
 ---

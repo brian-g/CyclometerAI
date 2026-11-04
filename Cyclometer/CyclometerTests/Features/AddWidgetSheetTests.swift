@@ -10,7 +10,7 @@ struct AddWidgetSheetTests {
     @Test("A category lists every 2×2, then every 2×1, then every 1×1, each in catalog order")
     func entriesLargestFirst() {
         #expect(names(AddWidgetEntry.entries(in: .ride)) == [
-            "speed twoByTwo",
+            "speed twoByTwo", "speedGauge twoByTwo",
             "speed twoByOne", "cadence twoByOne",
             "speed oneByOne", "averageSpeed oneByOne", "duration oneByOne", "distance oneByOne",
             "cadence oneByOne", "pace oneByOne", "sunset oneByOne",
@@ -55,6 +55,7 @@ struct AddWidgetSheetTests {
         let rows = AddWidgetEntry.rows(AddWidgetEntry.entries(in: .ride)).map(names)
         #expect(rows == [
             ["speed twoByTwo"],
+            ["speedGauge twoByTwo"],
             ["speed twoByOne"],
             ["cadence twoByOne"],
             ["speed oneByOne", "averageSpeed oneByOne"],

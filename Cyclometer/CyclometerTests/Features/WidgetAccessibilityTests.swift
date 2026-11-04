@@ -342,7 +342,7 @@ private final class LiveRide {
 
 /// The widgets that adopt `.widgetDetail`.
 enum TappableWidget: CaseIterable, CustomTestStringConvertible {
-    case map, cadence, speed, averageSpeed, duration, distance, pace, directions, heartRate, hrZones
+    case map, cadence, speed, speedGauge, averageSpeed, duration, distance, pace, directions, heartRate, hrZones
     case ascent, descent, grade, elevation, routeElevation, routeElevationWithoutRoute
     case distanceRemaining, eta, sunset, climb, activeCalories
 
@@ -356,6 +356,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .map: "Map"
         case .cadence: "Cadence"
         case .speed: "Speed"
+        case .speedGauge: "Speed Gauge"
         case .averageSpeed: "Average Speed"
         case .duration: "Duration"
         case .distance: "Distance"
@@ -382,7 +383,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         switch self {
         case .map: ""
         case .cadence: "92 rpm, average 88, maximum 110"
-        case .speed: "36.0 kilometers per hour, above average, average 28.8, maximum 43.2, distance 12.4 kilometers, time 1 hour, 2 minutes, 33 seconds"
+        case .speed, .speedGauge: "36.0 kilometers per hour, above average, average 28.8, maximum 43.2, distance 12.4 kilometers, time 1 hour, 2 minutes, 33 seconds"
         case .averageSpeed: "28.8 kilometers per hour"
         case .duration: "1 hour, 2 minutes, 33 seconds"
         case .distance: "12.4 kilometers"
@@ -413,6 +414,11 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .speed:
             AnyView(SpeedWidget(
                 speed: 10, speedHistory: [], activeSpeedSource: .gps,
+                distance: 12_400, elapsed: 3_753, averageSpeed: 8, maxSpeed: 12
+            ))
+        case .speedGauge:
+            AnyView(SpeedGaugeWidget(
+                speed: 10, speedHistory: [], averageHistory: [],
                 distance: 12_400, elapsed: 3_753, averageSpeed: 8, maxSpeed: 12
             ))
         case .averageSpeed:

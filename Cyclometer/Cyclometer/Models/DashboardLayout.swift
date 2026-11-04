@@ -346,7 +346,7 @@ enum DashboardLayoutValidator {
 
 extension DashboardLayout {
     /// What a new rider sees. Page 1 is the dashboard as built before #139, which differs from
-    /// UX.md's S05.4 table (no radar cell; Cadence 2×1 on row 3). Pages 2–4 are a
+    /// UX.md's S05.4 table (no radar cell; Cadence 2×1 on row 3). Pages 2–5 are a
     /// temporary showcase that puts every widget on screen at every size it supports, until the
     /// spec settles page 2 (UX.md §S05 "Multiple pages": TBD).
     static let factory = DashboardLayout(pages: [
@@ -392,6 +392,10 @@ extension DashboardLayout {
             WidgetPlacement(ETADashboardWidget.self, size: .oneByOne, row: 4, column: 0),
             WidgetPlacement(SunsetDashboardWidget.self, size: .oneByOne, row: 4, column: 1),
             WidgetPlacement(ClimbDashboardWidget.self, size: .twoByOne, row: 5, column: 0),
+        ]),
+        // W1's speed gauge (#534): no page had a 2×2 free above the ride controls.
+        DashboardPage(placements: [
+            WidgetPlacement(SpeedGaugeDashboardWidget.self, size: .twoByTwo, row: 0, column: 0),
         ]),
     ])
 }
