@@ -120,6 +120,15 @@ struct RouteTerrainTests {
         #expect(terrain.character == .flat)
     }
 
+    @Test("a terrain model's dip where a level road crosses a creek on fill is not a steep grade")
+    func creekFillDipIsNotASteepGrade() throws {
+        // The model is bare earth, so it reads the creek bed: 8 m down and back over 100 m, on a
+        // road that stays level (Gibsonville 23). Over a 100 m window this read 5%.
+        let (total, elevation) = profile(lead: 2_450, [(50, -16), (50, 16)], tail: 2_500)
+        let terrain = try #require(RouteTerrain.analyze(route(meters: total, profile: elevation)))
+        #expect(terrain.maxGradePercent < 3)
+    }
+
     // MARK: - Moving average over missing samples (#303)
 
     @Test("with nothing missing, the optional moving average is the plain one")
@@ -196,8 +205,8 @@ struct RouteTerrainTests {
 
     @Test("a route of repeated 300 m walls is punchy end to end")
     func repeatedWallsArePunchy() throws {
-        // Four times: 300 m at 10% up, 300 m back down, 3.4 km level. Gain is at least 27 m a
-        // wall — the 3 m hysteresis can leave the last metres of each unbanked — so 108 m or
+        // Four times: 300 m at 10% up, 300 m back down, 3.4 km level. Gain is at least 29 m a
+        // wall — the 1 m hysteresis can leave the last metre of each unbanked — so 116 m or
         // more over 18 km is at least 6 m/km, rolling by gain, with two kicks every 10 km.
         let wall: [(meters: Double, gradePercent: Double)] = [(300, 10), (300, -10), (3_400, 0)]
         let terrain = try analyze(Array([wall, wall, wall, wall].joined()))
@@ -208,8 +217,8 @@ struct RouteTerrainTests {
     @Test("a kick gaining less than the climb dip tolerance still counts")
     func shortKicksAreFound() throws {
         // 110 m at 8.5% is 9.4 m — under `climbDipToleranceMeters`, so a climb-sized reversal
-        // tolerance never sees it. Eight of them, 920 m apart, over 7.8 km: the 3 m gain
-        // hysteresis banks at least 6.8 m of each, so the route is still rolling by gain.
+        // tolerance never sees it. Eight of them, 920 m apart, over 7.8 km: the 1 m gain
+        // hysteresis banks at least 8.3 m of each, so the route is still rolling by gain.
         let kick: [(meters: Double, gradePercent: Double)] = [(110, 8.5), (110, -8.5), (700, 0)]
         #expect(110 * 0.085 < RouteTerrain.climbDipToleranceMeters)
         let (total, elevation) = profile(lead: 200, Array(Array(repeating: kick, count: 8).joined()), tail: 200)

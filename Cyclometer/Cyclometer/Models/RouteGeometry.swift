@@ -5,14 +5,21 @@ import Foundation
 /// — the parser reads the file, this derives from what it read.
 enum RouteGeometry {
 
-    /// Elevation moves smaller than this are terrain-model noise, not climbing.
-    ///
-    /// GPX elevation is usually a digital elevation model sampled once per point, and
-    /// summing every positive delta over that jitter reports far more ascent than the
-    /// tool the rider planned in showed them for the same file. On S20 that reads as a
-    /// bug rather than as a rounding difference, so gain is accumulated with hysteresis
-    /// against this floor instead.
+    /// Elevation moves smaller than this are noise, not terrain: the floor for a ride's GPS
+    /// altitude, for a route's "kicks" (`RouteTerrain`), and the least height a chart spans.
+    /// A planned route's ascent uses `routeGainNoiseMeters` instead.
     static let elevationNoiseThresholdMeters = 3.0
+
+    /// The hysteresis floor for a planned route's ascent (`elevationGainLoss`).
+    ///
+    /// A route file's elevation is a digital elevation model sampled once per point, and
+    /// summing every positive delta reports more ascent than the tool the rider planned in
+    /// showed them for the same file. But that elevation is smooth to fractions of a metre,
+    /// and `elevationNoiseThresholdMeters` (3 m) dropped every roller shallower than that:
+    /// Gibsonville 23 read 797 ft against RideWithGPS's 992 and the ridden route's ~1,100 ft
+    /// on the barometer. It is the barometer's floor, so a planned route and the ride that
+    /// follows it bank the same rollers.
+    static let routeGainNoiseMeters = ElevationTracker.barometricNoiseMeters
 
     /// Length of the polyline, summed segment by segment.
     ///
@@ -414,7 +421,7 @@ enum RouteGeometry {
     /// same confident zero standing in for absent data that #211 had to unpick out of the
     /// track-point sentinels.
     ///
-    /// Hysteresis rather than a raw positive-delta sum, against `elevationNoiseThresholdMeters`:
+    /// Hysteresis rather than a raw positive-delta sum, against `routeGainNoiseMeters`:
     /// `ElevationGainTally`, the rule the live ride's ascent uses too (#387).
     static func elevationGainLoss(_ coordinates: [RouteCoordinate]) -> (gain: Double, loss: Double)? {
         let elevations = coordinates.compactMap(\.elevationMeters)
@@ -422,7 +429,7 @@ enum RouteGeometry {
 
         var tally = ElevationGainTally()
         for elevation in elevations {
-            tally.add(elevation, noiseMeters: elevationNoiseThresholdMeters)
+            tally.add(elevation, noiseMeters: routeGainNoiseMeters)
         }
         return (tally.gainMeters, tally.lossMeters)
     }

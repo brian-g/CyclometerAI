@@ -98,7 +98,13 @@ enum RouteTerrain {
     /// no timestamps, so the window is a distance. It is longer than 3–5 s at riding speed
     /// (20–50 m) because a route file's elevation comes from a terrain model, and over 20 m one
     /// bad point in that model reads as a 40% wall.
-    static let gradeWindowMeters = 100.0
+    ///
+    /// 300 m rather than 100 m because a terrain model is bare earth: where a road crosses a
+    /// creek on fill, the model reads the creek bed. On Gibsonville 23 that made an 8 m dip the
+    /// barometer rode as 3–4 m, and a 7.3% max grade over 100 m on a road RideWithGPS put at 4%
+    /// (5.1% over this window). The ride's live grade (W16) has no such floor in its data and
+    /// keeps its own, shorter window, `ElevationTracker.gradeWindowMeters`.
+    static let gradeWindowMeters = 300.0
 
     /// A descent smaller than this does not end a climb. Real climbs level off and dip for a
     /// few metres, and splitting a Cat 1 into two Cat 3s at every false flat would misdescribe

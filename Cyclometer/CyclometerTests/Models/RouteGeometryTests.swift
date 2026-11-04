@@ -10,11 +10,12 @@ struct RouteGeometryTests {
         RouteCoordinate(latitude: latitude, longitude: longitude, elevationMeters: elevation)
     }
 
-    /// A profile that only ever jitters, never climbs: alternating ±1 m about a level
-    /// mean, well inside the 3 m deadband.
+    /// A profile that only ever jitters, never climbs: alternating steps about a level mean,
+    /// just under `RouteGeometry.routeGainNoiseMeters`.
     private func jitteringProfile(count: Int) -> [RouteCoordinate] {
-        (0..<count).map { index in
-            coordinate(36.0 + Double(index) * 0.0001, -80.0, 200 + (index.isMultiple(of: 2) ? 1 : -1))
+        let amplitude = RouteGeometry.routeGainNoiseMeters * 0.45
+        return (0..<count).map { index in
+            coordinate(36.0 + Double(index) * 0.0001, -80.0, 200 + (index.isMultiple(of: 2) ? amplitude : -amplitude))
         }
     }
 
@@ -97,8 +98,8 @@ struct RouteGeometryTests {
 
     @Test("jitter below the threshold accumulates nothing")
     func elevationIgnoresJitterBelowTheThreshold() throws {
-        // The test a raw positive-delta sum fails: 200 alternating ±1 m steps would
-        // report ~200 m of climbing on a level road.
+        // The test a raw positive-delta sum fails: 200 alternating ±0.45 m steps would
+        // report ~90 m of climbing on a level road.
         let result = try #require(RouteGeometry.elevationGainLoss(jitteringProfile(count: 200)))
         #expect(result.gain == 0)
         #expect(result.loss == 0)
@@ -106,11 +107,11 @@ struct RouteGeometryTests {
 
     @Test("a long climb of sub-threshold steps still banks its full height")
     func elevationAccumulatesAClimbMadeOfSubThresholdSteps() throws {
-        // The test a per-delta filter fails: every step is 0.5 m, under the 3 m floor, but
+        // The test a per-delta filter fails: every step is 0.5 m, under the 1 m floor, but
         // the climb is 500 m. Only a *moving reference* accumulates this.
         let climb = (0...1000).map { coordinate(36.0 + Double($0) * 0.0001, -80.0, 200 + Double($0) * 0.5) }
         let result = try #require(RouteGeometry.elevationGainLoss(climb))
-        #expect(abs(result.gain - 500) < RouteGeometry.elevationNoiseThresholdMeters)
+        #expect(abs(result.gain - 500) < RouteGeometry.routeGainNoiseMeters)
         #expect(result.loss == 0)
     }
 
@@ -127,7 +128,7 @@ struct RouteGeometryTests {
 
     @Test("a move exactly at the threshold is banked; one just under it is not")
     func elevationThresholdIsInclusiveAtItsBoundary() throws {
-        let threshold = RouteGeometry.elevationNoiseThresholdMeters
+        let threshold = RouteGeometry.routeGainNoiseMeters
         let atThreshold = try #require(RouteGeometry.elevationGainLoss([
             coordinate(36.0, -80, 100), coordinate(36.1, -80, 100 + threshold),
         ]))

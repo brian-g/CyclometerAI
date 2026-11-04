@@ -88,7 +88,7 @@ struct ElevationTrackerTests {
         #expect(tracker.gradePercent == grade)
     }
 
-    @Test("GPS takes the route's 3 m floor, the barometer 1 m")
+    @Test("GPS takes the 3 m floor, the barometer 1 m")
     func floorFollowsSource() {
         let rollers = (0..<100).map { 100 + ($0.isMultiple(of: 2) ? 0.0 : 2.0) }
         #expect(tracker(rollers, source: .gps).ascentMeters == 0)

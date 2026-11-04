@@ -12,9 +12,14 @@ import Foundation
 @ObservableState
 struct ElevationTracker: Equatable, Sendable {
     /// The barometer resolves a fraction of a metre, but wind on the phone and a passing truck move
-    /// it by about that much. One metre clears that and still banks a short roller. GPS uses the
-    /// route's `RouteGeometry.elevationNoiseThresholdMeters`, since its altitude is noisier still.
+    /// it by about that much. One metre clears that and still banks a short roller. GPS uses
+    /// `RouteGeometry.elevationNoiseThresholdMeters`, since its altitude is noisier still.
     static let barometricNoiseMeters = 1.0
+
+    /// The run W16's grade is measured over. Shorter than a planned route's
+    /// `RouteTerrain.gradeWindowMeters`: ridden altitude follows the road surface, so a short
+    /// window shows a short ramp as it happens rather than averaging it into what comes after.
+    static let gradeWindowMeters = 100.0
 
     /// What a resumed ride had before the kill, from its saved track: the `Ride` row deliberately
     /// stores no elevation (#284).
@@ -67,7 +72,7 @@ struct ElevationTracker: Equatable, Sendable {
     private var lastDistanceMeters: Double?
     private var lastSource: AltitudeResolver.Source?
 
-    /// Rise over run across the last `RouteTerrain.gradeWindowMeters` ridden, in percent; nil until
+    /// Rise over run across the last `gradeWindowMeters` ridden, in percent; nil until
     /// the ride has covered that far with an altitude.
     private(set) var gradePercent: Double?
     /// The ride's steepest grade up (positive) and down (negative); nil until it has had one.
@@ -106,7 +111,7 @@ struct ElevationTracker: Equatable, Sendable {
         liveLowestMeters = min(liveLowestMeters ?? altitude, altitude)
 
         window.append(Point(distance: distanceMeters, altitude: altitude))
-        let start = distanceMeters - RouteTerrain.gradeWindowMeters
+        let start = distanceMeters - Self.gradeWindowMeters
         // Keeps the newest point at or before the window's start, so the run spans it in full.
         while window.count > 1, window[1].distance <= start { window.removeFirst() }
         guard let first = window.first, first.distance <= start else { return }

@@ -1904,3 +1904,17 @@ map and calories but not these, so after a kill W2 covers only the time since th
   the resume; (5) elevation/HR seeds can double-count a flush since the resume; (6) Danger override's speaker
   route throws under `.playback`
 
+
+---
+
+# Route ascent under-counts against RideWithGPS (Gibsonville 23: 797 vs 992 ft)
+Analysis: our 797 ft is the 3 m hysteresis floor on a smooth terrain-model profile; 1 m gives 1091 ft, 2 m 984 ft.
+The barometer on the ridden route (1 m floor) read 853 ft at 17.1 mi and ~1,100 ft for the whole route. Brian: "1. Yes do this."
+- [x] `RouteGeometry.routeGainNoiseMeters = 1.0` for `elevationGainLoss`; `elevationNoiseThresholdMeters` stays 3 m for GPS ride altitude, kicks, chart spans
+- [x] `RouteGeometryTests` jitter fixture/threshold tests moved to the new floor
+- [ ] Brian runs it: re-import Gibsonville_23.gpx; S20 gain reads ~1,091 ft
+- [ ] Open: already-imported routes keep their stored gain (no re-derive pass)
+- [x] Max grade 7% was a DEM artifact at mi 22.58 (DEM dip 8 m, barometer 3–4 m). Brian: "Do the 300m window"
+      `RouteTerrain.gradeWindowMeters` 100 → 300 m (max grade, climb max grade, narrative grade bands);
+      live W16 keeps 100 m via new `ElevationTracker.gradeWindowMeters`
+- [ ] Brian runs it: re-imported Gibsonville 23 reads Max 5% grade
