@@ -1891,3 +1891,16 @@ map and calories but not these, so after a kill W2 covers only the time since th
 ## Then
 - [x] Targeted suites, then full `CyclometerTests`: 2439 passed, 0 failed
 - [x] Branch `fix/background-tones-and-resumed-speed-history`, commit, PR (#532)
+
+## Review follow-ups (`/code-review --fix`, 2026-11-03; Brian: "fix 1 and 2. None of 3-6")
+- [x] (1) `AudioClient.stop`: stops the engine and deactivates the session, called from the ride-end teardown;
+      with `audio` back, a running engine would hold the app awake after the ride. `RideEndAudioTests`, red without the call
+- [x] (2) The resume seed widened the shared watermark window and crowded W4/W5/W17 to its right edge.
+      `SpeedHistorySeed` → `WatermarkSeed` (`Models/`), seeding speed, average, cadence, HR and altitude together;
+      `WatermarkSeedTests` 6/6
+- [x] Full `CyclometerTests`: 2442 passed, 0 failed; commit, push
+- [ ] Brian: finish a ride, lock the phone, app suspends; resume after a kill keeps W4/W5/W17 traces
+- Deferred (Brian: "None of 3-6"): (3) W2 ramps across pauses and the kill gap; (4) replayed average can step at
+  the resume; (5) elevation/HR seeds can double-count a flush since the resume; (6) Danger override's speaker
+  route throws under `.playback`
+

@@ -25,6 +25,10 @@ struct AudioClient {
     /// The toolbar's Bell button (#492). For the people ahead of the rider, not the rider.
     var playBell:               @Sendable () async -> Void
     var setOverridesSilentMode: @Sendable (Bool) async -> Void
+    /// The ride is over: stop the engine and give up the session. With the `audio` background mode
+    /// a running engine keeps iOS from suspending the app, so leaving it up after the ride would
+    /// hold the app awake in the background until it is killed. The next tone starts it again.
+    var stop:                   @Sendable () async -> Void
 }
 
 extension AudioClient: DependencyKey {
@@ -36,7 +40,8 @@ extension AudioClient: DependencyKey {
             playDanger:              { await state.play(.danger) },
             playTurn:               { direction in await state.play(ToneKind(turn: direction)) },
             playBell:               { await state.play(.bell) },
-            setOverridesSilentMode: { enabled in state.setOverridesSilentMode(enabled) }
+            setOverridesSilentMode: { enabled in state.setOverridesSilentMode(enabled) },
+            stop:                   { state.stop() }
         )
     }()
 
@@ -46,7 +51,8 @@ extension AudioClient: DependencyKey {
         playDanger:              { },
         playTurn:               { _ in },
         playBell:               { },
-        setOverridesSilentMode: { _ in }
+        setOverridesSilentMode: { _ in },
+        stop:                   { }
     )
 }
 
@@ -386,6 +392,23 @@ private final class AudioEngineState: @unchecked Sendable {
 
     func setOverridesSilentMode(_ enabled: Bool) {
         lock.withLock { silentModeOverrideEnabled = enabled }
+    }
+
+    /// Under `lock`, so a tone starting concurrently either finishes its setup first and is cut
+    /// off here, or starts after and brings the engine and session back up. `player.stop()` fires a
+    /// sounding tone's completion, which only resumes its `play` call. The engine goes before the
+    /// session: deactivating a session with running I/O fails.
+    func stop() {
+        lock.withLock {
+            player.stop()
+            sounding = nil
+            engine.stop()
+            do {
+                try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            } catch {
+                logger.error("deactivating the audio session failed: \(error)")
+            }
+        }
     }
 
     func play(_ kind: ToneKind) async {
