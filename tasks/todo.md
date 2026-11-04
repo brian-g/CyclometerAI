@@ -1904,3 +1904,29 @@ map and calories but not these, so after a kill W2 covers only the time since th
   the resume; (5) elevation/HR seeds can double-count a flush since the resume; (6) Danger override's speaker
   route throws under `.playback`
 
+
+---
+
+# Route ascent under-counts against RideWithGPS (Gibsonville 23: 797 vs 992 ft)
+Analysis: our 797 ft is the 3 m hysteresis floor on a smooth terrain-model profile; 1 m gives 1091 ft, 2 m 984 ft.
+The barometer on the ridden route (1 m floor) read 853 ft at 17.1 mi and ~1,100 ft for the whole route. Brian: "1. Yes do this."
+- [x] `RouteGeometry.routeGainNoiseMeters = 1.0` for `elevationGainLoss`; `elevationNoiseThresholdMeters` stays 3 m for GPS ride altitude, kicks, chart spans
+- [x] `RouteGeometryTests` jitter fixture/threshold tests moved to the new floor
+- [ ] Brian runs it: re-import Gibsonville_23.gpx; S20 gain reads ~1,091 ft
+- [ ] Open: already-imported routes keep their stored gain (no re-derive pass)
+- [x] Max grade 7% was a DEM artifact at mi 22.58 (DEM dip 8 m, barometer 3–4 m). Brian: "Do the 300m window"
+      `RouteTerrain.gradeWindowMeters` 100 → 300 m (max grade, climb max grade, narrative grade bands);
+      live W16 keeps 100 m via new `ElevationTracker.gradeWindowMeters`
+- [ ] Brian runs it: re-imported Gibsonville 23 reads Max 5% grade
+
+## Review follow-ups (`/code-review --fix`, 2026-11-04; Brian: "1. go back to 100m and fill the narrow dips… 2. go with 1.5m. 3. pass, 4. don't change.")
+- [x] (1) 300 m window read a punchy route as "Max 3% grade | Punchy". Back to 100 m; `RouteTerrain.filledDips`
+      (morphological closing, `dipFillWidthMeters = 100`) before smoothing. Gibsonville: Max 7.3% → 6.2% at mi 8.74,
+      a real climb (barometer ~5.5–5.7%). W16 shares the 100 m window again; UX.md back to main
+- [x] (2) `routeGainNoiseMeters = 1.5`: whole-metre-rounded files flipped by exactly 1 m. Gibsonville 1,010 ft (1,024 rounded)
+- [x] Tests: whole-metre jitter fixture, `filledDipsFillsValleysNotHills`, kicks fixture pins max grade > 6%; build-for-testing green
+- (3) Re-derive stored routes: skipped (Brian: "#3 skip"); earlier imports keep their values until re-imported
+- (4) Character thresholds unchanged
+- [ ] Brian runs it: re-import Gibsonville 23 → ~1,010 ft, Max 6% grade
+- [x] Full `CyclometerTests`: first run 2444/2445 — `filledDipsFillsValleysNotHills` caught clamped windows levelling
+      a route's first/last 50 m; windows now hang off the ends (−∞ padding). Rerun: 2445 passed, 0 failed

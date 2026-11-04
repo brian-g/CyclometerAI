@@ -907,3 +907,12 @@ Declaration order is not a documented contract, and it did not hold.
 **Rule.** When a fix rests on an undocumented framework behaviour, grep the SDK's `.swiftinterface` first
 (SwiftUI MapKit lives in `_MapKit_SwiftUI.framework`, not `MapKit.framework`). If the behaviour isn't an API,
 say so when handing it over, and rate it [Guessing], not [Likely].
+
+## Route terrain numbers: check the ride's barometer before calling a ramp real (#533)
+I called Gibsonville's 7.3% max grade "a real short ramp, not a data glitch" from the terrain model alone. Brian
+rode it: "no where close to 7-8%". The ride export's barometer showed a 3–4 m dip where the model had 8 m — a
+creek on fill, which a bare-earth model reads as the creek bed.
+
+**Rule.** Before defending or changing a route's gain or grade, compare it with a ridden export of the same road
+(`Cyclometer_*.gpx`, barometric altitude) at the same spot. And replay a proposed threshold on the fixtures the
+other terrain outputs rely on (punchy, kicks): the 300 m window fixed the max grade and broke the Punchy label.

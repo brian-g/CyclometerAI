@@ -12,8 +12,8 @@ import Foundation
 @ObservableState
 struct ElevationTracker: Equatable, Sendable {
     /// The barometer resolves a fraction of a metre, but wind on the phone and a passing truck move
-    /// it by about that much. One metre clears that and still banks a short roller. GPS uses the
-    /// route's `RouteGeometry.elevationNoiseThresholdMeters`, since its altitude is noisier still.
+    /// it by about that much. One metre clears that and still banks a short roller. GPS uses
+    /// `RouteGeometry.elevationNoiseThresholdMeters`, since its altitude is noisier still.
     static let barometricNoiseMeters = 1.0
 
     /// What a resumed ride had before the kill, from its saved track: the `Ride` row deliberately
