@@ -98,13 +98,16 @@ enum RouteTerrain {
     /// no timestamps, so the window is a distance. It is longer than 3–5 s at riding speed
     /// (20–50 m) because a route file's elevation comes from a terrain model, and over 20 m one
     /// bad point in that model reads as a 40% wall.
-    ///
-    /// 300 m rather than 100 m because a terrain model is bare earth: where a road crosses a
-    /// creek on fill, the model reads the creek bed. On Gibsonville 23 that made an 8 m dip the
-    /// barometer rode as 3–4 m, and a 7.3% max grade over 100 m on a road RideWithGPS put at 4%
-    /// (5.1% over this window). The ride's live grade (W16) has no such floor in its data and
-    /// keeps its own, shorter window, `ElevationTracker.gradeWindowMeters`.
-    static let gradeWindowMeters = 300.0
+    static let gradeWindowMeters = 100.0
+
+    /// A dip narrower than this is filled before anything is graded. A terrain model is bare
+    /// earth, so where a road crosses a creek on fill it reads the creek bed: on Gibsonville 23
+    /// an 8 m dip the barometer rode as 3–4 m, and a 7.3% max grade on a road that never got
+    /// near it. A dip is a valley and a short ramp is a hill, so filling one leaves the other
+    /// alone; widening `gradeWindowMeters` instead averaged real ramps away with the dip (it
+    /// read a punchy route's 8.5% kicks as 3%). What it costs: the bottom of a real valley is
+    /// levelled across this width, by half its width times the steeper side's grade.
+    static let dipFillWidthMeters = 100.0
 
     /// A descent smaller than this does not end a climb. Real climbs level off and dip for a
     /// few metres, and splitting a Cat 1 into two Cat 3s at every false flat would misdescribe
@@ -210,7 +213,8 @@ enum RouteTerrain {
 
     // MARK: - Steps
 
-    /// The route's elevation resampled to `sampleSpacingMeters` (`raw`), smoothed over
+    /// The route's elevation resampled to `sampleSpacingMeters`, with dips narrower than
+    /// `dipFillWidthMeters` filled (`raw`), smoothed over
     /// `smoothingWindowMeters` (`elevation`), and the grade at each smoothed sample. One pipeline
     /// for `analyze` and the narrative's grade histogram (#203), so the two cannot disagree about
     /// how steep the road is. Nil for a route with no length or no elevation.
@@ -220,12 +224,34 @@ enum RouteTerrain {
         let total = RouteGeometry.distanceMeters(coordinates)
         guard total > 0 else { return nil }
         let count = Int(total / sampleSpacingMeters) + 1
-        guard let raw = RouteGeometry.elevationProfile(coordinates, sampleCount: count) else { return nil }
+        guard let resampled = RouteGeometry.elevationProfile(coordinates, sampleCount: count) else { return nil }
         // `elevationProfile` never returns fewer than two samples, so this never divides by zero.
-        let spacing = total / Double(raw.count - 1)
+        let spacing = total / Double(resampled.count - 1)
+
+        let raw = filledDips(resampled, halfWindow: Int((dipFillWidthMeters / 2 / spacing).rounded()))
 
         let elevation = movingAverage(raw, halfWindow: Int((smoothingWindowMeters / 2 / spacing).rounded()))
         return (raw, elevation, grades(elevation, spacing: spacing), spacing)
+    }
+
+    /// `values` with every dip narrower than `halfWindow` samples either side filled: the
+    /// highest value within reach, then the lowest of those (a morphological closing). Never
+    /// below `values`, and a rise, a fall or a hill comes through unchanged, because each point
+    /// has a window on its own slope whose highest value is the point itself.
+    ///
+    /// Windows may hang off either end, so a route that starts or finishes on a slope keeps it:
+    /// clamped to the profile, every window near the start would reach into the climb after it.
+    static func filledDips(_ values: [Double], halfWindow: Int) -> [Double] {
+        guard halfWindow > 0, values.count > 1 else { return values }
+        func sweep(_ input: [Double], _ pick: (Double, Double) -> Double) -> [Double] {
+            input.indices.map { index in
+                input[max(0, index - halfWindow)...min(input.count - 1, index + halfWindow)].reduce(input[index], pick)
+            }
+        }
+        // Off the ends is lower than anything, so it never raises a window's highest value.
+        let edge = Array(repeating: -Double.infinity, count: halfWindow)
+        let closed = sweep(sweep(edge + values + edge, max), min)
+        return Array(closed[halfWindow..<halfWindow + values.count])
     }
 
     /// `rise` with every step shallower than `riseEndTrimGradePercent` taken off each end.

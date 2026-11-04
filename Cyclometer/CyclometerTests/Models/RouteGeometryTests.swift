@@ -10,12 +10,11 @@ struct RouteGeometryTests {
         RouteCoordinate(latitude: latitude, longitude: longitude, elevationMeters: elevation)
     }
 
-    /// A profile that only ever jitters, never climbs: alternating steps about a level mean,
-    /// just under `RouteGeometry.routeGainNoiseMeters`.
+    /// A profile that only ever jitters, never climbs: a file that rounds to whole metres,
+    /// flipping between 200 and 201 m on a level road — the largest step such a file jitters by.
     private func jitteringProfile(count: Int) -> [RouteCoordinate] {
-        let amplitude = RouteGeometry.routeGainNoiseMeters * 0.45
-        return (0..<count).map { index in
-            coordinate(36.0 + Double(index) * 0.0001, -80.0, 200 + (index.isMultiple(of: 2) ? amplitude : -amplitude))
+        (0..<count).map { index in
+            coordinate(36.0 + Double(index) * 0.0001, -80.0, index.isMultiple(of: 2) ? 200 : 201)
         }
     }
 
@@ -98,8 +97,8 @@ struct RouteGeometryTests {
 
     @Test("jitter below the threshold accumulates nothing")
     func elevationIgnoresJitterBelowTheThreshold() throws {
-        // The test a raw positive-delta sum fails: 200 alternating ±0.45 m steps would
-        // report ~90 m of climbing on a level road.
+        // The test a raw positive-delta sum fails: 200 whole-metre rounding flips would
+        // report ~100 m of climbing on a level road. So does an inclusive 1 m floor.
         let result = try #require(RouteGeometry.elevationGainLoss(jitteringProfile(count: 200)))
         #expect(result.gain == 0)
         #expect(result.loss == 0)
@@ -107,7 +106,7 @@ struct RouteGeometryTests {
 
     @Test("a long climb of sub-threshold steps still banks its full height")
     func elevationAccumulatesAClimbMadeOfSubThresholdSteps() throws {
-        // The test a per-delta filter fails: every step is 0.5 m, under the 1 m floor, but
+        // The test a per-delta filter fails: every step is 0.5 m, under the 1.5 m floor, but
         // the climb is 500 m. Only a *moving reference* accumulates this.
         let climb = (0...1000).map { coordinate(36.0 + Double($0) * 0.0001, -80.0, 200 + Double($0) * 0.5) }
         let result = try #require(RouteGeometry.elevationGainLoss(climb))

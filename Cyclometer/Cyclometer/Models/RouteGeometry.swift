@@ -17,9 +17,11 @@ enum RouteGeometry {
     /// showed them for the same file. But that elevation is smooth to fractions of a metre,
     /// and `elevationNoiseThresholdMeters` (3 m) dropped every roller shallower than that:
     /// Gibsonville 23 read 797 ft against RideWithGPS's 992 and the ridden route's ~1,100 ft
-    /// on the barometer. It is the barometer's floor, so a planned route and the ride that
-    /// follows it bank the same rollers.
-    static let routeGainNoiseMeters = ElevationTracker.barometricNoiseMeters
+    /// on the barometer. Above a whole metre on purpose: a file that rounds its elevations to
+    /// whole metres flips by exactly 1 m on level ground, and an inclusive 1 m floor banked
+    /// every flip (Gibsonville rounded read 1,220 ft; at 1.5 m it reads 1,024, and 1,010 as
+    /// exported).
+    static let routeGainNoiseMeters = 1.5
 
     /// Length of the polyline, summed segment by segment.
     ///

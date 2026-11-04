@@ -97,7 +97,7 @@ struct RoutePersistenceTests {
         #expect(summary.elevationGainMeters == elevation.gain)
         #expect(summary.elevationLossMeters == elevation.loss)
         #expect(summary.bounds == RouteGeometry.boundingBox(imported.coordinates))
-        // 4 rises of 40 m, all clearing the 1 m floor.
+        // 4 rises of 40 m, all clearing the 1.5 m floor.
         #expect(summary.elevationGainMeters == 160)
         #expect(summary.elevationLossMeters == 0)
     }

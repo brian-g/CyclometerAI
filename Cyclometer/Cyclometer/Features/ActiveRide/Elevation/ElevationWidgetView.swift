@@ -55,7 +55,7 @@ struct ElevationTotalWidget: View {
 
 // MARK: - W16 Grade
 
-/// W16 Grade (#387): the road's slope over the last `ElevationTracker.gradeWindowMeters` ridden.
+/// W16 Grade (#387): the road's slope over the last `RouteTerrain.gradeWindowMeters` ridden.
 struct GradeWidget: View {
     let percent: Double?
     var metrics: () -> ElevationMetrics = { ElevationMetrics() }

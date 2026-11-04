@@ -826,7 +826,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 **Sizes:** 1x1
 
-- Value: the road's slope over the last 100 m ridden (shorter than S20's 300 m: ridden altitude has no terrain-model dips to average out), signed whole percent: "+4 %" climbing, "-3 %" descending (#387). "—" until the ride has covered 100 m with an altitude
+- Value: the road's slope over the last 100 m ridden (S20's grade window), signed whole percent: "+4 %" climbing, "-3 %" descending (#387). "—" until the ride has covered 100 m with an altitude
 - Holds while stopped, and after a pause until a fresh 100 m is ridden. A grade steeper than 25% (`RideEnergy.maxPlausibleGrade`) is altitude noise, not road, and is dropped for the last believable one
 - Sheet: Elevation
 
