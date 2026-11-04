@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-10-23 — Ride metrics pass. New widgets, none built yet: §W19 Distance Remaining and §W20 ETA (#461), §W21 Sunset (#462), §W22 Climb (#463), §W23 Active Calories with its Calories sheet (#465). §S05's Bottom Toolbar gains the Sensors sheet that the Sensor button (#466) and a new quiet Low Battery indicator (#464) both open. §S10 points to that indicator. §S15's Stats gain average and max HR, ascent, descent and calories (#460).  
 **Updated:** 2026-10-20 — §W5's zone bands are the rider's five cadence zones, drawn with or without readings, in the HR zone colours. §S12 gains a Cadence Zones section to set them (#79).  
 **Updated:** 2026-10-20 — §S12 wheel size is the inline picker as built, not a navigation row (#101 closed not planned, #84).  
 **Updated:** 2026-10-13 — §S12 gains Show Live Activity (#313).  
@@ -541,12 +542,19 @@ Toolbar buttons shown based on ride state:
 | Button | Shown when |
 |---|---|
 | Pause | Ride is active |
-| Sensor | One or more paired sensors not found |
+| Sensor | One or more paired sensors not found (#466) |
+| Low Battery | A connected sensor reads at or below 20% (`SensorHealth.lowBatteryPercent`, #464) |
 | Resume | Ride is paused |
 | Finish | Ride is paused |
 | Bell | Always |
 
 All toolbar buttons use `.buttonStyle(.glass)` (iOS 26), `.labelStyle(.iconOnly)`, and a 52×52pt frame. The toolbar uses `.sharedBackgroundVisibility(.hidden)`.
+
+- **Sensor** (#466): `sensor.tag.radiowaves.forward.fill`, badged with the number of paired sensors whose link isn't active, whether never found this ride or dropped. A combo CSC sensor counts once. Hidden while every paired sensor is connected, and when nothing is paired.
+- **Low Battery** (#464): a battery glyph tinted `cyRatingBad`, the point at which `SensorBatteryLabel` turns red. Hidden otherwise.
+- **Quiet.** Neither button plays a sound, fires a haptic or raises a banner: nothing mid-ride competes with radar alerts (§S10 "Sensors"). They appear and leave with the controls' transition, or a fade under Reduce Motion.
+- **Sheet: Sensors.** Both buttons open it. It lists every paired sensor with its status (connected, searching) and, when connected, its battery level. It has no pairing or forgetting actions; those stay in §S11.
+- **Placement.** Where the two sit beside Pause and Bell follows a Design.sketch S05 frame, which comes before either is built.
 
 **Key Layout Decisions:**
 - [x] S05.4 factory default layout resolved — see table above; rider-customisable after first launch
@@ -812,6 +820,64 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 ---
 
+#### W19 — Distance Remaining
+
+**Sizes:** 1x1 · **Category:** Route
+
+- Value: the route's length less the rider's progress along it, in km or mi to one decimal, as W6 (#461)
+- A value only while a route is being followed, as W18's ridden part: with turn-by-turn off the route isn't matched. Off route it holds the last matched progress. Once the route is complete it reads 0. On a loop's second lap it counts down to that lap's finish
+- Empty state: "--" with no route, or with turn-by-turn off
+- Sheet: Map, as W9
+
+---
+
+#### W20 — ETA
+
+**Sizes:** 1x1 · **Category:** Route
+
+- Value: the clock time the rider will arrive: now, plus W19's distance divided by W2's moving average speed, in the device's 12- or 24-hour format (#461). A stop pushes it later on its own, because "now" keeps advancing
+- Empty state: "--" when W19 has no value, or before the first moving second
+- Not terrain-aware. A projection from the route's climbs needs power and the rider model (#270, Phase 3)
+- Sheet: Map, as W9
+
+---
+
+#### W21 — Sunset
+
+**Sizes:** 1x1 · **Category:** Ride
+
+- Value: hours and minutes until today's sunset at the rider's location, labelled "TO SUNSET" (#462)
+- Computed on the phone from the latest fix and the date (NOAA solar position). No network and no WeatherKit, so it works offline. Recomputed at most once a minute
+- Empty state: "--" before a fix, after sunset, and on a day with no sunset (polar day or night)
+- Sheet: Map, as W9
+
+---
+
+#### W22 — Climb
+
+**Sizes:** 2x1 · **Category:** Route
+
+- Reads the route's climbs, which import already finds and categorises (§S20, `RouteTerrain`). Nothing is detected live (#463)
+- **On a climb:** distance to the top, climbing left (the climb's top less the route's elevation where the rider is), its category and average grade, and the climb's profile with the rider's place on it
+- **Between climbs:** the next climb's category, the distance to its start, and its length and gain
+- Off route it holds the last matched progress, as W19 does
+- Empty state: "--" with no route, turn-by-turn off, a route without elevation, or no climbs ahead
+- Sheet: Elevation
+
+---
+
+#### W23 — Active Calories
+
+**Sizes:** 1x1 · **Category:** Ride
+
+- Value: the ride's active energy so far in kcal, labelled "ACTIVE CALORIES" (#465)
+- The same estimate §S10's Health workout carries (#276), recomputed once a minute over the track recorded so far, so the ride's last value is the one written to Health. It uses heart rate when HR covers half the moving time and the rider's age and sex are known; otherwise physics along the track, or MET without a usable track
+- Empty state: "--" with no body weight in Health (a guessed weight is never shown as measured), and before the first estimate
+- Holds while paused. A ride resumed after a kill rebuilds its calories from the saved track
+- **Sheet: Calories.** A chart of calories accumulating over ride time, a point a minute. Under it: the total, which model produced it (heart rate, physics or MET), and the average rate in kcal per hour of moving time. When the estimate switches from physics to heart rate, the line can step; earlier points stay as they were computed. With no body weight the sheet says Health has none
+
+---
+
 ### Open UX Questions
 - [x] S05.4 factory default layout resolved — see table above.
 - [x] S05.5 removed — pages beyond page 1 are rider-defined, not factory-specified.
@@ -946,7 +1012,7 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 - Ride stats: total distance, total time, avg speed, average cadence (only if a cadence sensor reported), vehicle pass count (only with radar paired), route
 - Elevation profile
 - HR zone breakdown (pie chart), derived from the saved track against the rider's current zones (S12), like S15's HR chart; "No heart rate recorded" when there is none
-- **Sensors** (#391), only when the ride flagged one. Each flagged device appears once (a combo CSC sensor lists both its roles), with "LOW BATTERY" or "UNRELIABLE CONNECTION — CHECK BATTERY OR MOUNT" under it. There is no mid-ride alert, because it would compete with radar alerts. See BLE.md §14.5
+- **Sensors** (#391), only when the ride flagged one. Each flagged device appears once (a combo CSC sensor lists both its roles), with "LOW BATTERY" or "UNRELIABLE CONNECTION — CHECK BATTERY OR MOUNT" under it. There is no mid-ride alert, because it would compete with radar alerts. Mid-ride, a quiet Low Battery indicator in §S05's Bottom Toolbar shows instead (#464). See BLE.md §14.5
 - **Sync button** — Phase 2; taps present the Service Sync sheet (see below)
 - **Finish Ride** — a floating button that closes the sheet to the tabs, where the ride is in S14
 
@@ -1208,6 +1274,10 @@ ContentUnavailableView {
 - Route section, after the map: the route the ride followed, a link to its S20. A route deleted since shows its name with no link; a free ride has no section (#426)
 - Elevation profile chart (Swift Charts, AreaMark + LineMark in `brPrimary`)
 - Stats section: avg/max speed, avg/max cadence
+- Stats added by #460, not yet built:
+  - **Avg/Max HR:** from the `Ride` row. "—" without an HR source, as cadence.
+  - **Ascent/Descent:** recounted from the saved track by §W14's rule, so they match what the dashboard showed at the finish. The `Ride` row still stores no elevation (#284).
+  - **Calories:** the §S10 Health workout's estimate, from the saved track and the rider's current Health body weight. Hidden without one. A later change of weight moves an old ride's estimate.
 - HR zone graph over elapsed time
 - Strava segments list: name, distance, best time + date
 - GPX re-export action
