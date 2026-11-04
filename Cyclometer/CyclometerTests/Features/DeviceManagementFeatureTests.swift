@@ -8,7 +8,7 @@ import ComposableArchitecture
 struct DeviceManagementFeatureTests {
 
     private static let pairedID = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
-    private static let availableID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!
+    nonisolated private static let availableID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!
     private static let radarID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C3")!
     private static let hrID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D4")!
     /// A second paired CSC sensor, for the collisions that displace two incumbents.

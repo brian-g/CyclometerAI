@@ -562,11 +562,14 @@ struct LiveActivityFeatureTests {
     func settingOffWhileStartingSendsNothingMore() async {
         let ride = Self.makeRide()
         let calls = ride.calls
-        let clock = ride.clock
+        let (answered, answer) = AsyncStream<Void>.makeStream()
         var client = Self.recordingClient(into: calls)
         let recordedStart = client.start
         client.start = { attributes, content in
-            try? await clock.sleep(for: .milliseconds(500))
+            // Turning it off cancels this effect but not ActivityKit's request, so the wait is
+            // outside the cancellation: a cancelled clock sleep returns at once, and the answer
+            // then raced the setting's end.
+            await Task { for await _ in answered { break } }.value
             return await recordedStart(attributes, content)
         }
         ride.store.dependencies.liveActivityClient = client
@@ -575,11 +578,12 @@ struct LiveActivityFeatureTests {
         #expect(ride.store.state.liveActivity.phase == .starting)
         ride.store.state.$preferences.withLock { $0.isLiveActivityEnabled = false }
         await ride.store.send(.liveActivity(.preferenceChanged))
-        await clock.advance(by: .milliseconds(500))
+        await expectEventually("the setting's end") { calls.value == [.end] }
+        answer.yield()
         await expectEventually("the request still made") { calls.starts == 1 }
 
         await ride.tick(3)
-        // The recording client doesn't queue, so the setting's end is recorded ahead of the start.
+        // The recording client doesn't queue, so the answer, released after the end, lands last.
         #expect(calls.value.filter { $0 == .end }.count == 1)
         guard case .start = calls.value.last else {
             Issue.record("nothing after the start, got \(calls.value)")

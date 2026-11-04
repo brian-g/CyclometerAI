@@ -2,6 +2,9 @@ import SwiftUI
 
 enum HeroUnitAlignment: Hashable { case vertical, horizontal }
 enum HeroSize: Hashable { case small, medium, large }
+/// Where `heroAccessory` sits beside the digits: on their baseline (a glyph, W9's turn arrow), or
+/// centred on their height (a marker, the Heart rate sheet's zone dot, #494).
+enum HeroAccessoryPlacement: Hashable { case baseline, capCenter }
 
 struct HeroNumber<Label: View>: View {
     /// A `Text` rather than a `String`, so a self-updating one (the Live Activity's
@@ -12,8 +15,11 @@ struct HeroNumber<Label: View>: View {
     var alignment: HeroUnitAlignment = .horizontal
     var color: Color = .primary
     var accessory: AnyView? = nil
+    var accessoryPlacement: HeroAccessoryPlacement = .baseline
     var capAccessory: ((CGFloat) -> AnyView)? = nil
     let label: Label
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     // MARK: - Plain-value inits
 
@@ -94,12 +100,17 @@ struct HeroNumber<Label: View>: View {
         return copy
     }
 
-    /// Optional view shown immediately before the value, baseline-aligned with
-    /// it (e.g. W9's turn arrow). Lives inside HeroNumber so callers don't have
-    /// to re-derive the value's baseline.
-    func heroAccessory<A: View>(@ViewBuilder _ make: () -> A) -> Self {
+    /// Optional view shown immediately before the value, on its baseline (e.g. W9's turn arrow)
+    /// or centred on its digits (`.capCenter`, e.g. a sheet's zone dot). Lives inside HeroNumber so
+    /// callers don't have to re-derive the value's baseline: `.baselineOffset` lowers the digits'
+    /// glyphs but not the baseline the row aligns on, so the accessory takes the same offset to sit
+    /// on the digits, not above them (#494).
+    func heroAccessory<A: View>(
+        _ placement: HeroAccessoryPlacement = .baseline, @ViewBuilder _ make: () -> A
+    ) -> Self {
         var copy = self
         copy.accessory = AnyView(make())
+        copy.accessoryPlacement = placement
         return copy
     }
 
@@ -141,15 +152,24 @@ struct HeroNumber<Label: View>: View {
         }
     }
 
+    /// The digits' cap height, from the point size Dynamic Type draws them at: known before
+    /// layout, so a `.capCenter` accessory is centred in a single-pass render too.
+    private var capHeight: CGFloat {
+        let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(dynamicTypeSize))
+        let pointSize = UIFontMetrics(forTextStyle: .largeTitle).scaledValue(for: ptSize, compatibleWith: traits)
+        return pointSize * AppFonts.dDINCapHeightToPointSize
+    }
+
     // MARK: - Body
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            label.textCase(.uppercase)
+            // Label and unit stop growing at `cyCaptionMax`; the digits keep scaling (#499).
+            label.heroLabel()
             if alignment == .vertical {
                 VStack(alignment: .trailing, spacing: 0) {
                     HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
-                        if let accessory { accessory }
+                        placedAccessory
                         scaledValue
                     }
                     .digitBaselines(offset)
@@ -157,7 +177,7 @@ struct HeroNumber<Label: View>: View {
                 }
             } else {
                 HStack(alignment: .lastTextBaseline, spacing: Spacing.xs) {
-                    if let accessory { accessory }
+                    placedAccessory
                     scaledValue
                     if !unit.isEmpty { unitLabel.baselineOffset(offset) }
                 }
@@ -167,6 +187,22 @@ struct HeroNumber<Label: View>: View {
     }
 
     // MARK: - Private helpers
+
+    /// On the baseline, its bottom there; centred, its middle half the cap height above it. Then
+    /// lowered with the digits' glyphs, which `.baselineOffset` draws below the row's baseline.
+    @ViewBuilder
+    private var placedAccessory: some View {
+        if let accessory {
+            switch accessoryPlacement {
+            case .baseline:
+                accessory.offset(y: -offset)
+            case .capCenter:
+                accessory
+                    .alignmentGuide(.lastTextBaseline) { $0[VerticalAlignment.center] + capHeight / 2 }
+                    .offset(y: -offset)
+            }
+        }
+    }
 
     private var scaledValue: some View {
         valueText
@@ -191,7 +227,21 @@ struct HeroNumber<Label: View>: View {
     }
 
     private var unitLabel: some View {
-        Text(unit).textCase(.lowercase).font(.footnote)
+        Text(unit).textCase(.lowercase).heroUnit()
+    }
+}
+
+extension View {
+    /// A hero's label: capitals, held at `cyCaptionMax` while the digits keep scaling (#499). For a
+    /// label set above several heroes, as `ReadingColumn` does (#494).
+    func heroLabel() -> some View {
+        textCase(.uppercase).dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
+    }
+
+    /// A hero's unit size, held at `cyCaptionMax` (#499). For text set beside a hero as small as
+    /// its unit, as `ReadingColumn`'s "/" (#494).
+    func heroUnit() -> some View {
+        font(.footnote).dynamicTypeSize(...DynamicTypeSize.cyCaptionMax)
     }
 }
 

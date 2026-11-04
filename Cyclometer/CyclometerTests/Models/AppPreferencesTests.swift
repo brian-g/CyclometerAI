@@ -76,7 +76,11 @@ struct AppPreferencesTests {
         var preferences = AppPreferences()
         preferences.wheelCircumferenceMM = 2155
         preferences.isAutoDimEnabled = false
+        // Added by #471.
+        preferences.autoDimBrightness = 0.3
         preferences.isAutoPauseEnabled = false
+        // Added by #267, default false.
+        preferences.isResumeWhenMovingEnabled = true
         // Whichever unit the machine's locale is not — a literal would be the default
         // on half of all machines, and prove nothing there.
         preferences.preferredUnit = UnitSystem.system == .metric ? .imperial : .metric
@@ -101,6 +105,8 @@ struct AppPreferencesTests {
         preferences.dashboardLayout = DashboardLayout(pages: [
             DashboardPage(placements: [WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 6, column: 1)])
         ])
+        // Added by #517, default empty.
+        preferences.collapsedWidgetCategories = [.route, .heartRate]
 
         let data = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
@@ -119,8 +125,12 @@ struct AppPreferencesTests {
         #expect(decoded.pairedSensors.isEmpty)
         // Added by #110, so an older document has no key — auto-dim starts on.
         #expect(decoded.isAutoDimEnabled)
+        // Added by #471; dims to #110's fixed 10%.
+        #expect(decoded.autoDimBrightness == 0.1)
         // Added by #94, likewise absent from an older document.
         #expect(decoded.isAutoPauseEnabled)
+        // Added by #267; motion resumes only auto-pauses, as before.
+        #expect(decoded.isResumeWhenMovingEnabled == false)
         // Compared against `.system` rather than a literal because the decode fallback
         // reads `Locale.current` and has no seam to stub — asserting `.imperial` here
         // would only pass on a US/UK machine. `UnitSystemTests` covers the mapping
@@ -139,6 +149,8 @@ struct AppPreferencesTests {
         #expect(decoded.mapOrientation == .headingUp)
         // Added by #139; the dashboard starts on the factory layout.
         #expect(decoded.dashboardLayout == .factory)
+        // Added by #517; every Add Widget section starts expanded.
+        #expect(decoded.collapsedWidgetCategories.isEmpty)
     }
 
     /// A layout naming a widget this build doesn't have — written by a newer version, or holding
@@ -168,6 +180,18 @@ struct AppPreferencesTests {
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
 
         #expect(decoded.dashboardLayout == .factory)
+        #expect(decoded.wheelCircumferenceMM == 2155)
+    }
+
+    /// A collapsed section this build doesn't have (#517) is dropped alone: the known ones stay
+    /// collapsed, and no other preference resets.
+    @Test("An unknown collapsed category is dropped; the rest are kept")
+    func unknownCollapsedCategoryFallsBack() throws {
+        let json = Data(#"{"wheelCircumferenceMM":2155,"collapsedWidgetCategories":["route","force"]}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+
+        #expect(decoded.collapsedWidgetCategories == [.route])
         #expect(decoded.wheelCircumferenceMM == 2155)
     }
 

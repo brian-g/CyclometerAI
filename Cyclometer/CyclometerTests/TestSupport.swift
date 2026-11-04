@@ -234,3 +234,11 @@ extension TestStore where State == ActiveRideFeature.State, Action == ActiveRide
         await send(.task)
     }
 }
+
+extension Array where Element == Double {
+    /// These values a second apart as one unbroken watermark run — the evenly spaced history the
+    /// widget snapshots draw.
+    var asWatermark: [WatermarkPoint] {
+        enumerated().map { WatermarkPoint(time: Date(timeIntervalSinceReferenceDate: Double($0.offset)), value: $0.element, run: 0) }
+    }
+}

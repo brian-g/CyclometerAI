@@ -622,3 +622,1285 @@ Plan (issue scope as approved; mirrors #390 / PR #455):
 - **Not done.** A cadence sensor that stops notifying while coasting (rather than repeating its counter) would now show "--" instead of 0 when coasting. That's better than the old held pedalling rpm, but the 0 is lost. The window duplicates speed's 4 s (#455); once both are merged they could share one constant on `BLECSCClient`.
 - **Merging with #455.** The code and BLE.md merge cleanly with `390-speed-stale-watchdog` (dry run). `tasks/todo.md` will conflict because both append at the end; keep both sections.
 - **Code review: window raised to 5 s.** 4 s equalled the calculator's real longest silence on an unbroken link, not outlasted it: the first stroke after a stop re-primes and resets the duplicate count, so one crank turn mid-coast is re-prime + two duplicates before the next 0 (0, –, –, –, 0 = 4 s). The coasting test now includes that sequence; it fails at 4 s and passes at 5 s. Speed's 4 s (#455) has the same gap.
+
+---
+
+## #389 — Cadence and Directions detail sheets can go stale while open (W5, W9)
+
+Fix once in `WidgetDetailModifier`: present a wrapper whose own `body` calls the detail builder, so whatever the
+builder reads invalidates the open sheet directly (#144's fix, for every widget).
+
+- [x] `WidgetDetail.swift`: `WidgetDetailContent` wrapper; `.sheet` presents it; doc comment
+- [x] `cadenceSheetFollowsTheRideWhileOpen` (card unchanged, Pedaling vs Coasting follows)
+- [x] `directionsMapSheetFollowsTheRideWhileOpen` (card unchanged, orientation button follows)
+- [x] Frozen-value control fails each new test
+- [x] Revert loop: builder in `.sheet` again, 20 fresh invocations
+- [x] Fixed loop: 20/20 fresh invocations pass
+- [x] Full `CyclometerTests`
+- [x] Memory `sheet-builder-reads-go-stale` updated
+
+### Review
+
+- **Fix.** `WidgetDetailModifier` presents a private `WidgetDetailContent` whose `body` calls the widget's builder,
+  so whatever the builder reads invalidates the open sheet itself. That covers W5 and W9, and any future
+  `.widgetDetail` whose builder reads store state, with no widget changes. W8 gains nothing from it, and needs
+  nothing: everything its sheet shows is a `MapWidget` input, so a change redraws the card as well as re-running
+  the builder. That redraw is the path that masked the bug in #144; it only went stale with the card unchanged.
+  The `metrics:` closures on the RideMetrics/HR/Elevation sheets are now redundant; left as they are.
+- **Tests.** `cadenceSheetFollowsTheRideWhileOpen` (Pedaling vs Coasting "—" → "50% / 50%") and
+  `directionsMapSheetFollowsTheRideWhileOpen` (orientation button "Heading up" → "North up"). In both, the card
+  never changes. The frozen-value control fails both at the follow step.
+- **Fresh-invocation loops** (own DerivedData, no compile cache, 3 cases counted in every run):
+  - Reverted (`.sheet(isPresented:content: detail)`): Cadence failed 2/60. In both, the open sheet read only
+    Avg/Max Cadence for the full 6 s, never getting past its first partial build. Directions: 0/60.
+  - Fixed: 0/100 for all three sheet tests.
+- **What that does and doesn't show.** The revert rate here is ~1 in 30, well below #144's ~1 in 7, and two
+  failures is thin evidence: by chance alone, both would land in the revert runs ~14% of the time. The fix rests
+  mostly on being the same mechanism #388 proved for RideMetrics. The Directions test never reproduced the bug.
+  It pins the behaviour (the frozen control fails it) but isn't evidence the bug existed there. The live map
+  likely keeps the sheet's host updating on its own. [Likely]
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST EXECUTE
+  SUCCEEDED`, 1,864 unique cases, 0 failed. Those two alone: 49, 0 failed.
+
+---
+
+## Dashboard watermarks on a shared time axis
+
+Plan: `~/.claude/plans/precious-stargazing-wren.md`. Branch `fix/watermark-time-axis`. From the 2026-10-24 ride
+(IMG_5589): W1 drew the 11:29–11:45 stop, W5 didn't — the watermarks plot by sample index, and cadence had no
+samples while its sensor slept (speed had GPS fallback).
+
+- [x] `Watermark` helper: shared window + time buckets, runs broken at silences > 2 min
+- [x] `ActiveRideFeature.State`: `watermarkWindow` + four `…Watermark` series; remove the index-bucket versions
+- [x] W1 / W5 / W4 / W17–W18 charts plot against time over the window; previews incl. "Sensor gap"
+- [x] Build (app target `BUILD SUCCEEDED`); hand to Brian to run on device
+- [x] Tests: `WatermarkTests` (12, incl. this ride's regression); HR watermark test rewritten; the speed/cadence
+      count tests removed (properties gone, covered by `WatermarkTests`); snapshot call sites on `asWatermark`
+- [x] Snapshots: existing references unchanged (evenly spaced data draws the same against time); new
+      `testCadenceTwoByOneSensorGap` records the break
+- [x] Review follow-ups: lone points (a run of one) draw as a `Spacing.watermarkDot` dot, per Brian — Watch HR
+      via HealthKit lands minutes apart and drew no trace at all; W18 reads the window only without a route
+      profile (`aNewSampleDoesNotRerenderRouteElevationOnARoute` caught the redraw); new
+      `testHeartRateWidgetSparseWatchReadings`
+- [x] Full suite on the final tree: `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`
+      `TEST EXECUTE SUCCEEDED`, 1,879 unique cases, 0 failed; those two alone `TEST EXECUTE SUCCEEDED`, 0 failed
+## #406 — A resumed ride forgets it finished its route
+
+Persist `navigation.isRouteComplete` with the ride's route progress and restore it on resume (#197's path).
+
+- [x] `Ride.isRouteComplete` (declaration default), `RideSummaryUpdate`, `summarySnapshot`, `apply`
+- [x] Checkpoint writes it; `State(resuming:)` restores it
+- [x] Extend the #197 persistence, checkpoint, resume and migration tests
+- [x] Pipeline: a ride killed after finishing relaunches finished, and riding past the end isn't off route
+- [x] Pipeline: a ride killed mid-route still completes after the relaunch
+- [x] Revert check: the new pipeline test fails without the restore
+- [x] Full `CyclometerTests`
+
+### Review
+
+- **Fix.** `isRouteComplete` takes `routeProgressMeters`'s path: `Ride` (declaration default `false`, so older rows
+  migrate as unfinished), `RideSummaryUpdate`, `summarySnapshot`, `apply`, the checkpoint, and `State(resuming:)`.
+  `routeLoaded` doesn't reset it, so it survives `.task`'s reload. `nextManeuverIndex` comes back 0, but W9, its only
+  reader, shows a turn only with a distance, which is nil while complete. So nothing on screen changes.
+- **Tests.** The #197 persistence, checkpoint, resume and migration tests now cover the flag.
+  `finishedRideRelaunchesFinished` (pipeline: real store, GPX fixture) finishes 10 m short of the end, checkpoints, is
+  killed and relaunched, then rides 60 m+ past the end for six fixes. `killedRideRelaunchesStillNavigating` now also
+  checks that a ride resumed mid-route starts unfinished and still finishes (AC 3).
+- **Revert check** (restore line removed, fresh DerivedData, no compile cache): the new pipeline test failed on
+  `isRouteComplete`, `routeProgressFraction == 1` (twice) and `isOffRoute == false`. The issue's off-route claim
+  ([Likely; not reproduced]) is now reproduced. The resume unit test failed too; the mid-route test passed.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST EXECUTE
+  SUCCEEDED`, 1,866 unique cases, 0 failed. Those two alone: 49, 0 failed.
+- **Not done.** Completion is saved only at the next checkpoint (30 s) or pause, the same as progress. A kill within
+  that window after finishing still relaunches unfinished. Writing a checkpoint on completion would close it.
+
+---
+
+## #365 — Finish slides the dashboard down (on `brian/fixSafeAreas`)
+
+Mechanism, measured per frame on the sim (2026-10-25). A zoom dismissal with no source (the accessory goes at
+Finish) scales the root `_UIHostingView` to ~0.915. `UIKitTabBarController` computes its insets in that scaled frame
+(t24.3 b0) and never again. Keeping the strip up as the zoom target avoids it, but UIKit's zoom completion, and so
+`onDismiss`, lands ~0.63 s after the collapse looks done, so the strip lingers. A cover-vertical dismissal scales
+nothing. Setting the cover's `preferredTransition = .coverVertical` after it's on screen is honored.
+
+- [x] `DashboardFinishTransition`: from the Finish alert on, the cover's transition is cover-vertical. Cancel restores
+      the zoom. Re-applied after the cover opens, for an auto-end alert raised while minimized.
+- [x] Strip back to main's rule (gone at Finish); `dismissingRide` removed
+- [x] S10 still waits for `onDismiss` (`pendingRideSummary`); comments say why, without the disproved mechanism
+- [x] Reducer test updated; app and test target build
+- [x] ~~First device run~~: top safe area broken again. SwiftUI re-ran the cover's content closure (it read
+      `finishAlert`), re-applied `.navigationTransition(.zoom)` and replaced the slide a frame later
+- [x] Fix: the store is read in `DashboardFinishTransition`'s own body, so the closure never re-runs
+- [x] Sim drive on the shipped code: Finish slides, nav bar 62 before/after; Finish → Cancel → Resume → minimize
+      zooms into the strip, reopen, Finish slides, nav bar 62
+- [x] Brian ran it on device (same two flows): "Perfect". Auto-end while minimized not driven
+- [x] Tests
+
+### Review
+
+- **Root cause.** #365 is UIKit's zoom dismissal. With no source to zoom into, it scales the root host view, and the
+  tab bar controller computes its insets in that scaled frame and never again. Finish removes the accessory, so the
+  zoom has nothing to land in. Finish now dismisses cover-vertical, which scales nothing. Zoom open and drag-to-minimize
+  are unchanged.
+- **Why not the two earlier branches.** fix/365 heals the insets after the fact, so the stale frames show first: the
+  jank. The Codex branch kept the accessory as the zoom target until `onDismiss`, but UIKit's zoom completion lands
+  ~0.63 s after the collapse looks done, so the strip lingered.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST EXECUTE
+  SUCCEEDED`, 1,864 unique cases, 0 failed. Those two alone: 49, 0 failed.
+- **Not covered.** Auto-end while the dashboard is minimized (the alert is up as the cover opens) is handled by
+  re-applying after the opening, but no drive or device run has exercised it. No automated test covers the
+  transition. The sim drives were throwaway.
+
+---
+
+## #439 — Extract NumericEntryRow and split SettingsView into section views
+
+Plan: `~/.claude/plans/streamed-wishing-sunbeam.md`. No visual, copy or behaviour change. Deviations from the issue's
+API sketch (approved): the row takes `text: Binding<String>` rather than `text` + `onChange`, and `errorMessage: Text?`
+so the wheel message (`LocalizedStringResource`) and the HR errors (`String`) keep their own line-wrapping (#430).
+Cadence Zones (#79, after the issue was filed) gets a section too.
+
+- [x] `NumericEntryRow` in `UI/Components/NumericEntryRow/`: owns its `@FocusState`, commit-on-blur and keyboard Done;
+      previews for placeholder, valid, error (light + dark)
+- [x] `SettingsView` is a thin `Form` of `GeneralSection`, `HRZonesSection`, `CadenceZonesSection`, `AboutSection`;
+      no `@FocusState`
+- [x] `NumericEntryRowSnapshotTests`: placeholder, valid, error × light/dark; PNGs opened
+- [x] App and test target build
+- [x] Brian runs it ("never seen 2 done buttons"): one Done per field; Done and tap-elsewhere commit; out-of-range caption
+- [x] `SettingsSnapshotTests` zero diffs (en, and `-testLanguage de`); `SettingsFeatureTests` unchanged; full suite
+
+### Review
+
+- **Settings unchanged.** `SettingsSnapshotTests` 7/7 against the existing 14 references, with nothing rewritten on
+  disk, in en and under `-testLanguage de -testRegion DE`. `SettingsFeatureTests` 33/33, unchanged.
+- **New row.** `NumericEntryRowSnapshotTests` recorded 6 references, each opened (placeholder, valid, error; light and
+  dark), then 3/3 in en and de. Added to CI's snapshot skip list (review), like every other snapshot suite.
+- **Done.** Per-row keyboard toolbar gated on the row's own focus; Brian has never seen two Done buttons, so the
+  screen-level fallback wasn't needed.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST SUCCEEDED`,
+  1,884 unique cases, 0 failed. Those two alone: 50, 0 failed.
+- **Not covered.** Whether removing a focused row still sends a commit wasn't checked; it's a no-op either way (the
+  preset has already cleared the draft), and `SettingsFeature`'s comment no longer relies on it.
+
+---
+
+## #267 — Resume When Moving: let motion resume a manually paused ride
+
+Plan: `~/.claude/plans/cached-stirring-widget.md`. Off by default. Decisions (Brian, planning): a manual pause can be
+resumed by motion only after the ride has been seen stopped (≤ `stationarySpeedMPS`) since the pause, so a Pause
+tapped while coasting holds; the toggle doesn't depend on Auto-pause (OQ1); label "Resume When Moving", with a
+caption in the row (OQ2/OQ3).
+
+- [x] `AppPreferences.isResumeWhenMovingEnabled` (default false, `decodeIfPresent`)
+- [x] `SettingsFeature` read-through + `resumeWhenMovingChanged`; `SettingsView` row with caption under Auto-pause
+- [x] `ActiveRideFeature`: `hasStoppedWhilePaused`, `.speed` guard, cleared in `resume`
+- [x] UX.md §S12, DataModel.md §3.6
+- [x] App builds
+- [ ] Brian runs it on device — not yet; no ride at 9 PM. Walking (≥ 1.0 m/s) exercises the same path
+- [x] Tests: auto-pause/resume, track segment, Settings, AppPreferences; snapshots re-recorded and opened (en + de); full suite
+
+### Review
+
+- **Targeted.** 121 unique cases across the auto-pause, auto-pause threshold/replay, track segment, Settings,
+  AppPreferences, ride-end and Live Activity suites; 0 failed. Six new cases, all found in the log by name.
+- **Mutations.** Dropping the stop check failed `pauseTappedWhileCoastingHolds` and `invalidFixDoesNotCountAsAStop`;
+  ignoring the preference failed only `manualPauseHoldsWithoutThePreferenceAfterAStop`. The old
+  `motionDoesNotResumeAManuallyPausedRide` passed under that mutation: it never stops first, so it couldn't tell.
+- **Beyond the plan.** `invalidFixDoesNotCountAsAStop`: a nil displayed speed (negative GPS speed) doesn't arm.
+  Auto-pause does count nil seconds as stopped, but it needs ten in a row. One dropout right after a Pause tapped
+  while coasting would otherwise arm the resume.
+- **Snapshots.** All 7 `SettingsSnapshotTests` (14 PNGs) moved as expected. Re-recorded with
+  `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`. Opened default, full height dark, Live Activities off, custom wheel
+  invalid dark and HR invalid light; byte check shows none flat. 7/7 in en and under `-testLanguage de`.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`/`MapWidgetAccessibilityTests`: `TEST SUCCEEDED`,
+  1,888 unique cases, 0 failed. Those two alone: 50, 0 failed.
+- **Not covered.** Device behaviour. The Simulator may report a fixed location as no speed, which by design never
+  arms the resume [Guessing], so walk it on a phone.
+
+---
+
+# #452 — Delete a just-finished ride from S10
+
+Plan: `~/.claude/plans/keen-bouncing-papert.md`. Decided with Brian: a trash button in the nav bar's leading slot, and
+one rule for every delete — the ride's Health workout goes with it, from S10 or S14's swipe.
+
+- [x] `HealthKitClient.deleteWorkout`: route, distance and energy samples, then the workout, by sync identifier; share-authorized types only
+- [x] `RideHealthWorkout.deleteRide`: under `healthWorkoutGate`; Health first, then `persistenceClient.deleteRide`
+- [x] `RidesFeature.deleteRecordedRide` goes through it
+- [x] `RideSummaryFeature`: `deleteTapped` (loaded only) → alert → `delegate(.deleteRide)`
+- [x] `RideSummaryView`: leading trash toolbar item, `cyDestructive`, disabled until loaded; "loading" preview
+- [x] `AppFeature`: delegate → `rideSummary = nil` (no rename) → `rides(.deleteRecordedRide)`
+- [x] UX.md §S10 / HKWorkout / §S14
+- [x] Tests written: RideHealthWorkout (order, failure, no share, gate), RideSummaryFeature, presentation, RidesFeature
+- [x] Brian runs it (sim/device): delete from S10; History swipe; Health shows no workout
+- [x] Unit tests
+
+## Review
+
+- **Build.** `build` and `build-for-testing` succeed; no new warnings in the touched files.
+- **Brian's run.** Looks good.
+- **Suite.** `CyclometerTests` without `PersistenceClientTests`: `TEST SUCCEEDED`, 1,890 unique cases, 0 failed, the
+  10 new ones among them. S10's three snapshot references passed unchanged. `PersistenceClientTests` alone: 47, 0 failed.
+- **Plan correction.** The plan said toolbar items don't render in iOS 27 snapshots. They do (memory
+  `snapshot-toolbar-not-rendered`). S10's snapshots render `RideSummaryList` without a `NavigationStack`, so the new item
+  still can't appear there and the references shouldn't move.
+- **[Likely], unverified.** `deleteObjects(of:predicate:)` succeeds with a count of 0 when nothing matches, e.g. a ride
+  whose workout was skipped as another source's duplicate. The live client logs the count for each type.
+
+### #452 review (`/code-review xhigh --fix`)
+
+- **Fixed by the review, committed as `5d71e6c`.** S14 filters rides that are mid-delete out of every read, because a delete can wait behind a
+  backfill. `deleteWorkout` treats `errorNoData` as 0 deleted. The gate comment is corrected, and an always-true check
+  was dropped.
+- **Fixed after, at Brian's call.** `deleteRide` no longer checks Workouts share before Health. The client already checks
+  share access type by type, so distance and energy samples go even with Workouts off.
+- **Skipped.**
+  - The S10 delete can race that ride's thumbnail capture, which then stops the batch. History deletes already had
+    this race, and the fix belongs in `RideMapThumbnail.backfill`.
+  - A delete waits for a backfill's whole batch.
+  - If the Health delete succeeds and the ride delete then throws, the ride comes back without its workout.
+- **Suite.** 1,891 unique cases, 0 failed. `PersistenceClientTests` alone: 47, 0 failed.
+
+---
+
+# #476 — A ride deleted mid-capture stops the map-thumbnail backfill
+
+Found in #452's review. `saveMapThumbnail` throws `rideNotFound` for a ride deleted while it rendered. The batch
+`break`s on it, so older rides missing a thumbnail wait until the next launch or Finish.
+
+- [x] `RideMapThumbnail.backfillNow`: a `rideNotFound` capture is logged and skipped, like `RideHealthWorkout.settle`;
+  any other error still ends the batch
+- [x] Test: `RideMapThumbnailTests.deletedRideDoesNotEndBatch`
+
+## Review
+
+- **Mutation check.** With the new `catch` removed, `deletedRideDoesNotEndBatch` fails. Restored, `RideMapThumbnailTests` passes 15/15.
+- **Suite.** On `main` after #452's merge: 1,892 unique cases, 0 failed. `PersistenceClientTests` alone: 47, 0 failed.
+  A plain `' passed'` count read 1,890 because two result lines were split by interleaved `IDESchemeActionSDKRecord`
+  log lines. Both cases had passed. Join lines before counting.
+- **Not covered.** Nothing visible to check on device: the bug only left placeholder rows until next launch.
+
+---
+
+# #203 — On-device route narrative (Apple Intelligence)
+
+Plan approved. S20's Summary section gets a number-free paragraph from `FoundationModels`. It's generated at import
+plus a backfill, the same way the OSM surface lookup works, and stored on `Route`. Without Apple Intelligence, S20 is unchanged.
+
+- [x] `RouteTerrain.gradeProfile` extracted; `analyze` uses it
+- [x] `RouteNarrative.swift`: input (histogram, climb positions), prompt, instructions, validator
+- [x] `RouteNarrativeClient` (live `FoundationModels`; inert test/preview)
+- [x] `Route.terrainNarrative`, `RouteSummary.narrative`, `saveRouteNarrative`
+- [x] `RoutesFeature.resolveMissingNarratives` + `.narrativeResolved`
+- [x] `RouteSummarySection` row
+- [x] Docs: UX §S20, PRD §8.6 / §12 / changelog
+- [x] Build; hand over to Brian to run
+- [x] Tests: `RouteNarrativeTests` (sections, words, answer rules), `RoutesFeatureTests` narrative cases,
+  `RoutePersistenceTests` round trip, `RouteSchemaMigrationTests` nil column, `RouteDetailSnapshotTests` reference
+
+## Notes
+
+- **The prompt shape changed after probing the real model.** I ran the on-device model from a macOS script over hilly, flat and punchy inputs.
+  - With one gradient histogram for the whole route, it invented positions ("the final third drops gently" on a flat route) and put the hardest climb in the wrong third. The input is now **per third**, put into words in code, and a route that's the same end to end is said once.
+  - Asked for a paragraph, it answered in lower case, one clause per line. The output is now `@Generable` sentences (structure only, no terrain enum), tidied and joined by `RouteNarrative.paragraph`.
+  - Sampling is the default rather than greedy, because a rejected route is asked again next launch and greedy would repeat the same rejected answer.
+- **Thirds became terrain sections (Brian's call, after a probe).** Thirds kept positions right but cut across climbs. A
+  length-based count was considered and dropped: a fixed 2–3 sentences can't carry more sections, and the model drops
+  facts when a sentence holds two. The route now splits at its climbs and the stretches between them (thirds when there
+  are none), merges alike neighbours, and caps at five sections by joining the shortest neighbouring pair with its parts
+  in order. The sentence count is exactly the section count, set per request with a `DynamicGenerationSchema`, because a
+  static `@Generable` count let the model pad one section into five sentences.
+  - End to end, with the real `RouteNarrative.swift` compiled into a macOS probe over synthetic routes (Summit Climb, back-half
+    climbs, short sting, flat, climb-then-flat, six climbs, punchy), every climb was in the right place in riding order.
+  - Six climbs ran to 457–690 characters, so the cap is 600 (4 of 5 runs passed); the other routes ran 42–410.
+  - Folding a climb into a recomputed spread ("mostly flat, including a Cat 4 climb") made the model leave out every climb, which is why
+    merged sections keep their parts.
+- **Residual risk.** Wording can still drift ("the path twists"). The validator catches figures, not invented adjectives.
+- **Verification.** The first full local run hung for 2 h 20 min on the PersistenceClientTests × MapKit deadlock (sampled:
+  main in `MapEngine::~MapEngine`, 19 pool threads in `makeLiveClient()`). The rerun with that suite skipped passed:
+  2,179 passed, 11 skipped. The suite alone then passed 47/47.
+
+---
+
+# #447 — Paging dots down to the ride controls' bottom edge
+
+Plan: `~/.claude/plans/validated-zooming-sphinx.md`
+
+- [x] `RideDashboardView`: dots and ride controls share one bottom-aligned row; the `cornerMd` offset moves onto the row
+- [x] Build; hand over to Brian to run
+- [x] Docs: UX §S05 Multiple pages, Structural Zones, Dashboard Paging
+- [x] Tests: `CyclometerTests` (no snapshot covers this view)
+
+## Review
+
+- Brian checked it on the sim: the dots sit flush with the buttons' bottom edge.
+- The `-cornerMd` bottom padding moved from `rideControls` onto the shared row. Negative padding shrinks the layout
+  frame, so leaving it on the buttons would have lined the dots up 12 pt above the visible buttons.
+- Open: there's no page cap, so about 9+ dots reach Finish while paused. The buttons draw on top and keep their
+  touches. UX §S05 said the dots show "when there are multiple pages", but the code always shows them. Brian:
+  code wins. UX now says always visible, one dot per page, even for one page.
+- Verification: `CyclometerTests` without PersistenceClientTests passed 2,179, 0 failed. PersistenceClientTests alone
+  passed 47/47.
+
+---
+
+# #393 — Heart Rate sheet keeps time in zone across a crash resume
+
+Plan: `~/.claude/plans/functional-zooming-koala.md`
+
+- [x] `HeartRateSecondsTally.add(secondsByBPM:)` — sums a histogram; exact because a Watch hold never crosses a segment
+- [x] `ActiveRideFeature`: `seedElevation` → `seedFromSavedTrack` (one fetch); sends `.elevationSeeded` and new `.heartRateSeeded`
+- [x] Tests: resume path matches `secondsByBPM(saved + recorded)`; a seed after live seconds adds to them
+- [x] Build; hand over to Brian to run
+- [x] Tests: `ActiveRideFeatureHRDropoutTests`, `ActiveRideElevationTests`
+
+## Review
+
+- Saved and live tallies are summed rather than replayed together: exact, since a resume always opens a new segment
+  and a held Watch reading never crosses one.
+- One `fetchTrackPoints` now feeds both resume seeds (`seedFromSavedTrack`), instead of reading the track twice.
+- Verification: `ActiveRideFeatureHRDropoutTests` + `ActiveRideElevationTests` passed 23, 0 failed.
+
+---
+
+# #399 — One bucket-average helper for the dashboard series
+
+Plan: `~/.claude/plans/greedy-launching-spring.md`
+
+- [x] `Models/TimedSample.swift`: protocol + `buckets(to:)` + `bucketAveraged(to:)`
+- [x] Conform `SpeedSample`, `AltitudeSample`, the three chart `Point`s; delete the old copies
+- [x] Move `RideSpeedChart.elevationPoints`, HR/Cadence `downsampled`, `PaceTrace.runs` onto it
+- [x] `TimedSampleTests`: partition 1…4000 × {60, 120}; means; prove it bites on the Cadence formula
+- [ ] Build; hand over to Brian to run
+- [ ] Targeted tests + chart snapshots
+
+## Review
+
+- Six copies, not four: Cadence's chart and `PaceTrace.runs` also sliced by hand. Cadence still had the #140
+  floating-point edges and dropped the newest sample at 160 counts in 1…4000 (×{60, 120}); now fixed.
+- HR and Cadence keep `downsampled` as a one-line forwarder: two call sites each, same resolution.
+- Partition test failed 160× against Cadence's old formula, then passed; `TimedSampleTests` + `SpeedFeatureTests`
+  24 passed, 0 failed.
+- Not yet run: `RideMetricsTests`, `HeartRateMetricsTests`, `ElevationMetricsTests`, chart snapshots, AddWidgetSheet.
+# #397 — Resume seed fetches only the columns it replays
+
+Plan: `~/.claude/plans/greedy-launching-spring.md`
+
+- [x] Measure: 18k points, full fetch vs dictionary fetch (throwaway); go only if ≥ ~1.5× faster
+- [ ] `TrackSample` protocol + `TrackSampleDTO`; `TrackPointDTO` conforms
+- [ ] `Seed(savedTrack:)`, `secondsByBPM`, `HeartRateSecondsTally.add` generic over `TrackSample`
+- [ ] `PersistenceClient.fetchTrackSamples` (live dictionary fetch, test, mock); shared sentinel helper
+- [ ] `seedFromSavedTrack` uses `fetchTrackSamples`
+- [ ] `PersistenceClientTests` case: samples == full fetch mapped; unknown id empty
+- [ ] Build; hand over to Brian to run
+- [ ] Targeted tests
+
+## Review
+
+- Stopped at the gate. Simulator, Debug, 18,000 points, median of 7, three runs: full fetch 42.7 / 44.0 / 47.8 ms,
+  dictionary fetch of the 6 columns 32.7 / 33.9 / 35.8 ms — **1.29–1.33×**, about 10 ms saved.
+- The issue's 3 columns became 6 after #393 (HR seed reads bpm, source and timestamp too), which is most of why the
+  gain is small: SQLite still reads every row, and row materialisation, not column count, dominates.
+- Recommendation: close #397 as not worth a second track-point read path. Nothing below the gate was built.
+
+---
+
+# #398 — W14–W16 re-render only when their number changes
+
+Plan: `~/.claude/plans/greedy-launching-spring.md`
+
+- [x] Tests first: stopped tick and flat moving tick leave W14–W16 un-invalidated; a climb invalidates W14
+- [x] Confirm the new negative cases fail on current code
+- [x] `ElevationTracker` → `@ObservableState`; ascent/descent stored, set by `updateTotals()`
+- [ ] Build; hand over to Brian to run
+- [ ] Targeted tests + AddWidgetSheet snapshot
+
+## Review
+
+- `ElevationTracker` is `@ObservableState`; ascent/descent are stored, set by `updateTotals()` on a recorded or
+  seeded change. An in-place mutation keeps the tracker's `_$id`, so `\.elevation` observers aren't notified;
+  only changed properties are.
+- New tests failed 7 ways on the old code (every card on a stopped and a flat tick, W15 on a climb); 4/4 pass after.
+- Not yet run: `ElevationTrackerTests`, `AltitudeReanchorReplayTests`, `ActiveRideElevationTests`, AddWidgetSheet snapshot.
+
+---
+
+# #401 — W1 Speed: VoiceOver reads the trend
+
+Plan: `~/.claude/plans/greedy-launching-spring.md`
+
+- [x] Tests first: above (existing test's strings), below, even / no reading — at 1×1, 2×1, 2×2
+- [x] Confirm above/below fail and even/no-reading pass on current code
+- [x] `SpeedWidget.accessibilityValue`: "above average" / "below average" after the speed
+- [x] UX.md §W1 trend bullet
+- [x] W5 Cadence too (Brian): same words, its own trend rule; HR already reads "rising"/"falling"
+- [ ] Targeted tests; hand over for a VoiceOver check
+
+## Review
+
+- W1 and W5 read their ▲/▼ as "above average" / "below average" straight after the value, from the same `trend`
+  that draws it, so threshold and no-reading cases match by construction. W4 already read "rising"/"falling".
+- `widgetIsOneButton` hard-coded W1's old string; its live element already read the new one.
+- Above/below cases failed before the change; `WidgetAccessibilityTests` 68 passed, 0 failed after.
+
+---
+
+# #461 — W19 Distance Remaining and W20 ETA
+
+Plan: `~/.claude/plans/lively-herding-pike.md`
+
+- [x] `NavigationFeature.State.remainingDistanceMeters`, by `routeProgressFraction`'s rules
+- [x] W19/W20 adapters (`RouteProgressDashboardWidgets.swift`), views with previews, catalog
+- [x] ETA: `TimelineView` each second so a stop moves it; 12 h → "3:42" + "pm", 24 h → "15:42"; "—" once complete
+- [x] Tests: remaining (no route, TBT off, mid, off-route hold, complete, loop wrap), arrival, clock face, VoiceOver
+- [x] Snapshot suites written; UX.md §W19, §W20, §S08
+- [x] Build
+- [ ] Hand over to Brian to run
+- [x] Targeted tests; record + look at W19/W20 references
+
+## Review
+
+- The second lap of a loop is only the wrap case: `isRouteComplete` is terminal, and matching stops once it is set.
+  `total − progressMeters` counts the wrapped lap down with no extra logic.
+- The first run caught the 24-hour face reading "9:05". `.defaultDigits` drops the leading zero a 24-hour clock keeps,
+  so a 24-hour cycle now uses `.twoDigits`.
+- `AddWidgetSheetSnapshotTests` leaves the Route section out (live `Map`), so its references don't move.
+- 150/150 across NavigationFeature, RouteProgressWidget, WidgetAccessibility, both new snapshot suites and
+  AddWidgetSheet. All 11 new PNGs checked by eye: none blank, "pm" on the digits' baseline.
+
+### #486 review follow-up
+
+- [x] W20 reads "—" until 60 moving seconds (`ETADashboardWidget.settlingSeconds`): the first seconds' average gave arrivals hours out
+- [x] W20's `TimelineView` ticks only while there is an arrival (`EverySecondSchedule`), one schedule type so the sheet's identity holds
+- [x] VoiceOver says why "—": "No route" / "Turn-by-turn off" / "No reading" (`RouteProgressReading`)
+- [x] Clock face from the locale's own `jmm` pattern, day period removed: "9:05" US, "09:05" UK, "9.05" Finland — replaces the forced two-digit hour
+- [x] Map-sheet duplication filed as #487
+- 153/153 targeted. fr_CA's pattern turned out to be "HH:mm", not "HH 'h' mm" as I'd assumed; test dropped
+- Not verified: the schedule restarting when an arrival appears while stopped — needs a look on the simulator
+
+### #486 CI fix
+
+- [x] CI red on 387722e: `AddWidgetSheetTests` (two hardcoded Route lists) and `DashboardLayoutTests` (factory must show
+      every widget at every size) didn't know W19/W20. `main` green
+- [x] Route lists updated; W19 at row 4 right and W20 at row 5 left of the Elevation showcase page (Brian chose)
+- [x] Local run blocked: the simulator's launchd spawned nothing until the Mac rebooted — CI verified instead: 1803
+      passed on eee5b0b, but the job hit its 30-min timeout twice (build 21 min on a slow runner)
+- [x] `timeout-minutes` 30 → 45, comment updated with today's timings (Brian, option 1)
+
+---
+
+# #487 — One map-sheet builder for W8, W9, W19 and W20
+
+Stacked on `feat/461-distance-remaining-eta` (#486 is open, and W19/W20 only exist there).
+
+- [x] Move `Store.liveMapSheet` from `RouteProgressDashboardWidgets.swift` to `MapDashboardWidget.swift`, next to
+      `mapSheetRoute`, internal
+- [x] `LiveMapSheet.placeholder` in `MapWidgetView.swift`; W9/W19/W20 `detail` defaults use it
+- [x] W9's adapter: `detail: { store.liveMapSheet }`
+- [x] W8: left as is (Brian, option 1) — `MapWidget` builds its sheet from the values it already draws; #487's AC
+      to be reworded
+- [x] Build
+- [x] `DirectionsDashboardWidgetTests`, `WidgetAccessibilityTests`, `MapWidgetAccessibilityTests`, Directions/
+      DistanceRemaining/ETA snapshots: 101/101, every suite non-empty
+- [ ] Hand over to Brian to run
+
+## Review
+
+- `LiveMapSheet(` now appears three times: `store.liveMapSheet` (W9, W19, W20), `.placeholder`, and W8's own.
+- No reference image moved: the sheet is never drawn by a card, and the placeholder is the same empty sheet.
+
+---
+
+# #462 — W21 Time to Sunset
+
+Brian's answers: h:mm; "—" not "--"; VoiceOver says why it's empty; showcase row 5 right on the Elevation page;
+last in S08's Ride 1×1s; no Sketch check.
+
+- [x] `Models/Sunset.swift`: NOAA solar-position sunset (zenith 90.833°, no elevation) for a coordinate and
+      a calendar day, rounded to the minute as NOAA publishes it; nil for polar day/night
+- [x] `Sunset.countdown(now:coordinate:calendar:)`: the earliest of yesterday's and today's sunset still ahead
+      (a high-latitude sunset can fall after midnight), else `.passed`; `.noFix` without a coordinate; `.noSunset`
+      at polar day/night
+- [x] `ActiveRideFeature.State.sunsetFix`: the latest fix, taken at most once a minute in `.locationUpdated`,
+      so W21 re-renders once a minute, not once a fix
+- [x] `SunsetDashboardWidget` (id `sunset`, 1×1, `.ride`), `TimelineView(.everyMinute)` — exact because the sunset
+      is minute-rounded; tap opens `store.liveMapSheet`
+- [x] `SunsetWidget` view + previews (countdown, after sunset, no fix; light/dark)
+- [x] Catalog line; `AddWidgetSheetTests` Ride lists; factory showcase placement
+- [x] Tests written: NOAA cases (values from NOAA's own calculator JS run in node), both hemispheres, solstices/equinox,
+      polar day/night; countdown across midnight and a time-zone change; reducer throttle; accessibility; 6 snapshots
+- [x] UX.md §W21, §S08 Ride list, header line
+- [x] Build (app + tests)
+- [x] Hand over to Brian to run — "looks right"
+- [x] Record the 6 snapshots (checked: "1:12", and "—")
+- [x] Full `CyclometerTests` less `PersistenceClientTests` (#480): 2251 passed, 2 failed — fixed below; then Sunset,
+      Sunset snapshots, S08 catalog snapshot and `PersistenceClientTests` alone: 74/74, every suite non-empty
+
+## Review
+
+- The Reykjavik test was wrong, not the code: at 00:04 on the 22nd the 21st's sunset has set and the 22nd's (00:04 on
+  the 23rd) is ahead, so near midsummer it never reads "—". Test and UX.md now say so.
+- S08's catalog reference re-recorded: the only change from main is W21 beside Grade. It reads "—" there, as W19 and
+  W20 do, because the sample ride has no fix; a sample countdown would tie the reference to the wall clock.
+- No other exhaustive store needed `sunsetFix`: the six that assert `coordinate` were the lot.
+- NOAA values come from NOAA's own `main.js` (`calcSunriseSetUTC`, two passes, minute-rounded), run in node.
+
+
+### #490 review (`/code-review xhigh --fix`)
+
+- [x] Fixed: a day's sunset is the one whose solar noon falls on it, so Samoa/Tonga/Kiritimati (clock a day ahead of
+      the sun) read "—" after sunset instead of counting to tomorrow's; the time-zone test used Tokyo and expected the
+      bug, now Chicago, plus Apia; `SunsetFix.isFresh` two-sided for a clock set back; `utcMinutes` doc; W21 in
+      `MapDashboardWidget`'s caller lists; VoiceOver reuses `spokenElapsed`; `Sunset/` in TCA.md §8
+- [x] `SunsetTests` 23/23 (review ran it)
+- Skipped: refresh `sunsetFix` by distance instead of time (design change, small saving); no-fix and after-sunset
+  snapshots are identical images (kept: one per state)
+
+### W21 sunset icon (Brian, after review)
+
+- [x] `sunset.fill` in the lower right, `.title2`, `cyTextSecondary`, inset `Spacing.sm`; drawn in every state, hidden
+      from VoiceOver by `widgetDetail`; UX.md §W21
+- [x] Brian ran it: "looks good"
+- [x] Re-recorded the 6 W21 snapshots and S08's catalog; the catalog's pixel diff against the last commit is only the
+      icon (73×59 pt-px box, light and dark)
+- [x] Sunset, Sunset snapshots, S08 catalog snapshot, WidgetAccessibility: 107/107, every suite non-empty
+
+---
+
+# #463 — W22 Climb: current and next climb on the route
+
+From main (Brian), so it conflicts with #490 in the catalog, S08 lists and UX.md until that merges. Brian chose: the W5
+2×1 arrangement; climbs from stored `Route.terrain`; showcase on the Elevation page, row 5. No W22 frame in Sketch.
+
+- [x] `RouteClimb` + `ClimbReading.at(progressMeters:climbs:)` in `Models/RouteClimb.swift`
+- [x] `NavigationRoute.climbs` from `detail.summary.terrain`, profiles from `RouteTerrain.gradeProfile` at load
+- [x] `NavigationFeature.State.climbReading`
+- [x] `ClimbWidget` view + previews; `ClimbDashboardWidget` adapter (tap → Elevation sheet)
+- [x] Catalog, factory showcase (Elevation page row 5), `AddWidgetSheetTests` Route lists
+- [x] Tests: `ClimbReadingTests`, `NavigationFeatureTests`, accessibility, 10 snapshots
+- [x] UX.md §W22, §S08 Route list, header line
+- [x] Build (app + tests)
+- [x] Hand over to Brian — "looks right"
+- [x] Recorded the 10 W22 snapshots (checked: profile behind, ridden darker, stats on the baseline, "—")
+- [x] Full `CyclometerTests` less `PersistenceClientTests` (#480): 2246 passed, 0 failed, every new suite present;
+      `PersistenceClientTests` alone: 47/47
+
+## Review
+
+- The S08 catalog reference didn't move: its image ends before the Route section, so W22 there is unpinned (as W19/W20).
+- Climb distances need no conversion: `Climb.startMeters` is a sample index × the resample spacing, which is distance
+  along the same polyline `cumulativeDistances` measures; `ClimbReadingTests` pins a climb's top to the road's elevation.
+- "To climb" reaches exactly 0 at the top because the ride re-runs `RouteTerrain.gradeProfile` at load, the pipeline
+  the stored climb was found on. If that pipeline changes, stored climbs would sit on a different profile until
+  re-analysed; `RouteClimb` drops one that falls off the profile rather than misplacing it.
+
+### #493 merge with main (#490 landed)
+
+- [x] Merged `origin/main` (no rebase, so no force push). Conflicts were W21 and W22 adding a line in the same places;
+      each keeps both, W21 first: catalog, Elevation showcase page (+ its comment), `WidgetAccessibilityTests`, UX.md
+      (header lines, §W21 then §W22, S08's Ride and Route lists), and this file (#462's section, then #463's)
+- [x] Build; S08 lists, S08 catalog snapshot, DashboardLayout, WidgetAccessibility, Sunset, Climb, NavigationFeature:
+      224/224, every suite non-empty
+
+### #493 review (`/code-review xhigh --fix`)
+
+- [x] Fixed: climbing left measured from the climb's own profile top (`elevations.last`), not the stored
+      `topElevationMeters`, so it reads 0 at the top even after a pipeline change; `RouteClimb.sample` moved into
+      `ClimbWidgetView.swift` (shared by previews and tests, replacing a copy); W22 in TCA.md §8 and `ElevationSheet`'s doc
+- [x] ClimbReading 8/8, NavigationFeature 57/57, WidgetAccessibility 80/80, Climb snapshots 10/10 (review ran them)
+- Correction to the review above: `RouteClimb` drops a stored climb only when it falls *outside* the profile; one from a
+  different pipeline that still fits would be placed as stored.
+- Skipped, for Brian: analyze at load when a route has no stored terrain (pre-#252, not yet backfilled → "No climbs
+  ahead" on a hilly route); `ClimbWidgetSnapshotTests` on CI's skip list. Also skipped: a loop joined after its climb
+  reads "No climbs ahead" until the wrap (pinned by a test); keeping each climb's samples in the analysis instead of
+  re-deriving at load; the straight-route "second lap" unit test; exact float compares; S08's sample has no route
+
+### #493 review follow-ups (Brian: "#5, do it. #6, add to ci skip list")
+
+- [x] No stored analysis (pre-#252, not yet backfilled): `RouteClimb.climbs` runs `RouteTerrain.analyze` at load, so W22
+      finds the climbs instead of reading "No climbs ahead"; a stored analysis is still used as is. Test:
+      `noStoredAnalysisIsAnalysedAtLoad`; UX.md §W22 and `NavigationRoute.climbs`' doc say so
+- [x] `ClimbWidgetSnapshotTests` on CI's skip list, beside `ElevationWidgetSnapshotTests` (both draw a Swift Charts area)
+- [x] ClimbReading, NavigationFeature, NavigationPipeline, ElevationDashboardWidget: 79/79, every suite non-empty
+
+---
+
+# #465 — W23 Active Calories widget and Calories sheet
+
+Brian chose: showcase page 3 row 4 left; the sheet's average rate over W3 Moving Time; the chart over elapsed ride time,
+whole ride. The live estimate is `RideEnergy.activeKilocalories` over an in-memory copy of the recorded track, once a
+minute, with the rider built as `RideHealthWorkout.write` builds it.
+
+- [x] `RideEnergy.Rider.init?(kilograms:dateOfBirth:sex:on:)`, used by `RideHealthWorkout.write`
+- [x] `CaloriePoint`, `CalorieSeries.rebuild(track:through:rider:)` + `CalorieSeriesTests`
+- [x] `ActiveRideFeature`: calorie track, rider status, minute recompute, resume seed + rebuild; TestStore tests
+- [x] `CaloriesWidget` + adapter, `CaloriesSheet` + `CaloriesMetrics`, previews
+- [x] Catalog, factory showcase (page 3 row 4 left), S08 sample, `AddWidgetSheetTests` Ride lists
+- [x] Accessibility test; widget + sheet snapshots (sheet on CI's skip list)
+- [x] UX.md §W23, "Sheet: Calories", S08 Ride list, S10 calories line, header; TCA.md §8
+- [x] Build (app + tests)
+- [x] Hand over to Brian. He asked for `bolt.fill` in the lower right (W21's treatment), and for the sheet's rows to
+      become small hero columns, Total and Average, with the model in the section footer. Both done, and UX.md matches
+- [x] Recorded 12 Calories snapshots (widget + sheet: no body mass, early, long; light + dark) and re-recorded the S08
+      catalog. Opened them: none flat, W23 at the end of the catalog's Ride section
+- [x] Targeted suites: Calorie/ActiveRideCalories/RideEnergy/RideHealthWorkout/RideEndFailure, WidgetAccessibility,
+      AddWidgetSheet (+ snapshot), DashboardLayout, both Calories snapshot suites and every ActiveRideFeature suite:
+      369/369, every suite present, no host restarts
+- [x] #494 filed: the other widget sheets to the same hero columns
+
+## Review
+
+- **Same inputs as Health.** The live estimate runs on `calorieTrack`, filled in the same tick as the recorder, and
+  `minuteSeriesMatchesHealthWorkout` runs `RideHealthWorkout.write` on what the recorder flushed and gets the same kcal.
+  The CoreData round trip is exact: a negative GPS speed is already nil before it reaches the track.
+- **The host crash was mine.** `ActiveRideCaloriesTests` lacked `@MainActor`, so `TestStore.init` tripped the runtime
+  isolation check (SIGTRAP) and every suite running in parallel reported 0.000 s failures. Every sibling suite has it.
+- **Sample fixed.** `CaloriesMetrics.sampleLong` multiplied a varying rate by elapsed minutes, so the chart dipped;
+  calories never fall. It now rises everywhere and still steps where physics hands over to heart rate.
+- **One existing test touched.** `zeroSpeedCounterResetsOnSpeed` is exhaustive and its tick now appends a point with a
+  random `UUID()` id to `calorieTrack`. That one step runs non-exhaustive and the point's speed is checked after.
+- **Not covered.** Rebuild time for a 4 h ride after a kill (≈240 recomputes, off the main thread) isn't measured.
+
+### #495 review (`/code-review --fix`)
+
+- [x] Fixed by the review: the sheet's Average divides each point's energy by its own moving time (`CaloriePoint.movingSeconds`);
+      "No estimate yet" previews; DashboardLayout's free-cell comment
+- [x] Brian: "#3 do as recommended": a resumed ride whose saved track is empty or unreadable doesn't rebuild its minutes
+      before the resume (`isSavedTrackMissing`); the series starts at the resume. UX.md §W23 says so
+- Not done, Brian's call: the total can fall when the model drops back to physics (#1); no extra estimate at a pause, so
+  a ride ends on its last whole minute's value, not Health's (#2); #4–#7 left
+- Not run: `ActiveRideCaloriesTests` after the #3 change (built only)
+- [x] Run after the #3 change: the #465 suites, 189/189 passed (incl. `liveMinuteWaitsForSavedTrack`); full `CyclometerTests` not run
+
+---
+
+# #464 + #466 — Sensors toolbar button and Sensors sheet
+
+Brian chose: **one** toolbar button, glyph `antenna.radiowaves.left.and.right`, shown when any paired device is missing
+*or* low (≤ `SensorHealthReport.lowBatteryPercent`, 20%); its badge counts those devices. One PR closes both issues.
+Placement follows the Design.sketch `Sxx - Route overlay` frame, group **sensor button**: trailing, left of Bell.
+
+**State: `SensorHealthFeature`** (already subscribes to every status and battery stream)
+- [x] `.connected(SensorRole)` becomes `.statusChanged(SensorRole, isConnected:)`; the log still records only the
+      first connect. Connected means `.active` (HR: notifying), the bar #391 already used, not the Start
+      sheet's `.connected`/`.active`: #464 excludes changes to the verdict
+- [x] Keep each role's live status and current battery beside the log; battery clears on the client's `nil`
+      only. Clearing on a status change would race the once-per-connection read, which can land before `.active`
+- [x] Derived `devices`: paired sensors grouped by peripheral (combo CSC is one row with both roles), each with
+      connected (every role up), battery, name; `attentionCount` = missing + connected-and-low
+- [x] TestStore: ≤20 shows / >20 hides; low then disconnect stops counting as low and counts as missing;
+      combo counts once; never-found counts; nothing paired → 0; no extra effects (no sound/haptic/banner)
+
+**UI**
+- [x] `SensorsButton` (internal, `Features/ActiveRide/SensorHealth/`): 52 pt glass circle like the other controls, red count badge
+      as in the frame. VoiceOver "Sensors, 1 not found" / "Sensors, low battery: Radar, 18 percent" / both joined;
+      hint "Opens sensor status"
+- [x] `rideControls`: `[Pause | Resume Finish] · Spacer · [Sensors] [Bell]`, `controlTransition` (fade under Reduce Motion)
+- [x] `SensorsSheet`: one row per device via `SensorListRowView` + `SensorRowStyle.device`, Connected/Searching
+      capsule, `SensorBatteryLabel` when connected. No pair/forget. Reads live state in its body (#144 lesson)
+- [x] `ActiveRideFeature`: `isSensorsSheetPresented` + tap / presentation-changed actions, as Add Widget does; TestStore
+- [x] Previews for every state; snapshots of button (1 missing, 2 missing, 1 low, missing + low) and sheet, light + dark;
+      accessibility label test
+
+**Specs**
+- [x] UX.md §S05 Bottom Toolbar row + button paragraph; Open UX Question glyph → `antenna.radiowaves.left.and.right`;
+      new "Sheet: Sensors"; §S10 "no mid-ride alert" wording points at the quiet badge
+- [x] BLE.md §14.5 "surfaced on" adds S05; TCA.md §8 tree entry; `SensorHealthFeature` header comment ("records only")
+- [x] Extracted `RideControlButton` (was a private func) and `SensorStatusBadge` (was `SensorStatusRow.statusControl`)
+      so the new button and sheet share their styling; `Spacing.toolbarBadge`
+- [x] Build (app + tests)
+- [x] Brian: no overflow (UX.md §S05 says a future button revisits it), then "complete it"
+
+**Toolbar overflow:** Brian chose none. With one button the widest row (paused + Sensors) leaves ~13 dots' room at
+402 pt and no other toolbar item is planned; UX.md §S05 says a future button has to revisit it. No issue filed.
+
+## Review
+
+- [x] Recorded 14 snapshots (button: 1/2 missing, 1/2 low, missing + low; sheet: missing + low, two missing; light +
+      dark). Opened them: the button's first recording had no glass disc offscreen, so it snapshots in the key window
+      (`drawHierarchyInKeyWindow`). Both suites on CI's skip list
+- [x] Targeted run: every ActiveRideFeature suite, SensorHealth/RideEnd/RideSensorsSheet/VoiceOver suites, StartSheet
+      (+ snapshot, unchanged after the badge extraction), both new snapshot suites: 228/228, every new test present
+- **Not snapshotted:** "none missing / none low". The button isn't drawn then; `neverFoundIsMissing`, `nothingPaired`
+  and `lowBatteryComesAndGoes` pin the empty list that hides it.
+- **Not run:** the full `CyclometerTests` locally (CI runs it).
+
+### #496 review (`/code-review --fix`)
+
+- [x] Fixed by the review: `.finishTapped` also closes the Sensors sheet, so auto-end's finish alert can show
+      (`autoEndClosesSensorsSheet`); the badge doesn't take touches (`allowsHitTesting(false)`)
+- Open, Brian's call: (3) the button can flicker on a level rebounding across 20%, which needs hysteresis or a latch;
+  (4) before the first status replay every paired device reads missing, so possibly a flash at ride start; (5) one
+  sheet enum for the dashboard; (6) device grouping and "Speed & Cadence" title duplicated with S10
+- [x] Brian: (3) latch. Low is judged on the log's ride minimum (`SensorHealthLog.minBatteryPercent(peripheral:)`), and
+      the per-role current-level map is gone. The sheet shows that minimum. Departs from #464's AC ("above it again
+      hides the indicator"), on BLE.md §14.5's evidence. `lowBatteryLatches`, `lowThenDisconnected` (reconnects low)
+- Brian: (4) leave it unless seen on a real ride; (5), (6) not done
+- [x] Run after the latch: SensorHealth, RideEnd, RideSensorsSheet (incl. `autoEndClosesSensorsSheet`), VoiceOver,
+      DashboardEdit and both Sensors snapshot suites: 52/52, the new tests present
+- Not run: tests after the review's fixes (built only)
+
+---
+
+# #471 — Auto-dim brightness slider (S12)
+
+Plan: `~/.claude/plans/wiggly-finding-phoenix.md`. Brian chose: the slider sets the dimmed brightness (0–50%,
+default 10%, sun icons), and dragging previews it on the real backlight.
+
+- [x] `AppPreferences.autoDimBrightness` (+ decode fallback 0.1, range, shared `dimmedBrightness(from:)` clamp)
+- [x] `AppFeature` dims to the preference; `AppFeature.dimBrightness` removed; leaving the app ends a S12 preview
+- [x] `SettingsFeature` preview: capture → clamped write per tick → restore on end; the read is cancelled if the drag
+      ends first; the restore isn't cancellable (a fresh drag would otherwise capture the dim as the rider's level)
+- [x] `SettingsView` slider row under the toggle (bare `if`), `onDisappear` backstop, "Auto-dim off" preview
+- [x] Tests: SettingsFeature (4 new), AppScreenPower (`dimUsesChosenLevel`, backgrounding receives the preview end),
+      AppPreferences (round-trip + legacy decode)
+- [x] `UX.md` §S12 row + Auto-dim paragraph
+- [x] Brian runs it on device (the simulator's brightness doesn't move): "works good on initial go"
+- [x] Re-record `SettingsSnapshotTests` (General gains the row), compare against main, add `autoDimOff`
+
+## Review
+
+- [x] Targeted run: SettingsFeature, AppScreenPower, AppPreferences, LiveActivityFeature, CadenceZone: all green, every
+      new test present
+- [x] Snapshots: all 14 re-recorded + `autoDimOff` (light/dark). Pixel-compared with main: `autoDimOff` differs from
+      main's `default` only in the Auto-dim switch; every other reference gains one 61 pt row (183 px), with the content
+      below shifted by exactly that and the HR Zones header gap unchanged. The only other differences are glyph
+      anti-aliasing inside unmoved text
+- [x] Full `CyclometerTests` locally without `PersistenceClientTests` (MapKit deadlock): 2340 passed; then
+      `PersistenceClientTests` alone: green
+
+---
+
+# #491 — Symbols in the lower right of 1×1 widgets
+
+The issue's list, as W21 Sunset and W23 Active Calories already do it (`UX.md` §W21, §W23): an SF Symbol in the lower
+right, `title2`, `cyTextSecondary`, inset `Spacing.sm`, drawn in every state. VoiceOver doesn't read it:
+`.widgetDetail` makes the card one element with `children: .ignore`. All 12 names exist (checked against the macOS
+SF Symbols catalog).
+
+- [x] `View.widgetSymbol(_ systemName:)` in `UI/Components/WidgetSymbol/`: W21's overlay, once. W21 and W23 move onto it.
+      It takes an optional name; a multi-size widget passes nil for its other sizes. `TCA.md` §8 lists it
+- [x] Applied inside each 1×1 view, before `.background`, as W21's is: W3 `stopwatch`, W6 `ruler`, W11 `hare.fill`,
+      W14 `arrow.up.forward`, W15 `arrow.down.forward` (`ElevationTotalWidget` takes the symbol, as it takes the
+      title), W16 `mountain.2`, W19 `point.bottomleft.forward.to.arrow.triangle.scurvepath`, W20 `alarm`
+- [x] Multi-size widgets, at 1×1 only: W1 `gauge.open.with.lines.needle.33percent`, W4 `heart.fill`, W5 `tire`
+- Brian: W9 skipped (its turn arrow already marks it); W2 and W12 tabled until a suitable symbol is found; W4 and W5
+  draw it over their zone bands, to be judged on device
+- [x] `UX.md`: the corner symbol as a widget convention with the symbol per widget; §W21 and §W23 point at it
+- [x] Brian looks on device: W19 to `point.bottomleft.forward.to.arrow.triangle.scurvepath`; W6 to `ruler` (his edit)
+- [x] Snapshots: re-record the 1×1 references that move, the Add Widget catalog and the dashboard showcase pages;
+      pixel-compare with main, expecting only the lower-right corner to differ
+
+## Review
+
+- **First full run:** 44 failures, all snapshot tests of 1×1 cards, the Add Widget catalog, and Dashboard Edit chrome.
+  No 2×1/2×2 reference moved. W21's and W23's 12 references passed unchanged, so moving them onto `widgetSymbol`
+  draws exactly what their own overlays did.
+- **Re-recorded** the 11 suites with `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`: 47 PNGs. A separate run of the same
+  suites: 72 passed.
+- **Against main:** every single-card reference (588×288) differs only inside x ≥ 443, rows ≥ 185, the lower-right
+  corner. The catalog and the three Dashboard Edit references differ only at 1×1 cards' corners; opened, the 2×1
+  Cadence and W2 Average Speed carry no symbol.
+- **Final full run:** 2,101 passed, 0 failed, 11 skipped (`LiveActivityClientTests`, as on main).
+# #480 — PersistenceClientTests × MapKit deadlock
+
+Root cause (from code + the issue's samples): `CoreDataStack.load` sets `automaticallyMergesChangesFromParent` and
+`mergePolicy` on `viewContext`, a main-queue context. Set from any other thread, CoreData runs each setter through
+`performBlockAndWait` on main. `makeLiveClient()` builds a stack per test on the cooperative pool, so every parallel
+persistence test parks a pool thread on main. Nothing reads `viewContext` — every read and write goes through
+`newBackgroundContext()` or batch requests, and `batchDeleteTrackPoints` documents that nothing merges into it — so
+the configuration is dead code that only costs the hop. `.shared` pays it too, from whichever thread first resolves
+`\.persistenceClient`.
+
+- [x] Regression test first: a `@MainActor` test builds `CoreDataStack(inMemory: true)` on a separate thread while
+      main waits on a semaphore. On main's code it failed at the timeout (5.008 s), so the build waits for main.
+      With the fix it passed in 1.8 s alongside the other suites, so the timeout is now 30 s, as headroom against a
+      spurious failure under load
+- [x] `CoreDataStack`: drop the two `viewContext` setters and the unused `viewContext` accessor; `load` keeps
+      `loadPersistentStores` and its `fatalError`, so `.shared`'s launch behaviour is unchanged. The fixed binary has
+      no `setAutomaticallyMergesChangesFromParent:` reference; main's has one
+- [x] Run the new test, `PersistenceClientTests`, `RoutePersistenceTests`, `TimeSeriesMigrationTests` (plus the other
+      `CoreDataStack(inMemory:)` users: RideDataBuffer, RideDeletion, RideRename, RoutesImportIntegration,
+      NavigationPipeline): 105 passed, 0 failed
+- [x] Deadlock question: see Review
+- [x] Three consecutive full `CyclometerTests` runs with no `-skip-testing`: all three completed; see Review
+- [x] Update the `persistence-tests-mapkit-deadlock` memory and drop the skip advice
+
+## Review
+
+- **Reproducing it.** Six unloaded full runs on main's code (`test-without-building`, ~2.5 min each) never hung.
+  With all 18 cores held by busy loops, the first run hung. Its sample had the issue's exact signature: main in
+  `-[VKMapView dealloc]` → `MapEngine::~MapEngine` → `flushTileDecodeQueues` → `dispatch_sync` onto the tile-decode
+  queue; that queue's task in `dispatch_semaphore_wait`; all 18 cooperative-pool threads (the pool is 18 wide here)
+  in `makeLiveClient()` → `CoreDataStack.load:45` → `setAutomaticallyMergesChangesFromParent:` →
+  `performBlockAndWait` on main. A second loaded run of main didn't hang: it's a race even under load.
+- **Is it a true deadlock?** [Likely] yes. No thread was running whatever would signal the tile-decode semaphore, so
+  its work was queued somewhere that couldn't run. The sample can't show where. It can't be main alone: then the hang
+  wouldn't need the persistence tests, but every run recorded in this file that skipped only
+  `PersistenceClientTests` (six, MapKit suites included) completed. So it's waiting on a worker thread that the 18 blocked pool threads keep from
+  running, whether that's a Swift concurrency job or a GCD worker under the same thread limit.
+- **The fix under the same load.** Three loaded full runs on the fix: none showed the signature (sampled each time
+  the log went quiet). Two completed green (2,389 cases passed). The third was killed after an hour, with 2,388 cases
+  passed: the one still in flight was `PermissionsClientTests/liveHealthStatus()`.
+- **Found, not fixed (1): the load starves HealthKit.** `liveHealthStatus()` asks the simulator's HealthKit for a
+  status. Unloaded it takes 2.7–5.6 s; with every core busy it took 351 s, 1,318 s, and over an hour. It hit main's
+  second loaded run too, so it isn't from this change. It only shows under artificial load.
+- **Plain full runs on the fix, back to back:** 1) 2,389 passed, 0 failed; 2) 2,388 passed, 1 failed; 3) 2,389
+  passed, 0 failed (cases, counted across split log lines, as the 2340 above). None hung.
+- **Found, not fixed (2): `LiveActivityFeatureTests/settingOffWhileStartingSendsNothingMore()` is flaky.** It
+  failed once (plain run 2): "nothing after the start, got [start, end]". The test assumes the setting's `end` is
+  recorded before the delayed `start` resumes, but its own comment says the recording client doesn't queue, so the
+  order is a race. No CoreData involved; it passed in the other 11 full runs (6 on main).
+- **Logs:** `Cyclometer/.build/480-*.log`; the deadlock sample is `Cyclometer/.build/480-hang-main-sample.txt`.
+- [x] **(2) fixed, on Brian's call.** Cause: S12 "off" cancels `CancelID.start`, and the test's delayed start slept
+      with `try? await clock.sleep(...)`. A cancelled `TestClock` sleep returns at once (swift-clocks: the stream
+      ends on cancellation, then `checkCancellation()` throws), so the "late" answer was recorded right away and raced
+      the setting's `end`. A probe showed it: the start was recorded with the clock never advanced. The test's start
+      now waits on a gate outside the cancellation (`Task { for await … }`), as ActivityKit's request isn't cancelled
+      with the effect, and the test releases it once the `end` is recorded, so the order is causal. Not a
+      shielded clock sleep: one registered after `advance` would never fire. 200/200 iterations; mutation (drop the
+      reducer's `.cancel(id: CancelID.start)`, own DerivedData) fails it; `LiveActivityFeatureTests` 25/25. The
+      sibling `settingOffAndOnWhileStartingTakesTheSecondAnswer` uses the same sleep but its answer order is fixed
+      (the first is released by the cancel, the second only by `advance`), so it's unchanged
+
+---
+
+## #505 — Flush buffered track points on pause and when the app leaves the foreground
+
+Cause (ride 2026-10-30): `RideDataBuffer` is written to CoreData only every 30 s of active riding and at Finish,
+so a kill loses whatever is buffered — up to 30 s. A swipe-kill from the app switcher never reaches the background:
+the app goes `.inactive` and is then SIGKILLed, so the flush has to happen on leaving `.active`.
+
+- [x] Branch `505-flush-track-points-on-pause-and-background` from `main`.
+- [x] `TrackPointRecorderFeature`: `.pauseRecording` also returns `flushEffect()`. New `.appResignedActive` →
+      `flushEffect()`. Update the type's doc comment (flushes every 30 s, on pause, on leaving the foreground, at end).
+- [x] `AppFeature.scenePhaseChanged(isActive: false)`: with a ride in progress, also send
+      `.activeRide(.trackRecorder(.appResignedActive))` — the pattern `.liveActivity(.appBecameActive)` already uses.
+- [x] Tests (`TrackPointRecorderFeatureTests`): pause flushes the buffered points; `appResignedActive` flushes them;
+      an empty buffer writes nothing. AppFeature: leaving `.active` mid-ride flushes; with no ride, nothing changes.
+- [ ] Brian runs it on device (walking works): start a ride, walk ~1 min, open the app switcher, swipe the app away,
+      relaunch at once, walk on, finish. Expected: the GPX gap ≈ the time the app wasn't running, not up to 30 s more.
+- [ ] Then: `TrackPointRecorderFeatureTests`, `ActiveRideFeatureTests`, `LiveActivityFeatureTests`, `AppScreenPowerTests`.
+- [ ] Commit + PR.
+
+**CI fix.** Two older tests didn't account for the new flushes: `hrTallyMatchesRecordedTrack` read the track from the
+buffer after a pause, which now writes it out (it now counts written + buffered points), and the exhaustive
+`backgroundingRestoresEverything` didn't expect `.activeRide(.trackRecorder(.appResignedActive))`. The
+`ActiveRideFeature*`, `AppScreenPowerTests`, `AppFeatureTests`, `TrackPointRecorderFeatureTests`,
+`LiveActivityFeatureTests`, `RideRecordingTests` and `TrackSegmentTests` suites: 236 passed, 0 failed.
+
+**CI fix 2.** `RideEndFailureTests` counted ride-end flush attempts: the pause's flush is now the first. The all-fail
+test expects 3 attempts (pause, ride end, its retry). The fail-once test now fails the first two, so the ride end's
+retry is still what it exercises. Full `CyclometerTests`: 2,104 passed, 0 failed. The first CI fix ran only the suites
+I expected to be touched and missed this one.
+## #503 — A ride resumed after a kill redraws its saved track on the map
+
+Cause: `State(resuming:)` leaves `trackSegments` at `[[]]` by design ("a resumed ride redraws its map from empty"),
+though `seedFromSavedTrack` already fetches every saved `TrackPoint` on resume for elevation, HR and W23.
+
+- [x] Branch `503-resumed-ride-redraws-saved-track` from `main` (#505 is on its own branch, PR #507).
+- [x] `seedFromSavedTrack(rideId:resumedAt:)`: from the points it already fetches, keep those timestamped before the
+      resume (`.task`'s `startedAt`) — exactly the pre-kill track; any flushed since the resume are already drawn —
+      split them with `TrackPointDTO.segments(of:)`, drop empty ones, send `.trackSegmentsSeeded([[Coordinate]])`.
+- [x] `.trackSegmentsSeeded`: `trackSegments = seeded + trackSegments`, so live fixes that landed first stay after.
+      The kill gap stays a break: the live segment has its own index (active resume bumps it; a paused resume's
+      live segment is empty until `resume()` opens the next).
+- [x] Update the `trackSegments` / `trackSegmentIndex` doc comments that describe the empty redraw.
+- [x] Tests: reducer — seeded segments go in front of live ones; `RideRecordingTests` — kill-and-relaunch against
+      live persistence: the relaunched ride's `trackSegments` hold the pre-kill track, then the post-resume one;
+      a failed or empty fetch leaves `trackSegments` as the live points only.
+- [ ] Brian runs it on device (walking works): start a ride, walk, kill from the app switcher, relaunch, open the
+      map. Expected: the whole track so far, with a break at the kill.
+- [x] Then `ActiveRideFeatureTests`, `TrackSegmentTests`, `RideRecordingTests`; commit + PR.
+
+**Review.** The 14 `ActiveRideFeature*` suites, `TrackSegmentTests` and `RideRecordingTests`: 176 passed, 0 failed.
+Device check not done before the PR, at Brian's call.
+
+**Code review (`/code-review --fix`).** Fixed: the live-CoreData `receive` in `killAndRelaunchResumesRide` uses
+`effectDrainTimeout`; new `savedTrackSeedStopsAtTheResume` pins the before-the-resume filter; the failed-read test now
+draws a fix after the read; two stale `State(resuming:)` comments. Skipped: the wall-clock split (`timestamp <
+resumedAt`) assumes the clock doesn't step back across a kill — splitting by segment index instead loses points when a
+resume's checkpoint write fails, so it stays a design call; reusing `RideMapThumbnail.drawableSegments` (different
+types). Review's run: `TrackSegmentTests` + the two `RideRecordingTests` cases, 11 passed, 0 failed.
+
+---
+
+## #501 — Newly added icons to 1x1 widgets are too big
+
+The issue says "reduce the size by 80%". I read that as 80% of the current size, because cutting it to 20% would
+make the symbols unreadable at about 4 pt. `widgetSymbol(_:)` draws all of them at `.title2` (22 pt). The nearest
+Dynamic Type style is `.body` (17 pt, 77%), so it doesn't hardcode a size.
+
+- [x] Branch `501-widget-symbol-size` from `main`.
+- [x] `WidgetSymbol.swift`: `.title2` → `.body`; UX.md Widget Symbol Convention updated.
+- [x] Brian: "Go smaller" → `.subheadline` (15 pt, 68%). `.callout` (16 pt) was too small a step to notice.
+- [x] Brian: semantically a footnote → `.footnote` (13 pt, 59%).
+- [x] Brian looks at it on device.
+- [x] Re-record the 1×1 snapshot references (#500's 47 plus W21/W23's), check that only the lower-right corners
+      moved, then run the full widget snapshot suites and `AddWidgetSheet`; commit + PR.
+
+**Review.** Re-recorded 13 suites with `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`: 59 PNGs, #500's 47 plus the
+six each for W21 Sunset and W23 Active Calories. A separate verification run passed 83 tests with 0 failures. A
+pixel diff against main found one changed region in each single-widget reference, in its lower-right corner. The
+catalog has 9 regions, one for each 1×1 symbol it shows, and the edit-chrome references have one per 1×1 card.
+Nothing else moved.
+
+---
+
+## #414 — Hero numbers in the large are being clipped
+
+The snapshot named in the issue (`testCadenceOneByOneTrendUp`) is a **medium** hero (68 pt), not large. Its 6 ends in a
+hard edge at x=161 px: black to background, no anti-aliasing, while its left edge is anti-aliased. Cause: SwiftUI clips
+text to its frame, and with `.tracking(-4)` the frame counts the tracking after the last glyph too. At 68 pt D-DIN's
+right side bearing is 3.2 pt (advance 26.86, ink to 23.66), so the frame ends ~0.8 pt (2.4 px) inside the last digit.
+At 136 pt the bearing is 6.4 pt, so large doesn't clip. Small (34 pt) has no tracking.
+
+- [x] Branch `414-hero-digit-clipping` from `main`.
+- [x] `AppFonts.swift` `dDINCondensed`: where tracking applies (≥50 pt), a `TextRenderer` whose `displayPadding` lets
+      the text draw 4 pt past its trailing edge. Layout unchanged. Below 50 pt nothing changes, so the Lock Screen's
+      `Text(timerInterval:)` (small) keeps the system renderer.
+- [x] Re-record the snapshot references; pixel-diff against main.
+- [ ] Brian looks at it on device (skipped for now; he asked for the snapshots and the Lock Screen first).
+- [x] Lock Screen drive: the Live Activity's medium speed still renders.
+
+**Review.** Ran all 41 snapshot suites with `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`. 128 tests re-recorded 131
+PNGs in 20 suites; no other errors. A separate verification run passed 251 tests, and the full `CyclometerTests` run
+passed 2406 with 0 failures.
+
+Pixel diff against main:
+- The issue's `testCadenceOneByOneTrendUp`: one column (x=162, 42 px tall) changed. It was background (237) and is now
+  the 6's anti-aliased edge (85, 1, 1, 34), which mirrors its left edge. The real cut was ~1 px, not the 2.4 px I
+  estimated.
+- Most references: one narrow strip, 1–5 px wide, at the right edge of a value's last glyph; or, at ≤2 levels, nothing
+  visible (27 PNGs).
+- The large empty-state dash (`HeroNumberSnapshotTests/testEmptyState`) had lost a full 4 pt (12 px): an em dash has
+  no side bearing. It now draws at its true length and ends right above where the unit starts; they don't touch.
+- Speed 1×1/2×1 (the heroes with `minimumScaleFactor(0.5)`) have hundreds of faint anti-aliasing differences across
+  their digits. Ink runs match main to within 1 px and the unit doesn't move: the scaled glyphs rasterize slightly
+  differently through the renderer.
+- Catalog and edit-chrome references: the same changes, once per widget they draw.
+
+Lock Screen drive (throwaway XCUITest, deleted): the card draws, the elapsed timer (small, system renderer) counts,
+and the 17.9 mph speed (medium, through the renderer) has an anti-aliased right edge. The first two drives showed no
+card at all, because the sim still held an earlier drive's resumed ride and Live Activity state. A fresh install
+fixed that.
+
+---
+
+## #341 — Route arrows draw over the user's location
+
+**Plan (approved 2026-10-31).** Arrows were SwiftUI `Annotation`s, and the iOS 27 SDK has no annotation z-order control
+(`_MapKit_SwiftUI.swiftinterface`). Moving `UserAnnotation()` last failed on device. Arrows become `MapPolygon`
+triangles on the map plane, because overlays always draw beneath annotations, the rider's dot included.
+
+- [x] Revert the failed `UserAnnotation()` reorder (live map, S19)
+- [x] `RouteGeometry.coordinate(offsetFrom:north:east:)`: the inverse of `tangentPlaneOffset`, sharing one radii helper
+- [x] `RouteDirectionMarkers`: delete `screenAngleDegrees`; add `arrowInkFraction` (0.8, the glyph's measured ink),
+      `metersPerPoint(visibleBounds:mapWidthPoints:)` and `arrowTriangle(for:sizeMeters:)`
+- [x] `RouteDirectionArrows` draws `MapPolygon`s; `cyMapAnnotation` font deleted
+- [x] S19, S20 and the live map track their width with `onGeometryChange`; live map drops `ArrowPose`
+- [x] Tests: four `screenAngle*` tests replaced by triangle/`metersPerPoint` tests; geometry round-trip test
+- [x] Brian checked on device: happy
+- [x] Full `CyclometerTests` green (1869 tests, 166 suites) → commit + PR
+
+**Review.**
+- The dot now draws above the arrows on every map.
+- On the tilted live map, arrows lie flat on the road.
+- Live-map arrow size rests on `LiveMapCamera.visibleBounds`, which is approximate; Brian accepted it on device.
+
+---
+
+## #341 follow-up — Arrows measured with MapProxy, constant size through gestures
+
+**Plan (approved 2026-10-31).** On device the settled sheet drew arrows ~7× too big: the scale was estimated from
+`camera.distance` (live map) or the requested region (S19/S20), and metre-sized triangles grew with a pinch. Brian chose
+to measure the scale with `MapProxy` and hold the arrows' on-screen size during gestures too.
+
+- [x] `RouteDirectionMarkers.metersPerPoint(from:to:pointsApart:)` replaces the bounds-based estimate; `quantizedScale`
+      snaps to 2 % steps so only a visible size change redraws
+- [x] New `MapProxy.metersPerPoint(mapSize:)`: converts two points 50 pt apart across the map's centre
+- [x] `RouteMapContent` takes placed `arrows` + `metersPerPoint`; no longer walks the route per redraw
+- [x] S19, S20 and the live map wrap their `Map` in `MapReader`, re-measure on every camera frame, and place arrows only
+      when the viewport settles or geometry lands
+- [x] Tests: bounds `metersPerPoint` tests replaced by coordinate-pair and `quantizedScale` tests
+- [x] Brian checked on device: good
+- [x] Full `CyclometerTests` green (1871 tests, 166 suites, 2 known issues) → commit + push to PR #511
+
+**Review.**
+- Arrows draw at 16–22 pt at rest and mid-pinch on all three maps.
+- The live map measures the scale only while a route is loaded, so a free ride writes nothing.
+
+---
+
+## #341 follow-up — No arrows when zoomed out
+
+Brian: at a 50-mile radius the arrows are just blocky triangles over the route.
+
+- [x] `RouteDirectionMarkers.maximumArrowMetersPerPoint` (50 m/pt, ~20 km across a phone) + `drawsArrows(atMetersPerPoint:)`
+- [x] `RouteDirectionArrows` draws nothing past it, checked against the per-frame scale, so all three maps share it
+- [x] Test: `arrowsStopAtTheCutoffScale`
+- [x] Brian checked on device: good
+- [x] Full `CyclometerTests` green (1872 tests, 166 suites, 2 known issues) → commit + push to PR #511
+
+---
+
+## #492 — The bell button should have a bicycle bell sound
+
+Plan: `~/.claude/plans/transient-stargazing-map.md`. Brian chose: synthesized, always rings through silent, rotary brrring-brrring.
+
+- [x] Branch `492-bicycle-bell` from `main`.
+- [x] `AudioClient.swift`: `ToneSegment.Kind.ring` (overlapping strikes, one-pole decay per partial, peak-scaled,
+      faded); `ToneKind.bell` (two 8-strike flicks, inharmonic modes, volume 1.0, yields to a sounding
+      Warning/Danger); `ringsThroughSilentMode` → `.playback` + `.mixWithOthers`; `playBell`.
+- [x] `ActiveRideFeature`: `.bellTapped` → `audioClient.playBell()`; `RideDashboardView` sends it (drops the system
+      "Tink" and `AudioToolbox`).
+- [x] Tests written: renderer (length, peak, no clicks, dip between flicks, band, silent-mode), yields, reducer.
+- [x] `Audio.md` §Bell + acceptance criteria; `UX.md` §S05 toolbar line.
+- [x] Brian checked on device: rings with the silent switch on, and music keeps playing under it.
+- [x] Tune by ear until approved.
+  - Round 1 (Brian: rings too long, too high): fundamental 2.4 → 1.7 kHz; decay time constants halved
+    (300/200/120/70 → 150/100/60/35 ms); 1,300 → 1,050 ms. Beat partner kept at ~4 Hz (×1.0024).
+- [x] Run tests: full `CyclometerTests` 2412 passed, 0 failed (before rebasing onto #511/#512, which touch no
+      audio or ride code). Swapped `.userInteractive` (deprecated) for `.high`, its alias.
+
+**Review.** Brian approved the sound after round 1, and confirmed on device that it rings through the silent
+switch with music playing under it. Found, not fixed: Danger's silent-mode override
+calls `overrideOutputAudioPort(.speaker)` under `.playback`, which only applies to `.playAndRecord`; the override is
+unreachable in MVP. With earphones connected the bell plays in them (noted in `Audio.md`).
+
+---
+
+## #335 — All sheets should have close in the upper-left corner of the sheet
+
+Plan: `~/.claude/plans/temporal-chasing-dragonfly.md`. Brian chose: S10 is exempt (Delete keeps leading, #452); the
+map sheet gets a transparent nav bar with the system close, so its scale and controls drop below the bar.
+
+- [x] Branch `feat/335-sheet-close` from `main`.
+- [x] Start sheet: hand-made `xmark` → `Button(role: .close)` at `.cancellationAction`.
+- [x] Route filter sheet: trailing "Done" → `Button(role: .close)` at `.cancellationAction`.
+- [x] `LiveMapSheet`: `NavigationStack` + `.cancellationAction` close, hidden bar background; `#Preview("Sheet")`.
+- [x] `UX.md` Sheet standards S10 exception; §S05 map sheet close.
+- [x] Brian runs it: Start sheet, Route filter, map sheet from W8 and a "Sheet: Map" widget.
+- [x] Tests: StartSheetFeatureTests, WidgetAccessibilityTests, RoutesSnapshotTests; full `CyclometerTests` before push.
+  - Targeted: StartSheetFeatureTests 20, WidgetAccessibilityTests 83, RoutesSnapshotTests 6, all passed.
+  - Full `CyclometerTests`: 2417 passed, 0 failed.
+
+**Review.** Seven sheets already used the system close; three outliers now match. S10 is the one exception, by
+Brian's call. The map sheet's bar has no background, so the map still bleeds to the top edge; its controls move down
+below the bar. Snapshot references didn't move because no snapshot draws these toolbars: Routes pins
+`RouteFilterSheetBody`, Start pins rows, and the live map isn't snapshotted. iOS 27 does render toolbar items.
+
+**Shared close (Brian asked, after review).**
+- [x] `UI/Components/SheetCloseButton/SheetCloseButton.swift`: `.sheetCloseButton(disabled:action:)` adds the
+      `.cancellationAction` `Button(role: .close)`; `dismiss` unless an action is given. Previews: Sheet, Disabled.
+- [x] All 10 sheets use it; each widget sheet's now-unused `@Environment(\.dismiss)` removed. CLAUDE.md + UX.md name it.
+- [x] Brian runs it: every sheet's X still closes (the helper reads `dismiss` at the stack's root, not outside it).
+- [x] Full `CyclometerTests`: 2417 passed, 0 failed → commit + push to PR #514.
+
+---
+
+# #499 — Cap Dynamic Type on dashboard captions, units and badges
+
+Range form `.dynamicTypeSize(...DynamicTypeSize.x)` caps the size. The single-value form would pin it, and pinned text grows even at the default Large.
+
+- [x] `WidgetLabel`: capped at `.xxxLarge`. This covers every widget title.
+- [x] `HeroNumber`: label and unit capped at `.xxxLarge`, inside the component, so no call sites change. The digits are uncapped (out of scope).
+- [x] `widgetSymbol`: the 1×1 corner SF Symbol capped at `.xxxLarge` (Brian, after the first hand-over).
+- [x] `SpeedWidget`: its own hero's unit is capped at `.xxxLarge`, and the GPS/BLE source badge at `.xLarge`.
+- [x] `HeroNumberSnapshotTests`: added `testLargeAccessibilityDynamicTypeWithLabel` (AX5 with a label).
+- [x] Brian runs it at the largest text size and at the default size.
+- [x] Re-recorded the AX5 HeroNumber snapshot and added one with a label. Full `CyclometerTests`: TEST SUCCEEDED, 0 failures;
+      `testAddWidgetCatalog` unchanged.
+- [ ] Follow-up: at AX5 the hero digits overflow their fixed `frameSize` and draw over the label (see the WithLabel reference).
+- [x] Commit + PR #518 (M10.5, closes #499).
+
+---
+
+## #494 — Widget sheets: readings as small hero columns
+
+Plan: `~/.claude/plans/majestic-dazzling-ripple.md`. Branch `feat/494-reading-columns`.
+
+- [x] `MetricReading` → value / unit / spoken (`shown` computed), moved to `UI/Components/ReadingColumn/`
+- [x] `ReadingColumn` + `ReadingColumns` (equal-width, wrapping `Layout`) with previews
+- [x] Calories sheet on the shared component
+- [x] Ride metrics sheet: Distance · Speed (Current/Average/Max) · Pace (Current/Average) · Time (Moving/Ride)
+- [x] Heart rate sheet: Heart Rate + Zone (number + dot); "No HR Source" in the footer
+- [x] Elevation sheet: Current/Highest/Lowest · Ascent/Descent · Grade (3)
+- [x] Cadence sheet: `CadenceList` split out; Avg/Max Cadence columns
+- [x] App + test target build clean (0 warnings); test sources updated, not yet run
+- [x] Brian runs each sheet — "Looks great" (Grade wraps 2 + 1, zone as number + dot, accepted)
+- [x] Tests: metrics tests updated, `ReadingColumnsTests`, snapshots re-recorded (+ new Cadence suite), full suite
+- [x] UX.md: the four sheet texts + W5's sheet line + Updated line
+- [x] Commit + PR
+
+### Review
+- Snapshots re-recorded with record mode `failed`: Ride metrics ×3, Heart rate ×3, Elevation ×3 changed; Calories ×6
+  pixel-identical (the shared layout reproduces its HStack); Cadence ×3 new (added to CI's skip list).
+- Targeted run (5 sheet snapshot suites, metrics suites, `ReadingColumnsTests`, `WidgetAccessibilityTests`, AddWidgetSheet): TEST SUCCEEDED.
+- Full `CyclometerTests`: TEST SUCCEEDED, 2426 passed, 0 failures.
+
+### #494 review (`/code-review xhigh --fix`)
+
+- [x] Fixed: the Cadence chart's axis labels format in the environment's zone and locale, as `RideTimeAxis` does,
+      so `CadenceSheetSnapshotTests`' Chicago pin holds (its reference read 9:01 AM, the Mac's New York time; now
+      8:01 AM); `ReadingColumns.columns` clamps before `Int(_:)`, which trapped on a stack's infinite width
+      (`anInfiniteWidthFitsThemAll`), and measures natural widths once in `sizeThatFits`; the cadence demo's
+      coasting predicate never matched (`i / 6 % 30` is 0–29), so `CadenceDetail.sample` now coasts from 20 to 26 min;
+      the #361 doc comment back on `rowsSpeakInWords`; the Cadence snapshot helper forwards file/line
+- [x] Re-recorded Cadence Active + Active Dark (opened: 8:01 AM, the coasting drop). Then the 5 sheet snapshot suites
+      (the other 4 unchanged by the layout change), CadenceWidget snapshots, ReadingColumns, RideMetrics,
+      WidgetAccessibility: 74/74, every suite non-empty
+- Skipped, for Brian: (3) at accessibility sizes the small hero's digits overflow its fixed `frameSize` onto the label
+  and the wrapped row below, where the old rows scaled (#499's open follow-up, in `HeroNumber`); (4) the zone dot sits
+  ~4 pt above the digits' drawn baseline (`heroAccessory` aligns to the un-offset guide; moving it moves W9 too);
+  (7) `MetricReading.shown` puts a space before "%" ("+4 %", was "+4%"), unread today; (8) Grade's wrapped readings are
+  leading-aligned, against UX.md §Alignment's right-aligned rule for stacked numbers of one unit; (9) with no HR source
+  VoiceOver hears "No HR source" twice, on the reading and in the footer
+
+### Follow-ups from review (Brian, 2026-11-02)
+- [x] "No HR source" read once, in the footer; UX.md alignment exception for sheet readings (pushed)
+- [x] `HeroNumber` leading accessory on the digits' baseline: W9's arrow stays there (pushed)
+- [x] Zone dot centred on the digits: `heroAccessory(.capCenter)`; `ReadingColumn` uses it. The cap height comes
+      from the Dynamic Type-scaled point size, not a post-layout measurement, which a single-pass snapshot left at 0
+- [x] Grade: "Steepest" one column, "+9 % / -8 %" (`ReadingColumn` with several readings), read "climb …, descent …"
+- [x] Cadence zone rows as HR's: shared `ZoneTimeRow` + `ZoneDot` (UI/Components/ZoneTimeRow)
+- [x] Steepest's label lifted over the row (`heroLabel()`), so it no longer widens the first number; "/" as small as
+      the units (Brian)
+- [x] Cadence ranges use an en dash, in `CadenceZone.rangeText`: Cadence sheet and Settings both (Brian)
+- [x] Brian reviewed the renders: approved
+- [x] Re-recorded HR live ×2, Elevation ×3, Cadence ×3, Settings ×2 (full-suite record run: only those moved);
+      UX.md (Steepest pair, centred dot, zone rows with dots, en dash)
+- [ ] Full suite verify, commit + push
+
+---
+
+### #494 second review (`/code-review xhigh --fix`, 2026-11-02)
+
+- [x] Fixed: Cadence zone times read aloud truncated (`Int(seconds)`) while the row rounds, so 59.6 s showed
+      "0:01:00" and read "59 seconds"; now rounded once through a shared `MetricReading.zoneTime(seconds:)`, which
+      the HR rows use too
+- [x] Fixed: `ReadingColumns` with no width proposed stacked any two readings of unequal width (it fitted them to
+      their own summed width) and proposed the average width to each; now side by side at the widest, and
+      `placeSubviews` follows the same path
+- [x] Cleanups: `ReadingColumn` drops the `Accessory == EmptyView` type check (an empty accessory takes no room, as
+      HR's absent dot shows); the "/" and the units share `heroUnit()`; the preview uses `ZoneDot`; the stale "60-69"
+      in `rangeText`'s doc comment
+- [x] App + test targets build clean; tests not run (Brian runs first)
+- Skipped, for Brian: (2) AX-size digit overflow (#499 follow-up, known); (4) a live value gaining a digit can re-flow
+  a row 3 ↔ 2+1; (5) `heartRateSheetFollowsTheRideWhileOpen` no longer checks the "No HR Source" footer reaches
+  VoiceOver; (6) `.capCenter` sizes from Dynamic Type, so it would mis-centre under `minimumScaleFactor`;
+  (7) "Pedaling vs Coasting" still reads "—" aloud; (8) zone rows read "Z1 …", the Zone column "Zone 3, …";
+  (9) per-sibling `.offset` patches for the digits' `.baselineOffset`; (15) `ReadingColumns` re-measures with no cache
+
+### #494 review follow-ups (Brian: "Do as recommended")
+- [x] (6) `heartRateSheetFollowsTheRideWhileOpen` checks "No HR Source" is read with no source and gone once one
+      connects. That second check failed 3/3: the List keeps the dropped footer, hidden, for reuse
+      (`ListCollectionViewHeaderFooter hidden=true`), and the test's tree walker read hidden views. The walker now
+      skips hidden views, as VoiceOver does; the app was right. `WidgetAccessibilityTests` 83/83
+- Left, as recommended: (5) columns reflowing as values change width; (9) `.capCenter` vs shrunk digits, per-element
+  offsets. Not done, Brian's call: (4) accessibility sizes (#499), (7) "Pedaling vs Coasting, —", (8) "Z3" vs "Zone 3"
+- Deferred (Brian, 2026-11-03: "leave all of them for now"): (4) accessibility sizes (#499's `HeroNumber` rework),
+  (7) "Pedaling vs Coasting, —" read as a dash, (8) zone rows "Z3 Aerobic" vs the Zone column's "Zone 3, Aerobic"
+- [x] Cadence sheet: chart, Avg/Max Cadence and Pedaling vs Coasting in one section, as Heart rate's (Brian);
+      re-recorded Cadence Active ×2 (No Data unchanged); UX.md; Cadence snapshots + WidgetAccessibility 86/86
+
+---
+
+## #517 — Add Widget sheet: categories as remembered disclosure groups (2026-11-03)
+
+Branch `feat/517-add-widget-categories`. Plan approved (Brian): Ride, Heart, Power, Fitness, Elevation, Weather, Route;
+empty categories hidden; Cadence listed only with a paired cadence sensor (power widgets will gate the same way);
+Heart always shows (Watch HR has no pairing record).
+
+- [x] `WidgetCategory`: String/Codable, 7 cases, new titles
+- [x] `DashboardWidget.requiredSensor` + `isListed(pairedRoles:)`; Cadence → `.cadence`
+- [x] Recategorise: Ascent/Descent/Grade/Elevation → Elevation; Calories → Fitness
+- [x] `AppPreferences.collapsedWidgetCategories` (decodeIfPresent); ActiveRide computed state + action
+- [x] `AddWidgetCatalog`: DisclosureGroups, heading style (headline, uppercase, cyPrimary), sensor filter, previews
+- [x] Tests written: entries, sensor gate, prefs decode, TestStore action, snapshots (collapsed variant added, re-recorded; canvas 1400 → 2100 pt to fit Fitness and Elevation)
+- [x] Docs: UX.md §S08, DataModel.md §3.6
+- [x] App + test targets build clean
+- [x] Snapshot check: the default chevron ignores `.tint` (draws `textPrimary`), so the modifier was dropped and UX.md
+      says "system chevron"
+- [x] Full `CyclometerTests`: 2431 passed, 1 failed — `rowsPairOneByOnes` still held the old Ride list (missed when
+      updating `entriesLargestFirst`); fixed, `AddWidgetSheetTests` 4/4
+
+### #517 review (`/code-review --fix`, 2026-11-03; Brian: "fix 3, 5, 6, 7, 8, 9")
+- [x] (3) Collapsed categories decode as names and drop only unknown ones (`["route","force"]` keeps Route)
+- [x] (5) `ActiveRideFeature.preferences` doc comment lists every write, #517 and #391 included
+- [x] (6) Collapse test moved into the S07 suite, on its `makeStore()`
+- [x] (7) UX.md's #142 paragraph points to the #517 categories
+- [x] (8) "Ride Widgets" preview in production order
+- [x] (9) Collapsed snapshot on its own 1400 pt canvas, re-recorded
+- [x] Full `CyclometerTests`: 2432 passed, 0 failed
+- Deferred (Brian, 2026-11-03: "leave 1, 2, 3, 4"): (1) 52 pt tap target on category headings; (2) `cyPrimary`
+  headings at 2.4:1 in light mode; (4) VoiceOver heading trait inside the disclosure label; (10) sensor gate in
+  `entries(in:)`
+# #504 — Resume When Moving doesn't resume a ride paused while moving
+
+Rule (Brian): a manual pause is eligible for Resume When Moving once the ride has read as stopped **or** 15 s have
+passed since the pause. A Pause tapped while coasting still holds for 15 s (#267).
+
+- [x] Field-case TestStore test (pause at 3.2 m/s, keep riding) — red before the fix
+- [x] `ActiveRideFeature`: `manualPauseGraceSeconds = 15`, `pausedAt` set in `pause`, cleared in `resume`, lazily set in `.speed` for a restored ride
+- [x] Tests: restored paused ride, Finish alert past the grace, preference off past the grace
+- [x] UX.md §S12 Resume When Moving line
+- [x] Field case red before the fix (with `pausedAt` declared but unused), `ActiveRideFeatureAutoPauseTests` 19/19 green after.
+- [x] 13 exhaustive pause assertions in `ActiveRideFeatureTests` gain `$0.pausedAt = testDate`.
+- [x] Brian runs it (walking check)
+- [x] Full `CyclometerTests`: 2432 passed, 0 failed. The first run caught 7 tests whose stores lacked a `date` override
+      (`pause` now reads it) or asserted a resume without `pausedAt = nil`; fixed in the tests.
+- [x] Commit + PR
+- [x] Verified on a real ride (Brian)
+
+**Review.** The 15 s grace runs from the pause, stamped in `pause()`. A ride restored paused starts it at the first
+reading. A stop still arms the pause immediately, so #267's behaviour after a stop is unchanged.
+
+---
+
+# 2026-11-03 ride (Gibsonville 23, app killed at 14:05) — two fixes
+
+Brian, 2026-11-03: "fix both 1 and 2 (yes). Leave #3." Tone category: "Always .playback".
+
+## A. Radar, All Clear and turn tones are silent while the app is backgrounded
+Evidence: 42 × `failed to start … 561015905`, all inside the two background spells after the relaunch;
+audiomxd: "AmbientSound … does not have background entitlement". `audio` was dropped from
+`UIBackgroundModes` in cc3529d (#329); `.ambient` would stay silenced on lock even with it (BLE.md §13.2 Q4).
+- [x] `Info.plist`: `audio` back in `UIBackgroundModes`
+- [x] `AudioClient.configureSession`: every tone on `.playback` + `.mixWithOthers` (mixable, so it may start from the
+      background); the Danger override branch (`.duckOthers` + speaker) unchanged
+- [x] `ToneKind.ringsThroughSilentMode` goes (every tone now rings through); its test goes with it
+- [x] Docs: Audio.md Silent Mode column, session code sample and acceptance items; BLE.md §13.2 Q4 resolved;
+      PRD §2/§8.3 Silent Mode lines and OQ5 superseded
+- [x] App builds
+- [ ] Brian runs it: lock the phone, trigger a radar alert / turn tone, hear it (music keeps playing under it)
+
+## B. A ride resumed after a kill loses W2's speed watermark and average line
+`speed.speedSamples` and `averageSpeedSamples` are in-memory only; `seedFromSavedTrack` reseeds elevation, HR,
+map and calories but not these, so after a kill W2 covers only the time since the relaunch.
+- [x] `SpeedHistorySeed` (`Features/ActiveRide/Speed/`): from the saved track before the resume, the last
+      `SpeedFeature.historyWindow` of speeds, and the running average replayed the way the tick computes it
+      (distance += speed and count += 1 on points above `stationarySpeedMPS`, sample = distance / count)
+- [x] `.speedHistorySeeded(SpeedHistorySeed)`: sent from `seedFromSavedTrack`; prepends to both series
+- [x] Tests: seed replay (stationary points skipped from the average, window cut, only pre-resume points);
+      TestStore resume test that both series come back in front of live samples
+- [x] `SpeedHistorySeedTests` 5/5 and `TrackSegmentTests` 9/9 green
+- [ ] Brian runs it: kill mid-ride, relaunch, W2 keeps its pre-kill shape
+
+## Then
+- [x] Targeted suites, then full `CyclometerTests`: 2439 passed, 0 failed
+- [x] Branch `fix/background-tones-and-resumed-speed-history`, commit, PR (#532)
+
+## Review follow-ups (`/code-review --fix`, 2026-11-03; Brian: "fix 1 and 2. None of 3-6")
+- [x] (1) `AudioClient.stop`: stops the engine and deactivates the session, called from the ride-end teardown;
+      with `audio` back, a running engine would hold the app awake after the ride. `RideEndAudioTests`, red without the call
+- [x] (2) The resume seed widened the shared watermark window and crowded W4/W5/W17 to its right edge.
+      `SpeedHistorySeed` → `WatermarkSeed` (`Models/`), seeding speed, average, cadence, HR and altitude together;
+      `WatermarkSeedTests` 6/6
+- [x] Full `CyclometerTests`: 2442 passed, 0 failed; commit, push
+- [ ] Brian: finish a ride, lock the phone, app suspends; resume after a kill keeps W4/W5/W17 traces
+- Deferred (Brian: "None of 3-6"): (3) W2 ramps across pauses and the kill gap; (4) replayed average can step at
+  the resume; (5) elevation/HR seeds can double-count a flush since the resume; (6) Danger override's speaker
+  route throws under `.playback`
+

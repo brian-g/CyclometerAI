@@ -3,6 +3,13 @@
 **Date:** 2026-09-17
 
 **Updated:** 2026-10-23 — Ride metrics pass. New widgets, none built yet: §W19 Distance Remaining and §W20 ETA (#461), §W21 Sunset (#462), §W22 Climb (#463), §W23 Active Calories with its Calories sheet (#465). §S05's Bottom Toolbar gains the Sensors sheet that the Sensor button (#466) and a new quiet Low Battery indicator (#464) both open. §S10 points to that indicator. §S15's Stats gain average and max HR, ascent, descent and calories (#460).  
+**Updated:** 2026-11-03 — §S08's categories are now collapsible sections (#517): Ride, Heart, Power, Fitness, Elevation, Weather, Route, with uppercase `brPrimary` headline headings. Each starts expanded and reopens as the rider left it. A section with nothing to list isn't shown, and Cadence is listed only with a cadence sensor paired.  
+**Updated:** 2026-11-02 — Widget sheets show their readings as small-hero columns, as "Sheet: Calories" does (#494): "Sheet: Ride metrics", "Sheet: Heart rate", "Sheet: Elevation", §W5's Cadence sheet and §Widget Details' new **Sheet readings**. "No HR Source" moves to the Heart rate sheet's footer.  
+**Updated:** 2026-10-29 — §W23 Active Calories and "Sheet: Calories" added and built (#465), 1×1 in §S08's Ride section. §S10's active energy is now shown live, on W23.  
+**Updated:** 2026-10-28 — §W22 Climb added and built (#463), 2×1 in §S08's Route section.  
+**Updated:** 2026-10-28 — §W21 Sunset added and built (#462), 1×1 in §S08's Ride section.  
+**Updated:** 2026-10-28 — §W19 Distance Remaining and §W20 ETA added and built (#461), both 1×1 in §S08's Route section.  
+**Updated:** 2026-10-26 — §S10 gains a trash button to delete the ride just finished (#452). Deleting any ride, there or by §S14's swipe, now deletes its Health workout too, the decision #277 left open.  
 **Updated:** 2026-10-20 — §W5's zone bands are the rider's five cadence zones, drawn with or without readings, in the HR zone colours. §S12 gains a Cadence Zones section to set them (#79).  
 **Updated:** 2026-10-20 — §S12 wheel size is the inline picker as built, not a navigation row (#101 closed not planned, #84).  
 **Updated:** 2026-10-13 — §S12 gains Show Live Activity (#313).  
@@ -110,6 +117,7 @@ The design should be aligned with Apple HIG and use standard SwiftUI components 
 ## Alignment
 
 - Numbers arranged vertically and of the same unit must always be aligned to the right
+  - Exception: a widget sheet's readings (§Widget Details, **Sheet readings**, #494) are left-aligned columns, each under its label, and stay left-aligned where a row wraps
 - Horizontal text should always be baseline aligned unless otherwise noted
 
 ### Typography Scale
@@ -175,6 +183,8 @@ The dashboard is sparse, so an empty grid item will not get auto-filled by if on
 
 With the exception of the dashboard, all sheets should have a close button in the upper left (or a back button if there is a nested sheet). 
 
+As built (#335): the close is the system `Button(role: .close)` at `.cancellationAction`, so it sits in the sheet's corner and moves with the detent. Every sheet gets it from `.sheetCloseButton()` (`UI/Components/SheetCloseButton/`). S10 is the only other exception: Delete keeps its upper-left slot (#452), and Finish Ride or a swipe down closes the sheet.
+
 ### Widget Size Convention
 
 Widget sizes are expressed as **WxH** (width × height) in grid units. The dashboard grid is 2 columns × 7 rows. Cell dimensions are approximately 201×96pt on iPhone 17 Pro.
@@ -186,6 +196,28 @@ Widget sizes are expressed as **WxH** (width × height) in grid units. The dashb
 | 2x2 | 2 col × 2 rows | 402 × 195 |
 
 This convention matches the frame naming in `Design.sketch`.
+
+### Widget Symbol Convention
+
+A 1x1 widget carries an SF Symbol in its lower right (#491): `footnote` (#501: `title2` was too big), `textSecondary`, inset `sm` as the label. It marks the card at a glance, so it is drawn in every state, empty ones included. VoiceOver doesn't read it. A widget that also comes in larger sizes draws it at 1x1 only.
+
+| Widget | Symbol |
+|---|---|
+| W1 Speed | `gauge.open.with.lines.needle.33percent` |
+| W3 Duration | `stopwatch` |
+| W4 Heart Rate | `heart.fill` |
+| W5 Cadence | `tire` |
+| W6 Distance | `ruler` |
+| W11 Pace | `hare.fill` |
+| W14 Ascent | `arrow.up.forward` |
+| W15 Descent | `arrow.down.forward` |
+| W16 Grade | `mountain.2` |
+| W19 Distance Remaining | `point.bottomleft.forward.to.arrow.triangle.scurvepath` |
+| W20 ETA | `alarm` |
+| W21 Sunset | `sunset.fill` |
+| W23 Active Calories | `bolt.fill` |
+
+W9 Directions has none: its turn arrow already marks it. W2 Average Speed and W12 HR Zones have none yet, until a suitable symbol is found.
 
 ### Safe Area Handling
 - [x] Dynamic Island behavior on active ride dashboard. If the map is at the top or at the bottom in a 2x2 configuration, the map will bleed into the safe area.
@@ -482,7 +514,7 @@ The grid always occupies the full screen height between the Dynamic Island and t
 
 **Adaptive content** Each widget is size-aware. At `1×1` it surfaces the single most critical value — the number readable in under a second. At `2×1` it adds a secondary metric or sparkline. At `2×2` it exposes the full picture: hero number, trend watermark, supporting stats, and contextual detail. The content hierarchy within each widget is defined in the widget specifications below.
 
-**Multiple pages** The dashboard supports multiple swipeable pages, each with its own independent widget layout. Pages are managed through the customisation flow (S07). The paging indicator is always visible at the bottom of the grid when there are multiple pages defined. The factory default shows two paging dots, signalling that multi-page use is a first-class pattern, not an edge case. The widgets for the second page are TBD for this document. 
+**Multiple pages** The dashboard supports multiple swipeable pages, each with its own independent widget layout. Pages are managed through the customisation flow (S07). The paging indicator is always visible, one dot per page, even when only one page is defined. It sits in the bottom toolbar's row, centred on the screen, its bottom flush with the buttons' bottom edge (#447). The factory default shows two paging dots, signalling that multi-page use is a first-class pattern, not an edge case. The widgets for the second page are TBD for this document. 
 
 **Customisation** The rider configures the dashboard by choosing which widgets to display, their sizes, and their positions. The layout must satisfy:
 - All widgets fit within the 2-column × 7-row boundary
@@ -495,7 +527,7 @@ The grid always occupies the full screen height between the Dynamic Island and t
 
 **Grabber** A minimal grabber-style strip sits between the Dynamic Island and the top grid row. This allows the user to minimize the ride and look at other aspects of the app while riding (typically while stopped). The capsule is only a visual cue. The dashboard is a system zoom presentation, as in Apple Music: a tap on the ride accessory expands it out of the capsule, and a drag down anywhere on the dashboard collapses it back in, following the finger, with display-matched corners (#333). VoiceOver gets a "Minimize Ride" button on the capsule. The full-screen map sheet reserves a 52 pt band along its top edge, so pulling it down never pans the map (#330).
 
-**Auto-dim** After 30 s without a touch, the actively recording dashboard dims (#110). The countdown pauses while any finger is on the screen, a drag included, and restarts when the last one lifts, so the dashboard never dims under a drag or a collapse. While dimmed, the whole app window, including any sheet opened from the dashboard, takes no input: a tap only wakes the screen and reaches nothing beneath it, and a swipe, a drag or a long-press does nothing at all (#333).
+**Auto-dim** After 30 s without a touch, the actively recording dashboard dims to the rider's S12 Dimmed Brightness (#110, #471). The countdown pauses while any finger is on the screen, a drag included, and restarts when the last one lifts, so the dashboard never dims under a drag or a collapse. While dimmed, the whole app window, including any sheet opened from the dashboard, takes no input: a tap only wakes the screen and reaches nothing beneath it, and a swipe, a drag or a long-press does nothing at all (#333).
 
 **Turn instructions** When turn-by-turn is on and a turn comes within the lead distance, the dashboard shows the instruction centred over everything else, per `Sxx - Route overlay` in Design.sketch (#197 review). It is a card, 136 pt square at its smallest, with a 16 pt continuous corner radius, filled `borderSubtle` with a 1 pt `borderStrong` border, and the whole card at `turnOverlay` opacity. Inside, the turn's arrow sits in `primaryDark` at 64 pt (SF Pro Rounded Semibold), with the instruction under it in `textPrimary` at 34 pt (SF Pro Regular). The instruction is the cue's own words when the route file gave some, and the direction otherwise. The card is solid rather than glass, so the dashboard stays readable through it. It stays up until the rider is within 10 ft of the turn — a flat four seconds took it away with 90 m still to ride at a 100 m lead — and never takes a touch. Transient notices (source switch, calibration) and off-route keep the top banner slot.
 
@@ -524,8 +556,7 @@ This is the arrangement every new user sees. It demonstrates the full range of w
 **Structural Zones:**
 
 - Widgets (full screen, no intrinsic padding — widgets extend to screen edges)
-- Dashboard paging indicator
-- Bottom Toolbar
+- Bottom Toolbar, with the dashboard paging indicator in its row, centred on the screen
 
 **Widget Grid**
 
@@ -533,7 +564,7 @@ The dashboard divides the phone screen into 7 rows × 2 columns. Widget sizes fo
 
 **Dashboard Paging**
 
-Multiple dashboard pages are supported. Pages are added automatically (SpringBoard model). The paging indicator is always visible. See S07 for editing behavior.
+Multiple dashboard pages are supported. Pages are added automatically (SpringBoard model). The paging indicator is always visible. It sits in the bottom toolbar's row, centred on the screen, its bottom flush with the buttons' bottom edge. It draws beneath the buttons, so it never takes a button's touch (#447). See S07 for editing behavior.
 
 **Bottom Toolbar**
 
@@ -542,19 +573,20 @@ Toolbar buttons shown based on ride state:
 | Button | Shown when |
 |---|---|
 | Pause | Ride is active |
-| Sensor | One or more paired sensors not found (#466) |
-| Low Battery | A connected sensor reads at or below 20% (`SensorHealth.lowBatteryPercent`, #464) |
+| Sensors | A paired sensor isn't connected, or a connected one's battery has read at or below 20% this ride |
 | Resume | Ride is paused |
 | Finish | Ride is paused |
 | Bell | Always |
 
 All toolbar buttons use `.buttonStyle(.glass)` (iOS 26), `.labelStyle(.iconOnly)`, and a 52×52pt frame. The toolbar uses `.sharedBackgroundVisibility(.hidden)`.
 
-- **Sensor** (#466): `sensor.tag.radiowaves.forward.fill`, badged with the number of paired sensors whose link isn't active, whether never found this ride or dropped. A combo CSC sensor counts once. Hidden while every paired sensor is connected, and when nothing is paired.
-- **Low Battery** (#464): a battery glyph tinted `cyRatingBad`, the point at which `SensorBatteryLabel` turns red. Hidden otherwise.
-- **Quiet.** Neither button plays a sound, fires a haptic or raises a banner: nothing mid-ride competes with radar alerts (§S10 "Sensors"). They appear and leave with the controls' transition, or a fade under Reduce Motion.
-- **Sheet: Sensors.** Both buttons open it. It lists every paired sensor with its status (connected, searching) and, when connected, its battery level. It has no pairing or forgetting actions; those stay in §S11.
-- **Placement.** Where the two sit beside Pause and Bell follows a Design.sketch S05 frame, which comes before either is built.
+**Sensors** (#464, #466; Sketch "Sxx - Route overlay", group "sensor button") sits beside Bell, leading it. Its glyph is `antenna.radiowaves.left.and.right`, with a `brRatingBad` badge counting the devices that need attention: each paired device that isn't connected (never found this ride, or dropped), and each connected one whose battery has read at or below 20% this ride, the level `SensorBatteryLabel` turns red at. Low latches for the ride: a sagging cell reads high again between transmissions (BLE.md §14.5), and a live level would flick the button on and off as it rebounds. A combo CSC sensor is one device and counts once, and is connected only when both its roles are. With nothing paired, or every device connected and never at or below 20% this ride, the button is hidden. It appears and leaves with the other controls' transition, or a fade under Reduce Motion. It is quiet: no sound, haptic or banner, because nothing mid-ride competes with radar alerts (§S10). VoiceOver reads "Sensors, 1 not found", "Sensors, low battery: Radar, 18 percent", or both joined, with the hint "Opens sensor status".
+
+**Bell** rings a rotary bicycle bell, brrring-brrring (#492; `Audio.md` §Bell). It is for the people ahead, so it rings even with the phone on silent.
+
+The row fits its widest case, paused with Sensors showing (Resume, Finish · Sensors, Bell), with room between for about 13 page dots on a 402 pt screen. There is no overflow or priority order (#464, #466): a future toolbar button has to revisit that.
+
+**Sheet: Sensors** (#466). The Sensors button opens it, at the medium detent and expandable to large. One row per paired device, drawn as §S11's device rows are (a combo lists both its roles, "Speed & Cadence"), with its status, Connected or Searching, and while connected its lowest battery level this ride as `SensorBatteryLabel`, so a low one shows in red at the level that tripped the button. It has no pairing or forgetting actions; those stay on §S11.
 
 **Key Layout Decisions:**
 - [x] S05.4 factory default layout resolved — see table above; rider-customisable after first launch
@@ -583,6 +615,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 - Each widget exposes a label modifier; the label is hidden on 2x2 widgets
 - Tapping any widget opens a detail sheet for that metric category
 - VoiceOver reads each tappable widget as one button: its title, then what the card shows in words ("Cadence, 92 rpm, average 88, maximum 110"); units and time are spelled out ("36.0 kilometers per hour", "1 hour, 2 minutes"), and "—" is read as "No reading". A double-tap opens the same sheet (#361). In S07 edit mode the card's own element, with its Move actions, replaces it (#367)
+- **Sheet readings** (#494): a detail sheet shows each reading as a `small-hero` over its label, in columns that share the row's width equally, as the dashboard shows numbers. A row too narrow for its readings at their natural width wraps onto a second line, keeping the same columns, rather than wrapping a label. Two readings of one kind can share a column, each with its unit and a small "/" between them (Grade's Steepest, "+9 % / -8 %"), reading "—" once when neither has a value. A marker before a reading (the Heart rate sheet's zone dot) is centred on its digits. A missing reading reads "—" with no unit, and any reason for it goes in the section's footer. VoiceOver reads each column as one element, its label then the reading in words. The per-zone lists, donuts and charts stay as they are. Built as `ReadingColumn` / `ReadingColumns`, which every widget sheet uses
 
 ---
 
@@ -591,13 +624,13 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 **Sizes:** 2x2, 2x1, 1x1
 
 - Primary value: `large-hero`; unit: km/h or mph (`UserProfile.preferredUnit`)
-- Trend, at every size (#81): the shared trend indicator (#402), a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the primary value, level with the tops of its digits and a quarter of their height. It shows when current speed is above or below the ride average by more than 0.5 km/h. Hidden when even or with no reading. The unit doesn't move
+- Trend, at every size (#81): the shared trend indicator (#402), a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the primary value, level with the tops of its digits and a quarter of their height. It shows when current speed is above or below the ride average by more than 0.5 km/h. Hidden when even or with no reading. VoiceOver reads it as "above average" or "below average" after the speed (#401). The unit doesn't move
 - Watermark speed history graph (area line behind the numbers)
 - 2x1, 2x2: Max speed for ride (`small-hero`, labeled "MAX")
 - 2x1, 2x2: Current average speed (`small-hero`, labeled "AVG")
 - 2x2 only: Ride duration (`medium-hero`)
 - 2x2 only: Ride distance (`medium-hero`)
-- Sheet: Ride metrics. As built (#144), W1, W2, W3, W6 and W11 open the one sheet, at the medium detent and expandable to large. **Distance** comes first, on its own. **Speed:** a chart of the last hour's speed over a faint elevation area (the Cadence sheet's treatment), then current, average and max. **Pace:** a chart of the same hour, faster plotted higher, with a gap wherever the rider stopped, then current and average. **Time:** a moving vs stopped donut, then Moving Time (W3's) and Ride Time (W1's Time). A value with no source reads "—", including pace, where W11's own card shows "--:--". W5 is tagged the same but keeps its own Cadence sheet (#147), whose content is cadence-specific
+- Sheet: Ride metrics. As built (#144), W1, W2, W3, W6 and W11 open the one sheet, at the medium detent and expandable to large. **Distance** comes first, a column on its own. **Speed:** a chart of the last hour's speed over a faint elevation area (the Cadence sheet's treatment), then Current, Average and Max as columns. **Pace:** a chart of the same hour, faster plotted higher, with a gap wherever the rider stopped, then Current and Average as columns. **Time:** a moving vs stopped donut, then Moving Time (W3's) and Ride Time (W1's Time) as columns. A value with no source reads "—", including pace, where W11's own card shows "--:--". W5 is tagged the same but keeps its own Cadence sheet (#147), whose content is cadence-specific
 
 
 
@@ -650,7 +683,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - A watermark graph of the historical HR for the ride. The horizontal bands in the chart should show the zones (`brHRZone1`–`brHRZone5`)
 - As built (#145), W4 matches W5 Cadence. Behind the number, the last hour of heart rate is a faint line on the rider's zone bands. The y-axis is fixed from resting to max HR, so the bands don't move. The trend is the shared trend indicator (#402), as §W1's: a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the value, level with the tops of its digits and a quarter of their height, not over the unit as Design.sketch "W4 - Heart Rate" draws it. It compares the last 10 s of readings against the 20 s before, by 3 bpm or more. Hidden when steady or with no reading. The unit doesn't move. At 2×1 the hero has Avg and Max beside it, as W5's does. The left border shows the current zone's colour
 - Zone label: "Z1 Recovery/Light", "Z2 Endurance", "Z3 Aerobic", "Z4 Threshold", "Z5 Anaerobic" — §S12's names, so the dashboard and Settings use the same words (#145)
-- Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. The first section is the Cadence sheet's chart for heart rate (the last hour on zone bands over a faint elevation area, its y-axis fixed from resting to max), on the Ride Metrics charts' time axis; then current heart rate and zone, matching the cards' empty states: "No HR Source" with nothing connected, "—" with no reading. Then **Time in Zones**: a donut in the zone colours, and one row per zone giving its name, its bpm range as §S12 resolves it, and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
+- Sheet: Heart rate. As built (#145), W4 and W12 open the one sheet, at the medium detent and expandable to large. The first section is the Cadence sheet's chart for heart rate (the last hour on zone bands over a faint elevation area, its y-axis fixed from resting to max), on the Ride Metrics charts' time axis; then Heart Rate and Zone as columns, the zone as its number with its zone-colour dot before it, centred on the digit (its name is read by VoiceOver). Both read "—" with no reading; with nothing connected the section's footer says "No HR Source", the cards' empty state, and VoiceOver reads it there once, Heart Rate reading "No reading". Then **Time in Zones**: a donut in the zone colours, and one row per zone: a dot in its colour, keying it to the chart's band and the donut's slice; its name over its bpm range as §S12 resolves it; and the ride's time in it. Time in zone counts the seconds the ride records, by the rule §S10 uses on the saved track, so the sheet reads the same at finish. It restarts from zero when a crashed ride resumes
 
 ---
 
@@ -660,11 +693,11 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 
 - Value: current RPM
 - Empty state: "--" 
-- Trend, at both sizes (#402): the shared trend indicator, as §W1's: a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the value, level with the tops of its digits and a quarter of their height. It shows when current cadence is above or below the ride average by more than 5 rpm. Hidden when even, while coasting (0 rpm), with no reading, or before any pedalling is recorded. The unit doesn't move
+- Trend, at both sizes (#402): the shared trend indicator, as §W1's: a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the value, level with the tops of its digits and a quarter of their height. It shows when current cadence is above or below the ride average by more than 5 rpm. Hidden when even, while coasting (0 rpm), with no reading, or before any pedalling is recorded. VoiceOver reads it as "above average" or "below average" after the cadence (#401). The unit doesn't move
 - 2x1 displays the average and max
 - A watermark graph of the historical Cadence for the ride. The horizontal bands in the chart show the cadence zones.
 - As built (#79), the bands are always drawn, even before any reading arrives: they show the rider's zones, not ride data. There are five zones, set in §S12's Cadence Zones section: Z1 Recovery, Z2 Endurance, Z3 Steady State, Z4 Race Pace and Z5 Sprint, coloured `brHRZone1`–`brHRZone5`. They default to 60–69, 70–84, 85–94, 95–109 and 110+ rpm. A pedalling reading below Z1's 60 rpm still counts as Z1, as a heart rate below resting counts as HR zone 1. The Z1 band runs from 0, so the chart has no unshaded strip. The y-axis is fixed at 0–150 rpm. Time is kept per whole rpm and sorted into zones when shown, as HR's time in zone is, so a zone change re-sorts the whole ride's time, including time recorded before it. These five zones replace #38's four efficiency bands (grinding <70, optimal 85–100, over-spinning >100)
-- Sheet: Ride metrics
+- Sheet: Cadence. W5 opens its own sheet (#147), at the medium detent and expandable to large: one section holding a chart of cadence on the zone bands over a faint elevation area, then Avg Cadence and Max Cadence as columns ("—" before any pedalling), then Pedaling vs Coasting, with a small donut; and **Time in Cadence Zones**: a donut in the zone colours and one row per zone laid out as the Heart rate sheet's (#494): its colour dot, its name over its rpm range ("60–69 rpm"), and the ride's time in it
 
 ---
 
@@ -700,13 +733,15 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - MapKit view embedded in the widget
 - Current position dot in `brPrimary`; heading indicator
 - Route polyline in `brMapRoute` when a route is loaded, drawn beneath the travelled track in `brMapTravelPath` (#199)
+- Direction arrows on the route, beneath the position dot, by S20's rules (#341)
 - Always heading-up and following the rider (#199). The widget takes no gestures and shows no map controls, so nothing
   on it can take the map out of follow (#62). A tap opens the sheet
 - While a route is loaded, the map tilts into a 3D navigation view. MapKit limits the tilt to what its follow distance
   allows, about 35°
 - When positioned in the first or last row of the grid, the map extends into the safe area
 - Sheet: Full-screen map. It takes pinch-zoom, pan, rotate and tilt, and has re-centre, 2D/3D, compass and scale
-  controls, plus two of its own (#199):
+  controls, plus two of its own (#199). Its close sits upper-left in a bar with no background, and the controls sit
+  below that bar (#335):
   - **Orientation:** heading-up or north-up. The sheet opens in the rider's last choice, remembered across rides and
     relaunches (`AppPreferences.mapOrientation`). While the map is following, a tap switches orientation. After the
     rider has panned away, a tap returns to following in the saved orientation
@@ -816,7 +851,78 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 - Watermark: the whole route's elevation profile by distance, the part ridden darker than the part ahead (#387). With turn-by-turn off the route isn't matched, so nothing is marked ridden
 - The same heroes as W17
 - With no route, or a route whose file has no `<ele>`, it is W17
-- Sheet: Elevation. As built (#387), W14–W18 open the one sheet, at the medium detent and expandable to large: the last hour's elevation on the Ride Metrics time axis, then Current, Highest and Lowest; **Climbing**: Ascent and Descent; **Grade**: Current, Steepest Climb, Steepest Descent; and **Route**, with a route that has elevation: W18's profile
+- Sheet: Elevation. As built (#387), W14–W18 open the one sheet, at the medium detent and expandable to large: the last hour's elevation on the Ride Metrics time axis, then Current, Highest and Lowest as columns; **Climbing**: Ascent and Descent; **Grade**: Current, and Steepest as the climb and descent together ("+9 % / -8 %"); and **Route**, with a route that has elevation: W18's profile
+
+---
+
+#### W19 — Distance Remaining
+
+**Sizes:** 1x1
+
+- Value: the route's length less how far along it the rider is, in km or mi, to one decimal as W6 (#461). Medium hero with its unit
+- There is a value only while a route is being followed, as W18's ridden part: with no route, or turn-by-turn off, it reads "—" and stays placed. It reads 0 once the route is complete
+- Off route it holds at the last place the rider matched the route. On a loop joined near its end, coming round the start begins the lap again, so it counts down to that lap's finish
+- VoiceOver says why a "—" is empty: "No route", "Turn-by-turn off" for a route drawn on the map but not followed, or "No reading"
+- Sheet: Map, as W9
+
+---
+
+#### W20 — ETA
+
+**Sizes:** 1x1
+
+- Value: the clock time the rider will finish the route: now, plus W19's distance at the ride's moving average (W2's) (#461). A stop moves it later on its own, since now keeps advancing while the distance and average hold
+- In the device's 12- or 24-hour format. On a 12-hour clock the day period is the unit, lowercase as every unit: "3:42 pm". On a 24-hour clock there is no unit: "15:42"
+- "—" with no route, turn-by-turn off, or the route complete — there is nothing left to arrive at. Also "—" until the ride has a minute of moving time: the first seconds' average is barely above walking pace, and gives an arrival hours out
+- The digits are the locale's own short time with the day period taken out, so each clock keeps its own hour digits and separator: "9:05" (US), "09:05" (UK), "9.05" (Finland)
+- VoiceOver reads it as "Arrival, 3:42 PM", and a "—" as W19's
+- Not terrain-aware (#270, Phase 3)
+- Sheet: Map, as W9
+
+---
+
+#### W21 — Sunset
+
+**Sizes:** 1x1
+
+- Label "TO SUNSET". Value: hours and minutes until today's sunset where the rider is, as h:mm: "1:12", and "0:08" under an hour (#462). Medium hero, no unit
+- The SF Symbol `sunset.fill` in the lower right (Widget Symbol Convention)
+- Worked out on the device from the latest fix and the date by NOAA's solar-position algorithm (zenith 90.833°, no elevation), to the minute as NOAA publishes it — no network, no WeatherKit. The fix is retaken at most once a minute
+- The countdown turns over on the clock's minute and never reads 0:00: it reads 0:01 in the minute before sunset, and "—" from sunset's minute. "Today" is the device's calendar day, so midnight starts the next day's countdown, and a time-zone change moves it. A sunset after midnight (Reykjavik's, near midsummer) still counts as the day before's while it is ahead
+- "—" with no fix yet, after sunset, and with no sunset that day (polar day or night)
+- VoiceOver reads it as "Sunset, in 1 hour, 12 minutes", and a "—" as "No location", "After sunset" or "No sunset today"
+- Not included: sunrise, civil twilight, a low-light alert
+- Sheet: Map, as W9
+
+---
+
+#### W22 — Climb
+
+**Sizes:** 2x1
+
+- The route's categorized climbs (#463), as S20 lists them from the import's analysis (PRD §8.6, #252) — or, for a route imported before #252 and not yet backfilled, analysed when the ride loads it — placed by how far along the route the rider is: W19's progress, so it holds off route and starts over on a loop's next lap. W5's 2×1 arrangement, over the climb's profile drawn as W18's
+- **On a climb** (from its start to its top, inclusive): label "CLIMB · CAT 3"; medium hero, the distance to the top as W9 shows a distance (m or ft close in, so it reads 0 m at the top); on the right, small heroes "TO CLIMB" (the climb's top less the route's smoothed elevation where the rider is, whole m or ft) and "AVG" (its average grade, unsigned). The profile's ridden part is darker
+- **Between climbs:** label "NEXT CLIMB · CAT 3"; medium hero, the distance to its start; on the right, "LENGTH" and "GAIN". Its profile, nothing ridden
+- "—" with no route, turn-by-turn off, a route without elevation, no climb ahead, or the route complete
+- VoiceOver: "Climb, category 3, 1.2 kilometers to the top, 84 meters to climb, average 7 percent"; between climbs "next climb category 3 in 3.4 kilometers, 2.1 kilometers long, 140 meters of climbing". HC is "hors catégorie". A "—" says why: W19's reasons, "No elevation" or "No climbs ahead"
+- Not included: climbs on a free ride, per-100 m grade colouring, a 1×1, an alert at a climb's start
+- Sheet: Elevation, as W14–W18
+
+---
+
+#### W23 — Active Calories
+
+**Sizes:** 1x1
+
+- Label "ACTIVE CALORIES". Value: the ride's active energy so far, in whole kcal (#465). Medium hero, unit "kcal"
+- The SF Symbol `bolt.fill` in the lower right (Widget Symbol Convention)
+- The estimate is §S10's active energy (#276): `RideEnergy.activeKilocalories` over the track recorded so far, with the rider's body mass, date of birth and sex read from Health once at the start. Recomputed once a minute of recording time, so the ride's last value is the one written to its Health workout, and there is no second calorie model
+- The model moves from physics to heart rate once a strap's readings cover half the moving time, so the series can step there. Earlier minutes keep the value they were computed with
+- A pause holds the value; it goes on after the resume. A ride resumed after a kill rebuilds its earlier minutes from its saved track; if that track is empty or can't be read, the series starts at the resume
+- "—" with no body mass in Health (a guessed weight is never shown as measured), and before the first minute's estimate
+- VoiceOver reads it as "Active calories, 412 kilocalories", and a "—" as "No weight in Health" or "No estimate yet"
+- Not included: total (active plus resting) calories; kilojoules of work, which needs a power meter (Phase 3); §S15's calories row (#460)
+- Sheet: Calories. W23 opens it, at the medium detent and expandable to large: a chart of calories accumulating over ride time, from 0:00 to now with a pause taking no room, then **Total** and **Average** (kcal per hour of W3's Moving Time) as columns, the layout every widget sheet's readings now share (§Widget Details, #494). The section's footer names the model, "Model: Heart rate" (or Physics, or MET). With no estimate both read "—" and the footer says why instead: "Add your weight in the Health app to estimate active calories." or "The first estimate comes after a minute of riding."
 
 ---
 
@@ -881,7 +987,7 @@ Similar to option A of the speed widget uses a speedometer like dial to visualiz
 ### Open UX Questions
 - [x] S05.4 factory default layout resolved — see table above.
 - [x] S05.5 removed — pages beyond page 1 are rider-defined, not factory-specified.
-- [x] Should the Sensor toolbar button use a specific SF Symbol to indicate which sensor is missing? Yes, it should just use sensor.tag.radiowaves.forward.fill with a badge.
+- [x] Should the Sensor toolbar button use a specific SF Symbol to indicate which sensor is missing? Yes, it should just use `antenna.radiowaves.left.and.right` with a badge. One button covers missing sensors and low batteries (#464, #466).
 
 ---
 
@@ -965,11 +1071,22 @@ As built (#367): a press held a quarter of a second on a widget lifts it — it 
 
 ### Interaction
 
-The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart Rate, Weather (future), Route, and Force (future). The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
+The display of widgets is organized by category. It is filtered by size if the user tapped on a 1x1 space, then displaying only 1x1 widgets. The categories are: Ride, Heart, Power (future), Fitness, Elevation, Weather (future), and Route. The list of widgets will be shown with preview data. They could be screenshots, but that becomes a maintenance problem unless the collection of the screenshots is automated. When the user taps on a widget in the catalog, the sheet is closed and the widget is added to the dashboard, either at the cell being tapped, or in the first available space.
 
-As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions); Weather and Force appear when they have widgets. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
+As built (#142): edit mode's Add opens the sheet. A "Page" section comes first, holding **Empty page**, which inserts a blank page right after the current one and takes the rider to it (Done prunes it if left empty; disabled when the rider is already on a blank page). Then one section per category that has widgets — Ride (Speed, Cadence, Pace, since #462 Sunset, and since #465 Active Calories), Heart Rate (Heart Rate, HR Zones), Route (Map, Directions, and since #461 Distance Remaining and ETA, and since #463 Climb). #517 replaced these categories; see "As built (#517)" below for the current ones. Each section lists every widget at every size it supports: all 2×2s, then 2×1s, then 1×1s two to a row. Every entry's left and right edges align, with `md` between rows and between paired 1×1s. Each entry is the real widget drawn at its dashboard size and scaled down — so it keeps the dashboard's proportions — showing a fixed sample ride in the rider's units, in a hairline-bordered card like S07's. Tapping an entry places that widget in the first open spot, in reading order, on the page the rider is on, and closes the sheet. An entry the page can't take — the widget is already on it, or no gap fits that size — is dimmed (`Opacity.unavailable`) and disabled.
 
 As built (#368): in edit mode each empty cell shows a slot: a dashed hairline `borderStrong` outline, the size and inset of a 1×1 card, with no glyph and no wiggle. Tapping it opens the sheet aimed at that cell. The tapped cell is the widget's top-left and nothing shifts to fit, so the sheet lists only the sizes that fit from there: a 1×1 always; a 2×1 from the left column with its neighbour free; a 2×2 from the left column, above the last row, with its block free. A right-hand cell therefore shows only 1×1s. The Page section is hidden. A widget already on the page is still dimmed. Picking an entry puts its top-left at the tapped cell. VoiceOver reads a slot as "Empty, row 3, left", hint "Add widget here".
+
+As built (#517): every heading — Page and each category — is `.headline`, uppercase, in `brPrimary`. Each category is a disclosure group with the system chevron. All start expanded. What the rider collapses is saved in `AppPreferences.collapsedWidgetCategories`, so the sheet reopens as they left it: after closing it, on the next ride, and after a relaunch. Opening it from an empty cell uses the same saved state. The categories, in order:
+- **Ride:** Speed, Avg Speed, Duration, Distance, Cadence, Pace, Sunset
+- **Heart:** Heart Rate, HR Zones
+- **Power:** no widgets yet
+- **Fitness:** Active Calories
+- **Elevation:** Elevation, Ascent, Descent, Grade
+- **Weather:** no widgets yet
+- **Route:** Map, Directions, Route Elevation, Climb, Distance Remaining, ETA
+
+A category with nothing to list isn't drawn, so Power and Weather are hidden for now. A widget that needs a sensor is listed only while one is paired for that role. Today that is Cadence, which needs a cadence sensor, and Power's widgets will be gated on a power meter in the same way. Heart always shows, because Watch heart rate arrives through HealthKit and has no pairing record. A widget already on a page stays there if its sensor is unpaired.
 
 ### Open UX Questions
 
@@ -1012,9 +1129,10 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 - Ride stats: total distance, total time, avg speed, average cadence (only if a cadence sensor reported), vehicle pass count (only with radar paired), route
 - Elevation profile
 - HR zone breakdown (pie chart), derived from the saved track against the rider's current zones (S12), like S15's HR chart; "No heart rate recorded" when there is none
-- **Sensors** (#391), only when the ride flagged one. Each flagged device appears once (a combo CSC sensor lists both its roles), with "LOW BATTERY" or "UNRELIABLE CONNECTION — CHECK BATTERY OR MOUNT" under it. There is no mid-ride alert, because it would compete with radar alerts. Mid-ride, a quiet Low Battery indicator in §S05's Bottom Toolbar shows instead (#464). See BLE.md §14.5
+- **Sensors** (#391), only when the ride flagged one. Each flagged device appears once (a combo CSC sensor lists both its roles), with "LOW BATTERY" or "UNRELIABLE CONNECTION — CHECK BATTERY OR MOUNT" under it. There is no mid-ride alert, because it would compete with radar alerts; mid-ride, only §S05's quiet Sensors button shows a missing sensor or a low battery. See BLE.md §14.5
 - **Sync button** — Phase 2; taps present the Service Sync sheet (see below)
 - **Finish Ride** — a floating button that closes the sheet to the tabs, where the ride is in S14
+- **Delete** (#452) — a trash button at the leading end of the nav bar, not in the Design.sketch frame. By now the ride is saved and on its way to Apple Health, so this is how a rider throws it away. An alert confirms first: "Delete This Ride?", "It will be removed from Cyclometer and Apple Health. This can't be undone." Delete closes the sheet without saving the name, and deletes the ride as §S14's swipe does. Disabled until the stats have loaded: before then the ride's save hasn't landed
 
 > **Note:** The GPX file is written automatically at ride end and is available via the iOS Files app in the app's `Documents/Rides/` directory. No explicit export action is shown on this screen.
 
@@ -1035,10 +1153,12 @@ An outdoor cycling `HKWorkout` is written to Apple Health automatically once the
 
 - **Retried until it lands** (#277): a write that fails, or never ran because the app was killed or the ride was closed out at the next launch, is retried after the next Finish, and at the next launch unless that launch resumes an unfinished ride. A skipped duplicate counts as done. Without Workouts share access, nothing is attempted: rides wait and are written once it is allowed. A ride closed out as an orphan (a new ride was started before the unfinished one was found) gets no workout, since its end time is the relaunch
 
+- **Deleted with the ride** (#452), from S10 or §S14: the workout and the distance, energy and route samples written with it. It waits for any write of the same workout still in flight, and goes before the ride does, so a Health delete that fails leaves the ride in the list to delete again. Each type is deleted only where the app still has share access: without it nothing of that type was written, or the app can no longer remove it
+
 - **Consent** is the HealthKit share permission from S01, which the rider can revoke in iOS Settings → Health
 - **Duplicates:** if another source (e.g. an Apple Watch Outdoor Cycle) already recorded a cycling workout overlapping the ride, the write is skipped. A later rewrite of the same ride replaces its workout rather than adding one
 - **Carries** start, end, distance, route, estimated active energy and, when the rider has overridden Health in S12, the app's HR zones (#238). Otherwise the workout keeps Health's preferred zones Pause intervals are not marked, so Fitness shows elapsed time
-- **Active energy** (#276) comes from heart rate when a strap recorded at least half the ride and Health has the rider's weight, date of birth and sex (Male or Female): the Keytel (2005) equation at the ride's mean heart rate, less resting metabolism. Otherwise it is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. Calories are not shown in the app
+- **Active energy** (#276) comes from heart rate when a strap recorded at least half the ride and Health has the rider's weight, date of birth and sex (Male or Female): the Keytel (2005) equation at the ride's mean heart rate, less resting metabolism. Otherwise it is estimated from the recorded track: pedal power from air, rolling and gravity resistance (bike 10 kg, rider's weight from Health), treating a dropout or an implausible grade as flat and a second with no speed as stationary. Only a ride with no usable track falls back to Compendium MET values by speed. It earns Move credit. With no body weight in Health, the workout carries no energy and counts toward Exercise but not Move. W23 shows the same estimate live (#465); §S10 and §S15 don't show calories (#460)
 
 ### Open UX Questions
 - [x] Zone breakdown chart type? Pie chart
@@ -1170,9 +1290,16 @@ a confirmation:
   "Bikes" navigation link — or to move into the per-sensor detail under Sensors (S11) — rather than gaining
   more controls in place
 - Auto-pause (toggle)
+- Resume When Moving (toggle, off) — motion also resumes a ride the rider paused themselves, once the ride has
+  read as stopped since the pause or 15 s have passed, so a Pause tapped while coasting holds while the bike rolls
+  to a stop (#267, #504). Independent of Auto-pause. The
+  toggle's label carries, as a subtitle VoiceOver reads with it, "Also resumes a ride you paused yourself. Walking the bike counts as moving."
 - Auto-dim (toggle)
+- Dimmed Brightness (slider, only while Auto-dim is on) — the backlight level the dim drops to, 0–50%, default 10%,
+  with `sun.min` / `sun.max` at its ends (#471). A rider already darker than it isn't brightened. Dragging previews
+  the dim on the real backlight and letting go restores the rider's brightness, as does leaving Settings or the app
 - Place Names (toggle, on) — whether S10 reverse-geocodes a free ride's start for its default name (#283, §S10). Off, nothing is sent and the name is the offline one
-- Show Live Activity (toggle, on) — whether a ride shows its §S22 Live Activity (#313, PRD §8.10). Takes effect mid-ride: off ends the activity, on starts one. When iOS has Live Activities off for the app, the toggle is disabled, keeping its value, and the row itself, under the toggle, reads "Live Activities are turned off for Cyclometer in iOS Settings." with an Open Settings link (#313 review: in the row, not the section footer)
+- Show Live Activity (toggle, on) — whether a ride shows its §S22 Live Activity (#313, PRD §8.10). Takes effect mid-ride: off ends the activity, on starts one. When iOS has Live Activities off for the app, the toggle is disabled, keeping its value, and the toggle's label gains the subtitle "Live Activities are turned off for Cyclometer in iOS Settings.", with an Open Settings link under it (#313 review: in the row, not the section footer; a subtitle since #267, so VoiceOver reads it with the toggle)
 - Sensors — navigates to S11, with the count of paired sensors as the trailing value
 
 **HR Zones**
@@ -1190,7 +1317,7 @@ a confirmation:
   accurate only from M5 onward
 
 **Cadence Zones** (#79)
-- Five rows: Recovery, Endurance, Steady State, Race Pace, Sprint. Each shows its rpm range ("60-69 rpm", and "110+ rpm" for Sprint)
+- Five rows: Recovery, Endurance, Steady State, Race Pace, Sprint. Each shows its rpm range ("60–69 rpm", and "110+ rpm" for Sprint)
 - Rows 1–4 carry a Stepper on that zone's upper boundary, 1 rpm per step, as the HR Zones rows do. Sprint is display-only
 - A step that would empty a zone, take Recovery's upper boundary below 60, or take Sprint's lower boundary up to 150 (the §W5 chart's ceiling) does nothing
 - Reset Cadence Zones to Defaults restores 60–69 / 70–84 / 85–94 / 95–109 / 110+
@@ -1239,7 +1366,7 @@ but not used would be dead weight on the MVP settings screen. The section remain
 - Map thumbnail (56×56pt, rounded corners). A static image captured once after the ride ends, or at the next launch if that capture failed (#177), never a live map per row, which would be a performance issue: the recorded track in `brMapTravelPath` over a muted map with points of interest hidden, stored on the ride in light and dark. It is framed so the track fills the square, with its stroke 3pt from the edge on the longer axis (#280). A ride that barely moved is shown at least 200 m across. Place and road names can't be switched off in MapKit's standard style, so a few may show. A ride recorded before #177, or with no GPS track, shows a placeholder.
 - Ride name and date/time, relative within the previous week ("Today at 3:45 PM", "Yesterday at 2:05 PM" in the locale's own pattern; "Tuesday 9:10 AM"), absolute beyond it; the year shows only when it isn't the current one
 - Elapsed time and distance side by side on the trailing edge, each a small `HeroNumber` in the vertical layout with its label beneath (`time`, then the S12 distance unit), as Design.sketch draws them (#248). Time is hours and minutes without seconds ("0:45", "1:18"), truncated rather than rounded. The list is plain (edge to edge), as drawn, and so is S19's
-- Swipe actions: trailing — Delete (`brDestructive`). Leading — Sync (blue) and Make Route (green) are deferred: service sync is Phase 2 (§S10) and making a route from a ride has no issue yet (#248)
+- Swipe actions: trailing — Delete (`brDestructive`), which deletes the ride's Health workout too (§S10, #452). Leading — Sync (blue) and Make Route (green) are deferred: service sync is Phase 2 (§S10) and making a route from a ride has no issue yet (#248)
 
 ### Empty State
 
@@ -1328,7 +1455,7 @@ ContentUnavailableView {
 ### Key Components
 - List / map toggle (`list.bullet` / `map` SF Symbol): a glass circle floating on the trailing edge at the bottom of the screen, just above the tab bar and clear of a minimised ride's accessory, styled like the map sheet's buttons — not in the toolbar (#331). The toolbar keeps Import, Filter and Start Ride
 - List view: route rows map thumbnail, name, distance, and the route's summary line without its distance (#252) — gain, the hardest climbs, max grade, character and surface, two lines at most. A route with neither elevation nor a surface falls back to the file's own `<desc>`
-- Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls. The map can act as a filter. When switching back to the list will show only those routes displayed on the map. Map will initially zoom to a 50 mile radius around the user's current location. 
+- Map view: all routes as polylines on a `Map` view; user location centered; `MapUserLocationButton`, `MapCompass`, `MapScaleView` controls. The map can act as a filter. When switching back to the list will show only those routes displayed on the map. Map will initially zoom to a 50 mile radius around the user's current location. Direction arrows follow S20's rules, so the 50-mile opening view shows none until the rider zooms in (#341)
 - Tap a route → navigates to S20
 - Swipe a route row left to right → "Use Route" (`play.fill`, a full swipe allowed): opens the Start Sheet with that route in S05.1's Route row, as S20's CTA does. Absent while a ride is recording.
 - Empty state: `ContentUnavailableView` with "No Routes" label and import action
@@ -1352,8 +1479,11 @@ ContentUnavailableView {
 
 ### Key Components
 - `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag). Route should show the direction of travel. Forcasted wind direction and vectors should be overlayed (deferred to weather integration)
+- Direction-of-travel arrows (#341), the same on S19, S20 and W8 and its sheet: filled triangles in the line's own colour, lying flat on the map and drawn beneath the rider's location dot. They are sized in screen points, not on the ground, so a pinch never grows them: about 16 pt at street level, stepping up a point at a time to about 22 pt as the view widens. They are spaced so about a dozen are in view
+  - Zoomed out past 50 m per point (about 20 km across a phone-width map), no arrows draw. The cutoff is one map scale for every route on screen, so routes side by side show or hide their arrows together, never route by route
+  - **Accepted gap (#341):** S20's 220 pt map frames any route more than about 7 km north to south past the cutoff, so a large route opens with no arrows until the rider zooms in. The live sheet's route overview does the same for a large route
 - Distance and elevation gain/loss summary (`LabeledContent`)
-- Summary section (#252), after the map: the route's summary line of at most 80 characters, then Character, Max Grade, Hardest Climb (FIETS), one row per categorized climb (category, length, average grade) and a Surface row with its shares, captioned "Surface data © OpenStreetMap contributors". Hidden for a route with neither elevation nor a surface. Values use tabular digits
+- Summary section (#252), after the map: the route's summary line of at most 80 characters, then Character, Max Grade, Hardest Climb (FIETS), one row per categorized climb (category, length, average grade) and a Surface row with its shares, captioned "Surface data © OpenStreetMap contributors". Hidden for a route with neither elevation nor a surface. Values use tabular digits. Under the summary line, where Apple Intelligence is available, the on-device route narrative (#203): one sentence per section of the route (one to five), in `textSecondary`, describing the ride's shape in riding order, with no figures. Absent without it, and the section is otherwise unchanged
 - Elevation profile: Swift Charts `AreaMark` + `LineMark` in `brPrimary`, catmullRom interpolation
 - Current weather section: temperature, wind direction (`WindDirectionView` — rotated arrow SF Symbol + compass label + degrees), wind speed
 - Strava segments: name, distance, best time, best time date

@@ -195,9 +195,8 @@ enum RideDetailSeries {
     static func heartRate(_ points: [TrackPointDTO], sampleCount: Int) -> [Int] {
         let readings = points.compactMap(\.heartRateBPM)
         guard readings.count > sampleCount, sampleCount > 0 else { return readings }
-        return (0..<sampleCount).map { bucket in
-            let bucketReadings = readings[(bucket * readings.count / sampleCount)..<((bucket + 1) * readings.count / sampleCount)]
-            return Int((Double(bucketReadings.reduce(0, +)) / Double(bucketReadings.count)).rounded())
+        return readings.buckets(to: sampleCount).map { bucket in
+            Int((Double(bucket.reduce(0, +)) / Double(bucket.count)).rounded())
         }
     }
 
@@ -256,5 +255,11 @@ struct HeartRateSecondsTally: Equatable, Sendable {
                   point.timestamp.timeIntervalSince(reading.timestamp) <= RideDetailSeries.appleWatchHoldSeconds {
             secondsByBPM[bpm, default: 0] += 1
         }
+    }
+
+    /// Adds a resumed ride's seconds from before the kill (#393). Summing is exact: a held Watch
+    /// reading never crosses a segment, and every point after a resume is in a newer one.
+    mutating func add(secondsByBPM seconds: [Int: Int]) {
+        secondsByBPM.merge(seconds, uniquingKeysWith: +)
     }
 }

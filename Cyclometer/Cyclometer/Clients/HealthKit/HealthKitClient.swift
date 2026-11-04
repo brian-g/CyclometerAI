@@ -63,6 +63,10 @@ struct HealthKitClient {
     /// thrown, when another source already recorded a cycling workout over the same
     /// time; logs its own failures before rethrowing them.
     var saveWorkout:           @Sendable (RideWorkout) async throws -> Void
+    /// Removes what `saveWorkout` wrote for this ride, when the ride is deleted (#452). Nothing
+    /// to remove is not a failure: a skipped duplicate or a write that never ran left nothing.
+    /// Logs its own failures before rethrowing them.
+    var deleteWorkout:         @Sendable (UUID) async throws -> Void
     /// Whether the rider has allowed Workouts to be shared, so `RideHealthWorkout.backfill`
     /// can skip its reads when a write is sure to fail (#277). Share status, unlike read
     /// status, is one HealthKit reports.
@@ -86,6 +90,7 @@ extension HealthKitClient: DependencyKey {
             fetchHeartRateZoneCeilings: { try await fetchHeartRateZoneCeilings(store) },
             heartRateStream:       { makeHeartRateStream(store) },
             saveWorkout:           { try await saveWorkout($0, store) },
+            deleteWorkout:         { try await deleteWorkout($0, store) },
             isWorkoutSharingAllowed: { store.authorizationStatus(for: PermissionsClient.workoutType) == .sharingAuthorized }
         )
     }()
@@ -103,6 +108,7 @@ extension HealthKitClient: DependencyKey {
         fetchHeartRateZoneCeilings: { nil },
         heartRateStream:       { AsyncStream { $0.finish() } },
         saveWorkout:           { _ in },
+        deleteWorkout:         { _ in },
         // Matches `saveWorkout`'s no-op succeeding.
         isWorkoutSharingAllowed: { true }
     )
@@ -349,6 +355,46 @@ extension HealthKitClient {
             builder?.discardWorkout()
             logger.error(
                 "workout write failed for ride \(workout.rideId, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            throw error
+        }
+    }
+
+    /// Deletes the ride's route, distance and energy samples, then its workout, each by the sync
+    /// identifier `saveWorkout` stamped on it (#452). HealthKit lets an app delete only what it
+    /// saved, and its header doesn't say whether deleting a workout takes the linked samples with
+    /// it, so each goes explicitly. The workout goes last, as the ride's row does in #261: a failure
+    /// part way leaves it in Health, and the caller keeps the ride, so a retry finds what's left.
+    ///
+    /// A type without share access is skipped: nothing of it was written, or access was revoked
+    /// since, and either way the delete would throw.
+    private static func deleteWorkout(_ rideId: UUID, _ store: HKHealthStore) async throws {
+        let id = rideId.uuidString
+        let written: [(HKObjectType, String)] = [
+            (PermissionsClient.workoutRouteType, "\(id)-route"),
+            (PermissionsClient.distanceCyclingType, "\(id)-distance"),
+            (PermissionsClient.activeEnergyBurnedType, "\(id)-energy"),
+            (PermissionsClient.workoutType, id),
+        ]
+        do {
+            for (type, identifier) in written where store.authorizationStatus(for: type) == .sharingAuthorized {
+                let count: Int
+                do {
+                    count = try await store.deleteObjects(
+                        of: type,
+                        predicate: HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeySyncIdentifier,
+                                                               allowedValues: [identifier])
+                    )
+                } catch let error as HKError where error.code == .errorNoData {
+                    // Nothing of this type to delete, which the property's contract says is no
+                    // failure. Otherwise a ride without energy (no body mass) could never be deleted.
+                    count = 0
+                }
+                logger.notice("deleted \(count, privacy: .public) \(type.identifier, privacy: .public) for ride \(rideId, privacy: .public)")
+            }
+        } catch {
+            logger.error(
+                "workout delete failed for ride \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
             throw error
         }

@@ -225,65 +225,106 @@ struct RouteDirectionMarkersTests {
         #expect(!derived.isEmpty)
     }
 
-    @Test("a north-up flat map draws a chevron at its bearing")
-    func screenAngleOnAFlatNorthUpMap() {
+    // MARK: - #341: arrows lie on the map plane, beneath the rider's dot
+
+    /// A triangle's vertices: tip, then the two base corners.
+    private func triangle(bearing: Double, size: Double) -> [RouteCoordinate] {
+        RouteDirectionMarkers.arrowTriangle(
+            for: .init(coordinate: coordinate(37.0, -122.0), bearingDegrees: bearing),
+            sizeMeters: size
+        )
+    }
+
+    /// Metres are compared to a millimetre: the triangle is a few metres across, and the tangent
+    /// plane's round trip is good to far better than that over such a distance.
+    private let meterTolerance = 0.001
+
+    @Test("the triangle's tip points along the arrow's bearing")
+    func triangleTipPointsAlongBearing() throws {
+        let center = coordinate(37.0, -122.0)
         for bearing in stride(from: 0.0, to: 360.0, by: 15) {
-            #expect(abs(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: bearing,
-                                                                 headingDegrees: 0,
-                                                                 pitchDegrees: 0) - bearing)
-                    < angleTolerance)
+            let tip = triangle(bearing: bearing, size: 20)[0]
+            let measured = try #require(RouteGeometry.bearingDegrees(from: center, to: tip))
+            // Measured the short way round, so 359.9999 against 0 is a hair, not a full turn.
+            let difference = abs((measured - bearing + 540).truncatingRemainder(dividingBy: 360) - 180)
+            #expect(difference < angleTolerance, "bearing \(bearing) drew at \(measured)")
         }
     }
 
-    @Test("a heading-up map turns the world under the chevron")
-    func screenAngleCountersTheHeading() {
-        // Riding east with the map heading-up: the route ahead is straight up the screen.
-        #expect(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: 90,
-                                                        headingDegrees: 90,
-                                                        pitchDegrees: 0) == 0)
-
-        // A route heading north while the rider faces east reads as a left turn: 90° anticlockwise
-        // on screen, which is 270 in the clockwise convention rather than a negative angle.
-        #expect(abs(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: 0,
-                                                             headingDegrees: 90,
-                                                             pitchDegrees: 0) - 270)
-                < angleTolerance)
+    @Test("the triangle is as wide as it is long, and centred on the placement")
+    func triangleIsSizedAndCentred() {
+        let size = 20.0
+        for bearing in [0.0, 37.0, 90.0, 215.0] {
+            let vertices = triangle(bearing: bearing, size: size)
+            #expect(vertices.count == 3)
+            let (tip, right, left) = (vertices[0], vertices[1], vertices[2])
+            let baseMidpoint = coordinate((left.latitude + right.latitude) / 2,
+                                          (left.longitude + right.longitude) / 2)
+            #expect(abs(RouteGeometry.segmentMeters(from: tip, to: baseMidpoint) - size) < meterTolerance)
+            #expect(abs(RouteGeometry.segmentMeters(from: left, to: right) - size) < meterTolerance)
+            // Tip and base are each half the length from the centre, like the `.center`-anchored
+            // glyph it replaced.
+            #expect(abs(RouteGeometry.segmentMeters(from: coordinate(37.0, -122.0), to: tip)
+                        - size / 2) < meterTolerance)
+        }
     }
 
-    @Test("tilt leaves the axes alone and pulls everything between them towards the horizontal")
-    func screenAnglePitch() {
-        let pitch = 35.0   // What MapKit clamps the navigation tilt to at its follow distance.
-        for bearing in [0.0, 90.0, 180.0, 270.0] {
-            let angle = RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: bearing,
-                                                                 headingDegrees: 0,
-                                                                 pitchDegrees: pitch)
-            #expect(abs(angle - bearing) < angleTolerance)
-        }
-        // Foreshortening the screen's vertical axis moves a diagonal towards the horizontal —
-        // away from 0, towards 90 — and by a few degrees at this tilt, not a quadrant.
-        let diagonal = RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: 45,
-                                                                headingDegrees: 0,
-                                                                pitchDegrees: pitch)
-        #expect(diagonal > 45 && diagonal < 55)
+    @Test("metres per point are the ground distance over the screen distance")
+    func metersPerPointIsGroundOverScreen() throws {
+        let start = coordinate(37.0, -122.0)
+        let end = RouteGeometry.coordinate(offsetFrom: start, north: 0, east: 1_000)
+        let perPoint = try #require(RouteDirectionMarkers.metersPerPoint(from: start, to: end,
+                                                                         pointsApart: 100))
+        #expect(abs(perPoint - 10) < meterTolerance)
     }
 
-    @Test("the screen angle is always one MapKit can rotate by")
-    func screenAngleIsNormalised() {
-        for bearing in stride(from: 0.0, to: 360.0, by: 11) {
-            for heading in stride(from: 0.0, to: 360.0, by: 23) {
-                let angle = RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: bearing,
-                                                                     headingDegrees: heading,
-                                                                     pitchDegrees: 60)
-                #expect(angle >= 0 && angle < 360)
-            }
+    @Test("no distance on screen or on the ground means no scale, and so no arrows")
+    func metersPerPointNeedsADistance() {
+        let start = coordinate(37.0, -122.0)
+        let end = coordinate(37.0, -121.99)
+        for points in [0.0, -1.0, .nan, .infinity] {
+            #expect(RouteDirectionMarkers.metersPerPoint(from: start, to: end,
+                                                         pointsApart: points) == nil)
         }
-        // A camera reported mid-transition must not rotate a chevron to NaN.
-        #expect(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: .nan,
-                                                        headingDegrees: 0,
-                                                        pitchDegrees: 0) == 0)
-        #expect(RouteDirectionMarkers.screenAngleDegrees(bearingDegrees: 90,
-                                                        headingDegrees: 90,
-                                                        pitchDegrees: .nan) == 0)
+        #expect(RouteDirectionMarkers.metersPerPoint(from: start, to: start, pointsApart: 50) == nil)
+    }
+
+    @Test("the scale snaps to within half a step, and snapping again changes nothing")
+    func quantizedScaleSnapsWithinHalfAStep() {
+        let halfStep = (1 + RouteDirectionMarkers.scaleStep).squareRoot()
+        for scale in [0.05, 0.7, 1.0, 3.3, 47.0, 2_500.0] {
+            let snapped = RouteDirectionMarkers.quantizedScale(scale)
+            #expect(snapped / scale <= halfStep * (1 + 1e-12) && scale / snapped <= halfStep * (1 + 1e-12))
+            #expect(abs(RouteDirectionMarkers.quantizedScale(snapped) - snapped) < snapped * 1e-12)
+        }
+    }
+
+    @Test("small changes in scale write nothing; a step's worth does")
+    func quantizedScaleIgnoresSubStepChanges() {
+        // A following map whose scale wobbles by a fraction of a step must not redraw.
+        let snapped = RouteDirectionMarkers.quantizedScale(10)
+        #expect(RouteDirectionMarkers.quantizedScale(snapped * 1.001) == snapped)
+        #expect(RouteDirectionMarkers.quantizedScale(snapped / 1.001) == snapped)
+        // And it never runs backwards: a bigger scale never snaps smaller.
+        var previous = 0.0
+        for scale in stride(from: 5.0, through: 20.0, by: 0.01) {
+            let next = RouteDirectionMarkers.quantizedScale(scale)
+            #expect(next >= previous)
+            previous = next
+        }
+        #expect(RouteDirectionMarkers.quantizedScale(snapped * 1.05) > snapped)
+    }
+
+    @Test("zoomed out past the cutoff, no arrows draw")
+    func arrowsStopAtTheCutoffScale() {
+        let cutoff = RouteDirectionMarkers.maximumArrowMetersPerPoint
+        #expect(RouteDirectionMarkers.drawsArrows(atMetersPerPoint: 2))
+        #expect(RouteDirectionMarkers.drawsArrows(atMetersPerPoint: cutoff))
+        #expect(!RouteDirectionMarkers.drawsArrows(atMetersPerPoint: cutoff * 1.02))
+        // A 50-mile radius on a 400 pt map: ~400 m a point.
+        #expect(!RouteDirectionMarkers.drawsArrows(atMetersPerPoint: 400))
+        #expect(!RouteDirectionMarkers.drawsArrows(atMetersPerPoint: .nan))
+        #expect(!RouteDirectionMarkers.drawsArrows(atMetersPerPoint: 0))
     }
 
     // MARK: - #258 review: the arrows shifted on zoom and pointed the wrong way

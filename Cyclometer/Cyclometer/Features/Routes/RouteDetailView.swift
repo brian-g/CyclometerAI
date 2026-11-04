@@ -124,16 +124,22 @@ extension RouteDetailList where MapRow == RouteDetailMap {
 /// S20's map: the route with its start and finish flags and direction-of-travel arrows, framed
 /// on the route.
 ///
-/// Pan and zoom only, for the arrows' sake, as on S19's map: `Annotation` content is
-/// screen-space and does not counter-rotate, so under rotation every arrow would point wrong, and
-/// a pitched camera's region runs to the horizon and would space them for the wrong viewport.
-/// That is why the prototype's `MapPitchToggle` is gone.
+/// Pan and zoom only, for the arrows' sake, as on S19's map: a pitched or rotated camera's region
+/// is wider than the screen — pitched, it runs to the horizon — and would space them for the wrong
+/// viewport. That is why the prototype's `MapPitchToggle` is gone.
 struct RouteDetailMap: View {
     let summary: RouteSummary
     let coordinates: [RouteCoordinate]
 
     /// What the camera shows. The arrows space themselves from it, and nil means none at all.
     @State private var visibleBounds: RouteBounds?
+    /// What one screen point covers on the ground, measured from the map on every camera frame,
+    /// so the arrows hold their size through a pinch (#341).
+    @State private var metersPerPoint: Double?
+    /// The route's arrows, placed for `visibleBounds`. Kept here rather than placed in the map's
+    /// content because placing walks the route, and the content is redrawn whenever
+    /// `metersPerPoint` changes.
+    @State private var arrows = RouteDirectionMarkers.Arrows.none
 
     /// Padded and floored around the route's stored bounds, so it is ready before the polyline is.
     private var framing: MKCoordinateRegion {
@@ -141,22 +147,32 @@ struct RouteDetailMap: View {
     }
 
     var body: some View {
-        Map(initialPosition: .region(framing), interactionModes: [.pan, .zoom]) {
-            RouteMapContent(coordinates: coordinates, startTitle: "Start", finishTitle: "Finish",
-                            visibleBounds: visibleBounds)
-        }
-        .mapStyle(.standard(elevation: .realistic))
-        .mapControls {
-            MapCompass()
-            MapScaleView()
+        MapReader { proxy in
+            Map(initialPosition: .region(framing), interactionModes: [.pan, .zoom]) {
+                RouteMapContent(coordinates: coordinates, startTitle: "Start", finishTitle: "Finish",
+                                arrows: arrows, metersPerPoint: metersPerPoint)
+            }
+            .mapStyle(.standard(elevation: .realistic))
+            .mapControls {
+                MapCompass()
+                MapScaleView()
+            }
+            .measuresMapScale(proxy, into: $metersPerPoint)
+            .onMapCameraChange(frequency: .onEnd) { context in
+                visibleBounds = RoutesMapCamera.bounds(for: context.region)
+            }
         }
         // Seeded, because `.onMapCameraChange` is not guaranteed to fire on the first settle —
         // without this the route would open with no direction shown until the rider panned.
         // S19's map seeds for the same reason.
         .onAppear { visibleBounds = RoutesMapCamera.bounds(for: framing) }
-        .onMapCameraChange(frequency: .onEnd) { context in
-            visibleBounds = RoutesMapCamera.bounds(for: context.region)
-        }
+        // Placed when the viewport settles or the geometry lands — never per frame.
+        .onChange(of: visibleBounds, initial: true) { placeArrows() }
+        .onChange(of: coordinates) { placeArrows() }
+    }
+
+    private func placeArrows() {
+        arrows = RouteDirectionMarkers.arrows(coordinates: coordinates, visibleBounds: visibleBounds)
     }
 }
 

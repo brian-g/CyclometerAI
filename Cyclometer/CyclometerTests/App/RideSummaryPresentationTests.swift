@@ -13,7 +13,8 @@ struct RideSummaryPresentationTests {
 
     private func makeStore(
         _ state: AppFeature.State = AppFeature.State(),
-        persistenceClient: PersistenceClient
+        persistenceClient: PersistenceClient,
+        healthKitClient: HealthKitClient = .testValue
     ) -> TestStoreOf<AppFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -30,6 +31,7 @@ struct RideSummaryPresentationTests {
                 $0.locationClient = .testValue
                 $0.hapticsClient = .testValue
                 $0.persistenceClient = persistenceClient
+                $0.healthKitClient = healthKitClient
                 $0.defaultFileStorage = storage
             }
         }
@@ -47,7 +49,7 @@ struct RideSummaryPresentationTests {
         return state
     }
 
-    @Test("confirming Finish presents S10 for the ride just ended, not the bare dashboard")
+    @Test("confirming Finish presents S10 after the dashboard dismisses")
     func finishPresentsSummary() async {
         let store = makeStore(persistenceClient: .mock())
         store.exhaustivity = .off
@@ -63,9 +65,27 @@ struct RideSummaryPresentationTests {
 
         #expect(store.state.activeRide == nil)
         #expect(store.state.isDashboardPresented == false)
+        #expect(store.state.rideSummary == nil)
+        #expect(store.state.pendingRideSummary?.rideId == rideId)
+
+        await store.send(.dashboardDismissalCompleted)
+
         #expect(store.state.rideSummary?.rideId == rideId)
         #expect(store.state.rideSummary?.load == .waiting)
+        #expect(store.state.pendingRideSummary == nil)
         await store.skipInFlightEffects()
+    }
+
+    /// The cover's `onDismiss` fires for a drag down mid-ride too (#365). Only a Finish leaves S10
+    /// waiting on it.
+    @Test("minimizing the dashboard mid-ride presents no S10")
+    func minimizePresentsNoSummary() async {
+        let store = makeStore(
+            AppFeature.State(activeRide: ActiveRideFeature.State(recordingState: .active)),
+            persistenceClient: .mock()
+        )
+
+        await store.send(.dashboardDismissalCompleted)
     }
 
     @Test("the Finish Ride button dismisses S10 and saves the rider's name, refreshes S14, then rewrites the GPX")
@@ -133,5 +153,33 @@ struct RideSummaryPresentationTests {
             $0.rideSummary = nil
         }
         #expect(renamed.value == 0)
+    }
+
+    /// A rename typed before deleting must not be written to a ride that's going (#452).
+    @Test("confirming Delete closes S10 without a rename and deletes the ride and its workout through S14")
+    func confirmedDeleteDeletesRide() async {
+        let renamed = LockIsolated(0)
+        let deleted = LockIsolated<[String]>([])
+        var state = presenting(title: "Hill Repeats")
+        state.rideSummary?.alert = RideSummaryFeature.deleteAlert
+        let store = makeStore(
+            state,
+            persistenceClient: .mock(
+                onRenameRide: { _, _ in renamed.withValue { $0 += 1 } },
+                onDeleteRide: { id in deleted.withValue { $0.append("ride \(id)") } }
+            ),
+            healthKitClient: .mock(onDeleteWorkout: { id in deleted.withValue { $0.append("workout \(id)") } })
+        )
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.presented(.alert(.presented(.confirmDelete)))))
+        await store.receive(\.rideSummary.presented.delegate.deleteRide) {
+            $0.rideSummary = nil
+        }
+        await store.receive(\.rides.deleteRecordedRide)
+        await store.finish()
+
+        #expect(renamed.value == 0)
+        #expect(deleted.value == ["workout \(Self.rideId)", "ride \(Self.rideId)"])
     }
 }

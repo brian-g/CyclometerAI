@@ -39,6 +39,20 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// blanks mid-ride is broken, not configurable.
     var isAutoDimEnabled: Bool = true
 
+    /// Backlight level the dim drops to, 0…1 (#471, S12's slider). 10% by default, the
+    /// fixed level #110 shipped with.
+    var autoDimBrightness: Double = 0.1
+
+    /// The S12 slider's range. Above half, a dim would barely save anything.
+    static let autoDimBrightnessRange: ClosedRange<Double> = 0...0.5
+
+    /// What a dim sets the backlight to from the rider's own `level`. Clamped, so a rider
+    /// already riding darker than the dim level is left there rather than *brightened*.
+    /// The real dim and S12's preview both go through this, so the preview shows the dim.
+    func dimmedBrightness(from level: Double) -> Double {
+        min(level, autoDimBrightness)
+    }
+
     /// Whether S10 looks up the town a free ride started in for its default name (#283) —
     /// "Fargo Morning Loop" rather than "Morning Loop". On by default; off, the start
     /// coordinate is never sent to Apple's geocoder (PRD §12, Privacy).
@@ -65,6 +79,11 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// Nothing reads this yet: `SettingsFeature` still toggles its own copy, and the
     /// stop detection the ride state machine needs lands with #102.
     var isAutoPauseEnabled: Bool = true
+
+    /// Whether motion also resumes a ride the rider paused themselves (#267, S12). Off by default:
+    /// without it only a pause auto-pause made auto-resumes. Independent of `isAutoPauseEnabled` —
+    /// forgetting to tap Resume happens whether or not auto-pause is on.
+    var isResumeWhenMovingEnabled: Bool = false
 
     static let defaultTurnLeadDistanceMeters = 100.0
 
@@ -104,6 +123,10 @@ struct AppPreferences: Codable, Equatable, Sendable {
         get { dashboardLayoutOverride ?? .factory }
         set { dashboardLayoutOverride = newValue.isFactory ? nil : newValue }
     }
+
+    /// The S08 picker sections the rider has collapsed (#517). The collapsed set rather than the
+    /// expanded one, so every section — a newly added one too — starts expanded.
+    var collapsedWidgetCategories: Set<WidgetCategory> = []
 
     /// Whether the rider has finished onboarding (S01→S02) at least once (#105). Gates
     /// `AppFeature`'s launch presentation — once true, onboarding never reappears, even
@@ -172,6 +195,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
         isAutoDimEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isAutoDimEnabled
         ) ?? true
+        autoDimBrightness = try container.decodeIfPresent(
+            Double.self, forKey: .autoDimBrightness
+        ) ?? 0.1
         isPlaceNameLookupEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isPlaceNameLookupEnabled
         ) ?? true
@@ -184,6 +210,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
         isAutoPauseEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .isAutoPauseEnabled
         ) ?? true
+        isResumeWhenMovingEnabled = try container.decodeIfPresent(
+            Bool.self, forKey: .isResumeWhenMovingEnabled
+        ) ?? false
         hasCompletedOnboarding = try container.decodeIfPresent(
             Bool.self, forKey: .hasCompletedOnboarding
         ) ?? false
@@ -220,6 +249,10 @@ struct AppPreferences: Codable, Equatable, Sendable {
         ))
         .map { $0.keepingValidPlacements().prunedEmptyPages() }
         .flatMap { DashboardLayoutValidator.isValid($0) && !$0.isFactory ? $0 : nil }
+        // Decoded as names, so one this build doesn't have — from a newer build, or renamed — is
+        // dropped alone: the rest stay collapsed, and nothing throws to reset other preferences.
+        let collapsedNames = (try? container.decodeIfPresent([String].self, forKey: .collapsedWidgetCategories)) ?? []
+        collapsedWidgetCategories = Set(collapsedNames.compactMap(WidgetCategory.init(rawValue:)))
     }
 }
 

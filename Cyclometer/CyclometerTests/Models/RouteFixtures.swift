@@ -31,6 +31,16 @@ enum RouteFixtures {
         return points
     }
 
+    /// `path` with each point's elevation given by `profile` as a function of distance along it
+    /// (#463: a route with climbs for `RouteTerrain.analyze` to find).
+    static func withElevation(_ path: [RouteCoordinate], _ profile: (Double) -> Double) -> [RouteCoordinate] {
+        zip(path, RouteGeometry.cumulativeDistances(path)).map { point, distance in
+            var point = point
+            point.elevationMeters = profile(distance)
+            return point
+        }
+    }
+
     /// The point `meters` from `start` on `bearingDegrees`, flattening the WGS84 ellipsoid at
     /// `start`'s latitude — exact to well under a millimetre over the few metres `path` steps.
     static func offset(_ start: RouteCoordinate, bearingDegrees: Double, meters: Double) -> RouteCoordinate {

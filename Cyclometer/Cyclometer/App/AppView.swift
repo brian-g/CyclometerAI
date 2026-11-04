@@ -108,9 +108,15 @@ struct AppView: View {
             // the accessory, and a drag down anywhere collapses it back in. Hand-built
             // motion can't do this: moving a view re-flows its safe-area extension, so
             // the old overlay squished as it was dragged (#330).
-            .fullScreenCover(item: dashboardStore) { rideStore in
+            //
+            // Finish slides it down instead, as the accessory goes with the ride, and S10 rises
+            // once it has gone (#365).
+            .fullScreenCover(item: dashboardStore, onDismiss: {
+                store.send(.dashboardDismissalCompleted)
+            }) { rideStore in
                 RideDashboardView(store: rideStore)
                     .navigationTransition(.zoom(sourceID: DashboardZoom.sourceID, in: dashboardZoom))
+                    .background { DashboardFinishTransition(store: rideStore) }
             }
 
             // ── Onboarding (S01→S02) ──────────────────────────────────────────────

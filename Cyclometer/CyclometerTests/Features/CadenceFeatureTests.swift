@@ -7,7 +7,7 @@ import ComposableArchitecture
 @Suite("CadenceFeature")
 struct CadenceFeatureTests {
 
-    private static let testDate = Date(timeIntervalSince1970: 1_000_000)
+    nonisolated private static let testDate = Date(timeIntervalSince1970: 1_000_000)
 
     /// Recording by default: a reading only reaches the average and max while the ride is
     /// recording (#379), which is what most of these tests are about.
@@ -170,22 +170,6 @@ struct CadenceFeatureTests {
             $0.maxCadenceRPM = 95
         }
         await expireStaleData(store, clock)
-    }
-
-    @Test("Watermark series downsamples to at most watermarkResolution points")
-    func watermarkDownsamples() {
-        let many = (0..<200).map {
-            CadenceSample(time: Date(timeIntervalSince1970: Double($0)), rpm: Double($0))
-        }
-        #expect(
-            CadenceFeature.State(cadenceSamples: many).watermarkSamples.count
-                == CadenceFeature.watermarkResolution
-        )
-
-        let few = (0..<10).map {
-            CadenceSample(time: Date(timeIntervalSince1970: Double($0)), rpm: Double($0))
-        }
-        #expect(CadenceFeature.State(cadenceSamples: few).watermarkSamples.count == 10)
     }
 
     // MARK: - Stale-data watchdog (#456)

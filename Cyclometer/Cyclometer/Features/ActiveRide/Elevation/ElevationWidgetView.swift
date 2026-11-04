@@ -26,6 +26,8 @@ enum Grade {
 /// W14 Ascent and W15 Descent (#387): the ride's total climb or drop. Real at zero, as distance is.
 struct ElevationTotalWidget: View {
     let title: String
+    /// W14's or W15's lower-right symbol (#491).
+    let symbol: String
     let meters: Double
     let unit: UnitSystem
     /// The Elevation sheet's data. A closure so the card never reads it; only the open sheet does,
@@ -41,6 +43,7 @@ struct ElevationTotalWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .widgetSymbol(symbol)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: title, value: accessibilityValue) {
             ElevationSheet(metrics: metrics)
@@ -66,6 +69,7 @@ struct GradeWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .widgetSymbol("mountain.2")
         .background(Color.cyBgSecondary)
         .widgetDetail(label: GradeDashboardWidget.title, value: accessibilityValue) {
             ElevationSheet(metrics: metrics)
@@ -82,14 +86,17 @@ struct GradeWidget: View {
 struct ElevationWidget: View {
     let altitude: Double?       // meters; nil → "—"
     let gradePercent: Double?
-    let history: [Double]       // meters, oldest first, for the watermark
+    let history: [WatermarkPoint]   // meters, oldest first, for the watermark
+    /// The time span the watermark plots over, shared with the other widgets' watermarks
+    /// (`ActiveRideFeature.State.watermarkWindow`). Nil plots the history's own span.
+    var watermarkWindow: ClosedRange<Date>? = nil
     let unit: UnitSystem
     var metrics: () -> ElevationMetrics = { ElevationMetrics() }
 
     var body: some View {
         ZStack {
             if !history.isEmpty {
-                ElevationHistoryChart(history: history)
+                ElevationHistoryChart(history: history, window: watermarkWindow)
                     .opacity(Opacity.watermark)
             }
             ElevationReadout(
@@ -124,7 +131,10 @@ struct RouteElevationWidget: View {
     /// How far along the route the rider is, 0–1; nil while navigation isn't placing them on it.
     let routeProgress: Double?
     /// W17's watermark, for a ride with no route profile.
-    let history: [Double]
+    let history: [WatermarkPoint]
+    /// The time span the watermark plots over, shared with the other widgets' watermarks
+    /// (`ActiveRideFeature.State.watermarkWindow`). Nil plots the history's own span.
+    var watermarkWindow: ClosedRange<Date>? = nil
     let unit: UnitSystem
     var metrics: () -> ElevationMetrics = { ElevationMetrics() }
 
@@ -137,7 +147,7 @@ struct RouteElevationWidget: View {
             if let routeProfile {
                 RouteProfileChart(profile: routeProfile, progress: routeProgress)
             } else if !history.isEmpty {
-                ElevationHistoryChart(history: history)
+                ElevationHistoryChart(history: history, window: watermarkWindow)
                     .opacity(Opacity.watermark)
             }
             ElevationReadout(
@@ -213,20 +223,31 @@ extension Collection where Element == Double {
 
 /// W17's watermark: Speed's area-and-line treatment, on the ride's elevation.
 private struct ElevationHistoryChart: View {
-    let history: [Double]   // meters
+    let history: [WatermarkPoint]   // meters
+    let window: ClosedRange<Date>?
 
     var body: some View {
-        let domain = history.elevationChartDomain
-        Chart(Array(history.enumerated()), id: \.offset) { index, meters in
-            AreaMark(
-                x: .value("t", index),
-                yStart: .value("base", domain.lowerBound),
-                yEnd: .value("elevation", meters)
-            )
-            .foregroundStyle(Color.cyPrimary)
-            LineMark(x: .value("t", index), y: .value("elevation", meters))
+        let domain = history.map(\.value).elevationChartDomain
+        // One series per run, so a silence — a pause records no altitude — breaks the trace.
+        Chart {
+            ForEach(Array(history.enumerated()), id: \.offset) { _, point in
+                AreaMark(
+                    x: .value("t", point.time),
+                    yStart: .value("base", domain.lowerBound),
+                    yEnd: .value("elevation", point.value),
+                    series: .value("run", point.run)
+                )
                 .foregroundStyle(Color.cyPrimary)
+                LineMark(x: .value("t", point.time), y: .value("elevation", point.value), series: .value("run", point.run))
+                    .foregroundStyle(Color.cyPrimary)
+            }
+            ForEach(Array(history.lonePoints.enumerated()), id: \.offset) { _, point in
+                PointMark(x: .value("t", point.time), y: .value("elevation", point.value))
+                    .symbolSize(CGSize(width: Spacing.watermarkDot, height: Spacing.watermarkDot))
+                    .foregroundStyle(Color.cyPrimary)
+            }
         }
+        .chartXScale(domain: history.plotDomain(window))
         .chartYScale(domain: domain)
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
@@ -283,9 +304,17 @@ struct RouteProfileChart: View {
 
 // MARK: - Previews
 
+private let previewWindow = AltitudeSample.sampleHour.first!.time...AltitudeSample.sampleHour.last!.time
+private let previewHistory = Watermark.points(AltitudeSample.sampleHour, over: previewWindow, time: \.time, value: \.meters)
+/// A 15-minute pause, which records no altitude.
+private let previewGapHistory = Watermark.points(
+    AltitudeSample.sampleHour.filter { !(30..<45).contains(Int($0.time.timeIntervalSinceReferenceDate / 60)) },
+    over: previewWindow, time: \.time, value: \.meters
+)
+
 #Preview("W14–W16") {
     HStack(spacing: Spacing.xs) {
-        ElevationTotalWidget(title: "Ascent", meters: 412, unit: .metric)
+        ElevationTotalWidget(title: "Ascent", symbol: "arrow.up.forward", meters: 412, unit: .metric)
         GradeWidget(percent: 4.4)
     }
     .frame(height: 96)
@@ -293,7 +322,7 @@ struct RouteProfileChart: View {
 
 #Preview("W17 / W18") {
     VStack(spacing: Spacing.xs) {
-        ElevationWidget(altitude: 284, gradePercent: -3, history: AltitudeSample.sampleHour.map(\.meters), unit: .metric)
+        ElevationWidget(altitude: 284, gradePercent: -3, history: previewHistory, unit: .metric)
             .frame(height: 96)
         RouteElevationWidget(
             altitude: 284, gradePercent: 6, routeProfile: AltitudeSample.sampleHour.map(\.meters),
@@ -301,4 +330,9 @@ struct RouteProfileChart: View {
         )
         .frame(height: 96)
     }
+}
+
+#Preview("W17 — Sensor gap") {
+    ElevationWidget(altitude: 284, gradePercent: -3, history: previewGapHistory, watermarkWindow: previewWindow, unit: .metric)
+        .frame(height: 96)
 }

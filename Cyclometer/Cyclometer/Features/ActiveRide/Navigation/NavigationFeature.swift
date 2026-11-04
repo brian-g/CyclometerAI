@@ -223,6 +223,23 @@ struct NavigationFeature {
             else { return nil }
             return isRouteComplete ? 1 : min(max(progressMeters / total, 0), 1)
         }
+
+        /// Along the route to its finish, in metres: W19 and W20 (#461). Nil and 0 by
+        /// `routeProgressFraction`'s rules. Off route it holds the last match, as `progressMeters`
+        /// does; on a loop joined near its end, the wrap takes it back to the full lap.
+        var remainingDistanceMeters: Double? {
+            guard isFollowingRoute, let progressMeters, let total = activeRoute?.totalDistanceMeters, total > 0
+            else { return nil }
+            return isRouteComplete ? 0 : max(total - progressMeters, 0)
+        }
+
+        /// The climb the rider is on or the next one ahead: W22 (#463). Nil by
+        /// `remainingDistanceMeters`' rules, and `.noClimbAhead` once the route is complete. Off route it
+        /// holds the last match, as `progressMeters` does.
+        var climbReading: ClimbReading? {
+            guard isFollowingRoute, let progressMeters, let route = activeRoute else { return nil }
+            return isRouteComplete ? .noClimbAhead : .at(progressMeters: progressMeters, climbs: route.climbs)
+        }
     }
 
     enum Action: Equatable {
@@ -541,27 +558,35 @@ struct NavigationRoute: Equatable, Sendable {
     /// The route's elevation at `elevationProfileSamples` even distances, start to finish — W18's
     /// profile (#387) — or nil for a file with no `<ele>`. Here so no frame pays for it.
     let elevationProfile: [Double]?
+    /// The route's categorized climbs in ride order (#463), from the analysis S20 shows, or found at
+    /// load for a route that has none stored yet: W22's.
+    let climbs: [RouteClimb]
 
     var totalDistanceMeters: Double { cumulativeDistances.last ?? 0 }
 
     /// Nil for a polyline with no segment to follow: a one-point GPX imports fine
     /// (`GPXRouteImporter` rejects only an empty one).
-    init?(coordinates: [RouteCoordinate], maneuvers: [Maneuver]) {
+    init?(coordinates: [RouteCoordinate], maneuvers: [Maneuver], terrain: RouteTerrainAnalysis? = nil) {
         guard coordinates.count > 1, let first = coordinates.first, let last = coordinates.last else { return nil }
         self.coordinates = coordinates
         self.cumulativeDistances = RouteGeometry.cumulativeDistances(coordinates)
         self.maneuvers = maneuvers
         self.isLoop = RouteGeometry.distanceMeters([first, last]) <= NavigationFeature.loopClosureMeters
         self.elevationProfile = RouteGeometry.elevationProfile(coordinates, sampleCount: Self.elevationProfileSamples)
+        self.climbs = RouteClimb.climbs(of: terrain, on: coordinates)
     }
 
-    /// Twice the 2×1 watermark's resolution (`SpeedFeature.watermarkResolution`): a route is often
+    /// Twice the 2×1 watermark's resolution (`Watermark.bucketCount`): a route is often
     /// longer than an hour's riding, and its climbs shouldn't blur into one.
     static let elevationProfileSamples = 120
 
     /// Derives the turns (#192) here, at load, rather than reading a stored copy — there is none,
     /// so a fix to the derivation reaches routes imported before it.
     init?(detail: RouteDetail) {
-        self.init(coordinates: detail.coordinates, maneuvers: TurnDerivation.maneuvers(for: detail))
+        self.init(
+            coordinates: detail.coordinates,
+            maneuvers: TurnDerivation.maneuvers(for: detail),
+            terrain: detail.summary.terrain
+        )
     }
 }

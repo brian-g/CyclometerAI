@@ -33,7 +33,10 @@ struct CadenceDetail: Equatable {
 
 struct CadenceWidget: View {
     let cadence: Int?            // rpm; nil → "—"
-    let cadenceHistory: [Double] // rpm samples for watermark chart
+    let cadenceHistory: [WatermarkPoint] // rpm, for the watermark chart
+    /// The time span the watermark plots over, shared with the other widgets' watermarks
+    /// (`ActiveRideFeature.State.watermarkWindow`). Nil plots the history's own span.
+    var watermarkWindow: ClosedRange<Date>? = nil
     let averageCadence: Int      // rpm; 0 → no pedalling recorded yet
     let maxCadence: Int          // rpm
     /// The rider's S12 cadence zones (#79), drawn as the watermark's bands.
@@ -46,13 +49,14 @@ struct CadenceWidget: View {
     var body: some View {
         ZStack {
             // Drawn with or without readings (#79): the bands are the rider's zones, not data.
-            CadenceHistoryChart(history: cadenceHistory, zones: zones)
+            CadenceHistoryChart(history: cadenceHistory, window: watermarkWindow, zones: zones)
             switch size {
             case .oneByOne, .twoByTwo: oneByOneContent
             case .twoByOne:            twoByOneContent
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .widgetSymbol(size == .oneByOne ? "tire" : nil)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: CadenceDashboardWidget.title, value: accessibilityValue) {
             CadenceDetailSheet(
@@ -140,6 +144,10 @@ struct CadenceWidget: View {
     /// What VoiceOver reads after "Cadence" (#361): what this size shows, with no "—" read aloud.
     var accessibilityValue: String {
         var parts = [cadence.map { "\($0) rpm" } ?? "No reading"]
+        // The ▲/▼ on the cadence, read as W1's (#401).
+        if let trend = Self.trend(cadence: cadence, average: averageCadence).spokenAgainstAverage {
+            parts.append(trend)
+        }
         if size == .twoByOne {
             if averageCadence > 0 { parts.append("average \(averageCadence)") }
             if maxCadence > 0 { parts.append("maximum \(maxCadence)") }
@@ -151,7 +159,8 @@ struct CadenceWidget: View {
 // MARK: - Cadence History Watermark Chart
 
 private struct CadenceHistoryChart: View {
-    let history: [Double]   // rpm
+    let history: [WatermarkPoint]   // rpm
+    let window: ClosedRange<Date>?
     let zones: CadenceZoneBoundaries
 
     /// Fixed y-domain so the zone bands always map to the same screen positions
@@ -160,13 +169,14 @@ private struct CadenceHistoryChart: View {
     private static let yMax = Double(CadenceZoneBoundaries.ceilingRPM)
 
     var body: some View {
+        let domain = history.plotDomain(window)
         Chart {
             // Coloured zone bands behind the cadence line (#38, #79).
             ForEach(CadenceZone.allCases, id: \.self) { zone in
                 let range = zones.bandRange(for: zone, ceiling: Self.yMax)
                 RectangleMark(
-                    xStart: .value("t0", 0),
-                    xEnd: .value("t1", max(history.count - 1, 1)),
+                    xStart: .value("t0", domain.lowerBound),
+                    xEnd: .value("t1", domain.upperBound),
                     yStart: .value("rpm0", range.lowerBound),
                     yEnd: .value("rpm1", range.upperBound)
                 )
@@ -174,16 +184,25 @@ private struct CadenceHistoryChart: View {
             }
 
             // Cadence trace as a line over the bands. No area fill — it would tint
-            // the lower bands and defeat the at-a-glance read.
-            ForEach(Array(history.enumerated()), id: \.offset) { index, rpm in
-                LineMark(x: .value("t", index), y: .value("rpm", rpm))
+            // the lower bands and defeat the at-a-glance read. One series per run, so a silence
+            // breaks the line rather than being drawn across.
+            ForEach(Array(history.enumerated()), id: \.offset) { _, point in
+                LineMark(x: .value("t", point.time), y: .value("rpm", point.value), series: .value("run", point.run))
+                    .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.lineWatermark))
+            }
+            ForEach(Array(history.lonePoints.enumerated()), id: \.offset) { _, point in
+                PointMark(x: .value("t", point.time), y: .value("rpm", point.value))
+                    .symbolSize(CGSize(width: Spacing.watermarkDot, height: Spacing.watermarkDot))
                     .foregroundStyle(Color.cyTextPrimary.opacity(Opacity.lineWatermark))
             }
         }
+        .chartXScale(domain: domain)
         .chartYScale(domain: 0...Self.yMax)
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartLegend(.hidden)
+        // A lone reading's dot at the domain's edge would otherwise draw into the next cell.
+        .clipped()
     }
 }
 
@@ -206,6 +225,9 @@ private struct CadenceDetailChart: View {
     /// Marks plotted per series. A cap, not a target: a short ride has fewer.
     private static let maxPlottedPoints = 120
 
+    @Environment(\.timeZone) private var timeZone
+    @Environment(\.locale) private var locale
+
     private var timeRange: ClosedRange<Date>? {
         guard let first = cadenceSamples.first?.time, let last = cadenceSamples.last?.time,
               first < last else { return nil }
@@ -214,28 +236,16 @@ private struct CadenceDetailChart: View {
 
     /// A time-stamped value with the time as its identity, so marks keep their identity as
     /// the series grows instead of being re-diffed by array offset.
-    private struct Point: Identifiable {
+    private struct Point: Identifiable, TimedSample {
         let time: Date
         let value: Double
         var id: Date { time }
     }
 
-    /// At most `maxPlottedPoints`, by averaging contiguous buckets (time and value) — the
-    /// same strategy as `CadenceFeature.watermarkSamples`, keeping a full hour of 1 Hz
-    /// readings from becoming thousands of marks.
+    /// At most `maxPlottedPoints` bucket means, keeping a full hour of 1 Hz readings from
+    /// becoming thousands of marks.
     private static func downsampled(_ points: [Point]) -> [Point] {
-        guard points.count > maxPlottedPoints else { return points }
-        let bucket = Double(points.count) / Double(maxPlottedPoints)
-        return (0..<maxPlottedPoints).map { i in
-            let start = Int(Double(i) * bucket)
-            let end = min(max(start + 1, Int(Double(i + 1) * bucket)), points.count)
-            let slice = points[start..<end]
-            let meanTime = slice.map(\.time.timeIntervalSinceReferenceDate).reduce(0, +) / Double(slice.count)
-            return Point(
-                time: Date(timeIntervalSinceReferenceDate: meanTime),
-                value: slice.map(\.value).reduce(0, +) / Double(slice.count)
-            )
-        }
+        points.bucketAveraged(to: maxPlottedPoints)
     }
 
     private var cadencePoints: [Point] {
@@ -295,7 +305,9 @@ private struct CadenceDetailChart: View {
         }
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) {
-                AxisValueLabel(format: .dateTime.hour().minute())
+                // In the environment's zone and locale, as `RideTimeAxis` labels: the default style
+                // formats in the device's, so a snapshot couldn't pin it.
+                AxisValueLabel(format: Date.FormatStyle(locale: locale, timeZone: timeZone).hour().minute())
             }
         }
         .chartLegend(.hidden)
@@ -304,16 +316,35 @@ private struct CadenceDetailChart: View {
 
 // MARK: - Cadence Detail Sheet
 
-/// W5 "Ride metrics" sheet (UX.md §W5): cadence chart over elevation, average and max
-/// cadence, pedalling vs coasting, and time in each cadence zone, all from ride state.
-/// Cadence smoothness is not shown — no spec defines it.
+/// W5's Cadence sheet (UX.md §W5, #147): cadence chart over elevation, average and max cadence,
+/// pedalling vs coasting, and time in each cadence zone, all from ride state. Cadence smoothness is
+/// not shown — no spec defines it.
 private struct CadenceDetailSheet: View {
     let averageCadence: Int
     let maxCadence: Int
     let zones: CadenceZoneBoundaries
     let detail: CadenceDetail
 
-    @Environment(\.dismiss) private var dismiss
+    @State private var detent = PresentationDetent.medium
+
+    var body: some View {
+        NavigationStack {
+            CadenceList(averageCadence: averageCadence, maxCadence: maxCadence, zones: zones, detail: detail)
+                .navigationTitle("Cadence")
+                .navigationBarTitleDisplayMode(.inline)
+                .sheetCloseButton()
+        }
+        .presentationDetents([.medium, .large], selection: $detent)
+    }
+}
+
+/// The Cadence sheet's chart, readings and zones, apart from its navigation chrome so a snapshot
+/// can pin them.
+struct CadenceList: View {
+    let averageCadence: Int
+    let maxCadence: Int
+    let zones: CadenceZoneBoundaries
+    let detail: CadenceDetail
 
     private static let chartHeight: CGFloat = 140
     private static let donutHeight: CGFloat = 120
@@ -324,44 +355,48 @@ private struct CadenceDetailSheet: View {
     private var pedalingSeconds: TimeInterval { zoneSeconds.values.reduce(0, +) }
 
     var body: some View {
-        NavigationStack {
-            List {
+        List {
+            // The chart and the readings it explains share one section, as the Heart rate sheet's do.
+            Section {
                 if detail.cadenceSamples.count > 1 {
-                    Section {
-                        CadenceDetailChart(
-                            cadenceSamples: detail.cadenceSamples,
-                            altitudeSamples: detail.altitudeSamples,
-                            zones: zones
-                        )
-                            .frame(height: Self.chartHeight)
-                    }
+                    CadenceDetailChart(
+                        cadenceSamples: detail.cadenceSamples,
+                        altitudeSamples: detail.altitudeSamples,
+                        zones: zones
+                    )
+                        .frame(height: Self.chartHeight)
                 }
-                metricRow("Avg Cadence", averageCadence > 0 ? "\(averageCadence) rpm" : "—")
-                metricRow("Max Cadence", maxCadence > 0 ? "\(maxCadence) rpm" : "—")
+                ReadingColumns {
+                    ReadingColumn("Avg Cadence", Self.reading(averageCadence))
+                    ReadingColumn("Max Cadence", Self.reading(maxCadence))
+                }
                 pedalingVsCoastingRow
-                Section("Time in Cadence Zones") {
-                    if pedalingSeconds > 0 {
-                        DonutChart(slices: CadenceZone.allCases.map {
-                            DonutSlice(id: $0.displayName, value: zoneSeconds[$0] ?? 0, color: $0.color)
-                        })
-                        .frame(height: Self.donutHeight)
-                        .frame(maxWidth: .infinity)
-                    }
-                    ForEach(CadenceZone.allCases, id: \.self) { zone in
-                        metricRow("Z\(zone.rawValue) \(zone.displayName) · \(zones.rangeText(for: zone)) rpm",
-                                  Self.duration(zoneSeconds[zone] ?? 0))
-                    }
-                }
             }
-            .navigationTitle("Cadence")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .close) { dismiss() }
+            Section("Time in Cadence Zones") {
+                if pedalingSeconds > 0 {
+                    DonutChart(slices: CadenceZone.allCases.map {
+                        DonutSlice(id: $0.displayName, value: zoneSeconds[$0] ?? 0, color: $0.color)
+                    })
+                    .frame(height: Self.donutHeight)
+                    .frame(maxWidth: .infinity)
+                }
+                ForEach(CadenceZone.allCases, id: \.self) { zone in
+                    ZoneTimeRow(
+                        color: zone.color,
+                        name: "Z\(zone.rawValue) \(zone.displayName)",
+                        range: range(of: zone),
+                        // Rounded once: the tally is fractional BLE intervals, and the shown time
+                        // rounds while `Int(_:)` would truncate the spoken one.
+                        time: .zoneTime(seconds: Int((zoneSeconds[zone] ?? 0).rounded()))
+                    )
                 }
             }
         }
-        .presentationDetents([.medium])
+    }
+
+    /// "88 rpm"; "—" before any pedalling.
+    static func reading(_ rpm: Int) -> MetricReading {
+        rpm > 0 ? MetricReading(value: "\(rpm)", unit: "rpm", spoken: "\(rpm) rpm") : .missing
     }
 
     private var pedalingVsCoastingRow: some View {
@@ -386,18 +421,26 @@ private struct CadenceDetailSheet: View {
         return "\(pedalingPercent)% / \(100 - pedalingPercent)%"
     }
 
-    private static func duration(_ seconds: TimeInterval) -> String {
-        Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1)))
-    }
-
-    private func metricRow(_ label: String, _ value: String) -> some View {
-        LabeledContent(label, value: value)
+    /// "60–69 rpm", read "60 to 69 rpm"; Z5 "110+ rpm", read "110 rpm or more".
+    private func range(of zone: CadenceZone) -> MetricReading {
+        let lower = zones.lowerBound(of: zone)
+        return MetricReading(
+            value: zones.rangeText(for: zone),
+            unit: "rpm",
+            spoken: zones.upperBound(of: zone).map { "\(lower) to \($0) rpm" } ?? "\(lower) rpm or more"
+        )
     }
 }
 
 // MARK: - Previews
 
-private let demoHistory: [Double] = stride(from: 60.0, to: 105.0, by: 1.2).map { $0 }
+private let demoWindow = demoCadenceSamples.first!.time...demoCadenceSamples.last!.time
+private let demoHistory = Watermark.points(demoCadenceSamples, over: demoWindow, time: \.time, value: \.rpm)
+/// The sensor asleep through a 10-minute stop: no readings at all, not zeros.
+private let demoGapHistory = Watermark.points(
+    demoCadenceSamples.enumerated().filter { !(60..<120).contains($0.offset) }.map(\.element),
+    over: demoWindow, time: \.time, value: \.rpm
+)
 
 #Preview("2×1 — Active") {
     CadenceWidget(
@@ -432,6 +475,18 @@ private let demoHistory: [Double] = stride(from: 60.0, to: 105.0, by: 1.2).map {
     .frame(width: 196, height: 96)
 }
 
+#Preview("2×1 — Sensor gap") {
+    CadenceWidget(
+        cadence: 92,
+        cadenceHistory: demoGapHistory,
+        watermarkWindow: demoWindow,
+        averageCadence: 88,
+        maxCadence: 104,
+        size: .twoByOne
+    )
+    .frame(width: 393, height: 96)
+}
+
 #Preview("1×1 — No Signal") {
     CadenceWidget(
         cadence: nil,
@@ -445,9 +500,9 @@ private let demoHistory: [Double] = stride(from: 60.0, to: 105.0, by: 1.2).map {
 
 private let demoStart = Date(timeIntervalSince1970: 1_000_000)
 
-/// One reading every 10 s for 30 min: rpm climbs through the zones with a coasting gap.
+/// One reading every 10 s for 30 min: rpm climbs through the zones, coasting (0 rpm) from 20 to 26 min.
 private let demoCadenceSamples: [CadenceSample] = (0..<180).map { i in
-    let rpm = (70...74).contains(i / 6 % 30) ? 0 : 60 + 45 * abs(sin(Double(i) / 25))
+    let rpm = (20...25).contains(i / 6) ? 0 : 60 + 45 * abs(sin(Double(i) / 25))
     return CadenceSample(time: demoStart.addingTimeInterval(Double(i) * 10), rpm: rpm)
 }
 
@@ -456,18 +511,23 @@ private let demoAltitudeSamples: [AltitudeSample] = (0..<180).map { i in
     AltitudeSample(time: demoStart.addingTimeInterval(Double(i) * 10), meters: 120 + 80 * sin(Double(i) / 57))
 }
 
-#Preview("Detail Sheet — Active") {
-    CadenceDetailSheet(
-        averageCadence: 88,
-        maxCadence: 104,
-        zones: .default,
-        detail: CadenceDetail(
-            cadenceSamples: demoCadenceSamples,
-            altitudeSamples: demoAltitudeSamples,
-            zoneSeconds: [.zone1: 95, .zone2: 210, .zone3: 1_260, .zone4: 300, .zone5: 42],
-            coastingSeconds: 380
-        )
+extension CadenceDetail {
+    /// 30 minutes through the zones, with a coasting gap, over a climb and a descent.
+    static let sample = CadenceDetail(
+        cadenceSamples: demoCadenceSamples,
+        altitudeSamples: demoAltitudeSamples,
+        zoneSeconds: [.zone1: 95, .zone2: 210, .zone3: 1_260, .zone4: 300, .zone5: 42],
+        coastingSeconds: 380
     )
+}
+
+#Preview("Detail Sheet — Active") {
+    CadenceDetailSheet(averageCadence: 88, maxCadence: 104, zones: .default, detail: .sample)
+}
+
+#Preview("Detail Sheet — Active Dark") {
+    CadenceDetailSheet(averageCadence: 88, maxCadence: 104, zones: .default, detail: .sample)
+        .preferredColorScheme(.dark)
 }
 
 #Preview("Detail Sheet — No Data") {

@@ -36,6 +36,11 @@ struct ToneRendererDurationTests {
         #expect(approxMilliseconds(ToneRenderer.render(ToneKind.uTurn.segments)) == 760)
     }
 
+    @Test("Bell renders 1,050ms: two flicks and the ring-out")
+    func bellDuration() {
+        #expect(approxMilliseconds(ToneRenderer.render(ToneKind.bell.segments)) == 1_050)
+    }
+
     private func approxMilliseconds(_ buffer: AVAudioPCMBuffer) -> Int {
         Int((Double(buffer.frameLength) / ToneRenderer.sampleRate) * 1_000)
     }
@@ -146,12 +151,12 @@ struct ToneKindTurnTests {
         }
     }
 
-    @Test("Only a turn tone gives way, and only to a sounding Warning or Danger — radar keeps the speaker")
-    func onlyATurnToneGivesWay() {
-        let turns: [ToneKind] = [.turnLeft, .turnRight, .uTurn]
+    @Test("Only a turn tone or the bell gives way, and only to a sounding Warning or Danger — radar keeps the speaker")
+    func onlyATurnToneOrTheBellGivesWay() {
+        let yielding: [ToneKind] = [.turnLeft, .turnRight, .uTurn, .bell]
         for kind in ToneKind.allCases {
             let givesWayTo = ToneKind.allCases.filter { kind.yields(to: $0) }
-            #expect(givesWayTo == (turns.contains(kind) ? [.warning, .danger] : []), "\(kind)")
+            #expect(givesWayTo == (yielding.contains(kind) ? [.warning, .danger] : []), "\(kind)")
         }
     }
 
@@ -161,6 +166,7 @@ struct ToneKindTurnTests {
             switch segment.kind {
             case .tone(let frequency, let waveform, _, _, _): "\(frequency) Hz \(waveform) \(segment.durationMs) ms"
             case .silence: "rest \(segment.durationMs) ms"
+            case .ring(let fundamental, _, let strikes): "ring \(fundamental) Hz \(strikes.count) strikes \(segment.durationMs) ms"
             }
         }
     }
@@ -174,5 +180,66 @@ struct ToneKindTurnTests {
 
     private func rhythm(_ kind: ToneKind) -> [Double] {
         kind.segments.map(\.durationMs)
+    }
+}
+
+// MARK: - Bell (#492)
+
+@Suite("ToneKind — bell (#492)")
+struct ToneKindBellTests {
+
+    private let buffer = ToneRenderer.render(ToneKind.bell.segments)
+
+    @Test("Strikes piling up never clip: the ring is scaled to its peak")
+    func peakIsScaledNotClipped() {
+        let channel = buffer.floatChannelData![0]
+        let peak = (0..<Int(buffer.frameLength)).reduce(Float(0)) { max($0, abs(channel[$1])) }
+        #expect(abs(peak - ToneRenderer.ringPeak) < 0.001)
+    }
+
+    @Test("It starts and ends at silence — no click on either side")
+    func startsAndEndsSilent() {
+        let channel = buffer.floatChannelData![0]
+        #expect(abs(channel[0]) < 0.01)
+        #expect(abs(channel[Int(buffer.frameLength) - 1]) < 0.01)
+    }
+
+    @Test("Two rings, not one: the bell dips between the flicks")
+    func dipsBetweenTheFlicks() {
+        let firstFlick = rms(220..<280), gap = rms(390..<450), secondFlick = rms(670..<730)
+        #expect(gap < 0.75 * firstFlick)
+        #expect(gap < 0.75 * secondFlick)
+    }
+
+    @Test("Its fundamental sits in Audio.md's 1–4 kHz band")
+    func fundamentalIsAudibleOutdoors() throws {
+        let segment = try #require(ToneKind.bell.segments.first)
+        guard case .ring(let fundamental, _, _) = segment.kind else {
+            Issue.record("the bell is not a ring")
+            return
+        }
+        #expect((1_000...4_000).contains(fundamental))
+    }
+
+    /// Root mean square of the samples between `ms`, in milliseconds from the start.
+    private func rms(_ ms: Range<Int>) -> Float {
+        let channel = buffer.floatChannelData![0]
+        let frames = Int(Double(ms.lowerBound) * ToneRenderer.sampleRate / 1_000)..<Int(Double(ms.upperBound) * ToneRenderer.sampleRate / 1_000)
+        let sum = frames.reduce(Float(0)) { $0 + channel[$1] * channel[$1] }
+        return (sum / Float(frames.count)).squareRoot()
+    }
+}
+
+// MARK: - Background audio
+
+@Suite("Tones while backgrounded")
+struct ToneBackgroundModeTests {
+    /// Without the `audio` background mode a locked phone can't start a tone at all. It was dropped from
+    /// Info.plist once without anyone noticing (#329), and the 2026-11-03 ride lost every radar tone while
+    /// backgrounded (BLE.md §13.2 Q4). The test host is the app, so `Bundle.main` is its Info.plist.
+    @Test("The app declares the audio background mode")
+    func declaresAudioBackgroundMode() throws {
+        let modes = try #require(Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])
+        #expect(modes.contains("audio"))
     }
 }

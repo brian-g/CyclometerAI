@@ -76,6 +76,12 @@ struct SensorHealthLog: Equatable {
             min(entries[peripheral]?.minBatteryPercent ?? percent, percent)
     }
 
+    /// The lowest level the peripheral has reported so far. Read mid-ride by the Sensors button
+    /// and sheet (#464), which latch on it for the reason `SensorHealthReport.minBatteryPercent` does.
+    func minBatteryPercent(peripheral: UUID) -> Int? {
+        entries[peripheral]?.minBatteryPercent
+    }
+
     mutating func recordLinkLoss(peripheral: UUID, at date: Date) {
         var entry = entries[peripheral, default: Entry()]
         entry.recentLinkLosses.append(date)

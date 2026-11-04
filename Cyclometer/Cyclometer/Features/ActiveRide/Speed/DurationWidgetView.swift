@@ -17,6 +17,7 @@ struct DurationWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .widgetSymbol("stopwatch")
         .background(Color.cyBgSecondary)
         .widgetDetail(label: DurationDashboardWidget.title, value: accessibilityValue) {
             RideMetricsSheet(metrics: metrics)

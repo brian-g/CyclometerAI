@@ -18,6 +18,7 @@ struct PaceWidget: View {
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .widgetSymbol("hare.fill")
         .background(Color.cyBgSecondary)
         .widgetDetail(label: PaceDashboardWidget.title, value: accessibilityValue) {
             RideMetricsSheet(metrics: metrics)

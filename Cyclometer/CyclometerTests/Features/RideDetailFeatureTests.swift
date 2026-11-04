@@ -14,7 +14,7 @@ struct RideDetailFeatureTests {
 
     // MARK: Harness
 
-    private static let summary = RideListSummary(
+    nonisolated private static let summary = RideListSummary(
         id: UUID(), title: "River Loop", startedAt: Date(timeIntervalSince1970: 1_700_000_000),
         distanceMeters: 36_050, durationSeconds: 4_712
     )

@@ -45,16 +45,8 @@ struct StartSheetView: View {
             }
             .navigationTitle("New Ride")
             .navigationBarTitleDisplayMode(.inline)
+            .sheetCloseButton(disabled: store.isStarting) { store.send(.cancelButtonTapped) }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        store.send(.cancelButtonTapped)
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Cancel")
-                    .disabled(store.isStarting)
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         store.send(.startRideButtonTapped)
@@ -121,7 +113,7 @@ struct SensorStatusRow: View {
                 subtitle: sensor.name
             ) {
                 VStack(alignment: .trailing) {
-                    statusControl
+                    SensorStatusBadge(status: sensor.status)
                     if let battery = sensor.batteryPercent, sensor.status == .connected {
                         SensorBatteryLabel(percent: battery)
                     }
@@ -133,16 +125,6 @@ struct SensorStatusRow: View {
                     .padding(.bottom, Spacing.xs)
             }
         }
-    }
-
-    private var statusControl: some View {
-        let badge = sensor.status.badge
-        return Text(badge.label)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .foregroundStyle(badge.foreground)
-            .background(badge.background, in: Capsule())
     }
 }
 

@@ -27,6 +27,7 @@ enum Spacing {
     static let rideMetric: CGFloat    = unit * 16 // 64 — S14 row's time and distance columns, minimum width (Sketch: 65)
     static let grabberHeight: CGFloat = unit       //  4 — sheet grabber bar height
     static let pageIndicatorDot: CGFloat = 7       //  7 — dashboard paging indicator dot
+    static let toolbarBadge: CGFloat  = unit * 5  // 20 — ride toolbar count badge (Sketch "sensor button": 22 on a 64 pt button)
     static let hrBorderWidth: CGFloat = 3          //  3 — HR zone left accent bar
     static let strokeThin: CGFloat    = 1.5        //  1.5 — thin border stroke
     static let strokeHairline: CGFloat = 1         //  1 — hairline border (turn overlay)
@@ -35,6 +36,7 @@ enum Spacing {
     static let strokeMapRoute: CGFloat = 8         //  8 — live map: the planned route, wider so the track sits inside it
     static let strokeMapThumbnail: CGFloat = 3     //  3 — ride thumbnail: the recorded track at 56pt
     static let mapThumbnailMargin: CGFloat = 3     //  3 — ride thumbnail: gap from the track's stroke to the image edge (#280)
+    static let watermarkDot: CGFloat = unit        //  4 — dashboard watermark: a reading alone in its run, which a line can't draw
 
     // Corner radii
     static let cornerSm: CGFloat = unit      //  4

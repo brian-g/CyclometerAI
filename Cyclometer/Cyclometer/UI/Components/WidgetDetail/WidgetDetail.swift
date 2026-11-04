@@ -12,6 +12,11 @@ import SwiftUI
 /// The detail closure runs only when the sheet presents. That only keeps data off the dashboard's
 /// hot path if the widget also takes it lazily, as `CadenceWidget`'s `detail:` does.
 /// Detents belong to the detail content, not to this modifier.
+///
+/// The closure is called in the presented `WidgetDetailContent`'s own `body`, so the state it reads
+/// invalidates the open sheet directly. Called in the `.sheet` builder instead, a change re-ran the
+/// builder but now and then never reached the open sheet, which stayed stale until the card behind
+/// it redrew (#144, #389).
 private struct WidgetDetailModifier<Detail: View>: ViewModifier {
     let label: String
     let value: String
@@ -25,7 +30,7 @@ private struct WidgetDetailModifier<Detail: View>: ViewModifier {
             .contentShape(Rectangle())
             // S07: in edit mode a tap belongs to the edit controls, never the detail sheet.
             .onTapGesture { present() }
-            .sheet(isPresented: $isPresented, content: detail)
+            .sheet(isPresented: $isPresented) { WidgetDetailContent(detail: detail) }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(label)
             .accessibilityValue(value)
@@ -39,6 +44,13 @@ private struct WidgetDetailModifier<Detail: View>: ViewModifier {
     private func present() {
         if !isEditingDashboard { isPresented = true }
     }
+}
+
+/// The presented sheet, which builds `detail` in its own `body` (see `WidgetDetailModifier`).
+private struct WidgetDetailContent<Detail: View>: View {
+    let detail: () -> Detail
+
+    var body: some View { detail() }
 }
 
 extension EnvironmentValues {

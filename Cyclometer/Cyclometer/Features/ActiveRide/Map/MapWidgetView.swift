@@ -33,7 +33,8 @@ struct MapWidget: View {
 }
 
 /// The full-screen map sheet's content, detents included. Every widget whose tap opens the map — W8,
-/// and W9's "Sheet: Map" (#200) — presents this through `.widgetDetail`, so they show the same sheet.
+/// and W9, W19 and W20's "Sheet: Map" (#200, #461) — presents this through `.widgetDetail`, so they
+/// show the same sheet.
 struct LiveMapSheet: View {
     let trackSegments: [[Coordinate]]
     let route: [RouteCoordinate]
@@ -41,15 +42,27 @@ struct LiveMapSheet: View {
     let onOrientationToggle: () -> Void
 
     var body: some View {
-        ActiveRideMapView(
-            trackSegments: trackSegments,
-            route: route,
-            surface: .sheet,
-            orientation: orientation,
-            onOrientationToggle: onOrientationToggle
-        )
+        // A bar only for the close every sheet carries (#335). It has no background, so the map
+        // still runs to the sheet's top edge, and the map's controls sit below it.
+        NavigationStack {
+            ActiveRideMapView(
+                trackSegments: trackSegments,
+                route: route,
+                surface: .sheet,
+                orientation: orientation,
+                onOrientationToggle: onOrientationToggle
+            )
+            .sheetCloseButton()
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+        }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+    }
+
+    /// An empty sheet: the `detail` default of a widget view drawn without a store — previews and
+    /// snapshots, which never open it.
+    static var placeholder: LiveMapSheet {
+        LiveMapSheet(trackSegments: [[]], route: [], orientation: .headingUp, onOrientationToggle: {})
     }
 }
 
@@ -66,6 +79,13 @@ private let previewRoute: [RouteCoordinate] = [
     RouteCoordinate(latitude: 37.3349, longitude: -122.0090, elevationMeters: nil),
     RouteCoordinate(latitude: 37.3400, longitude: -121.9990, elevationMeters: nil)
 ]
+
+#Preview("Sheet") {
+    Color.cyBgSecondary
+        .sheet(isPresented: .constant(true)) {
+            LiveMapSheet(trackSegments: [previewTrack], route: previewRoute, orientation: .headingUp, onOrientationToggle: {})
+        }
+}
 
 #Preview("2×2 — With Track") {
     MapWidget(trackSegments: [previewTrack])

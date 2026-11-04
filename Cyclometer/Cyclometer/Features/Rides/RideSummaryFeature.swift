@@ -68,7 +68,7 @@ struct RideSummaryFeature {
         /// Empty for a ride with no heart-rate readings.
         var heartRateSecondsByBPM: [Int: Int] = [:]
 
-        /// The ride ended without part of its track (#345).
+        /// The ride ended without part of its track (#345), or the Delete confirmation (#452).
         @Presents var alert: AlertState<Action.Alert>?
 
         init(rideId: UUID) {
@@ -148,9 +148,22 @@ struct RideSummaryFeature {
         case titleChanged(String)
         case titleFocused
         case finishTapped
+        /// The toolbar's trash button (#452). Enabled only once loaded: before that the ride's
+        /// finalize hasn't landed, and an unavailable ride is still the next launch's to close out.
+        case deleteTapped
         case alert(PresentationAction<Alert>)
+        case delegate(Delegate)
 
-        enum Alert: Equatable {}
+        enum Alert: Equatable {
+            case confirmDelete
+        }
+
+        @CasePathable
+        enum Delegate: Equatable {
+            /// Confirmed. `AppFeature` closes the sheet and deletes the ride through the Rides
+            /// tab: this feature's effects are cancelled as it goes.
+            case deleteRide
+        }
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
@@ -274,7 +287,15 @@ struct RideSummaryFeature {
             case .finishTapped:
                 return .run { [dismiss] _ in await dismiss() }
 
-            case .alert:
+            case .deleteTapped:
+                guard state.load == .loaded else { return .none }
+                state.alert = Self.deleteAlert
+                return .none
+
+            case .alert(.presented(.confirmDelete)):
+                return .send(.delegate(.deleteRide))
+
+            case .alert, .delegate:
                 return .none
             }
         }
@@ -292,6 +313,15 @@ struct RideSummaryFeature {
         } message: {
             TextState("Your ride was saved, but its track from \(unsaved.lowerBound.formatted(style)) to \(unsaved.upperBound.formatted(style)) couldn't be. Its map and GPX file are missing that stretch.")
         }
+    }
+
+    static let deleteAlert = AlertState<Action.Alert> {
+        TextState("Delete This Ride?")
+    } actions: {
+        ButtonState(role: .destructive, action: .confirmDelete) { TextState("Delete") }
+        ButtonState(role: .cancel) { TextState("Cancel") }
+    } message: {
+        TextState("It will be removed from Cyclometer and Apple Health. This can't be undone.")
     }
 
     private static func clearUnsavedTrack(_ rideId: UUID) {

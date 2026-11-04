@@ -95,6 +95,34 @@ struct AppFeatureTests {
         await store.send(.dashboardOpened)
     }
 
+    /// A swipe-kill from the app switcher passes through `.inactive` and is then SIGKILLed, so the
+    /// points buffered since the last 30 s checkpoint are written as the app stops being active (#505).
+    @Test("Leaving the foreground mid-ride writes the buffered track points")
+    func resigningActiveFlushesTrackPoints() async {
+        let buffer = RideDataBuffer()
+        await buffer.append(TrackPointDTO(
+            rideId: UUID(0), timestamp: Date(timeIntervalSince1970: 1), latitude: 43, longitude: -89,
+            altitudeMeters: nil, horizontalAccuracyMeters: 5, speedMPS: 4, speedSource: .gps,
+            heartRateBPM: nil, heartRateSource: .none, cadenceRPM: nil, powerWatts: nil
+        ))
+        let flushed = LockIsolated<[TrackPointDTO]>([])
+        let store = TestStore(
+            initialState: AppFeature.State(activeRide: ActiveRideFeature.State(recordingState: .active))
+        ) {
+            AppFeature()
+        } withDependencies: {
+            $0.rideDataBuffer = buffer
+            $0.persistenceClient = .mock(onFlush: { flushed.setValue($0) })
+        }
+        store.exhaustivity = .off
+
+        await store.send(.scenePhaseChanged(isActive: false))
+        await store.receive(\.activeRide.trackRecorder.appResignedActive)
+        await store.finish()
+
+        #expect(flushed.value.map(\.speedMPS) == [4])
+    }
+
     /// Regression: the ride's long-running effects (1 Hz timer, HR, radar,
     /// location) are started by AppFeature when the ride begins — bound to
     /// `activeRide` via `.ifLet` — NOT by a dashboard-view `.task`. This is what

@@ -75,6 +75,11 @@ struct RoutesFeature {
         /// visit to the tab.
         var surfaceLookupsStarted: Set<UUID> = []
 
+        /// Routes whose on-device narrative has been asked for this session (#203). Once per
+        /// launch, as with the surface: a rejected or failed paragraph waits for the next launch
+        /// rather than running the model again on every visit to the tab.
+        var narrativeRequestsStarted: Set<UUID> = []
+
         /// Map thumbnails of the rows that have been on screen, by route id (#273) — the same
         /// lazy, per-row read `RidesFeature.State.thumbnails` does.
         var thumbnails: [UUID: RidesFeature.Thumbnail] = [:]
@@ -121,6 +126,8 @@ struct RoutesFeature {
         case polylinesResponse([UUID: [RouteCoordinate]])
         /// One route's OpenStreetMap surface, looked up and saved (#252).
         case surfaceResolved(UUID, RouteSurfaceBreakdown)
+        /// One route's on-device narrative, written and saved (#203).
+        case narrativeResolved(UUID, String)
         case riderCoordinateResponse(Coordinate?)
 
         /// A thumbnail capture stored at least one image (#273): rows on screen without one
@@ -170,6 +177,7 @@ struct RoutesFeature {
 
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.overpassClient) var overpassClient
+    @Dependency(\.routeNarrativeClient) var routeNarrativeClient
     @Dependency(\.locationClient) var locationClient
     @Dependency(\.permissionsClient) var permissionsClient
 
@@ -213,20 +221,21 @@ struct RoutesFeature {
 
             case .routesResponse(.success(var routes)):
                 state.hasLoaded = true
-                // A read that began before a lookup saved its surface can land after
-                // `.surfaceResolved`; keep what state already knows rather than blanking it.
-                let knownSurfaces = Dictionary(
-                    state.routes.compactMap { route in route.surface.map { (route.id, $0) } },
-                    uniquingKeysWith: { first, _ in first }
-                )
-                for index in routes.indices where routes[index].surface == nil {
-                    routes[index].surface = knownSurfaces[routes[index].id]
+                // A read that began before a lookup saved its surface or narrative can land
+                // after `.surfaceResolved` / `.narrativeResolved`; keep what state already knows
+                // rather than blanking it.
+                let known = Dictionary(state.routes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                for index in routes.indices {
+                    let id = routes[index].id
+                    if routes[index].surface == nil { routes[index].surface = known[id]?.surface }
+                    if routes[index].narrative == nil { routes[index].narrative = known[id]?.narrative }
                 }
                 state.routes = routes
                 Self.refreshFilters(&state)
                 return .merge(
                     state.showsMap ? loadMissingPolylines(state) : .none,
-                    resolveMissingSurfaces(&state)
+                    resolveMissingSurfaces(&state),
+                    resolveMissingNarratives(&state)
                 )
 
             case .polylinesResponse(let polylines):
@@ -248,6 +257,18 @@ struct RoutesFeature {
                 for elementID in state.path.ids {
                     if state.path[id: elementID, case: \.route]?.summary.id == id {
                         state.path[id: elementID, case: \.route]?.summary.surface = surface
+                    }
+                }
+                return .none
+
+            case let .narrativeResolved(id, narrative):
+                if let index = state.routes.firstIndex(where: { $0.id == id }) {
+                    state.routes[index].narrative = narrative
+                }
+                // As `.surfaceResolved`: an open S20 holds its own copy of the summary.
+                for elementID in state.path.ids {
+                    if state.path[id: elementID, case: \.route]?.summary.id == id {
+                        state.path[id: elementID, case: \.route]?.summary.narrative = narrative
                     }
                 }
                 return .none
@@ -428,6 +449,7 @@ struct RoutesFeature {
                 return .merge(
                     state.showsMap ? loadMissingPolylines(state) : .none,
                     resolveMissingSurfaces(&state),
+                    resolveMissingNarratives(&state),
                     captureMapThumbnails()
                 )
 
@@ -562,6 +584,39 @@ struct RoutesFeature {
                     continue
                 }
                 await send(.surfaceResolved(id, surface))
+            }
+        }
+    }
+
+    /// Writes the on-device narrative of every route that has a terrain analysis and no
+    /// narrative, and has not been asked about this session, one route at a time (#203). Run
+    /// after each read and each import, like `resolveMissingSurfaces` — which is also what
+    /// backfills routes imported before #203.
+    ///
+    /// Nothing at all is read on a device that cannot run the model: S20's Summary is complete
+    /// without a narrative. A route with no `<ele>` has no analysis, so it is never asked about.
+    /// A rejected or failed paragraph is logged and skipped; the next route is still written,
+    /// because unlike Overpass the model has no server to stop pestering.
+    private func resolveMissingNarratives(_ state: inout State) -> Effect<Action> {
+        let started = state.narrativeRequestsStarted
+        let missing = state.routes
+            .filter { $0.terrain != nil && $0.narrative == nil && !started.contains($0.id) }
+            .map(\.id)
+        guard !missing.isEmpty else { return .none }
+        state.narrativeRequestsStarted.formUnion(missing)
+        return .run { [persistenceClient, routeNarrativeClient] send in
+            guard routeNarrativeClient.isAvailable() else { return }
+            for id in missing {
+                do {
+                    guard let detail = try await persistenceClient.fetchRoute(id),
+                          let input = RouteNarrativeInput(summary: detail.summary, coordinates: detail.coordinates)
+                    else { continue }
+                    let narrative = try await routeNarrativeClient.narrate(input)
+                    try await persistenceClient.saveRouteNarrative(id, narrative)
+                    await send(.narrativeResolved(id, narrative))
+                } catch {
+                    logger.error("route narrative failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
             }
         }
     }

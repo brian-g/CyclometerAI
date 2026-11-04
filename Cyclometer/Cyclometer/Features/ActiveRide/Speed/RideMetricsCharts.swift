@@ -11,25 +11,15 @@ enum PaceTrace {
     /// and odometer. Mean speed, inverted later, is the pace over the bucket's moving time.
     /// Consecutive moving buckets form one run.
     static func runs(_ samples: [SpeedSample], resolution: Int) -> [[SpeedSample]] {
-        let count = samples.count
-        let buckets = min(count, resolution)
         var runs: [[SpeedSample]] = []
         var run: [SpeedSample] = []
-        for i in 0..<buckets {
-            // Integer edges, as `bucketAveraged(to:)`.
-            let moving = samples[(i * count / buckets)..<((i + 1) * count / buckets)]
-                .filter { $0.mps > ActiveRideFeature.stationarySpeedMPS }
-            guard !moving.isEmpty else {
+        for bucket in samples.buckets(to: resolution) {
+            guard let moving = bucket.filter({ $0.mps > ActiveRideFeature.stationarySpeedMPS }).mean else {
                 if !run.isEmpty { runs.append(run) }
                 run = []
                 continue
             }
-            let n = Double(moving.count)
-            let time = moving.reduce(0) { $0 + $1.time.timeIntervalSinceReferenceDate } / n
-            run.append(SpeedSample(
-                time: Date(timeIntervalSinceReferenceDate: time),
-                mps: moving.reduce(0) { $0 + $1.mps } / n
-            ))
+            run.append(moving)
         }
         if !run.isEmpty { runs.append(run) }
         return runs
@@ -125,7 +115,7 @@ struct RideSpeedChart: View {
     /// profile stays flat rather than amplifying jitter.
     private static let minElevationSpanMeters = RouteGeometry.elevationNoiseThresholdMeters
 
-    private struct Point: Identifiable {
+    private struct Point: Identifiable, TimedSample {
         let time: Date
         let value: Double
         var id: Date { time }
@@ -138,22 +128,13 @@ struct RideSpeedChart: View {
     }
 
     /// Elevation over `range`, as heights from 0 to `top`, in at most
-    /// `RideMetricsCharts.maxPlottedPoints` bucket means (integer edges, as `bucketAveraged(to:)`).
+    /// `RideMetricsCharts.maxPlottedPoints` bucket means.
     private func elevationPoints(top: Double) -> [Point] {
         let visible = altitudeSamples.filter { range.contains($0.time) }
         guard let low = visible.map(\.meters).min(), let high = visible.map(\.meters).max() else { return [] }
         let span = max(high - low, Self.minElevationSpanMeters)
-        let points = visible.map { Point(time: $0.time, value: ($0.meters - low) / span * top) }
-        let resolution = RideMetricsCharts.maxPlottedPoints
-        guard points.count > resolution else { return points }
-        return (0..<resolution).map { i in
-            let slice = points[(i * points.count / resolution)..<((i + 1) * points.count / resolution)]
-            let n = Double(slice.count)
-            return Point(
-                time: Date(timeIntervalSinceReferenceDate: slice.reduce(0) { $0 + $1.time.timeIntervalSinceReferenceDate } / n),
-                value: slice.reduce(0) { $0 + $1.value } / n
-            )
-        }
+        return visible.map { Point(time: $0.time, value: ($0.meters - low) / span * top) }
+            .bucketAveraged(to: RideMetricsCharts.maxPlottedPoints)
     }
 
     var body: some View {

@@ -1,6 +1,5 @@
 import SwiftUI
 import ComposableArchitecture
-import AudioToolbox
 
 /// Full-screen active ride dashboard — a fullScreenCover that zooms out of the ride
 /// accessory and collapses back into it on a drag down (#333).
@@ -61,11 +60,14 @@ struct RideDashboardView: View {
             }
             .animation(.default, value: activeBanner?.text)
         }
+        // The dots share the ride controls' row, flush with the buttons' bottom edge (#447), and
+        // sit beneath them: a long indicator can be drawn over, but never takes a button's touch.
         .overlay(alignment: .bottom) {
-            VStack(spacing: Spacing.xs) {
+            ZStack(alignment: .bottom) {
                 pageIndicator
                 rideControls
             }
+            .padding(.bottom, -1 * Spacing.cornerMd)
         }
         .overlay {
             if store.isEditingDashboard {
@@ -84,6 +86,9 @@ struct RideDashboardView: View {
         .alert($store.scope(state: \.finishAlert, action: \.finishAlert))
         .sheet(isPresented: $store.isAddWidgetPresented.sending(\.addWidgetPresentationChanged)) {
             AddWidgetSheet(store: store, canvas: gridSize)
+        }
+        .sheet(isPresented: $store.isSensorsSheetPresented.sending(\.sensorsSheetPresentationChanged)) {
+            SensorsSheet { store.sensorHealth.devices }
         }
     }
 
@@ -153,42 +158,31 @@ struct RideDashboardView: View {
     }
 
     // ── Ride Controls — floating glass buttons (S05) ───────────────────────────
+    // Sensors sits beside Bell, as in the Sketch frame "Sxx - Route overlay" (#466).
     private var rideControls: some View {
-        HStack(spacing: Spacing.sm) {
+        let sensorsNeedingAttention = store.sensorHealth.devicesNeedingAttention
+        return HStack(spacing: Spacing.sm) {
             if store.isPaused {
-                rideControlButton("Resume", systemImage: "play.fill") { store.send(.resumeTapped) }
+                RideControlButton("Resume", systemImage: "play.fill") { store.send(.resumeTapped) }
                     .transition(controlTransition)
-                rideControlButton("Finish", systemImage: "stop.fill") { store.send(.finishTapped) }
+                RideControlButton("Finish", systemImage: "stop.fill") { store.send(.finishTapped) }
                     .transition(controlTransition)
             } else {
-                rideControlButton("Pause", systemImage: "pause.fill") { store.send(.pauseTapped) }
+                RideControlButton("Pause", systemImage: "pause.fill") { store.send(.pauseTapped) }
                     .transition(controlTransition)
             }
 
             Spacer()
 
-            rideControlButton("Ring Bell", systemImage: "bell.fill") { ringBell() }
+            if !sensorsNeedingAttention.isEmpty {
+                SensorsButton(devices: sensorsNeedingAttention) { store.send(.sensorsButtonTapped) }
+                    .transition(controlTransition)
+            }
+            RideControlButton("Ring Bell", systemImage: "bell.fill") { store.send(.bellTapped) }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.isPaused)
+        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: sensorsNeedingAttention.isEmpty)
         .padding(.horizontal, Spacing.lg)
-        .padding(.bottom, -1 * Spacing.cornerMd)
-    }
-
-    /// One floating glass ride-control button. The icon-only `Label` keeps its
-    /// title available to VoiceOver, so no separate `accessibilityLabel` is needed.
-    private func rideControlButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button { action() } label: {
-            Label(title, systemImage: systemImage)
-                .labelStyle(.iconOnly)
-                .font(.title3.weight(.semibold))
-                .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
-        }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
     }
 
     /// Reduce Motion swaps the scale animation for a plain fade.
@@ -236,9 +230,55 @@ struct RideDashboardView: View {
         if isOffRoute { return (NavigationFeature.offRouteBannerText, "exclamationmark.triangle") }
         return nil
     }
+}
 
-    private func ringBell() {
-        AudioServicesPlaySystemSound(1005) // 1005 = system "Tink"; route via AudioClient later
+private func rideDashboardPreviewStore(
+    initialState: ActiveRideFeature.State,
+    reducer: () -> ActiveRideFeature
+) -> StoreOf<ActiveRideFeature> {
+    let initialState = initialState
+    initialState.$preferences.withLock { preferences in
+        preferences.dashboardLayout = .rideDashboardPreview
+    }
+    return Store(initialState: initialState, reducer: reducer)
+}
+
+private extension DashboardLayout {
+    /// A representative, map-free page keeps the interactive canvas responsive.
+    static let rideDashboardPreview = DashboardLayout(pages: [
+        DashboardPage(placements: [
+            WidgetPlacement(SpeedDashboardWidget.self, size: .twoByTwo, row: 0, column: 0),
+            WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
+            WidgetPlacement(HeartRateDashboardWidget.self, size: .oneByOne, row: 3, column: 0),
+            WidgetPlacement(HRZonesDashboardWidget.self, size: .oneByOne, row: 3, column: 1),
+            WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 4, column: 0),
+            WidgetPlacement(DirectionsDashboardWidget.self, size: .oneByOne, row: 4, column: 1)
+        ])
+    ])
+}
+
+/// One floating glass ride-control button (S05). The icon-only `Label` keeps its title
+/// available to VoiceOver, so no separate `accessibilityLabel` is needed.
+struct RideControlButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    init(_ title: String, systemImage: String, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.action = action
+    }
+
+    var body: some View {
+        Button { action() } label: {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+                .font(.title3.weight(.semibold))
+                .frame(width: Spacing.tapTarget, height: Spacing.tapTarget)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
     }
 }
 
@@ -284,7 +324,7 @@ private struct EditModeButton: View {
         $0.persistenceClient = .mock()
     } operation: {
         RideDashboardView(
-            store: Store(
+            store: rideDashboardPreviewStore(
                 initialState: ActiveRideFeature.State(
                     recordingState: .active,
                     elapsedSeconds: 2340,
@@ -317,7 +357,7 @@ private struct EditModeButton: View {
         $0.persistenceClient = .mock()
     } operation: {
         RideDashboardView(
-            store: Store(
+            store: rideDashboardPreviewStore(
                 initialState: ActiveRideFeature.State(
                     recordingState: .active,
                     elapsedSeconds: 2340,
@@ -344,7 +384,7 @@ private struct EditModeButton: View {
         $0.defaultFileStorage = .inMemory
         $0.persistenceClient = .mock()
     } operation: {
-        let store = Store(
+        let store = rideDashboardPreviewStore(
             initialState: ActiveRideFeature.State(
                 recordingState: .active,
                 elapsedSeconds: 2340,
@@ -371,7 +411,7 @@ private struct EditModeButton: View {
         $0.persistenceClient = .mock()
     } operation: {
         RideDashboardView(
-            store: Store(
+            store: rideDashboardPreviewStore(
                 initialState: ActiveRideFeature.State(
                     recordingState: .paused,
                     elapsedSeconds: 1230,

@@ -57,6 +57,10 @@ struct RidesFeature {
         /// first appears, so a long history never reads images nobody scrolled to.
         var thumbnails: [UUID: Thumbnail] = [:]
 
+        /// Rides removed optimistically whose delete hasn't finished. It can wait behind a workout
+        /// backfill (#452), and a read that lands meanwhile still has the row, so reads skip them.
+        var deletingRideIds: Set<UUID> = []
+
         /// The tab's navigation stack: S15, pushed from a row (#251), and S20 from S15's Route
         /// row (#426) — the same shape as `RoutesFeature.path`, for the same reason.
         var path = StackState<RideRoutePath.State>()
@@ -90,6 +94,8 @@ struct RidesFeature {
         case rowAppeared(UUID)
         case thumbnailLoaded(UUID, RideThumbnailImages?)
         case deleteRecordedRide(UUID)
+        /// The delete is over, whether it succeeded or not. Sent before `deleteFailed`.
+        case deleteFinished(UUID)
         case deleteFailed
         case path(StackActionOf<RideRoutePath>)
         case delegate(Delegate)
@@ -144,7 +150,8 @@ struct RidesFeature {
 
             case .ridesResponse(.success(let rides)):
                 state.hasLoaded = true
-                state.rides = rides
+                let deleting = state.deletingRideIds
+                state.rides = rides.filter { !deleting.contains($0.id) }
                 return .none
 
             case .ridesResponse(.failure):
@@ -220,17 +227,25 @@ struct RidesFeature {
             case .deleteRecordedRide(let id):
                 state.rides.removeAll { $0.id == id }
                 state.thumbnails[id] = nil
+                state.deletingRideIds.insert(id)
                 return .merge(
                     .cancel(id: CancelID.reload),
-                    .run { [persistenceClient] send in
+                    .run { send in
                         do {
-                            try await persistenceClient.deleteRide(id)
+                            // Its Health workout goes with it (#452).
+                            try await RideHealthWorkout.deleteRide(id)
+                            await send(.deleteFinished(id))
                         } catch {
                             logger.error("deleteRide failed: \(error.localizedDescription, privacy: .public)")
+                            await send(.deleteFinished(id))
                             await send(.deleteFailed)
                         }
                     }
                 )
+
+            case .deleteFinished(let id):
+                state.deletingRideIds.remove(id)
+                return .none
 
             // No alert in this screen's design (unchanged from #261) — resync from the
             // store, which is the authority on what survived the failed write.

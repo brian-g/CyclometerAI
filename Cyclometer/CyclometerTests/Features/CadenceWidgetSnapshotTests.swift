@@ -10,11 +10,12 @@ final class CadenceWidgetSnapshotTests: XCTestCase {
     private let canvas1x1: SwiftUISnapshotLayout = .fixed(width: 196, height: 96)
 
     // Representative cadence history (rpm) sweeping through every zone band.
-    private let sampleHistory: [Double] = stride(from: 60.0, to: 105.0, by: 2.25).map { $0 }
+    private let sampleHistory = stride(from: 60.0, to: 105.0, by: 2.25).map { $0 }.asWatermark
 
     private func widget(
         cadence: Int? = 92,
-        history: [Double],
+        history: [WatermarkPoint],
+        window: ClosedRange<Date>? = nil,
         average: Int = 88,
         max: Int = 104,
         size: WidgetSize,
@@ -24,6 +25,7 @@ final class CadenceWidgetSnapshotTests: XCTestCase {
         return CadenceWidget(
             cadence: cadence,
             cadenceHistory: history,
+            watermarkWindow: window,
             averageCadence: average,
             maxCadence: max,
             size: size
@@ -52,6 +54,18 @@ final class CadenceWidgetSnapshotTests: XCTestCase {
         assertSnapshot(
             of: widget(history: sampleHistory, size: .twoByOne, scheme: .dark),
             as: .image(layout: canvas2x1, traits: .init(userInterfaceStyle: .dark))
+        )
+    }
+
+    /// The sensor asleep through a stop: the trace breaks for the silence and picks up after it, at
+    /// its own place on the shared window rather than closed up against the readings before it.
+    func testCadenceTwoByOneSensorGap() {
+        let gapped = sampleHistory.enumerated().map { index, point in
+            WatermarkPoint(time: point.time, value: point.value, run: index < 8 ? 0 : 1)
+        }.filter { !(8..<12).contains(Int($0.time.timeIntervalSinceReferenceDate)) }
+        assertSnapshot(
+            of: widget(history: gapped, window: sampleHistory.plotDomain(nil), size: .twoByOne),
+            as: .image(layout: canvas2x1)
         )
     }
 

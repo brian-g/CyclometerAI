@@ -408,6 +408,7 @@ struct ActiveRideFeatureLocationTests {
         let store = makeStore()
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
@@ -464,6 +465,7 @@ struct ActiveRideFeatureLocationTests {
 
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
@@ -500,6 +502,7 @@ struct ActiveRideFeatureLocationTests {
             // Live position still follows the freshest fix — but no polyline vertex, and
             // `isFixRecordable` false means `.elapsedTick` writes no track point either.
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.horizontalAccuracy = 13.2
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.heading = 192.0
@@ -516,6 +519,35 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
         await store.receive(\.calibration.locationUpdated)
+    }
+
+    /// #462: W21 reads `sunsetFix`, so it re-renders once a minute rather than on every fix.
+    @Test("W21's fix is the latest, taken at most once a minute")
+    func sunsetFixIsTakenOnceAMinute() async {
+        let store = makeStore()
+        store.exhaustivity = .off
+        let here = Coordinate(latitude: 43.0731, longitude: -89.4012)
+        let there = Coordinate(latitude: 43.0800, longitude: -89.4100)
+        func fix(_ coordinate: Coordinate) -> LocationUpdate {
+            LocationUpdate(
+                coordinate: coordinate, altitude: 280, speed: 8.5, horizontalAccuracy: 5, heading: 0, timestamp: testDate
+            )
+        }
+
+        await store.send(.locationUpdated(fix(here)))
+        #expect(store.state.sunsetFix == SunsetFix(coordinate: here, takenAt: testDate))
+
+        let almost = testDate.addingTimeInterval(SunsetFix.refreshInterval - 1)
+        store.dependencies.date.now = almost
+        await store.send(.locationUpdated(fix(there)))
+        #expect(store.state.coordinate == there)
+        #expect(store.state.sunsetFix == SunsetFix(coordinate: here, takenAt: testDate))
+
+        let minute = testDate.addingTimeInterval(SunsetFix.refreshInterval)
+        store.dependencies.date.now = minute
+        await store.send(.locationUpdated(fix(there)))
+        #expect(store.state.sunsetFix == SunsetFix(coordinate: there, takenAt: minute))
+        await store.skipReceivedActions(strict: false)
     }
 
     @Test("Altitude samples older than the history window are pruned")
@@ -569,6 +601,7 @@ struct ActiveRideFeatureLocationTests {
         let store = makeStore()
         await store.send(.locationUpdated(Self.sampleUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
@@ -589,6 +622,7 @@ struct ActiveRideFeatureLocationTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -649,6 +683,7 @@ struct ActiveRideFeatureLocationTests {
 
         await store.send(.locationUpdated(invalidUpdate)) {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
@@ -710,6 +745,7 @@ struct ActiveRideFeatureLocationTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -782,6 +818,7 @@ struct ActiveRideFeatureTimerTests {
         let store = makeStore()
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -827,6 +864,7 @@ struct ActiveRideFeatureTimerTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -868,6 +906,7 @@ struct ActiveRideFeatureTimerTests {
         let store = makeStore(speedMPS: 10.0)
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -897,6 +936,7 @@ struct ActiveRideFeatureTimerTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -905,6 +945,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.elapsedTick)
         await store.send(.resumeTapped) {
             $0.recordingState = .active
+            $0.pausedAt = nil
             $0.cadence.isRecording = true
             $0.sensorHealth.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
@@ -982,6 +1023,7 @@ struct ActiveRideFeatureTimerTests {
         ))
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -1130,6 +1172,7 @@ struct ActiveRideFeatureStateMachineTests {
                 ActiveRideFeature()
             } withDependencies: {
                 $0.continuousClock = TestClock()
+                $0.date = .constant(testDate)
                 $0.hapticsClient = .testValue
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
@@ -1230,12 +1273,13 @@ struct ActiveRideFeatureStateMachineTests {
 
     /// #197: what a relaunch mid-route reads back. Awaited for the same reason as
     /// `taskCreatesRide`.
-    @Test("a checkpoint carries the route, and how far along it the ride has got")
+    @Test("a checkpoint carries the route, how far along it the ride has got, and whether it has finished")
     func checkpointCarriesTheRouteAndProgress() async throws {
         let route = RouteSummary.previewRoutes[1].reference
         let (written, write) = AsyncStream<RideSummaryUpdate>.makeStream()
         var state = ActiveRideFeature.State(route: route, recordingState: .active)
         state.navigation.progressMeters = 1_234
+        state.navigation.isRouteComplete = true
         let store = TestStore(initialState: state) {
             ActiveRideFeature()
         } withDependencies: {
@@ -1255,6 +1299,7 @@ struct ActiveRideFeatureStateMachineTests {
         let update = try #require(next)
         #expect(update.route == route)
         #expect(update.routeProgressMeters == 1_234)
+        #expect(update.isRouteComplete)
 
         await store.skipInFlightEffects(strict: false)
     }
@@ -1417,19 +1462,20 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(state.recordingState == .paused)
     }
 
-    @Test("State(resuming:) restores the route, and how far along it the ride had got (#197)")
+    @Test("State(resuming:) restores the route, how far along it the ride had got (#197), and whether it had finished (#406)")
     func stateResumingRestoresTheRoute() {
         let route = RouteSummary.previewRoutes[1].reference
         let summary = RideSummaryUpdate(
             rideId: UUID(), recordingState: .active,
             durationSeconds: 60, distanceMeters: 500, averageSpeedMPS: 8, maxSpeedMPS: 10,
-            route: route, routeProgressMeters: 1_234
+            route: route, routeProgressMeters: 1_234, isRouteComplete: true
         )
 
         let state = ActiveRideFeature.State(resuming: summary)
 
         #expect(state.route == route)
         #expect(state.navigation.progressMeters == 1_234)
+        #expect(state.navigation.isRouteComplete)
         // Loaded by `.task`, as for a fresh ride, not seeded here.
         #expect(state.navigation.activeRoute == nil)
     }
@@ -1562,6 +1608,7 @@ struct ActiveRideFeatureStateMachineTests {
         let store = makeStore(recordingState: .active)
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -1579,6 +1626,7 @@ struct ActiveRideFeatureStateMachineTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -1587,6 +1635,7 @@ struct ActiveRideFeatureStateMachineTests {
         }
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -1826,6 +1875,7 @@ struct ActiveRideFeatureStateMachineTests {
         }
         await store.receive(.autoEndTriggered) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
         }
         // .autoEndTriggered's own effects (the pause, then .finishTapped) are merged ahead of
         // the suspension notice that `onChange` appends for the same state change.
@@ -1899,6 +1949,7 @@ struct ActiveRideFeatureStateMachineTests {
         )
         await store.send(.locationUpdated(update)) {
             $0.coordinate = Coordinate(latitude: 43.0, longitude: -89.0)
+            $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0, longitude: -89.0), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0, longitude: -89.0)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
@@ -1918,17 +1969,23 @@ struct ActiveRideFeatureStateMachineTests {
             $0.calibration.lastFixTimestamp = update.timestamp
         }
 
+        // The recorded point also joins W23's track (#465), and its id is a fresh `UUID()` no
+        // expectation can name. So this one step skips that field, and the point is checked after.
+        // Assignments, not appends: a non-exhaustive closure runs on the new state.
+        store.exhaustivity = .off(showSkippedAssertions: false)
         await store.send(.elapsedTick) {
             $0.elapsedSeconds = 1
             $0.distanceMeters = 8.0
             $0.zeroSpeedSeconds = 0
             // Avg/Max speed are sampled here, not from the fix above (#381).
             $0.speedSampleCount = 1
-            $0.averageSpeedSamples.append(SpeedSample(time: testDate, mps: 8.0))
+            $0.averageSpeedSamples = [SpeedSample(time: testDate, mps: 8.0)]
             // The fix's altitude, sampled once a recorded second (#387).
             $0.altitudeSamples = [AltitudeSample(time: testDate, meters: 280.0)]
             $0.elevation.record(altitude: 280.0, distanceMeters: 8.0, source: .gps)
         }
+        store.exhaustivity = .on
+        #expect(store.state.calorieTrack.map(\.speedMPS) == [8.0])
         await store.receive(\.trackRecorder.timerTick)
     }
 
@@ -1967,7 +2024,7 @@ struct ActiveRideFeatureStateMachineTests {
 /// S12/#102: auto-pause fires at a much shorter zero-speed threshold than
 /// auto-end, so a rider stopped at a light pauses rather than waiting five
 /// minutes. Only a pause auto-pause itself triggered is eligible to auto-resume —
-/// a manual Pause tap always requires a manual Resume.
+/// a manual Pause tap requires a manual Resume unless Resume When Moving is on (#267).
 @MainActor
 @Suite("ActiveRideFeature — auto-pause")
 struct ActiveRideFeatureAutoPauseTests {
@@ -1978,25 +2035,47 @@ struct ActiveRideFeatureAutoPauseTests {
     private func makeStore(
         state: @autoclosure () -> ActiveRideFeature.State,
         isAutoPauseEnabled: Bool = true,
-        clock: TestClock<Duration> = TestClock()
+        isResumeWhenMovingEnabled: Bool = false,
+        clock: TestClock<Duration> = TestClock(),
+        date: DateGenerator = .constant(testDate)
     ) -> TestStoreOf<ActiveRideFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.isAutoPauseEnabled = isAutoPauseEnabled }
+            $preferences.withLock {
+                $0.isAutoPauseEnabled = isAutoPauseEnabled
+                $0.isResumeWhenMovingEnabled = isResumeWhenMovingEnabled
+            }
             return TestStore(initialState: state()) {
                 ActiveRideFeature()
             } withDependencies: {
                 $0.continuousClock = clock
-                $0.date = .constant(testDate)
+                $0.date = date
                 $0.hapticsClient = .testValue
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
                 $0.locationClient = .testValue
                 $0.defaultFileStorage = storage
             }
+        }
+    }
+
+    /// A wall clock the test moves by hand, for the grace that times a manual pause (#504).
+    private final class ManualDate: Sendable {
+        let now = LockIsolated(testDate)
+        var generator: DateGenerator { DateGenerator { [now] in now.value } }
+        func advance(by seconds: TimeInterval) { now.withValue { $0.addTimeInterval(seconds) } }
+    }
+
+    /// Sends one GPS reading a second, `seconds` times, moving `date` along with them.
+    private func ride(
+        _ store: TestStoreOf<ActiveRideFeature>, at speedMPS: Double, for seconds: Int, date: ManualDate
+    ) async {
+        for _ in 0..<seconds {
+            date.advance(by: 1)
+            await store.send(.speed(.gpsSpeedReceived(speedMPS)))
         }
     }
 
@@ -2013,6 +2092,7 @@ struct ActiveRideFeatureAutoPauseTests {
         }
         await store.receive(.autoPauseTriggered) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
             $0.isAutoPaused = true
         }
         await store.receive(\.trackRecorder.pauseRecording)
@@ -2098,6 +2178,7 @@ struct ActiveRideFeatureAutoPauseTests {
         }
         await store.receive(.autoPauseTriggered) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
             $0.isAutoPaused = true
         }
         await store.receive(\.trackRecorder.pauseRecording)
@@ -2156,6 +2237,7 @@ struct ActiveRideFeatureAutoPauseTests {
         }
         await store.receive(.autoPauseTriggered) {
             $0.recordingState = .paused
+            $0.pausedAt = testDate
             $0.isAutoPaused = true
         }
         await store.receive(\.trackRecorder.pauseRecording)
@@ -2164,14 +2246,16 @@ struct ActiveRideFeatureAutoPauseTests {
         }
     }
 
-    @Test("Motion resumes a ride that auto-pause itself paused")
-    func motionResumesAnAutoPausedRide() async {
+    @Test("Motion resumes a ride that auto-pause itself paused, whatever Resume When Moving says",
+          arguments: [false, true])
+    func motionResumesAnAutoPausedRide(isResumeWhenMovingEnabled: Bool) async {
         let store = makeStore(
             state: ActiveRideFeature.State(
                 recordingState: .paused,
                 zeroSpeedSeconds: ActiveRideFeature.autoPauseZeroSpeedSeconds,
                 isAutoPaused: true
-            )
+            ),
+            isResumeWhenMovingEnabled: isResumeWhenMovingEnabled
         )
         store.exhaustivity = .off
 
@@ -2226,6 +2310,179 @@ struct ActiveRideFeatureAutoPauseTests {
         #expect(store.state.recordingState == .paused)
         #expect(store.state.isAutoPaused == false)
     }
+
+    /// With the preference off, even a stop and a ride-off leave a manual pause alone.
+    @Test("Without Resume When Moving, a manual pause holds through a stop and a ride-off")
+    func manualPauseHoldsWithoutThePreferenceAfterAStop() async {
+        let store = makeStore(state: ActiveRideFeature.State(recordingState: .paused))
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(0)))
+        await store.send(.speed(.gpsSpeedReceived(5.0)))
+
+        #expect(store.state.recordingState == .paused)
+    }
+
+    /// #267's case: the rider paused at the café and rode off without tapping Resume. Goes through
+    /// the same `resume` as `.resumeTapped`, so the map breaks at the stop (#263).
+    @Test("With Resume When Moving, a manual pause resumes once the rider stops and rides off")
+    func resumeWhenMovingResumesAManualPause() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .paused),
+            isResumeWhenMovingEnabled: true
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(0)))
+        #expect(store.state.recordingState == .paused)
+        #expect(store.state.hasStoppedWhilePaused)
+
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
+        await store.receive(\.trackRecorder.resumeRecording)
+
+        #expect(store.state.recordingState == .active)
+        #expect(store.state.hasStoppedWhilePaused == false)
+        #expect(store.state.trackSegmentIndex == 1)
+        #expect(store.state.trackSegments.count == 2)
+    }
+
+    /// The reading after a Pause tapped while coasting is still above `movingSpeedMPS`. Without the
+    /// stop in between, it would undo the pause a second after the tap. The clock never moves here,
+    /// so `manualPauseGraceSeconds` (#504) never passes.
+    @Test("With Resume When Moving, a Pause tapped while coasting holds, within the grace, until the ride has stopped")
+    func pauseTappedWhileCoastingHolds() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active),
+            isResumeWhenMovingEnabled: true
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(3.0)))
+        await store.send(.pauseTapped)
+        await store.send(.speed(.gpsSpeedReceived(3.0)))
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.stationarySpeedMPS + 0.1)))
+        #expect(store.state.recordingState == .paused)
+
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.stationarySpeedMPS)))
+        await store.send(.speed(.gpsSpeedReceived(3.0)))
+        #expect(store.state.recordingState == .active)
+    }
+
+    /// A negative GPS speed is an invalid fix and clears the displayed speed to nil. That says
+    /// nothing about whether the rider stopped, so it must not count as the stop.
+    @Test("An invalid GPS fix is not a stop")
+    func invalidFixDoesNotCountAsAStop() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .paused),
+            isResumeWhenMovingEnabled: true
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(-1)))
+        await store.send(.speed(.gpsSpeedReceived(5.0)))
+
+        #expect(store.state.hasStoppedWhilePaused == false)
+        #expect(store.state.recordingState == .paused)
+    }
+
+    /// A rider at the Finish alert didn't forget to resume: walking the bike away from it must not
+    /// restart the ride behind the alert. Cancel hands the pause back to Resume When Moving.
+    @Test("With Resume When Moving, a pending Finish alert holds a manual pause")
+    func finishAlertHoldsAManualPause() async {
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .paused),
+            isResumeWhenMovingEnabled: true
+        )
+        store.exhaustivity = .off
+
+        await store.send(.speed(.gpsSpeedReceived(0)))
+        await store.send(.finishTapped)
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
+        #expect(store.state.recordingState == .paused)
+
+        await store.send(.finishAlert(.dismiss))
+        await store.send(.speed(.gpsSpeedReceived(ActiveRideFeature.movingSpeedMPS)))
+        #expect(store.state.recordingState == .active)
+    }
+
+    /// Ride 2026-10-30 (#504): a Pause at 3.2 m/s, and the rider rode on for 6.5 minutes with the
+    /// ride paused, because a manual pause waited for a stop the rider never made.
+    @Test("With Resume When Moving, a Pause tapped while riding resumes once the grace has passed")
+    func pauseTappedWhileRidingResumesAfterTheGrace() async {
+        let date = ManualDate()
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active),
+            isResumeWhenMovingEnabled: true,
+            date: date.generator
+        )
+        store.exhaustivity = .off
+        let grace = Int(ActiveRideFeature.manualPauseGraceSeconds)
+
+        await store.send(.speed(.gpsSpeedReceived(3.2)))
+        await store.send(.pauseTapped)
+        await ride(store, at: 3.2, for: grace - 1, date: date)
+        #expect(store.state.recordingState == .paused)
+
+        await ride(store, at: 3.2, for: 1, date: date)
+        await store.receive(\.trackRecorder.resumeRecording)
+        #expect(store.state.recordingState == .active)
+        #expect(store.state.pausedAt == nil)
+    }
+
+    /// `pausedAt` isn't persisted: a ride brought back paused after a kill times its grace from the
+    /// first `.speed` action the relaunched app sees. In the app that is `.task`'s `.startListening`;
+    /// here it is a reading.
+    @Test("With Resume When Moving, a ride restored paused times its grace from the first reading")
+    func restoredPausedRideTimesTheGraceFromTheFirstReading() async {
+        let date = ManualDate()
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .paused),
+            isResumeWhenMovingEnabled: true,
+            date: date.generator
+        )
+        store.exhaustivity = .off
+        let grace = Int(ActiveRideFeature.manualPauseGraceSeconds)
+
+        await store.send(.speed(.gpsSpeedReceived(3.2)))
+        #expect(store.state.pausedAt == testDate)
+        await ride(store, at: 3.2, for: grace - 1, date: date)
+        #expect(store.state.recordingState == .paused)
+
+        await ride(store, at: 3.2, for: 1, date: date)
+        #expect(store.state.recordingState == .active)
+    }
+
+    @Test("With Resume When Moving, a pending Finish alert holds a manual pause past the grace")
+    func finishAlertHoldsPastTheGrace() async {
+        let date = ManualDate()
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active),
+            isResumeWhenMovingEnabled: true,
+            date: date.generator
+        )
+        store.exhaustivity = .off
+
+        await store.send(.pauseTapped)
+        await store.send(.finishTapped)
+        await ride(store, at: 3.2, for: Int(ActiveRideFeature.manualPauseGraceSeconds) * 4, date: date)
+
+        #expect(store.state.recordingState == .paused)
+    }
+
+    @Test("Without Resume When Moving, a manual pause holds past the grace")
+    func manualPauseHoldsPastTheGraceWithoutThePreference() async {
+        let date = ManualDate()
+        let store = makeStore(
+            state: ActiveRideFeature.State(recordingState: .active),
+            date: date.generator
+        )
+        store.exhaustivity = .off
+
+        await store.send(.pauseTapped)
+        await ride(store, at: 3.2, for: Int(ActiveRideFeature.manualPauseGraceSeconds) * 4, date: date)
+
+        #expect(store.state.recordingState == .paused)
+    }
 }
 
 @MainActor
@@ -2233,7 +2490,7 @@ struct ActiveRideFeatureAutoPauseTests {
 struct ActiveRideFeatureHeartRateTests {
 
     /// The fixed `@Dependency(\.date)` every store in this suite is built with.
-    private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
+    nonisolated private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
 
     /// Storage is quarantined per store because the zone now derives from the shared
     /// `RiderProfile` (#96) — without this the assertions would depend on whatever
@@ -2629,7 +2886,7 @@ struct ActiveRideFeatureHeartRateTests {
 @Suite("ActiveRideFeature — HR dropout handling")
 struct ActiveRideFeatureHRDropoutTests {
 
-    private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
+    nonisolated private static let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
 
     /// An empty profile resolves to maxHR 190 / restingHR 60 → HRR 130, so
     /// (150 − 60) / 130 = 0.692 → zone 2. Every reading below is read against that.
@@ -2931,6 +3188,10 @@ struct ActiveRideFeatureHRDropoutTests {
         let now = LockIsolated(Self.fixedNow)
         let store = makeStore(now: now)
         store.exhaustivity = .off
+        // The pause writes the buffer out (#505), so the recorded track is what was written plus
+        // whatever is still buffered.
+        let written = LockIsolated<[TrackPointDTO]>([])
+        store.dependencies.persistenceClient = .mock(onFlush: { batch in written.withValue { $0 += batch } })
 
         await store.send(.trackRecorder(.startRecording))
         await store.send(.locationUpdated(Self.goodFix))
@@ -2944,7 +3205,7 @@ struct ActiveRideFeatureHRDropoutTests {
         await store.send(.elapsedTick)
         await store.skipInFlightEffects(strict: false)
 
-        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        let recorded = written.value + (await store.dependencies.rideDataBuffer.drainForFlush())
         #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2])
         #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(recorded))
     }
@@ -2968,6 +3229,57 @@ struct ActiveRideFeatureHRDropoutTests {
         let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
         #expect(store.state.hrSecondsTally.secondsByBPM == [72: 5])
         #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(recorded))
+    }
+
+    /// #393: after a kill and resume, the sheet counts the whole ride, as S10 does at finish.
+    @Test("A resumed ride's HR tally adds its saved track's seconds")
+    func hrTallySeededOnResume() async {
+        // Before the kill: a strap at 150 with a dropout, then a Watch sample held for 2 s.
+        let saved = RideSummaryFeatureTests.track(count: 6) { [150, 150, nil, 72, nil, nil][$0] }.map {
+            var point = $0
+            if point.heartRateBPM == 72 { point.heartRateSource = .appleWatch }
+            return point
+        }
+        let rideId = saved[0].rideId
+        var resumed = ActiveRideFeature.State(resuming: RideSummaryUpdate(
+            rideId: rideId, recordingState: .active,
+            durationSeconds: 6, distanceMeters: 66, averageSpeedMPS: 11, maxSpeedMPS: 11
+        ))
+        resumed.isHRPaired = true
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now, resumed)
+        store.dependencies.persistenceClient = .mock(trackPoints: [rideId: saved])
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.receive(\.heartRateSeeded)
+        #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2, 72: 3])
+
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.heartRateUpdated(160))
+        await store.send(.elapsedTick)
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2, 72: 3, 160: 2])
+        #expect(store.state.hrSecondsTally.secondsByBPM == RideDetailSeries.secondsByBPM(saved + recorded))
+    }
+
+    @Test("A resume seed that lands after the first live seconds adds to them")
+    func hrTallySeedAddsToLiveSeconds() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.heartRateUpdated(160))
+        await store.send(.elapsedTick)
+        await store.send(.heartRateSeeded([150: 2, 160: 3]))
+        await store.skipInFlightEffects(strict: false)
+
+        #expect(store.state.hrSecondsTally.secondsByBPM == [150: 2, 160: 4])
     }
 
     /// #145: W4's watermark and the sheet's chart are cadence's history for heart rate: every live
@@ -3591,7 +3903,7 @@ struct ActiveRideFeatureUnitsTests {
 @MainActor
 @Suite("ActiveRideFeature — vehicle pass persistence")
 struct ActiveRideFeatureVehiclePassPersistenceTests {
-    private static let coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+    nonisolated private static let coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
 
     /// 4 m — inside `VehiclePassDetector.passProximityMetres`, so `sendOvertake` below
     /// describes a vehicle that actually reached the rider. At the 40 m this used to
@@ -3802,6 +4114,7 @@ struct ActiveRideFeatureDashboardEditTests {
                 ActiveRideFeature()
             } withDependencies: {
                 $0.defaultFileStorage = storage
+                $0.date = .constant(testDate)
                 $0.uuid = .incrementing
             }
         }
@@ -4212,5 +4525,40 @@ struct ActiveRideFeatureDashboardEditTests {
         // A 1×1 onto a 2×1, and off the grid.
         await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 1, column: 0)))
         await store.send(.moveWidget(pageID: page.id, widgetID: PaceDashboardWidget.id, to: DashboardGrid.Cell(row: 7, column: 0)))
+    }
+
+    /// S08's sections reopen as the rider left them (#517): collapsing one writes the preference,
+    /// so the next sheet, ride and launch see it too.
+    @Test("Collapsing or expanding an Add Widget section writes the saved preference")
+    func addWidgetCollapsedCategoriesWritePreference() async {
+        let store = makeStore()
+
+        await store.send(.addWidgetCollapsedCategoriesChanged([.route])) {
+            $0.$preferences.withLock { $0.collapsedWidgetCategories = [.route] }
+        }
+        await store.send(.addWidgetCollapsedCategoriesChanged([])) {
+            $0.$preferences.withLock { $0.collapsedWidgetCategories = [] }
+        }
+    }
+}
+
+@MainActor
+@Suite("ActiveRideFeature — bell (#492)")
+struct ActiveRideBellTests {
+
+    @Test("The Bell button rings the bell once and changes nothing else")
+    func bellTappedRingsTheBell() async {
+        let rings = LockIsolated(0)
+        var audio = AudioClient.testValue
+        audio.playBell = { rings.withValue { $0 += 1 } }
+        let store = TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.audioClient = audio
+        }
+
+        await store.send(.bellTapped)
+        await store.finish()
+        #expect(rings.value == 1)
     }
 }

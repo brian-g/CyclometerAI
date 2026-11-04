@@ -662,7 +662,7 @@ struct PersistenceClientTests {
 
     // MARK: - fetchResumableRide (#175)
 
-    @Test("fetchResumableRide carries back the route, and how far along it the ride had got (#197)")
+    @Test("fetchResumableRide carries back the route, how far along it the ride had got (#197), and whether it had finished (#406)")
     func fetchResumableRideCarriesTheRouteAndProgress() async throws {
         let (client, _) = Self.makeLiveClient()
         let rideId = UUID()
@@ -676,12 +676,14 @@ struct PersistenceClientTests {
             distanceMeters: 500,
             averageSpeedMPS: 8,
             maxSpeedMPS: 10,
-            routeProgressMeters: 1_234
+            routeProgressMeters: 1_234,
+            isRouteComplete: true
         ))
 
         let resumable = try #require(try await client.fetchResumableRide())
         #expect(resumable.route == route)
         #expect(resumable.routeProgressMeters == 1_234)
+        #expect(resumable.isRouteComplete)
     }
 
     @Test("a free ride resumes with no route and no progress")
@@ -692,6 +694,7 @@ struct PersistenceClientTests {
         let resumable = try #require(try await client.fetchResumableRide())
         #expect(resumable.route == nil)
         #expect(resumable.routeProgressMeters == nil)
+        #expect(!resumable.isRouteComplete)
     }
 
     @Test("fetchResumableRide returns nil when no rides exist")

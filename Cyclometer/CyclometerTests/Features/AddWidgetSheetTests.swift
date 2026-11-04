@@ -11,16 +11,34 @@ struct AddWidgetSheetTests {
     func entriesLargestFirst() {
         #expect(names(AddWidgetEntry.entries(in: .ride)) == [
             "speed twoByTwo",
-            "speed twoByOne", "cadence twoByOne", "elevation twoByOne",
+            "speed twoByOne", "cadence twoByOne",
             "speed oneByOne", "averageSpeed oneByOne", "duration oneByOne", "distance oneByOne",
-            "cadence oneByOne", "pace oneByOne", "ascent oneByOne", "descent oneByOne", "grade oneByOne",
+            "cadence oneByOne", "pace oneByOne", "sunset oneByOne",
         ])
         #expect(names(AddWidgetEntry.entries(in: .heartRate)) == [
             "heartRate twoByOne", "hrZones twoByOne", "heartRate oneByOne", "hrZones oneByOne",
         ])
-        #expect(names(AddWidgetEntry.entries(in: .route)) == [
-            "map twoByTwo", "directions twoByOne", "routeElevation twoByOne", "directions oneByOne",
+        #expect(names(AddWidgetEntry.entries(in: .fitness)) == ["activeCalories oneByOne"])
+        #expect(names(AddWidgetEntry.entries(in: .elevation)) == [
+            "elevation twoByOne", "ascent oneByOne", "descent oneByOne", "grade oneByOne",
         ])
+        // No widgets yet (#517): the picker draws neither section.
+        #expect(AddWidgetEntry.entries(in: .power).isEmpty)
+        #expect(AddWidgetEntry.entries(in: .weather).isEmpty)
+        #expect(names(AddWidgetEntry.entries(in: .route)) == [
+            "map twoByTwo", "directions twoByOne", "routeElevation twoByOne", "climb twoByOne",
+            "directions oneByOne", "distanceRemaining oneByOne", "eta oneByOne",
+        ])
+    }
+
+    /// #517: a widget whose sensor isn't paired isn't listed; Watch heart rate has no pairing,
+    /// so the HR widgets always are.
+    @Test("Cadence is listed only with a cadence sensor paired; every other widget always")
+    func sensorGatedListing() {
+        #expect(!CadenceDashboardWidget.isListed(pairedRoles: [.speed, .heartRate]))
+        #expect(CadenceDashboardWidget.isListed(pairedRoles: [.cadence]))
+        let ungated = DashboardWidgetCatalog.all.filter { $0.id != CadenceDashboardWidget.id }
+        #expect(ungated.allSatisfy { $0.isListed(pairedRoles: []) })
     }
 
     /// Issue AC: every widget appears, at every size it supports — once.
@@ -39,18 +57,18 @@ struct AddWidgetSheetTests {
             ["speed twoByTwo"],
             ["speed twoByOne"],
             ["cadence twoByOne"],
-            ["elevation twoByOne"],
             ["speed oneByOne", "averageSpeed oneByOne"],
             ["duration oneByOne", "distance oneByOne"],
             ["cadence oneByOne", "pace oneByOne"],
-            ["ascent oneByOne", "descent oneByOne"],
-            ["grade oneByOne"],
+            ["sunset oneByOne"],
         ])
         #expect(AddWidgetEntry.rows(AddWidgetEntry.entries(in: .route)).map(names) == [
             ["map twoByTwo"],
             ["directions twoByOne"],
             ["routeElevation twoByOne"],
-            ["directions oneByOne"],
+            ["climb twoByOne"],
+            ["directions oneByOne", "distanceRemaining oneByOne"],
+            ["eta oneByOne"],
         ])
     }
 }

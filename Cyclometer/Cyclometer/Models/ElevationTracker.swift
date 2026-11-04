@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import Foundation
 
 /// The live ride's ascent, descent, grade and range (#387): W14–W18 and the Elevation sheet.
@@ -5,6 +6,10 @@ import Foundation
 /// Fed once a recorded second — the altitude `AltitudeResolver` settled on, and the ride's distance
 /// so far. Totals are running sums rather than something derived from `altitudeSamples`, which keeps
 /// only the last hour.
+///
+/// Observable per property, so W14–W16 re-render when their own number changes rather than on every
+/// second the tracker records (#398).
+@ObservableState
 struct ElevationTracker: Equatable, Sendable {
     /// The barometer resolves a fraction of a metre, but wind on the phone and a passing truck move
     /// it by about that much. One metre clears that and still banks a short roller. GPS uses the
@@ -75,8 +80,9 @@ struct ElevationTracker: Equatable, Sendable {
         let altitude: Double
     }
 
-    var ascentMeters: Double { (seed?.ascentMeters ?? 0) + gain.gainMeters }
-    var descentMeters: Double { (seed?.descentMeters ?? 0) + gain.lossMeters }
+    /// Stored rather than derived from `gain`, whose reference moves on seconds that bank nothing.
+    private(set) var ascentMeters = 0.0
+    private(set) var descentMeters = 0.0
     var highestMeters: Double? { [seed?.highestMeters, liveHighestMeters].compactMap { $0 }.max() }
     var lowestMeters: Double? { [seed?.lowestMeters, liveLowestMeters].compactMap { $0 }.min() }
 
@@ -95,6 +101,7 @@ struct ElevationTracker: Equatable, Sendable {
 
         let noise = source == .barometric ? Self.barometricNoiseMeters : RouteGeometry.elevationNoiseThresholdMeters
         gain.add(altitude, noiseMeters: noise)
+        updateTotals()
         liveHighestMeters = max(liveHighestMeters ?? altitude, altitude)
         liveLowestMeters = min(liveLowestMeters ?? altitude, altitude)
 
@@ -123,5 +130,11 @@ struct ElevationTracker: Equatable, Sendable {
 
     mutating func seed(_ seed: Seed) {
         self.seed = seed
+        updateTotals()
+    }
+
+    private mutating func updateTotals() {
+        ascentMeters = (seed?.ascentMeters ?? 0) + gain.gainMeters
+        descentMeters = (seed?.descentMeters ?? 0) + gain.lossMeters
     }
 }

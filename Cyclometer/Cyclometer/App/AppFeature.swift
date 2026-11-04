@@ -14,12 +14,9 @@ struct AppFeature {
 
     /// Idle time on the dashboard before the display dims (#110). iOS exposes no
     /// public API for the system Auto-Lock interval, so this is a fixed value rather
-    /// than a mirror of it. Moves to `AppPreferences` when it becomes a rider setting.
+    /// than a mirror of it. Moves to `AppPreferences` when it becomes a rider setting,
+    /// beside the level the dim drops to (`autoDimBrightness`, #471).
     static let dimAfterSeconds = 30
-
-    /// Backlight level the dim drops to, 0…1 — the "amount to dim", and the other
-    /// half of the future `AppPreferences` pair.
-    static let dimBrightness: Double = 0.1
 
     @Dependency(\.bleCSCClient) var bleCSCClient
     @Dependency(\.variaRadarClient) var variaRadarClient
@@ -39,6 +36,9 @@ struct AppFeature {
         @Presents var startSheet: StartSheetFeature.State? = nil
         /// S10, for the ride just finished (#249).
         @Presents var rideSummary: RideSummaryFeature.State? = nil
+        /// S10 between Finish and the dashboard's cover having gone (#365), so that it rises
+        /// onto Rides once the dashboard has slid away.
+        var pendingRideSummary: RideSummaryFeature.State? = nil
         var onboarding: OnboardingFeature.State? = nil
         var isDashboardPresented: Bool = false
         var rides: RidesFeature.State = RidesFeature.State()
@@ -81,6 +81,9 @@ struct AppFeature {
         case rideSummary(PresentationAction<RideSummaryFeature.Action>)
         case onboarding(OnboardingFeature.Action)
         case dashboardDismissed
+        /// The dashboard's cover has gone, whatever closed it. Presents S10 if a Finish is
+        /// waiting on it (#365).
+        case dashboardDismissalCompleted
         case dashboardOpened
         case rides(RidesFeature.Action)
         case routes(RoutesFeature.Action)
@@ -258,6 +261,12 @@ struct AppFeature {
                 state.isDashboardPresented = false
                 return .none
 
+            case .dashboardDismissalCompleted:
+                guard let pendingRideSummary = state.pendingRideSummary else { return .none }
+                state.pendingRideSummary = nil
+                state.rideSummary = pendingRideSummary
+                return .none
+
             case .dashboardOpened:
                 if state.activeRide != nil { state.isDashboardPresented = true }
                 return .none
@@ -274,8 +283,9 @@ struct AppFeature {
                 // export → finalizeRide) is a separate effect racing this one, so the
                 // write is very often still in flight at this exact moment.
                 guard let finishedRideId else { return .none }
-                // S10 for the ride just ended (#249). It waits for that finalize itself.
-                state.rideSummary = RideSummaryFeature.State(rideId: finishedRideId)
+                // S10 for the ride just ended (#249). It waits for that finalize itself, and
+                // for the dashboard to have slid away (#365).
+                state.pendingRideSummary = RideSummaryFeature.State(rideId: finishedRideId)
                 return .send(.rides(.rideFinished(finishedRideId)))
 
             case .rideSummary(.dismiss):
@@ -303,6 +313,13 @@ struct AppFeature {
                         logger.error("Rewriting the GPX of renamed ride \(id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                     }
                 }
+
+            case .rideSummary(.presented(.delegate(.deleteRide))):
+                // A plain nil rather than `.dismiss`, so the rename above never runs for a ride
+                // being deleted. Deleted through the Rides tab, which drops its row at once (#452).
+                guard let id = state.rideSummary?.rideId else { return .none }
+                state.rideSummary = nil
+                return .send(.rides(.deleteRecordedRide(id)))
 
             case .rideSummary:
                 return .none
@@ -374,7 +391,14 @@ struct AppFeature {
 
             case .scenePhaseChanged(let isActive):
                 state.isForeground = isActive
-                guard isActive else { return .none }
+                // A S12 dim preview cut off by leaving the app gives the rider's brightness back (#471).
+                // A ride writes its buffered track points: a swipe-kill from the app switcher
+                // goes no further than `.inactive` (#505).
+                guard isActive else {
+                    let dimPreviewEnded = Effect<Action>.send(.settings(.dimPreviewEnded))
+                    guard state.activeRide != nil else { return dimPreviewEnded }
+                    return .merge(dimPreviewEnded, .send(.activeRide(.trackRecorder(.appResignedActive))))
+                }
                 // S12 rereads the system's Live Activities setting, which the rider may just have
                 // changed in iOS Settings (#313).
                 let settings = Effect<Action>.send(.settings(.appBecameActive))
@@ -441,11 +465,8 @@ struct AppFeature {
                 guard state.isDashboardVisible, !state.isDimmed else { return .none }
                 state.isDimmed = true
                 state.preDimBrightness = level
-                return .run { [screenClient] _ in
-                    // Clamped, so a rider already riding at 5% is left at 5% rather
-                    // than being *brightened* to the dim level.
-                    await screenClient.setBrightness(min(level, Self.dimBrightness))
-                }
+                let dimmed = state.preferences.dimmedBrightness(from: level)
+                return .run { [screenClient] _ in await screenClient.setBrightness(dimmed) }
 
             case .onboarding(.delegate(.completed)):
                 // The two preference writes happen inside `OnboardingFeature`, which owns

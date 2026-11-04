@@ -76,6 +76,12 @@ struct ActiveRideFeature {
     /// moving, not one being nudged in a queue.
     static let movingSpeedMPS: Double = 1.0
 
+    /// How long after a manual pause Resume When Moving may undo it without the ride having read
+    /// as stopped (#504). Long enough for a bike to roll to a stop after a Pause tapped while
+    /// coasting (#267); short enough that a rider who paused while riding and rode on loses at
+    /// most this much of the ride — ride 2026-10-30 lost 6.5 minutes waiting for a stop.
+    static let manualPauseGraceSeconds: TimeInterval = 15
+
     /// How old a HealthKit HR sample can be and still count as "live" (#161).
     /// `HealthKitClient.heartRateStream()`'s own doc comment: outside an active workout
     /// the Watch's HR writes land minutes apart, so this can't be tight enough to
@@ -121,6 +127,7 @@ struct ActiveRideFeature {
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.rideDataBuffer) var rideDataBuffer
     @Dependency(\.rideEndIntentClient) var rideEndIntentClient
+    @Dependency(\.audioClient) var audioClient
 
     @ObservableState
     struct State: Equatable {
@@ -144,7 +151,7 @@ struct ActiveRideFeature {
         var maxHeartRateBPM: Int = 0
         /// Recorded seconds at each bpm, for the Heart Rate sheet's time in zone (#145). Fed the
         /// track points the recorder writes, by S10's rule, so the sheet shows what S10 will.
-        /// Starts over when a ride resumes after a crash: nothing seeds it from the saved track.
+        /// A ride resumed after a crash adds its saved track's seconds (`.heartRateSeeded`, #393).
         var hrSecondsTally = HeartRateSecondsTally()
         /// Heart-rate readings from the last `CadenceFeature.historyWindow`, behind W4's watermark,
         /// its trend and the Heart Rate sheet's chart (#145) — cadence's history, for heart rate.
@@ -235,16 +242,36 @@ struct ActiveRideFeature {
         var hrZoneSeconds: [Int] {
             RideDetailSeries.zoneSeconds(hrSecondsTally.secondsByBPM, zoneBounds: hrZoneBounds)
         }
-        /// W4's watermark: `hrSamples` in at most `CadenceFeature.watermarkResolution` bucket means,
-        /// as `CadenceFeature.State.watermarkSamples`.
-        var hrWatermarkSamples: [Double] {
-            let values = hrSamples.map { Double($0.bpm) }
-            let count = values.count
-            let buckets = min(count, CadenceFeature.watermarkResolution)
-            return (0..<buckets).map { i in
-                let slice = values[(i * count / buckets)..<((i + 1) * count / buckets)]
-                return slice.reduce(0, +) / Double(slice.count)
-            }
+        /// The one time window W1, W4, W5 and W17/W18 plot their watermarks over, so their traces line
+        /// up: a stop sits at the same x in each, whichever sensors kept reading through it.
+        var watermarkWindow: ClosedRange<Date>? {
+            Watermark.window(
+                oldest: [speed.speedSamples.first?.time, cadence.cadenceSamples.first?.time,
+                         hrSamples.first?.time, altitudeSamples.first?.time],
+                newest: [speed.speedSamples.last?.time, cadence.cadenceSamples.last?.time,
+                         hrSamples.last?.time, altitudeSamples.last?.time],
+                span: SpeedFeature.historyWindow
+            )
+        }
+        /// W1's watermark (m/s).
+        var speedWatermark: [WatermarkPoint] {
+            guard let window = watermarkWindow else { return [] }
+            return Watermark.points(speed.speedSamples, over: window, time: \.time, value: \.mps)
+        }
+        /// W5's watermark (rpm).
+        var cadenceWatermark: [WatermarkPoint] {
+            guard let window = watermarkWindow else { return [] }
+            return Watermark.points(cadence.cadenceSamples, over: window, time: \.time, value: \.rpm)
+        }
+        /// W4's watermark (bpm).
+        var hrWatermark: [WatermarkPoint] {
+            guard let window = watermarkWindow else { return [] }
+            return Watermark.points(hrSamples, over: window, time: \.time) { Double($0.bpm) }
+        }
+        /// W17's and W18's watermark (metres).
+        var altitudeWatermark: [WatermarkPoint] {
+            guard let window = watermarkWindow else { return [] }
+            return Watermark.points(altitudeSamples, over: window, time: \.time, value: \.meters)
         }
         var hrTrend: Trend { Trend(hrSamples) }
         /// Whether this second's reading is a measurement worth writing to the track,
@@ -267,15 +294,16 @@ struct ActiveRideFeature {
         /// to 190/55 before #96, which disagreed with the 60 that DataModel.md §3.5
         /// has always specified as the resting default.
         @SharedReader(.riderProfile) var riderProfile
-        /// Consulted for `isAutoPauseEnabled`. Written only for `mapOrientation`, from
-        /// the map sheet's orientation button (#199), and `dashboardLayout`, from S07 edit
-        /// mode (#141); Settings owns every other field (#102), and `calibration` writes the
+        /// Consulted for `isAutoPauseEnabled`. Written for `mapOrientation`, from the map
+        /// sheet's orientation button (#199); `dashboardLayout`, from S07 edit mode (#141);
+        /// `collapsedWidgetCategories`, from S08's sections (#517); and `sensorHealth`, at ride
+        /// end (#391). Settings owns every other field (#102), and `calibration` writes the
         /// wheel circumference through its own reference.
         @Shared(.appPreferences) var preferences
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
         /// Each paired sensor's battery and link over the ride, for the verdict saved at ride
-        /// end (#391).
+        /// end (#391), and its live status for the Sensors button and sheet (#464, #466).
         var sensorHealth = SensorHealthFeature.State()
         var navigation = NavigationFeature.State()
         /// The ride's Live Activity (#308), kept by `LiveActivityFeature`.
@@ -293,7 +321,8 @@ struct ActiveRideFeature {
         }
         /// `averageSpeedMPS` after each moving tick, for W2's trend line (#140) — the only ticks
         /// that change it. Kept over `SpeedFeature.historyWindow`, the speed watermark's own
-        /// window, so the two share a time axis. Not persisted, like the watermark.
+        /// window, so the two share a time axis. Not persisted, like the watermark; a resumed ride
+        /// rebuilds both from its saved track (`.watermarksSeeded`).
         var averageSpeedSamples: [SpeedSample] = []
         /// The displayed speed, for surfaces outside the dashboard (the mini-player): `SpeedFeature`'s
         /// pick, so a wheel sensor wins over GPS here as it does on the dashboard (#383).
@@ -321,16 +350,37 @@ struct ActiveRideFeature {
         /// radar" — rather than a 0 that claims a measurement nobody made (#285).
         var vehiclePassCount: Int? = nil
         var coordinate: Coordinate? = nil
+        /// `coordinate` as W21 reads it (#462): taken at most once a minute, so the card doesn't
+        /// re-render on every fix.
+        var sunsetFix: SunsetFix? = nil
+        /// Every point the recorder has been handed this ride, in order (#465): what the ride's
+        /// Health workout will read back from the store, so W23's estimate runs on the same track.
+        /// Kept here rather than fetched, since a fetch could land while a flush has the newest
+        /// points out of the buffer. A resumed ride's saved track is put in front of it
+        /// (`.calorieTrackSeeded`).
+        var calorieTrack: [TrackPointDTO] = []
+        /// The rider W23 estimates for: Health's body mass, date of birth and sex, read at start.
+        var energyRider: EnergyRiderStatus = .loading
+        /// W23's series, one point a minute of recording time (#465). The last is the estimate.
+        var calories: [CaloriePoint] = []
+        /// A resumed ride's saved track hasn't been read back yet: until it is, an estimate would
+        /// cover only the minutes since the resume (#465). Set by `State(resuming:)`.
+        var isSavedTrackPending = false
+        /// A resumed ride's saved track came back empty or couldn't be read, so there is nothing to
+        /// rebuild its minutes before the resume from: the series starts at the resume rather than
+        /// at minutes of made-up zeros (#465).
+        var isSavedTrackMissing = false
         /// The recorded track, one sub-array per continuous stretch of riding (#263).
         /// A pause ends the current segment and a resume opens the next, so the map draws
         /// a break where the rider stopped instead of a straight chord across it. Never
-        /// empty: there is always a segment in progress to append to.
+        /// empty: there is always a segment in progress to append to. A ride resumed after a
+        /// kill gets the segments from before it back from its saved track (#503).
         var trackSegments: [[Coordinate]] = [[]]
         /// Which segment `makeTrackPoint` stamps onto the points it records: how many times
         /// this ride has been resumed. Its own field rather than `trackSegments.count - 1`
         /// because it is the half that survives a kill (`Ride.trackSegmentIndex`) — the
-        /// coordinates are transient and a resumed ride redraws its map from empty, so
-        /// after a resume the two deliberately disagree.
+        /// coordinates are transient, and a resumed ride's map is rebuilt from the saved track,
+        /// which holds only the segments that recorded a point — so the two can disagree.
         var trackSegmentIndex: Int = 0
         /// The barometer where there is one, GPS where there isn't (#387): what `altitude` reads.
         var altitudeResolver = AltitudeResolver()
@@ -357,8 +407,21 @@ struct ActiveRideFeature {
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
         /// Whether the *current* pause was auto-triggered rather than a manual Pause
-        /// tap — the only kind motion is allowed to auto-resume (#102).
+        /// tap — the only kind motion is allowed to auto-resume (#102), unless the rider
+        /// has turned on Resume When Moving (#267).
         var isAutoPaused: Bool = false
+        /// Whether the ride has read as stopped since it was paused — one of the two things
+        /// that make a manual pause eligible for Resume When Moving (#267). Without it or
+        /// `pausedAt`'s grace, a Pause tapped while coasting would be undone by the next
+        /// reading; an auto-pause has always seen the stop, so it never needs either.
+        var hasStoppedWhilePaused: Bool = false
+        /// When the current pause began — the other thing: once `manualPauseGraceSeconds`
+        /// have passed, a manual pause is eligible without a stop, so a rider who paused
+        /// while riding and rode on isn't left paused until they next stop (#504). Not
+        /// persisted, like `hasStoppedWhilePaused`: a ride resumed paused after a kill times
+        /// its grace from the first `.speed` action the relaunched app sees — `.task`'s
+        /// `.startListening`, so from the relaunch rather than the first GPS fix.
+        var pausedAt: Date? = nil
         /// Wheel auto-calibration stands down while the rider has something more
         /// urgent to attend to — a radar alert, or a turn announced and not yet made
         /// (#197) — and whenever the ride isn't actively recording: a paused ride still
@@ -389,6 +452,11 @@ struct ActiveRideFeature {
         /// `nil` from Add, which adds in the first open spot. Read only while the sheet is up, and
         /// left set as it closes, so the sheet doesn't redraw as Add's while it slides away.
         var addWidgetCell: DashboardGrid.Cell?
+        /// S08's collapsed sections (#517), saved so the picker reopens as the rider left it.
+        var collapsedWidgetCategories: Set<WidgetCategory> { preferences.collapsedWidgetCategories }
+        /// The Sensors sheet (#466), from the toolbar's Sensors button. Its rows read
+        /// `sensorHealth` live, so this is the only state the sheet needs here.
+        var isSensorsSheetPresented = false
         @Presents var finishAlert: AlertState<Action.FinishAlert>?
         var isPaused: Bool { recordingState == .paused }
         /// The page the rider is on, an index into `dashboardLayout.pages`. Held here, not in
@@ -427,6 +495,13 @@ struct ActiveRideFeature {
         case addWidgetSelected(widgetID: String, size: WidgetSize)
         /// S08's "Empty page" (#142): a blank page after the one the rider is on.
         case addEmptyPageTapped
+        /// S08 (#517): the rider expanded or collapsed a section.
+        case addWidgetCollapsedCategoriesChanged(Set<WidgetCategory>)
+        /// The toolbar's Sensors button (#464, #466), shown while a paired sensor is missing or low.
+        case sensorsButtonTapped
+        case sensorsSheetPresentationChanged(Bool)
+        /// The toolbar's Bell button (#492).
+        case bellTapped
         case autoEndTriggered
         case autoPauseTriggered
         case heartRateUpdated(Int)
@@ -457,6 +532,20 @@ struct ActiveRideFeature {
         case altimeterEnded
         /// A resumed ride's elevation before the kill, from its saved track (#387).
         case elevationSeeded(ElevationTracker.Seed)
+        /// A resumed ride's seconds at each bpm before the kill, from its saved track (#393).
+        case heartRateSeeded([Int: Int])
+        /// A resumed ride's map before the kill, from its saved track (#503).
+        case trackSegmentsSeeded([[Coordinate]])
+        /// A resumed ride's chart watermarks and W2's average line before the kill, from its saved track.
+        case watermarksSeeded(WatermarkSeed)
+        /// Health's rider for W23, nil without a body mass (#465).
+        case energyRiderFetched(RideEnergy.Rider?)
+        /// One minute's estimate (#465).
+        case caloriesEstimated(CaloriePoint)
+        /// A resumed ride's saved track (#465), empty if it couldn't be read.
+        case calorieTrackSeeded([TrackPointDTO])
+        /// The minutes before a resume, or before Health answered, worked out afresh (#465).
+        case caloriesRebuilt([CaloriePoint])
         /// Handled by `LiveActivityFeature` (#308).
         case liveActivity(LiveActivityAction)
 
@@ -549,8 +638,14 @@ struct ActiveRideFeature {
                         async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
                         async let dob = try? healthKitClient.fetchDateOfBirth()
                         async let zoneCeilings = try? healthKitClient.fetchHeartRateZoneCeilings()
+                        async let kilograms = try? healthKitClient.fetchBodyMass()
+                        async let sex = try? healthKitClient.fetchBiologicalSex()
                         let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
                         await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM, zoneCeilingsBPM: await zoneCeilings))
+                        // Built as the ride's Health workout builds it, so W23 ends on its value (#465).
+                        await send(.energyRiderFetched(RideEnergy.Rider(
+                            kilograms: await kilograms, dateOfBirth: await dob, sex: await sex, on: startedAt
+                        )))
                     },
                     .run { [healthKitClient] send in
                         for await bpm in healthKitClient.heartRateStream() {
@@ -586,7 +681,7 @@ struct ActiveRideFeature {
                         // A stream that never gave a reading leaves GPS in charge already.
                         if hadReading { await send(.altimeterEnded) }
                     },
-                    isResuming ? seedElevation(rideId: state.rideId) : .none
+                    isResuming ? seedFromSavedTrack(rideId: state.rideId, resumedAt: startedAt) : .none
                 )
             case .dashboardPageChanged(let page):
                 state.dashboardPage = page
@@ -621,6 +716,19 @@ struct ActiveRideFeature {
             case .addWidgetPresentationChanged(let isPresented):
                 state.isAddWidgetPresented = isPresented && state.isEditingDashboard
                 return .none
+            case .sensorsButtonTapped:
+                state.isSensorsSheetPresented = true
+                return .none
+            case .sensorsSheetPresentationChanged(let isPresented):
+                state.isSensorsSheetPresented = isPresented
+                return .none
+            case .bellTapped:
+                // Straight to the speaker, not through AlertOrchestratorFeature: the bell is the
+                // rider's, not an alert. A sounding radar tone still keeps the speaker — the engine
+                // has the bell yield to it (`ToneKind.yields(to:)`).
+                return .run(priority: .high) { [audioClient] _ in
+                    await audioClient.playBell()
+                }
             case .addWidgetSelected(let widgetID, let size):
                 guard state.isEditingDashboard, state.isAddWidgetPresented else { return .none }
                 let page = state.dashboardLayout.pages[state.visibleDashboardPage]
@@ -642,6 +750,9 @@ struct ActiveRideFeature {
                 else { return .none }
                 state.dashboardPage = index + 1
                 state.isAddWidgetPresented = false
+                return .none
+            case .addWidgetCollapsedCategoriesChanged(let collapsed):
+                state.$preferences.withLock { $0.collapsedWidgetCategories = collapsed }
                 return .none
             case .dashboardEditingDoneTapped:
                 guard state.isEditingDashboard else { return .none }
@@ -673,8 +784,9 @@ struct ActiveRideFeature {
             case .finishTapped:
                 guard state.recordingState == .paused else { return .none }
                 // Auto-end sends this with no rider at the screen. SwiftUI won't show an alert
-                // from a view already showing a sheet, so the Add Widget sheet steps aside.
+                // from a view already showing a sheet, so every dashboard sheet steps aside.
                 state.isAddWidgetPresented = false
+                state.isSensorsSheetPresented = false
                 state.finishAlert = AlertState {
                     TextState("Finish Ride")
                 } actions: {
@@ -784,11 +896,13 @@ struct ActiveRideFeature {
                         // which waits for the finalize above to land and refreshes the list after
                         // it (#248).
                     },
-                    .run { [bleHRClient, variaRadarClient, locationClient] _ in
+                    .run { [bleHRClient, variaRadarClient, locationClient, audioClient] _ in
                         async let hr: Void = bleHRClient.disconnect()
                         async let radar: Void = variaRadarClient.disconnect()
                         async let loc: Void = locationClient.stopUpdates()
-                        _ = await (hr, radar, loc)
+                        // Or the engine holds the app awake in the background (`AudioClient.stop`).
+                        async let audio: Void = audioClient.stop()
+                        _ = await (hr, radar, loc, audio)
                     }
                 )
             case .finishAlert:
@@ -929,7 +1043,28 @@ struct ActiveRideFeature {
                         state.recordedHealthKitSampleAt = state.healthKitHRSample?.receivedAt
                     }
                     state.hrSecondsTally.add(point)
+                    state.calorieTrack.append(point)
                     effects.append(.send(.trackRecorder(.timerTick(point))))
+                }
+
+                // W23 (#465): once a minute, the estimate the ride's Health workout would get if it
+                // ended now. Only while active, under the guard above, so a pause holds it.
+                if state.elapsedSeconds % CalorieSeries.intervalSeconds == 0,
+                   let rider = state.energyRider.rider, !state.isSavedTrackPending {
+                    let track = state.calorieTrack
+                    let seconds = state.elapsedSeconds
+                    let movingSeconds = state.speedSampleCount
+                    let distanceMeters = state.distanceMeters
+                    effects.append(.run { send in
+                        let estimate = RideEnergy.activeKilocalories(
+                            trackPoints: track, movingSeconds: TimeInterval(seconds),
+                            distanceMeters: distanceMeters, rider: rider
+                        )
+                        await send(.caloriesEstimated(CaloriePoint(
+                            rideSeconds: seconds, movingSeconds: movingSeconds,
+                            kilocalories: estimate.kilocalories, method: estimate.method
+                        )))
+                    })
                 }
 
                 // DataModel.md §1 Checkpoint Policy: SwiftData Ride summary update
@@ -1057,6 +1192,9 @@ struct ActiveRideFeature {
                 // not do is enter the recorded track: no polyline vertex here, and no
                 // track point at the next tick (#210).
                 state.coordinate = update.coordinate
+                if state.sunsetFix?.isFresh(at: date.now) != true {
+                    state.sunsetFix = SunsetFix(coordinate: update.coordinate, takenAt: date.now)
+                }
                 state.horizontalAccuracy = update.horizontalAccuracy
                 let sinceRecorded = date.now.timeIntervalSince(
                     state.lastRecordablePositionAt ?? date.now
@@ -1103,16 +1241,66 @@ struct ActiveRideFeature {
             case .elevationSeeded(let seed):
                 state.elevation.seed(seed)
                 return .none
+            case .heartRateSeeded(let secondsByBPM):
+                state.hrSecondsTally.add(secondsByBPM: secondsByBPM)
+                return .none
+            case .trackSegmentsSeeded(let savedSegments):
+                // In front: any fix that reached the map while the fetch ran came after them.
+                state.trackSegments = savedSegments + state.trackSegments
+                return .none
+            case .watermarksSeeded(let seed):
+                // In front, as the map's: every sample since the resume came after them.
+                state.speed.speedSamples = seed.speed + state.speed.speedSamples
+                state.averageSpeedSamples = seed.averageSpeed + state.averageSpeedSamples
+                state.cadence.cadenceSamples = seed.cadence + state.cadence.cadenceSamples
+                state.hrSamples = seed.heartRate + state.hrSamples
+                state.altitudeSamples = seed.altitude + state.altitudeSamples
+                return .none
+            case .energyRiderFetched(let rider):
+                state.energyRider = EnergyRiderStatus(rider)
+                return rebuildCaloriesIfReady(state)
+            case .caloriesEstimated(let point):
+                // A rebuild still in flight may finish after this; it keeps this point.
+                guard point.rideSeconds > (state.calories.last?.rideSeconds ?? 0) else { return .none }
+                state.calories.append(point)
+                return .none
+            case .calorieTrackSeeded(let savedTrack):
+                // The points recorded since the resume, after the saved ones; any the store already
+                // had, from a flush since the resume, appear once.
+                let savedEnd = savedTrack.last?.timestamp ?? .distantPast
+                state.calorieTrack = savedTrack + state.calorieTrack.filter { $0.timestamp > savedEnd }
+                state.isSavedTrackPending = false
+                state.isSavedTrackMissing = savedTrack.isEmpty
+                return rebuildCaloriesIfReady(state)
+            case .caloriesRebuilt(let points):
+                let rebuiltEnd = points.last?.rideSeconds ?? 0
+                state.calories = points + state.calories.filter { $0.rideSeconds > rebuiltEnd }
+                return .none
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = status.isGranted
                 return .none
             case .speed:
-                // Only a pause auto-pause itself made is eligible to auto-resume — a
-                // rider who tapped Pause has to tap Resume (#102). The bar is
-                // `movingSpeedMPS`, not any speed at all: GPS noise alone used to clear
-                // `> 0` and undo the pause on the next sample (#262).
+                // A pause auto-pause itself made is eligible to auto-resume. One the rider
+                // tapped needs a manual Resume (#102), unless Resume When Moving is on, the ride
+                // has stopped since (#267) or `manualPauseGraceSeconds` have passed (#504), and
+                // no Finish alert is up: a rider at that alert didn't forget to resume, and
+                // walking the bike away from it must not restart the ride behind it. That also
+                // leaves an auto-end's pause, which always raises the alert, to the rider. The bar
+                // is `movingSpeedMPS`, not any speed at all: GPS noise alone used to clear `> 0`
+                // and undo the pause on the next sample (#262).
+                if state.recordingState == .paused {
+                    state.pausedAt = state.pausedAt ?? date.now
+                    if let speedMPS = state.speed.speedMPS, speedMPS <= Self.stationarySpeedMPS {
+                        state.hasStoppedWhilePaused = true
+                    }
+                }
+                let isManualPauseArmed = state.hasStoppedWhilePaused
+                    || state.pausedAt.map { date.now.timeIntervalSince($0) >= Self.manualPauseGraceSeconds } == true
+                let canAutoResume = state.isAutoPaused
+                    || (state.preferences.isResumeWhenMovingEnabled && isManualPauseArmed
+                        && state.finishAlert == nil)
                 var effect: Effect<Action> = .none
-                if state.isAutoPaused, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
+                if canAutoResume, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
                     effect = resume(&state)
                 }
                 // Every displayed reading, after the resume above so the one that resumes
@@ -1289,7 +1477,8 @@ struct ActiveRideFeature {
             cadenceCoastingSeconds: state.cadence.coastingSeconds,
             trackSegmentIndex: state.trackSegmentIndex,
             route: state.route,
-            routeProgressMeters: state.navigation.progressMeters
+            routeProgressMeters: state.navigation.progressMeters,
+            isRouteComplete: state.navigation.isRouteComplete
         )
     }
 
@@ -1301,19 +1490,58 @@ struct ActiveRideFeature {
         state.vehiclePassTracking = [:]
     }
 
-    /// A resumed ride's elevation from before the kill, read back from its saved track (#387). A
-    /// failed read leaves it at what the ride has done since the resume.
+    /// A resumed ride's elevation (#387), heart-rate seconds (#393), track for W23 (#465) and map
+    /// (#503) from before the kill, read back from its saved track in one fetch. A failed read leaves
+    /// each at what the ride has done since the resume.
     ///
     /// A phone with a barometer most likely recorded the track from it, and the seed counts it on
     /// the barometer's floor; GPS's coarser one would drop the short rollers the dashboard already
     /// counted, and Ascent would go down across the resume.
-    private func seedElevation(rideId: UUID) -> Effect<Action> {
+    private func seedFromSavedTrack(rideId: UUID, resumedAt: Date) -> Effect<Action> {
         .run { [persistenceClient, altimeterClient] send in
+            let points: [TrackPointDTO]
+            do {
+                points = try await persistenceClient.fetchTrackPoints(rideId)
+            } catch {
+                logger.error("Reading ride \(rideId, privacy: .public)'s saved track on resume failed: \(error.localizedDescription, privacy: .public) — the map, Ascent, HR time in zone and active calories count from the resume")
+                // W23 starts its series at the resume rather than waiting for a track that won't come.
+                await send(.calorieTrackSeeded([]))
+                return
+            }
             let source: AltitudeResolver.Source = altimeterClient.isAvailable() ? .barometric : .gps
-            guard let points = try? await persistenceClient.fetchTrackPoints(rideId),
-                  let seed = ElevationTracker.Seed(savedTrack: points, source: source)
-            else { return }
-            await send(.elevationSeeded(seed))
+            if let seed = ElevationTracker.Seed(savedTrack: points, source: source) {
+                await send(.elevationSeeded(seed))
+            }
+            let secondsByBPM = RideDetailSeries.secondsByBPM(points)
+            if !secondsByBPM.isEmpty {
+                await send(.heartRateSeeded(secondsByBPM))
+            }
+            if let watermarks = WatermarkSeed(savedTrack: points, resumedAt: resumedAt) {
+                await send(.watermarksSeeded(watermarks))
+            }
+            // Only the points from before the resume: any flushed since are already on the map.
+            let savedSegments = TrackPointDTO.segments(of: points.filter { $0.timestamp < resumedAt })
+                .filter { !$0.isEmpty }
+                .map { $0.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) } }
+            if !savedSegments.isEmpty {
+                await send(.trackSegmentsSeeded(savedSegments))
+            }
+            await send(.calorieTrackSeeded(points))
+        }
+    }
+
+    /// W23's minutes so far, worked out from the track once the rider and any saved track are in
+    /// (#465): a resumed ride's minutes before the kill, or a fresh ride's first minute when Health
+    /// answered after it. Only for an empty series, so it runs once; the minute tick adds the rest.
+    /// Not for a resumed ride with no saved track, whose minutes before the resume are unknown.
+    private func rebuildCaloriesIfReady(_ state: State) -> Effect<Action> {
+        guard let rider = state.energyRider.rider, !state.isSavedTrackPending, !state.isSavedTrackMissing,
+              state.calories.isEmpty, state.elapsedSeconds >= CalorieSeries.intervalSeconds
+        else { return .none }
+        let track = state.calorieTrack
+        let seconds = state.elapsedSeconds
+        return .run { send in
+            await send(.caloriesRebuilt(CalorieSeries.rebuild(track: track, through: seconds, rider: rider)))
         }
     }
 
@@ -1360,6 +1588,7 @@ struct ActiveRideFeature {
     /// leaves the recorder off for a ride resumed paused (#392).
     private func pause(_ state: inout State) -> Effect<Action> {
         state.recordingState = .paused
+        state.pausedAt = date.now
         let update = makeRideSummaryUpdate(from: state)
         return .merge(
             .send(.trackRecorder(.pauseRecording)),
@@ -1375,6 +1604,8 @@ struct ActiveRideFeature {
         state.recordingState = .active
         state.zeroSpeedSeconds = 0
         state.isAutoPaused = false
+        state.hasStoppedWhilePaused = false
+        state.pausedAt = nil
         beginTrackSegment(&state)
         // After `beginTrackSegment`, so the checkpoint this resume writes already
         // carries the new segment index — a kill before the next one would
@@ -1451,8 +1682,9 @@ extension ActiveRideFeature.State {
     /// checkpoint (#175, `PersistenceClient.fetchResumableRide`). Transient
     /// UI/sensor fields (coordinate, trackSegments, radar/BLE connection state,
     /// etc.) are left at `State()`'s defaults — `.task`'s existing scan/reconnect
-    /// effects repopulate those naturally, same as a fresh ride; rebuilding them is
-    /// explicitly out of scope for #175.
+    /// effects repopulate those naturally, same as a fresh ride, and its read of the
+    /// saved track puts the map's segments from before the kill back (#503); rebuilding
+    /// them was explicitly out of scope for #175.
     ///
     /// An extension initializer rather than one declared inside `State` itself —
     /// the latter would suppress the synthesized memberwise initializer that every
@@ -1480,10 +1712,10 @@ extension ActiveRideFeature.State {
         // field here — worst case, the auto-pause/auto-end grace period runs a
         // little longer than it would have, never a little shorter.
         zeroSpeedSeconds = summary.zeroSpeedSeconds
-        // The coordinates themselves are transient and are not restored (see above), but
-        // the *index* has to be: resuming at 0 would stamp the rest of the ride with the
-        // first segment's index, and the export would merge every earlier stretch of riding
-        // into the last one.
+        // The coordinates aren't restored here — `.task` reads them back from the saved
+        // track (#503) — but the *index* has to be: resuming at 0 would stamp the rest of
+        // the ride with the first segment's index, and the export would merge every earlier
+        // stretch of riding into the last one.
         //
         // And a ride that comes back `.active` continues into the *next* segment, not the
         // one it was killed in. The app was not running for the gap, so no points exist for
@@ -1495,6 +1727,8 @@ extension ActiveRideFeature.State {
         trackSegmentIndex = summary.trackSegmentIndex + (recordingState == .active ? 1 : 0)
         elapsedSeconds = Int(summary.durationSeconds)
         distanceMeters = summary.distanceMeters
+        // W23 waits for the saved track before estimating anything (#465).
+        isSavedTrackPending = true
         maxSpeedMPS = summary.maxSpeedMPS
         // The running averages are seeded from their *real* persisted sample
         // counts, not a fabricated weight — `average * count` reconstructs the
@@ -1528,5 +1762,8 @@ extension ActiveRideFeature.State {
         // out-and-back they were on is the one they come back on.
         route = summary.route
         navigation.progressMeters = summary.routeProgressMeters
+        // And whether it had finished (#406): otherwise the ring would read short of full, and
+        // riding on past the end would match nothing and go off route.
+        navigation.isRouteComplete = summary.isRouteComplete
     }
 }

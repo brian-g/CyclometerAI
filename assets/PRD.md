@@ -36,6 +36,8 @@
 | 0.6.9 | 2026-10-13 | Brian / Claude | Live Activity Dynamic Island (#310). §8.10 Presentations follows the "S22 - Dynamic Island" and "S22 - Expanded Dynamic Island" Sketch frames over the issue: compact leading is the status mark, not elapsed time, and compact speed is white with no unit. The no-route glyph is the app's `cyclometer.rider` across the Live Activity. Expanded puts distance's unit beside it while the row fits, and under it when a metric or long ride doesn't. The design-frames line now names the frames Sketch holds. |
 | 0.6.10 | 2026-10-13 | Brian / Claude | Live Activity S12 setting (#313). §8.10: Show Live Activity sits in S12's General section and takes effect mid-ride: off ends the showing activity, on starts one. With the system setting off, the toggle is disabled, keeping the rider's choice, and the toggle's own row explains and links to iOS Settings. |
 | 0.6.11 | 2026-10-20 | Brian / Claude | Live Activity ended outside the app (#412). §8.10 gets an "Ended outside the app" row: the system's 8-hour end is requested again on the next foreground, a swipe-away stops the activity for the ride, and "Don't Allow" stops it until Live Activities are switched back on. On the iOS 27 simulator, both of those go straight from `active` to `dismissed`. `LiveActivityClient` gains `ended`. |
+| 0.6.12 | 2026-10-26 | Brian / Claude | On-device route narrative (#203). §8.6 adds a short paragraph that Apple's on-device model (`FoundationModels`) writes from the route's computed terrain, shown in S20's Summary. It contains no figures or units. It's written after import and stored on the route, and it's skipped where Apple Intelligence is unavailable. §12 Privacy records that it never leaves the device. |
+| 0.6.13 | 2026-11-03 | Brian / Claude | App Intents (draft). New §8.11: ride controls (pause, resume, toggle, end) from Siri, the Action Button and Control Center; Start Ride opens the Start Sheet; spoken current-ride stats, last ride and period totals; GPX export of a ride to Shortcuts; GPX import from Shortcuts; rides and routes as Spotlight-indexed entities. The Live Activity stays display only (§8.10). Proposed milestone M10.8 in §13; OQ17 and OQ18 added; §12 Privacy records the on-device Spotlight index. |
 
 ---
 
@@ -205,7 +207,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 - **Persistence:** SwiftData (iOS 27+ minimum target; raised from iOS 26 on 2026-09-15 for HealthKit's cycling-specific HR, cadence and power zone tracking)
 - **Platform:** iPhone only; no iPad support
 - **Audio alerts:** Three tones — All Clear, Warning, Danger. Full spec in `Audio.md`.
-- **Silent Mode:** Danger tone overrides with user opt-in; Warning and All Clear always respect Silent Mode
+- **Silent Mode:** ~~Danger tone overrides with user opt-in; Warning and All Clear always respect Silent Mode~~ Every tone rings through Silent Mode and with the screen locked (2026-11-03, `Audio.md §AVAudioSession Configuration`)
 - **App name:** Cyclometer
 - **Apple Watch:** Deferred to Phase 2
 - **HR zone formula:** Karvonen only in MVP
@@ -356,14 +358,14 @@ A 24pt-wide vertical strip on the right edge of the active ride dashboard repres
 |---|---|---|---|
 | L1 — Advisory | 1–2 vehicles, low closing speed | Single tap — `UIImpactFeedbackGenerator` `.light` | None |
 | L2 — Caution | Moderate closing speed OR 3+ vehicles | Double tap `.medium`, 0.5s interval | Warning tone (see `Audio.md`) |
-| L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Core Haptics pattern: three 0.14s `HapticContinuous` bursts at full intensity and sharpness — pattern defined in `UX.md §S06` | Danger tone — overrides Silent Mode if user opt-in |
+| L3 — Danger | Any vehicle ≥ 30 km/h closing speed | Core Haptics pattern: three 0.14s `HapticContinuous` bursts at full intensity and sharpness — pattern defined in `UX.md §S06` | Danger tone — ~~overrides Silent Mode if user opt-in~~ rings through Silent Mode, like every tone |
 | L0 — Clear | Threat resolves after L2 or L3 | None | All Clear tone (see `Audio.md`) |
 
 #### Alert Rules
 - Minimum 3 seconds between same-level re-triggers to prevent alert fatigue
 - L3 alert persists until threat recedes; it is not dismissible by the rider
-- Danger tone: uses `AVAudioSession` category `.playback` with route override to force audio through speaker. **User must opt in to Silent Mode override in Settings (S12) before this behavior activates.** Default is silent-mode-respectful.
-- Warning and All Clear tones always respect Silent Mode (never override)
+- Every tone uses `AVAudioSession` category `.playback` with `.mixWithOthers`, so it plays with the screen locked and rings through Silent Mode (2026-11-03). `.ambient` would obey the switch but is silenced by the lock, and iOS can't read the switch to choose. ~~Danger tone: uses `.playback` with route override to force audio through speaker. User must opt in to Silent Mode override in Settings (S12) before this behavior activates. Default is silent-mode-respectful.~~
+- ~~Warning and All Clear tones always respect Silent Mode (never override)~~
 - Phase 2: Mirror haptic pattern on Apple Watch wrist
 
 ---
@@ -398,7 +400,7 @@ Wrist haptics are significantly more noticeable than pocket haptics. The same pa
 - [ ] Warning tone fires within 500ms of L2 threshold crossing (see `Audio.md`)
 - [ ] Danger tone fires within 200ms of L3 threshold crossing (see `Audio.md`)
 - [ ] All Clear tone fires within 300ms of threat resolving (see `Audio.md`)
-- [ ] Silent Mode override only activates when user has explicitly enabled it in S12
+- [ ] Every tone plays with the screen locked and the phone on silent
 - [ ] All three haptic levels and all four audio states fully testable with mock BLE data (no hardware required)
 
 ---
@@ -501,6 +503,8 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 | Ride with GPS | Service integration — **Phase 2** | Rider connects their Ride with GPS account in Settings → Accounts; routes are browsable and importable directly from the Cyclometer UI |
 
 **Analysis at import (#252).** Every imported route is analysed on the device: gradient smoothed over 100 m, climbs categorized Cat 4 to HC on the length × average-grade scale, a FIETS score per climb, a one-word character (flat, rolling, hilly, mountainous, punchy), and a summary line of at most 80 characters shown on S19 and S20. Surface comes from OpenStreetMap after the route is saved (§12 Privacy); the import never waits on it.
+
+**Route narrative (#203).** Where Apple Intelligence is available, the on-device model (`FoundationModels`) turns that analysis into a short paragraph for S20's Summary, such as where the climbs sit and how the ride finishes. The model only narrates. The route is split where its terrain changes, into each categorized climb and the stretches between them (thirds for a route with no climbs), at most five sections. Each section's position and gradient spread are computed first, and the model writes exactly one sentence per section. The paragraph contains no figures or units, which the app checks before storing it, so it can't contradict the numbers beside it or go stale when the unit system changes. It's written once, after import (earlier routes are caught up the same way), and stored on the route. A device without Apple Intelligence, or a route without elevation, gets no paragraph, and S20's Summary is unchanged. The S19 row never shows it.
 
 > **Revised 2026-08-14.** The three service integrations move to Phase 2 along with the Accounts section that
 > authenticates them (UX.md §S12). MVP loads routes from the Files app only. This is a consequence of
@@ -895,6 +899,99 @@ Design frames in `Design.sketch`: ~~Lock Screen light and dark × radar none / a
 - [ ] Text/background pairs pass WCAG AA in light, dark and reduced luminance
 - [ ] `ContentState` encodes under 4 KB at worst case
 - [ ] "CyclometerAI" appears nowhere in the extension
+
+### 8.11 App Intents (Siri, Shortcuts, Action Button, Control Center, Spotlight)
+
+**Milestone:** M10.8 (proposed). **Added:** v0.6.13.
+
+A rider with a bar-mounted phone and gloved hands can't reliably tap a sweaty screen, and unlocking mid-ride is unsafe (P1, P7). App Intents give the ride's controls a voice (Siri), a hardware button (Action Button) and a system control (Control Center, Lock Screen) without the rider looking at the app. The same framework exposes rides and routes to Shortcuts and Spotlight, so riders can export, query and compose without opening the app.
+
+Riding controls come first. Queries, export and Spotlight are built on the same entities but are secondary.
+
+#### Scope decisions
+
+| Decision | Detail |
+|---|---|
+| Ride controls are the priority | Pause, resume and end ride, reachable from Siri, the Action Button and Control Center. These are the only intents usable during a ride without touching the screen |
+| Live Activity stays display only | §8.10's "No controls" decision stands. No `LiveActivityIntent` buttons on the Lock Screen or Dynamic Island (OQ17) |
+| Start opens the Start Sheet | Starting a ride opens the app on the S05.1 Start Sheet, with the route preselected if one was named. The rider taps Start. No ride starts without the sheet's sensor check, and the sheet stays the only writer of the Ride row (#344) (OQ18) |
+| End asks first | Ending a ride asks for confirmation (`requestConfirmation`), matching the dashboard's finish alert. End is never a Control Center control: one stray tap must not end a ride |
+| Dialogs, no custom snippets | Intents answer with spoken/printed `IntentDialog` text only. No custom snippet views in this milestone, so there is no new design work |
+| GPX import is not an intent | Opening a `.gpx` from Files, Mail or AirDrop already works through `CFBundleDocumentTypes` and `onOpenURL`. An `ImportRouteIntent` exists only so Shortcuts can pass a file in (for example, a Mail attachment) |
+| No Watch, CarPlay or Mac surfaces | Phone only, as §8.10 |
+| No Siri action category | No `@AppIntent(schema:)` adoption until an Apple category fits a cycling workout; plain intents and App Shortcuts only |
+| English phrases only | §12 Localization: English at launch |
+
+#### Entities
+
+| Entity | Display | Query |
+|---|---|---|
+| `RideEntity` | Title, date, distance, duration (from `RideListSummary`) | By id; suggested = 10 most recent; string search on title; `EntityPropertyQuery` on start date for Shortcuts' "Find Rides" |
+| `RouteEntity` | Name, distance, elevation gain (from `RouteSummary`) | By id; suggested = all routes, most recently imported first; string search on name |
+
+Both read through `PersistenceClient` (`fetchRides`, `fetchRoutes`, `fetchRouteSummary`). Neither copies data out of the store: an entity is a view of a row, resolved by id each time.
+
+Both conform to `IndexedEntity` so iOS can index them in Spotlight. A deleted ride or route is removed from the index in the same step that deletes it.
+
+#### Intents
+
+| Intent | Parameters | Behaviour | Returns |
+|---|---|---|---|
+| `PauseRideIntent` | — | Same as the dashboard's Pause. No ride in progress → error dialog "No ride in progress." Already paused → "Your ride is already paused." | Dialog: "Ride paused." |
+| `ResumeRideIntent` | — | Same as Resume, after a manual or auto pause. Not paused → "Your ride isn't paused." | Dialog: "Ride resumed." |
+| `ToggleRidePauseIntent` | — | Pauses a moving ride, resumes a paused one. This is the intent for the Action Button and the Control Center control, since one press must do the right thing | Dialog naming the new state |
+| `EndRideIntent` | — | Asks "End your ride?" first, then opens the app and runs the same finish as the dashboard (summary, GPX export, Health write), landing on S10. It runs in the foreground on purpose: the rider has stopped by then, and Health refuses writes while the phone is locked | Opens S10 |
+| `StartRideIntent` | `route: RouteEntity?` | Opens the app on the Start Sheet with the route preselected. A ride already in progress → opens the dashboard instead | Opens the app |
+| `GetCurrentRideStatsIntent` | — | Distance, elapsed time and average speed of the ride in progress, in the rider's units. No ride → "No ride in progress." | Dialog, e.g. "18.4 kilometres in 52 minutes, averaging 21.2 km/h." |
+| `GetLastRideIntent` | — | The most recent finished ride | `RideEntity` + dialog: "Your last ride was 42.3 kilometres in 1 hour 52 minutes, on Saturday." |
+| `GetRideTotalsIntent` | `period: RidePeriod` (this week / month / year) | Count, total distance and total time of finished rides in that calendar period | Dialog: "This week: 3 rides, 96 kilometres, 4 hours 10 minutes." |
+| `ExportRideIntent` | `ride: RideEntity?` (default: last ride), `date: Date?` | Returns the ride's existing GPX file from `Documents/Rides`; never re-exports. With `date`, the ride on that day; more than one asks the rider to pick | `IntentFile` (`.gpx`) for Shortcuts to save, share or send |
+| `ImportRouteIntent` | `file: IntentFile` | Runs the file through `GPXRouteImporter`, the same path as opening it from Files | `RouteEntity` |
+| `OpenRideIntent` / `OpenRouteIntent` | the entity | Opens S15 / S20 for it. Spotlight uses these when a result is tapped | Opens the app |
+
+Spoken numbers use `Measurement` formatting in the rider's `UnitSystem`, written out in full (no "km/h" abbreviations read letter by letter).
+
+#### App Shortcuts (zero-setup phrases)
+
+`CyclometerShortcuts: AppShortcutsProvider`, every phrase including `\(.applicationName)`:
+
+- "Pause my ride in Cyclometer", "Resume my ride in Cyclometer"
+- "Start a ride in Cyclometer", "Start a ride on `\(\.$route)` in Cyclometer"
+- "End my ride in Cyclometer"
+- "How's my ride in Cyclometer" (current stats)
+- "What was my last ride in Cyclometer"
+- "How far have I ridden this `\(\.$period)` in Cyclometer"
+- "Export my last ride from Cyclometer"
+
+#### Controls
+
+In `CyclometerWidgets`, as `ControlWidget`s usable in Control Center, on the Lock Screen and on the Action Button:
+
+- **Start Ride**: `ControlWidgetButton` running `StartRideIntent`.
+- **Pause / Resume Ride**: `ControlWidgetButton` running `ToggleRidePauseIntent`. A button rather than a toggle, because a toggle's value provider runs in the extension and can't see the app's ride state. Revisit if ride state is ever shared through an App Group.
+
+#### Architecture
+
+- Intents live in the app target, under `Cyclometer/Intents/` (TCA.md §8), and run in the app's process.
+- **Controls.** A `ControlWidget` names its intent type, so the two intents the controls run (`StartRideIntent`, `ToggleRidePauseIntent`) are also compiled into the extension through target membership, like the Live Activity set. They must still *perform* in the app's process, where the store is: `ToggleRidePauseIntent` conforms to `LiveActivityIntent` for that reason alone (it adds no Live Activity button), and `StartRideIntent` opens the app. Their files reach the command center only through a protocol in a shared file, keeping app-only types out of the extension build. Confirm the process each runs in on device before building on it.
+- **One way into the store.** Ride commands reach `AppFeature` as a single action, `AppFeature.Action.intent(IntentCommand)` with `IntentCommand` = `pauseRide`, `resumeRide`, `toggleRidePause`, `endRide`, `startRide(routeID: UUID?)`, `openRide(UUID)`, `openRoute(UUID)`. The reducer maps each to the existing action (`pauseTapped`, `resumeTapped`, `finishTapped`'s confirmed path, `startRideButtonTapped`, the Rides and Routes stacks), so `TestStore` covers intent behaviour exactly as it covers taps. Intents never duplicate ride logic.
+- **Bridge.** `CyclometerApp` registers a small main-actor `IntentCommandCenter` with `AppDependencyManager`. It holds the app's store, sends `.intent(...)`, and exposes a read-only snapshot of the ride (status, distance, elapsed, average speed) for `GetCurrentRideStatsIntent` and for the error dialogs. Intents depend on the command center, never on `AppFeature.Action`'s shape.
+- **Query intents** read `PersistenceClient` directly; they change nothing in the store.
+- **Name clash.** AppIntents and swift-dependencies both declare `@Dependency`. Intent files qualify the one they use.
+- **Background launch.** A query or export intent can launch the app in the background with no scene. Whatever those intents need (the SwiftData container, `PersistenceClient`) must be available without the scene's `.task` having run. Verified in the first issue before anything is built on it.
+
+#### Acceptance criteria
+
+- [ ] "Pause my ride in Cyclometer" pauses a moving ride with the phone locked, and the dashboard shows paused on unlock
+- [ ] The Action Button, set to Pause / Resume Ride, pauses and resumes a ride with the phone locked
+- [ ] End ride asks for confirmation; declining leaves the ride running
+- [ ] Start Ride opens the Start Sheet, with the named route preselected; it never starts a ride on its own
+- [ ] Every ride-control intent with no ride in progress answers with a dialog and changes nothing
+- [ ] Spoken stats use the rider's units and match the dashboard
+- [ ] Export returns the same GPX file as Files, for the last ride and for a ride picked by date
+- [ ] Rides and routes appear in Spotlight; tapping one opens S15 / S20; a deleted ride or route disappears from Spotlight
+- [ ] Query and export intents work when the app was not running
+- [ ] Every `IntentCommand` is covered by an `AppFeature` `TestStore` test
 
 ---
 
@@ -1395,6 +1492,8 @@ Cyclometer/
 - GPS and ride data: stored locally only, apart from a free ride's start coordinate sent for its place name (below), which the rider can turn off
 - Route surface lookup (#252): after a route is imported, its line — the planned route, never a recorded ride — is sent to the public OpenStreetMap Overpass API (`overpass-api.de`) to read the surface of the roads along it. Nothing else is sent, and no account or identifier is attached. A failed or offline lookup leaves the route without a surface; it is retried on the next launch, and the first failure in a batch stops the rest, so a refusing or unreachable server is not asked again and again. Surface data is credited "© OpenStreetMap contributors" wherever it is shown (ODbL)
 - Ride place name (#283): when a ride that did not follow a route is summarised (S10), its start coordinate — that one point, nothing else — is sent to Apple's reverse geocoder (MapKit `MKReverseGeocodingRequest`) for the name of the town it started in, used in the ride's default name ("Fargo Morning Loop"). A ride on a route is named for the route and sends nothing. The S12 **Place Names** toggle (on by default) turns the lookup off, and the in-app privacy policy says so. A failed or offline lookup keeps the offline name silently
+- Route narrative (#203): written by Apple's on-device model (`FoundationModels`) from the route's computed terrain. Nothing is sent off the device
+- App Intents (§8.11): ride titles, dates, distances and route names are indexed in Spotlight's on-device index. Siri and Shortcuts read them through the app's intents. Nothing is sent to a server by the app
 - BLE device identifiers: not transmitted externally
 - No analytics or crash reporting without explicit user consent
 
@@ -1430,6 +1529,7 @@ Cyclometer/
 | M9 | Ride summary; ride history persistence; vehicle pass event count in summary |
 | M10 | Settings (S12, less Accounts); full device management (S11 flat list, extending the M6 pairing sheet); replace-or-cancel on role collision; radar and HR pairing brought under the paired-record gate; `RiderProfile` + HR zones; onboarding (S01, S02) |
 | M10.5 | Fit & finish, widgets and dashboard personalization; Ride Live Activity on the Lock Screen and Dynamic Island (§8.10) |
+| M10.8 (proposed) | App Intents (§8.11): ride controls from Siri, the Action Button and Control Center; Start Ride; ride queries; GPX export and import through Shortcuts; Spotlight for rides and routes |
 | M11 | QA; TestFlight open beta; bug fixes |
 | M12 | App Store submission |
 
@@ -1449,7 +1549,7 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detec
 | OQ2 | Does Garmin's mobile SDK provide a cleaner Varia BLE path than raw CoreBluetooth? Evaluate in M2 spike. | Engineering | High | ✅ **Resolved: Combined approach. Use CoreBluetooth and apply for Garmin developer program** |
 | OQ3 | iPad support? | Product | Low | ✅ **Resolved: No iPad** |
 | OQ4 | Audio alert delivery: tones vs synthesized voice? | Design | Medium | ✅ **Resolved: Tones — three-tone system (All Clear, Warning, Danger). Spec in `Audio.md`.** |
-| OQ5 | Override Silent Mode for L3 danger alerts? | Design | High | ✅ **Resolved: Yes, user opt-in. Warning and All Clear respect Silent Mode always.** |
+| OQ5 | Override Silent Mode for L3 danger alerts? | Design | High | ✅ **Resolved: Yes, user opt-in. Warning and All Clear respect Silent Mode always.** Superseded 2026-11-03: every tone rings through, because `.ambient` can't play with the screen locked |
 | OQ6 | App name for App Store? | Product | Medium | ✅ **Resolved: Cyclometer** |
 | OQ7 | Minimum Varia RTL515 / RCT715 firmware version required for BLE characteristic support? | Engineering | High | ✅ **Resolved: v2.00 or v3.00 depending on the production run** |
 | OQ8 | Include basic Apple Watch complication in Phase 1? | Product | Medium | ✅ **Resolved: Defer to Phase 2** |
@@ -1461,6 +1561,8 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detec
 | OQ14 | Radar visualization approach: arc, strip, ring, adaptive, or map overlay? | Design | High | ✅ **Resolved: Option F — right-side sidebar strip with car icons; vehicle position encodes relative distance. See §8.2 and `assets/design/Design.sketch` — S06.** |
 | OQ15 | Vehicle pass detection: minimum approach distance threshold before qualifying as a pass vs. turn-off? | Engineering | Medium | Open — requires field testing with RTL515/RCT715 to determine realistic detection parameters |
 | OQ16 | Audio tone fine-tuning: exact frequencies, durations, and waveforms validated on real ride (phone in jersey pocket at speed)? | Design | Medium | Open — `Audio.md §Acceptance Criteria` defines test requirements; field test required before M4 freeze |
+| OQ17 | Should the Live Activity gain Pause / Resume buttons (`LiveActivityIntent`) now that the intents exist? §8.10 removed them in v0.6.7. | Product | Medium | Open — §8.11 keeps the Live Activity display only; Siri, the Action Button and Control Center cover pause and resume |
+| OQ18 | Should Start Ride start a ride directly, skipping the Start Sheet, for a true one-press start from the Action Button? | Product | Medium | Open — §8.11 opens the Start Sheet, keeping its sensor check and its role as the only writer of the Ride row (#344) |
 
 ---
 

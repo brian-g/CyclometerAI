@@ -24,11 +24,11 @@ final class RouteDetailSnapshotTests: XCTestCase {
     private let device = ViewImageConfig(
         safeArea: UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0),
         size: CGSize(width: 402, height: 1_300),
-        traits: UITraitCollection(traitsFrom: [
-            UITraitCollection(horizontalSizeClass: .compact),
-            UITraitCollection(verticalSizeClass: .regular),
-            UITraitCollection(displayScale: 3)
-        ])
+        traits: UITraitCollection { traits in
+            traits.horizontalSizeClass = .compact
+            traits.verticalSizeClass = .regular
+            traits.displayScale = 3
+        }
     )
 
     // MARK: Harness
@@ -111,6 +111,14 @@ final class RouteDetailSnapshotTests: XCTestCase {
 
     func testWithElevationNeverRidden() {
         assertBothSchemes(screen(RouteSummary.previewRoutes[1], rides: []), named: "elevation-no-rides")
+    }
+
+    /// "Summit Climb" once the on-device model has written its paragraph (#203), under the
+    /// summary line. Without one, the section is `testWithElevationNeverRidden`'s, unchanged.
+    func testWithElevationAndNarrative() {
+        var route = RouteSummary.previewRoutes[1]
+        route.narrative = RouteSummary.previewNarrative
+        assertBothSchemes(screen(route, rides: []), named: "elevation-narrative")
     }
 
     /// "Coffee Spin": a GPX with no `<ele>`, so the whole elevation section is absent.

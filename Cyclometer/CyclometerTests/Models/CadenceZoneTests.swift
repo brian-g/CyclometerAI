@@ -60,7 +60,7 @@ struct CadenceZoneTests {
     @Test("Display ranges: Z1 from its floor, inclusive uppers, Z5 open-ended")
     func displayRanges() {
         let zones = CadenceZoneBoundaries.default
-        #expect(CadenceZone.allCases.map(zones.rangeText) == ["60-69", "70-84", "85-94", "95-109", "110+"])
+        #expect(CadenceZone.allCases.map(zones.rangeText) == ["60–69", "70–84", "85–94", "95–109", "110+"])
     }
 
     @Test("Bands are contiguous and cover 0...ceiling without gaps")

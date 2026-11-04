@@ -12,7 +12,7 @@ import ComposableArchitecture
 struct WheelCalibrationFeatureTests {
 
     private static let start = Date(timeIntervalSince1970: 1_000_000)
-    private static let storedMM = 2096
+    nonisolated private static let storedMM = 2096
 
     /// Every store gets its own in-memory document. This feature *writes* the shared
     /// preferences, so without quarantine a test would persist into the developer's

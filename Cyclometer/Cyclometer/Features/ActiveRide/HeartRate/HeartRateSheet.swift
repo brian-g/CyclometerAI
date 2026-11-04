@@ -31,19 +31,20 @@ struct HeartRateMetrics: Equatable {
         var id: Int { zone }
     }
 
+    /// "—" with no source too: the reason is `footer`'s, so VoiceOver reads it once (#494).
     var current: MetricReading {
-        if source == .none { return MetricReading(shown: "No HR Source", spoken: "No HR source") }
-        guard bpm > 0 else { return .missing }
-        return MetricReading(shown: "\(bpm) bpm", spoken: "\(bpm) beats per minute")
+        guard source != .none, bpm > 0 else { return .missing }
+        return MetricReading(value: "\(bpm)", unit: "bpm", spoken: "\(bpm) beats per minute")
     }
 
+    /// The zone's number; its name is spoken, and its colour is the dot beside it.
     var currentZone: MetricReading {
         guard source != .none, let zone = HeartRateZone(rawValue: zone) else { return .missing }
-        return MetricReading(
-            shown: "Z\(zone.rawValue) \(zone.s12DisplayName)",
-            spoken: "Zone \(zone.rawValue), \(zone.s12DisplayName)"
-        )
+        return MetricReading(value: "\(zone.rawValue)", spoken: "Zone \(zone.rawValue), \(zone.s12DisplayName)")
     }
+
+    /// Under the readings: why there are none, as the cards' empty state says it.
+    var footer: String? { source == .none ? "No HR Source" : nil }
 
     var hasZoneTime: Bool { zoneSeconds.contains { $0 > 0 } }
 
@@ -60,14 +61,12 @@ struct HeartRateMetrics: Equatable {
                 zone: zone.rawValue,
                 name: "Z\(zone.rawValue) \(zone.s12DisplayName)",
                 range: MetricReading(
-                    shown: "\(bounds.lowerBound)–\(bounds.upperBound) bpm",
+                    value: "\(bounds.lowerBound)–\(bounds.upperBound)",
+                    unit: "bpm",
                     spoken: "\(bounds.lowerBound) to \(bounds.upperBound) beats per minute"
                 ),
                 seconds: seconds,
-                time: MetricReading(
-                    shown: Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1))),
-                    spoken: seconds.spokenElapsed
-                )
+                time: .zoneTime(seconds: seconds)
             )
         }
     }
@@ -97,7 +96,6 @@ extension ActiveRideFeature.State {
 struct HeartRateSheet: View {
     var metrics: () -> HeartRateMetrics = { HeartRateMetrics() }
 
-    @Environment(\.dismiss) private var dismiss
     @State private var detent = PresentationDetent.medium
 
     var body: some View {
@@ -106,17 +104,13 @@ struct HeartRateSheet: View {
             HeartRateList(metrics: metrics)
                 .navigationTitle("Heart Rate")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(role: .close) { dismiss() }
-                    }
-                }
+                .sheetCloseButton()
         }
         .presentationDetents([.medium, .large], selection: $detent)
     }
 }
 
-/// The sheet's rows, apart from its navigation chrome so a snapshot can pin them.
+/// The sheet's chart, readings and zones, apart from its navigation chrome so a snapshot can pin them.
 struct HeartRateList: View {
     let metrics: HeartRateMetrics
 
@@ -136,18 +130,18 @@ struct HeartRateList: View {
                     )
                         .frame(height: Self.chartHeight)
                 }
-                row("Heart Rate", metrics.current)
-                LabeledContent("Zone") {
-                    HStack(spacing: Spacing.sm) {
+                ReadingColumns {
+                    ReadingColumn("Heart Rate", metrics.current)
+                    ReadingColumn("Zone", metrics.currentZone) {
                         if metrics.currentZone != .missing {
-                            zoneDot(metrics.zone)
+                            ZoneDot(color: .hrZone(metrics.zone))
                         }
-                        Text(metrics.currentZone.shown)
                     }
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Zone")
-                .accessibilityValue(metrics.currentZone.spoken)
+            } footer: {
+                if let footer = metrics.footer {
+                    Text(footer)
+                }
             }
             Section("Time in Zones") {
                 if metrics.hasZoneTime {
@@ -157,41 +151,9 @@ struct HeartRateList: View {
                     .frame(height: Self.donutHeight)
                     .frame(maxWidth: .infinity)
                 }
-                ForEach(zoneRows) { zoneRow($0) }
+                ForEach(zoneRows) { ZoneTimeRow(color: .hrZone($0.zone), name: $0.name, range: $0.range, time: $0.time) }
             }
         }
-    }
-
-    private func row(_ label: String, _ reading: MetricReading) -> some View {
-        LabeledContent(label, value: reading.shown)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(label)
-            .accessibilityValue(reading.spoken)
-    }
-
-    private func zoneRow(_ zone: HeartRateMetrics.ZoneRow) -> some View {
-        HStack(spacing: Spacing.sm) {
-            zoneDot(zone.zone)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(zone.name)
-                Text(zone.range.shown)
-                    .font(.footnote)
-                    .foregroundStyle(Color.cyTextSecondary)
-            }
-            Spacer(minLength: Spacing.sm)
-            Text(zone.time.shown)
-                .monospacedDigit()
-                .foregroundStyle(Color.cyTextSecondary)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(zone.name)
-        .accessibilityValue("\(zone.range.spoken), \(zone.time.spoken)")
-    }
-
-    private func zoneDot(_ zone: Int) -> some View {
-        Circle()
-            .fill(Color.hrZone(zone))
-            .frame(width: Spacing.sm, height: Spacing.sm)
     }
 }
 
@@ -212,25 +174,16 @@ struct HeartRateChart: View {
     private static let elevationHeightFraction = 0.6
     private static let minElevationSpanMeters = RouteGeometry.elevationNoiseThresholdMeters
 
-    private struct Point: Identifiable {
+    private struct Point: Identifiable, TimedSample {
         let time: Date
         let value: Double
         var id: Date { time }
     }
 
-    /// At most `RideMetricsCharts.maxPlottedPoints` bucket means (integer edges, as
-    /// `bucketAveraged(to:)`): an hour of 1 Hz readings would be thousands of marks.
+    /// At most `RideMetricsCharts.maxPlottedPoints` bucket means: an hour of 1 Hz readings would be
+    /// thousands of marks.
     private static func downsampled(_ points: [Point]) -> [Point] {
-        let count = points.count
-        let buckets = min(count, RideMetricsCharts.maxPlottedPoints)
-        return (0..<buckets).map { i in
-            let slice = points[(i * count / buckets)..<((i + 1) * count / buckets)]
-            let n = Double(slice.count)
-            return Point(
-                time: Date(timeIntervalSinceReferenceDate: slice.reduce(0) { $0 + $1.time.timeIntervalSinceReferenceDate } / n),
-                value: slice.reduce(0) { $0 + $1.value } / n
-            )
-        }
+        points.bucketAveraged(to: RideMetricsCharts.maxPlottedPoints)
     }
 
     var body: some View {

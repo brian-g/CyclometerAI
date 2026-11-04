@@ -6,14 +6,14 @@ struct AscentDashboardWidget: DashboardWidget {
     static let id = "ascent"
     static let title = "Ascent"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
-    static let category = WidgetCategory.ride
+    static let category = WidgetCategory.elevation
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>
 
     var body: some View {
         ElevationTotalWidget(
-            title: Self.title, meters: store.elevation.ascentMeters, unit: store.unitSystem,
+            title: Self.title, symbol: "arrow.up.forward", meters: store.elevation.ascentMeters, unit: store.unitSystem,
             metrics: { store.elevationMetrics }
         )
     }
@@ -24,14 +24,14 @@ struct DescentDashboardWidget: DashboardWidget {
     static let id = "descent"
     static let title = "Descent"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
-    static let category = WidgetCategory.ride
+    static let category = WidgetCategory.elevation
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>
 
     var body: some View {
         ElevationTotalWidget(
-            title: Self.title, meters: store.elevation.descentMeters, unit: store.unitSystem,
+            title: Self.title, symbol: "arrow.down.forward", meters: store.elevation.descentMeters, unit: store.unitSystem,
             metrics: { store.elevationMetrics }
         )
     }
@@ -42,7 +42,7 @@ struct GradeDashboardWidget: DashboardWidget {
     static let id = "grade"
     static let title = "Grade"
     static let supportedSizes: [WidgetSize] = [.oneByOne]
-    static let category = WidgetCategory.ride
+    static let category = WidgetCategory.elevation
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>
@@ -57,7 +57,7 @@ struct ElevationDashboardWidget: DashboardWidget {
     static let id = "elevation"
     static let title = "Elevation"
     static let supportedSizes: [WidgetSize] = [.twoByOne]
-    static let category = WidgetCategory.ride
+    static let category = WidgetCategory.elevation
 
     let size: WidgetSize
     let store: StoreOf<ActiveRideFeature>
@@ -66,7 +66,8 @@ struct ElevationDashboardWidget: DashboardWidget {
         ElevationWidget(
             altitude: store.altitude,
             gradePercent: store.elevation.gradePercent,
-            history: store.altitudeWatermarkSamples,
+            history: store.altitudeWatermark,
+            watermarkWindow: store.watermarkWindow,
             unit: store.unitSystem,
             metrics: { store.elevationMetrics }
         )
@@ -91,7 +92,30 @@ struct RouteElevationDashboardWidget: DashboardWidget {
             routeProfile: profile,
             routeProgress: profile == nil ? nil : store.navigation.routeProgressFraction,
             // Only W17's face reads it: a route's profile stands in for the ride's.
-            history: profile == nil ? store.altitudeWatermarkSamples : [],
+            history: profile == nil ? store.altitudeWatermark : [],
+            watermarkWindow: profile == nil ? store.watermarkWindow : nil,
+            unit: store.unitSystem,
+            metrics: { store.elevationMetrics }
+        )
+    }
+}
+
+/// W22 Climb on the dashboard (#463): the route's climb the rider is on, or the next one.
+struct ClimbDashboardWidget: DashboardWidget {
+    static let id = "climb"
+    static let title = "Climb"
+    static let supportedSizes: [WidgetSize] = [.twoByOne]
+    static let category = WidgetCategory.route
+
+    let size: WidgetSize
+    let store: StoreOf<ActiveRideFeature>
+
+    var body: some View {
+        ClimbWidget(
+            reading: store.navigation.climbReading,
+            hasRoute: store.navigation.activeRoute != nil,
+            isTurnByTurnEnabled: store.navigation.preferences.isTurnByTurnEnabled,
+            hasElevation: store.navigation.activeRoute?.elevationProfile != nil,
             unit: store.unitSystem,
             metrics: { store.elevationMetrics }
         )

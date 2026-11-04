@@ -21,11 +21,11 @@ final class SettingsSnapshotTests: XCTestCase {
     private let device = ViewImageConfig(
         safeArea: UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0),
         size: CGSize(width: 402, height: 874),
-        traits: UITraitCollection(traitsFrom: [
-            UITraitCollection(horizontalSizeClass: .compact),
-            UITraitCollection(verticalSizeClass: .regular),
-            UITraitCollection(displayScale: 3)
-        ])
+        traits: UITraitCollection { traits in
+            traits.horizontalSizeClass = .compact
+            traits.verticalSizeClass = .regular
+            traits.displayScale = 3
+        }
     )
 
     /// The same device stretched tall enough to hold the whole list, so sections below the
@@ -46,6 +46,7 @@ final class SettingsSnapshotTests: XCTestCase {
         pairedSensors: [PairedSensor] = [],
         riderProfile profile: RiderProfile = RiderProfile(),
         isSystemLiveActivityEnabled: Bool = true,
+        isAutoDimEnabled: Bool = true,
         customCircumferenceDraft: String? = nil,
         restingOverrideDraft: String? = nil,
         maxOverrideDraft: String? = nil
@@ -64,6 +65,7 @@ final class SettingsSnapshotTests: XCTestCase {
                 $0.preferredUnit = .imperial
                 $0.wheelCircumferenceMM = wheelCircumferenceMM
                 $0.pairedSensors = pairedSensors
+                $0.isAutoDimEnabled = isAutoDimEnabled
             }
             @Shared(.riderProfile) var riderProfile
             $riderProfile.withLock { $0 = profile }
@@ -176,6 +178,11 @@ final class SettingsSnapshotTests: XCTestCase {
     /// Cadence Zones section (#79): the issue's default ranges, steppers on Z1–Z4, and Reset.
     func testSettingsFullHeight() {
         assertBothSchemes(screen(), named: "fullHeight", on: fullHeightDevice)
+    }
+
+    /// Auto-dim off: the Dimmed Brightness slider under its toggle is gone (#471).
+    func testAutoDimOff() {
+        assertBothSchemes(screen(isAutoDimEnabled: false), named: "autoDimOff")
     }
 
     /// Live Activities turned off for the app in iOS Settings (#313): the Show Live Activity

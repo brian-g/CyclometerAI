@@ -520,7 +520,7 @@ struct AlertOrchestratorFeature {
                 state.previousAlertLevel = previous
                 state.currentAlertLevel = level
 
-                return .run(priority: .userInteractive) { [level, previous, silentOverride = state.silentModeOverrideEnabled] send in
+                return .run(priority: .high) { [level, previous, silentOverride = state.silentModeOverrideEnabled] send in
                     // Haptic first — tightest latency requirement
                     switch level {
                     case .clear:
@@ -556,7 +556,7 @@ struct AlertOrchestratorFeature {
 }
 ```
 
-> **Note:** `priority: .userInteractive` ensures the haptic/audio Effect is not starved by lower-priority Effects. The L3 danger haptic and audio tone are guaranteed to fire within the 200ms budget.
+> **Note:** `priority: .high` (`.userInteractive` is deprecated as of the Xcode 27 SDK) ensures the haptic/audio Effect is not starved by lower-priority Effects. The L3 danger haptic and audio tone are guaranteed to fire within the 200ms budget.
 
 ---
 
@@ -903,7 +903,7 @@ RadarFeature.reduce(.alertReceived(payload))
     ▼
 AlertOrchestratorFeature.reduce(.radarAlertChanged(.danger))
     │
-    │ .run(priority: .userInteractive)
+    │ .run(priority: .high)
     ├──▶ HapticClient.fireL3Danger()        ← < 200ms budget
     │        (Core Haptics: 3× 0.14s burst)
     └──▶ AudioAlertClient.playDanger()      ← < 200ms budget
@@ -1003,18 +1003,23 @@ Cyclometer/
 │   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12), HeartRateSheet — HR state lives
 │   │   │                                  // on ActiveRideFeature (§3)
 │   │   ├── Cadence/                       // CadenceFeature, CadenceWidgetView (W5)
-│   │   ├── Elevation/                     // ElevationWidgetView (W14–W18), ElevationSheet (#387) —
-│   │   │                                  // altitude and ElevationTracker live on ActiveRideFeature
+│   │   ├── Elevation/                     // ElevationWidgetView (W14–W18), ElevationSheet (#387),
+│   │   │                                  // ClimbWidgetView (W22, #463) — altitude and ElevationTracker
+│   │   │                                  // live on ActiveRideFeature; the route's climbs in Models/RouteClimb
 │   │   ├── Map/                           // MapWidgetView (W8), ActiveRideMapView,
 │   │   │                                  // LiveMapCamera, MapSheetButtons
 │   │   ├── Navigation/                    // NavigationFeature, DirectionsWidgetView (W9),
 │   │   │                                  // TurnInstructionOverlay
+│   │   ├── Sunset/                        // SunsetWidgetView (W21, #462) — the NOAA sunset lives in
+│   │   │                                  // Models/Sunset
+│   │   ├── Calories/                      // CaloriesWidgetView (W23, #465), CaloriesSheet — the series
+│   │   │                                  // lives on ActiveRideFeature; rebuilds in Models/CalorieSeries
 │   │   ├── LiveActivity/                  // RideActivityAttributes, RideLockScreenView (PRD §8.10) — shared with the extension;
 │   │   │                                  // LiveActivityFeature (app only)
 │   │   ├── Recording/                     // TrackPointRecorderFeature, GPSFixFilter
 │   │   ├── Alerts/                        // AlertOrchestratorFeature, VehiclePassDetector,
 │   │   │                                  // RideBanner
-│   │   ├── SensorHealth/                  // SensorHealthFeature (#391) — records only, no widget
+│   │   ├── SensorHealth/                  // SensorHealthFeature (#391), SensorsButton + SensorsSheet (#464, #466)
 │   │   └── Calibration/                   // WheelCalibrationFeature, WheelCalibration
 │   ├── Rides/                             // RidesFeature/View, RideDetail*, RideSummary*,
 │   │                                      // StartSheet*, RoutePicker*
@@ -1033,11 +1038,13 @@ Cyclometer/
 │
 ├── Models/                                // value types and SwiftData @Models (Ride, Route, …)
 ├── Export/                                // GPXExporter, GPXParsing, GPXRouteImporter
+├── Intents/                               // App Intents (PRD §8.11): RideEntity, RouteEntity,
+│                                          // the intents, CyclometerShortcuts, IntentCommandCenter
 ├── UI/
 │   ├── DesignSystem/                      // Color+Cyclometer, AppFonts, Typography,
 │   │                                      // Spacing, Opacity, WidgetSize
 │   └── Components/                        // HeroNumber, WidgetLabel, SensorListRow,
-│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, DonutChart,
+│                                          // RouteMap, RadarColumn, HRZoneBadge, WidgetDetail, WidgetSymbol, DonutChart,
 │                                          // OpenRingProgressView (S05.3 ring), …
 ├── PreviewContent/
 └── Resources/Fonts/                       // D-DIN
@@ -1129,7 +1136,7 @@ func testL3AlertFiresHapticAndAudio() async {
 | `CadenceFeature` | BLE, CSC crank calc; "--" when no source; shared-peripheral with SpeedFeature |
 | `TrackPointRecorderFeature` | 30s checkpoint flush; ride end flush; paused intervals excluded |
 | `WheelCalibrationFeature` | 2% trigger over two consecutive windows; correction averaged across the confirming windows; ±10% cap; out-of-range rejection; GPS accuracy gating; calibration suspension during L3 |
-| `AlertOrchestratorFeature` | Effect dispatched at `userInteractive` priority; < 200ms mock latency |
+| `AlertOrchestratorFeature` | Effect dispatched at `.high` priority; < 200ms mock latency |
 | `GPXExporter` | Schema validation; absent fields (not zero) for missing sensors; vehicle pass waypoints |
 | `VehiclePassDetection` | Overtake vs. turn-off discrimination; 2s minimum tracking |
 | Full ride state machine | `idle → active → paused → active → ended`; crash recovery from checkpoint |

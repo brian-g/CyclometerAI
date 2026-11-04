@@ -7,7 +7,7 @@ import ComposableArchitecture
 @Suite("SpeedFeature")
 struct SpeedFeatureTests {
 
-    private static let testDate = Date(timeIntervalSince1970: 1_000_000)
+    nonisolated private static let testDate = Date(timeIntervalSince1970: 1_000_000)
 
     private func makeStore(
         initialState: SpeedFeature.State = SpeedFeature.State(),
@@ -161,22 +161,6 @@ struct SpeedFeatureTests {
             $0.activeSpeedSource = .none
             // speedSamples unchanged
         }
-    }
-
-    @Test("Watermark series downsamples to at most watermarkResolution points")
-    func watermarkDownsamples() {
-        let many = (0..<200).map {
-            SpeedSample(time: Date(timeIntervalSince1970: Double($0)), mps: Double($0))
-        }
-        #expect(
-            SpeedFeature.State(speedSamples: many).watermarkSamples.count
-                == SpeedFeature.watermarkResolution
-        )
-
-        let few = (0..<10).map {
-            SpeedSample(time: Date(timeIntervalSince1970: Double($0)), mps: Double($0))
-        }
-        #expect(SpeedFeature.State(speedSamples: few).watermarkSamples.count == 10)
     }
 
     @Test("Downsampling averages each bucket's time as well as its speed (#140)")

@@ -12,13 +12,13 @@ struct RideSummaryFeatureTests {
     // MARK: Harness
 
     /// 08:00 UTC — a morning ride under `calendar` below.
-    private static let startedAt = Date(timeIntervalSince1970: 1_700_035_200)
+    nonisolated private static let startedAt = Date(timeIntervalSince1970: 1_700_035_200)
 
-    private static let summary = RideListSummary(
+    nonisolated private static let summary = RideListSummary(
         id: UUID(), title: "", startedAt: startedAt, distanceMeters: 1_100, durationSeconds: 100
     )
 
-    private static let stats = RideStats(
+    nonisolated private static let stats = RideStats(
         averageSpeedMPS: 6, maxSpeedMPS: 11, averageCadenceRPM: 90, maxCadenceRPM: 104, vehiclePassCount: 2
     )
 
@@ -32,13 +32,16 @@ struct RideSummaryFeatureTests {
         persistenceClient: PersistenceClient,
         geocodingClient: GeocodingClient = .testValue,
         healthKitClient: HealthKitClient = .testValue,
-        clock: TestClock<Duration> = TestClock()
+        clock: TestClock<Duration> = TestClock(),
+        load: RideSummaryFeature.State.Load = .waiting
     ) -> TestStoreOf<RideSummaryFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
-            TestStore(initialState: RideSummaryFeature.State(rideId: Self.summary.id)) {
+            var state = RideSummaryFeature.State(rideId: Self.summary.id)
+            state.load = load
+            return TestStore(initialState: state) {
                 RideSummaryFeature()
             } withDependencies: {
                 $0.persistenceClient = persistenceClient
@@ -472,6 +475,42 @@ struct RideSummaryFeatureTests {
 
         state.persistedTitle = "Morning Ride"
         #expect(state.titleToSave == nil)
+    }
+
+    // MARK: Delete (#452)
+
+    @Test("Delete asks first; confirming hands the delete to AppFeature")
+    func deleteConfirmedSendsDelegate() async {
+        let store = makeStore(persistenceClient: .mock(), load: .loaded)
+
+        await store.send(.deleteTapped) {
+            $0.alert = RideSummaryFeature.deleteAlert
+        }
+        await store.send(.alert(.presented(.confirmDelete))) {
+            $0.alert = nil
+        }
+        await store.receive(\.delegate.deleteRide)
+    }
+
+    @Test("Cancelling the Delete alert deletes nothing")
+    func deleteCancelledDoesNothing() async {
+        let store = makeStore(persistenceClient: .mock(), load: .loaded)
+
+        await store.send(.deleteTapped) {
+            $0.alert = RideSummaryFeature.deleteAlert
+        }
+        await store.send(.alert(.dismiss)) {
+            $0.alert = nil
+        }
+    }
+
+    /// Before the finalize lands the ride is still being written, and an unavailable ride is
+    /// the next launch's to close out: a delete would race both.
+    @Test("Delete does nothing until the ride has loaded", arguments: [RideSummaryFeature.State.Load.waiting, .unavailable])
+    func deleteBeforeLoadedDoesNothing(load: RideSummaryFeature.State.Load) async {
+        let store = makeStore(persistenceClient: .mock(), load: load)
+
+        await store.send(.deleteTapped)
     }
 }
 

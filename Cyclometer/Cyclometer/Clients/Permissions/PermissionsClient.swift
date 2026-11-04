@@ -277,7 +277,7 @@ private final class PermissionsLiveState: NSObject, @unchecked Sendable {
             guard let self else { return }
             for domain in PermissionDomain.allCases {
                 let state = await status(for: domain)
-                lock.withLock { lastKnown[domain] = state }
+                lock.withLock { self.lastKnown[domain] = state }
                 continuation.yield(PermissionChange(domain: domain, state: state))
             }
         }

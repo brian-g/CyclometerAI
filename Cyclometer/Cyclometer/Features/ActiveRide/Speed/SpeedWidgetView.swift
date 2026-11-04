@@ -5,7 +5,10 @@ import SwiftUI
 
 struct SpeedWidget: View {
     let speed: Double?          // m/s; nil → "—"
-    let speedHistory: [Double]  // m/s samples for watermark chart
+    let speedHistory: [WatermarkPoint]  // m/s, for the watermark chart
+    /// The time span the watermark plots over, shared with the other widgets' watermarks
+    /// (`ActiveRideFeature.State.watermarkWindow`). Nil plots the history's own span.
+    var watermarkWindow: ClosedRange<Date>? = nil
     let activeSpeedSource: SensorSource
     let distance: Double        // meters
     let elapsed: Int            // seconds
@@ -27,7 +30,7 @@ struct SpeedWidget: View {
     var body: some View {
         ZStack {
             if size != .oneByOne, !speedHistory.isEmpty {
-                SpeedHistoryChart(history: speedHistory, unit: unit)
+                SpeedHistoryChart(history: speedHistory, window: watermarkWindow, unit: unit)
                     .opacity(Opacity.watermark)
             }
             GeometryReader { geo in
@@ -39,6 +42,7 @@ struct SpeedWidget: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .widgetSymbol(size == .oneByOne ? "gauge.open.with.lines.needle.33percent" : nil)
         .background(Color.cyBgSecondary)
         .widgetDetail(label: SpeedDashboardWidget.title, value: accessibilityValue) {
             RideMetricsSheet(metrics: metrics)
@@ -49,32 +53,32 @@ struct SpeedWidget: View {
 
     @ViewBuilder
     private func twoByTwoContent(_ geo: GeometryProxy) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
                 speedHero(fontSize: heroFontSize(for: geo.size.height))
                 Spacer()
-                // Distance must never truncate — it takes the width it needs and
-                // pushes Time to the right (Time yields space first).
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.lg) {
-                    distanceStat
-                        .fixedSize(horizontal: true, vertical: false)
-                        .layoutPriority(1)
-                    timeStat
+                VStack(alignment: .trailing, spacing: Spacing.lg) {
+                    avgStat
+                    maxStat
                 }
             }
-            .padding(Spacing.sm)
-            .frame(maxHeight: .infinity)
-            .overlay(alignment: .topLeading) {
-                sourceBadge
-                    .padding(.top, Spacing.sm)
-                    .padding(.leading, Spacing.sm)
+            Spacer(minLength: 0)
+            // Centred, so the ride-control buttons in the bottom corners don't cover it (#449).
+            // Distance must never truncate — it takes the width it needs and Time yields space first.
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xl) {
+                distanceStat
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
+                timeStat
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: Spacing.lg) {
-                avgStat
-                maxStat
-            }
-            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity)
+        }
+        .padding(Spacing.sm)
+        .frame(maxHeight: .infinity)
+        .overlay(alignment: .topLeading) {
+            sourceBadge
+                .padding(.top, Spacing.sm)
+                .padding(.leading, Spacing.sm)
         }
     }
 
@@ -120,6 +124,7 @@ struct SpeedWidget: View {
             if speed != nil {
                 Text(unit.speedLabel)
                     .font(.footnote)
+                    .dynamicTypeSize(...DynamicTypeSize.cyCaptionMax) // As HeroNumber's unit.
                     .textCase(.lowercase)
             }
         }
@@ -162,6 +167,8 @@ struct SpeedWidget: View {
         }
         return Text(label)
             .font(.caption2.weight(.bold))
+            // Stays badge-sized beside the 2×1's title and on the 2×2 hero's corner at any size (#499).
+            .dynamicTypeSize(...DynamicTypeSize.xLarge)
             .padding(.horizontal, Spacing.xs)
             .padding(.vertical, 2)
             .foregroundStyle(fg)
@@ -188,6 +195,8 @@ struct SpeedWidget: View {
     /// and time are spelled out: VoiceOver reads "1:02:33" digit by digit, and a symbol is a guess.
     var accessibilityValue: String {
         var parts = [speed.map(unit.spokenSpeed(fromMPS:)) ?? "No reading"]
+        // The ▲/▼ on the speed (#401).
+        if let trend = trend.spokenAgainstAverage { parts.append(trend) }
         if size != .oneByOne {
             parts += ["average \(displayAvg)", "maximum \(displayMax)"]
         }
@@ -222,26 +231,41 @@ struct SpeedWidget: View {
 // MARK: - Speed History Watermark Chart
 
 private struct SpeedHistoryChart: View {
-    let history: [Double]   // m/s
+    let history: [WatermarkPoint]   // m/s
+    let window: ClosedRange<Date>?
     let unit: UnitSystem
 
     var body: some View {
-        Chart(Array(history.enumerated()), id: \.offset) { index, mps in
-            let displaySpeed = unit.speed(fromMPS: mps)
-            AreaMark(
-                x: .value("t", index),
-                y: .value("speed", displaySpeed)
-            )
-            .foregroundStyle(Color.cyPrimary)
-            LineMark(
-                x: .value("t", index),
-                y: .value("speed", displaySpeed)
-            )
-            .foregroundStyle(Color.cyPrimary)
+        // One series per run, so a silence breaks the trace rather than being drawn across.
+        Chart {
+            ForEach(Array(history.enumerated()), id: \.offset) { _, point in
+                let displaySpeed = unit.speed(fromMPS: point.value)
+                AreaMark(
+                    x: .value("t", point.time),
+                    yStart: .value("base", 0),
+                    yEnd: .value("speed", displaySpeed),
+                    series: .value("run", point.run)
+                )
+                .foregroundStyle(Color.cyPrimary)
+                LineMark(
+                    x: .value("t", point.time),
+                    y: .value("speed", displaySpeed),
+                    series: .value("run", point.run)
+                )
+                .foregroundStyle(Color.cyPrimary)
+            }
+            ForEach(Array(history.lonePoints.enumerated()), id: \.offset) { _, point in
+                PointMark(x: .value("t", point.time), y: .value("speed", unit.speed(fromMPS: point.value)))
+                    .symbolSize(CGSize(width: Spacing.watermarkDot, height: Spacing.watermarkDot))
+                    .foregroundStyle(Color.cyPrimary)
+            }
         }
+        .chartXScale(domain: history.plotDomain(window))
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartLegend(.hidden)
+        // A lone reading's dot at the domain's edge would otherwise draw into the next cell.
+        .clipped()
     }
 }
 
@@ -266,10 +290,18 @@ extension Int {
 
 // MARK: - Previews
 
+private let previewWindow = SpeedSample.sampleHour.first!.time...SpeedSample.sampleHour.last!.time
+private let previewHistory = Watermark.points(SpeedSample.sampleHour, over: previewWindow, time: \.time, value: \.mps)
+/// A stop with the wheel sensor asleep and no GPS: 15 minutes without a reading.
+private let previewGapHistory = Watermark.points(
+    SpeedSample.sampleHour.filter { !(30..<45).contains(Int($0.time.timeIntervalSinceReferenceDate / 60)) },
+    over: previewWindow, time: \.time, value: \.mps
+)
+
 #Preview("2×2 — Active") {
     SpeedWidget(
         speed: 7.89,
-        speedHistory: stride(from: 4.0, to: 9.5, by: 0.15).map { $0 },
+        speedHistory: previewHistory,
         activeSpeedSource: .gps,
         distance: 12_300,
         elapsed: 2340,
@@ -299,7 +331,7 @@ extension Int {
 #Preview("2×1") {
     SpeedWidget(
         speed: 7.89,
-        speedHistory: stride(from: 4.0, to: 9.5, by: 0.3).map { $0 },
+        speedHistory: previewHistory,
         activeSpeedSource: .gps,
         distance: 12_300,
         elapsed: 2340,
@@ -329,13 +361,29 @@ extension Int {
 #Preview("Imperial") {
     SpeedWidget(
         speed: 7.89,
-        speedHistory: stride(from: 4.0, to: 9.5, by: 0.15).map { $0 },
+        speedHistory: previewHistory,
         activeSpeedSource: .gps,
         distance: 12_300,
         elapsed: 2340,
         averageSpeed: 7.89,
         maxSpeed: 9.47,
         unit: .imperial,
+        size: .twoByTwo
+    )
+    .frame(width: 393, height: 200)
+}
+
+#Preview("Sensor gap") {
+    SpeedWidget(
+        speed: 7.89,
+        speedHistory: previewGapHistory,
+        watermarkWindow: previewWindow,
+        activeSpeedSource: .bleWheel,
+        distance: 12_300,
+        elapsed: 2340,
+        averageSpeed: 7.89,
+        maxSpeed: 9.47,
+        unit: .metric,
         size: .twoByTwo
     )
     .frame(width: 393, height: 200)

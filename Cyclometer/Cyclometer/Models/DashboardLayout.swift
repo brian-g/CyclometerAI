@@ -378,14 +378,20 @@ extension DashboardLayout {
             WidgetPlacement(DistanceDashboardWidget.self, size: .oneByOne, row: 1, column: 1),
             WidgetPlacement(HeartRateDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
             WidgetPlacement(HRZonesDashboardWidget.self, size: .twoByOne, row: 3, column: 0),
+            WidgetPlacement(CaloriesDashboardWidget.self, size: .oneByOne, row: 4, column: 0),
         ]),
-        // Elevation (#387): page 3 has six cells free, one short.
+        // Elevation (#387): page 3 had six cells free, one short (five since W23, #465). W19 and
+        // W20 (#461) join it, and W21 (#462) and W22 (#463).
         DashboardPage(placements: [
             WidgetPlacement(ElevationDashboardWidget.self, size: .twoByOne, row: 0, column: 0),
             WidgetPlacement(RouteElevationDashboardWidget.self, size: .twoByOne, row: 1, column: 0),
             WidgetPlacement(AscentDashboardWidget.self, size: .oneByOne, row: 2, column: 0),
             WidgetPlacement(DescentDashboardWidget.self, size: .oneByOne, row: 2, column: 1),
             WidgetPlacement(GradeDashboardWidget.self, size: .oneByOne, row: 3, column: 0),
+            WidgetPlacement(DistanceRemainingDashboardWidget.self, size: .oneByOne, row: 3, column: 1),
+            WidgetPlacement(ETADashboardWidget.self, size: .oneByOne, row: 4, column: 0),
+            WidgetPlacement(SunsetDashboardWidget.self, size: .oneByOne, row: 4, column: 1),
+            WidgetPlacement(ClimbDashboardWidget.self, size: .twoByOne, row: 5, column: 0),
         ]),
     ])
 }

@@ -20,21 +20,36 @@ protocol DashboardWidget: View {
     static var supportedSizes: [WidgetSize] { get }
     /// The section of S08's picker (#142) this widget is listed under.
     static var category: WidgetCategory { get }
+    /// The sensor this widget reads, without which S08 doesn't list it (#517). `nil`, the
+    /// default, for a widget that works with the phone alone or with a source that has no
+    /// pairing record (Watch heart rate comes through HealthKit).
+    static var requiredSensor: SensorRole? { get }
 
     init(size: WidgetSize, store: StoreOf<ActiveRideFeature>)
 }
 
-/// S08's picker sections (#142), in the order it lists them. UX.md §S08 also names Weather and
-/// Force; they get a case when they get a widget.
-enum WidgetCategory: CaseIterable {
+/// S08's picker sections (#142, #517), in the order it lists them. A section with nothing to list
+/// isn't drawn, so Power and Weather stay hidden until they have widgets.
+///
+/// The raw value is saved in the rider's collapsed sections (#517). Never rename one: a saved
+/// name this build doesn't have reopens every section.
+enum WidgetCategory: String, Codable, CaseIterable, Sendable {
     case ride
     case heartRate
+    case power
+    case fitness
+    case elevation
+    case weather
     case route
 
     var title: String {
         switch self {
         case .ride: "Ride"
-        case .heartRate: "Heart Rate"
+        case .heartRate: "Heart"
+        case .power: "Power"
+        case .fitness: "Fitness"
+        case .elevation: "Elevation"
+        case .weather: "Weather"
         case .route: "Route"
         }
     }
@@ -59,6 +74,11 @@ enum DashboardWidgetCatalog {
         GradeDashboardWidget.self,
         ElevationDashboardWidget.self,
         RouteElevationDashboardWidget.self,
+        DistanceRemainingDashboardWidget.self,
+        ETADashboardWidget.self,
+        SunsetDashboardWidget.self,
+        ClimbDashboardWidget.self,
+        CaloriesDashboardWidget.self,
     ]
 
     private static let byID = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
@@ -67,6 +87,14 @@ enum DashboardWidgetCatalog {
 }
 
 extension DashboardWidget {
+    static var requiredSensor: SensorRole? { nil }
+
+    /// Whether S08 lists this widget for a rider with `pairedRoles` paired (#517). Only the
+    /// picker asks: a widget already on a page stays there when its sensor is unpaired.
+    static func isListed(pairedRoles: Set<SensorRole>) -> Bool {
+        requiredSensor.map(pairedRoles.contains) ?? true
+    }
+
     /// This widget at `size`, type-erased so a page can hold any mix of widgets.
     static func view(size: WidgetSize, store: StoreOf<ActiveRideFeature>) -> AnyView {
         AnyView(Self(size: size, store: store))

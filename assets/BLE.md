@@ -1029,6 +1029,11 @@ not play backgrounded. The resolution requires an M4 decision about the L2 categ
 no API to read the silent-switch position, so "respect the switch" and "play while backgrounded" cannot
 both be satisfied by category choice alone. **Handed to M4 (#33) as an open design question.**
 
+> **Resolved 2026-11-03.** Every tone plays on `.playback` with `.mixWithOthers` and rings through the
+> Silent switch (`Audio.md §AVAudioSession Configuration`). The `audio` key had been dropped from
+> `UIBackgroundModes` in #329, and that day's ride logged 42 radar tones refused while backgrounded
+> ("does not have background entitlement"); it is back.
+
 ### 13.3 Decisions
 
 **1. Adopt `bluetooth-central`. — Done, this issue.**
@@ -1168,6 +1173,10 @@ receive. The code is `Models/SensorHealth.swift` (`SensorHealthReport`, `SensorH
   so a sensor without `0x180F` is cleared by a clean ride. One that never shows up keeps its
   previous verdict, so a dead cell that never connects is not cleared.
 - It is surfaced on S05.1 (the next ride's Start sheet) and S10 (UX.md).
+- Mid-ride, `SensorHealthFeature` also keeps each role's live status (`.active`, HR: notifying), for
+  S05's Sensors button and sheet (#464, #466): a device is missing while any of its roles isn't
+  active, and low while connected once its ride minimum above is at or below 20%. Low latches for
+  the ride on that minimum, for the reason the verdict uses it.
 
 ---
 

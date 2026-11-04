@@ -2,24 +2,9 @@ import SwiftUI
 
 // MARK: - Cyclometer Typography
 // Numbers are set by `HeroNumber` (UI/Components/HeroNumber), and D-DIN Condensed by `AppFonts`.
-// This file holds the remaining fixed, non-numeric fonts.
+// This file holds the remaining fixed, non-numeric fonts, and the Dynamic Type cap for captions.
 
 extension Font {
-    // ── Map ─────────────────────────────────────────────────────────────────
-    /// Direction-of-travel arrows drawn along a route polyline (S19, S20, the live map).
-    ///
-    /// A system symbol weight rather than D-DIN: it sets an SF Symbol, not a number. Fixed rather
-    /// than Dynamic Type-scaled, because a map annotation is anchored to a point on the ground —
-    /// growing it only makes neighbouring arrows collide.
-    ///
-    /// Sized by the caller rather than fixed, because one size cannot be right at two zooms: the
-    /// map's own features shrink as the camera pulls back. The ramp is
-    /// `RouteDirectionMarkers.arrowPoints(forSpacingMeters:)`, which is where the numbers and the
-    /// reasoning live.
-    static func cyMapAnnotation(points: CGFloat) -> Font {
-        .system(size: points, weight: .bold)
-    }
-
     /// 64 pt SF Pro Rounded semibold — the turn overlay's arrow (Sketch "Sxx - Route overlay")
     static let cyTurnGlyph = Font.system(size: 64, weight: .semibold, design: .rounded)
     /// 40 pt SF Pro Rounded semibold — W9's arrow beside a medium hero number (#200). The overlay's
@@ -27,4 +12,10 @@ extension Font {
     static let cyTurnGlyphCompact = Font.system(size: 40, weight: .semibold, design: .rounded)
     /// 34 pt SF Pro regular — the turn overlay's instruction, under the arrow
     static let cyTurnInstruction = Font.system(size: 34)
+}
+
+extension DynamicTypeSize {
+    /// The largest size a dashboard caption grows to: a widget's title and empty-state text, a hero's
+    /// label and unit, a 1×1's symbol. Past it, accessibility sizes push them out of the cell (#499).
+    static let cyCaptionMax = DynamicTypeSize.xxxLarge
 }
