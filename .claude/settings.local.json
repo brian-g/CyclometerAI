@@ -35,7 +35,8 @@
     "anthropic-skills:pptx": "off"
   },
   "enabledPlugins": {
-    "cloudflare@cloudflare": false
+    "cloudflare@cloudflare": false,
+    "superpowers@claude-plugins-official": false
   },
   "spinnerTipsEnabled": false
 }
