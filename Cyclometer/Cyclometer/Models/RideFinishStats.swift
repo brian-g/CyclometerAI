@@ -24,17 +24,20 @@ struct RideFinishStats: Sendable, Equatable {
 
     /// The live ride's numbers: W14/W15's totals, and W23's series as the dashboard has it
     /// (`calories`) closed with the estimate W23 would make now, on the arguments its minute tick
-    /// passes. A series still empty — a resume whose rebuild hasn't landed — is rebuilt from the
-    /// track, as that rebuild would.
+    /// passes. The dashboard's series opens on the first minute. One that doesn't is waiting on a
+    /// rebuild still out at the finish: a resume's, or that of a fresh ride whose Health rider came
+    /// after its first minute, with a minute tick landed since. It is rebuilt from the track, as
+    /// that rebuild would be.
     init(elevation: ElevationTracker, calorieTrack: [TrackPointDTO], calories: [CaloriePoint],
          elapsedSeconds: Int, movingSeconds: Int, distanceMeters: Double, rider: RideEnergy.Rider?) {
         // No altitude at all leaves the range unset; the totals would read 0 m of climbing.
         let hasAltitude = elevation.highestMeters != nil
         ascentMeters = hasAltitude ? elevation.ascentMeters : nil
         descentMeters = hasAltitude ? elevation.descentMeters : nil
+        let isWhole = calories.first?.rideSeconds == CalorieSeries.intervalSeconds
         calorieSeries = rider.map {
             CalorieSeries.closing(
-                calories.isEmpty ? CalorieSeries.rebuild(track: calorieTrack, through: elapsedSeconds, rider: $0) : calories,
+                isWhole ? calories : CalorieSeries.rebuild(track: calorieTrack, through: elapsedSeconds, rider: $0),
                 track: calorieTrack, rideSeconds: elapsedSeconds, movingSeconds: movingSeconds,
                 distanceMeters: distanceMeters, rider: $0
             )

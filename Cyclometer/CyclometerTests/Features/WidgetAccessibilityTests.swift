@@ -305,9 +305,13 @@ struct RideDetailAccessibilityTests {
         }
         let metrics = try #require(state.heartRateMetrics)
 
-        let sheet = try Host(HeartRateList(metrics: metrics), height: 900)
-        let sheetLines = try sheet.readings()
-        sheet.tearDown()
+        // Torn down at the end of this scope, thrown or not, before S15's host acquires the switch.
+        let sheetLines: [String]
+        do {
+            let sheet = try Host(HeartRateList(metrics: metrics), height: 900)
+            defer { sheet.tearDown() }
+            sheetLines = try sheet.readings()
+        }
         let store = Store(initialState: state) { RideDetailFeature() } withDependencies: {
             $0.defaultFileStorage = storage
         }

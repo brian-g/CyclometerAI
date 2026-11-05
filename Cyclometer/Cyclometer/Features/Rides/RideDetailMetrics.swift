@@ -18,7 +18,10 @@ struct RideDetailTrack: Equatable, Sendable {
     var lowestMeters: Double?
     var steepestClimbPercent: Double?
     var steepestDescentPercent: Double?
+}
 
+// In an extension, so the struct keeps its memberwise initializer.
+extension RideDetailTrack {
     /// The series are `WatermarkSeed`'s, unwindowed; the elevation is `ElevationTracker`'s
     /// replay. The track doesn't record which source each altitude came from, so
     /// `altitudeSource` is the caller's guess, as the finish-stats backfill makes it.
@@ -35,20 +38,6 @@ struct RideDetailTrack: Equatable, Sendable {
         lowestMeters = elevation.lowestMeters
         steepestClimbPercent = elevation.steepestClimbPercent
         steepestDescentPercent = elevation.steepestDescentPercent
-    }
-
-    init(speed: [SpeedSample] = [], cadence: [CadenceSample] = [], heartRate: [HeartRateSample] = [],
-         altitude: [AltitudeSample] = [], secondsByBPM: [Int: Int] = [:], highestMeters: Double? = nil,
-         lowestMeters: Double? = nil, steepestClimbPercent: Double? = nil, steepestDescentPercent: Double? = nil) {
-        self.speed = speed
-        self.cadence = cadence
-        self.heartRate = heartRate
-        self.altitude = altitude
-        self.secondsByBPM = secondsByBPM
-        self.highestMeters = highestMeters
-        self.lowestMeters = lowestMeters
-        self.steepestClimbPercent = steepestClimbPercent
-        self.steepestDescentPercent = steepestDescentPercent
     }
 }
 

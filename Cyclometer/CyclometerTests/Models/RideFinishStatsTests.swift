@@ -260,4 +260,20 @@ struct RideFinishStatsTests {
         #expect(series.map(\.rideSeconds) == [60, 90])
         #expect(series.first == CalorieSeries.rebuild(track: track, through: 90, rider: rider).first)
     }
+
+    /// The rider came from Health after the first minute: its rebuild was still out at the finish,
+    /// but the next minute's tick had landed. The series doesn't open on the first minute, so it is
+    /// rebuilt from the track rather than stored without its opening minute.
+    @Test("a live series missing its opening minute is rebuilt from the track")
+    func partialLiveSeriesIsRebuilt() throws {
+        let track = Self.track(UUID())
+        let rider = RideEnergy.Rider(kilograms: 75, age: 45, sex: .male)
+        let tick = CaloriePoint(rideSeconds: 120, movingSeconds: 120, kilocalories: 29, method: .heartRate)
+        let live = RideFinishStats(elevation: ElevationTracker(), calorieTrack: track, calories: [tick],
+                                   elapsedSeconds: 125, movingSeconds: 121, distanceMeters: 840, rider: rider)
+
+        let series = try #require(live.calorieSeries)
+        #expect(series.map(\.rideSeconds) == [60, 120, 125])
+        #expect(Array(series.prefix(2)) == CalorieSeries.rebuild(track: track, through: 125, rider: rider))
+    }
 }
