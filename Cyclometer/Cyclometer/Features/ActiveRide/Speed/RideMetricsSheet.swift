@@ -112,57 +112,86 @@ struct RideMetricsSheet: View {
 struct RideMetricsList: View {
     let metrics: RideMetrics
 
-    private static let chartHeight: CGFloat = 140
-    private static let donutHeight: CGFloat = 120
-
     var body: some View {
-        let range = metrics.historyRange
-        // A one-bucket run is a single point, which a line can't draw.
-        let paceRuns = PaceTrace.runs(metrics.speedHistory, resolution: RideMetricsCharts.maxPlottedPoints)
-            .filter { $0.count > 1 }
         List {
             Section {
                 ReadingColumns { ReadingColumn("Distance", metrics.distance) }
             }
-            Section("Speed") {
-                if let range {
-                    RideSpeedChart(
-                        speedSamples: metrics.speedHistory,
-                        altitudeSamples: metrics.altitudeHistory,
-                        range: range,
-                        unit: metrics.unit
-                    )
-                    .frame(height: Self.chartHeight)
-                }
-                ReadingColumns {
-                    ReadingColumn("Current", metrics.currentSpeed)
-                    ReadingColumn("Average", metrics.averageSpeed)
-                    ReadingColumn("Max", metrics.maxSpeed)
-                }
+            RideSpeedSection(metrics: metrics)
+            RidePaceSection(metrics: metrics)
+            RideTimeSection(metrics: metrics)
+        }
+    }
+}
+
+/// The sheet's sections one by one, shared with S15, which shows them over the whole ride without
+/// the current readings (#536).
+enum RideMetricsSections {
+    static let chartHeight: CGFloat = 140
+    static let donutHeight: CGFloat = 120
+}
+
+struct RideSpeedSection: View {
+    let metrics: RideMetrics
+    var showsCurrent = true
+
+    var body: some View {
+        Section("Speed") {
+            if let range = metrics.historyRange {
+                RideSpeedChart(
+                    speedSamples: metrics.speedHistory,
+                    altitudeSamples: metrics.altitudeHistory,
+                    range: range,
+                    unit: metrics.unit
+                )
+                .frame(height: RideMetricsSections.chartHeight)
             }
-            Section("Pace") {
-                if let range, !paceRuns.isEmpty {
-                    RidePaceChart(runs: paceRuns, range: range, unit: metrics.unit)
-                        .frame(height: Self.chartHeight)
-                }
-                ReadingColumns {
-                    ReadingColumn("Current", metrics.currentPace)
-                    ReadingColumn("Average", metrics.averagePace)
-                }
+            ReadingColumns {
+                if showsCurrent { ReadingColumn("Current", metrics.currentSpeed) }
+                ReadingColumn("Average", metrics.averageSpeed)
+                ReadingColumn("Max", metrics.maxSpeed)
             }
-            Section("Time") {
-                if metrics.rideSeconds > 0 {
-                    DonutChart(slices: [
-                        DonutSlice(id: "moving", value: TimeInterval(metrics.movingSeconds), color: .cyPrimary),
-                        DonutSlice(id: "stopped", value: TimeInterval(metrics.stoppedSeconds), color: .cyTextTertiary)
-                    ])
-                    .frame(height: Self.donutHeight)
-                    .frame(maxWidth: .infinity)
-                }
-                ReadingColumns {
-                    ReadingColumn("Moving Time", metrics.movingTime)
-                    ReadingColumn("Ride Time", metrics.rideTime)
-                }
+        }
+    }
+}
+
+struct RidePaceSection: View {
+    let metrics: RideMetrics
+    var showsCurrent = true
+
+    var body: some View {
+        // A one-bucket run is a single point, which a line can't draw.
+        let paceRuns = PaceTrace.runs(metrics.speedHistory, resolution: RideMetricsCharts.maxPlottedPoints)
+            .filter { $0.count > 1 }
+        Section("Pace") {
+            if let range = metrics.historyRange, !paceRuns.isEmpty {
+                RidePaceChart(runs: paceRuns, range: range, unit: metrics.unit)
+                    .frame(height: RideMetricsSections.chartHeight)
+            }
+            ReadingColumns {
+                if showsCurrent { ReadingColumn("Current", metrics.currentPace) }
+                ReadingColumn("Average", metrics.averagePace)
+            }
+        }
+    }
+}
+
+struct RideTimeSection: View {
+    let metrics: RideMetrics
+
+    var body: some View {
+        Section("Time") {
+            if metrics.rideSeconds > 0 {
+                DonutChart(slices: [
+                    DonutSlice(id: "moving", value: TimeInterval(metrics.movingSeconds), color: .cyPrimary),
+                    DonutSlice(id: "stopped", value: TimeInterval(metrics.stoppedSeconds), color: .cyTextTertiary)
+                ])
+                .frame(height: RideMetricsSections.donutHeight)
+                .frame(maxWidth: .infinity)
+            }
+            ReadingColumns {
+                ReadingColumn("Moving Time", metrics.movingTime)
+                ReadingColumn("Ride Time", metrics.rideTime)
             }
         }
     }

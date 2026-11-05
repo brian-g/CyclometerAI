@@ -30,20 +30,7 @@ struct ElevationTracker: Equatable, Sendable {
         /// what the dashboard showed before the kill rather than dropping. The track doesn't record
         /// which source each altitude came from, so `source` is the caller's best guess at it.
         init?(savedTrack points: [TrackPointDTO], source: AltitudeResolver.Source) {
-            var tracker = ElevationTracker()
-            var distanceMeters = 0.0
-            var segmentIndex = points.first?.segmentIndex
-            for point in points {
-                if point.segmentIndex != segmentIndex {
-                    tracker.restart()
-                    segmentIndex = point.segmentIndex
-                }
-                // The distance `ActiveRideFeature` integrates each second, from the speed it recorded.
-                let speedMPS = point.speedMPS ?? 0
-                if speedMPS > ActiveRideFeature.stationarySpeedMPS { distanceMeters += speedMPS }
-                guard let altitude = point.altitudeMeters else { continue }
-                tracker.record(altitude: altitude, distanceMeters: distanceMeters, source: source)
-            }
+            let tracker = ElevationTracker.replaying(savedTrack: points, source: source)
             guard let highest = tracker.highestMeters, let lowest = tracker.lowestMeters else { return nil }
             self.init(ascentMeters: tracker.ascentMeters, descentMeters: tracker.descentMeters,
                       highestMeters: highest, lowestMeters: lowest)
@@ -55,6 +42,27 @@ struct ElevationTracker: Equatable, Sendable {
             self.highestMeters = highestMeters
             self.lowestMeters = lowestMeters
         }
+    }
+
+    /// The tracker as the live ride left it, from its saved track: `Seed`'s replay, and S15's
+    /// Elevation and Grade sections (#536). Pauses and stops break the profile as they did on the
+    /// ride; `source` is the caller's best guess, as for `Seed`.
+    static func replaying(savedTrack points: [TrackPointDTO], source: AltitudeResolver.Source) -> ElevationTracker {
+        var tracker = ElevationTracker()
+        var distanceMeters = 0.0
+        var segmentIndex = points.first?.segmentIndex
+        for point in points {
+            if point.segmentIndex != segmentIndex {
+                tracker.restart()
+                segmentIndex = point.segmentIndex
+            }
+            // The distance `ActiveRideFeature` integrates each second, from the speed it recorded.
+            let speedMPS = point.speedMPS ?? 0
+            if speedMPS > ActiveRideFeature.stationarySpeedMPS { distanceMeters += speedMPS }
+            guard let altitude = point.altitudeMeters else { continue }
+            tracker.record(altitude: altitude, distanceMeters: distanceMeters, source: source)
+        }
+        return tracker
     }
 
     private var gain = ElevationGainTally()

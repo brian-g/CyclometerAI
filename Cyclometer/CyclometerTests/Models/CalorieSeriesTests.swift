@@ -100,4 +100,47 @@ struct CalorieSeriesTests {
         #expect(CalorieSeries.kilocaloriesPerHour(300, movingSeconds: 1_800) == 600)
         #expect(CalorieSeries.kilocaloriesPerHour(0, movingSeconds: 0) == nil)
     }
+
+    // MARK: Finished ride (#536)
+
+    @Test("a finished series closes on the finish second with the estimate the ride stores")
+    func closingAppendsTheFinish() {
+        let points = track(seconds: 150)
+        let minutes = CalorieSeries.rebuild(track: points, through: 150, rider: Self.rider)
+        let closed = CalorieSeries.closing(minutes, track: points, rideSeconds: 150, movingSeconds: 150,
+                                           distanceMeters: Self.speed * 150, rider: Self.rider)
+
+        let total = RideEnergy.activeKilocalories(trackPoints: points, movingSeconds: 150,
+                                                  distanceMeters: Self.speed * 150, rider: Self.rider)
+        #expect(closed.map(\.rideSeconds) == [60, 120, 150])
+        #expect(Array(closed.prefix(2)) == minutes)
+        #expect(closed.last == CaloriePoint(rideSeconds: 150, movingSeconds: 150,
+                                            kilocalories: total.kilocalories, method: total.method))
+    }
+
+    @Test("a finish on a whole minute replaces that minute's point rather than repeating it")
+    func closingReplacesAPointOnTheFinishSecond() {
+        let points = track(seconds: 120)
+        let stale = [
+            CaloriePoint(rideSeconds: 60, movingSeconds: 60, kilocalories: 5, method: .physics),
+            CaloriePoint(rideSeconds: 120, movingSeconds: 119, kilocalories: 9, method: .physics)
+        ]
+        let closed = CalorieSeries.closing(stale, track: points, rideSeconds: 120, movingSeconds: 120,
+                                           distanceMeters: Self.speed * 120, rider: Self.rider)
+
+        #expect(closed.map(\.rideSeconds) == [60, 120])
+        #expect(closed.first == stale.first)
+        #expect(closed.last?.movingSeconds == 120)
+    }
+
+    @Test("a series survives its JSON round trip, model and all")
+    func codableRoundTrip() throws {
+        let series = [
+            CaloriePoint(rideSeconds: 60, movingSeconds: 58, kilocalories: 12.5, method: .heartRate),
+            CaloriePoint(rideSeconds: 120, movingSeconds: 117, kilocalories: 24, method: .physics),
+            CaloriePoint(rideSeconds: 125, movingSeconds: 117, kilocalories: 25, method: .met)
+        ]
+        let decoded = try JSONDecoder().decode([CaloriePoint].self, from: JSONEncoder().encode(series))
+        #expect(decoded == series)
+    }
 }

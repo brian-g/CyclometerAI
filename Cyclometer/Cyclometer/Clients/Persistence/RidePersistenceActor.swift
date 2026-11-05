@@ -277,7 +277,7 @@ actor RidePersistenceActor {
         return RideExportMetadata(title: ride.title, startedAt: ride.startedAt, routeName: ride.routeName)
     }
 
-    /// Read path for S15's Stats section (#251).
+    /// Read path for S15's Stats section (#251) and its metric sections (#536).
     func fetchRideStats(id: UUID) throws -> RideStats {
         let ride = try fetchRide(id: id)
         return RideStats(
@@ -292,7 +292,11 @@ actor RidePersistenceActor {
             maxHeartRateBPM: ride.maxHeartRateBPM,
             ascentMeters: ride.ascentMeters,
             descentMeters: ride.descentMeters,
-            activeKilocalories: ride.activeKilocalories
+            activeKilocalories: ride.activeKilocalories,
+            calorieSeries: ride.calorieSeries,
+            movingSeconds: ride.speedSampleCount,
+            cadenceSecondsByRPM: ride.cadenceSecondsByRPM,
+            cadenceCoastingSeconds: ride.cadenceCoastingSeconds
         )
     }
 
@@ -469,6 +473,7 @@ actor RidePersistenceActor {
         ride.ascentMeters = stats.ascentMeters
         ride.descentMeters = stats.descentMeters
         ride.activeKilocalories = stats.activeKilocalories
+        ride.calorieSeries = stats.calorieSeries
         ride.isFinishStatsOwed = false
     }
 }

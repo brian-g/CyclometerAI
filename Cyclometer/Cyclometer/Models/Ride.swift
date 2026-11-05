@@ -45,6 +45,11 @@ final class Ride {
     /// #460. A flag, since nil is itself a result. The declaration default is what migration gives
     /// those older rides; `finalizeRide` always sets it.
     var isFinishStatsOwed: Bool = true
+    /// W23's series behind S15's Active Calories (#536), stored with the total so a later change of
+    /// Health body weight doesn't redraw the chart either. Its last point is `activeKilocalories`;
+    /// nil exactly when that is. JSON, read and written through `calorieSeries`; optional, so
+    /// #186's mandatory-attribute backfill trap doesn't apply.
+    var calorieSeriesData: Data?
 
     // MARK: - Heart Rate
     var averageHeartRateBPM: Int?
@@ -182,6 +187,11 @@ final class Ride {
     var cadenceSecondsByRPM: [Int: TimeInterval] {
         get { cadenceSecondsByRPMData.flatMap { try? JSONDecoder().decode([Int: TimeInterval].self, from: $0) } ?? [:] }
         set { cadenceSecondsByRPMData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+    }
+
+    var calorieSeries: [CaloriePoint]? {
+        get { calorieSeriesData.flatMap { try? JSONDecoder().decode([CaloriePoint].self, from: $0) } }
+        set { calorieSeriesData = newValue.flatMap { try? JSONEncoder().encode($0) } }
     }
 
     /// Nested rather than top-level to avoid colliding with the TCA-side

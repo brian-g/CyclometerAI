@@ -127,50 +127,73 @@ struct HeartRateSheet: View {
 struct HeartRateList: View {
     let metrics: HeartRateMetrics
 
-    private static let chartHeight: CGFloat = 140
-    private static let donutHeight: CGFloat = 120
-
     var body: some View {
-        let zoneRows = metrics.zoneRows
         List {
             Section {
-                if let range = metrics.historyRange {
-                    HeartRateChart(
-                        history: metrics.history,
-                        altitudeHistory: metrics.altitudeHistory,
-                        zoneBounds: metrics.zoneBounds,
-                        range: range
-                    )
-                        .frame(height: Self.chartHeight)
-                }
-                ReadingColumns {
-                    ReadingColumn("Heart Rate", metrics.current)
-                    ReadingColumn("Zone", metrics.currentZone) {
-                        if metrics.currentZone != .missing {
-                            ZoneDot(color: .hrZone(metrics.zone))
-                        }
-                    }
-                }
-                ReadingColumns {
-                    ReadingColumn("Average", metrics.average)
-                    ReadingColumn("Max", metrics.maximum)
-                }
+                HeartRateReadings(metrics: metrics)
             } footer: {
                 if let footer = metrics.footer {
                     Text(footer)
                 }
             }
             Section("Time in Zones") {
-                if metrics.hasZoneTime {
-                    DonutChart(slices: zoneRows.map {
-                        DonutSlice(id: "\($0.zone)", value: TimeInterval($0.seconds), color: .hrZone($0.zone))
-                    })
-                    .frame(height: Self.donutHeight)
-                    .frame(maxWidth: .infinity)
-                }
-                ForEach(zoneRows) { ZoneTimeRow(color: .hrZone($0.zone), name: $0.name, range: $0.range, time: $0.time) }
+                HeartRateZoneRows(metrics: metrics)
             }
         }
+    }
+}
+
+/// The sheet's chart and readings, the rows of its first section: shared with S15, which shows
+/// them over the whole ride without the current readings (#536).
+struct HeartRateReadings: View {
+    let metrics: HeartRateMetrics
+    var showsCurrent = true
+
+    private static let chartHeight: CGFloat = 140
+
+    var body: some View {
+        if let range = metrics.historyRange {
+            HeartRateChart(
+                history: metrics.history,
+                altitudeHistory: metrics.altitudeHistory,
+                zoneBounds: metrics.zoneBounds,
+                range: range
+            )
+                .frame(height: Self.chartHeight)
+        }
+        if showsCurrent {
+            ReadingColumns {
+                ReadingColumn("Heart Rate", metrics.current)
+                ReadingColumn("Zone", metrics.currentZone) {
+                    if metrics.currentZone != .missing {
+                        ZoneDot(color: .hrZone(metrics.zone))
+                    }
+                }
+            }
+        }
+        ReadingColumns {
+            ReadingColumn("Average", metrics.average)
+            ReadingColumn("Max", metrics.maximum)
+        }
+    }
+}
+
+/// The sheet's time in each zone, the rows of its zones section: shared with S15 (#536).
+struct HeartRateZoneRows: View {
+    let metrics: HeartRateMetrics
+
+    private static let donutHeight: CGFloat = 120
+
+    var body: some View {
+        let zoneRows = metrics.zoneRows
+        if metrics.hasZoneTime {
+            DonutChart(slices: zoneRows.map {
+                DonutSlice(id: "\($0.zone)", value: TimeInterval($0.seconds), color: .hrZone($0.zone))
+            })
+            .frame(height: Self.donutHeight)
+            .frame(maxWidth: .infinity)
+        }
+        ForEach(zoneRows) { ZoneTimeRow(color: .hrZone($0.zone), name: $0.name, range: $0.range, time: $0.time) }
     }
 }
 

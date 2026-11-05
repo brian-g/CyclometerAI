@@ -1,6 +1,6 @@
 import Foundation
 
-/// S15's Stats section (#251): the aggregates `Ride` stores, read on the screen's own load
+/// S15's Stats section (#251) and metric sections (#536): the aggregates `Ride` stores, read on the screen's own load
 /// rather than carried on every S14 row in `RideListSummary`. Each optional is hidden on S15
 /// when nil (#460).
 struct RideStats: Sendable, Equatable {
@@ -26,4 +26,12 @@ struct RideStats: Sendable, Equatable {
     var descentMeters: Double? = nil
     /// Stored at the finish (#460): nil without a body mass in Health.
     var activeKilocalories: Double? = nil
+    /// W23's series, stored with the total (#536): nil exactly when it is.
+    var calorieSeries: [CaloriePoint]? = nil
+    /// W3's moving seconds (`Ride.speedSampleCount`), for the Time section (#536).
+    var movingSeconds: Int = 0
+    /// W5's time at each whole rpm and time coasting (#340), for the Cadence sections (#536);
+    /// zones resolve against S12's as they are now.
+    var cadenceSecondsByRPM: [Int: TimeInterval] = [:]
+    var cadenceCoastingSeconds: TimeInterval = 0
 }
