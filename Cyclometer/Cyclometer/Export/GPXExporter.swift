@@ -86,10 +86,10 @@ enum GPXExporter {
         var xml = """
         <?xml version="1.0" encoding="UTF-8"?>
         <gpx version="1.1"
-             creator="Cyclometer iOS"
+             creator="Acme Ride"
              xmlns="http://www.topografix.com/GPX/1/1"
              xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2"
-             xmlns:cyc="http://cyclometerapp.com/xmlschemas/VehicleEvent/v1"
+             xmlns:cyc="http://acmeapps.xyz/ride/xmlschemas/VehicleEvent/v1"
              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
              xsi:schemaLocation="
                http://www.topografix.com/GPX/1/1
@@ -132,7 +132,7 @@ enum GPXExporter {
         return xml
     }
 
-    /// Atomic write + filename convention (`Cyclometer_YYYY-MM-DD_HH-mm.gpx`, under
+    /// Atomic write + filename convention (`AcmeRide_YYYY-MM-DD_HH-mm.gpx`, under
     /// `Documents/Rides/`), with numeric-suffix collision avoidance for the rare case
     /// of two rides starting in the same calendar minute. `documentsDirectory` is
     /// overridable so tests never touch the real filesystem.
@@ -244,7 +244,7 @@ enum GPXExporter {
     private static func isoString(_ date: Date) -> String { isoFormatter.string(from: date) }
 
     private static func filenameStem(for date: Date) -> String {
-        "Cyclometer_\(filenameFormatter.string(from: date))"
+        "AcmeRide_\(filenameFormatter.string(from: date))"
     }
 
     /// Whether `name` is one `write` could have produced: the stem, then an optional collision
@@ -252,7 +252,7 @@ enum GPXExporter {
     /// `Rides` through Files (#346). A Files duplicate (`… 2.gpx`) or a rename keeping the
     /// prefix doesn't match, and so is never swept.
     static func isExportFileName(_ name: String) -> Bool {
-        name.wholeMatch(of: #/Cyclometer_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}(-\d+)?\.gpx/#) != nil
+        name.wholeMatch(of: #/AcmeRide_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}(-\d+)?\.gpx/#) != nil
     }
 
     /// `&` must be escaped first — escaping it after `<`/`>`/quotes would double-escape
@@ -274,7 +274,7 @@ enum GPXExporter {
 
     /// Device-local time zone — this filename is rider-facing (Files app), unlike the
     /// UTC `<time>` elements inside the document. Locale/calendar are pinned to
-    /// `en_US_POSIX`/Gregorian so the literal `Cyclometer_YYYY-MM-DD_HH-mm` convention
+    /// `en_US_POSIX`/Gregorian so the literal `AcmeRide_YYYY-MM-DD_HH-mm` convention
     /// holds regardless of the device's Region/Calendar setting — an unpinned
     /// `DateFormatter` renders in whatever calendar system (Japanese, Buddhist,
     /// Islamic, Hebrew...) and digit script the device is set to.

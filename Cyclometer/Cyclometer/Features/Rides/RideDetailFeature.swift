@@ -2,7 +2,7 @@ import ComposableArchitecture
 import Foundation
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.persistence)
 
 /// S15 — Ride Detail: one finished ride's track, elevation and heart rate, its stats, and the

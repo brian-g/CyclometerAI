@@ -2,7 +2,7 @@ import ComposableArchitecture
 @preconcurrency import CoreBluetooth
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 // Retrieve after an untethered ride: `log collect --device --last 1h` (notice level persists).
 private let logger = Logger.cyclometer(.ble)
 
@@ -163,7 +163,7 @@ private final class BLECentral: NSObject, CBCentralManagerDelegate, CBPeripheral
 
     static let shared = BLECentral()
 
-    private let bleQueue = DispatchQueue(label: "name.glaeske.cyclometer.ble", qos: .userInitiated)
+    private let bleQueue = DispatchQueue(label: "xyz.acmeapps.ride.ble", qos: .userInitiated)
 
     /// Created lazily, on the first scan/connect/discover/notify/read request or the
     /// first `requestAuthorization()` call — never merely by reading `authorization()`

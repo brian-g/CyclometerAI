@@ -80,7 +80,7 @@ private struct GeneralSection: View {
                 Toggle(isOn: $store.isLiveActivityEnabled.sending(\.liveActivityChanged)) {
                     Text("Show Live Activity")
                     if !store.isSystemLiveActivityEnabled {
-                        Text("Live Activities are turned off for Cyclometer in iOS Settings.")
+                        Text("Live Activities are turned off for Acme Ride in iOS Settings.")
                     }
                 }
                 .disabled(!store.isSystemLiveActivityEnabled)

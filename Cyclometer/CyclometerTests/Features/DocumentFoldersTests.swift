@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import Cyclometer
 
-/// `Documents/` is browsable as *On My iPhone → Cyclometer*, so what the app leaves there is
+/// `Documents/` is browsable as *On My iPhone → AcmeRide*, so what the app leaves there is
 /// something the rider sees.
 @Suite("Document folders")
 struct DocumentFoldersTests {
@@ -65,8 +65,8 @@ struct DocumentFoldersTests {
     func sweepRemovesOrphans() async throws {
         let root = try makeDocumentsDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let referenced = try touch("Rides/Cyclometer_2026-09-19_11-48.gpx", in: root)
-        let orphan = try touch("Rides/Cyclometer_2026-09-20_07-05-1.gpx", in: root)
+        let referenced = try touch("Rides/AcmeRide_2026-09-19_11-48.gpx", in: root)
+        let orphan = try touch("Rides/AcmeRide_2026-09-20_07-05-1.gpx", in: root)
 
         await DocumentFolders.sweepOrphanedRideExports(documentsDirectory: root) {
             [referenced.lastPathComponent]
@@ -84,13 +84,13 @@ struct DocumentFoldersTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let untouched = [
             try touch("Rides/Morning loop.gpx", in: root),
-            try touch("Rides/Cyclometer_notes.txt", in: root),
+            try touch("Rides/AcmeRide_notes.txt", in: root),
             // Files' Duplicate, and a rename that keeps the prefix: the rider's now.
-            try touch("Rides/Cyclometer_2026-09-19_11-48 2.gpx", in: root),
-            try touch("Rides/Cyclometer_2026-09-19 Hill climb.gpx", in: root),
-            try touch("Rides/Old/Cyclometer_2026-01-01_08-00.gpx", in: root),
-            try touch("Cyclometer_2026-09-19_11-48.gpx", in: root),
-            try touch("Inbox/Cyclometer_2026-09-19_11-48.gpx", in: root),
+            try touch("Rides/AcmeRide_2026-09-19_11-48 2.gpx", in: root),
+            try touch("Rides/AcmeRide_2026-09-19 Hill climb.gpx", in: root),
+            try touch("Rides/Old/AcmeRide_2026-01-01_08-00.gpx", in: root),
+            try touch("AcmeRide_2026-09-19_11-48.gpx", in: root),
+            try touch("Inbox/AcmeRide_2026-09-19_11-48.gpx", in: root),
             try touch("pending-ride-end.json", in: root),
         ]
 
@@ -106,7 +106,7 @@ struct DocumentFoldersTests {
     func sweepStopsWhenReferencesFail() async throws {
         let root = try makeDocumentsDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let export = try touch("Rides/Cyclometer_2026-09-19_11-48.gpx", in: root)
+        let export = try touch("Rides/AcmeRide_2026-09-19_11-48.gpx", in: root)
 
         await DocumentFolders.sweepOrphanedRideExports(documentsDirectory: root) {
             throw PersistenceError.rideNotFound
@@ -172,7 +172,7 @@ struct DocumentFoldersTests {
     func exportIsNotAnInboxCopy() throws {
         let root = try makeDocumentsDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let export = root.appending(component: "Rides").appending(component: "Cyclometer_2026-09-19_11-48.gpx")
+        let export = root.appending(component: "Rides").appending(component: "AcmeRide_2026-09-19_11-48.gpx")
 
         #expect(DocumentFolders.isInboxCopy(export, documentsDirectory: root) == false)
     }

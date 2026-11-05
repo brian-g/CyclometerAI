@@ -393,7 +393,7 @@ struct RoutesFeature {
                 // has no such gate, and dropping it silently reads as the app losing the file.
                 guard !state.isImporting else {
                     state.alert = Self.alert("Still Importing",
-                                             "Cyclometer is finishing the last route. Try this one again in a moment.")
+                                             "Acme Ride is finishing the last route. Try this one again in a moment.")
                     return .none
                 }
                 state.isImporting = true

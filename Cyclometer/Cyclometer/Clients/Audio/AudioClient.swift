@@ -2,7 +2,7 @@ import ComposableArchitecture
 import AVFoundation
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.audio)
 
 /// TCA dependency for the app's synthesized tones (per Audio.md spec): the three radar safety

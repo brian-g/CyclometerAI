@@ -159,6 +159,20 @@ jobs:
             exit 1
           fi
 
+      # MapWidget follows the rider's location. If the app has no location decision, MapKit
+      # loops between setting user tracking and checking authorization, so the first test
+      # that puts it in a window never returns. That was the 30-minute hang that once kept
+      # MapWidgetAccessibilityTests out of CI (#361). The grant only takes once the app is
+      # installed, and the permission is stored per bundle ID, so the reinstall by the test
+      # run keeps it. The ID comes from the built app, so a rename can't leave it behind.
+      - name: Grant the app location
+        run: |
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator/Cyclometer.app"
+          BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw "$APP/Info.plist")
+          xcrun simctl install "$SIM_UDID" "$APP"
+          xcrun simctl privacy "$SIM_UDID" grant location "$BUNDLE_ID"
+          echo "Granted location to $BUNDLE_ID"
+
       # -parallel-testing-enabled NO: xcodebuild otherwise clones the simulator to
       # split the suite across destinations, and that bought us two recurring problems
       # for no speedup. First, clone launch is itself flaky — the failures on
@@ -184,10 +198,8 @@ jobs:
       # day one. Running them in CI needs its own issue — record-on-CI or a
       # per-pixel tolerance. They all pass locally.
       #
-      # MapWidgetAccessibilityTests is skipped for a different reason: it puts a live
-      # MapKit view in a window, and on the runner that never returned, so the job sat
-      # until its 30-minute timeout (#361, 2026-10-03). It passes locally. The same
-      # checks run here on the pure-SwiftUI widgets in WidgetAccessibilityTests.
+      # MapWidgetAccessibilityTests runs: it needs the location grant from "Grant the app
+      # location", and without one it fails at once rather than hanging.
       - name: Run unit tests
         working-directory: Cyclometer
         run: |
@@ -230,8 +242,7 @@ jobs:
             -skip-testing:CyclometerTests/ClimbWidgetSnapshotTests \
             -skip-testing:CyclometerTests/CaloriesSheetSnapshotTests \
             -skip-testing:CyclometerTests/SensorsButtonSnapshotTests \
-            -skip-testing:CyclometerTests/SensorsSheetSnapshotTests \
-            -skip-testing:CyclometerTests/MapWidgetAccessibilityTests
+            -skip-testing:CyclometerTests/SensorsSheetSnapshotTests
 
       - name: Summarize test failures
         if: failure()

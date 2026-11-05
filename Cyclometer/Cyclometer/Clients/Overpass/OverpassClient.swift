@@ -2,7 +2,7 @@ import ComposableArchitecture
 import Foundation
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.network)
 
 /// TCA dependency for the OpenStreetMap Overpass API, which is where a route's surface comes
@@ -96,7 +96,7 @@ extension OverpassClient: DependencyKey {
 
     private static var userAgent: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-        return "Cyclometer/\(version) (iOS; route surface lookup)"
+        return "AcmeRide/\(version) (iOS; route surface lookup)"
     }
 
     // MARK: - Response

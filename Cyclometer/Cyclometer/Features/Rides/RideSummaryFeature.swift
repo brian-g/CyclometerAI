@@ -2,7 +2,7 @@ import ComposableArchitecture
 import Foundation
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.persistence)
 
 /// S10 — Ride Summary: the ride that just ended, presented by `AppFeature` on Finish (#249).
@@ -321,7 +321,7 @@ struct RideSummaryFeature {
         ButtonState(role: .destructive, action: .confirmDelete) { TextState("Delete") }
         ButtonState(role: .cancel) { TextState("Cancel") }
     } message: {
-        TextState("It will be removed from Cyclometer and Apple Health. This can't be undone.")
+        TextState("It will be removed from Acme Ride and Apple Health. This can't be undone.")
     }
 
     private static func clearUnsavedTrack(_ rideId: UUID) {

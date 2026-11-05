@@ -2,7 +2,7 @@ import Foundation
 @testable import Cyclometer
 
 /// The stop that auto-pause slept through, from the ride of 2026-09-20 10:45 EDT
-/// (`Cyclometer_2026-09-20_10-45.gpx`, #262).
+/// (`AcmeRide_2026-09-20_10-45.gpx`, #262).
 ///
 /// 15:07:00Z–15:13:02Z: the rider comes to a halt, waits, shuffles forward twice, and
 /// finally gives up and taps Pause by hand at 15:13:02 — which is where the track's
