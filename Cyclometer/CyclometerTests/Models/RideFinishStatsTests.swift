@@ -63,13 +63,20 @@ struct RideFinishStatsTests {
         #expect(first == 1)
         let seed = try #require(ElevationTracker.Seed(savedTrack: track, source: .barometric))
         let rider = try #require(RideEnergy.Rider(kilograms: 75, dateOfBirth: dateOfBirth, sex: .male, on: Self.start))
-        #expect(stored.value[ride.rideId] == RideFinishStats(
-            ascentMeters: seed.ascentMeters,
-            descentMeters: seed.descentMeters,
-            activeKilocalories: RideEnergy.activeKilocalories(
-                trackPoints: track, movingSeconds: 120, distanceMeters: 840, rider: rider
-            ).kilocalories
-        ))
+        let total = RideEnergy.activeKilocalories(
+            trackPoints: track, movingSeconds: 120, distanceMeters: 840, rider: rider
+        ).kilocalories
+        let stats = try #require(stored.value[ride.rideId])
+        #expect(stats.ascentMeters == seed.ascentMeters)
+        #expect(stats.descentMeters == seed.descentMeters)
+        #expect(stats.activeKilocalories == total)
+        // W23's rebuild, minute by minute (#536), closing on the stored total: two whole minutes,
+        // the second of them the finish second.
+        let series = try #require(stats.calorieSeries)
+        #expect(series.map(\.rideSeconds) == [60, 120])
+        #expect(series.first == CalorieSeries.rebuild(track: track, through: 120, rider: rider).first)
+        #expect(series.last?.kilocalories == total)
+        #expect(series.last?.movingSeconds == 120)
 
         // Settled: a second run finds nothing owed.
         let second = await withDependencies {
@@ -97,6 +104,7 @@ struct RideFinishStatsTests {
         }
 
         #expect(stored.value[ride.rideId] == RideFinishStats(ascentMeters: nil, descentMeters: nil, activeKilocalories: nil))
+        #expect(stored.value[ride.rideId]?.calorieSeries == nil)
         #expect(owed.value.isEmpty)
     }
 
@@ -152,8 +160,8 @@ struct RideFinishStatsTests {
         for (second, point) in track.enumerated() {
             tracker.record(altitude: point.altitudeMeters ?? 0, distanceMeters: Double(second) * 7, source: .barometric)
         }
-        let live = RideFinishStats(elevation: tracker, calorieTrack: track, elapsedSeconds: 120,
-                                   distanceMeters: 840, rider: rider)
+        let live = RideFinishStats(elevation: tracker, calorieTrack: track, calories: [], elapsedSeconds: 120,
+                                   movingSeconds: 120, distanceMeters: 840, rider: rider)
 
         let written = LockIsolated<RideWorkout?>(nil)
         try await withDependencies {
@@ -171,14 +179,19 @@ struct RideFinishStatsTests {
         #expect(live.activeKilocalories == written.value?.activeEnergyKilocalories)
     }
 
-    @Test("a later change of Health body weight doesn't move a finished ride's calories")
+    @Test("a later change of Health body weight doesn't move a finished ride's calories or their chart")
     func laterWeightChangeKeepsCalories() async throws {
         let (client, _) = PersistenceClientTests.makeLiveClient()
         let rideId = UUID()
         try await client.createRide(rideId, Self.start, nil)
         var summary = RideSummaryUpdate(rideId: rideId, durationSeconds: 120, distanceMeters: 840,
                                         averageSpeedMPS: 7, maxSpeedMPS: 7)
-        summary.finish = RideFinishStats(ascentMeters: 60, descentMeters: 0, activeKilocalories: 31)
+        let series = [
+            CaloriePoint(rideSeconds: 60, movingSeconds: 60, kilocalories: 15, method: .heartRate),
+            CaloriePoint(rideSeconds: 120, movingSeconds: 118, kilocalories: 31, method: .heartRate)
+        ]
+        summary.finish = RideFinishStats(ascentMeters: 60, descentMeters: 0, activeKilocalories: 31,
+                                         calorieSeries: series)
         try await client.finalizeRide(rideId, Self.start.addingTimeInterval(180), summary, nil)
 
         await withDependencies {
@@ -188,7 +201,9 @@ struct RideFinishStatsTests {
             await RideFinishStats.backfill()
         }
 
-        #expect(try await client.fetchRideStats(rideId).activeKilocalories == 31)
+        let stats = try await client.fetchRideStats(rideId)
+        #expect(stats.activeKilocalories == 31)
+        #expect(stats.calorieSeries == series)
     }
 
     /// The tracker's totals as W14/W15 show them; no altitude at all is no data, not 0 m.
@@ -198,15 +213,67 @@ struct RideFinishStatsTests {
         tracker.record(altitude: 260, distanceMeters: 0, source: .barometric)
         tracker.record(altitude: 270, distanceMeters: 100, source: .barometric)
         tracker.record(altitude: 262, distanceMeters: 200, source: .barometric)
-        let live = RideFinishStats(elevation: tracker, calorieTrack: [], elapsedSeconds: 60,
-                                   distanceMeters: 200, rider: nil)
+        let live = RideFinishStats(elevation: tracker, calorieTrack: [], calories: [], elapsedSeconds: 60,
+                                   movingSeconds: 60, distanceMeters: 200, rider: nil)
         #expect(live.ascentMeters == tracker.ascentMeters)
         #expect(live.descentMeters == tracker.descentMeters)
         #expect(live.activeKilocalories == nil)
 
-        let none = RideFinishStats(elevation: ElevationTracker(), calorieTrack: [], elapsedSeconds: 60,
-                                   distanceMeters: 200, rider: nil)
+        let none = RideFinishStats(elevation: ElevationTracker(), calorieTrack: [], calories: [], elapsedSeconds: 60,
+                                   movingSeconds: 60, distanceMeters: 200, rider: nil)
         #expect(none.ascentMeters == nil)
         #expect(none.descentMeters == nil)
+    }
+
+    /// #536: what W23's sheet showed at the finish, closed on the second the ride ended with the
+    /// estimate #460 stores, so the chart ends on the Summary's number.
+    @Test("the live series is the dashboard's, closed on the finish second with the stored total")
+    func liveSeriesIsTheDashboards() throws {
+        let track = Self.track(UUID())
+        let rider = RideEnergy.Rider(kilograms: 75, age: 45, sex: .male)
+        let dashboard = [
+            CaloriePoint(rideSeconds: 60, movingSeconds: 60, kilocalories: 14, method: .heartRate),
+            CaloriePoint(rideSeconds: 120, movingSeconds: 120, kilocalories: 29, method: .heartRate)
+        ]
+        let live = RideFinishStats(elevation: ElevationTracker(), calorieTrack: track, calories: dashboard,
+                                   elapsedSeconds: 125, movingSeconds: 121, distanceMeters: 840, rider: rider)
+
+        let total = RideEnergy.activeKilocalories(trackPoints: track, movingSeconds: 125,
+                                                  distanceMeters: 840, rider: rider)
+        let series = try #require(live.calorieSeries)
+        #expect(Array(series.prefix(2)) == dashboard)
+        #expect(series.last == CaloriePoint(rideSeconds: 125, movingSeconds: 121,
+                                            kilocalories: total.kilocalories, method: total.method))
+        #expect(live.activeKilocalories == series.last?.kilocalories)
+    }
+
+    /// A resumed ride whose rebuild was still out at the finish has no series yet: it is rebuilt
+    /// from the track, as that rebuild would have.
+    @Test("an empty live series is rebuilt from the track")
+    func emptyLiveSeriesIsRebuilt() throws {
+        let track = Self.track(UUID())
+        let rider = RideEnergy.Rider(kilograms: 75, age: 45, sex: .male)
+        let live = RideFinishStats(elevation: ElevationTracker(), calorieTrack: track, calories: [],
+                                   elapsedSeconds: 90, movingSeconds: 90, distanceMeters: 630, rider: rider)
+
+        let series = try #require(live.calorieSeries)
+        #expect(series.map(\.rideSeconds) == [60, 90])
+        #expect(series.first == CalorieSeries.rebuild(track: track, through: 90, rider: rider).first)
+    }
+
+    /// The rider came from Health after the first minute: its rebuild was still out at the finish,
+    /// but the next minute's tick had landed. The series doesn't open on the first minute, so it is
+    /// rebuilt from the track rather than stored without its opening minute.
+    @Test("a live series missing its opening minute is rebuilt from the track")
+    func partialLiveSeriesIsRebuilt() throws {
+        let track = Self.track(UUID())
+        let rider = RideEnergy.Rider(kilograms: 75, age: 45, sex: .male)
+        let tick = CaloriePoint(rideSeconds: 120, movingSeconds: 120, kilocalories: 29, method: .heartRate)
+        let live = RideFinishStats(elevation: ElevationTracker(), calorieTrack: track, calories: [tick],
+                                   elapsedSeconds: 125, movingSeconds: 121, distanceMeters: 840, rider: rider)
+
+        let series = try #require(live.calorieSeries)
+        #expect(series.map(\.rideSeconds) == [60, 120, 125])
+        #expect(Array(series.prefix(2)) == CalorieSeries.rebuild(track: track, through: 125, rider: rider))
     }
 }

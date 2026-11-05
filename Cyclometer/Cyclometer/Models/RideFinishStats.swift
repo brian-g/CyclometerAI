@@ -15,44 +15,62 @@ struct RideFinishStats: Sendable, Equatable {
     /// Nil for a ride with no altitude, as both are.
     var ascentMeters: Double?
     var descentMeters: Double?
-    /// Nil without a body mass in Health (#276).
+    /// Nil without a body mass in Health (#276). The last point of `calorieSeries` when the
+    /// numbers are worked out here.
     var activeKilocalories: Double?
+    /// W23's chart for S15 (#536): one point a minute and one on the finish second, nil exactly
+    /// when `activeKilocalories` is.
+    var calorieSeries: [CaloriePoint]?
 
-    /// The live ride's numbers: W14/W15's totals, and the estimate W23 would make now, on the
-    /// arguments its minute tick passes.
-    init(elevation: ElevationTracker, calorieTrack: [TrackPointDTO], elapsedSeconds: Int,
-         distanceMeters: Double, rider: RideEnergy.Rider?) {
+    /// The live ride's numbers: W14/W15's totals, and W23's series as the dashboard has it
+    /// (`calories`) closed with the estimate W23 would make now, on the arguments its minute tick
+    /// passes. The dashboard's series opens on the first minute. One that doesn't is waiting on a
+    /// rebuild still out at the finish: a resume's, or that of a fresh ride whose Health rider came
+    /// after its first minute, with a minute tick landed since. It is rebuilt from the track, as
+    /// that rebuild would be.
+    init(elevation: ElevationTracker, calorieTrack: [TrackPointDTO], calories: [CaloriePoint],
+         elapsedSeconds: Int, movingSeconds: Int, distanceMeters: Double, rider: RideEnergy.Rider?) {
         // No altitude at all leaves the range unset; the totals would read 0 m of climbing.
         let hasAltitude = elevation.highestMeters != nil
         ascentMeters = hasAltitude ? elevation.ascentMeters : nil
         descentMeters = hasAltitude ? elevation.descentMeters : nil
-        activeKilocalories = rider.map {
-            RideEnergy.activeKilocalories(
-                trackPoints: calorieTrack, movingSeconds: TimeInterval(elapsedSeconds),
+        let isWhole = calories.first?.rideSeconds == CalorieSeries.intervalSeconds
+        calorieSeries = rider.map {
+            CalorieSeries.closing(
+                isWhole ? calories : CalorieSeries.rebuild(track: calorieTrack, through: elapsedSeconds, rider: $0),
+                track: calorieTrack, rideSeconds: elapsedSeconds, movingSeconds: movingSeconds,
                 distanceMeters: distanceMeters, rider: $0
-            ).kilocalories
+            )
         }
+        activeKilocalories = calorieSeries?.last?.kilocalories
     }
 
     /// A finished ride's numbers from its saved track, as the Health workout reads it, replayed
-    /// through the live elevation rule (`ElevationTracker.Seed`).
+    /// through the live elevation rule (`ElevationTracker.Seed`) and W23's rebuild.
     init(savedTrack: [TrackPointDTO], altitudeSource: AltitudeResolver.Source,
          movingSeconds: TimeInterval, distanceMeters: Double, rider: RideEnergy.Rider?) {
         let seed = ElevationTracker.Seed(savedTrack: savedTrack, source: altitudeSource)
         ascentMeters = seed?.ascentMeters
         descentMeters = seed?.descentMeters
-        activeKilocalories = rider.map {
-            RideEnergy.activeKilocalories(
-                trackPoints: savedTrack, movingSeconds: movingSeconds,
+        let rideSeconds = Int(movingSeconds)
+        // W3's moving seconds, by the odometer rule `CalorieSeries.rebuild` replays.
+        let odometerSeconds = savedTrack.count(where: { ($0.speedMPS ?? 0) > ActiveRideFeature.stationarySpeedMPS })
+        calorieSeries = rider.map {
+            CalorieSeries.closing(
+                CalorieSeries.rebuild(track: savedTrack, through: rideSeconds, rider: $0),
+                track: savedTrack, rideSeconds: rideSeconds, movingSeconds: odometerSeconds,
                 distanceMeters: distanceMeters, rider: $0
-            ).kilocalories
+            )
         }
+        activeKilocalories = calorieSeries?.last?.kilocalories
     }
 
-    init(ascentMeters: Double?, descentMeters: Double?, activeKilocalories: Double?) {
+    init(ascentMeters: Double?, descentMeters: Double?, activeKilocalories: Double?,
+         calorieSeries: [CaloriePoint]? = nil) {
         self.ascentMeters = ascentMeters
         self.descentMeters = descentMeters
         self.activeKilocalories = activeKilocalories
+        self.calorieSeries = calorieSeries
     }
 }
 

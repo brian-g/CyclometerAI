@@ -2036,3 +2036,22 @@ gps-only re-recorded (new rows; cadence rows hidden without a sensor), verify ru
 - [x] Cause: the `xcode-27-arm64/20261104` runner image added iOS 27.2, and `resolve-simulator.sh` picked the newest runtime. On 27.2 the anti-aliased edges of arcs render differently: HR zone donuts and the Live Activity ring. That broke 8 snapshots (AddWidgetSheet catalog, 5 Dynamic Island, 2 Lock Screen route). #541's run used 27.1 on the older image and passed.
 - [x] Reproduced locally: same 8 fail on an iPhone 17 Pro on iOS 27.2, all 27 pass on 27.0.
 - [x] Fix: the resolver prefers `PREFERRED_RUNTIME` (27.0, the reference runtime) after the device name, then falls back to the newest. It also prints the chosen device's runtime.
+
+---
+
+## #536 — S15 whole-ride metric sections, with the calorie series stored at the finish
+
+Plan: `~/.claude/plans/typed-fluttering-kahn.md` (approved 2026-11-05).
+
+- [x] A. Calorie series: `CaloriePoint` Codable, `CalorieSeries.closing`, `RideFinishStats.calorieSeries` (live + backfill), `Ride.calorieSeriesData`, `write`, `RideStats` fields
+- [x] B. Builders: `RideDetailTrack`, `ElevationTracker.replaying`, unwindowed `WatermarkSeed`, one `wholeRide` builder per metrics type
+- [x] C. Shared section content views (`showsCurrent`), S15 sections in §S15 order, old Elevation/HR Profile sections removed
+- [x] D. Docs: DataModel.md §3.1/§9, UX.md §S15 "As built"
+- [x] Tests: CalorieSeries, RideFinishStats, PersistenceClient, schema migration, RideDetailMetrics, RideDetailFeature, a11y, snapshots
+- [x] Decisions (2026-11-05): 1 rides finished since #460 keep no series (no extra backfill); 2 Distance row dropped on S15; 3 zones resolve now; 4 live finish stores the dashboard's series + a closing point
+
+### Review
+
+Brian ran it in the app and verified it (2026-11-05). Targeted run: every builder, series, finish-stats, migration, persistence, feature and a11y test passed. The five sheet snapshot suites and AddWidgetSheet passed **without re-recording**, so splitting the sections out changed nothing on the dashboard sheets. S15 references were re-recorded (all-sensors, gps-only, on-route, deleted-route) and no-altitude was added, on a 4,800 pt canvas. Full `CyclometerTests`: 2,483 passed, 0 failed.
+- The first recording showed a calorie chart that dipped and then jumped. Cause: the fixture's summary said 4,712 s against a 1,800 s track. Minutes past the end of the track fell below the heart-rate model's 50% coverage, so they dropped to physics. The fixture now matches its track. A real ride's track covers its own recording time, so this was not an app bug.
+- Found, not fixed: the Cadence sheet's "Pedaling vs Coasting" row has no explicit VoiceOver label or value, both on the sheet and on S15.

@@ -2,7 +2,8 @@ import Foundation
 
 /// The ride's active-energy estimate after `rideSeconds` of recording time: one point a minute of
 /// W23's series, behind the Calories sheet's chart (#465).
-struct CaloriePoint: Equatable, Sendable {
+/// Codable since a finished ride stores its series (#536).
+struct CaloriePoint: Equatable, Sendable, Codable {
     var rideSeconds: Int
     /// W3's moving seconds by `rideSeconds`, so the sheet's average divides this point's energy by
     /// the moving time it covers, not by the moving time since.
@@ -87,6 +88,22 @@ enum CalorieSeries {
             base += span + 1
         }
         return offsets
+    }
+
+    /// A finished ride's series (#536): `series` with one closing point on the finish second, the
+    /// estimate #460 stores as the ride's total, so the chart ends on the Summary's number. Its
+    /// arguments are #460's: `rideSeconds` is the recording time `activeKilocalories` costs, and
+    /// `movingSeconds` W3's moving seconds by the finish, for the sheet's average. A point already
+    /// on the finish second is replaced by it rather than repeated.
+    static func closing(_ series: [CaloriePoint], track: [TrackPointDTO], rideSeconds: Int, movingSeconds: Int,
+                        distanceMeters: Double, rider: RideEnergy.Rider) -> [CaloriePoint] {
+        let estimate = RideEnergy.activeKilocalories(
+            trackPoints: track, movingSeconds: TimeInterval(rideSeconds),
+            distanceMeters: distanceMeters, rider: rider
+        )
+        let finish = CaloriePoint(rideSeconds: rideSeconds, movingSeconds: movingSeconds,
+                                  kilocalories: estimate.kilocalories, method: estimate.method)
+        return series.filter { $0.rideSeconds < rideSeconds } + [finish]
     }
 
     /// The average burn over W3's moving time (#465), or nil before the rider has moved.

@@ -335,8 +335,8 @@ struct RideSchemaMigrationTests {
     }
 
     /// #460's opposite of #277: a ride from before it has no finish stats, so it migrates owed them,
-    /// and is settled the first time the backfill stores them.
-    @Test("a ride that ended before #460 migrates owed its finish stats, once")
+    /// and is settled the first time the backfill stores them — its calorie series too (#536).
+    @Test("a ride that ended before #460 migrates owed its finish stats and calorie series, once")
     func legacyRideIsOwedFinishStats() async throws {
         try await withTemporaryStoreURL(prefix: "RideMigration") { url in
             let rideId = UUID()
@@ -348,19 +348,23 @@ struct RideSchemaMigrationTests {
             #expect(legacyRide.ascentMeters == nil)
             #expect(legacyRide.descentMeters == nil)
             #expect(legacyRide.activeKilocalories == nil)
+            #expect(legacyRide.calorieSeriesData == nil)
+            #expect(legacyRide.calorieSeries == nil)
             legacyRide.endedAt = legacyRide.startedAt.addingTimeInterval(4_212)
             try context.save()
 
             let actor = RidePersistenceActor(modelContainer: container)
             #expect(try await actor.ridesOwedFinishStats().map(\.rideId) == [rideId])
+            let series = [CaloriePoint(rideSeconds: 60, movingSeconds: 57, kilocalories: 11, method: .physics)]
             try await actor.saveFinishStats(id: rideId, stats: RideFinishStats(
-                ascentMeters: 412, descentMeters: 398, activeKilocalories: nil
+                ascentMeters: 412, descentMeters: 398, activeKilocalories: 11, calorieSeries: series
             ))
             #expect(try await actor.ridesOwedFinishStats().isEmpty)
             let stats = try await actor.fetchRideStats(id: rideId)
             #expect(stats.ascentMeters == 412)
             #expect(stats.descentMeters == 398)
-            #expect(stats.activeKilocalories == nil)
+            #expect(stats.activeKilocalories == 11)
+            #expect(stats.calorieSeries == series)
         }
     }
 

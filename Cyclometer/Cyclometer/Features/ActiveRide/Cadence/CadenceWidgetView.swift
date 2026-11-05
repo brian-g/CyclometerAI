@@ -358,39 +358,49 @@ struct CadenceList: View {
         List {
             // The chart and the readings it explains share one section, as the Heart rate sheet's do.
             Section {
-                if detail.cadenceSamples.count > 1 {
-                    CadenceDetailChart(
-                        cadenceSamples: detail.cadenceSamples,
-                        altitudeSamples: detail.altitudeSamples,
-                        zones: zones
-                    )
-                        .frame(height: Self.chartHeight)
-                }
-                ReadingColumns {
-                    ReadingColumn("Avg Cadence", Self.reading(averageCadence))
-                    ReadingColumn("Max Cadence", Self.reading(maxCadence))
-                }
-                pedalingVsCoastingRow
+                readings
             }
             Section("Time in Cadence Zones") {
-                if pedalingSeconds > 0 {
-                    DonutChart(slices: CadenceZone.allCases.map {
-                        DonutSlice(id: $0.displayName, value: zoneSeconds[$0] ?? 0, color: $0.color)
-                    })
-                    .frame(height: Self.donutHeight)
-                    .frame(maxWidth: .infinity)
-                }
-                ForEach(CadenceZone.allCases, id: \.self) { zone in
-                    ZoneTimeRow(
-                        color: zone.color,
-                        name: "Z\(zone.rawValue) \(zone.displayName)",
-                        range: range(of: zone),
-                        // Rounded once: the tally is fractional BLE intervals, and the shown time
-                        // rounds while `Int(_:)` would truncate the spoken one.
-                        time: .zoneTime(seconds: Int((zoneSeconds[zone] ?? 0).rounded()))
-                    )
-                }
+                zoneRows
             }
+        }
+    }
+
+    /// The rows of the first section, shared with S15 (#536). The sheet has no current reading.
+    @ViewBuilder var readings: some View {
+        if detail.cadenceSamples.count > 1 {
+            CadenceDetailChart(
+                cadenceSamples: detail.cadenceSamples,
+                altitudeSamples: detail.altitudeSamples,
+                zones: zones
+            )
+                .frame(height: Self.chartHeight)
+        }
+        ReadingColumns {
+            ReadingColumn("Avg Cadence", Self.reading(averageCadence))
+            ReadingColumn("Max Cadence", Self.reading(maxCadence))
+        }
+        pedalingVsCoastingRow
+    }
+
+    /// The rows of the zones section, shared with S15 (#536).
+    @ViewBuilder var zoneRows: some View {
+        if pedalingSeconds > 0 {
+            DonutChart(slices: CadenceZone.allCases.map {
+                DonutSlice(id: $0.displayName, value: zoneSeconds[$0] ?? 0, color: $0.color)
+            })
+            .frame(height: Self.donutHeight)
+            .frame(maxWidth: .infinity)
+        }
+        ForEach(CadenceZone.allCases, id: \.self) { zone in
+            ZoneTimeRow(
+                color: zone.color,
+                name: "Z\(zone.rawValue) \(zone.displayName)",
+                range: range(of: zone),
+                // Rounded once: the tally is fractional BLE intervals, and the shown time
+                // rounds while `Int(_:)` would truncate the spoken one.
+                time: .zoneTime(seconds: Int((zoneSeconds[zone] ?? 0).rounded()))
+            )
         }
     }
 
