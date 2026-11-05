@@ -574,18 +574,19 @@ struct AppFeature {
         }
     }
 
-    /// What a finished ride is owed after its finalize: its thumbnail (#177) and its Apple
-    /// Health workout (#277). Covers rides closed out here, which never reached
-    /// `ActiveRideFeature`'s Finish, and anything a past attempt failed to do. Tells the Rides
-    /// tab when a thumbnail landed, so rows already on screen go back for their image (#248).
+    /// What a finished ride is owed after its finalize: its thumbnail (#177), its Apple Health
+    /// workout (#277) and its finish stats (#460). Covers rides closed out here, which never
+    /// reached `ActiveRideFeature`'s Finish, and anything a past attempt failed to do. Tells the
+    /// Rides tab when a thumbnail landed, so rows already on screen go back for their image (#248).
     ///
-    /// Side by side: offline, the thumbnails wait on map tiles, and the workout needs none.
+    /// Side by side: offline, the thumbnails wait on map tiles, and the others need none.
     private static func backfillFinishedRides(send: Send<Action>) async {
         async let workouts = RideHealthWorkout.backfill()
+        async let finishStats = RideFinishStats.backfill()
         if await RideMapThumbnail.backfill() > 0 {
             await send(.rides(.mapThumbnailsCaptured))
         }
-        _ = await workouts
+        _ = await (workouts, finishStats)
     }
 
     /// Clears exports no ride references (#346). At launch, and only once the fetch has found no

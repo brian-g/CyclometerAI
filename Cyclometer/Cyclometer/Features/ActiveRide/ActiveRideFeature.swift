@@ -803,6 +803,7 @@ struct ActiveRideFeature {
                 let rideId = state.rideId
                 let endedAt = date.now
                 let finalSummary = makeRideSummaryUpdate(from: state)
+                let liveFinish = liveFinishStats(from: state)
                 // Not routed through `.send(.trackRecorder(.stopRecording))`: AppFeature
                 // nils `activeRide` on this exact same action (AppFeature.swift:195), and
                 // a `.send`-effect resolves in a later action-processing cycle — by then
@@ -875,8 +876,10 @@ struct ActiveRideFeature {
                             logger.error("GPX export failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — ride will end with no gpxFileURL")
                         }
 
+                        var summary = finalSummary
+                        summary.finish = liveFinish?()
                         do {
-                            try await persistenceClient.finalizeRide(rideId, endedAt, finalSummary, gpxURL)
+                            try await persistenceClient.finalizeRide(rideId, endedAt, summary, gpxURL)
                             // Only now is the ride durably over. Clearing earlier would
                             // discard the one record that survives this write failing.
                             rideEndIntentClient.clear()
@@ -1480,6 +1483,23 @@ struct ActiveRideFeature {
             routeProgressMeters: state.navigation.progressMeters,
             isRouteComplete: state.navigation.isRouteComplete
         )
+    }
+
+    /// S15's stats as the dashboard has them at the finish (#460), deferred to the effect since the
+    /// energy estimate runs over the whole track. Nil when the live state doesn't cover all of the
+    /// ride — a resume whose saved track hasn't come back or couldn't be read, or Health's rider
+    /// read still out — which would store a partial ride: `finalizeRide` leaves it owed instead.
+    private func liveFinishStats(from state: State) -> (@Sendable () -> RideFinishStats)? {
+        guard !state.isSavedTrackPending, !state.isSavedTrackMissing, state.energyRider != .loading else { return nil }
+        let elevation = state.elevation
+        let track = state.calorieTrack
+        let seconds = state.elapsedSeconds
+        let distance = state.distanceMeters
+        let rider = state.energyRider.rider
+        return {
+            RideFinishStats(elevation: elevation, calorieTrack: track, elapsedSeconds: seconds,
+                            distanceMeters: distance, rider: rider)
+        }
     }
 
     /// A hard radar unpair or reconnect timeout is data loss, not a

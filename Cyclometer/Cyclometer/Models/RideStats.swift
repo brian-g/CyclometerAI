@@ -1,7 +1,8 @@
 import Foundation
 
-/// S15's Stats section (#251): the aggregates `Ride` already stores, read on the screen's
-/// own load rather than carried on every S14 row in `RideListSummary`.
+/// S15's Stats section (#251): the aggregates `Ride` stores, read on the screen's own load
+/// rather than carried on every S14 row in `RideListSummary`. Each optional is hidden on S15
+/// when nil (#460).
 struct RideStats: Sendable, Equatable {
     var averageSpeedMPS: Double
     var maxSpeedMPS: Double
@@ -16,4 +17,13 @@ struct RideStats: Sendable, Equatable {
     /// The denormalized name of the route the ride followed, nil for a free ride — S10's Route
     /// row and default title (#249).
     var routeName: String? = nil
+    /// Nil when no heart rate was recorded (#460).
+    var averageHeartRateBPM: Int? = nil
+    var maxHeartRateBPM: Int? = nil
+    /// Stored at the finish (#460): nil for a ride with no altitude, and for one still waiting on
+    /// `RideFinishStats.backfill`.
+    var ascentMeters: Double? = nil
+    var descentMeters: Double? = nil
+    /// Stored at the finish (#460): nil without a body mass in Health.
+    var activeKilocalories: Double? = nil
 }

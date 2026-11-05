@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-11-03 (#517) — §3.6: `AppPreferences` gains `collapsedWidgetCategories`, the S08 picker sections the rider has collapsed.
+**Updated:** 2026-11-05 (#460) — §3.1: `Ride` gains `ascentMeters`, `descentMeters` and `activeKilocalories`, S15's Summary stored once at the finish so a ride's numbers never change afterwards, and `isFinishStatsOwed`, which marks a ride still to have them worked out from its saved track. This partly reverses #284 for elevation: what is stored is the finish's total, not a running value. §9 records the migration and the one-time backfill.
+**Previously:** 2026-11-03 (#517) — §3.6: `AppPreferences` gains `collapsedWidgetCategories`, the S08 picker sections the rider has collapsed.
 **Previously:** 2026-10-20 (#79) — §3.1: W5's four efficiency-zone columns are replaced by `cadenceSecondsByRPMData`, which holds seconds pedalling at each whole rpm. Cadence zones are now the rider's own, set in S12, so #340's "fixed thresholds" reason no longer holds. Like HR's zones (#284), they resolve at read time, so a zone change re-sorts time already recorded. §3.6: `AppPreferences` gains `cadenceZones`. §9 records the migration
 **Previously:** 2026-10-03 (#340) — §3.1: `Ride` gains five defaulted `TimeInterval` columns holding W5's time in each cadence zone and coasting time, written at every checkpoint and read back by `State(resuming:)`. They don't contradict #284: cadence zones are fixed rpm thresholds, so a stored tally cannot go stale. §9 records the migration
 **Previously:** 2026-09-26 (#284) — §3.1: `Ride` drops `elevationGainMeters`, `elevationDropMeters` and `hrZoneDurations`, which were declared but never written. S10 and S15 derive elevation and zone time from the saved track, and zones resolve at read time. §9 records the migration
@@ -121,11 +122,23 @@ final class Ride {
     var durationSeconds: TimeInterval          // Excludes paused intervals
     var averageSpeedMPS: Double
     var maxSpeedMPS: Double
-    // No stored elevation gain/drop or HR zone seconds (#284): S10 and S15 derive both from the
-    // saved track, and zones resolve at read time (§8), so a stored breakdown would go stale.
+    // No stored HR zone seconds (#284): zones resolve at read time (§8), so a stored breakdown
+    // would go stale. Elevation is stored again (#460), but only the finish's totals, below.
     // W5's cadence seconds and coasting seconds *are* stored (#340): written at every checkpoint
     // and at ride end, read back on resume. They are kept per whole rpm, not per zone (#79), so the
     // S12 cadence zones resolve at read time, as HR's do, and a stored tally can't go stale.
+
+    // MARK: - Finish Stats (#460)
+    // S15's Summary, written once by finalizeRide and never recounted, so a ride's numbers don't
+    // move afterwards — not even when the rider's Health body weight changes. A ride whose live
+    // state covered all of it stores the dashboard's own numbers: the ElevationTracker totals
+    // W14/W15 showed, and RideEnergy's estimate on the Health workout's inputs (W23's at the
+    // finish). Any other ride — closed out at launch, or resumed with its saved track unread —
+    // is marked owed, and RideFinishStats.backfill works them out from the saved track.
+    var ascentMeters: Double?                  // nil for a ride with no altitude
+    var descentMeters: Double?
+    var activeKilocalories: Double?            // nil without a body mass in Health (#276)
+    var isFinishStatsOwed: Bool = true         // a flag, since nil is itself a result
 
     // MARK: - Heart Rate
     var averageHeartRateBPM: Int?
@@ -1189,6 +1202,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 | 1.1.1 (MVP — #284) | Remove `Ride.elevationGainMeters`, `Ride.elevationDropMeters` and `Ride.hrZoneDurations`. They were never written: elevation comes from the saved track, and zones resolve at read time (§8). Inferred lightweight migration drops the columns, and a store that still carries them opens with its rides intact (`RideSchemaMigrationTests`) |
 | 1.1.2 (MVP — #340) | Add `Ride.cadenceGrindingSeconds`, `cadenceTransitionSeconds`, `cadenceOptimalSeconds`, `cadenceOverspinSeconds` and `cadenceCoastingSeconds`, each `TimeInterval = 0` at the declaration so inferred lightweight migration backfills older rides with 0 (#186). `RideSchemaMigrationTests` covers it |
 | 1.1.3 (MVP — #79) | Replace #340's four zone columns with `Ride.cadenceSecondsByRPMData: Data?`, which holds seconds pedalling at each whole rpm as JSON and is read through `cadenceSecondsByRPM`. It is optional, so #186's backfill trap doesn't apply. Inferred lightweight migration drops the old columns and adds the new one as nil. A ride resumed across the upgrade starts its per-rpm tally from zero and keeps its coasting time. `RideSchemaMigrationTests` covers a store that holds data in the old columns |
+| 1.1.4 (MVP — #460) | Add `Ride.ascentMeters`, `descentMeters` and `activeKilocalories`, all optional, and `isFinishStatsOwed: Bool = true` at the declaration, so inferred lightweight migration gives every older ride `true` (#186). `RideFinishStats.backfill` then works each one out once at launch: ascent and descent from the saved track through `ElevationTracker.Seed`, calories from the saved track and Health's body mass at that moment. `RideSchemaMigrationTests` covers an older store |
 | 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 

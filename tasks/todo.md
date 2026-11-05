@@ -2001,3 +2001,25 @@ xcodebuild reinstalling over the `simctl install`) keeps the grant: 3/3 pass. A 
 Rename follow-ups in the same branch: `CFBundleDisplayName` moved into Info.plist (generation is off), Overpass UA `AcmeRide/`,
 old subsystem in docs; 3 test expectations + the Settings Live Activities snapshot updated. Full `CyclometerTests` minus the Map suite:
 2157 passed, 3 failed (those 3, since fixed and rerun green: 29/29).
+
+---
+
+## #460 — Store ascent, descent and calories on the Ride; show them on S15
+
+Plan: `~/.claude/plans/squishy-cooking-wand.md` (approved 2026-11-05).
+
+- [x] `Ride`: `ascentMeters`, `descentMeters`, `activeKilocalories` (optional), `isFinishStatsOwed: Bool = true`
+- [x] `RideFinishStats` + `RideSummaryUpdate.finish` (finalize-only, `apply` ignores it)
+- [x] `finalizeRide` writes `finish` or marks the ride owed
+- [x] Live finish in `ActiveRideFeature` builds `finish` when live state covers the whole ride
+- [x] `RideFinishStats.backfill` from the saved track + Health rider; persistence surface; run from `backfillFinishedRides`
+- [x] `RideStats` + `fetchRideStats` carry HR, ascent, descent, kcal
+- [x] S15 Stats rows, hidden without data, spoken units; previews
+- [x] Docs: DataModel.md §3.1/§9, UX.md §S15, `ElevationTracker.Seed` doc
+- [x] Tests (plan §Tests 1–10)
+- [x] Decisions (2026-11-05): 1 keep Max HR beside Avg HR; 2 hide Avg/Max Cadence without a sensor too (gps-only snapshot moves); 3 Health workout keeps its own energy estimate
+
+### Review
+Brian ran it on device: check steps 1–4 fine. Targeted suites (RideFinishStats, PersistenceClient, RideSchemaMigration,
+ActiveRideFeatureStateMachine, RideDetailFeature, S15 rows, RideHealthWorkout): 128 passed. S15 snapshots: all-sensors and
+gps-only re-recorded (new rows; cadence rows hidden without a sensor), verify run 4/4. Full `CyclometerTests`: 2470 passed, 0 failed.

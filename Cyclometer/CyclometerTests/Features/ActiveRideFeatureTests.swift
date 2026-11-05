@@ -1832,6 +1832,99 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(finalizedRide.value?.3 == nil)
     }
 
+    // MARK: Finish stats (#460)
+
+    /// Two minutes up a steady 0.5 m/s climb at 7 m/s with a strap: altitude, heart rate, and a
+    /// track for the energy estimate.
+    private static func climbTrack(_ rideId: UUID, altitude: Bool = true) -> [TrackPointDTO] {
+        (0..<120).map { second in
+            TrackPointDTO(
+                rideId: rideId, timestamp: testDate.addingTimeInterval(Double(second)),
+                latitude: 43.07 + Double(second) * 0.00006, longitude: -89.4,
+                altitudeMeters: altitude ? 260 + Double(second) * 0.5 : nil,
+                horizontalAccuracyMeters: 5, speedMPS: 7, speedSource: .gps,
+                heartRateBPM: 150, heartRateSource: .bleHR
+            )
+        }
+    }
+
+    /// A paused ride as the live dashboard has it at the finish: the tracker fed the track's
+    /// altitudes, W23's track, and Health's rider.
+    private static func finishingState(_ rideId: UUID, altitude: Bool = true,
+                                       energyRider: EnergyRiderStatus) -> ActiveRideFeature.State {
+        var state = ActiveRideFeature.State(rideId: rideId, recordingState: .paused, distanceMeters: 840)
+        state.elapsedSeconds = 120
+        state.calorieTrack = climbTrack(rideId, altitude: altitude)
+        for (second, point) in state.calorieTrack.enumerated() {
+            guard let meters = point.altitudeMeters else { continue }
+            state.elevation.record(altitude: meters, distanceMeters: Double(second) * 7, source: .barometric)
+        }
+        state.energyRider = energyRider
+        return state
+    }
+
+    /// Finishes the ride and returns the summary `finalizeRide` was handed.
+    private func finish(_ state: ActiveRideFeature.State) async -> RideSummaryUpdate? {
+        let finalized = LockIsolated<RideSummaryUpdate?>(nil)
+        let store = TestStore(initialState: state) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = .constant(testDate)
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.permissionsClient = .mock(initial: [.locationWhenInUse: .granted])
+            $0.locationClient = LocationClient(
+                startUpdates: { AsyncStream { $0.finish() } }, stopUpdates: {}, currentCoordinate: { nil }
+            )
+            $0.persistenceClient = .mock(onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) })
+        }
+        store.exhaustivity = .off
+        await store.send(.finishTapped)
+        await store.send(.finishAlert(.presented(.confirmFinish)))
+        await store.finish()
+        return finalized.value
+    }
+
+    private static let rider = RideEnergy.Rider(kilograms: 75, age: 45, sex: .male)
+
+    @Test("Finish stores the dashboard's ascent and descent and W23's estimate on the ride (#460)")
+    func finishStoresLiveFinishStats() async throws {
+        let rideId = UUID()
+        let state = Self.finishingState(rideId, energyRider: .rider(Self.rider))
+        let finish = try #require(await finish(state)?.finish)
+
+        #expect(try #require(finish.ascentMeters) > 0)
+        #expect(finish.ascentMeters == state.elevation.ascentMeters)
+        #expect(finish.descentMeters == state.elevation.descentMeters)
+        // W23's minute-tick arguments: the live track, the recording seconds, the distance.
+        #expect(finish.activeKilocalories == RideEnergy.activeKilocalories(
+            trackPoints: state.calorieTrack, movingSeconds: 120, distanceMeters: 840, rider: Self.rider
+        ).kilocalories)
+    }
+
+    @Test("Finish with no altitude and no body mass stores nil for each, as a result rather than owed (#460)")
+    func finishStoresNilFinishStats() async throws {
+        let state = Self.finishingState(UUID(), altitude: false, energyRider: .noBodyMass)
+        let finish = try #require(await finish(state)?.finish)
+        #expect(finish == RideFinishStats(ascentMeters: nil, descentMeters: nil, activeKilocalories: nil))
+    }
+
+    @Test("Finish leaves the stats to the backfill while the live state doesn't cover the whole ride (#460)",
+          arguments: ["saved track pending", "saved track missing", "Health rider loading"])
+    func finishWithPartialLiveStateIsOwed(_ gap: String) async {
+        var state = Self.finishingState(UUID(), energyRider: .rider(Self.rider))
+        switch gap {
+        case "saved track pending": state.isSavedTrackPending = true
+        case "saved track missing": state.isSavedTrackMissing = true
+        default: state.energyRider = .loading
+        }
+        let summary = await finish(state)
+        #expect(summary != nil)
+        #expect(summary?.finish == nil)
+    }
+
     @Test("Alert cancel does not change recording state")
     func alertCancelKeepsPaused() async {
         let store = makeStore(recordingState: .paused)

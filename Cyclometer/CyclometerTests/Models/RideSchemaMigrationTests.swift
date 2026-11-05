@@ -334,6 +334,36 @@ struct RideSchemaMigrationTests {
         }
     }
 
+    /// #460's opposite of #277: a ride from before it has no finish stats, so it migrates owed them,
+    /// and is settled the first time the backfill stores them.
+    @Test("a ride that ended before #460 migrates owed its finish stats, once")
+    func legacyRideIsOwedFinishStats() async throws {
+        try await withTemporaryStoreURL(prefix: "RideMigration") { url in
+            let rideId = UUID()
+            try writeLegacyStore(at: url, rideId: rideId, startedAt: .now)
+            let container = try openStore(at: url)
+            let context = ModelContext(container)
+            let legacyRide = try #require(context.fetch(FetchDescriptor<Ride>()).first)
+            #expect(legacyRide.isFinishStatsOwed)
+            #expect(legacyRide.ascentMeters == nil)
+            #expect(legacyRide.descentMeters == nil)
+            #expect(legacyRide.activeKilocalories == nil)
+            legacyRide.endedAt = legacyRide.startedAt.addingTimeInterval(4_212)
+            try context.save()
+
+            let actor = RidePersistenceActor(modelContainer: container)
+            #expect(try await actor.ridesOwedFinishStats().map(\.rideId) == [rideId])
+            try await actor.saveFinishStats(id: rideId, stats: RideFinishStats(
+                ascentMeters: 412, descentMeters: 398, activeKilocalories: nil
+            ))
+            #expect(try await actor.ridesOwedFinishStats().isEmpty)
+            let stats = try await actor.fetchRideStats(id: rideId)
+            #expect(stats.ascentMeters == 412)
+            #expect(stats.descentMeters == 398)
+            #expect(stats.activeKilocalories == nil)
+        }
+    }
+
     @Test("a migrated store is writable, not just readable")
     func migratedStoreAcceptsWrites() throws {
         try withTemporaryStoreURL(prefix: "RideMigration") { url in

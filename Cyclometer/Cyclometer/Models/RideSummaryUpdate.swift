@@ -38,4 +38,8 @@ struct RideSummaryUpdate: Sendable, Equatable {
     var routeProgressMeters: Double? = nil
     /// Whether the ride had finished its route (#406), so a resumed ride doesn't start it again.
     var isRouteComplete: Bool = false
+    /// The ride's ascent, descent and active energy at the finish (#460). Only `finalizeRide` reads
+    /// it, as only `createRide` writes `route`: a checkpoint never stores these. Nil when the live
+    /// ride didn't cover all of it, which leaves the ride owed them from its saved track.
+    var finish: RideFinishStats? = nil
 }

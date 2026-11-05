@@ -16,8 +16,9 @@ struct ElevationTracker: Equatable, Sendable {
     /// `RouteGeometry.elevationNoiseThresholdMeters`, since its altitude is noisier still.
     static let barometricNoiseMeters = 1.0
 
-    /// What a resumed ride had before the kill, from its saved track: the `Ride` row deliberately
-    /// stores no elevation (#284).
+    /// What a resumed ride had before the kill, from its saved track: the `Ride` row stores
+    /// elevation only at the finish (#460), never at a checkpoint. Also how
+    /// `RideFinishStats.backfill` works out a finished ride's totals.
     struct Seed: Equatable, Sendable {
         var ascentMeters: Double
         var descentMeters: Double
