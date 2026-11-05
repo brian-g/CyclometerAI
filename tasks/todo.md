@@ -2028,3 +2028,11 @@ gps-only re-recorded (new rows; cadence rows hidden without a sensor), verify ru
   isn't owed forever. #4 fixed: a throwing body-mass read at ride start sets `isBodyMassReadFailed`, and the Finish leaves
   the ride owed instead of storing no calories (W23 unchanged). #6 (S15 hides rows while the backfill runs, no refresh)
   — monitor. #12 not a bug: ALL CAPS is for dashboard labels; CLAUDE.md now says so.
+
+---
+
+## CI snapshot failures since #542 (fixed on #460's branch)
+
+- [x] Cause: the `xcode-27-arm64/20261104` runner image added iOS 27.2, and `resolve-simulator.sh` picked the newest runtime. On 27.2 the anti-aliased edges of arcs render differently: HR zone donuts and the Live Activity ring. That broke 8 snapshots (AddWidgetSheet catalog, 5 Dynamic Island, 2 Lock Screen route). #541's run used 27.1 on the older image and passed.
+- [x] Reproduced locally: same 8 fail on an iPhone 17 Pro on iOS 27.2, all 27 pass on 27.0.
+- [x] Fix: the resolver prefers `PREFERRED_RUNTIME` (27.0, the reference runtime) after the device name, then falls back to the newest. It also prints the chosen device's runtime.
