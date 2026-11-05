@@ -2055,3 +2055,19 @@ Plan: `~/.claude/plans/typed-fluttering-kahn.md` (approved 2026-11-05).
 Brian ran it in the app and verified it (2026-11-05). Targeted run: every builder, series, finish-stats, migration, persistence, feature and a11y test passed. The five sheet snapshot suites and AddWidgetSheet passed **without re-recording**, so splitting the sections out changed nothing on the dashboard sheets. S15 references were re-recorded (all-sensors, gps-only, on-route, deleted-route) and no-altitude was added, on a 4,800 pt canvas. Full `CyclometerTests`: 2,483 passed, 0 failed.
 - The first recording showed a calorie chart that dipped and then jumped. Cause: the fixture's summary said 4,712 s against a 1,800 s track. Minutes past the end of the track fell below the heart-rate model's 50% coverage, so they dropped to physics. The fixture now matches its track. A real ride's track covers its own recording time, so this was not an app bug.
 - Found, not fixed: the Cadence sheet's "Pedaling vs Coasting" row has no explicit VoiceOver label or value, both on the sheet and on S15.
+
+---
+
+## Xcode Cloud versioning (option 1: repo owns the version, tag triggers the release)
+
+Decision (2026-11-05): build numbers come from Xcode Cloud (`CI_BUILD_NUMBER`, applied by App Store Connect on upload). `MARKETING_VERSION` lives once in the repo; a `v<version>` tag starts the Release workflow, and CI fails if the tag and the repo disagree.
+
+- [x] Move `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` from the 4 targets to the project-level build settings
+- [x] Verify: `-showBuildSettings` for all 4 targets matches the baseline
+- [x] `ci_scripts/ci_pre_xcodebuild.sh`: when `CI_TAG` is set, require `v<MARKETING_VERSION>`, and exactly one `MARKETING_VERSION` in the project (catches a per-target override from Xcode's General tab)
+- [x] Exercise the script locally: matching tag, mismatched tag, bad tag format, no tag, a re-added target override
+- [ ] Brian: Release workflow start condition = Tag Changes `v*`; App Store Connect next build number above any manual upload
+
+### Review
+
+`-showBuildSettings` (Release) is identical to the baseline for all 4 targets. A simulator build gives 1.0 (1) for both the app and the widget extension. The script passed with no tag (skips) and a matching tag, and failed with a clear message for: a mismatched tag, a tag without `v`, a `-beta` suffix, a 4-part version, a re-added target override, and a `[config=…]` override. The last one first exited silently under `pipefail`; fixed. Not run on Xcode Cloud yet.
