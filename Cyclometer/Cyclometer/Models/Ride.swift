@@ -27,8 +27,24 @@ final class Ride {
     var durationSeconds: TimeInterval          // Excludes paused intervals
     var averageSpeedMPS: Double
     var maxSpeedMPS: Double
-    // No stored elevation gain/drop or HR zone seconds (#284): S10 and S15 derive both from the
-    // saved track, and zones resolve at read time, so a stored breakdown would go stale.
+    // No stored HR zone seconds (#284): zones resolve at read time, so a stored breakdown would go
+    // stale. Elevation is stored again (#460), but only the finish's totals, below.
+
+    // MARK: - Finish Stats (#460)
+    // S15's Summary, written once when the ride ends and never recounted, so a ride's numbers don't
+    // move afterwards, not even when the rider's Health body weight changes. Ascent and descent are
+    // the `ElevationTracker` totals W14/W15 showed at the finish; nil for a ride with no altitude.
+    // Active energy is `RideEnergy`'s estimate on the Health workout's inputs; nil without a body
+    // mass in Health (#276). Optional, so #186's mandatory-attribute backfill trap doesn't apply.
+    var ascentMeters: Double?
+    var descentMeters: Double?
+    var activeKilocalories: Double?
+    /// Whether the three above are still to be worked out from the saved track by
+    /// `RideFinishStats.backfill`: a ride whose live state didn't cover all of it (a close-out at
+    /// launch, a resume whose saved track never came back), and every ride that ended before
+    /// #460. A flag, since nil is itself a result. The declaration default is what migration gives
+    /// those older rides; `finalizeRide` always sets it.
+    var isFinishStatsOwed: Bool = true
 
     // MARK: - Heart Rate
     var averageHeartRateBPM: Int?

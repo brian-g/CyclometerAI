@@ -62,13 +62,24 @@ struct RideDetailList<MapRow: View>: View {
                 }
             }
             Section("Stats") {
+                // A row is absent, not dashed, for a ride that recorded nothing for it (UX.md
+                // §S15, #460): no altitude, heart rate, cadence sensor or body mass in Health.
+                if let reading = store.stats?.ascent(unit) { statRow("Ascent", reading) }
+                if let reading = store.stats?.descent(unit) { statRow("Descent", reading) }
                 LabeledContent("Avg Speed (\(unit.speedLabel))",
                                value: speedText(store.stats?.averageSpeedMPS, unit))
                 LabeledContent("Max Speed (\(unit.speedLabel))",
                                value: speedText(store.stats?.maxSpeedMPS, unit))
-                // A dash, not 0, for a ride with no cadence sensor — 0 rpm is a real reading.
-                LabeledContent("Avg Cadence (rpm)", value: countText(store.stats?.averageCadenceRPM))
-                LabeledContent("Max Cadence (rpm)", value: countText(store.stats?.maxCadenceRPM))
+                if let reading = store.stats?.averageHeartRate { statRow("Avg Heart Rate", reading) }
+                if let reading = store.stats?.maxHeartRate { statRow("Max Heart Rate", reading) }
+                // Absent, not 0, for a ride with no cadence sensor — 0 rpm is a real reading.
+                if let rpm = store.stats?.averageCadenceRPM {
+                    LabeledContent("Avg Cadence (rpm)", value: rpm.formatted())
+                }
+                if let rpm = store.stats?.maxCadenceRPM {
+                    LabeledContent("Max Cadence (rpm)", value: rpm.formatted())
+                }
+                if let reading = store.stats?.calories { statRow("Calories", reading) }
                 // Absent with no radar paired, where "0 passes" would be a claim nobody measured.
                 if let passes = store.stats?.vehiclePassCount {
                     LabeledContent("Vehicle Passes", value: passes.formatted())
@@ -103,8 +114,43 @@ struct RideDetailList<MapRow: View>: View {
         return unit.speed(fromMPS: mps).formatted(.number.precision(.fractionLength(1)))
     }
 
-    private func countText(_ value: Int?) -> String {
-        value?.formatted() ?? "—"
+    /// A row in the section's "Label (unit)" style, read by VoiceOver as the label and the value
+    /// with its unit in words (#460), rather than the symbol in brackets.
+    private func statRow(_ title: String, _ reading: MetricReading) -> some View {
+        LabeledContent("\(title) (\(reading.unit))", value: reading.value)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityValue(reading.spoken)
+    }
+}
+
+/// S15's #460 rows, each nil when the ride recorded nothing for it, so the row is left out
+/// rather than dashed (UX.md §S15).
+extension RideStats {
+    func ascent(_ unit: UnitSystem) -> MetricReading? {
+        ascentMeters.map { Self.elevation($0, unit) }
+    }
+
+    func descent(_ unit: UnitSystem) -> MetricReading? {
+        descentMeters.map { Self.elevation($0, unit) }
+    }
+
+    var averageHeartRate: MetricReading? { averageHeartRateBPM.map(Self.heartRate) }
+    var maxHeartRate: MetricReading? { maxHeartRateBPM.map(Self.heartRate) }
+
+    var calories: MetricReading? {
+        activeKilocalories.map {
+            MetricReading(value: CaloriesMetrics.whole($0), unit: "kcal", spoken: CaloriesMetrics.spoken($0))
+        }
+    }
+
+    private static func elevation(_ meters: Double, _ unit: UnitSystem) -> MetricReading {
+        MetricReading(value: unit.elevation(fromMeters: meters).formatted(.number.precision(.fractionLength(0))),
+                      unit: unit.elevationLabel, spoken: unit.spokenElevation(fromMeters: meters))
+    }
+
+    private static func heartRate(_ bpm: Int) -> MetricReading {
+        MetricReading(value: bpm.formatted(), unit: "bpm", spoken: "\(bpm) beats per minute")
     }
 }
 
@@ -196,7 +242,7 @@ struct RideMapView: View {
 
 /// S15 already pushed on the Rides tab's own stack, as the app hosts it: the Route row is a
 /// `NavigationLink(state:)`, which reports "not presentable" in a plain `NavigationStack` (#426).
-private func rideDetailPreview(route: RouteSummary?) -> some View {
+private func rideDetailPreview(route: RouteSummary?, hasFinishStats: Bool = true) -> some View {
     let summary = RideListSummary(id: UUID(), title: "River Loop", startedAt: .now.addingTimeInterval(-86_400),
                                   distanceMeters: 36_050, durationSeconds: 4_712)
     return withDependencies {
@@ -212,7 +258,12 @@ private func rideDetailPreview(route: RouteSummary?) -> some View {
                 rideStats: [summary.id: RideStats(averageSpeedMPS: 7.6, maxSpeedMPS: 12.4,
                                                   averageCadenceRPM: 88, maxCadenceRPM: 109,
                                                   vehiclePassCount: 1,
-                                                  routeId: route?.id, routeName: route?.name)],
+                                                  routeId: route?.id, routeName: route?.name,
+                                                  averageHeartRateBPM: hasFinishStats ? 142 : nil,
+                                                  maxHeartRateBPM: hasFinishStats ? 171 : nil,
+                                                  ascentMeters: hasFinishStats ? 412 : nil,
+                                                  descentMeters: hasFinishStats ? 398 : nil,
+                                                  activeKilocalories: hasFinishStats ? 845 : nil)],
                 vehiclePassEvents: [summary.id: [RideDetailPreview.pass(rideId: summary.id)]],
                 rides: [summary],
                 routes: route.map { [$0] } ?? [],
@@ -224,6 +275,12 @@ private func rideDetailPreview(route: RouteSummary?) -> some View {
 
 #Preview("Ride Detail") {
     rideDetailPreview(route: nil)
+}
+
+/// No altitude, heart rate or Health body mass: Ascent, Descent, the HR rows and Calories are
+/// absent rather than dashed (#460).
+#Preview("Ride Detail — no finish stats") {
+    rideDetailPreview(route: nil, hasFinishStats: false)
 }
 
 /// Ridden on "Summit Climb": the Route section links to its S20 (#426).

@@ -1409,7 +1409,7 @@ Sections appear on screen in the order listed below.
 - Weather summary (not implemented until M10.6): The weather summary should list the temperature range of the ride, the humidity range, and the wind over the route ridden. It might be appropriate to summarize the weather with iOS foundation models. The weather should be captured at intervals during the ride. A capture that fails, such as with no data connection, is skipped silently: the ride never waits on it and the rider is never told.
 - Summary: This shows some at a glance metrics in hero numbers. Ascent, Descent, Average Speed, Average Heart Rate, Average Cadence, Average Power (hidden until Phase 3), Calories.
   - Each value is hidden when the ride recorded no data for it (no "—").
-  - Ascent and Descent are stored on the `Ride` at the finish, not recounted from the track on open. Today the `Ride` stores no elevation (#284 removed the fields); storing it is a separate change.
+  - Ascent and Descent are stored on the `Ride` at the finish, not recounted from the track on open (#460).
   - Calories are the active energy stored on the `Ride` at the finish (§S10's estimate), not recomputed on open, so a later change of Health body weight doesn't move an old ride's number.
 - The next sections are detailed metrics that are the same as the dashboard metric sheets but show the entire ride and not just the last hour. Items are hidden when there is no sensor or data recorded for an item. They should be displayed in this order: 
   - Speed

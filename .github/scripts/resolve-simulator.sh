@@ -23,6 +23,11 @@
 set -euo pipefail
 
 PREFERRED_DEVICE="${PREFERRED_DEVICE:-iPhone 17 Pro}"
+# The runtime the snapshot references are recorded on (.claude/rules/testing.md). Newest isn't
+# safe: the 2026-11-04 runner image added iOS 27.2, which anti-aliases arc edges differently,
+# and the eight snapshots that draw an arc (HR zone donuts, the Live Activity ring) failed on
+# every run from #542 on. A runner without 27.0 falls back to the newest runtime.
+PREFERRED_RUNTIME="${PREFERRED_RUNTIME:-27.0}"
 
 echo "Available iOS runtimes:"
 xcrun simctl list runtimes ios || true
@@ -32,10 +37,11 @@ echo
 # machine it is the one that already has the reference simulators.
 udid="$(
   xcrun simctl list devices available --json \
-    | PREFERRED="$PREFERRED_DEVICE" python3 -c '
+    | PREFERRED="$PREFERRED_DEVICE" PREFERRED_RUNTIME="$PREFERRED_RUNTIME" python3 -c '
 import json, os, sys
 
 preferred = os.environ["PREFERRED"]
+preferred_runtime = tuple(int(p) for p in os.environ["PREFERRED_RUNTIME"].split("."))
 runtimes = json.load(sys.stdin)["devices"]
 
 def ios_version(runtime_id):
@@ -56,31 +62,37 @@ for runtime_id, devices in runtimes.items():
     for device in devices:
         if not device.get("isAvailable") or "iPhone" not in device.get("name", ""):
             continue
-        # Preferred name first, then newest runtime, then newest-sounding iPhone.
-        candidates.append((device["name"] == preferred, version, device["name"], device["udid"]))
+        # Preferred name first, then the reference runtime, then newest runtime, then
+        # newest-sounding iPhone.
+        candidates.append((
+            device["name"] == preferred, version == preferred_runtime,
+            version, device["name"], device["udid"]
+        ))
 
 if candidates:
-    print(max(candidates)[3])
+    print(max(candidates)[-1])
 '
 )"
 
 if [ -n "$udid" ]; then
   echo "Using existing simulator: $udid"
+  xcrun simctl list devices | grep -e "^-- " -e "$udid" | grep -B1 "$udid" || true
 else
   echo "No available iPhone simulator on this runner — creating one."
   echo "Device types:"
   xcrun simctl list devicetypes | grep -i iphone || true
 
   runtime="$(
-    xcrun simctl list runtimes --json | python3 -c '
-import json, sys
+    xcrun simctl list runtimes --json | PREFERRED_RUNTIME="$PREFERRED_RUNTIME" python3 -c '
+import json, os, sys
 runtimes = [
     r for r in json.load(sys.stdin)["runtimes"]
     if r.get("isAvailable") and r.get("platform") == "iOS"
 ]
 if not runtimes:
     sys.exit("No available iOS runtime on this runner.")
-runtimes.sort(key=lambda r: [int(p) for p in r["version"].split(".")])
+preferred_runtime = os.environ["PREFERRED_RUNTIME"]
+runtimes.sort(key=lambda r: (r["version"] == preferred_runtime, [int(p) for p in r["version"].split(".")]))
 print(runtimes[-1]["identifier"])
 '
   )"

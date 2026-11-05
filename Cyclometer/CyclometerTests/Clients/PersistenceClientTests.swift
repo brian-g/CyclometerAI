@@ -574,6 +574,73 @@ struct PersistenceClientTests {
         #expect(try await client.fetchRideStats(free).routeId == nil)
     }
 
+    // MARK: - Finish stats (#460)
+
+    @Test("finalizeRide stores the live finish stats, not owed, and fetchRideStats carries them with HR")
+    func finalizeStoresFinishStats() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date(), nil)
+        var summary = RideSummaryUpdate(
+            rideId: rideId, durationSeconds: 3_600, distanceMeters: 25_000, averageSpeedMPS: 7, maxSpeedMPS: 12,
+            averageHeartRateBPM: 142, maxHeartRateBPM: 171
+        )
+        summary.finish = RideFinishStats(ascentMeters: 412, descentMeters: 398, activeKilocalories: 845)
+        try await client.finalizeRide(rideId, Date(), summary, nil)
+
+        #expect(try await client.fetchRidesOwedFinishStats().isEmpty)
+        let stats = try await client.fetchRideStats(rideId)
+        #expect(stats.averageHeartRateBPM == 142)
+        #expect(stats.maxHeartRateBPM == 171)
+        #expect(stats.ascentMeters == 412)
+        #expect(stats.descentMeters == 398)
+        #expect(stats.activeKilocalories == 845)
+    }
+
+    @Test("finalizeRide stores nil finish stats as no data, without HR the HR stays nil")
+    func finalizeStoresNilFinishStats() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date(), nil)
+        var summary = RideSummaryUpdate(rideId: rideId, durationSeconds: 60, distanceMeters: 200,
+                                        averageSpeedMPS: 3, maxSpeedMPS: 5)
+        summary.finish = RideFinishStats(ascentMeters: nil, descentMeters: nil, activeKilocalories: nil)
+        try await client.finalizeRide(rideId, Date(), summary, nil)
+
+        // Nil is a result, not "still to work out": the ride isn't owed a backfill.
+        #expect(try await client.fetchRidesOwedFinishStats().isEmpty)
+        #expect(try await client.fetchRideStats(rideId) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5))
+    }
+
+    @Test("finalizeRide without finish stats leaves the ride owed them; a checkpoint never writes them")
+    func finalizeWithoutFinishStatsIsOwed() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let startedAt = Date(timeIntervalSince1970: 1_000_000)
+        let closedOut = UUID(), inProgress = UUID()
+        try await client.createRide(closedOut, startedAt, nil)
+        try await client.createRide(inProgress, startedAt.addingTimeInterval(7_200), nil)
+        var checkpoint = RideSummaryUpdate(rideId: inProgress, durationSeconds: 30, distanceMeters: 100,
+                                           averageSpeedMPS: 3, maxSpeedMPS: 4)
+        checkpoint.finish = RideFinishStats(ascentMeters: 10, descentMeters: 5, activeKilocalories: 3)
+        try await client.updateRideSummary(checkpoint)
+
+        try await client.finalizeRide(closedOut, startedAt.addingTimeInterval(3_600), RideSummaryUpdate(
+            rideId: closedOut, durationSeconds: 3_300, distanceMeters: 21_000, averageSpeedMPS: 6.4, maxSpeedMPS: 11
+        ), nil)
+
+        // The in-progress ride isn't listed: only a finished ride is owed.
+        #expect(try await client.fetchRidesOwedFinishStats() == [OwedFinishStats(
+            rideId: closedOut, startedAt: startedAt, distanceMeters: 21_000, movingSeconds: 3_300
+        )])
+        #expect(try await client.fetchRideStats(inProgress).ascentMeters == nil)
+
+        try await client.saveRideFinishStats(closedOut, RideFinishStats(
+            ascentMeters: 120, descentMeters: 118, activeKilocalories: 610
+        ))
+        #expect(try await client.fetchRidesOwedFinishStats().isEmpty)
+        #expect(try await client.fetchRideStats(closedOut).activeKilocalories == 610)
+    }
+
     // MARK: - Rename (#249, for S10)
 
     @Test("renameRide stores the title, and the Rides list reads it back")

@@ -48,6 +48,11 @@ struct PersistenceClient: Sendable {
     var fetchRidesOwedHealthWorkout: @Sendable () async throws -> [OwedHealthWorkout]
     /// Marks a ride's workout as done with: written, or skipped as another source's duplicate.
     var settleRideHealthWorkout: @Sendable (UUID) async throws -> Void
+    /// Finished rides still owed their finish stats, newest first — what
+    /// `RideFinishStats.backfill` works through (#460).
+    var fetchRidesOwedFinishStats: @Sendable () async throws -> [OwedFinishStats]
+    /// Stores a ride's finish stats worked out from its saved track, and marks it no longer owed.
+    var saveRideFinishStats: @Sendable (UUID, RideFinishStats) async throws -> Void
     /// Inserts confirmed vehicle-pass events in one batch — `VehiclePassDetector`
     /// can legitimately confirm more than one on the same tick (#172, DataModel.md §3.4).
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
@@ -129,6 +134,8 @@ extension PersistenceClient: DependencyKey {
             fetchRideMapThumbnail: { try await rideActor.fetchMapThumbnail(id: $0) },
             fetchRidesOwedHealthWorkout: { try await rideActor.ridesOwedHealthWorkout() },
             settleRideHealthWorkout: { try await rideActor.settleHealthWorkout(id: $0) },
+            fetchRidesOwedFinishStats: { try await rideActor.ridesOwedFinishStats() },
+            saveRideFinishStats: { try await rideActor.saveFinishStats(id: $0, stats: $1) },
             appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
             deleteRide: { try await deleteRideLive(id: $0, rideActor: rideActor, container: coreDataContainer) },
@@ -170,6 +177,8 @@ extension PersistenceClient: DependencyKey {
         fetchRideMapThumbnail: { _ in nil },
         fetchRidesOwedHealthWorkout: { [] },
         settleRideHealthWorkout: { _ in },
+        fetchRidesOwedFinishStats: { [] },
+        saveRideFinishStats: { _, _ in },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
         deleteRide: { _ in },

@@ -54,6 +54,14 @@ actor RidePersistenceActor {
             // Durably over, so now owed its Apple Health workout (#277) — on every path that
             // ends a ride, since all of them come through here.
             ride.isHealthWorkoutOwed = true
+            // The live finish's ascent, descent and energy (#460). Without them — a close-out,
+            // or a resume whose saved track hadn't come back — the ride is owed them from its
+            // saved track instead (`RideFinishStats.backfill`).
+            if let finish = summary.finish {
+                write(finish, to: ride)
+            } else {
+                ride.isFinishStatsOwed = true
+            }
         }
     }
 
@@ -112,6 +120,35 @@ actor RidePersistenceActor {
         } catch {
             logger.error("ridesOwedHealthWorkout failed: \(error.localizedDescription, privacy: .public)")
             throw error
+        }
+    }
+
+    /// Finished rides still owed their finish stats, newest first (#460). Filters on
+    /// `endedAt != nil` for the enum-predicate reason given on `fetchResumableRide`.
+    func ridesOwedFinishStats() throws -> [OwedFinishStats] {
+        do {
+            let descriptor = FetchDescriptor<Ride>(
+                predicate: #Predicate { $0.endedAt != nil && $0.isFinishStatsOwed },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+            )
+            return try modelContext.fetch(descriptor).map {
+                OwedFinishStats(
+                    rideId: $0.id,
+                    startedAt: $0.startedAt,
+                    distanceMeters: $0.distanceMeters,
+                    movingSeconds: $0.durationSeconds
+                )
+            }
+        } catch {
+            logger.error("ridesOwedFinishStats failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
+    /// A ride's finish stats worked out from its saved track (#460).
+    func saveFinishStats(id: UUID, stats: RideFinishStats) throws {
+        try savingChanges("saveFinishStats", id: id, context: modelContext) {
+            write(stats, to: try fetchRide(id: id))
         }
     }
 
@@ -250,7 +287,12 @@ actor RidePersistenceActor {
             maxCadenceRPM: ride.maxCadenceRPM,
             vehiclePassCount: ride.vehiclePassCount,
             routeId: ride.routeId,
-            routeName: ride.routeName
+            routeName: ride.routeName,
+            averageHeartRateBPM: ride.averageHeartRateBPM,
+            maxHeartRateBPM: ride.maxHeartRateBPM,
+            ascentMeters: ride.ascentMeters,
+            descentMeters: ride.descentMeters,
+            activeKilocalories: ride.activeKilocalories
         )
     }
 
@@ -420,5 +462,13 @@ actor RidePersistenceActor {
         // `update.route` is deliberately not written: the route is `createRide`'s alone.
         ride.routeProgressMeters = update.routeProgressMeters
         ride.isRouteComplete = update.isRouteComplete
+        // `update.finish` is deliberately not written here: only `finalizeRide` stores it (#460).
+    }
+
+    private func write(_ stats: RideFinishStats, to ride: Ride) {
+        ride.ascentMeters = stats.ascentMeters
+        ride.descentMeters = stats.descentMeters
+        ride.activeKilocalories = stats.activeKilocalories
+        ride.isFinishStatsOwed = false
     }
 }

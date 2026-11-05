@@ -361,6 +361,10 @@ struct ActiveRideFeature {
         var calorieTrack: [TrackPointDTO] = []
         /// The rider W23 estimates for: Health's body mass, date of birth and sex, read at start.
         var energyRider: EnergyRiderStatus = .loading
+        /// Health's body-mass read threw rather than finding none (#460). W23 shows it as no body
+        /// mass, but the finish mustn't store that as the ride's final "no calories": it leaves
+        /// the ride owed, for the backfill's fresh read.
+        var isBodyMassReadFailed = false
         /// W23's series, one point a minute of recording time (#465). The last is the estimate.
         var calories: [CaloriePoint] = []
         /// A resumed ride's saved track hasn't been read back yet: until it is, an estimate would
@@ -540,6 +544,8 @@ struct ActiveRideFeature {
         case watermarksSeeded(WatermarkSeed)
         /// Health's rider for W23, nil without a body mass (#465).
         case energyRiderFetched(RideEnergy.Rider?)
+        /// Health's body-mass read threw (#460), sent ahead of `.energyRiderFetched(nil)`.
+        case bodyMassReadFailed
         /// One minute's estimate (#465).
         case caloriesEstimated(CaloriePoint)
         /// A resumed ride's saved track (#465), empty if it couldn't be read.
@@ -638,13 +644,15 @@ struct ActiveRideFeature {
                         async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
                         async let dob = try? healthKitClient.fetchDateOfBirth()
                         async let zoneCeilings = try? healthKitClient.fetchHeartRateZoneCeilings()
-                        async let kilograms = try? healthKitClient.fetchBodyMass()
+                        async let bodyMass = Self.readBodyMass(healthKitClient)
                         async let sex = try? healthKitClient.fetchBiologicalSex()
                         let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
                         await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM, zoneCeilingsBPM: await zoneCeilings))
                         // Built as the ride's Health workout builds it, so W23 ends on its value (#465).
+                        let (kilograms, isReadFailed) = await bodyMass
+                        if isReadFailed { await send(.bodyMassReadFailed) }
                         await send(.energyRiderFetched(RideEnergy.Rider(
-                            kilograms: await kilograms, dateOfBirth: await dob, sex: await sex, on: startedAt
+                            kilograms: kilograms, dateOfBirth: await dob, sex: await sex, on: startedAt
                         )))
                     },
                     .run { [healthKitClient] send in
@@ -803,6 +811,7 @@ struct ActiveRideFeature {
                 let rideId = state.rideId
                 let endedAt = date.now
                 let finalSummary = makeRideSummaryUpdate(from: state)
+                let liveFinish = liveFinishStats(from: state)
                 // Not routed through `.send(.trackRecorder(.stopRecording))`: AppFeature
                 // nils `activeRide` on this exact same action (AppFeature.swift:195), and
                 // a `.send`-effect resolves in a later action-processing cycle — by then
@@ -875,8 +884,10 @@ struct ActiveRideFeature {
                             logger.error("GPX export failed at ride end for \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public) — ride will end with no gpxFileURL")
                         }
 
+                        var summary = finalSummary
+                        summary.finish = liveFinish?()
                         do {
-                            try await persistenceClient.finalizeRide(rideId, endedAt, finalSummary, gpxURL)
+                            try await persistenceClient.finalizeRide(rideId, endedAt, summary, gpxURL)
                             // Only now is the ride durably over. Clearing earlier would
                             // discard the one record that survives this write failing.
                             rideEndIntentClient.clear()
@@ -890,8 +901,12 @@ struct ActiveRideFeature {
                         // After finalize, so only a durably ended ride reaches Apple Health
                         // (UX.md §S10, #250): the finalize is what makes it owed a workout.
                         // Nothing waits on it: a failed write never costs the ride, and is
-                        // retried later (#277).
-                        await RideHealthWorkout.backfill()
+                        // retried later (#277). The finish stats too (#460): a ride whose live
+                        // state didn't cover all of it was just left owed them, and a launch that
+                        // resumed this ride skipped the launch backfill.
+                        async let workouts = RideHealthWorkout.backfill()
+                        async let finishStats = RideFinishStats.backfill()
+                        _ = await (workouts, finishStats)
                         // The map thumbnail (#177) is captured by `RidesFeature.rideFinished`,
                         // which waits for the finalize above to land and refreshes the list after
                         // it (#248).
@@ -1259,6 +1274,9 @@ struct ActiveRideFeature {
             case .energyRiderFetched(let rider):
                 state.energyRider = EnergyRiderStatus(rider)
                 return rebuildCaloriesIfReady(state)
+            case .bodyMassReadFailed:
+                state.isBodyMassReadFailed = true
+                return .none
             case .caloriesEstimated(let point):
                 // A rebuild still in flight may finish after this; it keeps this point.
                 guard point.rideSeconds > (state.calories.last?.rideSeconds ?? 0) else { return .none }
@@ -1480,6 +1498,34 @@ struct ActiveRideFeature {
             routeProgressMeters: state.navigation.progressMeters,
             isRouteComplete: state.navigation.isRouteComplete
         )
+    }
+
+    /// Health's body mass, and whether the read threw rather than finding none (#460).
+    private static func readBodyMass(_ healthKitClient: HealthKitClient) async -> (kilograms: Double?, isReadFailed: Bool) {
+        do {
+            return (try await healthKitClient.fetchBodyMass(), false)
+        } catch {
+            return (nil, true) // Logged inside HealthKitClient.
+        }
+    }
+
+    /// S15's stats as the dashboard has them at the finish (#460), deferred to the effect since the
+    /// energy estimate runs over the whole track. Nil when the live state doesn't cover all of the
+    /// ride — a resume whose saved track hasn't come back or couldn't be read, or Health's rider
+    /// read still out or failed — which would store a partial ride: `finalizeRide` leaves it owed
+    /// instead.
+    private func liveFinishStats(from state: State) -> (@Sendable () -> RideFinishStats)? {
+        guard !state.isSavedTrackPending, !state.isSavedTrackMissing,
+              state.energyRider != .loading, !state.isBodyMassReadFailed else { return nil }
+        let elevation = state.elevation
+        let track = state.calorieTrack
+        let seconds = state.elapsedSeconds
+        let distance = state.distanceMeters
+        let rider = state.energyRider.rider
+        return {
+            RideFinishStats(elevation: elevation, calorieTrack: track, elapsedSeconds: seconds,
+                            distanceMeters: distance, rider: rider)
+        }
     }
 
     /// A hard radar unpair or reconnect timeout is data loss, not a

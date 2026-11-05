@@ -315,3 +315,31 @@ struct RideChartPointIdentityTests {
         #expect(ElevationPoint.points(from: samples) == ElevationPoint.points(from: samples))
     }
 }
+
+/// #460: S15's stored-at-the-finish rows read their units in words, and are absent without data.
+@Suite("S15 finish-stats rows")
+struct RideDetailFinishStatsRowTests {
+    private let stats = RideStats(
+        averageSpeedMPS: 7, maxSpeedMPS: 12,
+        averageHeartRateBPM: 142, maxHeartRateBPM: 171,
+        ascentMeters: 412, descentMeters: 398, activeKilocalories: 845
+    )
+
+    @Test func rowsReadTheirUnitsInWords() {
+        #expect(stats.ascent(.metric) == MetricReading(value: "412", unit: "m", spoken: "412 meters"))
+        #expect(stats.ascent(.imperial)?.spoken == "1,352 feet")
+        #expect(stats.descent(.metric)?.spoken == "398 meters")
+        #expect(stats.averageHeartRate == MetricReading(value: "142", unit: "bpm", spoken: "142 beats per minute"))
+        #expect(stats.maxHeartRate?.spoken == "171 beats per minute")
+        #expect(stats.calories == MetricReading(value: "845", unit: "kcal", spoken: "845 kilocalories"))
+    }
+
+    @Test func rowsAreAbsentWithoutData() {
+        let none = RideStats(averageSpeedMPS: 7, maxSpeedMPS: 12)
+        #expect(none.ascent(.metric) == nil)
+        #expect(none.descent(.imperial) == nil)
+        #expect(none.averageHeartRate == nil)
+        #expect(none.maxHeartRate == nil)
+        #expect(none.calories == nil)
+    }
+}

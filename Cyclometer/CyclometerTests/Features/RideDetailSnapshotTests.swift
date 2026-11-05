@@ -95,14 +95,18 @@ final class RideDetailSnapshotTests: XCTestCase {
     // Named for this screen — reference PNGs are flat in the test bundle.
 
     /// HR, cadence and a paired radar: every section filled. HR swings 85–165 bpm, across
-    /// zones 1–4 of the default profile, so the chart shows several bands.
+    /// zones 1–4 of the default profile, so the chart shows several bands. The finish stats'
+    /// rows (#460) are all present.
     func testRideDetailAllSensors() {
         assertBothSchemes(screen(heartRate: true, stats: RideStats(
-            averageSpeedMPS: 7.6, maxSpeedMPS: 12.4, averageCadenceRPM: 88, maxCadenceRPM: 109, vehiclePassCount: 4
+            averageSpeedMPS: 7.6, maxSpeedMPS: 12.4, averageCadenceRPM: 88, maxCadenceRPM: 109, vehiclePassCount: 4,
+            averageHeartRateBPM: 142, maxHeartRateBPM: 165,
+            ascentMeters: 412, descentMeters: 398, activeKilocalories: 845
         )), named: "all-sensors")
     }
 
-    /// GPS alone: HR says so rather than charting zeros, cadence reads "—", passes are absent.
+    /// GPS alone: HR says so rather than charting zeros, and the cadence, pass and #460 rows are
+    /// absent rather than dashed: no sensor, altitude or body mass.
     func testRideDetailGPSOnly() {
         assertBothSchemes(screen(heartRate: false, stats: RideStats(averageSpeedMPS: 7.6, maxSpeedMPS: 12.4)),
                           named: "gps-only")
