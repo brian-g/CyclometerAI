@@ -108,34 +108,66 @@ struct ElevationList: View {
     var body: some View {
         List {
             Section {
-                if let range = metrics.historyRange {
-                    ElevationChart(history: metrics.history, range: range, unit: metrics.unit)
-                        .frame(height: Self.chartHeight)
-                }
-                ReadingColumns {
-                    ReadingColumn("Current", metrics.current)
-                    ReadingColumn("Highest", metrics.highest)
-                    ReadingColumn("Lowest", metrics.lowest)
-                }
+                ElevationReadings(metrics: metrics)
             }
-            Section("Climbing") {
-                ReadingColumns {
-                    ReadingColumn("Ascent", metrics.ascent)
-                    ReadingColumn("Descent", metrics.descent)
-                }
-            }
-            Section("Grade") {
-                ReadingColumns {
-                    ReadingColumn("Current", metrics.grade)
-                    ReadingColumn("Steepest", [metrics.steepestClimb, metrics.steepestDescent], spoken: metrics.steepestSpoken)
-                }
-            }
+            ElevationClimbingSection(metrics: metrics)
+            ElevationGradeSection(metrics: metrics)
             if let profile = metrics.routeProfile {
                 Section("Route") {
                     RouteProfileChart(profile: profile, progress: metrics.routeProgress)
                         .frame(height: Self.chartHeight)
                         .accessibilityLabel("Route elevation profile")
                 }
+            }
+        }
+    }
+}
+
+/// The sheet's chart and range, the rows of its first section: shared with S15, which shows them
+/// over the whole ride without the current reading (#536).
+struct ElevationReadings: View {
+    let metrics: ElevationMetrics
+    var showsCurrent = true
+
+    private static let chartHeight: CGFloat = 140
+
+    var body: some View {
+        if let range = metrics.historyRange {
+            ElevationChart(history: metrics.history, range: range, unit: metrics.unit)
+                .frame(height: Self.chartHeight)
+        }
+        ReadingColumns {
+            if showsCurrent { ReadingColumn("Current", metrics.current) }
+            ReadingColumn("Highest", metrics.highest)
+            ReadingColumn("Lowest", metrics.lowest)
+        }
+    }
+}
+
+/// Shared with S15 (#536).
+struct ElevationClimbingSection: View {
+    let metrics: ElevationMetrics
+
+    var body: some View {
+        Section("Climbing") {
+            ReadingColumns {
+                ReadingColumn("Ascent", metrics.ascent)
+                ReadingColumn("Descent", metrics.descent)
+            }
+        }
+    }
+}
+
+/// Shared with S15, which leaves out the current grade (#536).
+struct ElevationGradeSection: View {
+    let metrics: ElevationMetrics
+    var showsCurrent = true
+
+    var body: some View {
+        Section("Grade") {
+            ReadingColumns {
+                if showsCurrent { ReadingColumn("Current", metrics.grade) }
+                ReadingColumn("Steepest", [metrics.steepestClimb, metrics.steepestDescent], spoken: metrics.steepestSpoken)
             }
         }
     }

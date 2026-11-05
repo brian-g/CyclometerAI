@@ -68,7 +68,7 @@ enum RideEnergy {
     enum Sex: Equatable, Sendable { case male, female }
 
     struct Estimate: Equatable, Sendable {
-        enum Method: String, Sendable { case heartRate = "heart rate", physics, met = "MET" }
+        enum Method: String, Sendable, Codable { case heartRate = "heart rate", physics, met = "MET" }
         var kilocalories: Double
         var method: Method
     }

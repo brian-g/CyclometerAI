@@ -1519,11 +1519,14 @@ struct ActiveRideFeature {
               state.energyRider != .loading, !state.isBodyMassReadFailed else { return nil }
         let elevation = state.elevation
         let track = state.calorieTrack
+        let calories = state.calories
         let seconds = state.elapsedSeconds
+        let movingSeconds = state.speedSampleCount
         let distance = state.distanceMeters
         let rider = state.energyRider.rider
         return {
-            RideFinishStats(elevation: elevation, calorieTrack: track, elapsedSeconds: seconds,
+            RideFinishStats(elevation: elevation, calorieTrack: track, calories: calories,
+                            elapsedSeconds: seconds, movingSeconds: movingSeconds,
                             distanceMeters: distance, rider: rider)
         }
     }

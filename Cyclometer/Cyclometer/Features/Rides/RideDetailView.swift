@@ -13,7 +13,6 @@ struct RideDetailView: View {
     /// UX.md §S15: a 240pt map. Kept here because the generic `RideDetailList` cannot hold
     /// static stored properties.
     static let mapHeight: CGFloat = 240
-    static let chartHeight: CGFloat = 140
 
     var body: some View {
         RideDetailList(store: store)
@@ -51,16 +50,6 @@ struct RideDetailList<MapRow: View>: View {
                     Text(routeName)
                 }
             }
-            Section("Elevation Profile") {
-                if let profile = store.elevationProfileMeters {
-                    ElevationProfileView(samples: profile.map(unit.elevation(fromMeters:)),
-                                         unitLabel: unit.elevationLabel)
-                        .frame(height: RideDetailView.chartHeight)
-                        .padding(.vertical, Spacing.sm)
-                } else {
-                    unavailable("No elevation recorded")
-                }
-            }
             Section("Stats") {
                 // A row is absent, not dashed, for a ride that recorded nothing for it (UX.md
                 // §S15, #460): no altitude, heart rate, cadence sensor or body mass in Health.
@@ -85,15 +74,7 @@ struct RideDetailList<MapRow: View>: View {
                     LabeledContent("Vehicle Passes", value: passes.formatted())
                 }
             }
-            Section("HR Profile") {
-                if store.heartRateSamples.isEmpty {
-                    unavailable("No heart rate recorded")
-                } else {
-                    HeartRateProfileView(samples: store.heartRateSamples, zoneBounds: store.heartRateZoneBounds)
-                        .frame(height: RideDetailView.chartHeight)
-                        .padding(.vertical, Spacing.sm)
-                }
-            }
+            RideDetailMetricSections(store: store)
             // Strava segments need Accounts, Phase 2 — S20's placeholder idiom.
             Section("Strava Segments") {
                 LabeledContent("Connect Strava") { unavailable("Coming Soon") }
@@ -159,6 +140,52 @@ extension RideDetailList where MapRow == RideMapView {
         self.init(store: store, mapRow: RideMapView(segments: store.trackSegments,
                                                     passes: store.vehiclePasses,
                                                     unitSystem: store.unitSystem))
+    }
+}
+
+// MARK: - Metric sections
+
+/// The dashboard's metric sheets over the whole ride (#536), in UX.md §S15's order: Speed, Pace,
+/// Time, Active Calories, Cadence, Cadence Zones, Heart Rate, Heart Rate Zones, Elevation,
+/// Climbing, Grade. The sheets' own sections, without their current readings; each is left out
+/// when the ride recorded nothing for it.
+private struct RideDetailMetricSections: View {
+    let store: StoreOf<RideDetailFeature>
+
+    var body: some View {
+        if let metrics = store.rideMetrics {
+            if metrics.hasSpeed {
+                RideSpeedSection(metrics: metrics, showsCurrent: false)
+                RidePaceSection(metrics: metrics, showsCurrent: false)
+            }
+            if metrics.rideSeconds > 0 {
+                RideTimeSection(metrics: metrics)
+            }
+        }
+        if let metrics = store.caloriesMetrics {
+            Section {
+                CaloriesReadings(metrics: metrics)
+            } header: {
+                Text("Active Calories")
+            } footer: {
+                Text(metrics.footer)
+            }
+        }
+        if let cadence = store.cadence {
+            let list = CadenceList(averageCadence: cadence.averageCadence, maxCadence: cadence.maxCadence,
+                                   zones: cadence.zones, detail: cadence.detail)
+            Section("Cadence") { list.readings }
+            Section("Cadence Zones") { list.zoneRows }
+        }
+        if let metrics = store.heartRateMetrics {
+            Section("Heart Rate") { HeartRateReadings(metrics: metrics, showsCurrent: false) }
+            Section("Heart Rate Zones") { HeartRateZoneRows(metrics: metrics) }
+        }
+        if let metrics = store.elevationMetrics {
+            Section("Elevation") { ElevationReadings(metrics: metrics, showsCurrent: false) }
+            ElevationClimbingSection(metrics: metrics)
+            ElevationGradeSection(metrics: metrics, showsCurrent: false)
+        }
     }
 }
 
@@ -242,9 +269,10 @@ struct RideMapView: View {
 
 /// S15 already pushed on the Rides tab's own stack, as the app hosts it: the Route row is a
 /// `NavigationLink(state:)`, which reports "not presentable" in a plain `NavigationStack` (#426).
-private func rideDetailPreview(route: RouteSummary?, hasFinishStats: Bool = true) -> some View {
+private func rideDetailPreview(route: RouteSummary?, sensors: RideDetailPreview.Sensors = .all) -> some View {
     let summary = RideListSummary(id: UUID(), title: "River Loop", startedAt: .now.addingTimeInterval(-86_400),
-                                  distanceMeters: 36_050, durationSeconds: 4_712)
+                                  distanceMeters: 12_600, durationSeconds: TimeInterval(RideDetailPreview.seconds))
+    let track = RideDetailPreview.trackPoints(rideId: summary.id, sensors: sensors)
     return withDependencies {
         $0.defaultFileStorage = .inMemory
     } operation: {
@@ -254,16 +282,8 @@ private func rideDetailPreview(route: RouteSummary?, hasFinishStats: Bool = true
             RidesFeature()
         } withDependencies: {
             $0.persistenceClient = .mock(
-                trackPoints: [summary.id: RideDetailPreview.trackPoints(rideId: summary.id)],
-                rideStats: [summary.id: RideStats(averageSpeedMPS: 7.6, maxSpeedMPS: 12.4,
-                                                  averageCadenceRPM: 88, maxCadenceRPM: 109,
-                                                  vehiclePassCount: 1,
-                                                  routeId: route?.id, routeName: route?.name,
-                                                  averageHeartRateBPM: hasFinishStats ? 142 : nil,
-                                                  maxHeartRateBPM: hasFinishStats ? 171 : nil,
-                                                  ascentMeters: hasFinishStats ? 412 : nil,
-                                                  descentMeters: hasFinishStats ? 398 : nil,
-                                                  activeKilocalories: hasFinishStats ? 845 : nil)],
+                trackPoints: [summary.id: track],
+                rideStats: [summary.id: RideDetailPreview.stats(track: track, sensors: sensors, route: route)],
                 vehiclePassEvents: [summary.id: [RideDetailPreview.pass(rideId: summary.id)]],
                 rides: [summary],
                 routes: route.map { [$0] } ?? [],
@@ -277,10 +297,14 @@ private func rideDetailPreview(route: RouteSummary?, hasFinishStats: Bool = true
     rideDetailPreview(route: nil)
 }
 
-/// No altitude, heart rate or Health body mass: Ascent, Descent, the HR rows and Calories are
-/// absent rather than dashed (#460).
-#Preview("Ride Detail — no finish stats") {
-    rideDetailPreview(route: nil, hasFinishStats: false)
+/// GPS only: no Cadence or Heart Rate sections, and no HR or cadence rows in Stats.
+#Preview("Ride Detail — GPS only") {
+    rideDetailPreview(route: nil, sensors: .gpsOnly)
+}
+
+/// No altitude: no Elevation, Climbing or Grade sections, and no Ascent or Descent (#460).
+#Preview("Ride Detail — no altitude") {
+    rideDetailPreview(route: nil, sensors: .noAltitude)
 }
 
 /// Ridden on "Summit Climb": the Route section links to its S20 (#426).
@@ -288,26 +312,58 @@ private func rideDetailPreview(route: RouteSummary?, hasFinishStats: Bool = true
     rideDetailPreview(route: RouteSummary.previewRoutes[1])
 }
 
-/// A short synthetic ride for the preview only — a loop with a climb and a heart rate that
-/// follows it.
+/// A short synthetic ride for the preview only — a loop with a climb, and a heart rate and
+/// cadence that follow it.
 private enum RideDetailPreview {
-    static func trackPoints(rideId: UUID) -> [TrackPointDTO] {
-        (0..<120).map { second in
-            let angle = Double(second) / 120 * 2 * .pi
+    enum Sensors { case all, gpsOnly, noAltitude }
+
+    static let seconds = 1_800
+
+    static func trackPoints(rideId: UUID, sensors: Sensors) -> [TrackPointDTO] {
+        (0..<seconds).map { second in
+            let angle = Double(second) / Double(seconds) * 2 * .pi
+            let effort = sin(angle / 2)
+            let heartRate = sensors == .gpsOnly ? nil : 120 + Int(40 * effort)
             return TrackPointDTO(
                 rideId: rideId,
                 timestamp: Date(timeIntervalSince1970: 1_750_000_000 + Double(second)),
                 latitude: 37.3349 + 0.01 * sin(angle),
                 longitude: -122.0090 + 0.01 * cos(angle),
-                altitudeMeters: 100 + 40 * sin(angle / 2),
+                altitudeMeters: sensors == .noAltitude ? nil : 100 + 60 * effort,
                 horizontalAccuracyMeters: 5,
-                speedMPS: 7,
+                speedMPS: 7 - 2 * effort,
                 speedSource: .gps,
-                heartRateBPM: 120 + Int(30 * sin(angle / 2)),
-                heartRateSource: .bleHR,
-                cadenceRPM: 88
+                heartRateBPM: heartRate,
+                heartRateSource: heartRate == nil ? .none : .bleHR,
+                cadenceRPM: sensors == .gpsOnly ? nil : 92 - Int(20 * effort)
             )
         }
+    }
+
+    /// The `Ride` row's numbers for `track`, worked out as the finish would store them.
+    static func stats(track: [TrackPointDTO], sensors: Sensors, route: RouteSummary?) -> RideStats {
+        let finish = RideFinishStats(savedTrack: track, altitudeSource: .barometric,
+                                     movingSeconds: TimeInterval(seconds), distanceMeters: 12_600,
+                                     rider: RideEnergy.Rider(kilograms: 75, age: 40, sex: .male))
+        let hasSensors = sensors != .gpsOnly
+        let cadence = track.compactMap(\.cadenceRPM)
+        let heartRate = track.compactMap(\.heartRateBPM)
+        return RideStats(
+            averageSpeedMPS: 7, maxSpeedMPS: 9.4,
+            averageCadenceRPM: hasSensors ? cadence.reduce(0, +) / cadence.count : nil,
+            maxCadenceRPM: cadence.max(),
+            vehiclePassCount: 1,
+            routeId: route?.id, routeName: route?.name,
+            averageHeartRateBPM: hasSensors ? heartRate.reduce(0, +) / heartRate.count : nil,
+            maxHeartRateBPM: heartRate.max(),
+            ascentMeters: finish.ascentMeters,
+            descentMeters: finish.descentMeters,
+            activeKilocalories: finish.activeKilocalories,
+            calorieSeries: finish.calorieSeries,
+            movingSeconds: seconds,
+            cadenceSecondsByRPM: Dictionary(cadence.map { ($0, 1.0) }, uniquingKeysWith: +),
+            cadenceCoastingSeconds: hasSensors ? 140 : 0
+        )
     }
 
     static func pass(rideId: UUID) -> VehiclePassEventDTO {

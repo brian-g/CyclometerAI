@@ -25,8 +25,18 @@ struct WatermarkSeed: Equatable, Sendable {
     /// restored Avg speed does, give or take a tick that had no fix to record. Every series keeps
     /// only the last history window before the resume, the window the live ones are trimmed to.
     init?(savedTrack points: [TrackPointDTO], resumedAt: Date) {
+        self.init(points, before: resumedAt, isWindowed: true)
+    }
+
+    /// The same series over a finished ride's whole track, unwindowed: S15's metric sections
+    /// (#536). Nil when no point carries a reading.
+    init?(wholeRide points: [TrackPointDTO]) {
+        self.init(points, before: .distantFuture, isWindowed: false)
+    }
+
+    private init?(_ points: [TrackPointDTO], before resumedAt: Date, isWindowed: Bool) {
         func isInWindow(_ point: TrackPointDTO, _ window: TimeInterval) -> Bool {
-            point.timestamp >= resumedAt.addingTimeInterval(-window)
+            !isWindowed || point.timestamp >= resumedAt.addingTimeInterval(-window)
         }
         var speed: [SpeedSample] = []
         var averageSpeed: [SpeedSample] = []

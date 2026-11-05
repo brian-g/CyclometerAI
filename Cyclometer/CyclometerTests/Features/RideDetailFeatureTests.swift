@@ -43,7 +43,9 @@ struct RideDetailFeatureTests {
     nonisolated static func track(
         count: Int = 20,
         heartRate: (Int) -> Int? = { 120 + $0 },
-        cadence: Int? = 90
+        cadence: Int? = 90,
+        altitude: (Int) -> Double? = { 250 + Double($0) },
+        speed: (Int) -> Double = { _ in 6 }
     ) -> [TrackPointDTO] {
         (0..<count).map { second in
             TrackPointDTO(
@@ -51,9 +53,9 @@ struct RideDetailFeatureTests {
                 timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(second)),
                 latitude: 45 + Double(second) * 0.0001,
                 longitude: -93,
-                altitudeMeters: 250 + Double(second),
+                altitudeMeters: altitude(second),
                 horizontalAccuracyMeters: 5,
-                speedMPS: 6,
+                speedMPS: speed(second),
                 speedSource: .gps,
                 heartRateBPM: heartRate(second),
                 heartRateSource: heartRate(second) == nil ? .none : .bleHR,
@@ -82,7 +84,7 @@ struct RideDetailFeatureTests {
 
     // MARK: Loading
 
-    @Test("task loads the track per segment, its elevation and HR series, the stats and the passes")
+    @Test("task loads the track per segment, its metric series, the stats and the passes")
     func taskLoadsEverything() async {
         let points = Self.track()
         let store = makeStore(persistenceClient: .mock(
@@ -95,16 +97,16 @@ struct RideDetailFeatureTests {
 
         #expect(store.state.trackSegments == RideMapThumbnail.drawableSegments(points))
         #expect(store.state.trackSegments.count == 2)
-        let profile = store.state.elevationProfileMeters
-        #expect(profile?.count == RideDetailFeature.chartSampleCount)
-        #expect(profile?.first == 250)
-        #expect(profile?.last == 269)
-        #expect(store.state.heartRateSamples == Array(120..<140))
+        // `altimeterClient.testValue` has no barometer, so the replay guesses GPS.
+        #expect(store.state.track == RideDetailTrack(points: points, altitudeSource: .gps))
+        #expect(store.state.track?.heartRate.map(\.bpm) == Array(120..<140))
+        #expect(store.state.track?.altitude.first?.meters == 250)
+        #expect(store.state.track?.altitude.last?.meters == 269)
         #expect(store.state.stats == Self.stats)
         #expect(store.state.vehiclePasses == [Self.pass])
     }
 
-    @Test("a ride with no HR or cadence sensor loads no HR series and nil cadence — never zeros")
+    @Test("a ride with no HR or cadence sensor has no HR or cadence sections — never zeros")
     func noSensorsLoadEmptyNotZero() async {
         let noSensorStats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11)
         let store = makeStore(persistenceClient: .mock(
@@ -114,14 +116,16 @@ struct RideDetailFeatureTests {
 
         await load(store)
 
-        #expect(store.state.heartRateSamples.isEmpty)
+        #expect(store.state.track?.heartRate.isEmpty == true)
+        #expect(store.state.heartRateMetrics == nil)
+        #expect(store.state.cadence == nil)
         #expect(store.state.stats?.averageCadenceRPM == nil)
         #expect(store.state.stats?.maxCadenceRPM == nil)
         #expect(store.state.stats?.vehiclePassCount == nil)
         #expect(store.state.trackSegments.count == 2)
     }
 
-    @Test("a ride with no drawable track has no segments and no elevation profile")
+    @Test("a ride with no drawable track has no segments")
     func noTrackLoadsNothingToDraw() async {
         let store = makeStore(persistenceClient: .mock(
             // One point per segment: nothing a line can be drawn through.
@@ -132,7 +136,6 @@ struct RideDetailFeatureTests {
         await load(store)
 
         #expect(store.state.trackSegments.isEmpty)
-        #expect(store.state.elevationProfileMeters == nil)
         #expect(store.state.stats == Self.stats)
     }
 
@@ -239,75 +242,8 @@ struct RideDetailFeatureTests {
     }
 }
 
-@Suite("RideDetailSeries")
-struct RideDetailSeriesTests {
-
-    private static func points(heartRates: [Int?]) -> [TrackPointDTO] {
-        heartRates.enumerated().map { second, bpm in
-            TrackPointDTO(rideId: UUID(), timestamp: Date(timeIntervalSince1970: Double(second)),
-                          latitude: 45, longitude: -93, altitudeMeters: 0, horizontalAccuracyMeters: 5,
-                          speedMPS: nil, speedSource: .none,
-                          heartRateBPM: bpm, heartRateSource: bpm == nil ? .none : .bleHR, cadenceRPM: nil)
-        }
-    }
-
-    @Test("fewer readings than buckets come back as they are, gaps dropped")
-    func fewerReadingsThanBuckets() {
-        #expect(RideDetailSeries.heartRate(Self.points(heartRates: [100, nil, 110, 120]), sampleCount: 10)
-                == [100, 110, 120])
-    }
-
-    @Test("more readings than buckets are averaged, in order, into exactly that many")
-    func readingsAreBucketAveraged() {
-        let series = RideDetailSeries.heartRate(Self.points(heartRates: [100, 102, 110, 112, 120, 124]), sampleCount: 3)
-        #expect(series == [101, 111, 122])
-    }
-
-    @Test("no readings at all is an empty series, not zeros")
-    func noReadingsIsEmpty() {
-        #expect(RideDetailSeries.heartRate(Self.points(heartRates: [nil, nil, nil]), sampleCount: 3).isEmpty)
-    }
-}
-
-@Suite("HeartRateProfileView layout")
-struct HeartRateProfileLayoutTests {
-    /// §8's worked example: resting 60, max 190.
-    private static let bounds = HeartRateZone.allCases.map { HeartRateZone.bounds(for: $0, maxHR: 190, restingHR: 60) }
-
-    @Test("the domain fits the ride, padded, and only the zones it reaches get a band")
-    func domainFitsTheRide() {
-        let layout = HeartRateProfileView.layout(samples: [120, 145, 160], zoneBounds: Self.bounds)
-
-        #expect(layout.domain == 115...165)
-        // Zone edges at 138, 151, 164: zones 1–4 are in reach, zone 5 is not.
-        #expect(layout.bands == [
-            .init(zone: 1, bpm: 115...138), .init(zone: 2, bpm: 138...151),
-            .init(zone: 3, bpm: 151...164), .init(zone: 4, bpm: 164...165)
-        ])
-    }
-
-    @Test("a ride inside one zone is one band over the whole domain")
-    func oneZoneRide() {
-        let layout = HeartRateProfileView.layout(samples: [100, 110], zoneBounds: Self.bounds)
-        #expect(layout.bands == [.init(zone: 1, bpm: 95...115)])
-    }
-
-    @Test("readings above max sit in a zone 5 band that runs to the top of the domain")
-    func aboveMaxIsZone5() {
-        let layout = HeartRateProfileView.layout(samples: [185, 200], zoneBounds: Self.bounds)
-        #expect(layout.bands == [.init(zone: 5, bpm: 180...205)])
-    }
-}
-
 @Suite("Ride chart point identity")
-struct RideChartPointIdentityTests {
-    @Test("heart-rate points are identified by sample index, so the same samples give the same IDs")
-    func heartRateIDsAreStable() {
-        let samples = [120, 145, 160]
-        #expect(RideChartPoint.points(from: samples).map(\.id) == [0, 1, 2])
-        #expect(RideChartPoint.points(from: samples) == RideChartPoint.points(from: samples))
-    }
-
+struct ElevationPointIdentityTests {
     @Test("elevation points are identified by sample index, so the same samples give the same IDs")
     func elevationIDsAreStable() {
         let samples = [12.0, 18.5, 9.25]

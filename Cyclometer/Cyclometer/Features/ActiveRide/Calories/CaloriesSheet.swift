@@ -97,22 +97,31 @@ struct CaloriesSheet: View {
 struct CaloriesList: View {
     let metrics: CaloriesMetrics
 
-    private static let chartHeight: CGFloat = 140
-
     var body: some View {
         List {
             Section {
-                if !metrics.series.isEmpty {
-                    CaloriesChart(series: metrics.series, rideSeconds: metrics.rideSeconds)
-                        .frame(height: Self.chartHeight)
-                }
-                ReadingColumns {
-                    ReadingColumn("Total", metrics.total)
-                    ReadingColumn("Average", metrics.average)
-                }
+                CaloriesReadings(metrics: metrics)
             } footer: {
                 Text(metrics.footer)
             }
+        }
+    }
+}
+
+/// The sheet's chart and stats, the rows of its section: shared with S15 (#536).
+struct CaloriesReadings: View {
+    let metrics: CaloriesMetrics
+
+    private static let chartHeight: CGFloat = 140
+
+    var body: some View {
+        if !metrics.series.isEmpty {
+            CaloriesChart(series: metrics.series, rideSeconds: metrics.rideSeconds)
+                .frame(height: Self.chartHeight)
+        }
+        ReadingColumns {
+            ReadingColumn("Total", metrics.total)
+            ReadingColumn("Average", metrics.average)
         }
     }
 }

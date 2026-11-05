@@ -5,8 +5,8 @@ import os
 // Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.persistence)
 
-/// S15 — Ride Detail: one finished ride's track, elevation and heart rate, its stats, and the
-/// vehicles that passed it (#251).
+/// S15 — Ride Detail: one finished ride's track, its stats, the dashboard's metric sheets over the
+/// whole ride (#536), and the vehicles that passed it (#251).
 ///
 /// Seeded with the `RideListSummary` S14's row already holds, so the title and date are on
 /// screen from the first frame. Everything else is three reads — the CoreData track, the `Ride`
@@ -18,8 +18,8 @@ private let logger = Logger.cyclometer(.persistence)
 @Reducer
 struct RideDetailFeature {
 
-    /// Points in each chart. Enough for a smooth line at any phone width, without handing Swift
-    /// Charts the ~4 200 points a 70-minute ride records — S20 uses the same count.
+    /// Points in S10's elevation chart. Enough for a smooth line at any phone width, without
+    /// handing Swift Charts the ~4 200 points a 70-minute ride records — S20 uses the same count.
     static let chartSampleCount = RouteDetailFeature.elevationProfileSampleCount
 
     @ObservableState
@@ -43,11 +43,9 @@ struct RideDetailFeature {
         /// good for a ride with no drawable track.
         var trackSegments: [[RouteCoordinate]] = []
 
-        /// Nil until the track loads, and nil for a ride with no drawable track.
-        var elevationProfileMeters: [Double]?
-
-        /// Empty for a ride with no heart-rate readings — never zeros standing in for them.
-        var heartRateSamples: [Int] = []
+        /// What the metric sections take from the track (#536). Nil until it loads, and nil for
+        /// good if the read fails.
+        var track: RideDetailTrack?
 
         /// Nil until it loads, and nil for good if the read fails.
         var stats: RideStats?
@@ -73,11 +71,40 @@ struct RideDetailFeature {
                                     healthZoneCeilings: healthZoneCeilingsBPM)
             }
         }
+
+        // The metric sections (#536), each nil until both the track and the stats have landed,
+        // so a section never draws half-built, and nil for good when the ride has no data for it.
+        // Built here rather than stored so they follow the units and zones as they change.
+
+        var rideMetrics: RideMetrics? {
+            guard let track, let stats else { return nil }
+            return .wholeRide(track: track, stats: stats, summary: summary, unit: unitSystem)
+        }
+
+        var caloriesMetrics: CaloriesMetrics? {
+            guard track != nil, let stats else { return nil }
+            return .wholeRide(stats: stats, summary: summary)
+        }
+
+        var cadence: RideDetailCadence? {
+            guard let track, let stats else { return nil }
+            return .wholeRide(track: track, stats: stats, zones: preferences.cadenceZones)
+        }
+
+        var heartRateMetrics: HeartRateMetrics? {
+            guard let track, let stats else { return nil }
+            return .wholeRide(track: track, stats: stats, zoneBounds: heartRateZoneBounds)
+        }
+
+        var elevationMetrics: ElevationMetrics? {
+            guard let track, let stats else { return nil }
+            return .wholeRide(track: track, stats: stats, unit: unitSystem)
+        }
     }
 
     enum Action: Equatable {
         case task
-        case trackLoaded(segments: [[RouteCoordinate]], elevationProfile: [Double]?, heartRate: [Int])
+        case trackLoaded(segments: [[RouteCoordinate]], track: RideDetailTrack)
         /// The route arrives with the stats, so the Route row never turns into a link
         /// after it is on screen.
         case statsLoaded(RideStats, route: RouteSummary?)
@@ -87,6 +114,7 @@ struct RideDetailFeature {
 
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.healthKitClient) var healthKitClient
+    @Dependency(\.altimeterClient) var altimeterClient
     @Dependency(\.date) var date
 
     var body: some ReducerOf<Self> {
@@ -98,14 +126,16 @@ struct RideDetailFeature {
             case .task:
                 let id = state.summary.id
                 return .merge(
-                    .run { [persistenceClient] send in
+                    .run { [persistenceClient, altimeterClient] send in
                         do {
                             let points = try await persistenceClient.fetchTrackPoints(id)
+                            // `RideFinishStats.backfill`'s guess: a phone with a barometer most
+                            // likely used it.
+                            let source: AltitudeResolver.Source = altimeterClient.isAvailable() ? .barometric : .gps
                             // Derived here, once per load, rather than by the view on every body pass.
                             await send(.trackLoaded(
                                 segments: RideMapThumbnail.drawableSegments(points),
-                                elevationProfile: RideDetailSeries.elevationProfile(points, sampleCount: Self.chartSampleCount),
-                                heartRate: RideDetailSeries.heartRate(points, sampleCount: Self.chartSampleCount)
+                                track: RideDetailTrack(points: points, altitudeSource: source)
                             ))
                         } catch {
                             logger.error("fetchTrackPoints failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -148,10 +178,9 @@ struct RideDetailFeature {
                     }
                 )
 
-            case let .trackLoaded(segments, elevationProfile, heartRate):
+            case let .trackLoaded(segments, track):
                 state.trackSegments = segments
-                state.elevationProfileMeters = elevationProfile
-                state.heartRateSamples = heartRate
+                state.track = track
                 return .none
 
             case let .statsLoaded(stats, route):
@@ -173,7 +202,7 @@ struct RideDetailFeature {
     }
 }
 
-/// S15's chart series, derived from the recorded track. Plain arithmetic, so it is tested
+/// S10's and S15's series, derived from the recorded track. Plain arithmetic, so it is tested
 /// directly rather than through the charts.
 enum RideDetailSeries {
     /// Elevation at `sampleCount` evenly spaced distances along the ride, the same
@@ -186,18 +215,6 @@ enum RideDetailSeries {
             RouteCoordinate(latitude: $0.latitude, longitude: $0.longitude, elevationMeters: $0.altitudeMeters)
         }
         return RouteGeometry.elevationProfile(coordinates, sampleCount: sampleCount)
-    }
-
-    /// Heart rate over the ride's recorded time, averaged into at most `sampleCount` buckets.
-    /// Only seconds with a reading count. A point is recorded once a second while riding and
-    /// never while paused, so position in the series reads as moving time. Empty when no
-    /// second had a reading.
-    static func heartRate(_ points: [TrackPointDTO], sampleCount: Int) -> [Int] {
-        let readings = points.compactMap(\.heartRateBPM)
-        guard readings.count > sampleCount, sampleCount > 0 else { return readings }
-        return readings.buckets(to: sampleCount).map { bucket in
-            Int((Double(bucket.reduce(0, +)) / Double(bucket.count)).rounded())
-        }
     }
 
     /// How long an Apple Watch reading stands for the seconds after it. HealthKit delivers heart
@@ -222,7 +239,7 @@ enum RideDetailSeries {
     }
 
     /// Seconds in each zone, zone 1 first, against `zoneBounds` (zone 1 first). A reading below
-    /// zone 1 counts as zone 1 and one above zone 5 as zone 5 — `HeartRateProfileView`'s bands.
+    /// zone 1 counts as zone 1 and one above zone 5 as zone 5.
     static func zoneSeconds(_ secondsByBPM: [Int: Int], zoneBounds: [ClosedRange<Int>]) -> [Int] {
         var zones = Array(repeating: 0, count: zoneBounds.count)
         guard !zones.isEmpty else { return zones }

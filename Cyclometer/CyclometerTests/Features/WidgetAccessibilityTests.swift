@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import CoreLocation
 import Testing
 import SwiftUI
@@ -284,6 +285,51 @@ struct WidgetAccessibilityTests {
     }
 }
 
+/// #536: S15's metric sections read as the dashboard sheets they come from. Checked on Heart Rate,
+/// whose readings carry units and whose zone rows read a range and a time: every line the Heart
+/// Rate sheet reads, apart from its current reading and its no-source footer, S15 reads too.
+@MainActor
+@Suite(.serialized)
+struct RideDetailAccessibilityTests {
+    @Test func heartRateSectionsReadAsTheSheet() throws {
+        let points = RideDetailFeatureTests.track(count: 600, heartRate: { 110 + $0 / 10 }, cadence: nil)
+        let stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 9, averageHeartRateBPM: 140, maxHeartRateBPM: 169)
+        let storage = FileStorage.inMemory
+        let state = withDependencies { $0.defaultFileStorage = storage } operation: {
+            var state = RideDetailFeature.State(summary: RideListSummary(
+                id: UUID(), title: "River Loop", startedAt: .now, distanceMeters: 3_600, durationSeconds: 600
+            ))
+            state.track = RideDetailTrack(points: points, altitudeSource: .barometric)
+            state.stats = stats
+            return state
+        }
+        let metrics = try #require(state.heartRateMetrics)
+
+        let sheet = try Host(HeartRateList(metrics: metrics), height: 900)
+        let sheetLines = try sheet.readings()
+        sheet.tearDown()
+        let store = Store(initialState: state) { RideDetailFeature() } withDependencies: {
+            $0.defaultFileStorage = storage
+        }
+        let screen = try Host(RideDetailList(store: store, mapRow: Color.cyBgTertiary), height: 1_600)
+        defer { screen.tearDown() }
+        let screenLines = Set(try screen.readings())
+
+        // The current reading and its zone, the footer naming the missing source, and the zones
+        // header, which S15 names after its section (checked below).
+        let dropped: Set = ["Heart Rate No reading", "Zone No reading", "No HR Source ", "Time in Zones "]
+        #expect(sheetLines.contains("Time in Zones "))
+        #expect(screenLines.contains("Heart Rate Zones "))
+        let shared = sheetLines.filter { !dropped.contains($0) }
+        #expect(shared.contains("Average 140 beats per minute"), "sheet read \(sheetLines)")
+        #expect(shared.contains { $0.hasPrefix("Z1 ") }, "sheet read \(sheetLines)")
+        for line in shared {
+            #expect(screenLines.contains(line), "S15 doesn't read \"\(line)\"")
+        }
+        #expect(!screenLines.contains("Heart Rate No reading"))
+    }
+}
+
 /// The element checks for W8 Map. `MapWidget` follows the rider's location, and when the test host has
 /// no location decision on the simulator, MapKit loops forever between setting user tracking and
 /// checking authorization, so the first `Host` never returns. That was the CI hang that hit the
@@ -512,13 +558,15 @@ private final class Host {
     let window: UIWindow
     let controller: UIHostingController<AnyView>
 
-    init<V: View>(_ view: V) throws {
+    /// `height` is the view's; a widget's 200 pt by default. A screen asks for room for every row
+    /// it reads, since a List builds no element for a row it hasn't laid out.
+    init<V: View>(_ view: V, height: CGFloat = 200) throws {
         try #require(AccessibilityAutomation.isAvailable, AccessibilityAutomation.missingSymbol)
         AccessibilityAutomation.acquire()
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 393, height: 400)
-        controller = UIHostingController(rootView: AnyView(view.frame(width: 393, height: 200)))
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: height * 2)
+        controller = UIHostingController(rootView: AnyView(view.frame(width: 393, height: height)))
         window.rootViewController = controller
         window.isHidden = false
         settle()
@@ -531,6 +579,13 @@ private final class Host {
         try #require(!elements.isEmpty, AccessibilityAutomation.emptyTree)
         try #require(elements.count == 1, "\(elements.count) accessibility elements; a tappable widget must be one")
         return elements[0]
+    }
+
+    /// Every element's label and value, one line each, as VoiceOver reads them.
+    func readings() throws -> [String] {
+        let elements = Self.elements(in: controller.view)
+        try #require(!elements.isEmpty, AccessibilityAutomation.emptyTree)
+        return elements.map { "\($0.accessibilityLabel ?? "") \($0.accessibilityValue ?? "")" }
     }
 
     /// Every label and value in the presented sheet, joined.
