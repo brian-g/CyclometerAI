@@ -41,7 +41,7 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 
 **Sheets:** close every sheet with `.sheetCloseButton()` (`UI/Components/SheetCloseButton/`), inside its `NavigationStack` — never a hand-built close (UX.md §Sheet standards, #335).
 
-Labels: **ALL CAPS** · Units: *lowercase* · Units: baseline-aligned to their corresponding value
+Dashboard labels: **ALL CAPS** · Units: *lowercase* · Units: baseline-aligned to their corresponding value
 
 ## Build & Development
 

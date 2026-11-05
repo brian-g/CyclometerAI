@@ -95,6 +95,26 @@ struct ActiveRideCaloriesTests {
         #expect(store.state.caloriesMetrics.emptyReason == "Add your weight in the Health app to estimate active calories.")
     }
 
+    /// #460: W23 shows a failed read as no body mass, but the ride remembers it failed, so the
+    /// finish leaves its calories to the backfill rather than storing none for good.
+    @Test("A body-mass read that throws reads as no body mass, marked as failed")
+    func failedBodyMassReadIsMarked() async {
+        struct ReadFailed: Error {}
+        let now = LockIsolated(Self.fixedNow)
+        var healthKitClient = HealthKitClient.mock(dateOfBirth: Self.dateOfBirth, biologicalSex: .male)
+        healthKitClient.fetchBodyMass = { throw ReadFailed() }
+        let store = makeStore(now: now, healthKitClient: healthKitClient)
+
+        await store.send(.task)
+        await store.receive(\.bodyMassReadFailed) {
+            $0.isBodyMassReadFailed = true
+        }
+        await store.receive(\.energyRiderFetched) {
+            $0.energyRider = .noBodyMass
+        }
+        await store.skipInFlightEffects(strict: false)
+    }
+
     @Test("One point a minute, and the last is the energy the ride's Health workout is written with")
     func minuteSeriesMatchesHealthWorkout() async throws {
         let now = LockIsolated(Self.fixedNow)

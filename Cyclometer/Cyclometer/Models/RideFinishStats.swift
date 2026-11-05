@@ -68,16 +68,18 @@ struct OwedFinishStats: Sendable, Equatable {
 
 extension RideFinishStats {
     /// Works out and stores the stats of every finished ride still owed them, newest first, and
-    /// returns how many it stored. Runs at launch and after AppFeature's close-outs, like the
-    /// workout and thumbnail backfills; a Finish stores the live numbers itself.
+    /// returns how many it stored. Runs at launch, after AppFeature's close-outs and after a
+    /// Finish, like the workout backfill; a Finish whose live state covered the whole ride has
+    /// already stored the live numbers, so it is not owed.
     ///
     /// Calories use Health's body mass as it is now: for a ride closed out at launch that is
     /// moments after the ride, and for a ride from before #460 it is the closest there is. Once
     /// stored, a later change of weight no longer reaches the ride.
     ///
     /// The first failed read or write ends the batch and leaves the rest owed, to be tried at the
-    /// next launch. Two runs at once (a close-out during the launch run) both store the same
-    /// numbers, so they aren't serialised.
+    /// next launch. That includes Health's body mass: a read that throws is not "no body mass",
+    /// and storing nil for it would be final. Two runs at once (a close-out or a Finish during the
+    /// launch run) both store the same numbers, so they aren't serialised.
     @discardableResult
     static func backfill() async -> Int {
         @Dependency(\.persistenceClient) var persistenceClient
@@ -91,10 +93,16 @@ extension RideFinishStats {
         }
         guard !owed.isEmpty else { return 0 }
 
-        async let kilograms = try? healthKitClient.fetchBodyMass()
         async let dateOfBirth = try? healthKitClient.fetchDateOfBirth()
         async let sex = try? healthKitClient.fetchBiologicalSex()
-        let (riderKilograms, riderDateOfBirth, riderSex) = await (kilograms, dateOfBirth, sex)
+        let riderKilograms: Double?
+        do {
+            riderKilograms = try await healthKitClient.fetchBodyMass()
+        } catch {
+            logger.error("finish stats for \(owed.count, privacy: .public) rides not stored: body mass read failed — retried next launch")
+            return 0 // The read's own failure is logged inside HealthKitClient.
+        }
+        let (riderDateOfBirth, riderSex) = await (dateOfBirth, sex)
         // As the resume decides (`ActiveRideFeature.seedFromSavedTrack`): the track doesn't record
         // which source each altitude came from, and a phone with a barometer most likely used it.
         let source: AltitudeResolver.Source = altimeterClient.isAvailable() ? .barometric : .gps

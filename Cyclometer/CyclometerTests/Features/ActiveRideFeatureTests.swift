@@ -1863,9 +1863,22 @@ struct ActiveRideFeatureStateMachineTests {
         return state
     }
 
-    /// Finishes the ride and returns the summary `finalizeRide` was handed.
-    private func finish(_ state: ActiveRideFeature.State) async -> RideSummaryUpdate? {
+    /// Finishes the ride and returns the summary `finalizeRide` was handed. The ride is owed its
+    /// finish stats when that summary carried none, as `RidePersistenceActor` has it, and
+    /// `backfilled` collects the rides whose stats the backfill then stored.
+    private func finish(
+        _ state: ActiveRideFeature.State, backfilled: LockIsolated<[UUID]> = LockIsolated([])
+    ) async -> RideSummaryUpdate? {
         let finalized = LockIsolated<RideSummaryUpdate?>(nil)
+        var persistenceClient = PersistenceClient.mock(
+            onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) },
+            onSaveRideFinishStats: { id, _ in backfilled.withValue { $0.append(id) } }
+        )
+        persistenceClient.fetchRidesOwedFinishStats = {
+            guard let summary = finalized.value, summary.finish == nil else { return [] }
+            return [OwedFinishStats(rideId: summary.rideId, startedAt: testDate,
+                                    distanceMeters: summary.distanceMeters, movingSeconds: summary.durationSeconds)]
+        }
         let store = TestStore(initialState: state) {
             ActiveRideFeature()
         } withDependencies: {
@@ -1878,7 +1891,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.locationClient = LocationClient(
                 startUpdates: { AsyncStream { $0.finish() } }, stopUpdates: {}, currentCoordinate: { nil }
             )
-            $0.persistenceClient = .mock(onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) })
+            $0.persistenceClient = persistenceClient
         }
         store.exhaustivity = .off
         await store.send(.finishTapped)
@@ -1893,8 +1906,11 @@ struct ActiveRideFeatureStateMachineTests {
     func finishStoresLiveFinishStats() async throws {
         let rideId = UUID()
         let state = Self.finishingState(rideId, energyRider: .rider(Self.rider))
-        let finish = try #require(await finish(state)?.finish)
+        let backfilled = LockIsolated<[UUID]>([])
+        let finish = try #require(await finish(state, backfilled: backfilled)?.finish)
 
+        // Stored with the finalize, so the backfill that follows finds it settled.
+        #expect(backfilled.value.isEmpty)
         #expect(try #require(finish.ascentMeters) > 0)
         #expect(finish.ascentMeters == state.elevation.ascentMeters)
         #expect(finish.descentMeters == state.elevation.descentMeters)
@@ -1911,18 +1927,26 @@ struct ActiveRideFeatureStateMachineTests {
         #expect(finish == RideFinishStats(ascentMeters: nil, descentMeters: nil, activeKilocalories: nil))
     }
 
-    @Test("Finish leaves the stats to the backfill while the live state doesn't cover the whole ride (#460)",
-          arguments: ["saved track pending", "saved track missing", "Health rider loading"])
+    @Test("Finish leaves the stats to the backfill while the live state doesn't cover the whole ride, and runs it (#460)",
+          arguments: ["saved track pending", "saved track missing", "Health rider loading", "body mass read failed"])
     func finishWithPartialLiveStateIsOwed(_ gap: String) async {
-        var state = Self.finishingState(UUID(), energyRider: .rider(Self.rider))
+        let rideId = UUID()
+        var state = Self.finishingState(rideId, energyRider: .rider(Self.rider))
         switch gap {
         case "saved track pending": state.isSavedTrackPending = true
         case "saved track missing": state.isSavedTrackMissing = true
+        case "body mass read failed":
+            // As `.bodyMassReadFailed` then `.energyRiderFetched(nil)` leave it.
+            state.energyRider = .noBodyMass
+            state.isBodyMassReadFailed = true
         default: state.energyRider = .loading
         }
-        let summary = await finish(state)
+        let backfilled = LockIsolated<[UUID]>([])
+        let summary = await finish(state, backfilled: backfilled)
         #expect(summary != nil)
         #expect(summary?.finish == nil)
+        // Worked out from the saved track right after the finalize, not at some later launch.
+        #expect(backfilled.value == [rideId])
     }
 
     @Test("Alert cancel does not change recording state")

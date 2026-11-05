@@ -119,6 +119,27 @@ struct RideFinishStatsTests {
         #expect(stored.value.isEmpty)
     }
 
+    @Test("a failed body mass read ends the batch and leaves every ride owed, rather than storing no calories")
+    func failedBodyMassReadLeavesRidesOwed() async {
+        let ride = Self.owed()
+        let owed = LockIsolated([ride, Self.owed()])
+        let stored = LockIsolated<[UUID: RideFinishStats]>([:])
+
+        let count = await withDependencies {
+            $0.persistenceClient = Self.persistence(owed, stored: stored, trackPoints: [ride.rideId: Self.track(ride.rideId)])
+            var healthKitClient = HealthKitClient.mock(dateOfBirth: DateComponents(year: 1980, month: 6, day: 1),
+                                                       biologicalSex: .male)
+            healthKitClient.fetchBodyMass = { throw ReadFailed() }
+            $0.healthKitClient = healthKitClient
+        } operation: {
+            await RideFinishStats.backfill()
+        }
+
+        #expect(count == 0)
+        #expect(owed.value.count == 2)
+        #expect(stored.value.isEmpty)
+    }
+
     /// The acceptance criterion: a finished ride stores the energy its Health workout carries,
     /// given the same rider inputs.
     @Test("the stored active energy equals what the ride's Health workout is written with")

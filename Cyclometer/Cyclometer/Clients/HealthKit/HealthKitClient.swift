@@ -165,6 +165,13 @@ extension HealthKitClient {
         let samples: [HKQuantitySample]
         do {
             samples = try await descriptor.result(for: store)
+        } catch let error as HKError where [.errorAuthorizationNotDetermined, .errorAuthorizationDenied,
+                                            .errorHealthDataUnavailable].contains(error.code) {
+            // Nothing readable until the rider acts, the same answer a denied read gives below.
+            // Not thrown: the finish-stats backfill retries a throw at every launch (#460), and
+            // a rider who never answered Health's prompt would keep every ride owed for good.
+            logger.notice("no body mass readable — Health access not granted (\(error.code.rawValue, privacy: .public)); no energy")
+            return nil
         } catch {
             // Logged here because the caller's `try?` can't be: without this line, the workout's
             // own log would blame a missing body mass for what was a failed read.

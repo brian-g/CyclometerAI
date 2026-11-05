@@ -2023,3 +2023,8 @@ Plan: `~/.claude/plans/squishy-cooking-wand.md` (approved 2026-11-05).
 Brian ran it on device: check steps 1–4 fine. Targeted suites (RideFinishStats, PersistenceClient, RideSchemaMigration,
 ActiveRideFeatureStateMachine, RideDetailFeature, S15 rows, RideHealthWorkout): 128 passed. S15 snapshots: all-sensors and
 gps-only re-recorded (new rows; cadence rows hidden without a sensor), verify run 4/4. Full `CyclometerTests`: 2470 passed, 0 failed.
+- [x] Review (`/code-review xhigh --fix`): fixed 1–3 (Finish runs the backfill; a throwing body-mass read leaves rides owed).
+  Follow-up: `fetchBodyMass` maps not-determined/denied/unavailable to nil, so a rider who never answered Health's prompt
+  isn't owed forever. #4 fixed: a throwing body-mass read at ride start sets `isBodyMassReadFailed`, and the Finish leaves
+  the ride owed instead of storing no calories (W23 unchanged). #6 (S15 hides rows while the backfill runs, no refresh)
+  — monitor. #12 not a bug: ALL CAPS is for dashboard labels; CLAUDE.md now says so.
