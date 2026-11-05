@@ -1979,3 +1979,25 @@ fixed canvas, so `expandedHeight` 2100 → 2340, `collapsedHeight` 1400 → 1640
 - [x] (8) #350 scope extended to `plottedSeries` (W2 + gauge)
 - [x] Build-for-testing green
 - [x] Full `CyclometerTests`: 2453 passed, 0 failed
+
+---
+
+## Map a11y tests hang without location permission (2026-11-05; Brian: "fix only the tests")
+Cause, proven locally: when the test host's bundle ID has no location decision on the simulator, `MapWidget`'s
+`.userLocation` camera spins MapKit in a tracking-mode ↔ authorization-check layout loop forever. The rename to
+`xyz.acmeapps.ride` caused tonight's local hang; a fresh CI sim is very likely the #361 "never returned".
+The real app is fine: Brian checked on device that it prompts correctly. So no app change.
+- [x] `MapWidgetAccessibilityTests`: fail fast with a `#require` on `CLLocationManager().authorizationStatus != .notDetermined`,
+      whose message gives the `simctl` grant recipe, instead of hanging the run. Fix the suite comment's cause.
+- [x] CI (`tests.yml`): after "Wait for the simulator", install the built app on `$SIM_UDID` and
+      `simctl privacy grant location <ID read from the built Info.plist>`; remove the
+      `-skip-testing:…/MapWidgetAccessibilityTests` line; rewrite its comment
+- [x] Verify locally: reset location for the ID → the suite fails in seconds with the message; grant → 3/3 pass
+- [ ] CI: verified only by a push (Brian's call)
+
+### Review
+Location reset: all 3 fail in under 0.05 s with the grant message. Granted: 3/3 pass. CI-style run (base sim, `-parallel-testing-enabled NO`,
+xcodebuild reinstalling over the `simctl install`) keeps the grant: 3/3 pass. A grant made before `simctl install` is silently lost.
+Rename follow-ups in the same branch: `CFBundleDisplayName` moved into Info.plist (generation is off), Overpass UA `AcmeRide/`,
+old subsystem in docs; 3 test expectations + the Settings Live Activities snapshot updated. Full `CyclometerTests` minus the Map suite:
+2157 passed, 3 failed (those 3, since fixed and rerun green: 29/29).

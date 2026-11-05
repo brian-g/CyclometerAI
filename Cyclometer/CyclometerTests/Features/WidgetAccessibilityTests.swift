@@ -1,3 +1,4 @@
+import CoreLocation
 import Testing
 import SwiftUI
 import UIKit
@@ -283,15 +284,41 @@ struct WidgetAccessibilityTests {
     }
 }
 
-/// The element checks for W8 Map, apart so CI can skip them, as it does every suite that renders a
-/// live map (`.github/workflows/tests.yml`). On the CI runner the first `Host` holding a `MapWidget`
-/// never returned, and the job hit its 30-minute timeout; locally the suite passes.
+/// The element checks for W8 Map. `MapWidget` follows the rider's location, and when the test host has
+/// no location decision on the simulator, MapKit loops forever between setting user tracking and
+/// checking authorization, so the first `Host` never returns. That was the CI hang that hit the
+/// 30-minute job timeout (#361), and the local one after the bundle ID changed (2026-11-04). Each test
+/// therefore requires a decision first and fails at once, saying how to make one. CI grants it before
+/// the run (`.github/workflows/tests.yml`).
 @MainActor
 @Suite(.serialized)
 struct MapWidgetAccessibilityTests {
-    @Test func mapIsOneButton() throws { try ElementChecks.isOneButton(.map) }
-    @Test func mapDoubleTapOpensTheSheet() throws { try ElementChecks.doubleTapOpensTheSheet(.map) }
-    @Test func mapInEditModeIsNotAButton() throws { try ElementChecks.editModeIsNotAButton(.map) }
+    @Test func mapIsOneButton() throws {
+        try Self.requireLocationDecision()
+        try ElementChecks.isOneButton(.map)
+    }
+
+    @Test func mapDoubleTapOpensTheSheet() throws {
+        try Self.requireLocationDecision()
+        try ElementChecks.doubleTapOpensTheSheet(.map)
+    }
+
+    @Test func mapInEditModeIsNotAButton() throws {
+        try Self.requireLocationDecision()
+        try ElementChecks.editModeIsNotAButton(.map)
+    }
+
+    private static func requireLocationDecision() throws {
+        let bundleID = Bundle.main.bundleIdentifier ?? "<app bundle ID>"
+        try #require(
+            CLLocationManager().authorizationStatus != .notDetermined,
+            """
+            \(bundleID) has no location decision on this simulator, and MapWidget hangs without one. \
+            With the app installed, run: xcrun simctl privacy <simulator UDID> grant location \(bundleID). \
+            Parallel runs clone the base simulator, so grant it there.
+            """
+        )
+    }
 }
 
 /// One widget's VoiceOver element, checked in a `Host`.
