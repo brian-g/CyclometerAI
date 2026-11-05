@@ -3,7 +3,7 @@ import Foundation
 import os
 import UIKit
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.routes)
 
 /// S19's row thumbnail (#273): the route's polyline in `cyMapRoute` over a static map, the same

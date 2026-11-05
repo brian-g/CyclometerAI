@@ -6,7 +6,7 @@
 import Foundation
 
 struct NewRideDemoData {
-    static let bikeName = "Road Bike Stub"
+    static let bikeName = "Road Bike"
 }
 
 /// Discovered devices for the Settings → Sensors previews. The screen is driven by

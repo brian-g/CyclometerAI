@@ -7,7 +7,7 @@ import Synchronization
 private let logger = Logger.cyclometer(.liveActivity)
 
 /// TCA dependency for the ride's Live Activity (PRD §8.10, #307): the S05.3 mini-player's
-/// content on the Lock Screen and in the Dynamic Island, drawn by the `CyclometerWidgets`
+/// content on the Lock Screen and in the Dynamic Island, drawn by the `RideWidgets`
 /// extension.
 ///
 /// Local updates only — no push tokens — and never an alert: no call takes an

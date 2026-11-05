@@ -4,7 +4,7 @@ import Foundation
 import MapKit
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.recording)
 
 /// S14's row thumbnail (#177): the ride's recorded track over a static map, rendered once

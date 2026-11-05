@@ -2,7 +2,7 @@ import ComposableArchitecture
 import CoreBluetooth
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 // Retrieve after an untethered ride: `log collect --device --last 1h` (notice level persists).
 private let logger = Logger.cyclometer(.csc)
 

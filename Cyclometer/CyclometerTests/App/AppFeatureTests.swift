@@ -246,9 +246,9 @@ struct AppFeatureTests {
         let rides = documents.appending(component: "Rides", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: rides, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: documents) }
-        let referenced = rides.appending(component: "Cyclometer_2026-09-19_11-48.gpx")
-        let pending = rides.appending(component: "Cyclometer_2026-09-20_07-05.gpx")
-        let orphan = rides.appending(component: "Cyclometer_2026-09-18_17-30.gpx")
+        let referenced = rides.appending(component: "AcmeRide_2026-09-19_11-48.gpx")
+        let pending = rides.appending(component: "AcmeRide_2026-09-20_07-05.gpx")
+        let orphan = rides.appending(component: "AcmeRide_2026-09-18_17-30.gpx")
         for url in [referenced, pending, orphan] { try Data().write(to: url) }
 
         let store = TestStore(initialState: AppFeature.State()) {
@@ -285,7 +285,7 @@ struct AppFeatureTests {
         let rides = documents.appending(component: "Rides", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: rides, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: documents) }
-        let unreferenced = rides.appending(component: "Cyclometer_2026-09-20_07-05.gpx")
+        let unreferenced = rides.appending(component: "AcmeRide_2026-09-20_07-05.gpx")
         try Data().write(to: unreferenced)
 
         let store = TestStore(initialState: AppFeature.State()) {

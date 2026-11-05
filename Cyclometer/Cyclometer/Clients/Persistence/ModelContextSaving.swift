@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.persistence)
 
 /// Shared body for every SwiftData write in `RidePersistenceActor` and

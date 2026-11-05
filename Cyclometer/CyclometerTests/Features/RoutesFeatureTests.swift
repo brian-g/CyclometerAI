@@ -1195,7 +1195,7 @@ struct RoutesFeatureReviewTests {
             } actions: {
                 ButtonState(role: .cancel) { TextState("OK") }
             } message: {
-                TextState("Cyclometer is finishing the last route. Try this one again in a moment.")
+                TextState("Acme Ride is finishing the last route. Try this one again in a moment.")
             }
         }
         await store.finish()

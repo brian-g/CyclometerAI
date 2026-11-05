@@ -3,7 +3,7 @@ import CoreLocation
 import HealthKit
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.healthkit)
 
 private let bpmUnit = HKUnit.count().unitDivided(by: .minute())

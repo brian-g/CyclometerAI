@@ -980,7 +980,7 @@ background. That fragility is the reason §13.3 adopts `bluetooth-central` even 
 require it.
 
 > **To verify:** start a ride, lock the screen for 10+ minutes, then `log collect --device --last 1h`
-> and filter subsystem `com.xavier.cyclometer`. The sensor clients log one `csc` line and one `hr`
+> and filter subsystem `xyz.acmeapps.ride`. The sensor clients log one `csc` line and one `hr`
 > line per sensor per second, so a continuous stream of them across the locked window confirms it.
 > See §15 for why the rate is one a second and not one per notification.
 
@@ -1182,7 +1182,7 @@ receive. The code is `Models/SensorHealth.swift` (`SensorHealthReport`, `SensorH
 
 ## 15. Logging and Diagnostics
 
-Everything the app logs goes to one subsystem, `com.xavier.cyclometer`, under a per-area category.
+Everything the app logs goes to one subsystem, `xyz.acmeapps.ride`, under a per-area category.
 Stream it live with Console.app or the Xcode console; retrieve it after an untethered ride with
 `log collect --device --last 1h`.
 
@@ -1223,7 +1223,7 @@ decides every level in the BLE clients:
 
 ### 15.2 Persisted entry budget
 
-Per riding hour, subsystem `com.xavier.cyclometer`:
+Per riding hour, subsystem `xyz.acmeapps.ride`:
 
 | Source | Level | Gate | Entries per hour |
 |---|---|---|---|

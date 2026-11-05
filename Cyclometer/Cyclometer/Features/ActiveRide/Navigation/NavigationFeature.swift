@@ -2,7 +2,7 @@ import ComposableArchitecture
 import Foundation
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.navigation)
 
 /// Follows the route a ride was started on (#197): places the rider on its polyline, tracks how

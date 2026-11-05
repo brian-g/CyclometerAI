@@ -4,7 +4,7 @@ import Foundation
 import MapKit
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.network)
 
 /// TCA dependency for Apple's reverse geocoder, which names the place a ride started in for

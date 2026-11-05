@@ -73,7 +73,7 @@ struct GPXExporterTests {
         let attrs = try #require(capture.rootAttributes)
         #expect(attrs["xmlns"] == "http://www.topografix.com/GPX/1/1")
         #expect(attrs["xmlns:gpxtpx"] == "http://www.garmin.com/xmlschemas/TrackPointExtension/v2")
-        #expect(attrs["xmlns:cyc"] == "http://cyclometerapp.com/xmlschemas/VehicleEvent/v1")
+        #expect(attrs["xmlns:cyc"] == "http://acmeapps.xyz/ride/xmlschemas/VehicleEvent/v1")
     }
 
     @Test("vehicle pass waypoints appear before the track, per GPX 1.1 element order")
@@ -309,7 +309,7 @@ struct GPXExporterTests {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "yyyy-MM-dd_HH-mm"
-        return "Cyclometer_\(formatter.string(from: date))"
+        return "AcmeRide_\(formatter.string(from: date))"
     }
 
     @Test("round-trip: a synthetic multi-sensor ride parses back with matching point and waypoint counts and per-point field presence")

@@ -3,7 +3,7 @@ import Foundation
 import FoundationModels
 import os
 
-// Stream live: Console.app / Xcode console, filter subsystem "com.xavier.cyclometer".
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.routes)
 
 /// TCA dependency for the on-device language model (`FoundationModels`), which writes S20's route
