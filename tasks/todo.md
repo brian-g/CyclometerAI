@@ -2213,3 +2213,18 @@ Decisions (2026-11-05): 1 #538 before #537; 2 the title block's moving time is `
 - [x] Re-recorded 12 `RideDetailSnapshotTests` references (no-altitude unchanged); `ElevationSheetSnapshotTests` unchanged; full suite 2568 passed, 0 failed
 
 **Review:** builds clean. Live Elevation sheet's layout is untouched by design.
+
+---
+
+## #547 — Pace splits in Ride Detail's Pace section
+
+- [x] `PaceSplits.splits` replays the tick's rule on moving time; boundary seconds shared; partial last split, "0.0" leftover dropped, none under one unit
+- [x] `RideDetailTrack.paceSplits` per unit system; `RideMetrics.paceSplits` (empty on the live sheet)
+- [x] `PaceSplitRows`: header, 5 rows, "More" `DisclosureGroup`; pace right-aligned (Brian: no time column, collapse after 5)
+- [x] `RidePaceSplitsTests`, `RideDetailMetricsTests` updates, `testRideDetailPaceSplits` snapshot
+- [x] UX.md §S15 as-built note
+- [x] Brian checks on device
+- [x] Re-recorded 14 `RideDetailSnapshotTests` references (fixture is 6.7 mi: 5 rows and "More"); each first differs at the Pace section, nothing above it changed; 4 new `testRideDetailPaceSplits` references
+- [x] Targeted suites green; full `CyclometerTests` passed, 0 failed
+
+**Review:** splits are replayed with the odometer's rule, so they add up to the stored Moving Time (pinned in `RideDetailMetricsTests`). The live Ride Metrics sheet is unchanged: its `RideMetrics` carries no splits.
