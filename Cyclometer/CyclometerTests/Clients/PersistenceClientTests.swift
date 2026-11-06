@@ -527,23 +527,61 @@ struct PersistenceClientTests {
     @Test("fetchRideStats returns the finalized aggregates, nil cadence and pass count kept nil")
     func fetchRideStatsReturnsAggregates() async throws {
         let (client, _) = Self.makeLiveClient()
+        // S15's time range ends here (#538).
+        let endedAt = Date(timeIntervalSince1970: 1_700_000_000)
         let withSensors = UUID()
         try await client.createRide(withSensors, Date(), nil)
-        try await client.finalizeRide(withSensors, Date(), RideSummaryUpdate(
+        try await client.finalizeRide(withSensors, endedAt, RideSummaryUpdate(
             rideId: withSensors, durationSeconds: 120, distanceMeters: 500, averageSpeedMPS: 4, maxSpeedMPS: 9,
             averageCadenceRPM: 0, maxCadenceRPM: 104, vehiclePassCount: 3
         ), nil)
         let withoutSensors = UUID()
         try await client.createRide(withoutSensors, Date(), nil)
-        try await client.finalizeRide(withoutSensors, Date(), RideSummaryUpdate(
+        try await client.finalizeRide(withoutSensors, endedAt, RideSummaryUpdate(
             rideId: withoutSensors, durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
         ), nil)
 
         // A real 0 rpm average must survive as 0, not collapse into "no sensor".
         #expect(try await client.fetchRideStats(withSensors) == RideStats(
-            averageSpeedMPS: 4, maxSpeedMPS: 9, averageCadenceRPM: 0, maxCadenceRPM: 104, vehiclePassCount: 3
+            averageSpeedMPS: 4, maxSpeedMPS: 9, averageCadenceRPM: 0, maxCadenceRPM: 104, vehiclePassCount: 3,
+            endedAt: endedAt
         ))
-        #expect(try await client.fetchRideStats(withoutSensors) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5))
+        #expect(try await client.fetchRideStats(withoutSensors) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5, endedAt: endedAt))
+    }
+
+    @Test("updateRideNotes stores the notes fetchRideStats reads back, and an unknown ride throws (#538)")
+    func updateRideNotesRoundTrips() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date(), nil)
+        #expect(try await client.fetchRideStats(rideId).notes == "")
+
+        try await client.updateRideNotes(rideId, "Headwind out, tailwind home")
+        #expect(try await client.fetchRideStats(rideId).notes == "Headwind out, tailwind home")
+        try await client.updateRideNotes(rideId, "")
+        #expect(try await client.fetchRideStats(rideId).notes == "")
+
+        await #expect(throws: PersistenceError.rideNotFound) {
+            try await client.updateRideNotes(UUID(), "Nowhere")
+        }
+    }
+
+    @Test("fetchRideStats offers the GPX export only while the file is there (#538)")
+    func fetchRideStatsChecksTheGPXFile() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(rideId).gpx")
+        try Data("<gpx/>".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await client.createRide(rideId, Date(), nil)
+        try await client.finalizeRide(rideId, Date(), RideSummaryUpdate(
+            rideId: rideId, durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
+        ), url)
+
+        #expect(try await client.fetchRideStats(rideId).gpxFileURL == url)
+        // Deleted from Files.
+        try FileManager.default.removeItem(at: url)
+        #expect(try await client.fetchRideStats(rideId).gpxFileURL == nil)
     }
 
     @Test("fetchRideStats on an unknown rideId throws rideNotFound, live and mock alike")
@@ -605,11 +643,12 @@ struct PersistenceClientTests {
         var summary = RideSummaryUpdate(rideId: rideId, durationSeconds: 60, distanceMeters: 200,
                                         averageSpeedMPS: 3, maxSpeedMPS: 5)
         summary.finish = RideFinishStats(ascentMeters: nil, descentMeters: nil, activeKilocalories: nil)
-        try await client.finalizeRide(rideId, Date(), summary, nil)
+        let endedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try await client.finalizeRide(rideId, endedAt, summary, nil)
 
         // Nil is a result, not "still to work out": the ride isn't owed a backfill.
         #expect(try await client.fetchRidesOwedFinishStats().isEmpty)
-        #expect(try await client.fetchRideStats(rideId) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5))
+        #expect(try await client.fetchRideStats(rideId) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5, endedAt: endedAt))
     }
 
     @Test("finalizeRide without finish stats leaves the ride owed them; a checkpoint never writes them")

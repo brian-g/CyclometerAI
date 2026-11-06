@@ -172,6 +172,9 @@ struct RoutesFeature {
             /// "Use Route", from S20's CTA or S19's row swipe, on its way to `AppFeature`,
             /// which owns the Start sheet.
             case useRoute(RouteReference)
+            /// A ride's title or notes changed in an S15 on this tab's stack (#538), for
+            /// `AppFeature` to reload S14 on the Rides tab.
+            case rideEdited
         }
     }
 
@@ -487,6 +490,12 @@ struct RoutesFeature {
 
             case .path(.element(id: _, action: .route(.delegate(.useRoute(let route))))):
                 return .send(.delegate(.useRoute(route)))
+
+            // S15 opened from S20's Previous Rides (#426). S14, on the other tab, is
+            // `AppFeature`'s to reload.
+            case let .path(.element(id: _, action: .ride(.delegate(.rideEdited(id, title, notes))))):
+                state.path.applyRideEdit(id: id, title: title, notes: notes)
+                return .send(.delegate(.rideEdited))
 
             case .alert, .path, .delegate:
                 return .none

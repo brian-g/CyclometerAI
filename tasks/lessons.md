@@ -916,3 +916,14 @@ creek on fill, which a bare-earth model reads as the creek bed.
 **Rule.** Before defending or changing a route's gain or grade, compare it with a ridden export of the same road
 (`Cyclometer_*.gpx`, barometric altitude) at the same spot. And replay a proposed threshold on the fixtures the
 other terrain outputs rely on (punchy, kicks): the 300 m window fixed the max grade and broke the Punchy label.
+
+## Match the system's own motion, and don't reuse a framing helper built for a different map (2026-11-06, #538)
+
+**What happened.** On S15's map header, two things were wrong when Brian ran it:
+1. I reused `RoutesMapCamera.region(fitting:)`, the live maps' padded region with a 1.7 km floor, for a static header. His loop under a mile came out "very zoomed out".
+2. For the toolbar title I guessed at iOS's motion with an inserted `.push(from: .bottom)` inside `.clipped()`. The bar resized the item as it was inserted, which read as "a reveal from the center". iOS's inline title is "a fade in and a shift up".
+
+**Rules.**
+- Before reusing a camera or framing helper, check its floor and padding against the smallest real input: a short loop, not a sample route.
+- To match a system animation, look at the system's own instance first (here, S14's inline title) and copy that motion.
+- Keep a toolbar item laid out and animate its opacity and offset. Inserting or removing it lets the bar resize it mid-animation.

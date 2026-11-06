@@ -65,10 +65,18 @@ actor RidePersistenceActor {
         }
     }
 
-    /// S10's rename field (#249). The only write the rider makes to a finished ride.
+    /// S10's rename field (#249), and S15's Edit sheet (#538).
     func renameRide(id: UUID, title: String) throws {
         try savingChanges("renameRide", id: id, context: modelContext) {
             try fetchRide(id: id).title = title
+        }
+    }
+
+    /// S15's Edit sheet (#538). With `renameRide`, the only writes the rider makes to a
+    /// finished ride.
+    func updateRideNotes(id: UUID, notes: String) throws {
+        try savingChanges("updateRideNotes", id: id, context: modelContext) {
+            try fetchRide(id: id).notes = notes
         }
     }
 
@@ -296,7 +304,12 @@ actor RidePersistenceActor {
             calorieSeries: ride.calorieSeries,
             movingSeconds: ride.speedSampleCount,
             cadenceSecondsByRPM: ride.cadenceSecondsByRPM,
-            cadenceCoastingSeconds: ride.cadenceCoastingSeconds
+            cadenceCoastingSeconds: ride.cadenceCoastingSeconds,
+            endedAt: ride.endedAt,
+            notes: ride.notes,
+            // Only a file still there: the rider can delete it from Files, as `replaceGPXFile`
+            // allows for, and S15 must not offer to share a file that is gone.
+            gpxFileURL: ride.gpxFileURL.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
         )
     }
 

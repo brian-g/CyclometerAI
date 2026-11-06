@@ -34,4 +34,12 @@ struct RideStats: Sendable, Equatable {
     /// zones resolve against S12's as they are now.
     var cadenceSecondsByRPM: [Int: TimeInterval] = [:]
     var cadenceCoastingSeconds: TimeInterval = 0
+    /// The end of S15's title-block time range (#538). Nil only for a ride still recording.
+    var endedAt: Date? = nil
+    /// The rider's notes, shown under S15's title block when not empty and edited in its Edit
+    /// sheet (#538).
+    var notes: String = ""
+    /// The GPX written at the finish (#286), S15's Share item (#538). Nil when the export
+    /// failed or the file has since been deleted.
+    var gpxFileURL: URL? = nil
 }

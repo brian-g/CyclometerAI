@@ -102,4 +102,34 @@ struct RoutesNavigationTests {
         #expect(store.state.path[id: 1, case: \.ride]?.stats == stats)
         #expect(store.state.path[id: 1, case: \.ride]?.route == route)
     }
+
+    // MARK: S15 Edit (#538)
+
+    /// S20's Previous Rides row seeds the next S15 it opens, so it takes the new title, and the
+    /// edit leaves the tab for `AppFeature` to reload S14.
+    @Test("an edit saved in an S15 on the Routes stack retitles S20's row, and tells AppFeature")
+    func rideEditedPatchesPreviousRidesAndBubblesOut() async {
+        let ride = RouteRideSummary.previewRides[0]
+        var routeState = RouteDetailFeature.State(summary: Self.route)
+        routeState.previousRides = RouteRideSummary.previewRides
+        var state = RoutesFeature.State()
+        state.path.append(.route(routeState))
+        state.path.append(.ride(RideDetailFeature.State(summary: RideListSummary(ride))))
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            TestStore(initialState: state) {
+                RoutesFeature()
+            } withDependencies: {
+                $0.defaultFileStorage = storage
+            }
+        }
+
+        await store.send(.path(.element(id: 1, action: .ride(.delegate(.rideEdited(id: ride.rideId, title: "Hill Loop", notes: "")))))) {
+            $0.path[id: 0, case: \.route]?.previousRides[0].title = "Hill Loop"
+            $0.path[id: 1, case: \.ride]?.summary.title = "Hill Loop"
+        }
+        await store.receive(\.delegate.rideEdited)
+    }
 }

@@ -471,4 +471,46 @@ struct RidesFeatureTests {
         await store.receive(\.path[id: 1].route.delegate.useRoute, route.reference)
         await store.receive(\.delegate.useRoute, route.reference)
     }
+
+    // MARK: S15 Edit (#538)
+
+    /// The same ride can be on the stack twice (S15 → S20 → Previous Rides → S15), with S20's
+    /// row between them, so every copy takes the edit, and S14 reloads to show the new title.
+    @Test("an edit saved in S15 retitles every copy of that ride on the stack, and reloads S14")
+    func rideEditedPatchesTheStackAndReloads() async {
+        let ride = Self.summary()
+        let other = Self.summary(title: "Summit Climb")
+        let route = RouteSummary.previewRoutes[1]
+        var routeState = RouteDetailFeature.State(summary: route)
+        routeState.previousRides = [RouteRideSummary(rideId: ride.id, title: ride.title, startedAt: ride.startedAt,
+                                                     durationSeconds: ride.durationSeconds, distanceMeters: ride.distanceMeters)]
+        var detail = RideDetailFeature.State(summary: ride)
+        detail.stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11)
+        var state = RidesFeature.State(rides: [ride, other])
+        state.path.append(.ride(detail))
+        state.path.append(.route(routeState))
+        state.path.append(.ride(detail))
+        state.path.append(.ride(RideDetailFeature.State(summary: other)))
+        var renamed = ride
+        renamed.title = "Hill Loop"
+        let store = TestStore(initialState: state) {
+            RidesFeature()
+        } withDependencies: {
+            $0.persistenceClient = .mock(rides: [renamed, other])
+        }
+
+        await store.send(.path(.element(id: 2, action: .ride(.delegate(.rideEdited(id: ride.id, title: "Hill Loop", notes: "Windy")))))) {
+            $0.path[id: 0, case: \.ride]?.summary.title = "Hill Loop"
+            $0.path[id: 0, case: \.ride]?.stats?.notes = "Windy"
+            $0.path[id: 2, case: \.ride]?.summary.title = "Hill Loop"
+            $0.path[id: 2, case: \.ride]?.stats?.notes = "Windy"
+            $0.path[id: 1, case: \.route]?.previousRides[0].title = "Hill Loop"
+        }
+        await store.receive(\.reloadRides)
+        await store.receive(\.ridesResponse) {
+            $0.hasLoaded = true
+            $0.rides = [renamed, other]
+        }
+        #expect(store.state.path[id: 3, case: \.ride]?.summary.title == "Summit Climb")
+    }
 }

@@ -293,7 +293,8 @@ struct WidgetAccessibilityTests {
 struct RideDetailAccessibilityTests {
     @Test func heartRateSectionsReadAsTheSheet() throws {
         let points = RideDetailFeatureTests.track(count: 600, heartRate: { 110 + $0 / 10 }, cadence: nil)
-        let stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 9, averageHeartRateBPM: 140, maxHeartRateBPM: 169)
+        let stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 9, averageHeartRateBPM: 140, maxHeartRateBPM: 169,
+                              movingSeconds: 600)
         let storage = FileStorage.inMemory
         let state = withDependencies { $0.defaultFileStorage = storage } operation: {
             var state = RideDetailFeature.State(summary: RideListSummary(
@@ -315,7 +316,9 @@ struct RideDetailAccessibilityTests {
         let store = Store(initialState: state) { RideDetailFeature() } withDependencies: {
             $0.defaultFileStorage = storage
         }
-        let screen = try Host(RideDetailList(store: store, mapRow: Color.cyBgTertiary), height: 1_600)
+        let screen = try Host(RideDetailList(store: store, screenHeight: 874, toolbarBottom: 62) {
+            Color.cyBgTertiary
+        }, height: 2_400)  // Tall enough that the lazy list builds the zone rows under the Summary.
         defer { screen.tearDown() }
         let screenLines = Set(try screen.readings())
 
@@ -331,6 +334,10 @@ struct RideDetailAccessibilityTests {
             #expect(screenLines.contains(line), "S15 doesn't read \"\(line)\"")
         }
         #expect(!screenLines.contains("Heart Rate No reading"))
+
+        // The Summary's values read with their units in words (#538).
+        #expect(screenLines.contains("Avg Heart Rate 140 beats per minute"), "S15 read \(screenLines)")
+        #expect(screenLines.contains { $0.hasPrefix("Avg Speed ") && $0.contains(" per hour") }, "S15 read \(screenLines)")
     }
 }
 

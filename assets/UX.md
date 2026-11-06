@@ -1427,6 +1427,26 @@ Sections appear on screen in the order listed below.
 - Route section: the route the ride followed, a link to its S20. A route deleted since shows its name with no link; a free ride has no section (#426)
 - Strava segments list: name, distance, best time + date
 - Vehicle pass summary: Show count of vehicle passes, with the ability to navigate to show the details of each pass. The time of the pass, the speed of the vehicle at time of pass. Shown as a sheet. No tap on a pass. This section is hidden with no radar. 
+- **As built (#538):**
+  - **Page:** the inset-grouped list stays, rather than Sketch's plain page, so the #536 sections keep their cards. The map draws behind the list, under the top safe area.
+  - **Map header:** half the screen's height. Its bottom 80 pt (`Spacing.mapHeaderFade`) fades to the page, and the title block starts where the fade does.
+    - **Framing:** the route is framed tight, each side floored at 200 m (the S14 thumbnail's floor), with point margins at the sides and top and bottom. It fits between the toolbar and the fade.
+    - **Why not the other maps' framing:** their padded region has a 1.7 km floor, which zoomed far out on a loop under a mile.
+    - **Scroll:** the map fades linearly until the title reaches the top, and grows from its top edge when pulled down.
+    - **Tap:** opens the map sheet. The sheet pans and zooms and shows the passes; its controls are #537.
+  - **Title block:** the title wraps. Below it:
+    - the start date and the time range (the start alone when no end was stored)
+    - the notes, when there are any
+    - distance and moving time as small hero numbers, unlabelled, as in Sketch
+    - **Toolbar title:** once the block's bottom passes under the toolbar, the ride name fades in and rises into the bar, as S14's inline title does.
+  - **Toolbar:**
+    - **Share and Edit:** two buttons, rather than Sketch's "…" menu.
+    - **Share:** absent when the GPX file isn't there, for example after a failed export or a delete from Files. A container move also hides it; that is #546.
+    - **Edit:** opens a sheet with Title and Notes. Save is off for a blank or unchanged title.
+    - **Saving an edit:** the change shows at once. The title is retitled in every copy of the ride on the stack and on S20's Previous Rides row, and S14 reloads. The GPX is rewritten only when the title changed (#286). If a write fails, the screen reads the stored values back.
+    - **Make Route:** not built, as its behaviour is still TBD.
+  - **Summary:** hero numbers in a card. Each is absent with no data, and Average Speed is absent with no moving second.
+  - **Vehicle Passes:** after Strava. The count row is disabled while the passes are still loading or none were stored.
 
 ---
 

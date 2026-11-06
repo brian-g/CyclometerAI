@@ -5,16 +5,17 @@ import SwiftUI
 @_spi(Internals) import ComposableArchitecture
 @testable import Cyclometer
 
-/// S15 — Ride Detail (#251), from seeded state.
+/// S15 — Ride Detail (#251, laid out by #538), from seeded state.
 ///
-/// Renders `RideDetailList` with a placeholder map row, for the reasons
+/// Renders `RideDetailList` with a placeholder map header, for the reasons
 /// `RouteDetailSnapshotTests` gives: no read starts mid-capture, and a live `Map`'s tiles cannot
 /// be pinned reproducibly. The series behind the charts are pinned by `RideDetailFeatureTests`.
 ///
 /// Skipped in CI along with the other snapshot suites (see `.github/workflows/tests.yml`).
 final class RideDetailSnapshotTests: XCTestCase {
 
-    /// `RouteDetailSnapshotTests`' device, drawn tall enough for every section — its height too.
+    /// `RouteDetailSnapshotTests`' device, drawn tall enough for every section. The header is
+    /// sized from `screenHeight`, a phone's, not from this canvas.
     private let device = ViewImageConfig(
         safeArea: UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0),
         size: CGSize(width: 402, height: 4_800),
@@ -47,7 +48,7 @@ final class RideDetailSnapshotTests: XCTestCase {
 
     /// The `Ride` row as the finish stores it for `points`, with the dashboard's own averages.
     private static func stats(_ points: [TrackPointDTO], route: RouteSummary? = nil,
-                              bodyMass: Bool = true, radar: Bool = true) -> RideStats {
+                              bodyMass: Bool = true, radar: Bool = true, notes: String = "") -> RideStats {
         let finish = RideFinishStats(savedTrack: points, altitudeSource: .barometric,
                                      movingSeconds: summary.durationSeconds, distanceMeters: summary.distanceMeters,
                                      rider: bodyMass ? RideEnergy.Rider(kilograms: 75, age: 40, sex: .male) : nil)
@@ -65,12 +66,15 @@ final class RideDetailSnapshotTests: XCTestCase {
             activeKilocalories: finish.activeKilocalories, calorieSeries: finish.calorieSeries,
             movingSeconds: speeds.count,
             cadenceSecondsByRPM: cadence.isEmpty ? [:] : [72: 300, 84: 600, 91: 450, 99: 150],
-            cadenceCoastingSeconds: cadence.isEmpty ? 0 : 150
+            cadenceCoastingSeconds: cadence.isEmpty ? 0 : 150,
+            endedAt: summary.startedAt.addingTimeInterval(2_100),
+            notes: notes
         )
     }
 
     /// Imperial units, and the state `.task` would have produced seeded directly.
-    private func screen(_ points: [TrackPointDTO], stats: RideStats, route: RouteSummary? = nil) -> some View {
+    private func screen(_ points: [TrackPointDTO], stats: RideStats, route: RouteSummary? = nil,
+                        drawsTrack: Bool = true) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
@@ -78,7 +82,7 @@ final class RideDetailSnapshotTests: XCTestCase {
             @Shared(.appPreferences) var preferences
             $preferences.withLock { $0.preferredUnit = .imperial }
             var state = RideDetailFeature.State(summary: Self.summary)
-            state.trackSegments = RideMapThumbnail.drawableSegments(points)
+            state.trackSegments = drawsTrack ? RideMapThumbnail.drawableSegments(points) : []
             state.track = RideDetailTrack(points: points, altitudeSource: .barometric)
             state.stats = stats
             state.route = route
@@ -92,7 +96,12 @@ final class RideDetailSnapshotTests: XCTestCase {
         // `RouteDetailSnapshotTests` describes — yet an undimmed Route link, with the type its
         // store-powered stack would set (#426); that suite explains both.
         return NavigationStack {
-            RideDetailList(store: store, mapRow: Color.cyBgTertiary)
+            // iPhone 17 Pro's screen and status bar (`device`'s top inset).
+            // The placeholder runs under the header's safe-area padding, as the `Map` does: the
+            // map uses that padding only to frame the route.
+            RideDetailList(store: store, screenHeight: 874, toolbarBottom: 62) {
+                Color.cyBgTertiary.ignoresSafeArea()
+            }
                 .toolbar(.hidden, for: .navigationBar)
         }
             .environment(\.navigationDestinationType, RideRoutePath.State.self)
@@ -145,6 +154,20 @@ final class RideDetailSnapshotTests: XCTestCase {
     func testRideDetailNoAltitude() {
         let points = Self.points(altitude: false)
         assertBothSchemes(screen(points, stats: Self.stats(points)), named: "no-altitude")
+    }
+
+    /// Notes under the title block, between the date and the hero numbers (#538).
+    func testRideDetailNotes() {
+        let points = Self.points()
+        assertBothSchemes(screen(points, stats: Self.stats(points, notes: "Headwind on the way out, tailwind home.")),
+                          named: "notes")
+    }
+
+    /// A trainer ride, with no drawable track: no map header, and the title block first under
+    /// the toolbar (#538).
+    func testRideDetailNoTrack() {
+        let points = Self.points()
+        assertBothSchemes(screen(points, stats: Self.stats(points), drawsTrack: false), named: "no-track")
     }
 
     /// Ridden on a saved route: a Route section under the map, linking to S20 (#426).

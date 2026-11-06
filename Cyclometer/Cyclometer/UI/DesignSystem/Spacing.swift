@@ -25,6 +25,7 @@ enum Spacing {
     static let turnOverlay: CGFloat   = unit * 34 // 136 — turn overlay card's minimum side (Sketch "Sxx - Route overlay")
     static let rideThumbnail: CGFloat = unit * 14 // 56 — S14 row's map thumbnail, square (UX.md §S14)
     static let rideMetric: CGFloat    = unit * 16 // 64 — S14 row's time and distance columns, minimum width (Sketch: 65)
+    static let mapHeaderFade: CGFloat = unit * 20 // 80 — S15 map header: the bottom band that fades to the page, where the title starts (UX.md §S15)
     static let grabberHeight: CGFloat = unit       //  4 — sheet grabber bar height
     static let pageIndicatorDot: CGFloat = 7       //  7 — dashboard paging indicator dot
     static let toolbarBadge: CGFloat  = unit * 5  // 20 — ride toolbar count badge (Sketch "sensor button": 22 on a 64 pt button)

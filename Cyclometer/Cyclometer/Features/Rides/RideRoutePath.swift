@@ -16,6 +16,28 @@ enum RideRoutePath {
 extension RideRoutePath.State: Equatable {}
 extension RideRoutePath.Action: Equatable {}
 
+extension StackState<RideRoutePath.State> {
+    /// Carries an S15 edit (#538) to the other copies of the ride on the same stack: another S15
+    /// of it further down (S15 → S20 → Previous Rides → the same S15), and the Previous Rides
+    /// row an S20 seeds S15 from, which would otherwise open it under the old title.
+    mutating func applyRideEdit(id: UUID, title: String, notes: String) {
+        for elementID in ids {
+            switch self[id: elementID] {
+            case .ride(var ride) where ride.summary.id == id:
+                ride.summary.title = title
+                ride.stats?.notes = notes
+                self[id: elementID] = .ride(ride)
+            case .route(var route):
+                guard let index = route.previousRides.firstIndex(where: { $0.rideId == id }) else { continue }
+                route.previousRides[index].title = title
+                self[id: elementID] = .route(route)
+            default:
+                continue
+            }
+        }
+    }
+}
+
 /// The `destination:` of both tabs' stacks.
 struct RideRoutePathView: View {
     let store: StoreOf<RideRoutePath>
