@@ -575,6 +575,28 @@ struct PersistenceClientTests {
         }
     }
 
+    @Test("pauses survive a checkpoint, a resume and the finish, for S15's stops (#537)")
+    func pausesRoundTrip() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let closed = RidePause(startedAt: start, endedAt: start.addingTimeInterval(60), isAuto: false)
+        let open = RidePause(startedAt: start.addingTimeInterval(600), endedAt: nil, isAuto: true)
+        try await client.createRide(rideId, start, nil)
+        #expect(try await client.fetchRideStats(rideId).pauses.isEmpty)
+
+        var checkpoint = RideSummaryUpdate(rideId: rideId, recordingState: .paused, durationSeconds: 600,
+                                           distanceMeters: 4_000, averageSpeedMPS: 6, maxSpeedMPS: 9)
+        checkpoint.pauses = [closed, open]
+        try await client.updateRideSummary(checkpoint)
+        #expect(try await client.fetchResumableRide()?.pauses == [closed, open])
+
+        var finish = checkpoint
+        finish.recordingState = .ended
+        try await client.finalizeRide(rideId, start.addingTimeInterval(700), finish, nil)
+        #expect(try await client.fetchRideStats(rideId).pauses == [closed, open])
+    }
+
     @Test("fetchRideStats offers the GPX export only while the file is there (#538)")
     func fetchRideStatsChecksTheGPXFile() async throws {
         let (client, _) = Self.makeLiveClient()

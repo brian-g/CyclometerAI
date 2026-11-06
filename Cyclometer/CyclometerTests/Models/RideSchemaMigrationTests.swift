@@ -208,6 +208,9 @@ struct RideSchemaMigrationTests {
             #expect(ride.cadenceSecondsByRPM.isEmpty)
             #expect(ride.cadenceCoastingSeconds == 0)
 
+            // #537's pauses: a ride recorded before them has none, and S15 offers no Stops layer.
+            #expect(ride.pauses.isEmpty)
+
             // #177's thumbnail: a ride recorded before it has none, and S14 shows its
             // placeholder rather than a decode failure.
             #expect(ride.mapThumbnailLight == nil)

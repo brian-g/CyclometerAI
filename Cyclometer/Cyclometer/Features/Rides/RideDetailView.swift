@@ -427,11 +427,21 @@ private struct RideDetailMetricSections: View {
 /// What S15's header and its full-screen map both draw.
 struct RideTrackContent: MapContent {
     let segments: [[RouteCoordinate]]
+    /// The map sheet's route coloring (#537). Plain draws `segments` in the brand color.
+    var coloring: RouteColoring = .plain
+    var coloredRuns: [ColoredRun] = []
 
     var body: some MapContent {
-        ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-            MapPolyline(coordinates: segment.map(\.coordinate2D))
-                .stroke(Color.cyPrimary, lineWidth: Spacing.strokeMapTrack)
+        if coloring == .plain || coloredRuns.isEmpty {
+            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                MapPolyline(coordinates: segment.map(\.coordinate2D))
+                    .stroke(Color.cyPrimary, lineWidth: Spacing.strokeMapTrack)
+            }
+        } else {
+            ForEach(Array(coloredRuns.enumerated()), id: \.offset) { _, run in
+                MapPolyline(coordinates: run.coordinates.map(\.coordinate2D))
+                    .stroke(coloring.color(band: run.band), lineWidth: Spacing.strokeMapTrack)
+            }
         }
         if let start = segments.first?.first {
             Marker("Start", systemImage: "flag.fill", coordinate: start.coordinate2D)
@@ -469,12 +479,18 @@ struct RideHeaderMap: View {
     }
 }
 
-/// S15's full-screen map (#538): the recorded track, and a marker at each vehicle pass labelled
-/// with how fast it went by. Pans and zooms.
+/// S15's full-screen map (#538): the recorded track, pannable and zoomable, on the chosen
+/// basemap, with the route colored by a metric and the pass and stop layers that are on (#537).
 struct RideMapView: View {
     let segments: [[RouteCoordinate]]
-    let passes: [VehiclePassEventDTO]
+    var coloring: RouteColoring = .plain
+    var coloredRuns: [ColoredRun] = []
+    /// Already filtered to the layers that are on: empty when a layer is off or the ride has
+    /// nothing for it.
+    var stops: [RideStop] = []
+    var passes: [VehiclePassEventDTO]
     let unitSystem: UnitSystem
+    var basemap: MapBasemap = .standard
 
     var body: some View {
         if segments.isEmpty {
@@ -493,19 +509,33 @@ struct RideMapView: View {
             Map(initialPosition: .region(RoutesMapCamera.region(
                 fitting: RouteGeometry.boundingBox(segments.flatMap { $0 })
             ))) {
-                RideTrackContent(segments: segments)
+                RideTrackContent(segments: segments, coloring: coloring, coloredRuns: coloredRuns)
+                ForEach(Array(stops.enumerated()), id: \.offset) { _, stop in
+                    // The title is all VoiceOver has: MapKit content takes no accessibility
+                    // modifiers, so it says which kind of pause as well as how long.
+                    Marker(stop.title, systemImage: stop.isAuto ? "pause.circle.fill" : "pause.fill",
+                           coordinate: stop.coordinate.coordinate2D)
+                        .tint(Color.cyTextSecondary)
+                }
                 ForEach(Array(passes.enumerated()), id: \.offset) { _, pass in
-                    Marker(pass.vehicleSpeed(unitSystem)?.shown ?? "", systemImage: "car.fill",
+                    Marker(pass.vehicleSpeed(unitSystem)?.shown ?? "Vehicle pass", systemImage: "car.fill",
                            coordinate: CLLocationCoordinate2D(latitude: pass.latitude, longitude: pass.longitude))
                         .tint(passTint(pass.alertLevelAtPass))
                 }
             }
-            .mapStyle(.standard(elevation: .realistic))
+            .mapStyle(mapStyle)
             .mapControls {
                 MapCompass()
                 MapScaleView()
                 MapPitchToggle()
             }
+        }
+    }
+
+    private var mapStyle: MapStyle {
+        switch basemap {
+        case .standard: .standard(elevation: .realistic)
+        case .hybrid: .hybrid(elevation: .realistic)
         }
     }
 

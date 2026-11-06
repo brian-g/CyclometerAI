@@ -159,6 +159,10 @@ final class Ride {
     /// is: a kill and resume mid-ride would otherwise restart the numbering at 0 and merge
     /// the new stretch of riding into the ride's first segment.
     var trackSegmentIndex: Int = 0
+    /// Every pause, manual or auto, in order (#537), for S15's stops. Written at every checkpoint
+    /// and at the finish. JSON, read and written through `pauses`; optional, so #186's
+    /// mandatory-attribute backfill trap doesn't apply, and a ride recorded before it has none.
+    var pausesData: Data?
 
     // MARK: - Relationships
     // TrackPoints and VehiclePassEvents are linked by rideId only (TrackPoint's
@@ -187,6 +191,11 @@ final class Ride {
     var cadenceSecondsByRPM: [Int: TimeInterval] {
         get { cadenceSecondsByRPMData.flatMap { try? JSONDecoder().decode([Int: TimeInterval].self, from: $0) } ?? [:] }
         set { cadenceSecondsByRPMData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+    }
+
+    var pauses: [RidePause] {
+        get { pausesData.flatMap { try? JSONDecoder().decode([RidePause].self, from: $0) } ?? [] }
+        set { pausesData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
     }
 
     var calorieSeries: [CaloriePoint]? {
@@ -231,6 +240,7 @@ extension Ride {
             cadenceSecondsByRPM: cadenceSecondsByRPM,
             cadenceCoastingSeconds: cadenceCoastingSeconds,
             trackSegmentIndex: trackSegmentIndex,
+            pauses: pauses,
             // `createRide` writes the id and name together, so this is both or neither.
             route: routeId.flatMap { id in routeName.map { RouteReference(id: id, name: $0) } },
             routeProgressMeters: routeProgressMeters,

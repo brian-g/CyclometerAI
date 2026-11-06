@@ -97,6 +97,8 @@ struct AppPreferencesTests {
         preferences.isTurnByTurnEnabled = false
         // Added by #199.
         preferences.mapOrientation = .northUp
+        // Added by #537.
+        preferences.rideMapBasemap = .hybrid
         // Added by #283.
         preferences.isPlaceNameLookupEnabled = false
         // Added by #313.
@@ -147,10 +149,21 @@ struct AppPreferencesTests {
         #expect(decoded.isLiveActivityEnabled)
         // Added by #199; the map sheet starts heading-up.
         #expect(decoded.mapOrientation == .headingUp)
+        // Added by #537; S15's map starts on the standard map.
+        #expect(decoded.rideMapBasemap == .standard)
         // Added by #139; the dashboard starts on the factory layout.
         #expect(decoded.dashboardLayout == .factory)
         // Added by #517; every Add Widget section starts expanded.
         #expect(decoded.collapsedWidgetCategories.isEmpty)
+    }
+
+    /// `imagery`, offered while #537 was built and then dropped, or a basemap from a newer build.
+    @Test("A basemap this build doesn't have falls back to Standard and keeps the rest")
+    func unknownBasemapFallsBack() throws {
+        let json = Data(#"{"wheelCircumferenceMM":2136,"rideMapBasemap":"imagery"}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+        #expect(decoded.rideMapBasemap == .standard)
+        #expect(decoded.wheelCircumferenceMM == 2136)
     }
 
     /// A layout naming a widget this build doesn't have — written by a newer version, or holding

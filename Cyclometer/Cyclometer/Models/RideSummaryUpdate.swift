@@ -29,6 +29,9 @@ struct RideSummaryUpdate: Sendable, Equatable {
     /// See `Ride.trackSegmentIndex` (#263) — which track segment the ride is recording
     /// into, carried across a kill so a resume doesn't merge two stretches of riding.
     var trackSegmentIndex: Int = 0
+    /// See `Ride.pauses` (#537), carried across a kill so a ride resumed paused closes the
+    /// pause it was killed in.
+    var pauses: [RidePause] = []
     /// The route the ride was started on (#197), read back so a resumed ride is still following
     /// it. `RidePersistenceActor.apply` never writes it: a ride's route is set once, by
     /// `createRide`, and no checkpoint may change it.

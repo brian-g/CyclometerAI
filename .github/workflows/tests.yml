@@ -242,7 +242,8 @@ jobs:
             -skip-testing:CyclometerTests/ClimbWidgetSnapshotTests \
             -skip-testing:CyclometerTests/CaloriesSheetSnapshotTests \
             -skip-testing:CyclometerTests/SensorsButtonSnapshotTests \
-            -skip-testing:CyclometerTests/SensorsSheetSnapshotTests
+            -skip-testing:CyclometerTests/SensorsSheetSnapshotTests \
+            -skip-testing:CyclometerTests/RideMapLegendSnapshotTests
 
       - name: Summarize test failures
         if: failure()

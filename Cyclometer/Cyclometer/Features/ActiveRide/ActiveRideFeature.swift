@@ -386,6 +386,9 @@ struct ActiveRideFeature {
         /// coordinates are transient, and a resumed ride's map is rebuilt from the saved track,
         /// which holds only the segments that recorded a point — so the two can disagree.
         var trackSegmentIndex: Int = 0
+        /// Every pause so far, manual or auto (#537): opened by `pause`, closed by `resume`,
+        /// checkpointed with the rest, for S15's stops.
+        var pauses: [RidePause] = []
         /// The barometer where there is one, GPS where there isn't (#387): what `altitude` reads.
         var altitudeResolver = AltitudeResolver()
         /// The ride's altitude everywhere — dashboard, track point, GPX `<ele>`. Nil until a source
@@ -1494,6 +1497,7 @@ struct ActiveRideFeature {
             cadenceSecondsByRPM: state.cadence.secondsByRPM,
             cadenceCoastingSeconds: state.cadence.coastingSeconds,
             trackSegmentIndex: state.trackSegmentIndex,
+            pauses: state.pauses,
             route: state.route,
             routeProgressMeters: state.navigation.progressMeters,
             isRouteComplete: state.navigation.isRouteComplete
@@ -1636,8 +1640,12 @@ struct ActiveRideFeature {
     /// `trackRecorder.isRecording == (recordingState == .active)`, which `.task` relies on when it
     /// leaves the recorder off for a ride resumed paused (#392).
     private func pause(_ state: inout State) -> Effect<Action> {
+        let now = date.now
         state.recordingState = .paused
-        state.pausedAt = date.now
+        state.pausedAt = now
+        // Before the checkpoint, so a kill while paused keeps the pause. `isAutoPaused` is set
+        // before this by `.autoPauseTriggered`.
+        state.pauses.open(at: now, isAuto: state.isAutoPaused)
         let update = makeRideSummaryUpdate(from: state)
         return .merge(
             .send(.trackRecorder(.pauseRecording)),
@@ -1655,6 +1663,7 @@ struct ActiveRideFeature {
         state.isAutoPaused = false
         state.hasStoppedWhilePaused = false
         state.pausedAt = nil
+        state.pauses.close(at: date.now)
         beginTrackSegment(&state)
         // After `beginTrackSegment`, so the checkpoint this resume writes already
         // carries the new segment index — a kill before the next one would
@@ -1774,6 +1783,9 @@ extension ActiveRideFeature.State {
         // place of the pause. A ride that comes back `.paused` needs no bump: it records
         // nothing until the resume that opens its own segment.
         trackSegmentIndex = summary.trackSegmentIndex + (recordingState == .active ? 1 : 0)
+        // A ride killed while paused comes back with its pause open, for the resume to close.
+        // One killed while recording has none open: nobody paused for the gap.
+        pauses = summary.pauses
         elapsedSeconds = Int(summary.durationSeconds)
         distanceMeters = summary.distanceMeters
         // W23 waits for the saved track before estimating anything (#465).

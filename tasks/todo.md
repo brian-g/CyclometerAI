@@ -2144,11 +2144,11 @@ UX.md §S15's Map Details section puts three sets of controls in #538's full-scr
 - **Simulator:** basemaps, layers, every coloring on a long ride (polyline count, lag), VoiceOver.
 - **Full suite**, then commit, PR and review.
 
-- [ ] 1. Record pauses (RidePause, Ride.pausesData, RideSummaryUpdate, ActiveRideFeature pause/resume/restore, RideStats)
-- [ ] 2. Pure models (RideMapTrack, RideStops, RouteColoring + legend)
-- [ ] 3. Sheet state and UI (Map Options menu, markers, RideMapLegend)
-- [ ] Tests, snapshots, simulator check, full suite
-- [ ] UX.md §S15 Map Details "As built (#537)"
+- [x] 1. Record pauses (RidePause, Ride.pausesData, RideSummaryUpdate, ActiveRideFeature pause/resume/restore, RideStats)
+- [x] 2. Pure models (RideMapTrack, RideStops, RouteColoring + legend)
+- [x] 3. Sheet state and UI (Map Options menu, markers, RideMapLegend)
+- [x] Tests, snapshots, simulator check, full suite
+- [x] UX.md §S15 Map Details "As built (#537)"
 
 ---
 
@@ -2182,3 +2182,21 @@ Decisions (2026-11-05): 1 #538 before #537; 2 the title block's moving time is `
 - **Deviation: no scrolled snapshot.** The first `onScrollGeometryChange` resets a seeded offset. Pinning the offset would draw a faded map over content that hasn't moved, a state the app never shows. The chrome arithmetic is unit-tested, and Brian checked it on device.
 - **Full `CyclometerTests`:** passed, 2,507 cases.
 - **Follow-up:** #546, the absolute GPX path (Share is hidden after a container move).
+
+### #537 Review (2026-11-06)
+
+- **Built as planned:**
+  - pauses recorded on the ride
+  - `RideMapTrack`, `RideStops` and `RouteColorScale`
+  - the Map Options menu, stop and pass markers, and the legend
+- **Brian's run:**
+  - **Basemap didn't redraw.** It changed only after a coloring was picked: the sheet handed the map `store.state` whole, so the basemap and layer reads weren't observed. The map now gets each field read from the store. Lesson and memory recorded.
+  - **The basemap is remembered** (`AppPreferences.rideMapBasemap`).
+  - **Satellite** is now MapKit's hybrid style; plain imagery was dropped.
+- **Not verified on device:** the pass layer, since Brian's only ride has no passes. Stops need a ride recorded on this build. The "Map" preview covers both.
+- **Tests:**
+  - `RidePauseRecordingTests`, `RideMapTrackGradeTests`, `RideStopsTests`, `RouteColorScaleTests`, `RideMapSheetFeatureTests`, `RideDetailMapSheetTests`
+  - storage round-trip, migration, preferences decode
+  - `RideMapLegendSnapshotTests` (8 references)
+  - 14 exhaustive `ActiveRideFeatureTests` updated for the new `pauses` state
+- **Full `CyclometerTests`:** passed, 2,565 cases.

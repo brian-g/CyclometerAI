@@ -46,4 +46,7 @@ struct RideStats: Sendable, Equatable {
     /// The GPX written at the finish (#286), S15's Share item (#538). Nil when the export
     /// failed or the file has since been deleted.
     var gpxFileURL: URL? = nil
+    /// Every pause, manual or auto, for the map sheet's stops (#537). Empty for a ride recorded
+    /// before pauses were.
+    var pauses: [RidePause] = []
 }

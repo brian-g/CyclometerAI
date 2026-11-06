@@ -18,6 +18,8 @@ struct RideDetailTrack: Equatable, Sendable {
     var lowestMeters: Double?
     var steepestClimbPercent: Double?
     var steepestDescentPercent: Double?
+    /// What the map sheet's route coloring and stops read (#537).
+    var map = RideMapTrack(segments: [])
 }
 
 // In an extension, so the struct keeps its memberwise initializer.
@@ -38,6 +40,7 @@ extension RideDetailTrack {
         lowestMeters = elevation.lowestMeters
         steepestClimbPercent = elevation.steepestClimbPercent
         steepestDescentPercent = elevation.steepestDescentPercent
+        map = RideMapTrack(points: points)
     }
 }
 
