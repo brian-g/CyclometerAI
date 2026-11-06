@@ -271,8 +271,9 @@ struct RouteColorScaleTests {
         #expect(heartRate.legend(.metric)[2].spoken == "Zone 3, 144 to 162 beats per minute")
 
         let cadence = RouteColorScale(coloring: .cadence, track: track, heartRateZones: zones, cadenceZones: .default)
-        #expect(cadence.legend(.metric).map(\.label) == ["<70", "70–85", "85–95", "95–110", "110+"])
-        #expect(cadence.legend(.metric)[0].spoken == "Zone 1, under 70 r p m")
+        #expect(cadence.legend(.metric).map(\.label) == ["60–69", "70–84", "85–94", "95–109", "110+"])
+        #expect(cadence.legend(.metric)[0].spoken == "Zone 1, 60 to 69 r p m")
+        #expect(cadence.legend(.metric)[4].spoken == "Zone 5, 110 r p m and over")
         #expect(cadence.legendUnit(.metric) == "rpm")
     }
 

@@ -251,15 +251,14 @@ struct RouteColorScale: Equatable, Sendable {
                             spoken: "Zone \(index + 1), \(range.lowerBound) to \(range.upperBound) beats per minute")
             }
         case .cadence:
-            // Zone 1's floor is S12's display floor; a slower pedal stroke is still zone 1.
-            let edges = CadenceZone.allCases.map { "\(cadenceZones.lowerBound(of: $0))" }
-                + ["\(CadenceZoneBoundaries.ceilingRPM)"]
-            return Self.bands(edges, spokenEdges: edges.map { "\($0) r p m" })
-                .map { entry in
-                    var entry = entry
-                    entry.spoken = "Zone \(entry.band), \(entry.spoken)"
-                    return entry
-                }
+            // S12's ranges, so the legend reads as Settings lists the zones. Zone 1's floor is S12's
+            // display floor; a slower pedal stroke still colors as zone 1.
+            return CadenceZone.allCases.map { zone in
+                let lower = cadenceZones.lowerBound(of: zone)
+                let range = cadenceZones.upperBound(of: zone).map { "\(lower) to \($0) r p m" } ?? "\(lower) r p m and over"
+                return LegendEntry(band: zone.rawValue, label: cadenceZones.rangeText(for: zone),
+                                   spoken: "Zone \(zone.rawValue), \(range)")
+            }
         }
     }
 
