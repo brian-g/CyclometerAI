@@ -231,6 +231,12 @@ struct RideDetailFeature {
                 state.stats = stats
                 state.route = route
                 if let title = stats.title { state.summary.title = title }
+                // A map sheet opened before the stats landed has no stops and no pass layer yet.
+                if case var .mapSheet(sheet) = state.destination {
+                    sheet.stops = RideStops.stops(pauses: stats.pauses, track: sheet.track)
+                    sheet.hasRadar = stats.vehiclePassCount != nil
+                    state.destination = .mapSheet(sheet)
+                }
                 return .none
 
             case .vehiclePassesLoaded(let passes):
@@ -246,13 +252,23 @@ struct RideDetailFeature {
                 state.healthRestingBPM = restingBPM
                 state.healthMaxBPM = maxBPM
                 state.healthZoneCeilingsBPM = zoneCeilingsBPM
-                return .none
+                // An open map sheet colored by heart rate redraws against the zones as they now are.
+                guard case .mapSheet = state.destination else { return .none }
+                return .send(.destination(.presented(.mapSheet(.heartRateZonesChanged(state.heartRateZoneBounds)))))
 
             case .mapTapped:
                 // The header is drawn only for a ride with a drawable track.
                 guard !state.trackSegments.isEmpty else { return .none }
+                let map = state.track?.map ?? RideMapTrack(segments: [])
                 state.destination = .mapSheet(RideMapSheetFeature.State(
-                    segments: state.trackSegments, passes: state.vehiclePasses, unitSystem: state.unitSystem
+                    segments: state.trackSegments,
+                    track: map,
+                    passes: state.vehiclePasses,
+                    stops: RideStops.stops(pauses: state.stats?.pauses ?? [], track: map),
+                    unitSystem: state.unitSystem,
+                    hasRadar: state.stats?.vehiclePassCount != nil,
+                    heartRateZones: state.heartRateZoneBounds,
+                    cadenceZones: state.preferences.cadenceZones
                 ))
                 return .none
 

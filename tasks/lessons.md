@@ -927,3 +927,11 @@ other terrain outputs rely on (punchy, kicks): the 300 m window fixed the max gr
 - Before reusing a camera or framing helper, check its floor and padding against the smallest real input: a short loop, not a sample route.
 - To match a system animation, look at the system's own instance first (here, S14's inline title) and copy that motion.
 - Keep a toolbar item laid out and animate its opacity and offset. Inserting or removing it lets the bar resize it mid-animation.
+
+## Never hand a child view `store.state` whole (2026-11-06, #537)
+
+**What happened.** The map sheet passed `RideMapView(state: store.state)`. Changing the basemap didn't redraw the map until a coloring was picked. Brian: "when the map layer change is done it does not change until Speed, Grade, Cadence, or Heart Rate are chosen."
+
+**Why.** TCA's observation tracks the fields a view's body reads through the store. The sheet's body read only `coloring` and `legend` (for the legend). The basemap and layer toggles were read from a copy inside the child, so changing them didn't redraw the sheet. A coloring change did redraw it, and the redraw picked up the basemap that had been set earlier.
+
+**Rule.** In a store-backed view, read each field from `store` in the body that builds the child, and pass plain values down. Alternatively, pass the store itself. Never pass `store.state` or another snapshot of it.

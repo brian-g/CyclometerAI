@@ -50,6 +50,15 @@ struct RideDetailEditTests {
         }
     }
 
+    /// The map sheet as `mapTapped` opens it on this harness's ride: no track loaded, so no
+    /// stops, and no radar in `stats`.
+    private static func sheet(_ state: RideDetailFeature.State, passes: [VehiclePassEventDTO]) -> RideMapSheetFeature.State {
+        RideMapSheetFeature.State(
+            segments: segments, passes: passes, unitSystem: state.unitSystem, hasRadar: false,
+            heartRateZones: state.heartRateZoneBounds, cadenceZones: state.preferences.cadenceZones
+        )
+    }
+
     /// The Edit sheet open on the ride as stored.
     private func editing(_ state: inout RideDetailFeature.State) {
         state.destination = .edit(RideEditFeature.State(title: Self.summary.title, notes: Self.stats.notes))
@@ -64,9 +73,7 @@ struct RideDetailEditTests {
             $0.vehiclePasses = [Self.pass]
         }
         await store.send(.mapTapped) {
-            $0.destination = .mapSheet(RideMapSheetFeature.State(
-                segments: Self.segments, passes: [Self.pass], unitSystem: $0.unitSystem
-            ))
+            $0.destination = .mapSheet(Self.sheet($0, passes: [Self.pass]))
         }
     }
 
@@ -122,11 +129,11 @@ struct RideDetailEditTests {
     func latePassesReachTheOpenMapSheet() async {
         let store = makeStore { $0.trackSegments = Self.segments }
         await store.send(.mapTapped) {
-            $0.destination = .mapSheet(RideMapSheetFeature.State(segments: Self.segments, passes: [], unitSystem: $0.unitSystem))
+            $0.destination = .mapSheet(Self.sheet($0, passes: []))
         }
         await store.send(.vehiclePassesLoaded([Self.pass])) {
             $0.vehiclePasses = [Self.pass]
-            $0.destination = .mapSheet(RideMapSheetFeature.State(segments: Self.segments, passes: [Self.pass], unitSystem: $0.unitSystem))
+            $0.destination = .mapSheet(Self.sheet($0, passes: [Self.pass]))
         }
     }
 

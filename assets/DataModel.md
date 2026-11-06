@@ -144,6 +144,7 @@ final class Ride {
     // finish second whose energy is activeKilocalories. JSON [CaloriePoint], read through
     // `calorieSeries`; written with the three above, by finalizeRide or the backfill.
     var calorieSeriesData: Data?               // nil exactly when activeKilocalories is
+    var pausesData: Data?                      // #537: [RidePause] JSON (startedAt, endedAt?, isAuto), every manual and auto pause, for S15's stops; written with every checkpoint and the finish
 
     // MARK: - Heart Rate
     var averageHeartRateBPM: Int?
@@ -582,6 +583,7 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// #199. Which way up the full-screen map sheet opens; toggled on the sheet itself. The W8
     /// widget is always heading-up and ignores it (#62).
     var mapOrientation: MapOrientation = .headingUp   // enum MapOrientation: String, Codable { case headingUp, northUp }
+    var rideMapBasemap: MapBasemap = .standard       // enum MapBasemap: String, Codable { case standard, hybrid } — S15's map sheet (#537)
     /// #79. The rider's cadence zone boundaries: the lower rpm of zones 2–5, strictly rising,
     /// above Z1's 60 rpm display floor and below the W5 chart's 150 rpm ceiling. Set by S12's
     /// Cadence Zones steppers; read live by CadenceFeature and W5. An invalid stored value
@@ -1209,6 +1211,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 | 1.1.3 (MVP — #79) | Replace #340's four zone columns with `Ride.cadenceSecondsByRPMData: Data?`, which holds seconds pedalling at each whole rpm as JSON and is read through `cadenceSecondsByRPM`. It is optional, so #186's backfill trap doesn't apply. Inferred lightweight migration drops the old columns and adds the new one as nil. A ride resumed across the upgrade starts its per-rpm tally from zero and keeps its coasting time. `RideSchemaMigrationTests` covers a store that holds data in the old columns |
 | 1.1.4 (MVP — #460) | Add `Ride.ascentMeters`, `descentMeters` and `activeKilocalories`, all optional, and `isFinishStatsOwed: Bool = true` at the declaration, so inferred lightweight migration gives every older ride `true` (#186). `RideFinishStats.backfill` then works each one out once at launch: ascent and descent from the saved track through `ElevationTracker.Seed`, calories from the saved track and Health's body mass at that moment. `RideSchemaMigrationTests` covers an older store |
 | 1.1.5 (MVP — #536) | Add `Ride.calorieSeriesData: Data?`, optional, so inferred lightweight migration adds it as nil (#186 doesn't apply). The rides #460's backfill still owes get a series when it stores their stats; a ride that already has its stats stored keeps no series, and S15 hides its Active Calories section. `RideSchemaMigrationTests` covers an older store |
+| 1.1.6 (MVP — #537) | Add `Ride.pausesData: Data?`, optional, so inferred lightweight migration adds it as nil and a ride recorded before it reads as having no pauses (#186 doesn't apply). `RideSchemaMigrationTests` covers it |
 | 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 

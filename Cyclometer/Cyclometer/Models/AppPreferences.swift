@@ -103,6 +103,9 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// The sheet only: the W8 widget is always heading-up and offers no way out of it (#62).
     var mapOrientation: MapOrientation = .headingUp
 
+    /// The base map S15's full-screen map opens on (#537), the rider's last pick in its options.
+    var rideMapBasemap: MapBasemap = .standard
+
     /// The rider's own dashboard layout, or nil while they're on the factory one (#139). Only
     /// the override is stored, so a rider who never customises follows `.factory` when it changes.
     var dashboardLayoutOverride: DashboardLayout?
@@ -228,6 +231,10 @@ struct AppPreferences: Codable, Equatable, Sendable {
         mapOrientation = try container.decodeIfPresent(
             MapOrientation.self, forKey: .mapOrientation
         ) ?? .headingUp
+        // `try?`: a basemap this build doesn't have falls back alone.
+        rideMapBasemap = (try? container.decodeIfPresent(
+            MapBasemap.self, forKey: .rideMapBasemap
+        )) ?? .standard
         // `try?`: boundaries that no longer validate fall back to the defaults rather than
         // throwing and resetting every other preference with them.
         cadenceZones = (try? container.decodeIfPresent(

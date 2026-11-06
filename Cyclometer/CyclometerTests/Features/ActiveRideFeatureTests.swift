@@ -623,6 +623,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: false)]
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -746,6 +747,7 @@ struct ActiveRideFeatureLocationTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: false)]
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -819,6 +821,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: false)]
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -865,6 +868,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: false)]
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -907,6 +911,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: false)]
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -937,6 +942,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: false)]
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -946,6 +952,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.resumeTapped) {
             $0.recordingState = .active
             $0.pausedAt = nil
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: testDate, isAuto: false)]
             $0.cadence.isRecording = true
             $0.sensorHealth.isRecording = true
             // A resume opens a new track segment, so the map and the export break the
@@ -1024,6 +1031,7 @@ struct ActiveRideFeatureTimerTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: false)]
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -1609,6 +1617,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: false)]
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -1636,6 +1645,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: false)]
         }
         await store.receive(\.trackRecorder.pauseRecording)
         await store.receive(\.calibration.suspensionChanged) {
@@ -1688,6 +1698,8 @@ struct ActiveRideFeatureStateMachineTests {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
+            // Resume closes the open pause at this time (#537).
+            $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -1993,6 +2005,7 @@ struct ActiveRideFeatureStateMachineTests {
         await store.receive(.autoEndTriggered) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: false)]
         }
         // .autoEndTriggered's own effects (the pause, then .finishTapped) are merged ahead of
         // the suspension notice that `onChange` appends for the same state change.
@@ -2210,6 +2223,7 @@ struct ActiveRideFeatureAutoPauseTests {
         await store.receive(.autoPauseTriggered) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: true)]
             $0.isAutoPaused = true
         }
         await store.receive(\.trackRecorder.pauseRecording)
@@ -2296,6 +2310,7 @@ struct ActiveRideFeatureAutoPauseTests {
         await store.receive(.autoPauseTriggered) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: true)]
             $0.isAutoPaused = true
         }
         await store.receive(\.trackRecorder.pauseRecording)
@@ -2355,6 +2370,7 @@ struct ActiveRideFeatureAutoPauseTests {
         await store.receive(.autoPauseTriggered) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
+            $0.pauses = [RidePause(startedAt: testDate, endedAt: nil, isAuto: true)]
             $0.isAutoPaused = true
         }
         await store.receive(\.trackRecorder.pauseRecording)
