@@ -109,16 +109,6 @@ struct RideDetailList<MapHeader: View>: View {
                     Text("Coming Soon").foregroundStyle(Color.cyTextSecondary)
                 }
             }
-            // Absent with no radar paired, where "0 passes" would be a claim nobody measured.
-            if let passes = store.stats?.vehiclePassCount {
-                Section {
-                    Button { store.send(.passesTapped) } label: {
-                        LabeledContent("Vehicle Passes", value: passes.formatted())
-                    }
-                    .tint(Color.cyTextPrimary)
-                    .disabled(store.vehiclePasses.isEmpty)
-                }
-            }
         }
         .listSectionSpacing(.compact)
         // The list draws over the map, so its own background is the map's surround instead.
@@ -305,7 +295,8 @@ private struct RideTitleBlock: View {
 // MARK: - Summary
 
 /// S15's Summary (UX.md §S15): the whole ride at a glance in hero numbers, each left out when the
-/// ride recorded nothing for it (#460). Average Power waits for Phase 3.
+/// ride recorded nothing for it (#460), then the vehicle pass count (#549). Average Power waits
+/// for Phase 3.
 private struct RideSummarySection: View {
     let store: StoreOf<RideDetailFeature>
 
@@ -320,12 +311,22 @@ private struct RideSummarySection: View {
                 stats.averageCadence.map { ("Avg Cadence", $0) },
                 stats.calories.map { ("Calories", $0) },
             ].compactMap { $0 }
-            if !readings.isEmpty {
+            if !readings.isEmpty || stats.vehiclePassCount != nil {
                 Section("Summary") {
-                    ReadingColumns {
-                        ForEach(readings, id: \.label) { item in
-                            ReadingColumn(item.label, item.reading)
+                    if !readings.isEmpty {
+                        ReadingColumns {
+                            ForEach(readings, id: \.label) { item in
+                                ReadingColumn(item.label, item.reading)
+                            }
                         }
+                    }
+                    // Absent with no radar paired, where "0 passes" would be a claim nobody measured.
+                    if let passes = stats.vehiclePassCount {
+                        Button { store.send(.passesTapped) } label: {
+                            LabeledContent("Vehicle Passes", value: passes.formatted())
+                        }
+                        .tint(Color.cyTextPrimary)
+                        .disabled(store.vehiclePasses.isEmpty)
                     }
                 }
             }
