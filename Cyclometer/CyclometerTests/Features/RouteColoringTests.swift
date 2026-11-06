@@ -56,6 +56,15 @@ struct RideMapTrackGradeTests {
         }
     }
 
+    /// `elevationProfile` holds the last altitude flat to the stretch's end: no reading, not a flat road.
+    @Test("no grade past the stretch's last altitude reading")
+    func noGradePastTheLastAltitude() throws {
+        let points = RideMapFixtures.points(count: 30, altitude: { $0 < 15 ? 100 : nil })
+        let grades = try #require(RideMapTrack(points: points).segments.first?.map(\.gradePercent))
+        #expect(grades[5] != nil)
+        #expect(grades[20] == nil)
+    }
+
     @Test("no grade without altitude, on a stretch shorter than the window, or where it's steeper than road")
     func gradeIsAbsentWithoutABelievableReading() {
         #expect(!RideMapTrack(points: RideMapFixtures.points(count: 30)).hasGrade)
@@ -204,6 +213,14 @@ struct RouteColorScaleTests {
         let colored = runs(RideMapFixtures.points(count: 40, heartRate: { $0 < 2 ? 150 : 100 }))
         #expect(colored.map(\.band) == [1])
         #expect(colored[0].coordinates.count == 40)
+    }
+
+    @Test("a long stretch flickering at a band edge draws in the band it covered most, not the run before it")
+    func longFlickerKeepsItsBand() {
+        // 200 m in zone 1, then 400 m of zone 3 with a zone 4 second in every four.
+        let colored = runs(RideMapFixtures.points(count: 60, heartRate: { $0 < 20 ? 100 : $0 % 4 == 3 ? 170 : 150 }))
+        #expect(colored.map(\.band) == [1, 3])
+        #expect(colored[1].coordinates.count == 40)
     }
 
     @Test("runs never join across a pause, even in the same band")

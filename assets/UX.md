@@ -1420,7 +1420,7 @@ Sections appear on screen in the order listed below.
         - **Speed:** five equal bands between the ride's own 5th and 95th percentile moving speeds, on the map grade ramp. A ride at one speed is all the middle band.
         - **Grade:** the map's grade bands (under 3%, 3–6, 6–9, 9–12, 12% and over), on S20's 100 m centred window. It is worked out within each stretch of riding, so it never spans a pause. Descents are colored flat. A grade steeper than road (over 25%) is treated as no reading.
         - **Heart rate and cadence:** the rider's zones, in the zone colors. A cadence of 0 rpm is no reading.
-        - **Short stretches:** a stretch under 50 m takes the band of the stretch before it, so a reading flickering at a band edge doesn't break the line into slivers.
+        - **Short stretches:** a stretch under 50 m takes the band of the stretch before it, so a reading flickering at a band edge doesn't break the line into slivers. Short stretches in a row that together pass 50 m draw as one, in the band they covered most of, so a long stretch ridden at a band edge keeps its own color.
       - **Legend:** a glass card at the bottom of the map: the coloring's name and unit, then five swatches with their ranges. VoiceOver reads it as one element, low to high.
       - **Late loads:** passes, stops and Health's heart rate zones that land after the sheet opened reach it.
       - **Not built:** the wind layer (M10.6).

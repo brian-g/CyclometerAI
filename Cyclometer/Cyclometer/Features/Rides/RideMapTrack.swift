@@ -10,8 +10,8 @@ struct RideMapTrack: Equatable, Sendable {
         var heartRateBPM: Int?
         var cadenceRPM: Int?
         /// Rise over `RouteTerrain.gradeWindowMeters` centred on the point, as S20 measures a
-        /// route. Nil with no altitude, on a stretch shorter than the window, and where the
-        /// altitude is too noisy to be road.
+        /// route. Nil with no altitude (before the stretch's first reading or after its last), on a
+        /// stretch shorter than the window, and where the altitude is too noisy to be road.
         var gradePercent: Double?
     }
 
@@ -60,6 +60,11 @@ struct RideMapTrack: Equatable, Sendable {
         }
         let cumulative = RouteGeometry.cumulativeDistances(coordinates)
         guard let total = cumulative.last, total >= RouteTerrain.gradeWindowMeters else { return nil }
+        // `elevationProfile` holds the first and last altitudes flat out to the stretch's ends. A
+        // held altitude is no reading, not a flat road, so the points out there have no grade.
+        let measured = segment.indices.filter { segment[$0].altitudeMeters != nil }
+        guard let firstMeasured = measured.first, let lastMeasured = measured.last else { return nil }
+        let measuredSpan = cumulative[firstMeasured]...cumulative[lastMeasured]
         let sampleCount = Int((total / RouteTerrain.sampleSpacingMeters).rounded()) + 1
         guard let profile = RouteGeometry.elevationProfile(coordinates, sampleCount: sampleCount),
               profile.count > 1 else { return nil }
@@ -67,6 +72,7 @@ struct RideMapTrack: Equatable, Sendable {
         let grades = RouteTerrain.grades(profile, spacing: spacing)
         guard !grades.isEmpty else { return nil }
         return cumulative.map { distance in
+            guard measuredSpan.contains(distance) else { return nil }
             let grade = grades[min(grades.count - 1, max(0, Int((distance / spacing).rounded())))]
             // `ElevationTracker`'s bar: steeper than any road is the altitude, not the road.
             return abs(grade) <= RideEnergy.maxPlausibleGrade * 100 ? grade : nil

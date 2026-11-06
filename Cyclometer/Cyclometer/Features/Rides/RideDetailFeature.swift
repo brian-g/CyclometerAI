@@ -388,10 +388,16 @@ enum RideDetailSeries {
         var zones = Array(repeating: 0, count: zoneBounds.count)
         guard !zones.isEmpty else { return zones }
         for (bpm, seconds) in secondsByBPM {
-            let zone = zoneBounds.lastIndex { $0.lowerBound <= bpm } ?? 0
-            zones[zone] += seconds
+            zones[zoneIndex(bpm, zoneBounds: zoneBounds)] += seconds
         }
         return zones
+    }
+
+    /// The zone `bpm` falls in, 0 for zone 1, against `zoneBounds` (zone 1 first): the highest zone
+    /// whose floor it reaches, so a reading below zone 1 counts as zone 1. The rule the zone
+    /// breakdowns and the map's heart rate coloring share.
+    static func zoneIndex(_ bpm: Int, zoneBounds: [ClosedRange<Int>]) -> Int {
+        zoneBounds.lastIndex { $0.lowerBound <= bpm } ?? 0
     }
 }
 

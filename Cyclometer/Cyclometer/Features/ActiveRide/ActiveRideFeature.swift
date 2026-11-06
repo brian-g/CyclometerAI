@@ -1640,11 +1640,12 @@ struct ActiveRideFeature {
     /// `trackRecorder.isRecording == (recordingState == .active)`, which `.task` relies on when it
     /// leaves the recorder off for a ride resumed paused (#392).
     private func pause(_ state: inout State) -> Effect<Action> {
+        let now = date.now
         state.recordingState = .paused
-        state.pausedAt = date.now
+        state.pausedAt = now
         // Before the checkpoint, so a kill while paused keeps the pause. `isAutoPaused` is set
         // before this by `.autoPauseTriggered`.
-        state.pauses.open(at: date.now, isAuto: state.isAutoPaused)
+        state.pauses.open(at: now, isAuto: state.isAutoPaused)
         let update = makeRideSummaryUpdate(from: state)
         return .merge(
             .send(.trackRecorder(.pauseRecording)),

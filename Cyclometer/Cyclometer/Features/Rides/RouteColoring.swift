@@ -121,18 +121,18 @@ struct RouteColorScale: Equatable, Sendable {
         }
     }
 
-    /// The zone whose range holds `bpm`. Below zone 1 is zone 1 and above zone 5 is zone 5, as
-    /// the Heart Rate sheet counts them.
+    /// The zone `bpm` falls in, by the Heart Rate sheet's rule (`RideDetailSeries.zoneIndex`):
+    /// below zone 1 is zone 1 and above zone 5 is zone 5.
     static func heartRateBand(_ bpm: Int, zones: [ClosedRange<Int>]) -> Int {
-        guard !zones.isEmpty else { return 1 }
-        return (zones.firstIndex { bpm <= $0.upperBound } ?? zones.count - 1) + 1
+        RideDetailSeries.zoneIndex(bpm, zoneBounds: zones) + 1
     }
 
     // MARK: Runs
 
     /// The route as polylines of one band each. A run shorter than `RouteColoring.minimumRunMeters`
-    /// takes the band of the run before it (the first, of the run after it). Runs never join across
-    /// a pause: each stretch of riding starts its own.
+    /// takes the band of the run before it (the first, of the run after it). Short runs in a row that
+    /// together pass it draw as one run, in the band they covered most of. Runs never join across a
+    /// pause: each stretch of riding starts its own.
     func runs(_ track: RideMapTrack) -> [ColoredRun] {
         track.segments.flatMap { segment -> [ColoredRun] in
             var groups: [(band: Int?, points: [RouteCoordinate])] = []
@@ -150,15 +150,50 @@ struct RouteColorScale: Equatable, Sendable {
                 if index + 1 < groups.count, let next = groups[index + 1].points.first { coordinates.append(next) }
                 return RouteGeometry.distanceMeters(coordinates)
             }
+            let lengths = groups.indices.map { length($0, of: groups) }
             var folded: [(band: Int?, points: [RouteCoordinate])] = []
-            for index in groups.indices {
-                if let last = folded.indices.last,
-                   folded[last].band == groups[index].band || length(index, of: groups) < RouteColoring.minimumRunMeters {
-                    folded[last].points += groups[index].points
+            func addRun(_ band: Int?, _ points: [RouteCoordinate]) {
+                if let last = folded.indices.last, folded[last].band == band {
+                    folded[last].points += points
                 } else {
-                    folded.append(groups[index])
+                    folded.append((band, points))
                 }
             }
+            // Short groups in a row, held until a long one or the stretch's end. Together under the
+            // minimum they are a flicker, and join the run before them. Together over it they are a
+            // stretch ridden at a band edge, and draw in the band they covered most of: folded into
+            // the run before, a kilometre of zone 2–3 flicker would draw in that run's band, or in
+            // grey after a coast.
+            var flicker: [Int] = []
+            func endFlicker() {
+                guard !flicker.isEmpty else { return }
+                defer { flicker = [] }
+                let points = flicker.flatMap { groups[$0].points }
+                var meters: [(band: Int?, meters: Double)] = []
+                for index in flicker {
+                    if let at = meters.firstIndex(where: { $0.band == groups[index].band }) {
+                        meters[at].meters += lengths[index]
+                    } else {
+                        meters.append((groups[index].band, lengths[index]))
+                    }
+                }
+                if let last = folded.indices.last,
+                   meters.reduce(0, { $0 + $1.meters }) < RouteColoring.minimumRunMeters {
+                    folded[last].points += points
+                } else {
+                    // The first band to reach the most length, so a tie always goes the same way.
+                    addRun(meters.reduce(meters[0]) { $1.meters > $0.meters ? $1 : $0 }.band, points)
+                }
+            }
+            for index in groups.indices {
+                if lengths[index] < RouteColoring.minimumRunMeters {
+                    flicker.append(index)
+                } else {
+                    endFlicker()
+                    addRun(groups[index].band, groups[index].points)
+                }
+            }
+            endFlicker()
             if folded.count > 1, length(0, of: folded) < RouteColoring.minimumRunMeters {
                 folded[1].points = folded[0].points + folded[1].points
                 folded.removeFirst()
