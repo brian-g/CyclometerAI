@@ -5,39 +5,92 @@ import SwiftUI
 /// S15 — Ride Detail, pushed from an S14 row as `RideRoutePath` state (#251), or from S20's
 /// Previous Rides on the Routes tab (#426).
 ///
-/// The prototype's layout, now reading the persisted ride. This view owns only the loading,
-/// which a snapshot must not run; the screen itself is `RideDetailList`.
+/// Laid out after Apple Fitness's workout detail (#538): a map header that runs under the top
+/// safe area and fades as the list scrolls, the ride's title over the fade, a hero Summary, then
+/// the ride's sections. This view owns only the loading, which a snapshot must not run, and the
+/// screen's measurements; the screen itself is `RideDetailList`.
 struct RideDetailView: View {
     let store: StoreOf<RideDetailFeature>
 
-    /// UX.md §S15: a 240pt map. Kept here because the generic `RideDetailList` cannot hold
-    /// static stored properties.
-    static let mapHeight: CGFloat = 240
-
     var body: some View {
-        RideDetailList(store: store)
-            .task { await store.send(.task).finish() }
+        // The screen's, not the list's: the header is half the screen, and the toolbar's bottom
+        // is where the title passes under it.
+        GeometryReader { proxy in
+            RideDetailList(
+                store: store,
+                screenHeight: proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom,
+                toolbarBottom: proxy.safeAreaInsets.top
+            )
+        }
+        .task { await store.send(.task).finish() }
     }
 }
 
 /// S15's content, rendered from state alone so a snapshot can seed it.
 ///
-/// Generic over the map row for the reason `RouteDetailList` is: a live `Map` renders its tiles
-/// asynchronously and cannot be pixel-snapshotted reproducibly, so tests pass a placeholder of
-/// the same height.
-struct RideDetailList<MapRow: View>: View {
-    let store: StoreOf<RideDetailFeature>
-    let mapRow: MapRow
+/// Generic over the map header for the reason `RouteDetailList` is: a live `Map` renders its tiles
+/// asynchronously and cannot be pixel-snapshotted reproducibly, so tests pass a placeholder.
+struct RideDetailList<MapHeader: View>: View {
+    @Bindable var store: StoreOf<RideDetailFeature>
+    /// The full screen's height, safe areas included. Passed in rather than read from the list,
+    /// so a snapshot drawn on a tall canvas still sizes the header to a phone.
+    let screenHeight: CGFloat
+    /// Where the toolbar ends, from the top of the screen: the map frames the route below it,
+    /// and the title moves into it once scrolled above it.
+    let toolbarBottom: CGFloat
+    let mapHeader: MapHeader
+
+    @State private var isTitleUnderToolbar = false
+
+    init(store: StoreOf<RideDetailFeature>, screenHeight: CGFloat, toolbarBottom: CGFloat,
+         @ViewBuilder mapHeader: () -> MapHeader) {
+        self.store = store
+        self.screenHeight = screenHeight
+        self.toolbarBottom = toolbarBottom
+        self.mapHeader = mapHeader()
+    }
+
+    /// Room for the header, kept while the track loads (`RideDetailFeature.State.reservesMapHeader`).
+    private var hasHeader: Bool { store.reservesMapHeader }
+    /// The map itself, once there is a track to draw.
+    private var drawsMap: Bool { !store.trackSegments.isEmpty }
+    private var mapHeight: CGFloat { (screenHeight * RideDetailHeaderChrome.mapHeightFraction).rounded() }
+    /// A ride S10 never named — recorded before #249, or closed out at launch — has a "" `title`.
+    /// `RideRow`'s fallback.
+    private var title: String { store.summary.title.isEmpty ? "Ride" : store.summary.title }
 
     var body: some View {
-        let unit = store.unitSystem
         List {
             Section {
-                mapRow
-                    .frame(height: RideDetailView.mapHeight)
-                    .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerMd, style: .continuous))
+                if hasHeader {
+                    // Clear, so the map behind shows through. The title block starts where the
+                    // map starts to fade (UX.md §S15).
+                    Button { store.send(.mapTapped) } label: {
+                        Color.clear
+                            .frame(height: mapHeight - Spacing.mapHeaderFade)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!drawsMap)
+                    .accessibilityHidden(!drawsMap)
+                    .accessibilityLabel("Route map")
+                    .accessibilityHint("Opens the map full screen")
                     .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+                // The answer, not the frame, so the action runs only when it flips.
+                RideTitleBlock(store: store, title: title)
+                    .onGeometryChange(for: Bool.self) { [toolbarBottom] proxy in
+                        RideDetailHeaderChrome.isTitleUnderToolbar(
+                            titleBottom: proxy.frame(in: .global).maxY, toolbarBottom: toolbarBottom
+                        )
+                    } action: { isTitleUnderToolbar = $0 }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
+            RideSummarySection(store: store)
+            RideDetailMetricSections(store: store)
             // Gone for a free ride. A deleted route keeps its name, without a link (#426).
             if let route = store.route {
                 Section("Route") {
@@ -50,63 +103,238 @@ struct RideDetailList<MapRow: View>: View {
                     Text(routeName)
                 }
             }
-            Section("Stats") {
-                // A row is absent, not dashed, for a ride that recorded nothing for it (UX.md
-                // §S15, #460): no altitude, heart rate, cadence sensor or body mass in Health.
-                if let reading = store.stats?.ascent(unit) { statRow("Ascent", reading) }
-                if let reading = store.stats?.descent(unit) { statRow("Descent", reading) }
-                LabeledContent("Avg Speed (\(unit.speedLabel))",
-                               value: speedText(store.stats?.averageSpeedMPS, unit))
-                LabeledContent("Max Speed (\(unit.speedLabel))",
-                               value: speedText(store.stats?.maxSpeedMPS, unit))
-                if let reading = store.stats?.averageHeartRate { statRow("Avg Heart Rate", reading) }
-                if let reading = store.stats?.maxHeartRate { statRow("Max Heart Rate", reading) }
-                // Absent, not 0, for a ride with no cadence sensor — 0 rpm is a real reading.
-                if let rpm = store.stats?.averageCadenceRPM {
-                    LabeledContent("Avg Cadence (rpm)", value: rpm.formatted())
-                }
-                if let rpm = store.stats?.maxCadenceRPM {
-                    LabeledContent("Max Cadence (rpm)", value: rpm.formatted())
-                }
-                if let reading = store.stats?.calories { statRow("Calories", reading) }
-                // Absent with no radar paired, where "0 passes" would be a claim nobody measured.
-                if let passes = store.stats?.vehiclePassCount {
-                    LabeledContent("Vehicle Passes", value: passes.formatted())
-                }
-            }
-            RideDetailMetricSections(store: store)
             // Strava segments need Accounts, Phase 2 — S20's placeholder idiom.
             Section("Strava Segments") {
-                LabeledContent("Connect Strava") { unavailable("Coming Soon") }
+                LabeledContent("Connect Strava") {
+                    Text("Coming Soon").foregroundStyle(Color.cyTextSecondary)
+                }
+            }
+            // Absent with no radar paired, where "0 passes" would be a claim nobody measured.
+            if let passes = store.stats?.vehiclePassCount {
+                Section {
+                    Button { store.send(.passesTapped) } label: {
+                        LabeledContent("Vehicle Passes", value: passes.formatted())
+                    }
+                    .tint(Color.cyTextPrimary)
+                    .disabled(store.vehiclePasses.isEmpty)
+                }
             }
         }
-        // A ride S10 never named — recorded before #249, or closed out at launch — has a ""
-        // `title`. `RideRow`'s fallback.
-        .navigationTitle(store.summary.title.isEmpty ? "Ride" : store.summary.title)
+        .listSectionSpacing(.compact)
+        // The list draws over the map, so its own background is the map's surround instead.
+        .scrollContentBackground(.hidden)
+        .contentMargins(.top, hasHeader ? 0 : nil, for: .scrollContent)
+        .modifier(RideMapHeaderBackground(hasHeader: hasHeader, drawsMap: drawsMap, height: mapHeight,
+                                          toolbarBottom: toolbarBottom, header: mapHeader))
+        // The title the next screen's back button carries. The bar shows `principal` instead.
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func unavailable(_ text: String) -> some View {
-        Text(text).foregroundStyle(Color.cyTextSecondary)
-    }
-
-    private func speedText(_ mps: Double?, _ unit: UnitSystem) -> String {
-        guard let mps else { return "—" }
-        return unit.speed(fromMPS: mps).formatted(.number.precision(.fractionLength(1)))
-    }
-
-    /// A row in the section's "Label (unit)" style, read by VoiceOver as the label and the value
-    /// with its unit in words (#460), rather than the symbol in brackets.
-    private func statRow(_ title: String, _ reading: MetricReading) -> some View {
-        LabeledContent("\(title) (\(reading.unit))", value: reading.value)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(title)
-            .accessibilityValue(reading.spoken)
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+        .toolbar {
+            // In once the title block's name has scrolled under the bar: a fade and a short rise,
+            // as S14's inline title comes in when its large title scrolls away. Always laid out,
+            // so the bar never resizes the item — inserting it revealed it from the centre.
+            ToolbarItem(placement: .principal) {
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .opacity(isTitleUnderToolbar ? 1 : 0)
+                    .offset(y: isTitleUnderToolbar ? 0 : Spacing.sm)
+                    .animation(.smooth(duration: 0.25), value: isTitleUnderToolbar)
+                    .accessibilityHidden(!isTitleUnderToolbar)
+            }
+            // Absent when the finish's GPX export failed, or the rider deleted the file.
+            if let url = store.stats?.gpxFileURL {
+                ToolbarItem(placement: .primaryAction) {
+                    ShareLink(item: url) {
+                        Label("Share GPX", systemImage: "square.and.arrow.up")
+                    }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                // Off until the stats bring the stored notes (`RideDetailFeature.editTapped`).
+                Button("Edit") { store.send(.editTapped) }
+                    .disabled(store.stats == nil)
+            }
+        }
+        .sheet(item: $store.scope(state: \.destination?.mapSheet, action: \.destination.mapSheet)) { store in
+            RideMapSheet(store: store)
+        }
+        .sheet(item: $store.scope(state: \.destination?.passes, action: \.destination.passes)) { store in
+            RidePassesSheet(store: store)
+        }
+        .sheet(item: $store.scope(state: \.destination?.edit, action: \.destination.edit)) { store in
+            RideEditView(store: store)
+        }
     }
 }
 
-/// S15's #460 rows, each nil when the ride recorded nothing for it, so the row is left out
-/// rather than dashed (UX.md §S15).
+extension RideDetailList where MapHeader == RideHeaderMap {
+    init(store: StoreOf<RideDetailFeature>, screenHeight: CGFloat, toolbarBottom: CGFloat) {
+        self.init(store: store, screenHeight: screenHeight, toolbarBottom: toolbarBottom) {
+            RideHeaderMap(segments: store.trackSegments)
+        }
+    }
+}
+
+// MARK: - Header
+
+/// The map behind the list, and the scroll that moves it (#538). A modifier holding the offset as
+/// its own state, so a scroll frame re-runs this body alone: the list is its `content`, which a
+/// change here doesn't rebuild. View state, not store state: it changes every frame of a scroll
+/// and only the chrome reads it.
+private struct RideMapHeaderBackground<Header: View>: ViewModifier {
+    /// The list runs under the top safe area, with room kept for the header.
+    let hasHeader: Bool
+    /// The track has loaded, so the map draws in that room.
+    let drawsMap: Bool
+    let height: CGFloat
+    let toolbarBottom: CGFloat
+    let header: Header
+
+    /// How far the list has scrolled (`RideDetailHeaderChrome`).
+    @State private var scrollOffset: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .background(alignment: .top) {
+                ZStack(alignment: .top) {
+                    Color(.systemGroupedBackground)
+                    if drawsMap {
+                        RideMapHeaderFrame(height: height, toolbarBottom: toolbarBottom, offset: scrollOffset,
+                                           content: header)
+                            .transition(.opacity)
+                    }
+                }
+                // In with the track rather than popping in over the room kept for it.
+                .animation(.easeIn(duration: 0.25), value: drawsMap)
+                .ignoresSafeArea()
+            }
+            // Under the top safe area only with a map to run under it. Without one, the title
+            // block is the first thing below the toolbar.
+            .ignoresSafeArea(edges: hasHeader ? .top : [])
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, offset in
+                scrollOffset = offset
+            }
+    }
+}
+
+/// The map header's frame (#538): pinned to the top of the screen, `height` tall, its bottom
+/// `Spacing.mapHeaderFade` fading to the page. It rides up with the list and fades as it goes,
+/// and stretches from the top when the rider pulls down past it.
+private struct RideMapHeaderFrame<Content: View>: View {
+    let height: CGFloat
+    let toolbarBottom: CGFloat
+    let offset: CGFloat
+    let content: Content
+
+    var body: some View {
+        content
+            // The route fits between the toolbar and the start of the title area (UX.md §S15).
+            .safeAreaPadding(.top, toolbarBottom)
+            .safeAreaPadding(.bottom, Spacing.mapHeaderFade)
+            .frame(height: height)
+            .mask {
+                VStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: Spacing.mapHeaderFade)
+                }
+            }
+            .scaleEffect(RideDetailHeaderChrome.mapStretch(offset: offset, mapHeight: height), anchor: .top)
+            .offset(y: -max(offset, 0))
+            .opacity(RideDetailHeaderChrome.mapOpacity(offset: offset, mapHeight: height, fade: Spacing.mapHeaderFade))
+            // The clear row in the list above it takes the taps.
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The title over the map's fade (UX.md §S15): the ride's name, its date and time range, the
+/// rider's notes, then distance and moving time in small heroes.
+private struct RideTitleBlock: View {
+    let store: StoreOf<RideDetailFeature>
+    let title: String
+
+    var body: some View {
+        let unit = store.unitSystem
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(title)
+                .font(.title)
+                .accessibilityAddTraits(.isHeader)
+            dateText.font(.headline)
+            if let notes = store.stats?.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.body)
+                    .foregroundStyle(Color.cyTextSecondary)
+            }
+            // Sketch's "S15 - Ride Detail (Alternative)": value and unit, no labels; VoiceOver
+            // names them.
+            HStack(alignment: .lastTextBaseline, spacing: Spacing.xl) {
+                HeroNumber(unit.distance(fromMeters: store.summary.distanceMeters),
+                           unit: unit.distanceLabel)
+                    .heroNumberSize(.small)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Distance")
+                    .accessibilityValue(unit.spokenDistance(fromMeters: store.summary.distanceMeters))
+                // Moving time is W3's, from the `Ride` row, so it arrives with the stats.
+                if let seconds = store.stats?.movingSeconds {
+                    HeroNumber(seconds.formattedElapsed, unit: "")
+                        .heroNumberSize(.small)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Moving time")
+                        .accessibilityValue(seconds.spokenElapsed)
+                }
+            }
+            .padding(.top, Spacing.xs)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The start date and the time range, "September 26, 2026, 1:31 – 1:40 PM"; the start alone
+    /// until the stats bring the end.
+    private var dateText: Text {
+        let start = store.summary.startedAt
+        if let end = store.stats?.endedAt, end > start {
+            return Text(start..<end, format: .interval.month(.wide).day().year().hour().minute())
+        }
+        return Text(start, format: .dateTime.month(.wide).day().year().hour().minute())
+    }
+}
+
+// MARK: - Summary
+
+/// S15's Summary (UX.md §S15): the whole ride at a glance in hero numbers, each left out when the
+/// ride recorded nothing for it (#460). Average Power waits for Phase 3.
+private struct RideSummarySection: View {
+    let store: StoreOf<RideDetailFeature>
+
+    var body: some View {
+        if let stats = store.stats {
+            let unit = store.unitSystem
+            let readings: [(label: String, reading: MetricReading)] = [
+                stats.ascent(unit).map { ("Ascent", $0) },
+                stats.descent(unit).map { ("Descent", $0) },
+                stats.averageSpeed(unit).map { ("Avg Speed", $0) },
+                stats.averageHeartRate.map { ("Avg Heart Rate", $0) },
+                stats.averageCadence.map { ("Avg Cadence", $0) },
+                stats.calories.map { ("Calories", $0) },
+            ].compactMap { $0 }
+            if !readings.isEmpty {
+                Section("Summary") {
+                    ReadingColumns {
+                        ForEach(readings, id: \.label) { item in
+                            ReadingColumn(item.label, item.reading)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// S15's Summary values, each nil when the ride recorded nothing for it, so it is left out rather
+/// than dashed (UX.md §S15, #460).
 extension RideStats {
     func ascent(_ unit: UnitSystem) -> MetricReading? {
         ascentMeters.map { Self.elevation($0, unit) }
@@ -116,8 +344,20 @@ extension RideStats {
         descentMeters.map { Self.elevation($0, unit) }
     }
 
+    /// Nil with no moving second, when the stored average is a 0 nobody rode — the Speed
+    /// section's rule (`RideMetrics.hasSpeed`).
+    func averageSpeed(_ unit: UnitSystem) -> MetricReading? {
+        guard movingSeconds > 0 else { return nil }
+        return MetricReading(value: unit.speed(fromMPS: averageSpeedMPS).formatted(.number.precision(.fractionLength(1))),
+                             unit: unit.speedLabel, spoken: unit.spokenSpeed(fromMPS: averageSpeedMPS))
+    }
+
     var averageHeartRate: MetricReading? { averageHeartRateBPM.map(Self.heartRate) }
-    var maxHeartRate: MetricReading? { maxHeartRateBPM.map(Self.heartRate) }
+
+    /// Nil with no cadence sensor. A real 0 rpm average is a reading.
+    var averageCadence: MetricReading? {
+        averageCadenceRPM.map { MetricReading(value: $0.formatted(), unit: "rpm", spoken: "\($0) rpm") }
+    }
 
     var calories: MetricReading? {
         activeKilocalories.map {
@@ -132,14 +372,6 @@ extension RideStats {
 
     private static func heartRate(_ bpm: Int) -> MetricReading {
         MetricReading(value: bpm.formatted(), unit: "bpm", spoken: "\(bpm) beats per minute")
-    }
-}
-
-extension RideDetailList where MapRow == RideMapView {
-    init(store: StoreOf<RideDetailFeature>) {
-        self.init(store: store, mapRow: RideMapView(segments: store.trackSegments,
-                                                    passes: store.vehiclePasses,
-                                                    unitSystem: store.unitSystem))
     }
 }
 
@@ -191,8 +423,54 @@ private struct RideDetailMetricSections: View {
 
 // MARK: - Map
 
-/// S15's map: the recorded track, one polyline per stretch of riding (#263), start and finish
-/// flags, and a marker at each vehicle pass labelled with how fast it went by.
+/// The recorded track, one polyline per stretch of riding (#263), with start and finish flags.
+/// What S15's header and its full-screen map both draw.
+struct RideTrackContent: MapContent {
+    let segments: [[RouteCoordinate]]
+
+    var body: some MapContent {
+        ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+            MapPolyline(coordinates: segment.map(\.coordinate2D))
+                .stroke(Color.cyPrimary, lineWidth: Spacing.strokeMapTrack)
+        }
+        if let start = segments.first?.first {
+            Marker("Start", systemImage: "flag.fill", coordinate: start.coordinate2D)
+                .tint(Color.cyPrimary)
+        }
+        // No finish on a loop, which would stack on the start flag and hide it — the rule
+        // and threshold `RouteMapContent` uses. Most rides end where they began.
+        if let start = segments.first?.first, let finish = segments.last?.last,
+           RouteGeometry.distanceMeters([start, finish]) >= RouteMapContent.loopClosureMeters {
+            // `RouteMapContent`'s finish flag, for the reason given there.
+            Marker("Finish", systemImage: "flag.checkered", coordinate: finish.coordinate2D)
+                .tint(Color.cyTextPrimary)
+        }
+    }
+}
+
+/// S15's map header (#538): the route alone, framed whole, with no panning, zooming or pass
+/// markers. Tapping it opens `RideMapSheet`, which has all of those.
+///
+/// Framed tight on the track (`RideMapThumbnail.headerRect`), with its margins in points, so a
+/// short loop fills the header as a long ride does. The live maps' degree padding and 1.7 km
+/// floor left a loop under a mile a speck.
+struct RideHeaderMap: View {
+    let segments: [[RouteCoordinate]]
+
+    var body: some View {
+        Map(initialPosition: .rect(RideMapThumbnail.headerRect(for: segments)), interactionModes: []) {
+            RideTrackContent(segments: segments)
+        }
+        .mapStyle(.standard(elevation: .realistic))
+        // Room for the start and finish flags, whose balloons stand above their points, and for
+        // the track's stroke at the sides.
+        .safeAreaPadding(.horizontal, Spacing.xl)
+        .safeAreaPadding(.vertical, Spacing.xxl)
+    }
+}
+
+/// S15's full-screen map (#538): the recorded track, and a marker at each vehicle pass labelled
+/// with how fast it went by. Pans and zooms.
 struct RideMapView: View {
     let segments: [[RouteCoordinate]]
     let passes: [VehiclePassEventDTO]
@@ -215,24 +493,9 @@ struct RideMapView: View {
             Map(initialPosition: .region(RoutesMapCamera.region(
                 fitting: RouteGeometry.boundingBox(segments.flatMap { $0 })
             ))) {
-                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-                    MapPolyline(coordinates: segment.map(\.coordinate2D))
-                        .stroke(Color.cyPrimary, lineWidth: Spacing.strokeMapTrack)
-                }
-                if let start = segments.first?.first {
-                    Marker("Start", systemImage: "flag.fill", coordinate: start.coordinate2D)
-                        .tint(Color.cyPrimary)
-                }
-                // No finish on a loop, which would stack on the start flag and hide it — the rule
-                // and threshold `RouteMapContent` uses. Most rides end where they began.
-                if let start = segments.first?.first, let finish = segments.last?.last,
-                   RouteGeometry.distanceMeters([start, finish]) >= RouteMapContent.loopClosureMeters {
-                    // `RouteMapContent`'s finish flag, for the reason given there.
-                    Marker("Finish", systemImage: "flag.checkered", coordinate: finish.coordinate2D)
-                        .tint(Color.cyTextPrimary)
-                }
+                RideTrackContent(segments: segments)
                 ForEach(Array(passes.enumerated()), id: \.offset) { _, pass in
-                    Marker(passLabel(pass), systemImage: "car.fill",
+                    Marker(pass.vehicleSpeed(unitSystem)?.shown ?? "", systemImage: "car.fill",
                            coordinate: CLLocationCoordinate2D(latitude: pass.latitude, longitude: pass.longitude))
                         .tint(passTint(pass.alertLevelAtPass))
                 }
@@ -244,14 +507,6 @@ struct RideMapView: View {
                 MapPitchToggle()
             }
         }
-    }
-
-    /// The vehicle's own speed, in the rider's units, or no label when the radar never
-    /// measured one.
-    private func passLabel(_ pass: VehiclePassEventDTO) -> String {
-        guard let kph = pass.estimatedPassSpeedKph else { return "" }
-        let speed = unitSystem.speed(fromMPS: kph / AlertLevel.kphPerMPS)
-        return "\(speed.formatted(.number.precision(.fractionLength(0)))) \(unitSystem.speedLabel)"
     }
 
     /// The alert level the radar had reached as the vehicle went by, in the radar column's
@@ -269,10 +524,11 @@ struct RideMapView: View {
 
 /// S15 already pushed on the Rides tab's own stack, as the app hosts it: the Route row is a
 /// `NavigationLink(state:)`, which reports "not presentable" in a plain `NavigationStack` (#426).
-private func rideDetailPreview(route: RouteSummary?, sensors: RideDetailPreview.Sensors = .all) -> some View {
+private func rideDetailPreview(route: RouteSummary?, sensors: RideDetailPreview.Sensors = .all,
+                               notes: String = "") -> some View {
     let summary = RideListSummary(id: UUID(), title: "River Loop", startedAt: .now.addingTimeInterval(-86_400),
                                   distanceMeters: 12_600, durationSeconds: TimeInterval(RideDetailPreview.seconds))
-    let track = RideDetailPreview.trackPoints(rideId: summary.id, sensors: sensors)
+    let track = sensors == .noTrack ? [] : RideDetailPreview.trackPoints(rideId: summary.id, sensors: sensors)
     return withDependencies {
         $0.defaultFileStorage = .inMemory
     } operation: {
@@ -283,7 +539,7 @@ private func rideDetailPreview(route: RouteSummary?, sensors: RideDetailPreview.
         } withDependencies: {
             $0.persistenceClient = .mock(
                 trackPoints: [summary.id: track],
-                rideStats: [summary.id: RideDetailPreview.stats(track: track, sensors: sensors, route: route)],
+                rideStats: [summary.id: RideDetailPreview.stats(track: track, sensors: sensors, route: route, notes: notes)],
                 vehiclePassEvents: [summary.id: [RideDetailPreview.pass(rideId: summary.id)]],
                 rides: [summary],
                 routes: route.map { [$0] } ?? [],
@@ -297,7 +553,7 @@ private func rideDetailPreview(route: RouteSummary?, sensors: RideDetailPreview.
     rideDetailPreview(route: nil)
 }
 
-/// GPS only: no Cadence or Heart Rate sections, and no HR or cadence rows in Stats.
+/// GPS only: no Cadence or Heart Rate sections, and no heart rate or cadence in the Summary.
 #Preview("Ride Detail — GPS only") {
     rideDetailPreview(route: nil, sensors: .gpsOnly)
 }
@@ -305,6 +561,22 @@ private func rideDetailPreview(route: RouteSummary?, sensors: RideDetailPreview.
 /// No altitude: no Elevation, Climbing or Grade sections, and no Ascent or Descent (#460).
 #Preview("Ride Detail — no altitude") {
     rideDetailPreview(route: nil, sensors: .noAltitude)
+}
+
+/// The rider's notes under the title block (#538).
+#Preview("Ride Detail — notes") {
+    rideDetailPreview(route: nil, notes: "Headwind all the way out, tailwind home. New tyres feel quick.")
+}
+
+/// No drawable track — a trainer ride: no map header, and the title block at the top (#538).
+#Preview("Ride Detail — no track") {
+    rideDetailPreview(route: nil, sensors: .noTrack)
+}
+
+/// Dark, metric.
+#Preview("Ride Detail — dark") {
+    rideDetailPreview(route: nil)
+        .preferredColorScheme(.dark)
 }
 
 /// Ridden on "Summit Climb": the Route section links to its S20 (#426).
@@ -315,7 +587,7 @@ private func rideDetailPreview(route: RouteSummary?, sensors: RideDetailPreview.
 /// A short synthetic ride for the preview only — a loop with a climb, and a heart rate and
 /// cadence that follow it.
 private enum RideDetailPreview {
-    enum Sensors { case all, gpsOnly, noAltitude }
+    enum Sensors { case all, gpsOnly, noAltitude, noTrack }
 
     static let seconds = 1_800
 
@@ -341,11 +613,11 @@ private enum RideDetailPreview {
     }
 
     /// The `Ride` row's numbers for `track`, worked out as the finish would store them.
-    static func stats(track: [TrackPointDTO], sensors: Sensors, route: RouteSummary?) -> RideStats {
+    static func stats(track: [TrackPointDTO], sensors: Sensors, route: RouteSummary?, notes: String) -> RideStats {
         let finish = RideFinishStats(savedTrack: track, altitudeSource: .barometric,
                                      movingSeconds: TimeInterval(seconds), distanceMeters: 12_600,
                                      rider: RideEnergy.Rider(kilograms: 75, age: 40, sex: .male))
-        let hasSensors = sensors != .gpsOnly
+        let hasSensors = sensors != .gpsOnly && sensors != .noTrack
         let cadence = track.compactMap(\.cadenceRPM)
         let heartRate = track.compactMap(\.heartRateBPM)
         return RideStats(
@@ -362,7 +634,9 @@ private enum RideDetailPreview {
             calorieSeries: finish.calorieSeries,
             movingSeconds: seconds,
             cadenceSecondsByRPM: Dictionary(cadence.map { ($0, 1.0) }, uniquingKeysWith: +),
-            cadenceCoastingSeconds: hasSensors ? 140 : 0
+            cadenceCoastingSeconds: hasSensors ? 140 : 0,
+            endedAt: track.last?.timestamp,
+            notes: notes
         )
     }
 

@@ -478,6 +478,9 @@ struct AppFeature {
             case .routes(.delegate(.useRoute(let route))), .rides(.delegate(.useRoute(let route))):
                 return presentStartSheet(&state, route: route)
 
+            case .routes(.delegate(.rideEdited)):
+                return .send(.rides(.reloadRides))
+
             case .settings(.delegate(.liveActivityToggled)):
                 // A ride already running follows S12's toggle now, not from the next ride (#313).
                 guard state.activeRide != nil else { return .none }

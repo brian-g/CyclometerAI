@@ -371,4 +371,35 @@ struct RideMapThumbnailTests {
         }
         #expect(saves.value == 1)
     }
+
+    // MARK: S15 header (#538)
+
+    @Test("S15's header frames the track itself, centred, with no padding on its long axis")
+    func headerRectFramesTheTrack() {
+        let ride = Self.eastWestRide
+        let bounds = RouteGeometry.boundingBox(ride.flatMap { $0 })
+        let track = RideMapThumbnail.trackRect(for: bounds)
+        let header = RideMapThumbnail.headerRect(for: ride)
+        #expect(abs(header.width - track.width) < 1e-6)
+        #expect(abs(header.midX - track.midX) < 1e-6)
+        #expect(abs(header.midY - track.midY) < 1e-6)
+        // About 33 m north to south, so that side is floored.
+        #expect(abs(header.height - RideMapThumbnail.minimumSide(for: bounds)) < 1e-6)
+    }
+
+    /// The bug Brian saw on a loop under a mile: `RoutesMapCamera`'s 1.7 km floor zoomed far out.
+    @Test("S15's header floors each side at the thumbnail's 200 m, not the other maps' 1.7 km")
+    func headerRectIsFlooredAtTwoHundredMeters() {
+        let jitter = [[
+            RouteCoordinate(latitude: 43.07000, longitude: -89.40000),
+            RouteCoordinate(latitude: 43.07003, longitude: -89.40002),
+        ]]
+        let bounds = RouteGeometry.boundingBox(jitter.flatMap { $0 })
+        let header = RideMapThumbnail.headerRect(for: jitter)
+        let floor = RideMapThumbnail.minimumSide(for: bounds)
+        #expect(abs(header.width - floor) < 1e-6)
+        #expect(abs(header.height - floor) < 1e-6)
+        let meters = header.width / MKMapPointsPerMeterAtLatitude(43.07)
+        #expect(abs(meters - 200) < 0.5)
+    }
 }

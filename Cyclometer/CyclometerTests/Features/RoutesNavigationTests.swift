@@ -102,4 +102,31 @@ struct RoutesNavigationTests {
         #expect(store.state.path[id: 1, case: \.ride]?.stats == stats)
         #expect(store.state.path[id: 1, case: \.ride]?.route == route)
     }
+
+    // MARK: S15 Edit (#538)
+
+    /// S20 reads its Previous Rides back when it reappears. S14 is on the other tab, so the edit
+    /// leaves this one for `AppFeature` to reload it.
+    @Test("an edit saved in an S15 on the Routes stack tells AppFeature")
+    func rideEditedBubblesOut() async {
+        let ride = RouteRideSummary.previewRides[0]
+        var routeState = RouteDetailFeature.State(summary: Self.route)
+        routeState.previousRides = RouteRideSummary.previewRides
+        var state = RoutesFeature.State()
+        state.path.append(.route(routeState))
+        state.path.append(.ride(RideDetailFeature.State(summary: RideListSummary(ride))))
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            TestStore(initialState: state) {
+                RoutesFeature()
+            } withDependencies: {
+                $0.defaultFileStorage = storage
+            }
+        }
+
+        await store.send(.path(.element(id: 1, action: .ride(.delegate(.rideEdited(id: ride.rideId, title: "Hill Loop", notes: ""))))))
+        await store.receive(\.delegate.rideEdited)
+    }
 }

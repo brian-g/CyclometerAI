@@ -29,6 +29,21 @@ struct AppFeatureTests {
         #expect(store.state.activeRide != nil)
     }
 
+    /// S15 can be opened from S20's Previous Rides on the Routes tab (#426). An edit saved there
+    /// reaches S14 on the Rides tab through here (#538).
+    @Test("a ride edited on the Routes tab reloads S14")
+    func rideEditedOnRoutesReloadsRides() async {
+        let store = TestStore(initialState: AppFeature.State()) {
+            AppFeature()
+        } withDependencies: {
+            $0.persistenceClient = .mock()
+        }
+        store.exhaustivity = .off
+
+        await store.send(.routes(.delegate(.rideEdited)))
+        await store.receive(\.rides.reloadRides)
+    }
+
     /// Tapping the accessory re-presents the full-screen dashboard.
     @Test("dashboardOpened re-presents the dashboard while a ride is active")
     func dashboardOpenedRepresents() async {

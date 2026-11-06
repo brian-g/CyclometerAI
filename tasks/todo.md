@@ -2071,3 +2071,114 @@ Decision (2026-11-05): build numbers come from Xcode Cloud (`CI_BUILD_NUMBER`, a
 ### Review
 
 `-showBuildSettings` (Release) is identical to the baseline for all 4 targets. A simulator build gives 1.0 (1) for both the app and the widget extension. The script passed with no tag (skips) and a matching tag, and failed with a clear message for: a mismatched tag, a tag without `v`, a `-beta` suffix, a 4-part version, a re-added target override, and a `[config=…]` override. The last one first exited silently under `pipefail`; fixed. Not run on Xcode Cloud yet.
+
+---
+
+## #537 — S15 map sheet: basemaps, event layers, route coloring (blocked on #538)
+
+Plan approved 2026-11-05 (`~/.claude/plans/generic-mapping-catmull.md`, appendix). Start on `feat/537` from `main` once #538 merges.
+
+
+#### Context
+UX.md §S15's Map Details section puts three sets of controls in #538's full-screen map sheet: basemaps, event layers (vehicle passes, stops) and route coloring (speed, grade, cadence, HR). Branch `feat/537` after #538 merges.
+
+**Decisions (Brian):**
+1. #538 first.
+2. Stops come from persisted pause events, not `segmentIndex`. `segmentIndex` goes up on every resume, and also when a ride killed while recording comes back (`ActiveRideFeature.swift:1776`). GPS gaps don't change it.
+3. Speed uses 5 ride-relative bands on the `mapGrade1–5` ramp.
+4. Descents are colored as flat (`mapGrade1`).
+
+**Assumptions:**
+- Rides recorded before the change have no pause events, so no Stops toggle and no fallback to segments.
+- A pause the ride ends in is not a stop.
+- Sheet choices reset on each open.
+- The controls are a toolbar `Menu` plus a bottom legend. Check Design.sketch first.
+
+#### 1. Record pauses (shared path, so the full suite runs)
+- `Models/RidePause.swift`: `RidePause { startedAt: Date; endedAt: Date?; isAuto: Bool }`, Codable.
+- `Ride.pausesData: Data?` plus a computed `pauses`, on the `syncRecordsData` pattern. Include it in `summarySnapshot`.
+- `RideSummaryUpdate.pauses = []`, written by `RidePersistenceActor.apply`.
+- `ActiveRideFeature`:
+  - Add `State.pauses`.
+  - `pause(_:)` appends an open `RidePause` (`isAuto: state.isAutoPaused`) before its checkpoint.
+  - `resume(_:)` closes it before its checkpoint.
+  - Restore `pauses` from the summary next to `trackSegmentIndex`.
+- `RideStats` and `fetchRideStats` carry `pauses`.
+
+#### 2. Pure models (`Features/Rides/`)
+- **`RideMapTrack`**, built in the track-load effect: per-segment coordinate, timestamp, speed, HR, cadence and grade.
+  - Grade: resample with `RouteGeometry.elevationProfile` to `RouteTerrain.sampleSpacingMeters`, then `RouteTerrain.grades`, the 100 m window.
+  - No dip-fill (the altitude is barometric), and the window never crosses a pause.
+- **`RideStops.stops(pauses:track:)`:** one stop per closed pause, at the last point at or before `startedAt`, with its duration and whether it was auto.
+- **`RouteColoring`** (`.plain`, `.speed`, `.grade`, `.cadence`, `.heartRate`):
+  - `runs(track:zones:)` gives each point a band, joins equal runs, and folds runs under a minimum length into the run before. Runs share boundary coordinates and never join across a pause.
+  - `legend(...)` lists each band's color and range in the rider's units.
+- **Bands:**
+  - Speed: five equal bands between the 5th and 95th percentile moving speed, on `mapGrade1–5`.
+  - Grade: `mapGrade1–5` at 0–3, 3–6, 6–9, 9–12 and 12+ %; descents use `mapGrade1`.
+  - HR: `.hrZone(n)` against `heartRateZoneBounds`.
+  - Cadence: `CadenceZone.color` via `CadenceZoneBoundaries.zone(forRPM:)`.
+  - No reading or 0 rpm: `cyTextTertiary`.
+  - No new tokens.
+
+#### 3. Sheet state and UI (on #538's `RideMapSheetFeature`)
+- **State:** `basemap` (`.standard`, `.hybrid`, `.imagery`, with `.realistic` elevation), `showsPasses`, `showsStops`, `coloring`, cached `coloredRuns`.
+- **Actions:** `basemapSelected`, `layerToggled`, `routeColoringSelected`. Recompute the runs when the coloring changes, and on `healthProfileFetched` while HR is selected.
+- **Availability:**
+  - Cadence needs `store.cadence`, HR needs `heartRateMetrics`, Grade needs `elevationMetrics`.
+  - The pass toggle is absent with `vehiclePassCount == nil`; the Stops toggle is absent with no stops.
+- **Controls:** a toolbar `Menu` "Map Options" with an inline Picker for Map (Standard, Hybrid, Satellite), Toggles for Vehicle Passes and Stops, and an inline Picker for Color Route By.
+- **Markers:**
+  - Passes reuse `passLabel` and `passTint`.
+  - Stops are `pause.fill` (manual) or `pause.circle.fill` (auto), labelled with the duration. VoiceOver reads "Pause, 3 minutes" or "Auto pause, 3 minutes".
+- **`RideMapLegend`:** a bottom overlay when the coloring isn't Plain, one accessibility element, with previews for each coloring.
+- **Docs:** UX.md §S15 Map Details "As built (#537)", including the assumptions.
+
+#### Verification
+- **TestStore pause recording:** manual and auto pauses, resume closes, a kill while paused then resume, a kill while active records nothing, finish while paused stays open.
+- **Storage:** `RideSchemaMigrationTests` (an old store opens with `pauses == []`); a pauses round-trip.
+- **`RideStopsTests`:** both kinds of pause; an open pause is excluded; no stop from a GPS gap or a kill.
+- **`RouteColoringTests`:** each metric's bands; descents flat; speed percentiles and an all-equal-speed ride; zone edges; neutral for no reading; folding of short runs; no join across a pause; the legend in both unit systems.
+- **Availability (reducer):** GPS-only, no radar, no stops.
+- **Snapshots:** `RideMapLegend` per coloring, not the live Map.
+- **Simulator:** basemaps, layers, every coloring on a long ride (polyline count, lag), VoiceOver.
+- **Full suite**, then commit, PR and review.
+
+- [ ] 1. Record pauses (RidePause, Ride.pausesData, RideSummaryUpdate, ActiveRideFeature pause/resume/restore, RideStats)
+- [ ] 2. Pure models (RideMapTrack, RideStops, RouteColoring + legend)
+- [ ] 3. Sheet state and UI (Map Options menu, markers, RideMapLegend)
+- [ ] Tests, snapshots, simulator check, full suite
+- [ ] UX.md §S15 Map Details "As built (#537)"
+
+---
+
+## #538 — S15 Ride Detail redesign: map header, toolbar, Summary, section order
+
+Plan approved 2026-11-05 (`~/.claude/plans/generic-mapping-catmull.md`). Branch `feat/538`.
+
+Decisions (2026-11-05): 1 #538 before #537; 2 the title block's moving time is `RideStats.movingSeconds`; 3 notes show under the title block when not empty.
+
+- [x] 0. Check Design.sketch for an S15 artboard; raise any difference before following it
+- [x] 1. Data: `RideStats` gains `endedAt`, `notes`, `gpxFileURL`; `updateRideNotes` client + actor + mock hook
+- [x] 2. Reducer: `Destination` (mapSheet / passes / edit), `RideMapSheetFeature`, `RideEditFeature`, save in the parent (rename, notes, GPX rewrite when the title changes), `delegate(.rideEdited)` → S14 and S20 reload
+- [x] 3. View: background map header (50% screen height, 80 pt fade, no interaction, framed above the title), clear header row, `RideDetailHeaderChrome` (fade, stretch, toolbar title), title block with notes, Share + Edit toolbar, Summary `ReadingColumns`, section order, Stats removed, Vehicle Passes row + sheet, map sheet (W8 pattern)
+- [x] Previews for every state
+- [x] Tests: RideDetailFeature, Rides/Routes reload, header chrome, persistence, accessibility, snapshots (no-track, notes; scrolled dropped, see Review)
+- [x] Hand to Brian to run; full CyclometerTests before pushing
+- [x] UX.md §S15 "As built (#538)"; DataModel.md if it lists RideStats (it doesn't)
+- [x] Sketch decisions (2026-11-05, "S15 - Ride Detail (Alternative)"): Share + Edit as separate buttons (not Sketch's … menu); inset-grouped List kept (not Sketch's plain page); title block's distance and moving time unlabelled, as in Sketch
+
+### #538 Review (2026-11-06)
+
+- **Brian's run:**
+  - The route fits between the toolbar and the fade, and the title sits at the fade. Pull-to-stretch works.
+  - Two fixes came out of it:
+    1. **Header zoom on a loop under a mile.** The header used `RoutesMapCamera`'s 1.7 km floor. It now uses `RideMapThumbnail.headerRect` (tight, 200 m floor) plus point margins.
+    2. **Toolbar title animation.** The title is now always laid out in `.principal` and fades in while rising 8 pt. Inserting it had made the bar reveal it from the centre.
+- **Tests:**
+  - New: `RideDetailEditTests`, `RideEditFeatureTests`, `RideDetailHeaderChromeTests`, `headerRect` cases, `updateRideNotes` and GPX-presence persistence cases, the Rides/Routes stack patch, and the AppFeature reload.
+  - A11y now checks that the Summary is spoken with its units. Its host grew to 2,400 pt so the lazy list builds the zone rows.
+  - Snapshots re-recorded. The map placeholder now `.ignoresSafeArea()`, as the `Map` does.
+- **Deviation: no scrolled snapshot.** The first `onScrollGeometryChange` resets a seeded offset. Pinning the offset would draw a faded map over content that hasn't moved, a state the app never shows. The chrome arithmetic is unit-tested, and Brian checked it on device.
+- **Full `CyclometerTests`:** passed, 2,507 cases.
+- **Follow-up:** #546, the absolute GPX path (Share is hidden after a container move).

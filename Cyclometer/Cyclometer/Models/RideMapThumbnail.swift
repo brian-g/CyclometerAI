@@ -37,6 +37,39 @@ enum RideMapThumbnail {
     /// From the centre of the track's stroke to the image edge: the margin, plus half the stroke.
     static let inset = Spacing.mapThumbnailMargin + Spacing.strokeMapThumbnail / 2
 
+    /// The track's own extent in map points, unpadded. Mercator keeps north up and east right, so
+    /// the bounding box's corners bound the projected track.
+    static func trackRect(for bounds: RouteBounds) -> MKMapRect {
+        let topLeft = MKMapPoint(CLLocationCoordinate2D(latitude: bounds.maxLatitude, longitude: bounds.minLongitude))
+        let bottomRight = MKMapPoint(CLLocationCoordinate2D(latitude: bounds.minLatitude, longitude: bounds.maxLongitude))
+        return MKMapRect(x: topLeft.x, y: topLeft.y, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y)
+    }
+
+    /// `minimumSideMeters` in map points, at the middle latitude of `bounds`.
+    static func minimumSide(for bounds: RouteBounds) -> Double {
+        minimumSideMeters * MKMapPointsPerMeterAtLatitude((bounds.minLatitude + bounds.maxLatitude) / 2)
+    }
+
+    /// The track framed tight, as S15's map header shows it (#538): its own extent, each side
+    /// floored at `minimumSideMeters` about its middle. No padding — the header's map adds its
+    /// margins in points, which `RoutesMapCamera.region(fitting:)`'s degree padding and 1.7 km
+    /// floor can't give a loop under a mile.
+    static func headerRect(for segments: [[RouteCoordinate]]) -> MKMapRect {
+        let bounds = RouteGeometry.boundingBox(segments.flatMap { $0 })
+        let track = trackRect(for: bounds)
+        let side = minimumSide(for: bounds)
+        // Kept inside the world, for `mapRect`'s reason below: the floor can push a track by
+        // ±180° past the edge, and MapKit answers a rect outside the world with an arbitrary camera.
+        let world = MKMapRect.world
+        let width = min(max(track.width, side), world.width)
+        let height = min(max(track.height, side), world.height)
+        return MKMapRect(
+            x: min(max(track.midX - width / 2, world.minX), world.maxX - width),
+            y: min(max(track.midY - height / 2, world.minY), world.maxY - height),
+            width: width, height: height
+        )
+    }
+
     /// A square framed so the track fills the image, `Spacing.mapThumbnailMargin` from its edge
     /// on the longer axis (#280). Unlike the other maps, which pad and floor a region in degrees
     /// (`RoutesMapCamera.region(fitting:)`), a thumbnail is too small to spare that padding.
@@ -45,14 +78,8 @@ enum RideMapThumbnail {
     /// uniformly, so a margin in points is the same fraction of the rect.
     static func mapRect(for segments: [[RouteCoordinate]]) -> MKMapRect {
         let bounds = RouteGeometry.boundingBox(segments.flatMap { $0 })
-        // Mercator keeps north up and east right, so the box's corners bound the projected track.
-        let topLeft = MKMapPoint(CLLocationCoordinate2D(latitude: bounds.maxLatitude, longitude: bounds.minLongitude))
-        let bottomRight = MKMapPoint(CLLocationCoordinate2D(latitude: bounds.minLatitude, longitude: bounds.maxLongitude))
-        let track = MKMapRect(x: topLeft.x, y: topLeft.y, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y)
-
-        let latitude = (bounds.minLatitude + bounds.maxLatitude) / 2
-        let minimumSide = minimumSideMeters * MKMapPointsPerMeterAtLatitude(latitude)
-        let contentSide = max(track.width, track.height, minimumSide)
+        let track = trackRect(for: bounds)
+        let contentSide = max(track.width, track.height, minimumSide(for: bounds))
         // Kept inside the world: a track across ±180°, which `RouteBounds` leaves unhandled, spans
         // nearly all of it, and MapKit answers a rect outside the world with an arbitrary camera
         // (`RoutesMapCamera.span(_:limit:)` guards the same).

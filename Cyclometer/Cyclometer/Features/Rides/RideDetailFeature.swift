@@ -47,6 +47,9 @@ struct RideDetailFeature {
         /// good if the read fails.
         var track: RideDetailTrack?
 
+        /// The track read threw, so no header is coming.
+        var trackReadFailed = false
+
         /// Nil until it loads, and nil for good if the read fails.
         var stats: RideStats?
 
@@ -57,8 +60,20 @@ struct RideDetailFeature {
         /// Oldest first.
         var vehiclePasses: [VehiclePassEventDTO] = []
 
+        /// The one sheet S15 shows at a time (#538): the full-screen map, the pass list, or Edit.
+        @Presents var destination: Destination.State?
+
         init(summary: RideListSummary) {
             self.summary = summary
+        }
+
+        /// Whether S15 keeps room for the map header (#538): once a drawable track has loaded,
+        /// and while the track is still loading for a ride that covered ground, so the title
+        /// block doesn't drop half a screen when the track lands. A ride with distance but no
+        /// GPS track, such as one on a trainer with a speed sensor, gives the room back on load.
+        var reservesMapHeader: Bool {
+            if !trackSegments.isEmpty { return true }
+            return track == nil && !trackReadFailed && summary.distanceMeters > 0
         }
 
         var unitSystem: UnitSystem { preferences.preferredUnit }
@@ -105,11 +120,35 @@ struct RideDetailFeature {
     enum Action: Equatable {
         case task
         case trackLoaded(segments: [[RouteCoordinate]], track: RideDetailTrack)
+        case trackLoadFailed
         /// The route arrives with the stats, so the Route row never turns into a link
         /// after it is on screen.
         case statsLoaded(RideStats, route: RouteSummary?)
         case vehiclePassesLoaded([VehiclePassEventDTO])
         case healthProfileFetched(restingBPM: Int?, maxBPM: Int?, zoneCeilingsBPM: [Int]?)
+        case mapTapped
+        case passesTapped
+        case editTapped
+        /// A write of the edit failed. The store is the authority on what was saved, so the
+        /// screen reads it back.
+        case editFailed
+        case editReverted(title: String, notes: String)
+        case destination(PresentationAction<Destination.Action>)
+        case delegate(Delegate)
+
+        enum Delegate: Equatable {
+            /// The rider saved a new title or notes, for S14 to reload (#538). Other S15s and S20s
+            /// read the new title back when they next appear.
+            case rideEdited(id: UUID, title: String, notes: String)
+        }
+    }
+
+    /// S15's sheets (#538). `Equatable` in extensions below, as TCA asks.
+    @Reducer
+    enum Destination {
+        case mapSheet(RideMapSheetFeature)
+        case passes(RidePassesFeature)
+        case edit(RideEditFeature)
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
@@ -139,6 +178,7 @@ struct RideDetailFeature {
                             ))
                         } catch {
                             logger.error("fetchTrackPoints failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                            await send(.trackLoadFailed)
                         }
                     },
                     .run { [persistenceClient] send in
@@ -183,13 +223,23 @@ struct RideDetailFeature {
                 state.track = track
                 return .none
 
+            case .trackLoadFailed:
+                state.trackReadFailed = true
+                return .none
+
             case let .statsLoaded(stats, route):
                 state.stats = stats
                 state.route = route
+                if let title = stats.title { state.summary.title = title }
                 return .none
 
             case .vehiclePassesLoaded(let passes):
                 state.vehiclePasses = passes
+                // An open map sheet copied the passes when it opened, maybe before they landed.
+                if case var .mapSheet(sheet) = state.destination {
+                    sheet.passes = passes
+                    state.destination = .mapSheet(sheet)
+                }
                 return .none
 
             case let .healthProfileFetched(restingBPM, maxBPM, zoneCeilingsBPM):
@@ -197,10 +247,88 @@ struct RideDetailFeature {
                 state.healthMaxBPM = maxBPM
                 state.healthZoneCeilingsBPM = zoneCeilingsBPM
                 return .none
+
+            case .mapTapped:
+                // The header is drawn only for a ride with a drawable track.
+                guard !state.trackSegments.isEmpty else { return .none }
+                state.destination = .mapSheet(RideMapSheetFeature.State(
+                    segments: state.trackSegments, passes: state.vehiclePasses, unitSystem: state.unitSystem
+                ))
+                return .none
+
+            case .passesTapped:
+                state.destination = .passes(RidePassesFeature.State(
+                    passes: state.vehiclePasses, unitSystem: state.unitSystem
+                ))
+                return .none
+
+            case .editTapped:
+                // Not before the stats land: the sheet would open on no notes, and a save would
+                // write over the stored ones unseen. The view keeps Edit off until then.
+                guard let stats = state.stats else { return .none }
+                state.destination = .edit(RideEditFeature.State(title: state.summary.title, notes: stats.notes))
+                return .none
+
+            case let .destination(.presented(.edit(.delegate(.save(title, notes))))):
+                // Written from here, not from the sheet: S15 stays on the stack, so this effect
+                // outlives the sheet being closed. Shown at once, and read back if a write fails.
+                let id = state.summary.id
+                let isRenamed = title != state.summary.title
+                let isNoteChanged = notes != (state.stats?.notes ?? "")
+                state.destination = nil
+                state.summary.title = title
+                state.stats?.notes = notes
+                return .run { [persistenceClient] send in
+                    do {
+                        // The notes first. A rename that lands must reach S14 and the GPX below,
+                        // so it goes last: a failure then leaves at most the notes written, which
+                        // every S15 reads back with its stats.
+                        if isNoteChanged { try await persistenceClient.updateRideNotes(id, notes) }
+                        if isRenamed { try await persistenceClient.renameRide(id, title) }
+                    } catch {
+                        logger.error("Saving the edit of ride \(id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+                        await send(.editFailed)
+                        return
+                    }
+                    // Before the rewrite below, which reads the whole track back, so S14 shows
+                    // the new name at once.
+                    await send(.delegate(.rideEdited(id: id, title: title, notes: notes)))
+                    // The GPX carries the title (#286). A failed rewrite leaves the file as it
+                    // was; the rename stands either way — `AppFeature`'s S10 rename.
+                    guard isRenamed else { return }
+                    do {
+                        try await GPXExporter.rewrite(rideId: id)
+                    } catch {
+                        logger.error("Rewriting the GPX of renamed ride \(id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+
+            case .editFailed:
+                let id = state.summary.id
+                return .run { [persistenceClient] send in
+                    do {
+                        let stats = try await persistenceClient.fetchRideStats(id)
+                        await send(.editReverted(title: stats.title ?? "", notes: stats.notes))
+                    } catch {
+                        logger.error("Reading back ride \(id, privacy: .public) after a failed edit failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+
+            case let .editReverted(title, notes):
+                state.summary.title = title
+                state.stats?.notes = notes
+                return .none
+
+            case .destination, .delegate:
+                return .none
             }
         }
+        .ifLet(\.$destination, action: \.destination)
     }
 }
+
+extension RideDetailFeature.Destination.State: Equatable {}
+extension RideDetailFeature.Destination.Action: Equatable {}
 
 /// S10's and S15's series, derived from the recorded track. Plain arithmetic, so it is tested
 /// directly rather than through the charts.

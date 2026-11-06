@@ -31,6 +31,8 @@ struct PersistenceClient: Sendable {
     var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate, URL?) async throws -> Void
     /// Sets a finished ride's title — S10's rename field (#249).
     var renameRide: @Sendable (UUID, String) async throws -> Void
+    /// Sets a finished ride's notes — S15's Edit sheet (#538).
+    var updateRideNotes: @Sendable (UUID, String) async throws -> Void
     /// Replaces a ride's exported GPX with new contents at the same URL — a rename's rewrite
     /// (#286). A no-op for a ride with no file, including one the rider deleted from Files.
     var replaceRideGPX: @Sendable (UUID, Data) async throws -> Void
@@ -128,6 +130,7 @@ extension PersistenceClient: DependencyKey {
             updateRideSummary: { try await rideActor.updateRideSummary($0) },
             finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
             renameRide: { try await rideActor.renameRide(id: $0, title: $1) },
+            updateRideNotes: { try await rideActor.updateRideNotes(id: $0, notes: $1) },
             replaceRideGPX: { try await rideActor.replaceGPXFile(id: $0, contents: $1) },
             saveRideMapThumbnail: { try await rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
             fetchRideIdsMissingMapThumbnail: { try await rideActor.rideIdsMissingMapThumbnail() },
@@ -171,6 +174,7 @@ extension PersistenceClient: DependencyKey {
         updateRideSummary: { _ in },
         finalizeRide: { _, _, _, _ in },
         renameRide: { _, _ in },
+        updateRideNotes: { _, _ in },
         replaceRideGPX: { _, _ in },
         saveRideMapThumbnail: { _, _, _ in },
         fetchRideIdsMissingMapThumbnail: { [] },
