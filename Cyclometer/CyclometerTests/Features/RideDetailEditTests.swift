@@ -90,6 +90,13 @@ struct RideDetailEditTests {
         }
     }
 
+    /// Opened on no notes, a save would write over the stored ones without the rider seeing them.
+    @Test("Edit waits for the stats, which bring the stored notes")
+    func editTappedBeforeStatsDoesNothing() async {
+        let store = makeStore { $0.stats = nil }
+        await store.send(.editTapped)
+    }
+
     // MARK: Saving
 
     @Test("saving a new title and notes shows them at once, writes both, tells the stack, and rewrites the GPX")
@@ -166,6 +173,34 @@ struct RideDetailEditTests {
         await store.finish()
 
         #expect(replaced.value == 0)
+    }
+
+    /// The notes are written first, so a failure can't leave a rename stored that S14 and the
+    /// GPX never hear about.
+    @Test("a notes write that fails leaves the title unwritten, so nothing is half-saved")
+    func failedNotesWriteSkipsRename() async {
+        let renamed = LockIsolated(0)
+        var client = PersistenceClient.mock(
+            rideExportMetadata: [Self.summary.id: RideExportMetadata(title: "River Loop", startedAt: Self.summary.startedAt)],
+            rideStats: [Self.summary.id: Self.stats],
+            onRenameRide: { _, _ in renamed.withValue { $0 += 1 } }
+        )
+        client.updateRideNotes = { _, _ in throw PersistenceError.rideNotFound }
+        let store = makeStore(editing, persistenceClient: client)
+
+        await store.send(.destination(.presented(.edit(.delegate(.save(title: "Hill Loop", notes: "Tailwind home")))))) {
+            $0.destination = nil
+            $0.summary.title = "Hill Loop"
+            $0.stats?.notes = "Tailwind home"
+        }
+        await store.receive(.editFailed)
+        await store.receive(.editReverted(title: "River Loop", notes: "Headwind out")) {
+            $0.summary.title = "River Loop"
+            $0.stats?.notes = "Headwind out"
+        }
+        await store.finish()
+
+        #expect(renamed.value == 0)
     }
 }
 

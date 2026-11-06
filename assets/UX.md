@@ -1442,7 +1442,7 @@ Sections appear on screen in the order listed below.
   - **Toolbar:**
     - **Share and Edit:** two buttons, rather than Sketch's "…" menu.
     - **Share:** absent when the GPX file isn't there, for example after a failed export or a delete from Files. A container move also hides it; that is #546.
-    - **Edit:** opens a sheet with Title and Notes. Save is off for a blank or unchanged title.
+    - **Edit:** opens a sheet with Title and Notes. Off until the stats load, so the sheet never opens without the stored notes. Save is off for a blank title, and while neither field has changed.
     - **Saving an edit:** the change shows at once. The title is retitled in every copy of the ride on the stack and on S20's Previous Rides row, and S14 reloads. The GPX is rewritten only when the title changed (#286). If a write fails, the screen reads the stored values back.
     - **Make Route:** not built, as its behaviour is still TBD.
   - **Summary:** hero numbers in a card. Each is absent with no data, and Average Speed is absent with no moving second.

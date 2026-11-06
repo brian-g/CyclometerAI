@@ -58,9 +58,16 @@ enum RideMapThumbnail {
         let bounds = RouteGeometry.boundingBox(segments.flatMap { $0 })
         let track = trackRect(for: bounds)
         let side = minimumSide(for: bounds)
-        let width = max(track.width, side)
-        let height = max(track.height, side)
-        return MKMapRect(x: track.midX - width / 2, y: track.midY - height / 2, width: width, height: height)
+        // Kept inside the world, for `mapRect`'s reason below: the floor can push a track by
+        // ±180° past the edge, and MapKit answers a rect outside the world with an arbitrary camera.
+        let world = MKMapRect.world
+        let width = min(max(track.width, side), world.width)
+        let height = min(max(track.height, side), world.height)
+        return MKMapRect(
+            x: min(max(track.midX - width / 2, world.minX), world.maxX - width),
+            y: min(max(track.midY - height / 2, world.minY), world.maxY - height),
+            width: width, height: height
+        )
     }
 
     /// A square framed so the track fills the image, `Spacing.mapThumbnailMargin` from its edge

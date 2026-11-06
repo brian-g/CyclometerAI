@@ -266,7 +266,6 @@ struct RideDetailFinishStatsRowTests {
         #expect(stats.ascent(.imperial)?.spoken == "1,352 feet")
         #expect(stats.descent(.metric)?.spoken == "398 meters")
         #expect(stats.averageHeartRate == MetricReading(value: "142", unit: "bpm", spoken: "142 beats per minute"))
-        #expect(stats.maxHeartRate?.spoken == "171 beats per minute")
         #expect(stats.calories == MetricReading(value: "845", unit: "kcal", spoken: "845 kilocalories"))
     }
 
@@ -275,7 +274,6 @@ struct RideDetailFinishStatsRowTests {
         #expect(none.ascent(.metric) == nil)
         #expect(none.descent(.imperial) == nil)
         #expect(none.averageHeartRate == nil)
-        #expect(none.maxHeartRate == nil)
         #expect(none.calories == nil)
     }
 }

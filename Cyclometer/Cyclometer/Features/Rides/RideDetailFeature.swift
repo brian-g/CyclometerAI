@@ -239,9 +239,10 @@ struct RideDetailFeature {
                 return .none
 
             case .editTapped:
-                state.destination = .edit(RideEditFeature.State(
-                    title: state.summary.title, notes: state.stats?.notes ?? ""
-                ))
+                // Not before the stats land: the sheet would open on no notes, and a save would
+                // write over the stored ones unseen. The view keeps Edit off until then.
+                guard let stats = state.stats else { return .none }
+                state.destination = .edit(RideEditFeature.State(title: state.summary.title, notes: stats.notes))
                 return .none
 
             case let .destination(.presented(.edit(.delegate(.save(title, notes))))):
@@ -255,8 +256,11 @@ struct RideDetailFeature {
                 state.stats?.notes = notes
                 return .run { [persistenceClient] send in
                     do {
-                        if isRenamed { try await persistenceClient.renameRide(id, title) }
+                        // The notes first. A rename that lands must reach S14 and the GPX below,
+                        // so it goes last: a failure then leaves at most the notes written, which
+                        // every S15 reads back with its stats.
                         if isNoteChanged { try await persistenceClient.updateRideNotes(id, notes) }
+                        if isRenamed { try await persistenceClient.renameRide(id, title) }
                     } catch {
                         logger.error("Saving the edit of ride \(id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                         await send(.editFailed)

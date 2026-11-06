@@ -40,9 +40,6 @@ struct RideDetailList<MapHeader: View>: View {
     let toolbarBottom: CGFloat
     let mapHeader: MapHeader
 
-    /// How far the list has scrolled (`RideDetailHeaderChrome`). View state, not store state: it
-    /// changes every frame of a scroll and only the chrome reads it.
-    @State private var scrollOffset: CGFloat = 0
     @State private var isTitleUnderToolbar = false
 
     init(store: StoreOf<RideDetailFeature>, screenHeight: CGFloat, toolbarBottom: CGFloat,
@@ -77,12 +74,13 @@ struct RideDetailList<MapHeader: View>: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
+                // The answer, not the frame, so the action runs only when it flips.
                 RideTitleBlock(store: store, title: title)
-                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom in
-                        isTitleUnderToolbar = RideDetailHeaderChrome.isTitleUnderToolbar(
-                            titleBottom: bottom, toolbarBottom: toolbarBottom
+                    .onGeometryChange(for: Bool.self) { [toolbarBottom] proxy in
+                        RideDetailHeaderChrome.isTitleUnderToolbar(
+                            titleBottom: proxy.frame(in: .global).maxY, toolbarBottom: toolbarBottom
                         )
-                    }
+                    } action: { isTitleUnderToolbar = $0 }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -121,26 +119,8 @@ struct RideDetailList<MapHeader: View>: View {
         // The list draws over the map, so its own background is the map's surround instead.
         .scrollContentBackground(.hidden)
         .contentMargins(.top, hasMap ? 0 : nil, for: .scrollContent)
-        .background(alignment: .top) {
-            ZStack(alignment: .top) {
-                Color(.systemGroupedBackground)
-                if hasMap {
-                    RideMapHeaderFrame(
-                        height: mapHeight,
-                        toolbarBottom: toolbarBottom,
-                        offset: scrollOffset,
-                        content: mapHeader
-                    )
-                }
-            }
-            .ignoresSafeArea()
-        }
-        // Under the top safe area only with a map to run under it. Without one, the title block
-        // is the first thing below the toolbar.
-        .ignoresSafeArea(edges: hasMap ? .top : [])
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, offset in
-            scrollOffset = offset
-        }
+        .modifier(RideMapHeaderBackground(hasMap: hasMap, height: mapHeight, toolbarBottom: toolbarBottom,
+                                          header: mapHeader))
         // The title the next screen's back button carries. The bar shows `principal` instead.
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -167,7 +147,9 @@ struct RideDetailList<MapHeader: View>: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
+                // Off until the stats bring the stored notes (`RideDetailFeature.editTapped`).
                 Button("Edit") { store.send(.editTapped) }
+                    .disabled(store.stats == nil)
             }
         }
         .sheet(item: $store.scope(state: \.destination?.mapSheet, action: \.destination.mapSheet)) { store in
@@ -191,6 +173,40 @@ extension RideDetailList where MapHeader == RideHeaderMap {
 }
 
 // MARK: - Header
+
+/// The map behind the list, and the scroll that moves it (#538). A modifier holding the offset as
+/// its own state, so a scroll frame re-runs this body alone: the list is its `content`, which a
+/// change here doesn't rebuild. View state, not store state: it changes every frame of a scroll
+/// and only the chrome reads it.
+private struct RideMapHeaderBackground<Header: View>: ViewModifier {
+    let hasMap: Bool
+    let height: CGFloat
+    let toolbarBottom: CGFloat
+    let header: Header
+
+    /// How far the list has scrolled (`RideDetailHeaderChrome`).
+    @State private var scrollOffset: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .background(alignment: .top) {
+                ZStack(alignment: .top) {
+                    Color(.systemGroupedBackground)
+                    if hasMap {
+                        RideMapHeaderFrame(height: height, toolbarBottom: toolbarBottom, offset: scrollOffset,
+                                           content: header)
+                    }
+                }
+                .ignoresSafeArea()
+            }
+            // Under the top safe area only with a map to run under it. Without one, the title
+            // block is the first thing below the toolbar.
+            .ignoresSafeArea(edges: hasMap ? .top : [])
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, offset in
+                scrollOffset = offset
+            }
+    }
+}
 
 /// The map header's frame (#538): pinned to the top of the screen, `height` tall, its bottom
 /// `Spacing.mapHeaderFade` fading to the page. It rides up with the list and fades as it goes,
@@ -326,7 +342,6 @@ extension RideStats {
     }
 
     var averageHeartRate: MetricReading? { averageHeartRateBPM.map(Self.heartRate) }
-    var maxHeartRate: MetricReading? { maxHeartRateBPM.map(Self.heartRate) }
 
     /// Nil with no cadence sensor. A real 0 rpm average is a reading.
     var averageCadence: MetricReading? {
