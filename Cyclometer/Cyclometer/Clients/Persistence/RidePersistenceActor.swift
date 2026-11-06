@@ -305,6 +305,7 @@ actor RidePersistenceActor {
             movingSeconds: ride.speedSampleCount,
             cadenceSecondsByRPM: ride.cadenceSecondsByRPM,
             cadenceCoastingSeconds: ride.cadenceCoastingSeconds,
+            title: ride.title,
             endedAt: ride.endedAt,
             notes: ride.notes,
             // Only a file still there: the rider can delete it from Files, as `replaceGPXFile`

@@ -17,6 +17,8 @@ struct RideDetailEditTests {
     )
 
     private static let stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11, notes: "Headwind out")
+    /// `stats` as the live read returns it, with the stored title.
+    private static let storedStats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11, title: "River Loop", notes: "Headwind out")
 
     private static let pass = VehiclePassEventDTO(
         rideId: summary.id, timestamp: Date(timeIntervalSince1970: 1_700_000_005),
@@ -90,6 +92,57 @@ struct RideDetailEditTests {
         }
     }
 
+    /// The header room is kept while the track loads, so the title block doesn't drop half a
+    /// screen when it lands, and given back once it's clear no track is coming.
+    @Test("the header's room is kept while the track loads, and only for a ride that covered ground")
+    func headerRoomWhileTrackLoads() async {
+        let store = makeStore()
+        #expect(store.state.reservesMapHeader, "loading, with distance")
+        await store.send(.trackLoaded(segments: Self.segments, track: RideDetailTrack(points: [], altitudeSource: .gps))) {
+            $0.trackSegments = Self.segments
+            $0.track = RideDetailTrack(points: [], altitudeSource: .gps)
+        }
+        #expect(store.state.reservesMapHeader, "a drawable track")
+
+        let noTrack = makeStore()
+        await noTrack.send(.trackLoaded(segments: [], track: RideDetailTrack(points: [], altitudeSource: .gps))) {
+            $0.track = RideDetailTrack(points: [], altitudeSource: .gps)
+        }
+        #expect(!noTrack.state.reservesMapHeader, "loaded, nothing to draw")
+
+        let failed = makeStore()
+        await failed.send(.trackLoadFailed) { $0.trackReadFailed = true }
+        #expect(!failed.state.reservesMapHeader, "the read threw")
+
+        let stationary = makeStore { $0.summary.distanceMeters = 0 }
+        #expect(!stationary.state.reservesMapHeader, "no distance, so no track to wait for")
+    }
+
+    @Test("passes that land after the map sheet opened appear in it")
+    func latePassesReachTheOpenMapSheet() async {
+        let store = makeStore { $0.trackSegments = Self.segments }
+        await store.send(.mapTapped) {
+            $0.destination = .mapSheet(RideMapSheetFeature.State(segments: Self.segments, passes: [], unitSystem: $0.unitSystem))
+        }
+        await store.send(.vehiclePassesLoaded([Self.pass])) {
+            $0.vehiclePasses = [Self.pass]
+            $0.destination = .mapSheet(RideMapSheetFeature.State(segments: Self.segments, passes: [Self.pass], unitSystem: $0.unitSystem))
+        }
+    }
+
+    // MARK: Title from the store
+
+    /// An S15 that was off screen while the ride was renamed elsewhere (the other tab, or further
+    /// up the stack) takes the new title when it reappears and reloads.
+    @Test("the stats bring the stored title, which replaces the one S15 was opened with")
+    func statsLoadedTakesTheStoredTitle() async {
+        let store = makeStore { $0.stats = nil }
+        await store.send(.statsLoaded(RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11, title: "Hill Loop"), route: nil)) {
+            $0.stats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11, title: "Hill Loop")
+            $0.summary.title = "Hill Loop"
+        }
+    }
+
     /// Opened on no notes, a save would write over the stored ones without the rider seeing them.
     @Test("Edit waits for the stats, which bring the stored notes")
     func editTappedBeforeStatsDoesNothing() async {
@@ -154,7 +207,7 @@ struct RideDetailEditTests {
         let replaced = LockIsolated(0)
         var client = PersistenceClient.mock(
             rideExportMetadata: [Self.summary.id: RideExportMetadata(title: "River Loop", startedAt: Self.summary.startedAt)],
-            rideStats: [Self.summary.id: Self.stats],
+            rideStats: [Self.summary.id: Self.storedStats],
             onReplaceRideGPX: { _, _ in replaced.withValue { $0 += 1 } }
         )
         client.renameRide = { _, _ in throw PersistenceError.rideNotFound }
@@ -182,7 +235,7 @@ struct RideDetailEditTests {
         let renamed = LockIsolated(0)
         var client = PersistenceClient.mock(
             rideExportMetadata: [Self.summary.id: RideExportMetadata(title: "River Loop", startedAt: Self.summary.startedAt)],
-            rideStats: [Self.summary.id: Self.stats],
+            rideStats: [Self.summary.id: Self.storedStats],
             onRenameRide: { _, _ in renamed.withValue { $0 += 1 } }
         )
         client.updateRideNotes = { _, _ in throw PersistenceError.rideNotFound }
@@ -241,5 +294,51 @@ struct RideEditFeatureTests {
             RideEditFeature()
         }
         await store.send(.saveTapped)
+    }
+
+    @Test("closing with nothing changed closes at once")
+    func closeWithoutChangesDismisses() async {
+        let dismissed = LockIsolated(false)
+        let store = TestStore(initialState: RideEditFeature.State(title: "River Loop", notes: "")) {
+            RideEditFeature()
+        } withDependencies: {
+            $0.dismiss = DismissEffect { dismissed.setValue(true) }
+        }
+        await store.send(.closeTapped)
+        await store.finish()
+        #expect(dismissed.value)
+    }
+
+    @Test("closing with changes asks first; Discard closes, Keep Editing stays")
+    func closeWithChangesAsks() async {
+        let dismissed = LockIsolated(0)
+        let store = TestStore(initialState: RideEditFeature.State(title: "River Loop", notes: "")) {
+            RideEditFeature()
+        } withDependencies: {
+            $0.dismiss = DismissEffect { dismissed.withValue { $0 += 1 } }
+        }
+        // A blank title can't be saved, but it is still a change to lose.
+        await store.send(.titleChanged("")) { $0.title = "" }
+        #expect(store.state.hasChanges && !store.state.canSave)
+
+        await store.send(.closeTapped) { $0.discardDialog = Self.discardDialog }
+        await store.send(.discardDialog(.dismiss)) { $0.discardDialog = nil }
+        #expect(dismissed.value == 0)
+
+        await store.send(.closeTapped) { $0.discardDialog = Self.discardDialog }
+        await store.send(.discardDialog(.presented(.discard))) { $0.discardDialog = nil }
+        await store.finish()
+        #expect(dismissed.value == 1)
+    }
+
+    private static let discardDialog = ConfirmationDialogState<RideEditFeature.Action.Discard>(titleVisibility: .hidden) {
+        TextState("Discard Changes?")
+    } actions: {
+        ButtonState(role: .destructive, action: .discard) {
+            TextState("Discard Changes")
+        }
+        ButtonState(role: .cancel) {
+            TextState("Keep Editing")
+        }
     }
 }

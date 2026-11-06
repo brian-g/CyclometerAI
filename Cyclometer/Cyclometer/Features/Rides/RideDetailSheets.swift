@@ -83,14 +83,17 @@ struct RideEditView: View {
             }
             .navigationTitle("Edit Ride")
             .navigationBarTitleDisplayMode(.inline)
-            .sheetCloseButton()
+            .sheetCloseButton { store.send(.closeTapped) }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { store.send(.saveTapped) }
                         .disabled(!store.canSave)
                 }
             }
+            .confirmationDialog($store.scope(state: \.discardDialog, action: \.discardDialog))
         }
+        // Changes leave only by Save or by the close, which asks first.
+        .interactiveDismissDisabled(store.hasChanges)
     }
 }
 

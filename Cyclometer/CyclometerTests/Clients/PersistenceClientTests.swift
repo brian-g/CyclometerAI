@@ -544,9 +544,18 @@ struct PersistenceClientTests {
         // A real 0 rpm average must survive as 0, not collapse into "no sensor".
         #expect(try await client.fetchRideStats(withSensors) == RideStats(
             averageSpeedMPS: 4, maxSpeedMPS: 9, averageCadenceRPM: 0, maxCadenceRPM: 104, vehiclePassCount: 3,
-            endedAt: endedAt
+            title: "", endedAt: endedAt
         ))
-        #expect(try await client.fetchRideStats(withoutSensors) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5, endedAt: endedAt))
+        #expect(try await client.fetchRideStats(withoutSensors) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5, title: "", endedAt: endedAt))
+    }
+
+    @Test("fetchRideStats carries the stored title, so an S15 reloading after a rename shows it (#538)")
+    func fetchRideStatsCarriesTitle() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date(), nil)
+        try await client.renameRide(rideId, "Hill Loop")
+        #expect(try await client.fetchRideStats(rideId).title == "Hill Loop")
     }
 
     @Test("updateRideNotes stores the notes fetchRideStats reads back, and an unknown ride throws (#538)")
@@ -648,7 +657,7 @@ struct PersistenceClientTests {
 
         // Nil is a result, not "still to work out": the ride isn't owed a backfill.
         #expect(try await client.fetchRidesOwedFinishStats().isEmpty)
-        #expect(try await client.fetchRideStats(rideId) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5, endedAt: endedAt))
+        #expect(try await client.fetchRideStats(rideId) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5, title: "", endedAt: endedAt))
     }
 
     @Test("finalizeRide without finish stats leaves the ride owed them; a checkpoint never writes them")

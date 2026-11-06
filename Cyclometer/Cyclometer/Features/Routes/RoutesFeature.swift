@@ -492,9 +492,8 @@ struct RoutesFeature {
                 return .send(.delegate(.useRoute(route)))
 
             // S15 opened from S20's Previous Rides (#426). S14, on the other tab, is
-            // `AppFeature`'s to reload.
-            case let .path(.element(id: _, action: .ride(.delegate(.rideEdited(id, title, notes))))):
-                state.path.applyRideEdit(id: id, title: title, notes: notes)
+            // `AppFeature`'s to reload. S20 reads its Previous Rides back when it next appears.
+            case .path(.element(id: _, action: .ride(.delegate(.rideEdited)))):
                 return .send(.delegate(.rideEdited))
 
             case .alert, .path, .delegate:

@@ -474,10 +474,10 @@ struct RidesFeatureTests {
 
     // MARK: S15 Edit (#538)
 
-    /// The same ride can be on the stack twice (S15 → S20 → Previous Rides → S15), with S20's
-    /// row between them, so every copy takes the edit, and S14 reloads to show the new title.
-    @Test("an edit saved in S15 retitles every copy of that ride on the stack, and reloads S14")
-    func rideEditedPatchesTheStackAndReloads() async {
+    /// S14 reloads to show the new title. The other copies of the ride on the stack (S15 → S20 →
+    /// Previous Rides → S15) are left as they are: each reads the title back when it reappears.
+    @Test("an edit saved in S15 reloads S14 and leaves the rest of the stack to reload itself")
+    func rideEditedReloadsRides() async {
         let ride = Self.summary()
         let other = Self.summary(title: "Summit Climb")
         let route = RouteSummary.previewRoutes[1]
@@ -499,18 +499,11 @@ struct RidesFeatureTests {
             $0.persistenceClient = .mock(rides: [renamed, other])
         }
 
-        await store.send(.path(.element(id: 2, action: .ride(.delegate(.rideEdited(id: ride.id, title: "Hill Loop", notes: "Windy")))))) {
-            $0.path[id: 0, case: \.ride]?.summary.title = "Hill Loop"
-            $0.path[id: 0, case: \.ride]?.stats?.notes = "Windy"
-            $0.path[id: 2, case: \.ride]?.summary.title = "Hill Loop"
-            $0.path[id: 2, case: \.ride]?.stats?.notes = "Windy"
-            $0.path[id: 1, case: \.route]?.previousRides[0].title = "Hill Loop"
-        }
+        await store.send(.path(.element(id: 2, action: .ride(.delegate(.rideEdited(id: ride.id, title: "Hill Loop", notes: "Windy"))))))
         await store.receive(\.reloadRides)
         await store.receive(\.ridesResponse) {
             $0.hasLoaded = true
             $0.rides = [renamed, other]
         }
-        #expect(store.state.path[id: 3, case: \.ride]?.summary.title == "Summit Climb")
     }
 }

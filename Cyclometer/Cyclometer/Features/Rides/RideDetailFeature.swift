@@ -47,6 +47,9 @@ struct RideDetailFeature {
         /// good if the read fails.
         var track: RideDetailTrack?
 
+        /// The track read threw, so no header is coming.
+        var trackReadFailed = false
+
         /// Nil until it loads, and nil for good if the read fails.
         var stats: RideStats?
 
@@ -62,6 +65,15 @@ struct RideDetailFeature {
 
         init(summary: RideListSummary) {
             self.summary = summary
+        }
+
+        /// Whether S15 keeps room for the map header (#538): once a drawable track has loaded,
+        /// and while the track is still loading for a ride that covered ground, so the title
+        /// block doesn't drop half a screen when the track lands. A ride with distance but no
+        /// GPS track, such as one on a trainer with a speed sensor, gives the room back on load.
+        var reservesMapHeader: Bool {
+            if !trackSegments.isEmpty { return true }
+            return track == nil && !trackReadFailed && summary.distanceMeters > 0
         }
 
         var unitSystem: UnitSystem { preferences.preferredUnit }
@@ -108,6 +120,7 @@ struct RideDetailFeature {
     enum Action: Equatable {
         case task
         case trackLoaded(segments: [[RouteCoordinate]], track: RideDetailTrack)
+        case trackLoadFailed
         /// The route arrives with the stats, so the Route row never turns into a link
         /// after it is on screen.
         case statsLoaded(RideStats, route: RouteSummary?)
@@ -124,8 +137,8 @@ struct RideDetailFeature {
         case delegate(Delegate)
 
         enum Delegate: Equatable {
-            /// The rider saved a new title or notes, for the stack to update the other copies of
-            /// this ride it holds and for S14 to reload (#538).
+            /// The rider saved a new title or notes, for S14 to reload (#538). Other S15s and S20s
+            /// read the new title back when they next appear.
             case rideEdited(id: UUID, title: String, notes: String)
         }
     }
@@ -165,6 +178,7 @@ struct RideDetailFeature {
                             ))
                         } catch {
                             logger.error("fetchTrackPoints failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                            await send(.trackLoadFailed)
                         }
                     },
                     .run { [persistenceClient] send in
@@ -209,13 +223,23 @@ struct RideDetailFeature {
                 state.track = track
                 return .none
 
+            case .trackLoadFailed:
+                state.trackReadFailed = true
+                return .none
+
             case let .statsLoaded(stats, route):
                 state.stats = stats
                 state.route = route
+                if let title = stats.title { state.summary.title = title }
                 return .none
 
             case .vehiclePassesLoaded(let passes):
                 state.vehiclePasses = passes
+                // An open map sheet copied the passes when it opened, maybe before they landed.
+                if case var .mapSheet(sheet) = state.destination {
+                    sheet.passes = passes
+                    state.destination = .mapSheet(sheet)
+                }
                 return .none
 
             case let .healthProfileFetched(restingBPM, maxBPM, zoneCeilingsBPM):
@@ -283,9 +307,8 @@ struct RideDetailFeature {
                 let id = state.summary.id
                 return .run { [persistenceClient] send in
                     do {
-                        let metadata = try await persistenceClient.fetchRide(id)
                         let stats = try await persistenceClient.fetchRideStats(id)
-                        await send(.editReverted(title: metadata.title, notes: stats.notes))
+                        await send(.editReverted(title: stats.title ?? "", notes: stats.notes))
                     } catch {
                         logger.error("Reading back ride \(id, privacy: .public) after a failed edit failed: \(error.localizedDescription, privacy: .public)")
                     }

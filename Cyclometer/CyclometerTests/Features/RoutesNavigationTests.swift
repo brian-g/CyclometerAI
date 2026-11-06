@@ -105,10 +105,10 @@ struct RoutesNavigationTests {
 
     // MARK: S15 Edit (#538)
 
-    /// S20's Previous Rides row seeds the next S15 it opens, so it takes the new title, and the
-    /// edit leaves the tab for `AppFeature` to reload S14.
-    @Test("an edit saved in an S15 on the Routes stack retitles S20's row, and tells AppFeature")
-    func rideEditedPatchesPreviousRidesAndBubblesOut() async {
+    /// S20 reads its Previous Rides back when it reappears. S14 is on the other tab, so the edit
+    /// leaves this one for `AppFeature` to reload it.
+    @Test("an edit saved in an S15 on the Routes stack tells AppFeature")
+    func rideEditedBubblesOut() async {
         let ride = RouteRideSummary.previewRides[0]
         var routeState = RouteDetailFeature.State(summary: Self.route)
         routeState.previousRides = RouteRideSummary.previewRides
@@ -126,10 +126,7 @@ struct RoutesNavigationTests {
             }
         }
 
-        await store.send(.path(.element(id: 1, action: .ride(.delegate(.rideEdited(id: ride.rideId, title: "Hill Loop", notes: "")))))) {
-            $0.path[id: 0, case: \.route]?.previousRides[0].title = "Hill Loop"
-            $0.path[id: 1, case: \.ride]?.summary.title = "Hill Loop"
-        }
+        await store.send(.path(.element(id: 1, action: .ride(.delegate(.rideEdited(id: ride.rideId, title: "Hill Loop", notes: ""))))))
         await store.receive(\.delegate.rideEdited)
     }
 }

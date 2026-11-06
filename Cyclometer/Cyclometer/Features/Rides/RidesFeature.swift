@@ -255,9 +255,9 @@ struct RidesFeature {
             case .path(.element(id: _, action: .route(.delegate(.useRoute(let route))))):
                 return .send(.delegate(.useRoute(route)))
 
-            // S14 lists the ride under its title.
-            case let .path(.element(id: _, action: .ride(.delegate(.rideEdited(id, title, notes))))):
-                state.path.applyRideEdit(id: id, title: title, notes: notes)
+            // S14 lists the ride under its title. Any other S15 or S20 of the ride on the stack
+            // reads the new title back when it next appears (#538).
+            case .path(.element(id: _, action: .ride(.delegate(.rideEdited)))):
                 return .send(.reloadRides)
 
             case .path, .delegate:

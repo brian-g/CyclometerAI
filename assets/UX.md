@@ -1433,7 +1433,8 @@ Sections appear on screen in the order listed below.
     - **Framing:** the route is framed tight, each side floored at 200 m (the S14 thumbnail's floor), with point margins at the sides and top and bottom. It fits between the toolbar and the fade.
     - **Why not the other maps' framing:** their padded region has a 1.7 km floor, which zoomed far out on a loop under a mile.
     - **Scroll:** the map fades linearly until the title reaches the top, and grows from its top edge when pulled down.
-    - **Tap:** opens the map sheet. The sheet pans and zooms and shows the passes; its controls are #537.
+    - **Tap:** opens the map sheet. The sheet pans and zooms and shows the passes, including passes that finish loading while it's open. Its controls are #537.
+    - **While the track loads:** a ride that covered ground keeps the header's room, so the title block doesn't drop half a screen. The map fades in when the track lands. A ride with distance but no GPS track, such as a trainer ride with a speed sensor, gives the room back once its track has loaded.
   - **Title block:** the title wraps. Below it:
     - the start date and the time range (the start alone when no end was stored)
     - the notes, when there are any
@@ -1442,8 +1443,8 @@ Sections appear on screen in the order listed below.
   - **Toolbar:**
     - **Share and Edit:** two buttons, rather than Sketch's "…" menu.
     - **Share:** absent when the GPX file isn't there, for example after a failed export or a delete from Files. A container move also hides it; that is #546.
-    - **Edit:** opens a sheet with Title and Notes. Off until the stats load, so the sheet never opens without the stored notes. Save is off for a blank title, and while neither field has changed.
-    - **Saving an edit:** the change shows at once. The title is retitled in every copy of the ride on the stack and on S20's Previous Rides row, and S14 reloads. The GPX is rewritten only when the title changed (#286). If a write fails, the screen reads the stored values back.
+    - **Edit:** opens a sheet with Title and Notes. Off until the stats load, so the sheet never opens without the stored notes. Save is off for a blank title, and while neither field has changed. With changes, the close asks "Discard Changes?" (Discard Changes / Keep Editing), and the sheet can't be swiped away.
+    - **Saving an edit:** the change shows at once, and S14 reloads. Every S15 reads the stored title with its stats each time it appears, and S20 rereads its Previous Rides. So other copies of the ride, further up the stack or on the other tab, show the new title when they come back. The GPX is rewritten only when the title changed (#286). If a write fails, the screen reads the stored values back.
     - **Make Route:** not built, as its behaviour is still TBD.
   - **Summary:** hero numbers in a card. Each is absent with no data, and Average Speed is absent with no moving second.
   - **Vehicle Passes:** after Strava. The count row is disabled while the passes are still loading or none were stored.

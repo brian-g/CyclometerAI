@@ -50,7 +50,10 @@ struct RideDetailList<MapHeader: View>: View {
         self.mapHeader = mapHeader()
     }
 
-    private var hasMap: Bool { !store.trackSegments.isEmpty }
+    /// Room for the header, kept while the track loads (`RideDetailFeature.State.reservesMapHeader`).
+    private var hasHeader: Bool { store.reservesMapHeader }
+    /// The map itself, once there is a track to draw.
+    private var drawsMap: Bool { !store.trackSegments.isEmpty }
     private var mapHeight: CGFloat { (screenHeight * RideDetailHeaderChrome.mapHeightFraction).rounded() }
     /// A ride S10 never named — recorded before #249, or closed out at launch — has a "" `title`.
     /// `RideRow`'s fallback.
@@ -59,7 +62,7 @@ struct RideDetailList<MapHeader: View>: View {
     var body: some View {
         List {
             Section {
-                if hasMap {
+                if hasHeader {
                     // Clear, so the map behind shows through. The title block starts where the
                     // map starts to fade (UX.md §S15).
                     Button { store.send(.mapTapped) } label: {
@@ -68,6 +71,8 @@ struct RideDetailList<MapHeader: View>: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .disabled(!drawsMap)
+                    .accessibilityHidden(!drawsMap)
                     .accessibilityLabel("Route map")
                     .accessibilityHint("Opens the map full screen")
                     .listRowInsets(EdgeInsets())
@@ -118,9 +123,9 @@ struct RideDetailList<MapHeader: View>: View {
         .listSectionSpacing(.compact)
         // The list draws over the map, so its own background is the map's surround instead.
         .scrollContentBackground(.hidden)
-        .contentMargins(.top, hasMap ? 0 : nil, for: .scrollContent)
-        .modifier(RideMapHeaderBackground(hasMap: hasMap, height: mapHeight, toolbarBottom: toolbarBottom,
-                                          header: mapHeader))
+        .contentMargins(.top, hasHeader ? 0 : nil, for: .scrollContent)
+        .modifier(RideMapHeaderBackground(hasHeader: hasHeader, drawsMap: drawsMap, height: mapHeight,
+                                          toolbarBottom: toolbarBottom, header: mapHeader))
         // The title the next screen's back button carries. The bar shows `principal` instead.
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -179,7 +184,10 @@ extension RideDetailList where MapHeader == RideHeaderMap {
 /// change here doesn't rebuild. View state, not store state: it changes every frame of a scroll
 /// and only the chrome reads it.
 private struct RideMapHeaderBackground<Header: View>: ViewModifier {
-    let hasMap: Bool
+    /// The list runs under the top safe area, with room kept for the header.
+    let hasHeader: Bool
+    /// The track has loaded, so the map draws in that room.
+    let drawsMap: Bool
     let height: CGFloat
     let toolbarBottom: CGFloat
     let header: Header
@@ -192,16 +200,19 @@ private struct RideMapHeaderBackground<Header: View>: ViewModifier {
             .background(alignment: .top) {
                 ZStack(alignment: .top) {
                     Color(.systemGroupedBackground)
-                    if hasMap {
+                    if drawsMap {
                         RideMapHeaderFrame(height: height, toolbarBottom: toolbarBottom, offset: scrollOffset,
                                            content: header)
+                            .transition(.opacity)
                     }
                 }
+                // In with the track rather than popping in over the room kept for it.
+                .animation(.easeIn(duration: 0.25), value: drawsMap)
                 .ignoresSafeArea()
             }
             // Under the top safe area only with a map to run under it. Without one, the title
             // block is the first thing below the toolbar.
-            .ignoresSafeArea(edges: hasMap ? .top : [])
+            .ignoresSafeArea(edges: hasHeader ? .top : [])
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, offset in
                 scrollOffset = offset
             }
