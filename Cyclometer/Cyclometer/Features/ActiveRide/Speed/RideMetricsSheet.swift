@@ -18,6 +18,8 @@ struct RideMetrics: Equatable {
     var speedHistory: [SpeedSample] = []
     /// Elevation over the same window, beneath the speed chart.
     var altitudeHistory: [AltitudeSample] = []
+    /// S15's per-mile or per-km splits (#547). Empty on the live sheet, which shows none.
+    var paceSplits: [PaceSplit] = []
 
     private var hasAverage: Bool { averageSpeedMPS > 0 }
 
@@ -171,6 +173,9 @@ struct RidePaceSection: View {
             ReadingColumns {
                 if showsCurrent { ReadingColumn("Current", metrics.currentPace) }
                 ReadingColumn("Average", metrics.averagePace)
+            }
+            if !metrics.paceSplits.isEmpty {
+                PaceSplitRows(splits: metrics.paceSplits, unit: metrics.unit)
             }
         }
     }
