@@ -93,8 +93,8 @@ struct ReadingColumns: Layout {
     /// them to their summed width instead stacked any two of unequal width.
     private func grid(width proposed: CGFloat?, subviews: Subviews) -> Grid {
         let widths = subviews.map { $0.sizeThatFits(.unspecified).width }
-        let columns = proposed.map { Self.columns(fitting: $0, widths: widths, spacing: spacing, maxColumns: maxColumns) }
-            ?? min(widths.count, max(maxColumns, 1))
+        // No width: as many as an unbounded one fits, all of them up to `maxColumns`.
+        let columns = Self.columns(fitting: proposed ?? .infinity, widths: widths, spacing: spacing, maxColumns: maxColumns)
         let gaps = spacing * CGFloat(max(columns - 1, 0))
         let width = proposed ?? (widths.max() ?? 0) * CGFloat(columns) + gaps
         let columnWidth = columns == 0 ? 0 : (width - gaps) / CGFloat(columns)

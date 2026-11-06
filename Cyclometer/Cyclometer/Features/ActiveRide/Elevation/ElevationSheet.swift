@@ -103,12 +103,13 @@ struct ElevationSheet: View {
 struct ElevationList: View {
     let metrics: ElevationMetrics
 
-    private static let chartHeight: CGFloat = 140
+    /// Both charts' height, the route's and `ElevationChartRow`'s.
+    fileprivate static let chartHeight: CGFloat = 140
 
     var body: some View {
         List {
             Section {
-                ElevationHistoryChart(metrics: metrics)
+                ElevationChartRow(metrics: metrics)
                 ReadingColumns {
                     ReadingColumn("Current", metrics.current)
                     ReadingColumn("Highest", metrics.highest)
@@ -145,7 +146,7 @@ struct ElevationRideSection: View {
 
     var body: some View {
         Section("Elevation") {
-            ElevationHistoryChart(metrics: metrics)
+            ElevationChartRow(metrics: metrics)
             ReadingColumns(maxColumns: 2) {
                 ReadingColumn("Highest", metrics.highest)
                 ReadingColumn("Lowest", metrics.lowest)
@@ -158,15 +159,13 @@ struct ElevationRideSection: View {
 }
 
 /// The elevation chart as a list row, at the sheet's height. Nothing with fewer than two samples.
-private struct ElevationHistoryChart: View {
+private struct ElevationChartRow: View {
     let metrics: ElevationMetrics
-
-    private static let chartHeight: CGFloat = 140
 
     var body: some View {
         if let range = metrics.historyRange {
             ElevationChart(history: metrics.history, range: range, unit: metrics.unit)
-                .frame(height: Self.chartHeight)
+                .frame(height: ElevationList.chartHeight)
         }
     }
 }
