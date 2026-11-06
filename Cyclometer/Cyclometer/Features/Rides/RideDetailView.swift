@@ -378,9 +378,9 @@ extension RideStats {
 // MARK: - Metric sections
 
 /// The dashboard's metric sheets over the whole ride (#536), in UX.md §S15's order: Speed, Pace,
-/// Time, Active Calories, Cadence, Cadence Zones, Heart Rate, Heart Rate Zones, Elevation,
-/// Climbing, Grade. The sheets' own sections, without their current readings; each is left out
-/// when the ride recorded nothing for it.
+/// Time, Active Calories, Cadence, Cadence Zones, Heart Rate, Heart Rate Zones, Elevation (with
+/// the sheet's Climbing and Grade, #548). The sheets' own sections, without their current
+/// readings; each is left out when the ride recorded nothing for it.
 private struct RideDetailMetricSections: View {
     let store: StoreOf<RideDetailFeature>
 
@@ -414,9 +414,7 @@ private struct RideDetailMetricSections: View {
             Section("Heart Rate Zones") { HeartRateZoneRows(metrics: metrics) }
         }
         if let metrics = store.elevationMetrics {
-            Section("Elevation") { ElevationReadings(metrics: metrics, showsCurrent: false) }
-            ElevationClimbingSection(metrics: metrics)
-            ElevationGradeSection(metrics: metrics, showsCurrent: false)
+            ElevationRideSection(metrics: metrics)
         }
     }
 }
@@ -588,7 +586,7 @@ private func rideDetailPreview(route: RouteSummary?, sensors: RideDetailPreview.
     rideDetailPreview(route: nil, sensors: .gpsOnly)
 }
 
-/// No altitude: no Elevation, Climbing or Grade sections, and no Ascent or Descent (#460).
+/// No altitude: no Elevation section, and no Ascent or Descent (#460).
 #Preview("Ride Detail — no altitude") {
     rideDetailPreview(route: nil, sensors: .noAltitude)
 }

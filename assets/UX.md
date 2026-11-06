@@ -1438,9 +1438,8 @@ Sections appear on screen in the order listed below.
   - Cadence Zones
   - Heart Rate
   - Heart Rate Zones
-  - Elevation
-  - Climbing
-  - Grade
+  - Elevation, with the Elevation sheet's Climbing and Grade in it (#548)
+  - **As built (#548):** one Elevation section: the chart, then Highest and Lowest, Ascent and Descent, and Steepest, in a grid two columns wide that drops to one when the readings don't fit side by side. The Elevation sheet keeps its three sections.
   - **As built (#536):** each section is its dashboard sheet's own (W1/W3/W11 Ride metrics, W23 Calories, W5 Cadence, W4/W12 Heart Rate, W14–W18 Elevation), built from the saved ride: the track for the charts, the `Ride` row for everything the dashboard stored at the finish. Charts cover the whole ride. The current readings are left out (Speed, Pace, Heart Rate and Zone, Elevation, Grade), and so are the Elevation sheet's Route part and the Ride metrics sheet's Distance row. Average, Max, Highest, Lowest and Steepest stay. The sheets' untitled first sections take the section's name, and their zone sections are titled Cadence Zones and Heart Rate Zones. Hidden: Speed and Pace with no moving second, Active Calories with no stored series, Cadence with no cadence sensor, Heart Rate with no heart rate, and Elevation, Climbing and Grade with no altitude. HR and cadence zone time is sorted against the rider's zones as they are now (S12 and Health), as the sheets sort it, so a later zone change re-sorts an old ride. Active Calories draws the series stored at the finish, ending on the Summary's total, so a later change of Health body weight moves neither. A ride finished before #536 but after #460 has no series, so it has no Active Calories section.
 - Route section: the route the ride followed, a link to its S20. A route deleted since shows its name with no link; a free ride has no section (#426)
 - Strava segments list: name, distance, best time + date

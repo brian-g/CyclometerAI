@@ -32,6 +32,15 @@ struct ReadingColumnsTests {
         #expect(columns(100, [140, 40]) == 1)
     }
 
+    /// #548 — a cap holds the grid to that many, however many more would fit; it never adds columns.
+    @Test func maxColumnsCapsTheGrid() {
+        let widths: [CGFloat] = [60, 60, 60, 60, 60]
+        #expect(ReadingColumns.columns(fitting: 400, widths: widths, spacing: 12, maxColumns: 2) == 2)
+        #expect(ReadingColumns.columns(fitting: 100, widths: widths, spacing: 12, maxColumns: 2) == 1)
+        #expect(ReadingColumns.columns(fitting: .infinity, widths: widths, spacing: 12, maxColumns: 2) == 2)
+        #expect(ReadingColumns.columns(fitting: 400, widths: [60], spacing: 12, maxColumns: 2) == 1)
+    }
+
     /// A stack measures a child's flexibility with an infinite width; `Int(_:)` would trap on it.
     @Test func anInfiniteWidthFitsThemAll() {
         #expect(columns(.infinity, [80, 60, 90]) == 3)

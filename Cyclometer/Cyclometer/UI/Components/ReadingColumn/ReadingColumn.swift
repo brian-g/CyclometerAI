@@ -65,17 +65,21 @@ struct ReadingColumn<Accessory: View>: View {
 
 /// A row of `ReadingColumn`s sharing its width equally (#494). Columns that don't fit side by side
 /// at their natural width wrap onto another line, rather than wrapping their labels, and keep the
-/// same column grid there, so wrapped readings line up under those above.
+/// same column grid there, so wrapped readings line up under those above. `maxColumns` caps the
+/// grid, so more readings than that run on in rows of that many (S15's Elevation, #548).
 struct ReadingColumns: Layout {
     var spacing: CGFloat = Spacing.md
+    var maxColumns = Int.max
 
-    /// How many columns of `widths` fit across `width`: as many as the widest allows, at least one.
-    static func columns(fitting width: CGFloat, widths: [CGFloat], spacing: CGFloat) -> Int {
+    /// How many columns of `widths` fit across `width`: as many as the widest allows, at least one,
+    /// and no more than `maxColumns`.
+    static func columns(fitting width: CGFloat, widths: [CGFloat], spacing: CGFloat, maxColumns: Int = .max) -> Int {
         guard let widest = widths.max() else { return 0 }
         let fit = ((width + spacing) / (widest + spacing)).rounded(.down)
+        let most = min(widths.count, max(maxColumns, 1))
         // Clamped before `Int(_:)`, which traps on the infinite width a stack proposes to measure
         // its children's flexibility.
-        return fit.isNaN ? 1 : Int(min(max(fit, 1), CGFloat(widths.count)))
+        return fit.isNaN ? 1 : Int(min(max(fit, 1), CGFloat(most)))
     }
 
     private struct Grid {
@@ -89,7 +93,8 @@ struct ReadingColumns: Layout {
     /// them to their summed width instead stacked any two of unequal width.
     private func grid(width proposed: CGFloat?, subviews: Subviews) -> Grid {
         let widths = subviews.map { $0.sizeThatFits(.unspecified).width }
-        let columns = proposed.map { Self.columns(fitting: $0, widths: widths, spacing: spacing) } ?? widths.count
+        let columns = proposed.map { Self.columns(fitting: $0, widths: widths, spacing: spacing, maxColumns: maxColumns) }
+            ?? min(widths.count, max(maxColumns, 1))
         let gaps = spacing * CGFloat(max(columns - 1, 0))
         let width = proposed ?? (widths.max() ?? 0) * CGFloat(columns) + gaps
         let columnWidth = columns == 0 ? 0 : (width - gaps) / CGFloat(columns)
@@ -159,6 +164,15 @@ private struct ReadingColumnsPreview: View {
                         [MetricReading(value: "+9", unit: "%", spoken: "9 percent"), MetricReading(value: "-8", unit: "%", spoken: "-8 percent")],
                         spoken: "climb 9 percent, descent -8 percent"
                     )
+                }
+            }
+            Section("Two at Most") {
+                ReadingColumns(maxColumns: 2) {
+                    ReadingColumn("Highest", previewGrade)
+                    ReadingColumn("Lowest", previewGrade)
+                    ReadingColumn("Ascent", previewGrade)
+                    ReadingColumn("Descent", previewGrade)
+                    ReadingColumn("Steepest", previewGrade)
                 }
             }
             Section("Wrapping") {
