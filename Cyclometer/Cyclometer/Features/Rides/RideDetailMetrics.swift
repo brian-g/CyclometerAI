@@ -127,7 +127,7 @@ extension HeartRateMetrics {
 }
 
 extension ElevationMetrics {
-    /// Elevation, Climbing and Grade, without the sheet's Route part. Ascent and descent are the
+    /// S15's Elevation section: the sheet's readings without its Route part. Ascent and descent are the
     /// totals stored at the finish (#460); the range and steepest grades are the replay's. Nil for
     /// a ride with no altitude.
     static func wholeRide(track: RideDetailTrack, stats: RideStats, unit: UnitSystem) -> ElevationMetrics? {

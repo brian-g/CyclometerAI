@@ -149,8 +149,8 @@ final class RideDetailSnapshotTests: XCTestCase {
                           named: "gps-only")
     }
 
-    /// Sensors but no altitude: no Elevation, Climbing or Grade sections, and no Ascent or
-    /// Descent rows (#536).
+    /// Sensors but no altitude: no Elevation section (which holds Climbing and Grade, #548), and
+    /// no Ascent or Descent rows (#536).
     func testRideDetailNoAltitude() {
         let points = Self.points(altitude: false)
         assertBothSchemes(screen(points, stats: Self.stats(points)), named: "no-altitude")

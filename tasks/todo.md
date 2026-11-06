@@ -2200,3 +2200,16 @@ Decisions (2026-11-05): 1 #538 before #537; 2 the title block's moving time is `
   - `RideMapLegendSnapshotTests` (8 references)
   - 14 exhaustive `ActiveRideFeatureTests` updated for the new `pauses` state
 - **Full `CyclometerTests`:** passed, 2,565 cases.
+
+---
+
+## #548 — Merge Climbing and Grade into Ride Detail's Elevation section
+
+- [x] `ReadingColumns(maxColumns:)` caps the grid; test in `ReadingColumnsTests`
+- [x] `ElevationRideSection`: chart, then Highest | Lowest, Ascent | Descent, Steepest, two columns
+- [x] S15 uses it; the Elevation sheet inlines its own three sections (the shared ones had no other user)
+- [x] UX.md §S15 as-built note
+- [x] Brian checks on device
+- [x] Re-recorded 12 `RideDetailSnapshotTests` references (no-altitude unchanged); `ElevationSheetSnapshotTests` unchanged; full suite 2568 passed, 0 failed
+
+**Review:** builds clean. Live Elevation sheet's layout is untouched by design.

@@ -7,8 +7,8 @@ import CoreGraphics
 @Suite("Reading columns")
 struct ReadingColumnsTests {
 
-    private func columns(_ width: CGFloat, _ widths: [CGFloat]) -> Int {
-        ReadingColumns.columns(fitting: width, widths: widths, spacing: 12)
+    private func columns(_ width: CGFloat, _ widths: [CGFloat], max maxColumns: Int = .max) -> Int {
+        ReadingColumns.columns(fitting: width, widths: widths, spacing: 12, maxColumns: maxColumns)
     }
 
     @Test func noReadingsNoColumns() {
@@ -30,6 +30,17 @@ struct ReadingColumnsTests {
     @Test func aReadingWiderThanTheRowStillGetsAColumn() {
         #expect(columns(100, [140]) == 1)
         #expect(columns(100, [140, 40]) == 1)
+    }
+
+    /// #548 — a cap holds the grid to that many, however many more would fit; it never adds columns.
+    @Test func maxColumnsCapsTheGrid() {
+        let widths: [CGFloat] = [60, 60, 60, 60, 60]
+        #expect(columns(400, widths, max: 2) == 2)
+        #expect(columns(100, widths, max: 2) == 1)
+        #expect(columns(.infinity, widths, max: 2) == 2)
+        #expect(columns(400, [60], max: 2) == 1)
+        // A cap below one still leaves one column.
+        #expect(columns(400, widths, max: 0) == 1)
     }
 
     /// A stack measures a child's flexibility with an infinite width; `Int(_:)` would trap on it.

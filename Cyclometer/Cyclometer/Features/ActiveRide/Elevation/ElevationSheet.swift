@@ -103,15 +103,31 @@ struct ElevationSheet: View {
 struct ElevationList: View {
     let metrics: ElevationMetrics
 
-    private static let chartHeight: CGFloat = 140
+    /// Both charts' height, the route's and `ElevationChartRow`'s.
+    fileprivate static let chartHeight: CGFloat = 140
 
     var body: some View {
         List {
             Section {
-                ElevationReadings(metrics: metrics)
+                ElevationChartRow(metrics: metrics)
+                ReadingColumns {
+                    ReadingColumn("Current", metrics.current)
+                    ReadingColumn("Highest", metrics.highest)
+                    ReadingColumn("Lowest", metrics.lowest)
+                }
             }
-            ElevationClimbingSection(metrics: metrics)
-            ElevationGradeSection(metrics: metrics)
+            Section("Climbing") {
+                ReadingColumns {
+                    ReadingColumn("Ascent", metrics.ascent)
+                    ReadingColumn("Descent", metrics.descent)
+                }
+            }
+            Section("Grade") {
+                ReadingColumns {
+                    ReadingColumn("Current", metrics.grade)
+                    ReadingColumn("Steepest", [metrics.steepestClimb, metrics.steepestDescent], spoken: metrics.steepestSpoken)
+                }
+            }
             if let profile = metrics.routeProfile {
                 Section("Route") {
                     RouteProfileChart(profile: profile, progress: metrics.routeProgress)
@@ -123,52 +139,33 @@ struct ElevationList: View {
     }
 }
 
-/// The sheet's chart and range, the rows of its first section: shared with S15, which shows them
-/// over the whole ride without the current reading (#536).
-struct ElevationReadings: View {
+/// S15's Elevation section (#548): the sheet's chart over the whole ride, then its Elevation,
+/// Climbing and Grade readings in one grid two columns wide, without the current ones (#536).
+struct ElevationRideSection: View {
     let metrics: ElevationMetrics
-    var showsCurrent = true
 
-    private static let chartHeight: CGFloat = 140
+    var body: some View {
+        Section("Elevation") {
+            ElevationChartRow(metrics: metrics)
+            ReadingColumns(maxColumns: 2) {
+                ReadingColumn("Highest", metrics.highest)
+                ReadingColumn("Lowest", metrics.lowest)
+                ReadingColumn("Ascent", metrics.ascent)
+                ReadingColumn("Descent", metrics.descent)
+                ReadingColumn("Steepest", [metrics.steepestClimb, metrics.steepestDescent], spoken: metrics.steepestSpoken)
+            }
+        }
+    }
+}
+
+/// The elevation chart as a list row, at the sheet's height. Nothing with fewer than two samples.
+private struct ElevationChartRow: View {
+    let metrics: ElevationMetrics
 
     var body: some View {
         if let range = metrics.historyRange {
             ElevationChart(history: metrics.history, range: range, unit: metrics.unit)
-                .frame(height: Self.chartHeight)
-        }
-        ReadingColumns {
-            if showsCurrent { ReadingColumn("Current", metrics.current) }
-            ReadingColumn("Highest", metrics.highest)
-            ReadingColumn("Lowest", metrics.lowest)
-        }
-    }
-}
-
-/// Shared with S15 (#536).
-struct ElevationClimbingSection: View {
-    let metrics: ElevationMetrics
-
-    var body: some View {
-        Section("Climbing") {
-            ReadingColumns {
-                ReadingColumn("Ascent", metrics.ascent)
-                ReadingColumn("Descent", metrics.descent)
-            }
-        }
-    }
-}
-
-/// Shared with S15, which leaves out the current grade (#536).
-struct ElevationGradeSection: View {
-    let metrics: ElevationMetrics
-    var showsCurrent = true
-
-    var body: some View {
-        Section("Grade") {
-            ReadingColumns {
-                if showsCurrent { ReadingColumn("Current", metrics.grade) }
-                ReadingColumn("Steepest", [metrics.steepestClimb, metrics.steepestDescent], spoken: metrics.steepestSpoken)
-            }
+                .frame(height: ElevationList.chartHeight)
         }
     }
 }
@@ -253,4 +250,15 @@ extension ElevationMetrics {
 
 #Preview("Elevation sheet") {
     ElevationList(metrics: .sample())
+}
+
+/// S15's one section over the whole ride: no current readings, two columns (#548).
+#Preview("Ride Detail section") {
+    List { ElevationRideSection(metrics: .sample()) }
+}
+
+/// Columns too wide for two at this size fall to one.
+#Preview("Ride Detail section — Large Text") {
+    List { ElevationRideSection(metrics: .sample(.imperial)) }
+        .dynamicTypeSize(.accessibility3)
 }
