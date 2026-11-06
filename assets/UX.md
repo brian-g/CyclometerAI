@@ -1464,7 +1464,7 @@ Sections appear on screen in the order listed below.
     - **Saving an edit:** the change shows at once, and S14 reloads. Every S15 reads the stored title with its stats each time it appears, and S20 rereads its Previous Rides. So other copies of the ride, further up the stack or on the other tab, show the new title when they come back. The GPX is rewritten only when the title changed (#286). If a write fails, the screen reads the stored values back.
     - **Make Route:** not built, as its behaviour is still TBD.
   - **Summary:** hero numbers in a card. Each is absent with no data, and Average Speed is absent with no moving second.
-  - **Vehicle Passes:** after Strava. The count row is disabled while the passes are still loading or none were stored.
+  - **Vehicle Passes:** the last row of the Summary card, under the hero numbers (#549). Absent with no radar paired; the card shows for the count alone when there are no hero numbers. The count row is disabled while the passes are still loading or none were stored.
 
 ---
 
