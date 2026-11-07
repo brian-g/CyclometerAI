@@ -185,4 +185,29 @@ final class RideDetailSnapshotTests: XCTestCase {
         stats.routeName = "Gone Loop"
         assertBothSchemes(screen(points, stats: stats), named: "deleted-route")
     }
+
+    /// The Pace section of a 12.4 mi ride (#547): the first five splits, then "More" closed, and
+    /// open with the rest, ending on the partial last mile. Alone, so the splits needn't disagree
+    /// with the full screen's 6.7 mi header.
+    func testRideDetailPaceSplits() {
+        let splits = PaceSplit.samples(12)
+        let device = ViewImageConfig(safeArea: .zero, size: CGSize(width: 402, height: 1_100),
+                                     traits: self.device.traits)
+        for isExpanded in [false, true] {
+            let view = List {
+                Section("Pace") {
+                    PaceSplitRows(splits: splits, unit: .imperial, isExpanded: isExpanded)
+                }
+            }
+            .tint(Color.cyPrimary)
+            .environment(\.locale, Locale(identifier: "en_US"))
+            for scheme in [UIUserInterfaceStyle.light, .dark] {
+                assertSnapshot(
+                    of: UIHostingController(rootView: view.preferredColorScheme(scheme == .light ? .light : .dark)),
+                    as: .image(on: device, traits: .init(userInterfaceStyle: scheme)),
+                    named: "\(isExpanded ? "expanded" : "collapsed")-\(scheme == .light ? "light" : "dark")"
+                )
+            }
+        }
+    }
 }

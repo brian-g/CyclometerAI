@@ -116,16 +116,36 @@ struct RideDetailMetricsTests {
 
     // MARK: Speed, Pace, Time
 
-    @Test("Speed, Pace and Time are the Ride metrics sheet's, without the current speed")
+    @Test("Speed, Pace and Time are the Ride metrics sheet's, without the current speed, plus the splits")
     func rideMetricsMatchTheSheet() {
         var sheet = Self.live.rideMetrics
         sheet.speedMPS = nil
+        #expect(sheet.paceSplits.isEmpty, "the live sheet has no splits (#547)")
+        sheet.paceSplits = Self.saved.paceSplits[Self.live.unitSystem] ?? []
 
         let built = RideMetrics.wholeRide(track: Self.saved, stats: Self.stats, summary: Self.summary,
                                           unit: Self.live.unitSystem)
         #expect(built == sheet)
         #expect(built.hasSpeed)
         #expect(built.currentSpeed == .missing)
+    }
+
+    @Test("the splits follow the rider's units (#547)", arguments: UnitSystem.allCases)
+    func splitsFollowTheUnits(unit: UnitSystem) {
+        let built = RideMetrics.wholeRide(track: Self.saved, stats: Self.stats, summary: Self.summary, unit: unit)
+        let expected = PaceSplits.splits(Self.track, metersPerSplit: PaceSplits.metersPerSplit(unit))
+        #expect(!expected.isEmpty)
+        #expect(built.paceSplits == expected)
+    }
+
+    @Test("the splits add up to the Moving Time the row stored (#547)")
+    func splitsEndOnTheMovingTime() throws {
+        // Imperial, where the ride's last 0.99 mi is a partial split; in km its 0.03 left over is
+        // too short to be one.
+        let built = RideMetrics.wholeRide(track: Self.saved, stats: Self.stats, summary: Self.summary, unit: .imperial)
+        #expect(try #require(built.paceSplits.last).isPartial)
+        let seconds = built.paceSplits.map(\.movingSeconds).reduce(0, +)
+        #expect(abs(seconds - Double(Self.stats.movingSeconds)) < 1e-6)
     }
 
     @Test("a ride with no moving second has no Speed or Pace, but still a Time")

@@ -20,6 +20,9 @@ struct RideDetailTrack: Equatable, Sendable {
     var steepestDescentPercent: Double?
     /// What the map sheet's route coloring and stops read (#537).
     var map = RideMapTrack(segments: [])
+    /// The Pace section's splits (#547), for each unit system, so a change of units needn't reread
+    /// the track.
+    var paceSplits: [UnitSystem: [PaceSplit]] = [:]
 }
 
 // In an extension, so the struct keeps its memberwise initializer.
@@ -41,6 +44,9 @@ extension RideDetailTrack {
         steepestClimbPercent = elevation.steepestClimbPercent
         steepestDescentPercent = elevation.steepestDescentPercent
         map = RideMapTrack(points: points)
+        paceSplits = Dictionary(uniqueKeysWithValues: UnitSystem.allCases.map { unit in
+            (unit, PaceSplits.splits(points, metersPerSplit: PaceSplits.metersPerSplit(unit)))
+        })
     }
 }
 
@@ -64,7 +70,8 @@ extension RideMetrics {
             rideSeconds: Int(summary.durationSeconds),
             unit: unit,
             speedHistory: track.speed,
-            altitudeHistory: track.altitude
+            altitudeHistory: track.altitude,
+            paceSplits: track.paceSplits[unit] ?? []
         )
     }
 
