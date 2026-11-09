@@ -99,6 +99,12 @@ struct CompassPointTests {
         #expect(CompassPoint(degrees: 360) == .north)
         #expect(CompassPoint(degrees: 450) == .east)
     }
+
+    @Test("A non-finite bearing is north, not a trap")
+    func nonFinite() {
+        #expect(CompassPoint(degrees: .nan) == .north)
+        #expect(CompassPoint(degrees: .infinity) == .north)
+    }
 }
 
 @Suite("WeatherCondition display")

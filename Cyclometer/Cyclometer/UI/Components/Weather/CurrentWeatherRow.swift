@@ -54,7 +54,7 @@ struct WindLabel: View {
         .font(.subheadline)
         .foregroundStyle(Color.cyTextSecondary)
         .monospacedDigit()
-        .accessibilityLabel("Wind from \(point.abbreviation), \(speed, format: .number.precision(.fractionLength(0))) \(unit.speedLabel)")
+        .accessibilityLabel("Wind from \(point.name), \(speed, format: .number.precision(.fractionLength(0))) \(unit.speedLabel)")
     }
 
     /// A bearing names where the wind comes from; the arrow shows where it goes.

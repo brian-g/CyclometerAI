@@ -116,9 +116,6 @@ final class StartSheetSnapshotTests: XCTestCase {
     /// The Weather group and its footer.
     private let weatherCanvas: SwiftUISnapshotLayout = .fixed(width: 402, height: 340)
 
-    /// Forty minutes into the fixture forecast's first hour.
-    private static let weatherNow = WeatherReading.fixtureDate.addingTimeInterval(40 * 60)
-
     /// Pinned locale and time zone, so the hour labels and temperature unit don't follow the host.
     private func weather(
         _ weather: StartSheetWeather,
@@ -135,8 +132,9 @@ final class StartSheetSnapshotTests: XCTestCase {
     }
 
     private static func loaded(_ current: WeatherReading = .fixture) -> StartSheetWeather {
-        .loaded(StartSheetForecast(current: current, hourly: WeatherReading.fixtureHourly,
-                                   attribution: .fixture, fetchedAt: weatherNow))
+        var forecast = StartSheetForecast.fixture
+        forecast.current = current
+        return .loaded(forecast)
     }
 
     /// No route: the hour under way and the next three. °C, km/h, a 24-hour clock. The footer

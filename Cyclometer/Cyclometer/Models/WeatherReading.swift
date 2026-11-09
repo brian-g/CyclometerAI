@@ -92,6 +92,10 @@ extension WeatherReading {
     /// hour (2026-09-21 14:00 UTC), as WeatherKit's forecast hours are.
     static let fixtureDate = Date(timeIntervalSince1970: 1_789_999_200)
 
+    /// Forty minutes into the fixture forecast's first hour: a "now" the forecast covers, for
+    /// anything that picks the hours under way from it.
+    static let fixtureNow = fixtureDate.addingTimeInterval(40 * 60)
+
     /// `WeatherClient.testValue`'s current conditions: a mild, breezy, partly cloudy day.
     static let fixture = WeatherReading(
         date: fixtureDate,

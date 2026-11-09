@@ -413,6 +413,16 @@ struct StartSheetForecast: Equatable {
     var fetchedAt: Date
 }
 
+extension StartSheetForecast {
+    /// `WeatherClient.testValue`'s answer, fetched at `WeatherReading.fixtureNow`.
+    static let fixture = StartSheetForecast(
+        current: .fixture,
+        hourly: WeatherReading.fixtureHourly,
+        attribution: .fixture,
+        fetchedAt: WeatherReading.fixtureNow
+    )
+}
+
 /// A single sensor row in the Start sheet's Sensors group.
 struct SensorRow: Equatable, Identifiable {
     enum Kind: CaseIterable {

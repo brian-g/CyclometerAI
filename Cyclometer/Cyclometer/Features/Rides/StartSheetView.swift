@@ -93,7 +93,10 @@ struct StartSheetWeatherSection: View {
                 centered { message("Weather unavailable") }
             case .loaded(let forecast):
                 CurrentWeatherRow(reading: forecast.current, unit: unit)
-                HourlyForecastStrip(hours: hours)
+                // A forecast with no hour in the ride's window would be an empty, padded row.
+                if !hours.isEmpty {
+                    HourlyForecastStrip(hours: hours)
+                }
             }
         } header: {
             Text("Weather")
@@ -113,7 +116,9 @@ struct StartSheetWeatherSection: View {
         }
     }
 
-    private func message(_ text: String) -> some View {
+    /// A key, not a `String`: `Text(String)` line-breaks by the device language, so a wrapped
+    /// message would differ by host (#430).
+    private func message(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .foregroundStyle(Color.cyTextSecondary)
             .multilineTextAlignment(.center)
@@ -188,7 +193,7 @@ private extension DependencyValues {
         locationClient.currentCoordinate = { Coordinate(latitude: 46.8772, longitude: -96.7898) }
         weatherClient = .testValue
         // The fixture forecast is dated, so "now" has to be inside it for the strip to have hours.
-        date = .constant(WeatherReading.fixtureDate.addingTimeInterval(40 * 60))
+        date = .constant(WeatherReading.fixtureNow)
     }
 }
 
@@ -296,12 +301,7 @@ private extension DependencyValues {
 #Preview("Weather — loaded") {
     List {
         StartSheetWeatherSection(
-            weather: .loaded(StartSheetForecast(
-                current: .fixture,
-                hourly: WeatherReading.fixtureHourly,
-                attribution: .fixture,
-                fetchedAt: WeatherReading.fixtureDate.addingTimeInterval(40 * 60)
-            )),
+            weather: .loaded(.fixture),
             hours: Array(WeatherReading.fixtureHourly.prefix(4)),
             unit: .metric
         )
