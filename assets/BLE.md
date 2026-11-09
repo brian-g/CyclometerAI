@@ -571,7 +571,7 @@ static func reconnectDelay(attempt: Int) -> Duration {
 }
 ```
 
-`VariaRadarClient` and `BLECSCClient` share this ladder. **It has no attempt cap:** a paired sensor stays `.reconnecting` until it reconnects, the rider unpairs it, or Bluetooth turns off. On iOS the first `connect()` is a pending request that never times out and completes whenever the peripheral comes back in range. That pending request usually restores the link. Re-issuing `connect()` on the ladder is an idempotent nudge for when the pending request was cleared.
+`VariaRadarClient` and `BLECSCClient` both use this ladder. **It has no attempt cap:** a paired sensor stays `.reconnecting` until it reconnects, the rider unpairs it or moves its roles to another sensor, or Bluetooth turns off. A drop leaves no connection request pending, because `BLECentral` connects without CoreBluetooth's auto-reconnect option. The ladder's first `connect()`, 1 s after the drop, places a request that never times out and completes whenever the peripheral comes back in range. That request usually restores the link. Later attempts are idempotent nudges for when it was cleared.
 
 **Why no cap.** The spec used to give up after 10 attempts (~3 min) and drop the sensor to `.disconnected`. On the 2026-11-09 ride the rider walked out of range for ~3.5 min. `BLECSCClient` gave up and released the speed and cadence slots. The pending connect still completed when the rider came back, but a `.connected` event for a released slot is ignored. So the link came up with no notify subscription, and speed and cadence stayed dark for the rest of the ride. The radar, which never had the cap, reconnected. Stopping for longer than 3 minutes is normal on a ride, and how long a sensor stays out of range doesn't tell us it's lost.
 
@@ -889,6 +889,7 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | HR payload parses 8-bit BPM | Single byte BPM read correctly |
 | HR payload parses 16-bit BPM | Two-byte BPM read correctly per flags |
 | Reconnection backoff sequence | Delays follow 1s, 2s, 4s, 8s, 16s, 30s, 30s... pattern |
+| Reconnection has no attempt cap | Past the old 10-attempt cap the role stays `.reconnecting`; a late connect resubscribes and the role returns to `.active` |
 | Log gate admits the first sample | `LogSampleGate.admit` is true on its first call, whatever the uptime |
 | Log gate holds one line per bucket | A 4 Hz stream over 10s admits exactly 10 lines |
 | Log gate does not halve a jittering 1 Hz stream | Samples drifting either side of a 1s spacing all admit — the reason for bucketing over an interval gate |

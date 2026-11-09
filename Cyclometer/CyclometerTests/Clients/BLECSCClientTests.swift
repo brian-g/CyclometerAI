@@ -779,9 +779,12 @@ struct BLECSCIntegrationTests {
 
         // The pending connect completes when the sensor is back in range. The slot is
         // still held, so the role goes straight back to connected — no .disconnected
-        // in between.
-        harness.events.yield(.connected(id: id))
+        // in between — and the client resubscribes, which a released slot never did.
+        // The ladder stops: nothing is left sleeping.
+        harness.bringToActive(id)
         #expect(await speedStates.next() == .connected)
+        #expect(await speedStates.next() == .active)
+        #expect(harness.clock.isIdle)
     }
 
     @Test("User-initiated disconnect does not trigger reconnection")

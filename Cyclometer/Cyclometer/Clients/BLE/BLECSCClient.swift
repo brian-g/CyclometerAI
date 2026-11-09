@@ -1021,12 +1021,13 @@ private final class CSCClientState: @unchecked Sendable {
     // MARK: Reconnection
 
     private func startReconnect(peripheralID: UUID) {
-        // On iOS the original connect() request stays pending and completes whenever
-        // the peripheral reappears — that pending request, not this ladder, is what
-        // usually restores the connection. Re-issuing connect() is an idempotent nudge
-        // that matters when the pending request was cleared; the BLE.md §6.1 ladder
-        // bounds how often it is re-issued. BLECentral retains discovered peripherals,
-        // so reconnect-by-UUID works without rescanning.
+        // A drop leaves no connect() pending: BLECentral connects without CoreBluetooth's
+        // auto-reconnect option. This ladder's first connect() places a request that
+        // never times out and completes whenever the peripheral reappears — that request
+        // is what usually restores the connection. Later attempts are idempotent nudges
+        // that matter when it was cleared; the BLE.md §6.1 ladder bounds how often they
+        // are re-issued. BLECentral retains discovered peripherals, so reconnect-by-UUID
+        // works without rescanning.
         //
         // The ladder never gives up while the slot is reconnecting, same as
         // VariaRadarClient. It used to release the slot after 10 attempts (~3 min), but
