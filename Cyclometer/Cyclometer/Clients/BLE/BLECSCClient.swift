@@ -119,10 +119,6 @@ struct BLECSCClient: Sendable {
     static func reconnectDelay(attempt: Int) -> Duration {
         .seconds(min(1 << min(attempt, 5), 30))
     }
-
-    /// After this many failed attempts the sensor is considered lost: its slot is
-    /// released and the role falls back to `.disconnected` (BLE.md §6.1).
-    static let maxReconnectAttempts = 10
 }
 
 // MARK: - Measurement parsing
@@ -1026,11 +1022,20 @@ private final class CSCClientState: @unchecked Sendable {
 
     private func startReconnect(peripheralID: UUID) {
         // On iOS the original connect() request stays pending and completes whenever
-        // the peripheral reappears; re-issuing connect() is an idempotent nudge,
-        // bounded by the BLE.md §6.1 ladder. BLECentral retains discovered
-        // peripherals, so reconnect-by-UUID works without rescanning.
+        // the peripheral reappears — that pending request, not this ladder, is what
+        // usually restores the connection. Re-issuing connect() is an idempotent nudge
+        // that matters when the pending request was cleared; the BLE.md §6.1 ladder
+        // bounds how often it is re-issued. BLECentral retains discovered peripherals,
+        // so reconnect-by-UUID works without rescanning.
+        //
+        // The ladder never gives up while the slot is reconnecting, same as
+        // VariaRadarClient. It used to release the slot after 10 attempts (~3 min), but
+        // the pending connect still completed when the rider walked back into range,
+        // and `.connected` for a released slot is ignored — so the link came up with no
+        // notify subscription and the sensors stayed dark for the rest of the ride.
         let task = Task { [weak self] in
-            for attempt in 0..<BLECSCClient.maxReconnectAttempts {
+            var attempt = 0
+            while !Task.isCancelled {
                 guard let self else { return }
                 try? await self.clock.sleep(for: BLECSCClient.reconnectDelay(attempt: attempt))
                 guard !Task.isCancelled else { return }
@@ -1040,17 +1045,8 @@ private final class CSCClientState: @unchecked Sendable {
                 guard stillReconnecting else { return }
                 logger.notice("reconnect attempt \(attempt + 1) for \(peripheralID, privacy: .public)")
                 await self.bleClient.connect(peripheralID, cscOwnerID)
+                attempt += 1
             }
-            // Ladder exhausted — give up and release the slot so the role falls back
-            // to .disconnected (BLE.md §6.1). Guard that we're still reconnecting so a
-            // late success (which cancels this task) isn't undone.
-            guard let self else { return }
-            self.lock.withLock {
-                guard self.slots[peripheralID]?.connectionState == .reconnecting else { return }
-                self.slots.removeValue(forKey: peripheralID)
-                self.recomputeRoleStatesLocked()
-            }
-            logger.notice("reconnect gave up for \(peripheralID, privacy: .public) — sensor lost")
         }
         lock.withLock {
             slots[peripheralID]?.reconnectTask?.cancel()

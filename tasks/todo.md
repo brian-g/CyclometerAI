@@ -2244,3 +2244,18 @@ Plan: `~/.claude/plans/wiggly-brewing-dawn.md`. No UI. Attribution is in scope; 
 - [x] Build; `WeatherClientTests` 39/39 (34 mapping cases); full `CyclometerTests` 2619 passed, 0 failed
 
 **Review:** a data layer only, with no caller yet. Code and issue diverge in one place: the issue asked for `@DependencyClient`, but every client in the repo is a plain struct + `DependencyKey`, so this follows `GeocodingClient`. Only the pure condition mapping and the fixtures are unit-tested. The live WeatherKit path waits for the App Service on the App ID and first runs end to end with #149.
+
+---
+
+## CSC sensors never reconnect after a >3 min walk-away (ride 2026-11-09)
+
+Ride log: speed + cadence dropped at 14:43:26, `BLECSCClient` gave up at attempt 10 (14:46:28) and released the slots; iOS's pending connect completed at 14:47:04, but `.connected` for an unknown slot is ignored, so the link sat up with no notify subscription. The radar (unbounded ladder) recovered at 14:46:38.
+
+- [x] Branch `fix/csc-reconnect-never-gives-up` off `main`
+- [x] `BLECSCClient`: drop `maxReconnectAttempts`; ladder runs until the slot leaves `.reconnecting` (match `VariaRadarClient`)
+- [x] `BLECSCClientTests`: `reconnectGivesUp` → past 10 attempts the role stays `.reconnecting`, keeps connecting, and a late `.connected` restores it; `SteppedClock` doc reference
+- [x] BLE.md §6.1: no attempt cap; drop the give-up banner
+- [x] Brian checks on device (walk away > 3 min, come back)
+- [x] Targeted `BLECSCIntegrationTests` 38/38; full `CyclometerTests` 2294 passed, 0 failed
+
+**Review:** the speed/cadence client now handles reconnects the same way as `VariaRadarClient`. The spec's 10-attempt cap was the bug, so BLE.md §6.1 now describes the uncapped ladder. Nothing ever showed the give-up banner, so nothing else depended on it. Speed falls back to GPS based on missing readings (#390), so a long `.reconnecting` was already handled.
