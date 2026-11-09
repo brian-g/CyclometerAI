@@ -2247,6 +2247,20 @@ Plan: `~/.claude/plans/wiggly-brewing-dawn.md`. No UI. Attribution is in scope; 
 
 ---
 
+## CSC sensors never reconnect after a >3 min walk-away (ride 2026-11-09)
+
+Ride log: speed + cadence dropped at 14:43:26, `BLECSCClient` gave up at attempt 10 (14:46:28) and released the slots; iOS's pending connect completed at 14:47:04, but `.connected` for an unknown slot is ignored, so the link sat up with no notify subscription. The radar (unbounded ladder) recovered at 14:46:38.
+
+- [x] Branch `fix/csc-reconnect-never-gives-up` off `main`
+- [x] `BLECSCClient`: drop `maxReconnectAttempts`; ladder runs until the slot leaves `.reconnecting` (match `VariaRadarClient`)
+- [x] `BLECSCClientTests`: `reconnectGivesUp` → past 10 attempts the role stays `.reconnecting`, keeps connecting, and a late `.connected` restores it; `SteppedClock` doc reference
+- [x] BLE.md §6.1: no attempt cap; drop the give-up banner
+- [x] Brian checks on device (walk away > 3 min, come back)
+- [x] Targeted `BLECSCIntegrationTests` 38/38; full `CyclometerTests` 2294 passed, 0 failed
+
+**Review:** the speed/cadence client now handles reconnects the same way as `VariaRadarClient`. The spec's 10-attempt cap was the bug, so BLE.md §6.1 now describes the uncapped ladder. Nothing ever showed the give-up banner, so nothing else depended on it. Speed falls back to GPS based on missing readings (#390), so a long `.reconnecting` was already handled.
+
+**Code review (`/code-review --fix`):** fixed the comment and §6.1 (a drop leaves no connect pending, because `BLECentral` connects without auto-reconnect, so the ladder's first attempt places the request); §6.1 now lists role reassignment as an exit; added a §12 row; `reconnectNeverGivesUp` now drives the late connect to `.active` and checks the ladder goes idle. The review ran `BLECSCIntegrationTests` + `BLECSCBackoffTests`: 40/40. On the count: the full run has 2626 raw `passed` lines, comparable to #148's 2619. The 2294 above was a unique-name count. Left for Brian: an interrogating (no-role) slot that drops now reconnects forever; `.connected` for a paired peripheral with no slot is still dropped; the uncapped ladder logs a `.notice` every 30 s; the two ladders could share one helper.
 ## #149 — Start Sheet forecast weather (S05.1)
 
 Plan: `~/.claude/plans/wiggly-brewing-dawn.md`. Decided this session: current row + hourly strip, between Ride Setup and Sensors; strip covers the route's estimated time (past rides of the route → recent average speed → 3 h), 3 h with no route.

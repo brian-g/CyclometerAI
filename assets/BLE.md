@@ -1,6 +1,7 @@
 # Cyclometer — BLE Integration Specification
 **Version:** 1.2  
 **Date:** 2026-05-21  
+**Updated:** 2026-11-09 — §6.1: the reconnect ladder has no attempt cap. A sensor out of range for more than 3 min was dropped and never resubscribed when its pending connect completed  
 **Updated:** 2026-08-18 — Unified discovery (#98): one `DiscoveredDevice` and one `SensorKind` tag across all three clients; the pairing scan is refcounted per client and held by S11 on all three  
 **Updated:** 2026-05-22 — Sensor role model: speed/cadence split at pairing time; `SensorRole` replaces `SensorType.speedCadence`; `SpeedFeature` and `CadenceFeature` replace `SpeedCadenceFeature`  
 **Status:** Draft — Pending M2 Engineering Spike Validation  
@@ -565,25 +566,14 @@ check.
 ### 6.1 Reconnection Policy (Exponential Backoff)
 
 ```swift
-struct ReconnectionPolicy: Sendable {
-    static let initialDelay: TimeInterval = 1.0
-    static let maxDelay: TimeInterval = 30.0
-    static let maxAttempts = 10
-
-    var attemptCount: Int = 0
-
-    mutating func nextDelay() -> TimeInterval? {
-        guard attemptCount < Self.maxAttempts else { return nil } // Give up
-        let delay = min(Self.initialDelay * pow(2.0, Double(attemptCount)), Self.maxDelay)
-        attemptCount += 1
-        return delay
-    }
-
-    mutating func reset() { attemptCount = 0 }
+static func reconnectDelay(attempt: Int) -> Duration {
+    .seconds(min(1 << min(attempt, 5), 30))   // 1, 2, 4, 8, 16, then 30 s
 }
 ```
 
-After `maxAttempts` the sensor is considered lost and transitions to `disconnected`. A non-intrusive banner is shown: "Radar sensor not found — reconnect in Sensors."
+`VariaRadarClient` and `BLECSCClient` both use this ladder. **It has no attempt cap:** a paired sensor stays `.reconnecting` until it reconnects, the rider unpairs it or moves its roles to another sensor, or Bluetooth turns off. A drop leaves no connection request pending, because `BLECentral` connects without CoreBluetooth's auto-reconnect option. The ladder's first `connect()`, 1 s after the drop, places a request that never times out and completes whenever the peripheral comes back in range. That request usually restores the link. Later attempts are idempotent nudges for when it was cleared.
+
+**Why no cap.** The spec used to give up after 10 attempts (~3 min) and drop the sensor to `.disconnected`. On the 2026-11-09 ride the rider walked out of range for ~3.5 min. `BLECSCClient` gave up and released the speed and cadence slots. The pending connect still completed when the rider came back, but a `.connected` event for a released slot is ignored. So the link came up with no notify subscription, and speed and cadence stayed dark for the rest of the ride. The radar, which never had the cap, reconnected. Stopping for longer than 3 minutes is normal on a ride, and how long a sensor stays out of range doesn't tell us it's lost.
 
 ### 6.2 Disconnection During Active Ride
 
@@ -899,6 +889,7 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | HR payload parses 8-bit BPM | Single byte BPM read correctly |
 | HR payload parses 16-bit BPM | Two-byte BPM read correctly per flags |
 | Reconnection backoff sequence | Delays follow 1s, 2s, 4s, 8s, 16s, 30s, 30s... pattern |
+| Reconnection has no attempt cap | Past the old 10-attempt cap the role stays `.reconnecting`; a late connect resubscribes and the role returns to `.active` |
 | Log gate admits the first sample | `LogSampleGate.admit` is true on its first call, whatever the uptime |
 | Log gate holds one line per bucket | A 4 Hz stream over 10s admits exactly 10 lines |
 | Log gate does not halve a jittering 1 Hz stream | Samples drifting either side of a 1s spacing all admit — the reason for bucketing over an interval gate |

@@ -5,7 +5,8 @@ import Foundation
 /// `TestClock.advance` calls `Task.megaYield()` several times, and every megaYield runs 20
 /// detached `.background`-priority tasks one after another. A Mac schedules those at once; the
 /// CI VM throttles background QoS, so each advance took 10–30 s there, and the 10-step ladder in
-/// `BLECSCIntegrationTests.reconnectGivesUp` took 150 s against 0.008 s locally.
+/// `BLECSCIntegrationTests.reconnectGivesUp` (now `reconnectNeverGivesUp`) took 150 s against
+/// 0.008 s locally.
 ///
 /// This clock never yields. `advanceToNextSleep()` waits until the code under test is actually
 /// sleeping and then resumes it directly, so the test needs no scheduling luck, and a sleep that

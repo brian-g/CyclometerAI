@@ -754,8 +754,8 @@ struct BLECSCIntegrationTests {
         #expect(abs((await speeds.next() ?? 0) - 4.192) < 0.0001)   // 2 rev/s from (105,107)
     }
 
-    @Test("Reconnection gives up after the max attempt ladder and releases the role")
-    func reconnectGivesUp() async {
+    @Test("Reconnection never gives up, and a connect after a long absence restores the role")
+    func reconnectNeverGivesUp() async {
         let harness = Harness()
         let id = UUID()
         await harness.client.setRoles(id, [.speed])
@@ -769,13 +769,22 @@ struct BLECSCIntegrationTests {
         harness.events.yield(.disconnected(id: id, error: nil))
         #expect(await speedStates.next() == .reconnecting)
 
-        // Walk the full backoff ladder; each sleep releases one reconnect attempt.
-        for delay in [1, 2, 4, 8, 16, 30, 30, 30, 30, 30] {
+        // Walk past the old 10-attempt cap (ride 2026-11-09: the rider walked out of
+        // range for ~3.5 min). Each sleep releases one reconnect attempt, and the
+        // ladder holds at 30 s rather than releasing the slot.
+        for delay in [1, 2, 4, 8, 16, 30, 30, 30, 30, 30, 30, 30] {
             #expect(await harness.clock.advanceToNextSleep() == .seconds(delay))
             #expect(await connects.next() == id)
         }
-        // Ladder exhausted → sensor considered lost, role released to disconnected.
-        #expect(await speedStates.next() == .disconnected)
+
+        // The pending connect completes when the sensor is back in range. The slot is
+        // still held, so the role goes straight back to connected — no .disconnected
+        // in between — and the client resubscribes, which a released slot never did.
+        // The ladder stops: nothing is left sleeping.
+        harness.bringToActive(id)
+        #expect(await speedStates.next() == .connected)
+        #expect(await speedStates.next() == .active)
+        #expect(harness.clock.isIdle)
     }
 
     @Test("User-initiated disconnect does not trigger reconnection")
