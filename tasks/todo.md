@@ -2261,3 +2261,26 @@ Ride log: speed + cadence dropped at 14:43:26, `BLECSCClient` gave up at attempt
 **Review:** the speed/cadence client now handles reconnects the same way as `VariaRadarClient`. The spec's 10-attempt cap was the bug, so BLE.md §6.1 now describes the uncapped ladder. Nothing ever showed the give-up banner, so nothing else depended on it. Speed falls back to GPS based on missing readings (#390), so a long `.reconnecting` was already handled.
 
 **Code review (`/code-review --fix`):** fixed the comment and §6.1 (a drop leaves no connect pending, because `BLECentral` connects without auto-reconnect, so the ladder's first attempt places the request); §6.1 now lists role reassignment as an exit; added a §12 row; `reconnectNeverGivesUp` now drives the late connect to `.active` and checks the ladder goes idle. The review ran `BLECSCIntegrationTests` + `BLECSCBackoffTests`: 40/40. On the count: the full run has 2626 raw `passed` lines, comparable to #148's 2619. The 2294 above was a unique-name count. Left for Brian: an interrogating (no-role) slot that drops now reconnects forever; `.connected` for a paired peripheral with no slot is still dropped; the uncapped ladder logs a `.notice` every 30 s; the two ladders could share one helper.
+## #149 — Start Sheet forecast weather (S05.1)
+
+Plan: `~/.claude/plans/wiggly-brewing-dawn.md`. Decided this session: current row + hourly strip, between Ride Setup and Sensors; strip covers the route's estimated time (past rides of the route → recent average speed → 3 h), 3 h with no route.
+
+- [x] Branch `feat/149-start-sheet-weather`
+- [x] `isDaylight` on `WeatherReading`; `RideDurationEstimate`, `CompassPoint`, condition symbols + tests. Temperature uses the locale's `.weather` unit, not `UnitSystem` (UK: mph but °C)
+- [x] `StartSheetFeature`: weather + route-estimate effects, `forecastHours`; reducer tests (existing `.task` tests get the extra receive)
+- [x] `UI/Components/Weather/` (`CurrentWeatherRow`, `HourlyForecastStrip`, `WeatherAttributionFooter`), sheet section, previews
+- [x] Snapshots recorded, PNGs checked by eye, re-run green. First recording caught multicolor symbols vanishing in light mode → hierarchical `cyTextSecondary` (Brian's pick)
+- [x] In-app privacy text, PRD §12 + changelog, UX §S05.1
+- [x] Brian's review: temperature as a small `HeroNumber` (unit stays lowercase "°c", his call); strip fills the row and scrolls only when it must (`ViewThatFits`); "Legal" on the mark's baseline (mark checked tight-cropped); hero on the row's last baseline (lesson recorded)
+- [x] Full `CyclometerTests`: 2661 passed, 0 failed; commit + PR
+
+**Review:** the first screen to call WeatherKit. The live path, the real mark loading and the App Service on the App ID are still unchecked on a device: tests run on the fixture client, and `AsyncImage` can't load in a snapshot. The route-time estimate is built from moving time, so it leaves out stops.
+
+**Review follow-ups (Brian's picks from `/code-review`):**
+- [x] Location on but no fix → "Weather unavailable"; "Turn on Location" only when it's off
+- [x] Route rides under 25% of the route don't count; strip capped at 12 h
+- [x] Ride history read only when the route's rides can't answer (`fromRouteRides` / `fromRecentRides`)
+- [x] One WeatherKit request: `WeatherClient.forecast` (current + hourly) replaces `hourlyForecast`
+- [x] "Calm" for still air; mark and strip symbols scale with Dynamic Type; VoiceOver "… chance of rain"; no "-0°"
+- [x] Deferred: "Now" by position, noted on #204
+- [x] Full `CyclometerTests`: 2666 passed, 0 failed

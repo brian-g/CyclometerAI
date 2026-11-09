@@ -23,6 +23,7 @@ struct StartSheetView: View {
                         Toggle("Turn-by-Turn", isOn: $store.isTurnByTurnEnabled.sending(\.turnByTurnChanged))
                     }
                 }
+                StartSheetWeatherSection(weather: store.weather, hours: store.forecastHours, unit: store.unitSystem)
                 Section("Sensors") {
                     // Every paired sensor, connected or not — a rider setting up a ride
                     // needs to see that the strap they paired is the one about to be
@@ -68,6 +69,59 @@ struct StartSheetView: View {
         // behind it, which the next launch would resume (#344).
         .interactiveDismissDisabled(store.isStarting)
         .task { await store.send(.task).finish() }
+    }
+}
+
+/// The Weather group (#149): current conditions and the ride's hours, or why there are none. Its
+/// footer carries WeatherKit's attribution, shown only with WeatherKit data above it.
+///
+/// Internal rather than private so `StartSheetSnapshotTests` can pin it, as with `SensorStatusRow`.
+struct StartSheetWeatherSection: View {
+    let weather: StartSheetWeather
+    /// `StartSheetFeature.State.forecastHours`: the strip's hours, picked for the ride.
+    let hours: [WeatherReading]
+    let unit: UnitSystem
+
+    var body: some View {
+        Section {
+            switch weather {
+            case .loading:
+                centered { ProgressView() }
+            case .unavailable(.noLocation):
+                centered { message("Turn on Location to see the weather here") }
+            case .unavailable(.failed):
+                centered { message("Weather unavailable") }
+            case .loaded(let forecast):
+                CurrentWeatherRow(reading: forecast.current, unit: unit)
+                // A forecast with no hour in the ride's window would be an empty, padded row.
+                if !hours.isEmpty {
+                    HourlyForecastStrip(hours: hours)
+                }
+            }
+        } header: {
+            Text("Weather")
+        } footer: {
+            if case .loaded(let forecast) = weather {
+                WeatherAttributionFooter(attribution: forecast.attribution)
+            }
+        }
+    }
+
+    /// Centred the way the Sensors group's "No paired sensors" is.
+    private func centered(@ViewBuilder _ content: () -> some View) -> some View {
+        HStack {
+            Spacer()
+            content()
+            Spacer()
+        }
+    }
+
+    /// A key, not a `String`: `Text(String)` line-breaks by the device language, so a wrapped
+    /// message would differ by host (#430).
+    private func message(_ text: LocalizedStringKey) -> some View {
+        Text(text)
+            .foregroundStyle(Color.cyTextSecondary)
+            .multilineTextAlignment(.center)
     }
 }
 
@@ -130,6 +184,19 @@ struct SensorStatusRow: View {
 
 // MARK: - Previews
 
+private extension DependencyValues {
+    /// The Weather group from the fixture client at a fixed position, so no preview reads live
+    /// location or WeatherKit (#149).
+    mutating func previewWeather() {
+        permissionsClient = .testValue
+        locationClient = .testValue
+        locationClient.currentCoordinate = { Coordinate(latitude: 46.8772, longitude: -96.7898) }
+        weatherClient = .testValue
+        // The fixture forecast is dated, so "now" has to be inside it for the strip to have hours.
+        date = .constant(WeatherReading.fixtureNow)
+    }
+}
+
 // The rows come from the paired records, so the preview has to seed them — and in the
 // same dependency scope the store reads, or the seed lands in different storage.
 //
@@ -165,6 +232,7 @@ struct SensorStatusRow: View {
                 $0.bleHRClient = .testValue
                 $0.bleCSCClient = .testValue
                 $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+                $0.previewWeather()
             }
         )
     }
@@ -205,6 +273,7 @@ struct SensorStatusRow: View {
                 $0.bleHRClient = .testValue
                 $0.bleCSCClient = .testValue
                 $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+                $0.previewWeather()
             }
         )
     }
@@ -222,9 +291,34 @@ struct SensorStatusRow: View {
                 $0.bleHRClient = .testValue
                 $0.bleCSCClient = .testValue
                 $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+                $0.previewWeather()
             }
         )
     }
+}
+
+/// The weather group in each state, as the sheet draws it (#149).
+#Preview("Weather — loaded") {
+    List {
+        StartSheetWeatherSection(
+            weather: .loaded(.fixture),
+            hours: Array(WeatherReading.fixtureHourly.prefix(4)),
+            unit: .metric
+        )
+    }
+}
+
+#Preview("Weather — loading") {
+    List { StartSheetWeatherSection(weather: .loading, hours: [], unit: .metric) }
+}
+
+#Preview("Weather — no location") {
+    List { StartSheetWeatherSection(weather: .unavailable(.noLocation), hours: [], unit: .metric) }
+}
+
+#Preview("Weather — failed, dark") {
+    List { StartSheetWeatherSection(weather: .unavailable(.failed), hours: [], unit: .metric) }
+        .preferredColorScheme(.dark)
 }
 
 /// As S20's "Use This Route" opens it.
@@ -242,6 +336,7 @@ struct SensorStatusRow: View {
                 $0.bleHRClient = .testValue
                 $0.bleCSCClient = .testValue
                 $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+                $0.previewWeather()
             }
         )
     }
