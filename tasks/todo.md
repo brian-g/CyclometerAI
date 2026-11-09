@@ -2228,3 +2228,19 @@ Decisions (2026-11-05): 1 #538 before #537; 2 the title block's moving time is `
 - [x] Targeted suites green; full `CyclometerTests` passed, 0 failed
 
 **Review:** splits are replayed with the odometer's rule, so they add up to the stored Moving Time (pinned in `RideDetailMetricsTests`). The live Ride Metrics sheet is unchanged: its `RideMetrics` carries no splits.
+
+---
+
+## #148 — WeatherClient: the WeatherKit dependency (M10.6)
+
+Plan: `~/.claude/plans/wiggly-brewing-dawn.md`. No UI. Attribution is in scope; `testValue` returns fixtures (decided in planning).
+
+- [x] Branch `feat/148-weather-client`
+- [x] `Models/WeatherReading.swift`: `WeatherReading`, `WeatherSourceAttribution`, `WeatherCondition(_ kit:)` mapping, fixtures
+- [x] `Clients/Weather/WeatherClient.swift`: `current` / `hourlyForecast` / `attribution`; live, test = preview = fixtures, `unavailable`
+- [x] `com.apple.developer.weatherkit` entitlement
+- [x] `WeatherClientTests` (mapping table over `allCases`, fixtures, `unavailable`)
+- [x] TCA.md §8 Clients list; PRD §12 Privacy bullet + changelog row
+- [x] Build; `WeatherClientTests` 39/39 (34 mapping cases); full `CyclometerTests` 2619 passed, 0 failed
+
+**Review:** a data layer only, with no caller yet. Code and issue diverge in one place: the issue asked for `@DependencyClient`, but every client in the repo is a plain struct + `DependencyKey`, so this follows `GeocodingClient`. Only the pure condition mapping and the fixtures are unit-tested. The live WeatherKit path waits for the App Service on the App ID and first runs end to end with #149.

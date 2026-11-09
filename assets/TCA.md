@@ -1030,7 +1030,7 @@ Cyclometer/
 │
 ├── Clients/                               // one folder per dependency client
 │   ├── Altimeter/  Audio/  BLE/  Geocoding/  Haptics/  HealthKit/  Location/
-│   ├── LiveActivity/  MapSnapshot/  Overpass/  Permissions/  Screen/
+│   ├── LiveActivity/  MapSnapshot/  Overpass/  Permissions/  Screen/  Weather/
 │   ├── Persistence/                       // PersistenceClient, Ride/RoutePersistenceActor,
 │   │                                      // SwiftDataStack, CoreDataStack, RideDataBuffer,
 │   │                                      // TrackPointMO, CyclometerTimeSeries.xcdatamodeld
