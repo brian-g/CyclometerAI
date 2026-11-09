@@ -2261,3 +2261,12 @@ Plan: `~/.claude/plans/wiggly-brewing-dawn.md`. Decided this session: current ro
 - [x] Full `CyclometerTests`: 2661 passed, 0 failed; commit + PR
 
 **Review:** the first screen to call WeatherKit. The live path, the real mark loading and the App Service on the App ID are still unchecked on a device: tests run on the fixture client, and `AsyncImage` can't load in a snapshot. The route-time estimate is built from moving time, so it leaves out stops.
+
+**Review follow-ups (Brian's picks from `/code-review`):**
+- [x] Location on but no fix → "Weather unavailable"; "Turn on Location" only when it's off
+- [x] Route rides under 25% of the route don't count; strip capped at 12 h
+- [x] Ride history read only when the route's rides can't answer (`fromRouteRides` / `fromRecentRides`)
+- [x] One WeatherKit request: `WeatherClient.forecast` (current + hourly) replaces `hourlyForecast`
+- [x] "Calm" for still air; mark and strip symbols scale with Dynamic Type; VoiceOver "… chance of rain"; no "-0°"
+- [x] Deferred: "Now" by position, noted on #204
+- [x] Full `CyclometerTests`: 2666 passed, 0 failed

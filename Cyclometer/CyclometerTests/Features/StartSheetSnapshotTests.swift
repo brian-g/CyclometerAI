@@ -155,11 +155,13 @@ final class StartSheetSnapshotTests: XCTestCase {
         )
     }
 
-    /// An evening ride: clear and partly cloudy skies take their moon forms.
+    /// An evening ride: clear and partly cloudy skies take their moon forms. The air is still, so the
+    /// wind reads "Calm", with no arrow.
     func testStartSheetWeatherNight() {
         var current = WeatherReading.fixture
         current.condition = .clear
         current.isDaylight = false
+        current.windSpeed = Measurement(value: 0.4, unit: .kilometersPerHour)
         let hours = WeatherReading.fixtureHourly.prefix(4).map {
             var hour = $0
             hour.isDaylight = false

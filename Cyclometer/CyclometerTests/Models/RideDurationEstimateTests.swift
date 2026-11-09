@@ -16,69 +16,84 @@ struct RideDurationEstimateTests {
         RideListSummary(id: UUID(), title: "", startedAt: .distantPast, distanceMeters: meters, durationSeconds: seconds)
     }
 
+    private static func fromRoute(_ rides: [RouteRideSummary]) -> TimeInterval? {
+        RideDurationEstimate.fromRouteRides(routeDistanceMeters: route, rides: rides)
+    }
+
+    private static func fromRecent(_ rides: [RideListSummary]) -> TimeInterval? {
+        RideDurationEstimate.fromRecentRides(routeDistanceMeters: route, rides: rides)
+    }
+
+    // MARK: Rides of the route
+
     @Test("Earlier rides of the route: the route's distance at their median speed")
     func medianOfRouteRides() {
         // 5, 6 and 8 m/s: the median is 6, so 40 km takes 6,667 s. The 8 m/s outlier moves nothing.
         let rides = [Self.routeRide(meters: 40_000, seconds: 8_000),
                      Self.routeRide(meters: 40_000, seconds: 5_000),
                      Self.routeRide(meters: 36_000, seconds: 6_000)]
-        let seconds = RideDurationEstimate.seconds(routeDistanceMeters: Self.route, routeRides: rides, recentRides: [])
-        #expect(seconds == Self.route / 6)
+        #expect(Self.fromRoute(rides) == Self.route / 6)
     }
 
     @Test("An even count takes the mean of the middle two speeds")
     func evenMedian() {
         let rides = [Self.routeRide(meters: 40_000, seconds: 10_000),   // 4 m/s
                      Self.routeRide(meters: 40_000, seconds: 5_000)]    // 8 m/s
-        #expect(RideDurationEstimate.seconds(routeDistanceMeters: Self.route, routeRides: rides, recentRides: []) == Self.route / 6)
+        #expect(Self.fromRoute(rides) == Self.route / 6)
     }
 
     @Test("A ride abandoned halfway still counts for the full route's time")
     func partialRouteRide() {
         // Half the route in half the time a full ride takes: the same 5 m/s.
-        let rides = [Self.routeRide(meters: 20_000, seconds: 4_000)]
-        #expect(RideDurationEstimate.seconds(routeDistanceMeters: Self.route, routeRides: rides, recentRides: []) == 8_000)
+        #expect(Self.fromRoute([Self.routeRide(meters: 20_000, seconds: 4_000)]) == 8_000)
     }
 
-    @Test("Route rides beat recent riding elsewhere")
-    func routeRidesFirst() {
-        let seconds = RideDurationEstimate.seconds(
-            routeDistanceMeters: Self.route,
-            routeRides: [Self.routeRide(meters: 40_000, seconds: 8_000)],
-            recentRides: [Self.ride(meters: 10_000, seconds: 1_000)]
-        )
-        #expect(seconds == 8_000)
+    /// A mistaken 30 m start at 0.5 m/s would otherwise make a 40 km route take 22 hours.
+    @Test("A ride covering less than a quarter of the route doesn't count")
+    func shortRouteRideIgnored() {
+        let quarter = Self.route * RideDurationEstimate.minimumRouteShare
+        #expect(Self.fromRoute([Self.routeRide(meters: 30, seconds: 60)]) == nil)
+        #expect(Self.fromRoute([Self.routeRide(meters: quarter.nextDown, seconds: 2_000)]) == nil)
+        // Exactly a quarter counts: 10 km at 5 m/s.
+        #expect(Self.fromRoute([Self.routeRide(meters: quarter, seconds: 2_000)]) == 8_000)
+        // And a short one beside a real one changes nothing.
+        #expect(Self.fromRoute([Self.routeRide(meters: 30, seconds: 60),
+                                Self.routeRide(meters: 40_000, seconds: 8_000)]) == 8_000)
     }
+
+    @Test("A route ride with no time is skipped")
+    func zeroDurationRouteRideSkipped() {
+        #expect(Self.fromRoute([Self.routeRide(meters: 40_000, seconds: 0)]) == nil)
+    }
+
+    // MARK: Recent rides
 
     @Test("No rides of the route: the overall speed of the last ten rides")
     func recentRidesFallback() {
         // Ten rides at 5 m/s, then an eleventh — older, past the cap — at 1 m/s.
         let recent = Array(repeating: Self.ride(meters: 10_000, seconds: 2_000), count: RideDurationEstimate.recentRideCount)
             + [Self.ride(meters: 1_000, seconds: 1_000)]
-        #expect(RideDurationEstimate.seconds(routeDistanceMeters: Self.route, routeRides: [], recentRides: recent) == 8_000)
+        #expect(Self.fromRecent(recent) == 8_000)
     }
 
     @Test("Overall speed weights rides by their length, not one ride one vote")
     func recentRidesAggregate() {
         // 30 km in 6,000 s and 10 km in 4,000 s: 40 km in 10,000 s is 4 m/s.
-        let recent = [Self.ride(meters: 30_000, seconds: 6_000), Self.ride(meters: 10_000, seconds: 4_000)]
-        #expect(RideDurationEstimate.seconds(routeDistanceMeters: Self.route, routeRides: [], recentRides: recent) == 10_000)
+        #expect(Self.fromRecent([Self.ride(meters: 30_000, seconds: 6_000), Self.ride(meters: 10_000, seconds: 4_000)]) == 10_000)
     }
 
-    @Test("Rides with no distance or no time are skipped")
-    func emptyRidesSkipped() {
-        let seconds = RideDurationEstimate.seconds(
-            routeDistanceMeters: Self.route,
-            routeRides: [Self.routeRide(meters: 0, seconds: 600), Self.routeRide(meters: 500, seconds: 0)],
-            recentRides: [Self.ride(meters: 0, seconds: 300), Self.ride(meters: 20_000, seconds: 4_000)]
-        )
-        #expect(seconds == 8_000)
+    @Test("Recent rides with no distance or no time are skipped")
+    func emptyRecentRidesSkipped() {
+        #expect(Self.fromRecent([Self.ride(meters: 0, seconds: 300), Self.ride(meters: 500, seconds: 0),
+                                 Self.ride(meters: 20_000, seconds: 4_000)]) == 8_000)
     }
 
     @Test("Nothing to go on is no estimate")
     func noRides() {
-        #expect(RideDurationEstimate.seconds(routeDistanceMeters: Self.route, routeRides: [], recentRides: []) == nil)
-        #expect(RideDurationEstimate.seconds(routeDistanceMeters: 0, routeRides: [Self.routeRide(meters: 1, seconds: 1)], recentRides: []) == nil)
+        #expect(Self.fromRoute([]) == nil)
+        #expect(Self.fromRecent([]) == nil)
+        #expect(RideDurationEstimate.fromRouteRides(routeDistanceMeters: 0, rides: [Self.routeRide(meters: 1, seconds: 1)]) == nil)
+        #expect(RideDurationEstimate.fromRecentRides(routeDistanceMeters: 0, rides: [Self.ride(meters: 1, seconds: 1)]) == nil)
     }
 }
 
@@ -115,5 +130,14 @@ struct WeatherConditionDisplayTests {
         #expect(WeatherCondition.clear.symbolName(isDaylight: false) == "moon.stars.fill")
         #expect(WeatherCondition.partlyCloudy.symbolName(isDaylight: false) == "cloud.moon.fill")
         #expect(WeatherCondition.rain.symbolName(isDaylight: false) == WeatherCondition.rain.symbolName(isDaylight: true))
+    }
+
+    @Test("Temperatures round to whole degrees, and a negative that rounds to zero is plain zero")
+    func wholeDegrees() {
+        let cold = Measurement(value: -0.3, unit: UnitTemperature.celsius).wholeDegrees(in: .celsius)
+        #expect(cold == 0)
+        #expect(cold.sign == .plus)
+        #expect(Measurement(value: 18, unit: UnitTemperature.celsius).wholeDegrees(in: .fahrenheit) == 64)
+        #expect(Measurement(value: -2.6, unit: UnitTemperature.celsius).wholeDegrees(in: .celsius) == -3)
     }
 }

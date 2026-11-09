@@ -24,6 +24,14 @@ struct WeatherReading: Equatable, Sendable {
     var isDaylight: Bool
 }
 
+extension Measurement where UnitType == UnitTemperature {
+    /// Whole degrees in `unit`, as a forecast quotes them. A cold morning's -0.3° is 0, not "-0".
+    func wholeDegrees(in unit: UnitTemperature) -> Double {
+        // Adding zero turns the -0 that rounding leaves into 0.
+        converted(to: unit).value.rounded() + 0
+    }
+}
+
 /// What WeatherKit's terms ask for wherever its data is shown: the Apple Weather mark and a link
 /// to its legal attribution page. Named to stay clear of `WeatherKit.WeatherAttribution`.
 struct WeatherSourceAttribution: Equatable, Sendable {

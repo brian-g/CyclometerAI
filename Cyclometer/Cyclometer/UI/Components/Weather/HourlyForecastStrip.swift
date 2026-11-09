@@ -9,6 +9,8 @@ struct HourlyForecastStrip: View {
     /// Follows the device's 12- or 24-hour setting, which iOS folds into the current locale.
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
+    /// The symbols' row grows with Dynamic Type, as the `.title3` symbols in it do.
+    @ScaledMetric(relativeTo: .title3) private var symbolHeight = Spacing.xl
 
     var body: some View {
         // The first choice is used whenever its columns fit at their natural width; it then
@@ -39,13 +41,16 @@ struct HourlyForecastStrip: View {
                 .foregroundStyle(Color.cyTextSecondary)
             WeatherSymbol(reading: hour)
                 .font(.title3)
-                .frame(height: Spacing.xl)
-            Text(hour.temperature.formatted(Self.temperatureStyle.locale(locale)))
+                .frame(height: symbolHeight)
+            // Whole degrees with no unit, as a forecast strip quotes them: the row above has it.
+            Text("\(hour.temperature.wholeDegrees(in: temperatureUnit), format: .number.precision(.fractionLength(0)))°")
                 .font(.subheadline.weight(.semibold))
             if let chance = hour.precipitationChance {
-                Text(chance, format: .percent.precision(.fractionLength(0)))
+                let percent = chance.formatted(.percent.precision(.fractionLength(0)))
+                Text(percent)
                     .font(.caption)
                     .foregroundStyle(Color.cyTextSecondary)
+                    .accessibilityLabel("\(percent) chance of rain")
             }
         }
         .monospacedDigit()
@@ -53,18 +58,13 @@ struct HourlyForecastStrip: View {
         .accessibilityElement(children: .combine)
     }
 
+    private var temperatureUnit: UnitTemperature { UnitTemperature(forLocale: locale, usage: .weather) }
+
     private var hourStyle: Date.FormatStyle {
         var style = Date.FormatStyle.dateTime.hour().locale(locale)
         style.timeZone = timeZone
         return style
     }
-
-    /// "18°": whole degrees with no unit, as a forecast strip quotes them. The unit is the row's.
-    static let temperatureStyle = Measurement<UnitTemperature>.FormatStyle(
-        width: .narrow,
-        usage: .weather,
-        numberFormatStyle: .number.precision(.fractionLength(0))
-    )
 }
 
 // MARK: - Previews

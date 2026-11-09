@@ -70,6 +70,8 @@ struct StartSheetFeature {
 
         /// A ride's worth of forecast when there is no route to say how long the ride is.
         static let defaultForecastWindow: TimeInterval = 3 * 3600
+        /// The most the strip covers, however long the estimate: a day's riding.
+        static let maximumForecastWindow: TimeInterval = 12 * 3600
         /// WeatherKit forecasts by the hour; each entry is dated at the start of its hour.
         static let forecastHourLength: TimeInterval = 3600
 
@@ -77,7 +79,8 @@ struct StartSheetFeature {
         /// starts before the ride is expected to end.
         var forecastHours: [WeatherReading] {
             guard case let .loaded(forecast) = weather else { return [] }
-            let end = forecast.fetchedAt.addingTimeInterval(rideEstimate ?? Self.defaultForecastWindow)
+            let window = min(rideEstimate ?? Self.defaultForecastWindow, Self.maximumForecastWindow)
+            let end = forecast.fetchedAt.addingTimeInterval(window)
             return forecast.hourly.filter {
                 $0.date.addingTimeInterval(Self.forecastHourLength) > forecast.fetchedAt && $0.date < end
             }
@@ -306,22 +309,28 @@ struct StartSheetFeature {
 
     /// The weather at the rider's position (#149). Location *status*, never a request: S01 owns the
     /// location prompt, and a sheet that opens with location off still works without it.
+    ///
+    /// Only location that is off reads as `.noLocation`, whose message asks the rider to turn it on.
+    /// Location that is on but gave no fix in time (indoors, say) is `.failed`: turning on what is
+    /// already on would fix nothing.
     private func fetchWeather() -> Effect<Action> {
         .run { send in
-            guard await permissionsClient.status(.locationWhenInUse).isGranted,
-                  let position = await locationClient.currentCoordinate()
-            else {
+            guard await permissionsClient.status(.locationWhenInUse).isGranted else {
                 await send(.weatherUnavailable(.noLocation))
+                return
+            }
+            guard let position = await locationClient.currentCoordinate() else {
+                await send(.weatherUnavailable(.failed))
                 return
             }
             let coordinate = RouteCoordinate(latitude: position.latitude, longitude: position.longitude)
             do {
-                async let current = weatherClient.current(coordinate)
-                async let hourly = weatherClient.hourlyForecast(coordinate)
+                async let weather = weatherClient.forecast(coordinate)
                 async let attribution = weatherClient.attribution()
+                let fetched = try await weather
                 let forecast = StartSheetForecast(
-                    current: try await current,
-                    hourly: try await hourly,
+                    current: fetched.current,
+                    hourly: fetched.hourly,
                     attribution: try await attribution,
                     fetchedAt: date.now
                 )
@@ -336,22 +345,28 @@ struct StartSheetFeature {
     /// How long a ride on `route` will take, for how far ahead the forecast looks (#149). A failed
     /// read is no estimate, and the forecast keeps its default. A newer pick cancels an older one's
     /// read, so a slow answer for the last route can't land on this one.
+    ///
+    /// The rider's whole ride history is read only when the route's own rides can't answer.
     private func estimateRide(_ route: RouteReference?) -> Effect<Action> {
         guard let route else { return .cancel(id: CancelID.rideEstimate) }
         return .run { send in
             var estimate: TimeInterval?
             do {
                 if let summary = try await persistenceClient.fetchRouteSummary(route.id) {
-                    async let routeRides = persistenceClient.fetchRouteRides(route.id)
-                    async let recentRides = persistenceClient.fetchRides()
-                    estimate = RideDurationEstimate.seconds(
-                        routeDistanceMeters: summary.distanceMeters,
-                        routeRides: try await routeRides,
-                        recentRides: try await recentRides
+                    let distance = summary.distanceMeters
+                    estimate = try await RideDurationEstimate.fromRouteRides(
+                        routeDistanceMeters: distance,
+                        rides: persistenceClient.fetchRouteRides(route.id)
                     )
+                    if estimate == nil {
+                        estimate = try await RideDurationEstimate.fromRecentRides(
+                            routeDistanceMeters: distance,
+                            rides: persistenceClient.fetchRides()
+                        )
+                    }
                 }
             } catch {
-                estimate = nil
+                // No estimate: the forecast keeps its default.
             }
             await send(.rideEstimateLoaded(estimate))
         }
@@ -396,9 +411,10 @@ enum StartSheetWeather: Equatable {
     case loaded(StartSheetForecast)
 
     enum Unavailable: Equatable {
-        /// Location is off for the app, or no fix came back in time.
+        /// Location is off for the app: the one case the rider can fix by turning it on.
         case noLocation
-        /// WeatherKit didn't answer: offline, or the App ID lacks its App Service.
+        /// No weather to show for any other reason: location is on but gave no fix in time, or
+        /// WeatherKit didn't answer (offline, or the App ID lacks its App Service).
         case failed
     }
 }

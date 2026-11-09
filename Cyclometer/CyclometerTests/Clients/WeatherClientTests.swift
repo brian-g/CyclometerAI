@@ -98,9 +98,11 @@ struct WeatherClientTests {
         #expect(reading.precipitationChance == nil)
     }
 
-    @Test("testValue's forecast is hourly, ascending, and in range")
+    @Test("testValue's forecast is the fixture's current conditions, then hours ascending and in range")
     func testValueForecast() async throws {
-        let hours = try await WeatherClient.testValue.hourlyForecast(Self.coordinate)
+        let forecast = try await WeatherClient.testValue.forecast(Self.coordinate)
+        #expect(forecast.current == .fixture)
+        let hours = forecast.hourly
         #expect(hours == WeatherReading.fixtureHourly)
         #expect(!hours.isEmpty)
         for (earlier, later) in zip(hours, hours.dropFirst()) {
@@ -126,7 +128,7 @@ struct WeatherClientTests {
     func unavailableThrows() async {
         let client = WeatherClient.unavailable
         await #expect(throws: WeatherClientError.unavailable) { try await client.current(Self.coordinate) }
-        await #expect(throws: WeatherClientError.unavailable) { try await client.hourlyForecast(Self.coordinate) }
+        await #expect(throws: WeatherClientError.unavailable) { try await client.forecast(Self.coordinate) }
         await #expect(throws: WeatherClientError.unavailable) { try await client.attribution() }
     }
 }

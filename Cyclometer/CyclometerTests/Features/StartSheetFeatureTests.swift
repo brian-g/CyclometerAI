@@ -329,8 +329,8 @@ struct StartSheetFeatureTests {
         }
 
         await store.send(.task)
-        // No position from `LocationClient.testValue`, so no weather (#149).
-        await store.receive(.weatherUnavailable(.noLocation)) { $0.weather = .unavailable(.noLocation) }
+        // Location granted but no position from `LocationClient.testValue`, so no weather (#149).
+        await store.receive(.weatherUnavailable(.failed)) { $0.weather = .unavailable(.failed) }
 
         radarContinuation.yield(91)
         await store.receive(\.batteryUpdated) { $0.setBattery(91, for: .radar) }
@@ -424,11 +424,16 @@ struct StartSheetFeatureTests {
 
     private nonisolated static let fargo = Coordinate(latitude: 46.8772, longitude: -96.7898)
 
-    @Test("With location, the sheet shows the weather where the rider is")
+    /// One WeatherKit request for current conditions and the forecast, not one for each.
+    @Test("With location, the sheet shows the weather where the rider is, in one request")
     func weatherLoads() async {
         let asked = LockIsolated<[RouteCoordinate]>([])
         var weather = WeatherClient.testValue
-        weather.current = { coordinate in asked.withValue { $0.append(coordinate) }; return .fixture }
+        weather.forecast = { coordinate in
+            asked.withValue { $0.append(coordinate) }
+            return WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly)
+        }
+        weather.current = { _ in Issue.record("Current conditions come with the forecast"); return .fixture }
 
         let store = TestStore(initialState: StartSheetFeature.State()) {
             StartSheetFeature()
@@ -460,6 +465,20 @@ struct StartSheetFeatureTests {
         await store.send(.task)
         await store.receive(.weatherUnavailable(.noLocation)) { $0.weather = .unavailable(.noLocation) }
         #expect(!positionAsked.value)
+    }
+
+    /// Indoors, say. "Turn on Location" would ask for what is already on.
+    @Test("Location on but no fix in time shows the unavailable state, not the turn-on-location one")
+    func weatherWithoutFix() async {
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.locationClient.currentCoordinate = { nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await store.receive(.weatherUnavailable(.failed)) { $0.weather = .unavailable(.failed) }
     }
 
     @Test("A failed WeatherKit request shows the unavailable state")
@@ -495,16 +514,34 @@ struct StartSheetFeatureTests {
         #expect(state.forecastHours.isEmpty)
     }
 
+    @Test("However long the estimate, the strip covers at most twelve hours")
+    func forecastHoursCapped() {
+        let day = (0..<24).map { hour in
+            var reading = WeatherReading.fixtureHourly[0]
+            reading.date = WeatherReading.fixtureDate.addingTimeInterval(Double(hour) * 3600)
+            return reading
+        }
+        var forecast = StartSheetForecast.fixture
+        forecast.hourly = day
+        var state = StartSheetFeature.State(route: Self.route.reference)
+        state.weather = .loaded(forecast)
+        state.rideEstimate = 20 * 3600
+        // 14:40 + 12 h is 02:40: the hours from 14:00 to 02:00.
+        #expect(state.forecastHours == Array(day.prefix(13)))
+    }
+
     @Test("A route S20 seeded is estimated as the sheet opens, from the rider's rides of it")
     func estimateOnOpen() async {
         let summary = RouteSummary.previewRoutes[1]
         // 10 m/s, so the estimate is exactly the route's distance over 10.
         let rides = [RouteRideSummary(rideId: UUID(), title: "", startedAt: .distantPast, endedAt: nil,
                                       durationSeconds: 3_600, distanceMeters: 36_000)]
+        var persistence = PersistenceClient.mock(routes: [summary], ridesByRoute: [summary.id: rides])
+        persistence.fetchRides = { Issue.record("The route's own rides answered; history isn't needed"); return [] }
         let store = TestStore(initialState: StartSheetFeature.State(route: summary.reference)) {
             StartSheetFeature()
         } withDependencies: {
-            $0.persistenceClient = .mock(routes: [summary], ridesByRoute: [summary.id: rides])
+            $0.persistenceClient = persistence
         }
         store.exhaustivity = .off(showSkippedAssertions: false)
 

@@ -376,13 +376,13 @@ the screen differs only in its title, the **Next** button, and the helper text, 
   - Bike picker (Phase 2) — selecting a bike selects its sensors, so the sensor list below follows this control, and the wheel circumference follows from whichever speed sensor that bike carries. See DataModel.md §3.9
 
 - Group: Weather (#149), between Ride Setup and Sensors
-  - Current conditions: the sky's symbol and name, the temperature trailing as a small `HeroNumber`, and under them the wind as an arrow pointing downwind, the compass point it blows from, and its speed in the rider's units ("→ W 14 km/h")
-  - Hourly strip: one column per hour (time, or "Now" for the hour under way; sky; temperature; chance of rain), spread across the row's full width, or scrolling sideways when there are more than fit
-  - The strip covers the hours the ride will take. With a route chosen, that is the route's distance at the median speed of the rider's earlier rides of it, or failing those, the overall speed of their last 10 rides (`RideDurationEstimate`). With no route, or nothing to estimate from, it covers 3 hours. Choosing a route on S05.2 re-estimates
+  - Current conditions: the sky's symbol and name, the temperature trailing as a small `HeroNumber`, and under them the wind as an arrow pointing downwind, the compass point it blows from, and its speed in the rider's units ("→ W 14 km/h"), or "Calm" with no arrow when the speed rounds to 0
+  - Hourly strip: one column per hour (time, or "Now" for the hour under way; sky; whole-degree temperature with no unit; chance of rain, which VoiceOver reads as "… chance of rain"), spread across the row's full width, or scrolling sideways when there are more than fit
+  - The strip covers the hours the ride will take. With a route chosen, that is the route's distance at the median speed of the rider's earlier rides of it that covered at least 25% of the route, or failing those, the overall speed of their last 10 rides, read only when needed (`RideDurationEstimate`). With no route, or nothing to estimate from, it covers 3 hours, and never more than 12. Choosing a route on S05.2 re-estimates
   - Temperature is in the locale's weather unit, which follows iOS's Temperature setting, not the S12 metric/imperial choice: the UK reads mph and °C. Wind follows S12
   - Symbols are hierarchical in `cyTextSecondary`. Multicolor draws clouds and moons in fixed white, which vanishes on a light row. Clear and partly cloudy skies use their moon forms after dark
-  - Location is read, never requested (S01 owns the prompt). Without it the group reads "Turn on Location to see the weather here", and with WeatherKit unreachable it reads "Weather unavailable". The rest of the sheet works either way
-  - Footer, only under WeatherKit data: the Apple Weather mark (`Spacing.weatherMark` high; the service's name until it loads) and a "Legal" link on the mark's baseline (the mark is cropped to its glyphs, which have no descenders, so its bottom edge is the baseline), as WeatherKit's terms require
+  - Location is read, never requested (S01 owns the prompt). With location off the group reads "Turn on Location to see the weather here". With location on but no fix in time, or WeatherKit unreachable, it reads "Weather unavailable": turning on location would fix neither. The rest of the sheet works either way
+  - Footer, only under WeatherKit data: the Apple Weather mark (`Spacing.weatherMark` high, scaled with Dynamic Type; the service's name until it loads) and a "Legal" link on the mark's baseline (the mark is cropped to its glyphs, which have no descenders, so its bottom edge is the baseline), as WeatherKit's terms require
 
 - Group: Sensors
   - Sensor type (icon)

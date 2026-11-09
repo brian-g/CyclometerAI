@@ -25,7 +25,7 @@ struct CurrentWeatherRow: View {
             }
             Spacer()
             let temperatureUnit = UnitTemperature(forLocale: locale, usage: .weather)
-            HeroNumber(reading.temperature.converted(to: temperatureUnit).value, decimals: 0, unit: temperatureUnit.symbol)
+            HeroNumber(reading.temperature.wholeDegrees(in: temperatureUnit), decimals: 0, unit: temperatureUnit.symbol)
                 .heroNumberSize(.small)
                 .layout(.horizontal)
         }
@@ -34,7 +34,8 @@ struct CurrentWeatherRow: View {
 }
 
 /// The wind: an arrow pointing the way it blows, the compass point it comes from, and its speed in
-/// the rider's units ("W 14 km/h").
+/// the rider's units ("W 14 km/h"). "Calm" when the speed rounds to nothing in those units: an arrow
+/// and a compass point for still air would point somewhere for no reason.
 struct WindLabel: View {
     let reading: WeatherReading
     let unit: UnitSystem
@@ -42,19 +43,26 @@ struct WindLabel: View {
     var body: some View {
         let from = reading.windDirection.converted(to: .degrees).value
         let point = CompassPoint(degrees: from)
-        let speed = unit.speed(fromMPS: reading.windSpeed.converted(to: .metersPerSecond).value)
-        Label {
-            Text("\(point.abbreviation) \(speed, format: .number.precision(.fractionLength(0))) \(unit.speedLabel)")
-        } icon: {
-            // Downwind: a westerly blows toward the east.
-            Image(systemName: "arrow.up")
-                .rotationEffect(.degrees(from + Self.downwind))
+        let speed = unit.speed(fromMPS: reading.windSpeed.converted(to: .metersPerSecond).value).rounded()
+        Group {
+            if speed == 0 {
+                Text("Calm")
+                    .accessibilityLabel("Wind calm")
+            } else {
+                Label {
+                    Text("\(point.abbreviation) \(speed, format: .number.precision(.fractionLength(0))) \(unit.speedLabel)")
+                } icon: {
+                    // Downwind: a westerly blows toward the east.
+                    Image(systemName: "arrow.up")
+                        .rotationEffect(.degrees(from + Self.downwind))
+                }
+                .labelIconToTitleSpacing(Spacing.xs)
+                .accessibilityLabel("Wind from \(point.name), \(speed, format: .number.precision(.fractionLength(0))) \(unit.speedLabel)")
+            }
         }
-        .labelIconToTitleSpacing(Spacing.xs)
         .font(.subheadline)
         .foregroundStyle(Color.cyTextSecondary)
         .monospacedDigit()
-        .accessibilityLabel("Wind from \(point.name), \(speed, format: .number.precision(.fractionLength(0))) \(unit.speedLabel)")
     }
 
     /// A bearing names where the wind comes from; the arrow shows where it goes.
