@@ -78,7 +78,8 @@ extension WeatherClient {
         CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
     }
 
-    /// Logs a failed request, then rethrows it for the caller's empty state.
+    /// Logs a failed request, then rethrows it for the caller's empty state. A cancelled one (the
+    /// effect torn down, or a refresh superseding it) is rethrown unlogged: it didn't fail.
     private static func logFailure<T>(
         _ request: String,
         _ body: () async throws -> T
@@ -86,7 +87,9 @@ extension WeatherClient {
         do {
             return try await body()
         } catch {
-            logger.error("WeatherKit \(request, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            if !Task.isCancelled {
+                logger.error("WeatherKit \(request, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            }
             throw error
         }
     }
