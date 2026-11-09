@@ -111,6 +111,78 @@ final class StartSheetSnapshotTests: XCTestCase {
         )
     }
 
+    // MARK: Weather (#149)
+
+    /// The Weather group and its footer.
+    private let weatherCanvas: SwiftUISnapshotLayout = .fixed(width: 402, height: 340)
+
+    /// Pinned locale and time zone, so the hour labels and temperature unit don't follow the host.
+    private func weather(
+        _ weather: StartSheetWeather,
+        hours: [WeatherReading] = [],
+        unit: UnitSystem = .metric,
+        locale: String = "en_GB"
+    ) -> some View {
+        List {
+            StartSheetWeatherSection(weather: weather, hours: hours, unit: unit)
+        }
+        .tint(Color.cyPrimary)
+        .environment(\.locale, Locale(identifier: locale))
+        .environment(\.timeZone, TimeZone(identifier: "America/Chicago")!)
+    }
+
+    private static func loaded(_ current: WeatherReading = .fixture) -> StartSheetWeather {
+        var forecast = StartSheetForecast.fixture
+        forecast.current = current
+        return .loaded(forecast)
+    }
+
+    /// No route: the hour under way and the next three. °C, km/h, a 24-hour clock. The footer
+    /// shows the service's name, which stands in for the mark `AsyncImage` can't load here.
+    func testStartSheetWeatherMetric() {
+        assertBothSchemes(
+            weather(Self.loaded(), hours: Array(WeatherReading.fixtureHourly.prefix(4))),
+            named: "metric", layout: weatherCanvas
+        )
+    }
+
+    /// A long route: more hours than fit, so the strip runs off the trailing edge. °F, mph, a
+    /// 12-hour clock.
+    func testStartSheetWeatherImperialLongRide() {
+        assertBothSchemes(
+            weather(Self.loaded(), hours: WeatherReading.fixtureHourly, unit: .imperial, locale: "en_US"),
+            named: "imperial", layout: weatherCanvas
+        )
+    }
+
+    /// An evening ride: clear and partly cloudy skies take their moon forms. The air is still, so the
+    /// wind reads "Calm", with no arrow.
+    func testStartSheetWeatherNight() {
+        var current = WeatherReading.fixture
+        current.condition = .clear
+        current.isDaylight = false
+        current.windSpeed = Measurement(value: 0.4, unit: .kilometersPerHour)
+        let hours = WeatherReading.fixtureHourly.prefix(4).map {
+            var hour = $0
+            hour.isDaylight = false
+            return hour
+        }
+        assertBothSchemes(weather(Self.loaded(current), hours: hours), named: "night", layout: weatherCanvas)
+    }
+
+    func testStartSheetWeatherLoading() {
+        assertBothSchemes(weather(.loading), named: "loading", layout: weatherCanvas)
+    }
+
+    /// Location off for the app: says what would fix it. No attribution without WeatherKit data.
+    func testStartSheetWeatherNoLocation() {
+        assertBothSchemes(weather(.unavailable(.noLocation)), named: "noLocation", layout: weatherCanvas)
+    }
+
+    func testStartSheetWeatherFailed() {
+        assertBothSchemes(weather(.unavailable(.failed)), named: "failed", layout: weatherCanvas)
+    }
+
     // MARK: Route row (#196)
 
     /// The Route row inside a plain `NavigationLink`, so the reference carries a disclosure chevron.

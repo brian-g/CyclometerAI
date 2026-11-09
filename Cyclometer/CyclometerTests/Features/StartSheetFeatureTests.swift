@@ -329,6 +329,8 @@ struct StartSheetFeatureTests {
         }
 
         await store.send(.task)
+        // Location granted but no position from `LocationClient.testValue`, so no weather (#149).
+        await store.receive(.weatherUnavailable(.failed)) { $0.weather = .unavailable(.failed) }
 
         radarContinuation.yield(91)
         await store.receive(\.batteryUpdated) { $0.setBattery(91, for: .radar) }
@@ -394,6 +396,8 @@ struct StartSheetFeatureTests {
             $0.route = Self.route.reference
             $0.path = StackState()
         }
+        // `PersistenceClient.testValue` has no such route, so no estimate (#149).
+        await store.receive(.rideEstimateLoaded(nil))
     }
 
     /// The way back to a free ride once S20 has seeded a route.
@@ -414,5 +418,199 @@ struct StartSheetFeatureTests {
             $0.route = nil
             $0.path = StackState()
         }
+    }
+
+    // MARK: - Weather (#149)
+
+    private nonisolated static let fargo = Coordinate(latitude: 46.8772, longitude: -96.7898)
+
+    /// One WeatherKit request for current conditions and the forecast, not one for each.
+    @Test("With location, the sheet shows the weather where the rider is, in one request")
+    func weatherLoads() async {
+        let asked = LockIsolated<[RouteCoordinate]>([])
+        var weather = WeatherClient.testValue
+        weather.forecast = { coordinate in
+            asked.withValue { $0.append(coordinate) }
+            return WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly)
+        }
+        weather.current = { _ in Issue.record("Current conditions come with the forecast"); return .fixture }
+
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.date = .constant(WeatherReading.fixtureNow)
+            $0.locationClient.currentCoordinate = { Self.fargo }
+            $0.weatherClient = weather
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await store.receive(.weatherLoaded(StartSheetForecast.fixture)) { $0.weather = .loaded(StartSheetForecast.fixture) }
+        #expect(asked.value == [RouteCoordinate(latitude: Self.fargo.latitude, longitude: Self.fargo.longitude)])
+    }
+
+    /// S01 owns the location prompt; this sheet only reads the status.
+    @Test("With location off, the sheet says so and never asks for a position")
+    func weatherWithoutLocation() async {
+        let positionAsked = LockIsolated(false)
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.permissionsClient.status = { _ in .denied }
+            $0.permissionsClient.request = { _ in Issue.record("The sheet must not raise a location prompt"); return .denied }
+            $0.locationClient.currentCoordinate = { positionAsked.setValue(true); return Self.fargo }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await store.receive(.weatherUnavailable(.noLocation)) { $0.weather = .unavailable(.noLocation) }
+        #expect(!positionAsked.value)
+    }
+
+    /// Indoors, say. "Turn on Location" would ask for what is already on.
+    @Test("Location on but no fix in time shows the unavailable state, not the turn-on-location one")
+    func weatherWithoutFix() async {
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.locationClient.currentCoordinate = { nil }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await store.receive(.weatherUnavailable(.failed)) { $0.weather = .unavailable(.failed) }
+    }
+
+    @Test("A failed WeatherKit request shows the unavailable state")
+    func weatherFails() async {
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.locationClient.currentCoordinate = { Self.fargo }
+            $0.weatherClient = .unavailable
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await store.receive(.weatherUnavailable(.failed)) { $0.weather = .unavailable(.failed) }
+    }
+
+    @Test("With no route, the strip covers the hour under way and the next three hours")
+    func forecastHoursDefault() {
+        var state = StartSheetFeature.State()
+        state.weather = .loaded(StartSheetForecast.fixture)
+        // 14:40: 14:00, 15:00, 16:00 and 17:00 all start before 17:40.
+        #expect(state.forecastHours == Array(WeatherReading.fixtureHourly.prefix(4)))
+    }
+
+    @Test("With a route, the strip covers the ride's estimated time")
+    func forecastHoursForRoute() {
+        var state = StartSheetFeature.State(route: Self.route.reference)
+        state.weather = .loaded(StartSheetForecast.fixture)
+        state.rideEstimate = 5.5 * 3600
+        // 14:40 + 5 h 30 min is 20:10: the hours from 14:00 to 20:00.
+        #expect(state.forecastHours == Array(WeatherReading.fixtureHourly.prefix(7)))
+        state.weather = .unavailable(.failed)
+        #expect(state.forecastHours.isEmpty)
+    }
+
+    @Test("However long the estimate, the strip covers at most twelve hours")
+    func forecastHoursCapped() {
+        let day = (0..<24).map { hour in
+            var reading = WeatherReading.fixtureHourly[0]
+            reading.date = WeatherReading.fixtureDate.addingTimeInterval(Double(hour) * 3600)
+            return reading
+        }
+        var forecast = StartSheetForecast.fixture
+        forecast.hourly = day
+        var state = StartSheetFeature.State(route: Self.route.reference)
+        state.weather = .loaded(forecast)
+        state.rideEstimate = 20 * 3600
+        // 14:40 + 12 h is 02:40: the hours from 14:00 to 02:00.
+        #expect(state.forecastHours == Array(day.prefix(13)))
+    }
+
+    @Test("A route S20 seeded is estimated as the sheet opens, from the rider's rides of it")
+    func estimateOnOpen() async {
+        let summary = RouteSummary.previewRoutes[1]
+        // 10 m/s, so the estimate is exactly the route's distance over 10.
+        let rides = [RouteRideSummary(rideId: UUID(), title: "", startedAt: .distantPast, endedAt: nil,
+                                      durationSeconds: 3_600, distanceMeters: 36_000)]
+        var persistence = PersistenceClient.mock(routes: [summary], ridesByRoute: [summary.id: rides])
+        persistence.fetchRides = { Issue.record("The route's own rides answered; history isn't needed"); return [] }
+        let store = TestStore(initialState: StartSheetFeature.State(route: summary.reference)) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.persistenceClient = persistence
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await store.receive(.rideEstimateLoaded(summary.distanceMeters / 10)) { $0.rideEstimate = summary.distanceMeters / 10 }
+    }
+
+    @Test("Picking another route clears the estimate until the new one lands; None leaves it cleared")
+    func estimateFollowsTheRoute() async {
+        let summary = RouteSummary.previewRoutes[1]
+        let recent = [RideListSummary(id: UUID(), title: "", startedAt: .distantPast,
+                                      distanceMeters: 18_000, durationSeconds: 3_600)]
+        var initial = StartSheetFeature.State()
+        initial.rideEstimate = 9_999
+        let store = TestStore(initialState: initial) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.persistenceClient = .mock(rides: recent, routes: [summary])
+        }
+
+        await store.send(.path(.push(id: 0, state: .routePicker(RoutePickerFeature.State())))) {
+            $0.path[id: 0] = .routePicker(RoutePickerFeature.State())
+        }
+        await store.send(.path(.element(id: 0, action: .routePicker(.delegate(.routeSelected(summary.reference)))))) {
+            $0.route = summary.reference
+            $0.path = StackState()
+            $0.rideEstimate = nil
+        }
+        // No rides of this route yet: the rider's recent speed, 5 m/s.
+        await store.receive(.rideEstimateLoaded(summary.distanceMeters / 5)) { $0.rideEstimate = summary.distanceMeters / 5 }
+
+        await store.send(.path(.push(id: 1, state: .routePicker(RoutePickerFeature.State(selection: summary.reference))))) {
+            $0.path[id: 1] = .routePicker(RoutePickerFeature.State(selection: summary.reference))
+        }
+        await store.send(.path(.element(id: 1, action: .routePicker(.delegate(.routeSelected(nil)))))) {
+            $0.route = nil
+            $0.path = StackState()
+            $0.rideEstimate = nil
+        }
+    }
+
+    @Test("A slow estimate for the last route can't land on the newly picked one")
+    func staleEstimateCancelled() async {
+        let first = RouteSummary.previewRoutes[0]
+        let second = RouteSummary.previewRoutes[1]
+        let gate = AsyncStream<Void>.makeStream()
+        var persistence = PersistenceClient.mock(routes: [first, second])
+        persistence.fetchRouteSummary = { id in
+            if id == first.id { for await _ in gate.stream { break } }
+            return id == first.id ? first : second
+        }
+        persistence.fetchRides = {
+            [RideListSummary(id: UUID(), title: "", startedAt: .distantPast, distanceMeters: 10_000, durationSeconds: 1_000)]
+        }
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.persistenceClient = persistence
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.path(.push(id: 0, state: .routePicker(RoutePickerFeature.State()))))
+        await store.send(.path(.element(id: 0, action: .routePicker(.delegate(.routeSelected(first.reference))))))
+        await store.send(.path(.push(id: 1, state: .routePicker(RoutePickerFeature.State()))))
+        await store.send(.path(.element(id: 1, action: .routePicker(.delegate(.routeSelected(second.reference))))))
+        // 10 m/s from the recent ride, over the second route.
+        await store.receive(.rideEstimateLoaded(second.distanceMeters / 10)) { $0.rideEstimate = second.distanceMeters / 10 }
+        gate.continuation.yield()
+        await store.finish()
+        #expect(store.state.rideEstimate == second.distanceMeters / 10)
     }
 }

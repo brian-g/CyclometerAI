@@ -16,9 +16,17 @@ private let logger = Logger.cyclometer(.network)
 /// show their empty state on a throw.
 struct WeatherClient: Sendable {
     var current: @Sendable (RouteCoordinate) async throws -> WeatherReading
-    /// WeatherKit's default window, hourly from the current hour, in ascending date order.
-    var hourlyForecast: @Sendable (RouteCoordinate) async throws -> [WeatherReading]
+    /// Current conditions and the hourly forecast in one WeatherKit request, for a screen that
+    /// shows both (S05.1): one call against the quota rather than two.
+    var forecast: @Sendable (RouteCoordinate) async throws -> WeatherForecast
     var attribution: @Sendable () async throws -> WeatherSourceAttribution
+}
+
+/// `WeatherClient.forecast`'s answer.
+struct WeatherForecast: Equatable, Sendable {
+    var current: WeatherReading
+    /// WeatherKit's default window, hourly from the current hour, in ascending date order.
+    var hourly: [WeatherReading]
 }
 
 enum WeatherClientError: Error, Equatable {
@@ -27,17 +35,19 @@ enum WeatherClientError: Error, Equatable {
 }
 
 extension WeatherClient: DependencyKey {
-    static let liveValue = WeatherClient(
+    static let liveValue: WeatherClient = WeatherClient(
         current: { coordinate in
             try await logFailure("current conditions") {
                 let current = try await WeatherService.shared.weather(for: location(coordinate), including: .current)
                 return WeatherReading(current)
             }
         },
-        hourlyForecast: { coordinate in
-            try await logFailure("hourly forecast") {
-                let hourly = try await WeatherService.shared.weather(for: location(coordinate), including: .hourly)
-                return hourly.forecast.map(WeatherReading.init)
+        forecast: { coordinate in
+            try await logFailure("forecast") {
+                let (current, hourly) = try await WeatherService.shared.weather(
+                    for: location(coordinate), including: .current, .hourly
+                )
+                return WeatherForecast(current: WeatherReading(current), hourly: hourly.forecast.map(WeatherReading.init))
             }
         },
         attribution: {
@@ -49,17 +59,17 @@ extension WeatherClient: DependencyKey {
 
     /// Fixture data, so a feature built on weather is testable without the network or the
     /// entitlement. A test of the failure path overrides with `unavailable`.
-    static let testValue = WeatherClient(
+    static let testValue: WeatherClient = WeatherClient(
         current: { _ in .fixture },
-        hourlyForecast: { _ in WeatherReading.fixtureHourly },
+        forecast: { _ in WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly) },
         attribution: { .fixture }
     )
 
-    static let previewValue = testValue
+    static let previewValue: WeatherClient = testValue
 
     static let unavailable = WeatherClient(
         current: { _ in throw WeatherClientError.unavailable },
-        hourlyForecast: { _ in throw WeatherClientError.unavailable },
+        forecast: { _ in throw WeatherClientError.unavailable },
         attribution: { throw WeatherClientError.unavailable }
     )
 }
@@ -104,7 +114,8 @@ private extension WeatherReading {
             windDirection: current.wind.direction,
             humidity: current.humidity,
             condition: WeatherCondition(current.condition, cloudCover: current.cloudCover),
-            precipitationChance: nil
+            precipitationChance: nil,
+            isDaylight: current.isDaylight
         )
     }
 
@@ -116,7 +127,8 @@ private extension WeatherReading {
             windDirection: hour.wind.direction,
             humidity: hour.humidity,
             condition: WeatherCondition(hour.condition, cloudCover: hour.cloudCover),
-            precipitationChance: hour.precipitationChance
+            precipitationChance: hour.precipitationChance,
+            isDaylight: hour.isDaylight
         )
     }
 }
