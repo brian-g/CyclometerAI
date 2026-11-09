@@ -935,3 +935,19 @@ other terrain outputs rely on (punchy, kicks): the 300 m window fixed the max gr
 **Why.** TCA's observation tracks the fields a view's body reads through the store. The sheet's body read only `coloring` and `legend` (for the legend). The basemap and layer toggles were read from a copy inside the child, so changing them didn't redraw the sheet. A coloring change did redraw it, and the redraw picked up the basemap that had been set earlier.
 
 **Rule.** In a store-backed view, read each field from `store` in the body that builds the child, and pass plain values down. Alternatively, pass the store itself. Never pass `store.state` or another snapshot of it.
+
+---
+
+## A row of values aligns on its last baseline, every time (2026-11-09, #149)
+
+**What happened.** The Start sheet's current-weather row put a small `HeroNumber` beside a two-line label
+(sky name over the wind) with `HStack(alignment: .firstTextBaseline)`. The number sat on the top line and
+rode high. Brian: "the hero number is too high."
+
+**Why I was wrong.** The rule was already written down (memory `ux-layout-rules`, UX.md §Alignment): values
+side by side use `.lastTextBaseline`. I reached for `.firstTextBaseline` out of habit from a single-line row,
+and never re-checked the rule once the leading side became two lines.
+
+**Rule.** Any row with a number beside text uses `.lastTextBaseline`, and when one side is multi-line,
+check the snapshot to see which line the number lands on. Measure digit bottoms in pixels rather than
+trusting the guide: `HeroNumber` corrects its own baselines, but a bespoke sibling might not.

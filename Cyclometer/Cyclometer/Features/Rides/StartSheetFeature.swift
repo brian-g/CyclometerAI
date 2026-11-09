@@ -3,8 +3,8 @@ import Foundation
 import SwiftUI
 
 /// S05.1 — Start Ride sheet. Global (app-level) setup screen: the ride's route — which S05.2,
-/// pushed on the sheet's own stack, changes — the Phase 2 bike placeholder, and a live Sensors
-/// group. Presented by `AppFeature` via `@Presents`; the "Start Ride" CTA bubbles up as
+/// pushed on the sheet's own stack, changes — the Phase 2 bike placeholder, the weather where the
+/// rider is over the hours the ride will take (#149), and a live Sensors group. Presented by `AppFeature` via `@Presents`; the "Start Ride" CTA bubbles up as
 /// `.delegate(.startRide)`, carrying the route, for the parent to begin the ride.
 ///
 /// The CTA writes the ride's `Ride` row before that delegate is sent (#344). A ride without its
@@ -20,6 +20,11 @@ struct StartSheetFeature {
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.uuid) var uuid
     @Dependency(\.date) var date
+    @Dependency(\.weatherClient) var weatherClient
+    @Dependency(\.locationClient) var locationClient
+    @Dependency(\.permissionsClient) var permissionsClient
+
+    private enum CancelID { case rideEstimate }
 
     @ObservableState
     struct State: Equatable {
@@ -51,6 +56,32 @@ struct StartSheetFeature {
         var isStarting: Bool { pendingRideId != nil }
         /// The row couldn't be written (#344).
         @Presents var alert: AlertState<Action.Alert>?
+
+        /// The rider's units for the wind.
+        var unitSystem: UnitSystem { preferences.preferredUnit }
+
+        /// The weather where the rider is (#149), fetched once as the sheet opens.
+        var weather: StartSheetWeather = .loading
+
+        /// How long a ride on the chosen route will take, from the rider's own rides
+        /// (`RideDurationEstimate`). Nil with no route, or nothing to estimate from, and then the
+        /// forecast covers `defaultForecastWindow`.
+        var rideEstimate: TimeInterval?
+
+        /// A ride's worth of forecast when there is no route to say how long the ride is.
+        static let defaultForecastWindow: TimeInterval = 3 * 3600
+        /// WeatherKit forecasts by the hour; each entry is dated at the start of its hour.
+        static let forecastHourLength: TimeInterval = 3600
+
+        /// The strip's hours: the one under way when the weather was fetched, then each hour that
+        /// starts before the ride is expected to end.
+        var forecastHours: [WeatherReading] {
+            guard case let .loaded(forecast) = weather else { return [] }
+            let end = forecast.fetchedAt.addingTimeInterval(rideEstimate ?? Self.defaultForecastWindow)
+            return forecast.hourly.filter {
+                $0.date.addingTimeInterval(Self.forecastHourLength) > forecast.fetchedAt && $0.date < end
+            }
+        }
 
         /// What the Route row pushes: S05.2, opened on the sheet's current answer so that answer is the
         /// one checked. Built here rather than in the view, so a test holds it to that.
@@ -93,6 +124,9 @@ struct StartSheetFeature {
         case rideCreated(rideId: UUID, route: RouteReference?)
         case rideCreationFailed
         case turnByTurnChanged(Bool)
+        case weatherLoaded(StartSheetForecast)
+        case weatherUnavailable(StartSheetWeather.Unavailable)
+        case rideEstimateLoaded(TimeInterval?)
         case alert(PresentationAction<Alert>)
         case path(StackActionOf<Path>)
         case delegate(Delegate)
@@ -129,6 +163,9 @@ struct StartSheetFeature {
                 // process. Only the owner of the presentation knows both ends of the
                 // lifetime.
                 return .merge(
+                    fetchWeather(),
+                    // A route S20's "Use This Route" opened the sheet on.
+                    estimateRide(state.route),
                     .run { send in
                         for await status in variaRadarClient.connectionState() {
                             await send(.radarStatusUpdated(status))
@@ -243,6 +280,20 @@ struct StartSheetFeature {
                 // navigation land in the same pass — and a test can assert both.
                 state.route = route
                 state.path.pop(from: id)
+                // The last route's estimate is no answer for this one: the default until it lands.
+                state.rideEstimate = nil
+                return estimateRide(route)
+
+            case .weatherLoaded(let forecast):
+                state.weather = .loaded(forecast)
+                return .none
+
+            case .weatherUnavailable(let reason):
+                state.weather = .unavailable(reason)
+                return .none
+
+            case .rideEstimateLoaded(let estimate):
+                state.rideEstimate = estimate
                 return .none
 
             case .path, .delegate, .alert:
@@ -251,6 +302,60 @@ struct StartSheetFeature {
         }
         .ifLet(\.$alert, action: \.alert)
         .forEach(\.path, action: \.path)
+    }
+
+    /// The weather at the rider's position (#149). Location *status*, never a request: S01 owns the
+    /// location prompt, and a sheet that opens with location off still works without it.
+    private func fetchWeather() -> Effect<Action> {
+        .run { send in
+            guard await permissionsClient.status(.locationWhenInUse).isGranted,
+                  let position = await locationClient.currentCoordinate()
+            else {
+                await send(.weatherUnavailable(.noLocation))
+                return
+            }
+            let coordinate = RouteCoordinate(latitude: position.latitude, longitude: position.longitude)
+            do {
+                async let current = weatherClient.current(coordinate)
+                async let hourly = weatherClient.hourlyForecast(coordinate)
+                async let attribution = weatherClient.attribution()
+                let forecast = StartSheetForecast(
+                    current: try await current,
+                    hourly: try await hourly,
+                    attribution: try await attribution,
+                    fetchedAt: date.now
+                )
+                await send(.weatherLoaded(forecast))
+            } catch {
+                // Logged in WeatherClient.
+                await send(.weatherUnavailable(.failed))
+            }
+        }
+    }
+
+    /// How long a ride on `route` will take, for how far ahead the forecast looks (#149). A failed
+    /// read is no estimate, and the forecast keeps its default. A newer pick cancels an older one's
+    /// read, so a slow answer for the last route can't land on this one.
+    private func estimateRide(_ route: RouteReference?) -> Effect<Action> {
+        guard let route else { return .cancel(id: CancelID.rideEstimate) }
+        return .run { send in
+            var estimate: TimeInterval?
+            do {
+                if let summary = try await persistenceClient.fetchRouteSummary(route.id) {
+                    async let routeRides = persistenceClient.fetchRouteRides(route.id)
+                    async let recentRides = persistenceClient.fetchRides()
+                    estimate = RideDurationEstimate.seconds(
+                        routeDistanceMeters: summary.distanceMeters,
+                        routeRides: try await routeRides,
+                        recentRides: try await recentRides
+                    )
+                }
+            } catch {
+                estimate = nil
+            }
+            await send(.rideEstimateLoaded(estimate))
+        }
+        .cancellable(id: CancelID.rideEstimate, cancelInFlight: true)
     }
 
     // Map the shared client lifecycle onto the sheet's two-state badge (UX.md §S05.1).
@@ -282,6 +387,30 @@ extension StartSheetFeature.State {
         guard let index = sensors.firstIndex(where: { $0.kind == kind }) else { return }
         sensors[index].batteryPercent = percent
     }
+}
+
+/// The Start sheet's Weather group (#149).
+enum StartSheetWeather: Equatable {
+    case loading
+    case unavailable(Unavailable)
+    case loaded(StartSheetForecast)
+
+    enum Unavailable: Equatable {
+        /// Location is off for the app, or no fix came back in time.
+        case noLocation
+        /// WeatherKit didn't answer: offline, or the App ID lacks its App Service.
+        case failed
+    }
+}
+
+/// What the Weather group shows once WeatherKit has answered.
+struct StartSheetForecast: Equatable {
+    var current: WeatherReading
+    /// WeatherKit's whole forecast; `StartSheetFeature.State.forecastHours` picks the ride's hours.
+    var hourly: [WeatherReading]
+    var attribution: WeatherSourceAttribution
+    /// When it was fetched, which is the strip's "Now".
+    var fetchedAt: Date
 }
 
 /// A single sensor row in the Start sheet's Sensors group.

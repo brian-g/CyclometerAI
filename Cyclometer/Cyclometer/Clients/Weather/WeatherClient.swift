@@ -27,7 +27,7 @@ enum WeatherClientError: Error, Equatable {
 }
 
 extension WeatherClient: DependencyKey {
-    static let liveValue = WeatherClient(
+    static let liveValue: WeatherClient = WeatherClient(
         current: { coordinate in
             try await logFailure("current conditions") {
                 let current = try await WeatherService.shared.weather(for: location(coordinate), including: .current)
@@ -49,13 +49,13 @@ extension WeatherClient: DependencyKey {
 
     /// Fixture data, so a feature built on weather is testable without the network or the
     /// entitlement. A test of the failure path overrides with `unavailable`.
-    static let testValue = WeatherClient(
+    static let testValue: WeatherClient = WeatherClient(
         current: { _ in .fixture },
         hourlyForecast: { _ in WeatherReading.fixtureHourly },
         attribution: { .fixture }
     )
 
-    static let previewValue = testValue
+    static let previewValue: WeatherClient = testValue
 
     static let unavailable = WeatherClient(
         current: { _ in throw WeatherClientError.unavailable },
@@ -104,7 +104,8 @@ private extension WeatherReading {
             windDirection: current.wind.direction,
             humidity: current.humidity,
             condition: WeatherCondition(current.condition, cloudCover: current.cloudCover),
-            precipitationChance: nil
+            precipitationChance: nil,
+            isDaylight: current.isDaylight
         )
     }
 
@@ -116,7 +117,8 @@ private extension WeatherReading {
             windDirection: hour.wind.direction,
             humidity: hour.humidity,
             condition: WeatherCondition(hour.condition, cloudCover: hour.cloudCover),
-            precipitationChance: hour.precipitationChance
+            precipitationChance: hour.precipitationChance,
+            isDaylight: hour.isDaylight
         )
     }
 }

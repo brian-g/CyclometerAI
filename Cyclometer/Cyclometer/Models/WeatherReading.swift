@@ -20,6 +20,8 @@ struct WeatherReading: Equatable, Sendable {
     /// Chance of precipitation, 0…1. Forecast hours only: WeatherKit doesn't give one for
     /// current conditions, so there it is `nil`.
     var precipitationChance: Double?
+    /// Whether the sun is up then, so a clear night shows a moon rather than a sun.
+    var isDaylight: Bool
 }
 
 /// What WeatherKit's terms ask for wherever its data is shown: the Apple Weather mark and a link
@@ -86,8 +88,9 @@ extension WeatherCondition {
 // MARK: - Fixtures
 
 extension WeatherReading {
-    /// One fixed instant, so anything rendered from the fixtures is the same on every run.
-    static let fixtureDate = Date(timeIntervalSince1970: 1_790_000_000)
+    /// One fixed instant, so anything rendered from the fixtures is the same on every run. On the
+    /// hour (2026-09-21 14:00 UTC), as WeatherKit's forecast hours are.
+    static let fixtureDate = Date(timeIntervalSince1970: 1_789_999_200)
 
     /// `WeatherClient.testValue`'s current conditions: a mild, breezy, partly cloudy day.
     static let fixture = WeatherReading(
@@ -97,7 +100,8 @@ extension WeatherReading {
         windDirection: Measurement(value: 270, unit: .degrees),
         humidity: 0.62,
         condition: .partlyCloudy,
-        precipitationChance: nil
+        precipitationChance: nil,
+        isDaylight: true
     )
 
     /// `WeatherClient.testValue`'s forecast: twelve hours from `fixtureDate`, warming then
@@ -112,7 +116,8 @@ extension WeatherReading {
             windDirection: Measurement(value: 270 - 90 * progress, unit: .degrees),
             humidity: 0.62 + 0.3 * progress,
             condition: progress < 0.5 ? .partlyCloudy : progress < 0.8 ? .cloudy : .rain,
-            precipitationChance: 0.1 + 0.6 * progress
+            precipitationChance: 0.1 + 0.6 * progress,
+            isDaylight: true
         )
     }
 }

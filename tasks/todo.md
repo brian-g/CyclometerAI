@@ -2244,3 +2244,20 @@ Plan: `~/.claude/plans/wiggly-brewing-dawn.md`. No UI. Attribution is in scope; 
 - [x] Build; `WeatherClientTests` 39/39 (34 mapping cases); full `CyclometerTests` 2619 passed, 0 failed
 
 **Review:** a data layer only, with no caller yet. Code and issue diverge in one place: the issue asked for `@DependencyClient`, but every client in the repo is a plain struct + `DependencyKey`, so this follows `GeocodingClient`. Only the pure condition mapping and the fixtures are unit-tested. The live WeatherKit path waits for the App Service on the App ID and first runs end to end with #149.
+
+---
+
+## #149 — Start Sheet forecast weather (S05.1)
+
+Plan: `~/.claude/plans/wiggly-brewing-dawn.md`. Decided this session: current row + hourly strip, between Ride Setup and Sensors; strip covers the route's estimated time (past rides of the route → recent average speed → 3 h), 3 h with no route.
+
+- [x] Branch `feat/149-start-sheet-weather`
+- [x] `isDaylight` on `WeatherReading`; `RideDurationEstimate`, `CompassPoint`, condition symbols + tests. Temperature uses the locale's `.weather` unit, not `UnitSystem` (UK: mph but °C)
+- [x] `StartSheetFeature`: weather + route-estimate effects, `forecastHours`; reducer tests (existing `.task` tests get the extra receive)
+- [x] `UI/Components/Weather/` (`CurrentWeatherRow`, `HourlyForecastStrip`, `WeatherAttributionFooter`), sheet section, previews
+- [x] Snapshots recorded, PNGs checked by eye, re-run green. First recording caught multicolor symbols vanishing in light mode → hierarchical `cyTextSecondary` (Brian's pick)
+- [x] In-app privacy text, PRD §12 + changelog, UX §S05.1
+- [x] Brian's review: temperature as a small `HeroNumber` (unit stays lowercase "°c", his call); strip fills the row and scrolls only when it must (`ViewThatFits`); "Legal" on the mark's baseline (mark checked tight-cropped); hero on the row's last baseline (lesson recorded)
+- [x] Full `CyclometerTests`: 2661 passed, 0 failed; commit + PR
+
+**Review:** the first screen to call WeatherKit. The live path, the real mark loading and the App Service on the App ID are still unchecked on a device: tests run on the fixture client, and `AsyncImage` can't load in a snapshot. The route-time estimate is built from moving time, so it leaves out stops.
