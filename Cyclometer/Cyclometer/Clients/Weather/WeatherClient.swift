@@ -103,7 +103,7 @@ private extension WeatherReading {
             windSpeed: current.wind.speed,
             windDirection: current.wind.direction,
             humidity: current.humidity,
-            condition: WeatherCondition(current.condition),
+            condition: WeatherCondition(current.condition, cloudCover: current.cloudCover),
             precipitationChance: nil
         )
     }
@@ -115,7 +115,7 @@ private extension WeatherReading {
             windSpeed: hour.wind.speed,
             windDirection: hour.wind.direction,
             humidity: hour.humidity,
-            condition: WeatherCondition(hour.condition),
+            condition: WeatherCondition(hour.condition, cloudCover: hour.cloudCover),
             precipitationChance: hour.precipitationChance
         )
     }

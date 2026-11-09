@@ -10,8 +10,9 @@ struct WeatherClientTests {
 
     // MARK: - Condition mapping
 
-    /// Every WeatherKit condition, pinned to the app condition it folds into. Keyed by WeatherKit's
-    /// raw value so a case a later SDK adds has no entry and fails `everyConditionIsPinned`.
+    /// Every WeatherKit condition, pinned to the app condition it folds into, or `nil` where the
+    /// sky comes from cloud cover instead. Keyed by WeatherKit's raw value so a case a later SDK
+    /// adds has no entry and fails `everyConditionIsPinned`.
     private static let expected: [String: Cyclometer.WeatherCondition?] = [
         WeatherKit.WeatherCondition.clear.rawValue: .clear,
         WeatherKit.WeatherCondition.mostlyClear.rawValue: .clear,
@@ -49,11 +50,38 @@ struct WeatherClientTests {
         WeatherKit.WeatherCondition.breezy.rawValue: nil,
     ]
 
-    @Test("Each WeatherKit condition maps to its pinned app condition",
+    /// Cloud cover across all three okta bands, so a sky condition is shown to ignore it and a
+    /// sky-less one to follow it.
+    private static let cloudCovers = [0.0, 0.5, 1.0]
+
+    @Test("Each WeatherKit condition maps to its pinned app condition, or to cloud cover",
           arguments: WeatherKit.WeatherCondition.allCases)
     func conditionMapping(_ condition: WeatherKit.WeatherCondition) throws {
         let pinned = try #require(Self.expected[condition.rawValue], "\(condition) has no pinned mapping")
-        #expect(Cyclometer.WeatherCondition(condition) == pinned)
+        for cloudCover in Self.cloudCovers {
+            let expected = pinned ?? Cyclometer.WeatherCondition(cloudCover: cloudCover)
+            #expect(Cyclometer.WeatherCondition(condition, cloudCover: cloudCover) == expected)
+        }
+    }
+
+    /// Each band's edge oktas, as cloud cover.
+    private static let oktaBandEdges: [(Double, Cyclometer.WeatherCondition)] = [
+        (0.0, .clear),
+        (0.25, .clear),
+        (0.375, .partlyCloudy),
+        (0.625, .partlyCloudy),
+        (0.75, .cloudy),
+        (1.0, .cloudy),
+    ]
+
+    @Test("Cloud cover folds into the sky in okta bands", arguments: oktaBandEdges)
+    func cloudCoverBands(_ cloudCover: Double, _ expected: Cyclometer.WeatherCondition) {
+        #expect(Cyclometer.WeatherCondition(cloudCover: cloudCover) == expected)
+    }
+
+    @Test("A breezy clear day keeps its sky")
+    func breezyClearDay() {
+        #expect(Cyclometer.WeatherCondition(.breezy, cloudCover: 0.1) == .clear)
     }
 
     @Test("Every WeatherKit condition is pinned, and nothing else is")

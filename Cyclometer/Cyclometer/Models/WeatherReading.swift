@@ -15,7 +15,7 @@ struct WeatherReading: Equatable, Sendable {
     var windDirection: Measurement<UnitAngle>
     /// Relative humidity, 0…1.
     var humidity: Double
-    /// `nil` when WeatherKit's condition says nothing about the sky (see `WeatherCondition.init`).
+    /// `nil` only for a condition a later SDK adds (see `WeatherCondition.init`).
     var condition: WeatherCondition?
     /// Chance of precipitation, 0…1. Forecast hours only: WeatherKit doesn't give one for
     /// current conditions, so there it is `nil`.
@@ -35,10 +35,10 @@ struct WeatherSourceAttribution: Equatable, Sendable {
 
 extension WeatherCondition {
     /// Folds WeatherKit's conditions into the app's nine, which are persisted on `Ride` and
-    /// unchanged by this. `nil` for the conditions that describe temperature or wind (both of
-    /// which a reading already carries) and say nothing about the sky, and for any case a later
-    /// SDK adds.
-    init?(_ condition: WeatherKit.WeatherCondition) {
+    /// unchanged by this. The conditions that describe temperature or wind (both of which a
+    /// reading already carries) say nothing about the sky, so for those the sky comes from
+    /// `cloudCover` (0…1) instead. `nil` only for a case a later SDK adds.
+    init?(_ condition: WeatherKit.WeatherCondition, cloudCover: Double) {
         switch condition {
         case .clear, .mostlyClear:
             self = .clear
@@ -60,11 +60,27 @@ extension WeatherCondition {
              .tropicalStorm, .hurricane, .hail:
             self = .thunderstorm
         case .hot, .frigid, .windy, .breezy:
-            return nil
+            self.init(cloudCover: cloudCover)
         @unknown default:
             return nil
         }
     }
+
+    /// The sky from cloud cover alone, in the oktas (eighths of sky) the National Weather Service
+    /// uses: up to 2/8 is clear or mostly clear, 3–5/8 partly cloudy, 6/8 and over mostly cloudy
+    /// or cloudy. Those groups fold the same way as WeatherKit's sky conditions above.
+    init(cloudCover: Double) {
+        switch cloudCover * Self.oktasPerSky {
+        case ..<Self.clearOktasBelow: self = .clear
+        case ..<Self.partlyCloudyOktasBelow: self = .partlyCloudy
+        default: self = .cloudy
+        }
+    }
+
+    private static let oktasPerSky = 8.0
+    /// Halfway between the bands, since cloud cover is continuous.
+    private static let clearOktasBelow = 2.5
+    private static let partlyCloudyOktasBelow = 5.5
 }
 
 // MARK: - Fixtures
