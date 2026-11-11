@@ -442,8 +442,7 @@ struct NavigationFeature {
             longitude: update.coordinate.longitude,
             elevationMeters: nil
         )
-        // CoreLocation's course is -1 when it has none.
-        let course = update.heading >= 0 && update.speed >= Self.courseSpeedFloorMPS ? update.heading : nil
+        let course = update.course
 
         guard let progress = state.progressMeters, state.snappedIndex != nil, !state.isOffRoute else {
             return RouteGeometry.passes(
@@ -548,6 +547,15 @@ struct NavigationFeature {
 /// turns — worked out once when the ride loads it, so no fix pays for any of it.
 ///
 /// One value rather than separate fields, because none of them means anything without the others.
+extension LocationUpdate {
+    /// The direction of travel, degrees from true north, when the fix has one that means something:
+    /// nil for CoreLocation's -1 ("no course") and below `NavigationFeature.courseSpeedFloorMPS`,
+    /// where it is noise. Route matching and W10's wind arrow (#150) both read it.
+    var course: Double? {
+        heading >= 0 && speed >= NavigationFeature.courseSpeedFloorMPS ? heading : nil
+    }
+}
+
 struct NavigationRoute: Equatable, Sendable {
     let coordinates: [RouteCoordinate]
     let cumulativeDistances: [Double]

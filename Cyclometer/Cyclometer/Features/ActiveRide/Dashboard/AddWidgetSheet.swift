@@ -235,6 +235,10 @@ extension ActiveRideFeature.State {
                 kilocalories: Double(minute) * 412 / 39, method: .heartRate
             )
         }
+        // W10 (#150): the fixture's westerly on a rider heading east, a tailwind. No hour in its
+        // rain window reaches 50%, so the card shows the wind.
+        state.weather.forecast = .fixture
+        state.weather.course = 90
         return state
     }
 }

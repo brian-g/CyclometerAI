@@ -318,15 +318,7 @@ struct StartSheetFeature {
             }
             let coordinate = RouteCoordinate(latitude: position.latitude, longitude: position.longitude)
             do {
-                async let weather = weatherClient.forecast(coordinate)
-                async let attribution = weatherClient.attribution()
-                let fetched = try await weather
-                let forecast = AttributedForecast(
-                    current: fetched.current,
-                    hourly: fetched.hourly,
-                    attribution: try await attribution,
-                    fetchedAt: date.now
-                )
+                let forecast = try await weatherClient.attributedForecast(coordinate, date: date)
                 await send(.weatherLoaded(forecast))
             } catch {
                 // Logged in WeatherClient.

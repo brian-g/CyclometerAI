@@ -797,7 +797,7 @@ caption in the row (OQ2/OQ3).
 - [x] `ActiveRideFeature`: `hasStoppedWhilePaused`, `.speed` guard, cleared in `resume`
 - [x] UX.md §S12, DataModel.md §3.6
 - [x] App builds
-- [x] Brian runs it on device — not yet; no ride at 9 PM. Walking (≥ 1.0 m/s) exercises the same path
+- [ ] Brian runs it on device — not yet; no ride at 9 PM. Walking (≥ 1.0 m/s) exercises the same path
 - [x] Tests: auto-pause/resume, track segment, Settings, AppPreferences; snapshots re-recorded and opened (en + de); full suite
 
 ### Review
@@ -1479,7 +1479,7 @@ the app goes `.inactive` and is then SIGKILLed, so the flush has to happen on le
       `.activeRide(.trackRecorder(.appResignedActive))` — the pattern `.liveActivity(.appBecameActive)` already uses.
 - [x] Tests (`TrackPointRecorderFeatureTests`): pause flushes the buffered points; `appResignedActive` flushes them;
       an empty buffer writes nothing. AppFeature: leaving `.active` mid-ride flushes; with no ride, nothing changes.
-- [x] Brian runs it on device (walking works): start a ride, walk ~1 min, open the app switcher, swipe the app away,
+- [ ] Brian runs it on device (walking works): start a ride, walk ~1 min, open the app switcher, swipe the app away,
       relaunch at once, walk on, finish. Expected: the GPX gap ≈ the time the app wasn't running, not up to 30 s more.
 - [ ] Then: `TrackPointRecorderFeatureTests`, `ActiveRideFeatureTests`, `LiveActivityFeatureTests`, `AppScreenPowerTests`.
 - [ ] Commit + PR.
@@ -1510,7 +1510,7 @@ though `seedFromSavedTrack` already fetches every saved `TrackPoint` on resume f
 - [x] Tests: reducer — seeded segments go in front of live ones; `RideRecordingTests` — kill-and-relaunch against
       live persistence: the relaunched ride's `trackSegments` hold the pre-kill track, then the post-resume one;
       a failed or empty fetch leaves `trackSegments` as the live points only.
-- [x] Brian runs it on device (walking works): start a ride, walk, kill from the app switcher, relaunch, open the
+- [ ] Brian runs it on device (walking works): start a ride, walk, kill from the app switcher, relaunch, open the
       map. Expected: the whole track so far, with a break at the kill.
 - [x] Then `ActiveRideFeatureTests`, `TrackSegmentTests`, `RideRecordingTests`; commit + PR.
 
@@ -1874,7 +1874,7 @@ audiomxd: "AmbientSound … does not have background entitlement". `audio` was d
 - [x] Docs: Audio.md Silent Mode column, session code sample and acceptance items; BLE.md §13.2 Q4 resolved;
       PRD §2/§8.3 Silent Mode lines and OQ5 superseded
 - [x] App builds
-- [x] Brian runs it: lock the phone, trigger a radar alert / turn tone, hear it (music keeps playing under it)
+- [ ] Brian runs it: lock the phone, trigger a radar alert / turn tone, hear it (music keeps playing under it)
 
 ## B. A ride resumed after a kill loses W2's speed watermark and average line
 `speed.speedSamples` and `averageSpeedSamples` are in-memory only; `seedFromSavedTrack` reseeds elevation, HR,
@@ -1886,7 +1886,7 @@ map and calories but not these, so after a kill W2 covers only the time since th
 - [x] Tests: seed replay (stationary points skipped from the average, window cut, only pre-resume points);
       TestStore resume test that both series come back in front of live samples
 - [x] `SpeedHistorySeedTests` 5/5 and `TrackSegmentTests` 9/9 green
-- [x] Brian runs it: kill mid-ride, relaunch, W2 keeps its pre-kill shape
+- [ ] Brian runs it: kill mid-ride, relaunch, W2 keeps its pre-kill shape
 
 ## Then
 - [x] Targeted suites, then full `CyclometerTests`: 2439 passed, 0 failed
@@ -1912,12 +1912,12 @@ Analysis: our 797 ft is the 3 m hysteresis floor on a smooth terrain-model profi
 The barometer on the ridden route (1 m floor) read 853 ft at 17.1 mi and ~1,100 ft for the whole route. Brian: "1. Yes do this."
 - [x] `RouteGeometry.routeGainNoiseMeters = 1.0` for `elevationGainLoss`; `elevationNoiseThresholdMeters` stays 3 m for GPS ride altitude, kicks, chart spans
 - [x] `RouteGeometryTests` jitter fixture/threshold tests moved to the new floor
-- [x] Brian runs it: re-import Gibsonville_23.gpx; S20 gain reads ~1,091 ft
+- [ ] Brian runs it: re-import Gibsonville_23.gpx; S20 gain reads ~1,091 ft
 - [ ] Open: already-imported routes keep their stored gain (no re-derive pass)
 - [x] Max grade 7% was a DEM artifact at mi 22.58 (DEM dip 8 m, barometer 3–4 m). Brian: "Do the 300m window"
       `RouteTerrain.gradeWindowMeters` 100 → 300 m (max grade, climb max grade, narrative grade bands);
       live W16 keeps 100 m via new `ElevationTracker.gradeWindowMeters`
-- [x] Brian runs it: re-imported Gibsonville 23 reads Max 5% grade
+- [ ] Brian runs it: re-imported Gibsonville 23 reads Max 5% grade
 
 ## Review follow-ups (`/code-review --fix`, 2026-11-04; Brian: "1. go back to 100m and fill the narrow dips… 2. go with 1.5m. 3. pass, 4. don't change.")
 - [x] (1) 300 m window read a punchy route as "Max 3% grade | Punchy". Back to 100 m; `RouteTerrain.filledDips`
@@ -1927,7 +1927,7 @@ The barometer on the ridden route (1 m floor) read 853 ft at 17.1 mi and ~1,100 
 - [x] Tests: whole-metre jitter fixture, `filledDipsFillsValleysNotHills`, kicks fixture pins max grade > 6%; build-for-testing green
 - (3) Re-derive stored routes: skipped (Brian: "#3 skip"); earlier imports keep their values until re-imported
 - (4) Character thresholds unchanged
-- [x] Brian runs it: re-import Gibsonville 23 → ~1,010 ft, Max 6% grade
+- [ ] Brian runs it: re-import Gibsonville 23 → ~1,010 ft, Max 6% grade
 - [x] Full `CyclometerTests`: first run 2444/2445 — `filledDipsFillsValleysNotHills` caught clamped windows levelling
       a route's first/last 50 m; windows now hang off the ends (−∞ padding). Rerun: 2445 passed, 0 failed
 

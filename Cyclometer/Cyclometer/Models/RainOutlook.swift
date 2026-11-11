@@ -33,19 +33,19 @@ struct RainOutlook: Equatable, Sendable {
     /// The hour's own symbol when its sky is precipitation; rain otherwise, since an hour can be
     /// "Cloudy" overall and still more likely wet than not.
     var symbolName: String {
-        switch condition {
-        case .drizzle, .rain, .heavyRain, .snow, .thunderstorm:
-            condition?.symbolName(isDaylight: isDaylight) ?? Self.rainSymbolName
-        case .clear, .partlyCloudy, .cloudy, .foggy, nil:
-            Self.rainSymbolName
-        }
+        precipitation?.symbolName(isDaylight: isDaylight) ?? Self.rainSymbolName
     }
 
     /// "Snow", "Thunderstorms"; "Rain" for an hour whose sky isn't precipitation.
     var name: String {
+        precipitation?.displayName ?? "Rain"
+    }
+
+    /// The hour's sky when it is precipitation, which the card names and draws; nil for any other.
+    private var precipitation: WeatherCondition? {
         switch condition {
-        case .drizzle, .rain, .heavyRain, .snow, .thunderstorm: condition?.displayName ?? "Rain"
-        case .clear, .partlyCloudy, .cloudy, .foggy, nil: "Rain"
+        case .drizzle, .rain, .heavyRain, .snow, .thunderstorm: condition
+        case .clear, .partlyCloudy, .cloudy, .foggy, nil: nil
         }
     }
 

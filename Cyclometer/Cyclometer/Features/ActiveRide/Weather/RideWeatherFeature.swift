@@ -21,6 +21,8 @@ struct RideWeatherFeature {
     /// reads "—" rather than a wind that may have turned.
     static let maxAge: TimeInterval = 30 * 60
 
+    private enum CancelID { case fetch }
+
     @ObservableState
     struct State: Equatable {
         /// The latest answer, kept through failed refreshes until it is `maxAge` old.
@@ -44,10 +46,15 @@ struct RideWeatherFeature {
 
         /// Two-sided, as `SunsetFix.isFresh` is, so a clock set back doesn't hold off the next
         /// request until it catches up.
+        ///
+        /// A request still out after `refreshInterval` has stalled, WeatherKit never having
+        /// answered, and the next fix replaces it: otherwise W10 would read "—" for the rest of
+        /// the ride.
         func isFetchDue(at now: Date) -> Bool {
-            guard !isFetching else { return false }
-            guard let lastAttemptAt else { return true }
-            let interval = didLastAttemptFail ? RideWeatherFeature.retryInterval : RideWeatherFeature.refreshInterval
+            guard let lastAttemptAt else { return !isFetching }
+            let interval = didLastAttemptFail && !isFetching
+                ? RideWeatherFeature.retryInterval
+                : RideWeatherFeature.refreshInterval
             return abs(now.timeIntervalSince(lastAttemptAt)) >= interval
         }
     }
@@ -62,9 +69,9 @@ struct RideWeatherFeature {
         Reduce { state, action in
             switch action {
             case .locationUpdated(let update):
-                // CoreLocation's course is -1 when it has none, and noise below walking pace.
-                if update.heading >= 0, update.speed >= NavigationFeature.courseSpeedFloorMPS {
-                    state.course = update.heading
+                // Held through a fix without one (`LocationUpdate.course`): a stop, or no course.
+                if let course = update.course {
+                    state.course = course
                 }
                 let now = date.now
                 if let forecast = state.forecast, abs(now.timeIntervalSince(forecast.fetchedAt)) >= Self.maxAge {
@@ -79,20 +86,15 @@ struct RideWeatherFeature {
                 )
                 return .run { send in
                     do {
-                        async let weather = weatherClient.forecast(coordinate)
-                        async let attribution = weatherClient.attribution()
-                        let fetched = try await weather
-                        await send(.forecastLoaded(AttributedForecast(
-                            current: fetched.current,
-                            hourly: fetched.hourly,
-                            attribution: try await attribution,
-                            fetchedAt: date.now
-                        )))
+                        let forecast = try await weatherClient.attributedForecast(coordinate, date: date)
+                        await send(.forecastLoaded(forecast))
                     } catch {
-                        // Logged in WeatherClient.
+                        // Logged in WeatherClient. A stalled request the next one replaced is
+                        // cancelled, and a cancelled effect's send goes nowhere.
                         await send(.fetchFailed)
                     }
                 }
+                .cancellable(id: CancelID.fetch, cancelInFlight: true)
 
             case .forecastLoaded(let forecast):
                 state.forecast = forecast

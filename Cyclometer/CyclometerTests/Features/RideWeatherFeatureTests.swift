@@ -90,6 +90,42 @@ struct RideWeatherFeatureTests {
         await store.send(.locationUpdated(Self.fix()))
     }
 
+    /// A request WeatherKit never answers mustn't hold off every later one: past `refreshInterval`
+    /// the next fix replaces it, and the stalled one's cancellation reports nothing.
+    @Test("A request still out after ten minutes has stalled, and the next fix replaces it")
+    func stalledRequestIsReplaced() async {
+        let now = LockIsolated(Self.start)
+        let isStalled = LockIsolated(true)
+        let store = TestStore(initialState: RideWeatherFeature.State()) {
+            RideWeatherFeature()
+        } withDependencies: {
+            $0.date = DateGenerator { now.value }
+            $0.weatherClient.forecast = { coordinate in
+                if isStalled.value { try await Task.never() }
+                return try await WeatherClient.testValue.forecast(coordinate)
+            }
+        }
+        await store.send(.locationUpdated(Self.fix())) {
+            $0.course = 192
+            $0.isFetching = true
+            $0.lastAttemptAt = Self.start
+        }
+
+        now.setValue(Self.start.addingTimeInterval(RideWeatherFeature.refreshInterval - 1))
+        await store.send(.locationUpdated(Self.fix()))
+
+        let replaced = Self.start.addingTimeInterval(RideWeatherFeature.refreshInterval)
+        now.setValue(replaced)
+        isStalled.setValue(false)
+        await store.send(.locationUpdated(Self.fix())) {
+            $0.lastAttemptAt = replaced
+        }
+        await store.receive(.forecastLoaded(Self.forecast(at: replaced))) {
+            $0.forecast = Self.forecast(at: replaced)
+            $0.isFetching = false
+        }
+    }
+
     @Test("A failed request is retried after a minute, not on the next fix")
     func retriesAfterFailure() async {
         let now = LockIsolated(Self.start)
