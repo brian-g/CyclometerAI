@@ -428,7 +428,7 @@ private final class LiveRide {
 enum TappableWidget: CaseIterable, CustomTestStringConvertible {
     case map, cadence, speed, speedGauge, averageSpeed, duration, distance, pace, directions, heartRate, hrZones
     case ascent, descent, grade, elevation, routeElevation, routeElevationWithoutRoute
-    case distanceRemaining, eta, sunset, climb, activeCalories
+    case distanceRemaining, eta, sunset, climb, activeCalories, weather, weatherRain
 
     var testDescription: String { title }
 
@@ -459,6 +459,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .sunset: "Sunset"
         case .climb: "Climb"
         case .activeCalories: "Active Calories"
+        case .weather, .weatherRain: "Weather"
         }
     }
 
@@ -485,7 +486,17 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .sunset: "in 1 hour, 12 minutes"
         case .climb: "category 3, 1.2 kilometers to the top, 84 meters to climb, average 7 percent"
         case .activeCalories: "412 kilocalories"
+        case .weather: "14 kilometers per hour, tailwind, 18 degrees Celsius"
+        case .weatherRain: "Rain, 70% chance, from 15:00"
         }
+    }
+
+    /// Rain forecast for the fixture forecast's second hour, 15:00 UTC.
+    private static var rainAtThree: RainOutlook? {
+        var forecast = AttributedForecast.fixture
+        forecast.hourly[1].precipitationChance = 0.7
+        forecast.hourly[1].condition = .rain
+        return RainOutlook(forecast, now: WeatherReading.fixtureNow)
     }
 
     @MainActor
@@ -552,6 +563,15 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
             ), unit: .metric))
         case .activeCalories:
             AnyView(CaloriesWidget(kilocalories: 412.3, rider: .rider(RideEnergy.Rider(kilograms: 75))))
+        case .weather:
+            // A westerly on a rider heading east. en_GB reads the temperature in Celsius.
+            AnyView(WeatherWidget(reading: .fixture, course: 90, unit: .metric)
+                .environment(\.locale, Locale(identifier: "en_GB")))
+        case .weatherRain:
+            // The 1×1 in rain reads the rain alone; 15:00 UTC on a 24-hour clock.
+            AnyView(WeatherWidget(reading: .fixture, course: 90, unit: .metric, rain: Self.rainAtThree)
+                .environment(\.locale, Locale(identifier: "en_GB"))
+                .environment(\.timeZone, TimeZone(identifier: "UTC")!))
         }
     }
 }

@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-11-11 — §W10 Weather built (#150): wind first, with an arrow relative to the direction of travel; 2×1 and 1×1; rain within two hours takes over the card; "Sheet: Weather" added. §S08's Weather section lists it.  
 **Updated:** 2026-11-04 — "Sheet: Heart rate" gains Average and Max under Heart Rate and Zone (#531), as §W5's Cadence sheet has.  
 **Updated:** 2026-10-23 — Ride metrics pass. New widgets, none built yet: §W19 Distance Remaining and §W20 ETA (#461), §W21 Sunset (#462), §W22 Climb (#463), §W23 Active Calories with its Calories sheet (#465). §S05's Bottom Toolbar gains the Sensors sheet that the Sensor button (#466) and a new quiet Low Battery indicator (#464) both open. §S10 points to that indicator. §S15's Stats gain average and max HR, ascent, descent and calories (#460).  
 **Updated:** 2026-11-03 — §S08's categories are now collapsible sections (#517): Ride, Heart, Power, Fitness, Elevation, Weather, Route, with uppercase `brPrimary` headline headings. Each starts expanded and reopens as the rider left it. A section with nothing to list isn't shown, and Cadence is listed only with a cadence sensor paired.  
@@ -774,11 +775,20 @@ As built (#534): **Speed Gauge** in S08's Ride section, after Speed; W1 itself i
 
 #### W10 — Weather
 
-**Sizes:** 2x2, 2x1, 1x1
+**Sizes:** 2x1, 1x1 (#150; no 2x2 yet)
 
-- Current temperature with unit
-- Wind direction indicator (arrow rotated to bearing) and wind speed
-- Sheet: Weather details
+- Labelled "Weather". The wind comes first (#150): its speed in the S12 units as the hero, with an arrow before the digits
+- The arrow is relative to the rider's direction of travel, not to north: up is a tailwind, down a headwind, right a wind crossing from the left. Heading south into a northerly it points up
+  - The direction of travel is the last GPS course taken above 2 m/s, held through a stop so the arrow doesn't swing at a light. Before the first one this ride there is no arrow, only the speed. Still air (rounds to 0) has no arrow either
+- 2x1 adds the temperature on the right, in the locale's weather unit (as S05.1), on the wind's baseline
+- **Rain.** When the hour under way, or one starting within two hours, has a 50% or higher chance of precipitation, the hero becomes that chance with the hour's symbol (rain, snow, thunderstorm) and when it starts: "Now", or the hour ("3 PM" on a 12-hour clock, "15:00" on a 24-hour one). The first such hour is shown, not the wettest. Both are measured from the clock, not from when the forecast was fetched, so "from 15:00" turns to "Now" at 15:00 even while refreshes fail
+  - 1x1: the rain alone, its start in the lower-right corner in place of the wind symbol
+  - 2x1: the rain on the left with its start after it; the wind, smaller, with its arrow, sits left of the temperature on the right
+- Fetched from WeatherKit at the rider's position when a location fix arrives and the forecast is 10 minutes old. A failed request is retried after a minute, and a request with no answer after 10 minutes is replaced. The last forecast is kept until it is an hour old, checked against the clock each minute, so it goes even when no fix arrives (tunnel, GPS lost)
+- Empty state "—": no location, WeatherKit unreachable, or a forecast over an hour old. Always on the dashboard
+- VoiceOver: "Weather, 14 kilometers per hour, headwind, 18 degrees Celsius"; in rain, "Rain, 70% chance, from 3 PM", and on the 2x1 the wind and temperature after it
+- Sheet: Weather — the sky, then Wind (with the same arrow), From (compass point), Temperature and Humidity as sheet readings; the next three hours as S05.1's hourly strip; WeatherKit's attribution in the footer. "Weather unavailable" in the footer with nothing to show
+- Not yet: a wind map over the route (#561, shared with S20's overlay, #204)
 
 ---
 
@@ -1094,10 +1104,10 @@ As built (#517): every heading — Page and each category — is `.headline`, up
 - **Power:** no widgets yet
 - **Fitness:** Active Calories
 - **Elevation:** Elevation, Ascent, Descent, Grade
-- **Weather:** no widgets yet
+- **Weather:** Weather (#150)
 - **Route:** Map, Directions, Route Elevation, Climb, Distance Remaining, ETA
 
-A category with nothing to list isn't drawn, so Power and Weather are hidden for now. A widget that needs a sensor is listed only while one is paired for that role. Today that is Cadence, which needs a cadence sensor, and Power's widgets will be gated on a power meter in the same way. Heart always shows, because Watch heart rate arrives through HealthKit and has no pairing record. A widget already on a page stays there if its sensor is unpaired.
+A category with nothing to list isn't drawn, so Power is hidden for now. A widget that needs a sensor is listed only while one is paired for that role. Today that is Cadence, which needs a cadence sensor, and Power's widgets will be gated on a power meter in the same way. Heart always shows, because Watch heart rate arrives through HealthKit and has no pairing record. A widget already on a page stays there if its sensor is unpaired.
 
 ### Open UX Questions
 

@@ -29,7 +29,7 @@ protocol DashboardWidget: View {
 }
 
 /// S08's picker sections (#142, #517), in the order it lists them. A section with nothing to list
-/// isn't drawn, so Power and Weather stay hidden until they have widgets.
+/// isn't drawn, so Power stays hidden until it has widgets.
 ///
 /// The raw value is saved in the rider's collapsed sections (#517). Never rename one: a saved
 /// name this build doesn't have reopens every section.
@@ -80,6 +80,7 @@ enum DashboardWidgetCatalog {
         SunsetDashboardWidget.self,
         ClimbDashboardWidget.self,
         CaloriesDashboardWidget.self,
+        WeatherDashboardWidget.self,
     ]
 
     private static let byID = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })

@@ -173,7 +173,7 @@ struct AppPreferencesTests {
         let json = Data(#"""
         {"wheelCircumferenceMM":2155,
          "dashboardLayoutOverride":{"pages":[{"placements":[
-           {"widgetID":"weather","size":"oneByOne","row":0,"column":0},
+           {"widgetID":"noSuchWidget","size":"oneByOne","row":0,"column":0},
            {"widgetID":"pace","size":"oneByOne","row":0,"column":1}]}]}}
         """#.utf8)
 

@@ -951,3 +951,12 @@ and never re-checked the rule once the leading side became two lines.
 **Rule.** Any row with a number beside text uses `.lastTextBaseline`, and when one side is multi-line,
 check the snapshot to see which line the number lands on. Measure digit bottoms in pixels rather than
 trusting the guide: `HeroNumber` corrects its own baselines, but a bespoke sibling might not.
+
+## A card's label is the widget's name (2026-11-11, #150)
+
+**What happened.** W10 is titled "Weather" in the catalog, and I labelled its card "Wind" because wind is its
+hero. Brian: "I think this widget should be called weather." The card then also had to show rain, which a
+"Wind" label could not have carried.
+
+**Rule.** Label a card with the widget's `title`, not with whichever reading it leads with. Reference the
+adapter's `title` rather than retyping a string, so the two can't drift.

@@ -132,7 +132,7 @@ final class StartSheetSnapshotTests: XCTestCase {
     }
 
     private static func loaded(_ current: WeatherReading = .fixture) -> StartSheetWeather {
-        var forecast = StartSheetForecast.fixture
+        var forecast = AttributedForecast.fixture
         forecast.current = current
         return .loaded(forecast)
     }

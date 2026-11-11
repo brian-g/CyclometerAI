@@ -302,6 +302,8 @@ struct ActiveRideFeature {
         @Shared(.appPreferences) var preferences
         var speed = SpeedFeature.State()
         var calibration = WheelCalibrationFeature.State()
+        /// The weather where the rider is, for W10 (#150).
+        var weather = RideWeatherFeature.State()
         /// Each paired sensor's battery and link over the ride, for the verdict saved at ride
         /// end (#391), and its live status for the Sensors button and sheet (#464, #466).
         var sensorHealth = SensorHealthFeature.State()
@@ -528,6 +530,7 @@ struct ActiveRideFeature {
         case alertOrchestrator(AlertOrchestratorFeature.Action)
         case speed(SpeedFeature.Action)
         case calibration(WheelCalibrationFeature.Action)
+        case weather(RideWeatherFeature.Action)
         case sensorHealth(SensorHealthFeature.Action)
         case navigation(NavigationFeature.Action)
         case trackRecorder(TrackPointRecorderFeature.Action)
@@ -575,6 +578,9 @@ struct ActiveRideFeature {
         }
         Scope(state: \.calibration, action: \.calibration) {
             WheelCalibrationFeature()
+        }
+        Scope(state: \.weather, action: \.weather) {
+            RideWeatherFeature()
         }
         Scope(state: \.sensorHealth, action: \.sensorHealth) {
             SensorHealthFeature()
@@ -1246,6 +1252,7 @@ struct ActiveRideFeature {
                 return .merge(
                     .send(.speed(.gpsSpeedReceived(update.speed))),
                     .send(.calibration(.locationUpdated(update))),
+                    .send(.weather(.locationUpdated(update))),
                     // Only while a route is being followed: a free ride, and a ride with turn-by-turn
                     // off, never involve navigation at all (#197).
                     state.navigation.isFollowingRoute ? .send(.navigation(.locationUpdated(update))) : .none
@@ -1332,7 +1339,7 @@ struct ActiveRideFeature {
                     state.maxSpeedMPS = max(state.maxSpeedMPS, speedMPS)
                 }
                 return effect
-            case .calibration, .sensorHealth:
+            case .calibration, .sensorHealth, .weather:
                 return .none
             case .navigation(.delegate(.turnAnnounced(let direction))):
                 // Whether the turn's tone sounds is the orchestrator's call: it knows whether radar

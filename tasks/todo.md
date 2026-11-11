@@ -2284,3 +2284,29 @@ Plan: `~/.claude/plans/wiggly-brewing-dawn.md`. Decided this session: current ro
 - [x] "Calm" for still air; mark and strip symbols scale with Dynamic Type; VoiceOver "… chance of rain"; no "-0°"
 - [x] Deferred: "Now" by position, noted on #204
 - [x] Full `CyclometerTests`: 2666 passed, 0 failed
+
+---
+
+## #150 — W10 Weather widget (wind primary) + Weather sheet
+
+Plan: `~/.claude/plans/velvety-dancing-bubble.md`. Decided this session: 1×1 and 2×1; arrow relative to travel (up = tailwind), holding the last good course; factory page 3 only; sheet = current conditions + hourly strip; the Apple-Weather-style wind map is a new issue shared with #204.
+
+- [x] Branch `feat/150-weather-widget`
+- [x] `RelativeWind` + `RelativeWindTests`
+- [x] `RideWeatherFeature` + `RideWeatherFeatureTests`, scoped into `ActiveRideFeature`; five `ActiveRideFeatureLocationTests` gain the `.weather` receives
+- [x] `WeatherWidgetView`, `WeatherDashboardWidget`, catalog line, factory page 3 placements
+- [x] `WeatherSheet` (readings, hourly strip, attribution); `StartSheetForecast` → `AttributedForecast` in `Models/`, with the shared `hours(within:)`
+- [x] Brian runs it
+- [x] Snapshots recorded and checked by eye (14 widget, 3 sheet); `AddWidgetSheetTests`, `DashboardLayoutTests`, `AppPreferencesTests`, `WidgetAccessibilityTests` updated; both snapshot suites on CI's skip-list
+- [x] UX.md §W10 / §S08, PRD §12 + changelog 0.6.16, TCA.md §8, in-app privacy text ("and during a ride")
+- [x] Wind-map issue filed as #561, static first (Brian: "probably not animated right now")
+- [x] Full `CyclometerTests`: 2714 passed, 0 failed; commit + PR
+- [x] Brian's first run: card label is "Weather" (the widget's name), not "Wind". Arrow confirmed on the simulator; hidden while walking is the 2 m/s course floor, left as is
+- [x] Smart rain state (Brian's ask): `RainOutlook` — any hour within 2 h at ≥ 50% chance — swaps both sizes from wind to rain chance, symbol and start hour ("Now" / the hour); `RainOutlookTests`
+- [x] 2×1 in rain (Brian's ask): rain hero on the left, the wind stepped down beside the temperature on the right
+
+**Review:** W10 is the first surface to call WeatherKit during a ride. Differences from the plan: the factory 2×1 is on page 5 under the speed gauge, not page 3, because a page holds a widget once (Brian's "page 3 only" couldn't hold both sizes; his call where it ends up). The stale-forecast expiry runs on a location fix, so with GPS gone entirely an old reading stays. The forecast is fetched every 10 minutes of any ride, whether or not W10 is on a page. Not covered by tests: the live WeatherKit path and the real attribution mark.
+- [x] `/code-review --fix`: stalled request replaced after 10 min; shared `WeatherClient.attributedForecast` and `LocationUpdate.course`; S08 sample has a forecast; PRD §12 one-minute retry. My replace-all had ticked eight earlier tasks' "Brian runs it" boxes; re-opened
+- [x] Brian's picks from the review: rain "Now" and its window measured from the clock, not the fetch; "15:00" on a 24-hour clock; a forecast goes at an hour old by the clock (`forecast(at:)`, checked each minute), even with no fixes. Kept: lowercase units, fetching with W10 unplaced (#151 records it), permanent-failure retries, attribution re-fetch, .5 rounding
+- [x] The review's shared fetch read `\.date` up front, failing `StartSheetFeatureTests.weatherFails` (no date provided); `now` is a closure now
+- [x] Full `CyclometerTests`: 2716 passed, 0 failed

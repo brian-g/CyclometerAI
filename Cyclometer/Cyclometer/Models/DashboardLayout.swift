@@ -379,6 +379,8 @@ extension DashboardLayout {
             WidgetPlacement(HeartRateDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
             WidgetPlacement(HRZonesDashboardWidget.self, size: .twoByOne, row: 3, column: 0),
             WidgetPlacement(CaloriesDashboardWidget.self, size: .oneByOne, row: 4, column: 0),
+            // W10 (#150). Its 2×1 is on the last page: a page holds a widget once.
+            WidgetPlacement(WeatherDashboardWidget.self, size: .oneByOne, row: 4, column: 1),
         ]),
         // Elevation (#387): page 3 had six cells free, one short (five since W23, #465). W19 and
         // W20 (#461) join it, and W21 (#462) and W22 (#463).
@@ -396,6 +398,7 @@ extension DashboardLayout {
         // W1's speed gauge (#534): no page had a 2×2 free above the ride controls.
         DashboardPage(placements: [
             WidgetPlacement(SpeedGaugeDashboardWidget.self, size: .twoByTwo, row: 0, column: 0),
+            WidgetPlacement(WeatherDashboardWidget.self, size: .twoByOne, row: 2, column: 0),
         ]),
     ])
 }
