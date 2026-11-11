@@ -54,7 +54,7 @@ struct RideWeatherFeatureTests {
             $0.forecast = Self.forecast(at: Self.start)
             $0.isFetching = false
         }
-        #expect(store.state.reading == .fixture)
+        #expect(store.state.forecast?.current == .fixture)
     }
 
     @Test("A fresh forecast isn't refetched; one ten minutes old is")
@@ -177,7 +177,7 @@ struct RideWeatherFeatureTests {
             $0.isFetching = false
             $0.didLastAttemptFail = true
         }
-        #expect(store.state.reading == .fixture)
+        #expect(store.state.forecast?.current == .fixture)
 
         let stale = Self.start.addingTimeInterval(RideWeatherFeature.maxAge)
         now.setValue(stale)
@@ -189,7 +189,7 @@ struct RideWeatherFeatureTests {
         await store.receive(.fetchFailed) {
             $0.isFetching = false
         }
-        #expect(store.state.reading == nil)
+        #expect(store.state.forecast?.current == nil)
     }
 
     @Test("The course follows the rider while moving and holds through a stop")
@@ -208,17 +208,18 @@ struct RideWeatherFeatureTests {
         #expect(store.state.course == 200)
     }
 
-    @Test("Rain within two hours is the widget's outlook; the sheet's strip covers three")
-    func derivedFromForecast() {
+    /// #150 review: the widget asks once a minute, so a forecast goes at an hour old even when no
+    /// fix arrives to clear it from state.
+    @Test("A forecast is shown until it is an hour old, by the clock, and not after")
+    func forecastHasAnHourCeiling() {
         var state = RideWeatherFeature.State()
-        #expect(state.rain == nil)
-        #expect(state.forecastHours.isEmpty)
+        #expect(state.forecast(at: Self.start) == nil)
 
-        var forecast = AttributedForecast.fixture
-        forecast.hourly[1].precipitationChance = 0.7
-        state.forecast = forecast
-        #expect(state.rain?.chance == 0.7)
-        // Fetched at 14:40: the hours starting 14:00 through 17:00.
-        #expect(state.forecastHours.map(\.date) == (0..<4).map { WeatherReading.fixtureDate.addingTimeInterval(Double($0) * 3600) })
+        state.forecast = Self.forecast(at: Self.start)
+        #expect(state.forecast(at: Self.start.addingTimeInterval(RideWeatherFeature.maxAge - 1)) != nil)
+        #expect(state.forecast(at: Self.start.addingTimeInterval(RideWeatherFeature.maxAge)) == nil)
+        // A clock set back an hour doesn't keep it either.
+        #expect(state.forecast(at: Self.start.addingTimeInterval(-RideWeatherFeature.maxAge)) == nil)
+        #expect(RideWeatherFeature.maxAge == 3600)
     }
 }

@@ -18,8 +18,9 @@ struct RideWeatherFeature {
     /// through a gap in coverage comes out the other side.
     static let retryInterval: TimeInterval = 60
     /// How old a forecast can be and still be shown while requests keep failing. Past this, W10
-    /// reads "—" rather than a wind that may have turned.
-    static let maxAge: TimeInterval = 30 * 60
+    /// reads "—" rather than a wind that may have turned. Checked against the clock
+    /// (`forecast(at:)`), so it holds with no fixes arriving too.
+    static let maxAge: TimeInterval = 60 * 60
 
     private enum CancelID { case fetch }
 
@@ -39,10 +40,13 @@ struct RideWeatherFeature {
         /// W10's sheet shows the next few hours: enough to see what the ride is heading into.
         static let forecastWindow: TimeInterval = 3 * 3600
 
-        var reading: WeatherReading? { forecast?.current }
-        /// Rain within `RainOutlook.window`, which W10 shows in place of the wind.
-        var rain: RainOutlook? { forecast.flatMap(RainOutlook.init) }
-        var forecastHours: [WeatherReading] { forecast?.hours(within: Self.forecastWindow) ?? [] }
+        /// The forecast to show at `now`: nil once it is `maxAge` old. Two-sided, so a clock set
+        /// back doesn't hold it either. W10 asks once a minute, so a forecast goes on time even
+        /// when no fix arrives to clear it.
+        func forecast(at now: Date) -> AttributedForecast? {
+            guard let forecast, abs(now.timeIntervalSince(forecast.fetchedAt)) < RideWeatherFeature.maxAge else { return nil }
+            return forecast
+        }
 
         /// Two-sided, as `SunsetFix.isFresh` is, so a clock set back doesn't hold off the next
         /// request until it catches up.
@@ -74,7 +78,7 @@ struct RideWeatherFeature {
                     state.course = course
                 }
                 let now = date.now
-                if let forecast = state.forecast, abs(now.timeIntervalSince(forecast.fetchedAt)) >= Self.maxAge {
+                if state.forecast(at: now) == nil {
                     state.forecast = nil
                 }
                 guard state.isFetchDue(at: now) else { return .none }
@@ -86,7 +90,7 @@ struct RideWeatherFeature {
                 )
                 return .run { send in
                     do {
-                        let forecast = try await weatherClient.attributedForecast(coordinate, date: date)
+                        let forecast = try await weatherClient.attributedForecast(coordinate, now: { date.now })
                         await send(.forecastLoaded(forecast))
                     } catch {
                         // Logged in WeatherClient. A stalled request the next one replaced is

@@ -1,7 +1,9 @@
 import Foundation
 
 /// Rain the rider is about to meet (#150): the first hour of a forecast, among the one under way
-/// and those starting within `window`, whose chance of precipitation is at least `threshold`.
+/// now and those starting within `window`, whose chance of precipitation is at least `threshold`.
+/// Measured from the clock, not from when the forecast was fetched, so rain fetched as "from 15:00"
+/// reads "Now" once 15:00 comes, even while refreshes fail.
 /// While there is one, W10 shows it in place of the wind.
 struct RainOutlook: Equatable, Sendable {
     /// How far ahead W10 looks: far enough to turn for home, near enough to be about this ride.
@@ -13,19 +15,19 @@ struct RainOutlook: Equatable, Sendable {
     var chance: Double
     /// The start of that hour.
     var start: Date
-    /// That hour had already begun when the forecast was fetched: the rain is "now".
+    /// That hour had already begun at `now`: the rain is "Now".
     var isUnderWay: Bool
     /// The hour's sky, for its symbol. Nil for a condition a later SDK adds.
     var condition: WeatherCondition?
     var isDaylight: Bool
 
     /// Nil when no hour in the window reaches the threshold.
-    init?(_ forecast: AttributedForecast) {
-        let wet = forecast.hours(within: Self.window).first { ($0.precipitationChance ?? 0) >= Self.threshold }
+    init?(_ forecast: AttributedForecast, now: Date) {
+        let wet = forecast.hours(within: Self.window, from: now).first { ($0.precipitationChance ?? 0) >= Self.threshold }
         guard let wet, let chance = wet.precipitationChance else { return nil }
         self.chance = chance
         start = wet.date
-        isUnderWay = wet.date <= forecast.fetchedAt
+        isUnderWay = wet.date <= now
         condition = wet.condition
         isDaylight = wet.isDaylight
     }

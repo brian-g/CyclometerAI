@@ -20,7 +20,7 @@ struct WeatherWidget: View {
     var rain: RainOutlook? = nil
     /// The Weather sheet's data. A closure so the card never reads the forecast itself; only the
     /// open sheet does, in its own body (#144).
-    var metrics: () -> WeatherMetrics = { WeatherMetrics() }
+    var metrics: (Date) -> WeatherMetrics = { _ in WeatherMetrics() }
     var size: WidgetSize = .oneByOne   // only .oneByOne / .twoByOne used by W10
 
     @Environment(\.locale) private var locale
@@ -110,8 +110,9 @@ struct WeatherWidget: View {
             }
     }
 
-    /// When the rain starts: "Now", or the hour ("3 PM", "15"). In the 1×1's corner, and after the
-    /// chance on the 2×1.
+    /// When the rain starts: "Now", or the hour — "3 PM" on a 12-hour clock, "15:00" on a 24-hour
+    /// one, where a bare "15" beside the chance would read as a second number. In the 1×1's corner,
+    /// and after the chance on the 2×1.
     private func rainStart(_ rain: RainOutlook) -> some View {
         Text(rainStartText(rain))
             .font(.footnote)
@@ -121,7 +122,11 @@ struct WeatherWidget: View {
 
     private func rainStartText(_ rain: RainOutlook) -> String {
         guard !rain.isUnderWay else { return "Now" }
-        var style = Date.FormatStyle.dateTime.hour().locale(locale)
+        let isTwentyFourHour = [.zeroToTwentyThree, .oneToTwentyFour].contains(locale.hourCycle)
+        var style = (isTwentyFourHour
+            ? Date.FormatStyle.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)
+            : Date.FormatStyle.dateTime.hour()
+        ).locale(locale)
         style.timeZone = timeZone
         return rain.start.formatted(style)
     }
@@ -244,7 +249,7 @@ private extension RainOutlook {
         var forecast = AttributedForecast.fixture
         forecast.hourly[1].precipitationChance = 0.7
         forecast.hourly[1].condition = .rain
-        return RainOutlook(forecast)
+        return RainOutlook(forecast, now: WeatherReading.fixtureNow)
     }
 
     /// A thunderstorm in the hour under way.
@@ -252,6 +257,6 @@ private extension RainOutlook {
         var forecast = AttributedForecast.fixture
         forecast.hourly[0].precipitationChance = 0.9
         forecast.hourly[0].condition = .thunderstorm
-        return RainOutlook(forecast)
+        return RainOutlook(forecast, now: WeatherReading.fixtureNow)
     }
 }

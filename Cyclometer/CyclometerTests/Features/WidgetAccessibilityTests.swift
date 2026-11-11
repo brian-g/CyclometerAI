@@ -487,7 +487,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         case .climb: "category 3, 1.2 kilometers to the top, 84 meters to climb, average 7 percent"
         case .activeCalories: "412 kilocalories"
         case .weather: "14 kilometers per hour, tailwind, 18 degrees Celsius"
-        case .weatherRain: "Rain, 70% chance, from 15"
+        case .weatherRain: "Rain, 70% chance, from 15:00"
         }
     }
 
@@ -496,7 +496,7 @@ enum TappableWidget: CaseIterable, CustomTestStringConvertible {
         var forecast = AttributedForecast.fixture
         forecast.hourly[1].precipitationChance = 0.7
         forecast.hourly[1].condition = .rain
-        return RainOutlook(forecast)
+        return RainOutlook(forecast, now: WeatherReading.fixtureNow)
     }
 
     @MainActor

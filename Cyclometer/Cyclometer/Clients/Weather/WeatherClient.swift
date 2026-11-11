@@ -76,9 +76,12 @@ extension WeatherClient: DependencyKey {
 
 extension WeatherClient {
     /// The forecast at `coordinate` with its attribution, as S05.1 and W10 show it: one request for
-    /// the weather, the attribution alongside, dated by `date` when both have answered. Throws when
+    /// the weather, the attribution alongside, dated by `now` when both have answered. Throws when
     /// either fails, and the caller shows its empty state (failures are logged in `liveValue`).
-    func attributedForecast(_ coordinate: RouteCoordinate, date: DateGenerator) async throws -> AttributedForecast {
+    ///
+    /// `now` is a closure, so a failed request never reads the caller's `\.date`: a test of the
+    /// failure path needn't provide one (reading an unprovided dependency is a test failure).
+    func attributedForecast(_ coordinate: RouteCoordinate, now: () -> Date) async throws -> AttributedForecast {
         async let fetched = self.forecast(coordinate)
         async let attribution = self.attribution()
         let weather = try await fetched
@@ -86,7 +89,7 @@ extension WeatherClient {
             current: weather.current,
             hourly: weather.hourly,
             attribution: try await attribution,
-            fetchedAt: date.now
+            fetchedAt: now()
         )
     }
 }

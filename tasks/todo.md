@@ -2306,3 +2306,7 @@ Plan: `~/.claude/plans/velvety-dancing-bubble.md`. Decided this session: 1×1 an
 - [x] 2×1 in rain (Brian's ask): rain hero on the left, the wind stepped down beside the temperature on the right
 
 **Review:** W10 is the first surface to call WeatherKit during a ride. Differences from the plan: the factory 2×1 is on page 5 under the speed gauge, not page 3, because a page holds a widget once (Brian's "page 3 only" couldn't hold both sizes; his call where it ends up). The stale-forecast expiry runs on a location fix, so with GPS gone entirely an old reading stays. The forecast is fetched every 10 minutes of any ride, whether or not W10 is on a page. Not covered by tests: the live WeatherKit path and the real attribution mark.
+- [x] `/code-review --fix`: stalled request replaced after 10 min; shared `WeatherClient.attributedForecast` and `LocationUpdate.course`; S08 sample has a forecast; PRD §12 one-minute retry. My replace-all had ticked eight earlier tasks' "Brian runs it" boxes; re-opened
+- [x] Brian's picks from the review: rain "Now" and its window measured from the clock, not the fetch; "15:00" on a 24-hour clock; a forecast goes at an hour old by the clock (`forecast(at:)`, checked each minute), even with no fixes. Kept: lowercase units, fetching with W10 unplaced (#151 records it), permanent-failure retries, attribution re-fetch, .5 rounding
+- [x] The review's shared fetch read `\.date` up front, failing `StartSheetFeatureTests.weatherFails` (no date provided); `now` is a closure now
+- [x] Full `CyclometerTests`: 2716 passed, 0 failed

@@ -236,8 +236,9 @@ extension ActiveRideFeature.State {
             )
         }
         // W10 (#150): the fixture's westerly on a rider heading east, a tailwind. No hour in its
-        // rain window reaches 50%, so the card shows the wind.
-        state.weather.forecast = .fixture
+        // rain window reaches 50%, so the card shows the wind. Fetched now: the card checks the
+        // forecast's age against the clock.
+        state.weather.forecast = .fixture(at: .now)
         state.weather.course = 90
         return state
     }

@@ -46,14 +46,16 @@ struct WeatherMetrics: Equatable {
     private static let percentPerUnit = 100.0
 }
 
-extension ActiveRideFeature.State {
-    /// The Weather sheet's inputs.
-    var weatherMetrics: WeatherMetrics {
-        WeatherMetrics(
-            forecast: weather.forecast,
-            hours: weather.forecastHours,
-            course: weather.course,
-            unit: unitSystem
+extension RideWeatherFeature.State {
+    /// The Weather sheet's inputs at `now`: nothing once the forecast is an hour old, and the strip
+    /// from the hour under way.
+    func metrics(at now: Date, unit: UnitSystem) -> WeatherMetrics {
+        let forecast = forecast(at: now)
+        return WeatherMetrics(
+            forecast: forecast,
+            hours: forecast?.hours(within: Self.forecastWindow, from: now) ?? [],
+            course: course,
+            unit: unit
         )
     }
 }
@@ -65,14 +67,16 @@ extension ActiveRideFeature.State {
 /// `metrics` is called in this view's own `body`, not the presenter's `.sheet` builder, so the
 /// open sheet follows the ride (see `RideMetricsSheet`, #144).
 struct WeatherSheet: View {
-    var metrics: () -> WeatherMetrics = { WeatherMetrics() }
+    var metrics: (Date) -> WeatherMetrics = { _ in WeatherMetrics() }
 
     @State private var detent = PresentationDetent.medium
 
     var body: some View {
-        let metrics = metrics()
         NavigationStack {
-            WeatherList(metrics: metrics)
+            // Once a minute, as the card: the strip's "Now" moves on the hour.
+            TimelineView(.everyMinute) { context in
+                WeatherList(metrics: metrics(context.date))
+            }
                 .navigationTitle("Weather")
                 .navigationBarTitleDisplayMode(.inline)
                 .sheetCloseButton()

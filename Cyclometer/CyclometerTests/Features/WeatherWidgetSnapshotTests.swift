@@ -42,7 +42,7 @@ final class WeatherWidgetSnapshotTests: XCTestCase {
         var forecast = AttributedForecast.fixture
         forecast.hourly[hour].precipitationChance = chance
         forecast.hourly[hour].condition = condition
-        return RainOutlook(forecast)
+        return RainOutlook(forecast, now: WeatherReading.fixtureNow)
     }
 
     // MARK: - 1×1

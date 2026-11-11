@@ -13,12 +13,21 @@ struct WeatherDashboardWidget: DashboardWidget {
     let store: StoreOf<ActiveRideFeature>
 
     var body: some View {
-        WeatherWidget(
-            reading: store.weather.reading,
+        // Once a minute, as W21 does: rain turns to "Now" on the hour, and a forecast an hour old
+        // goes, whether or not a fix arrives.
+        TimelineView(.everyMinute) { context in
+            widget(at: context.date)
+        }
+    }
+
+    private func widget(at now: Date) -> WeatherWidget {
+        let forecast = store.weather.forecast(at: now)
+        return WeatherWidget(
+            reading: forecast?.current,
             course: store.weather.course,
             unit: store.unitSystem,
-            rain: store.weather.rain,
-            metrics: { store.weatherMetrics },
+            rain: forecast.flatMap { RainOutlook($0, now: now) },
+            metrics: { date in store.weather.metrics(at: date, unit: store.unitSystem) },
             size: size
         )
     }

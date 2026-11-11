@@ -318,7 +318,7 @@ struct StartSheetFeature {
             }
             let coordinate = RouteCoordinate(latitude: position.latitude, longitude: position.longitude)
             do {
-                let forecast = try await weatherClient.attributedForecast(coordinate, date: date)
+                let forecast = try await weatherClient.attributedForecast(coordinate, now: { date.now })
                 await send(.weatherLoaded(forecast))
             } catch {
                 // Logged in WeatherClient.

@@ -781,11 +781,11 @@ As built (#534): **Speed Gauge** in S08's Ride section, after Speed; W1 itself i
 - The arrow is relative to the rider's direction of travel, not to north: up is a tailwind, down a headwind, right a wind crossing from the left. Heading south into a northerly it points up
   - The direction of travel is the last GPS course taken above 2 m/s, held through a stop so the arrow doesn't swing at a light. Before the first one this ride there is no arrow, only the speed. Still air (rounds to 0) has no arrow either
 - 2x1 adds the temperature on the right, in the locale's weather unit (as S05.1), on the wind's baseline
-- **Rain.** When the hour under way, or one starting within two hours, has a 50% or higher chance of precipitation, the hero becomes that chance with the hour's symbol (rain, snow, thunderstorm) and when it starts: "Now", or the hour. The first such hour is shown, not the wettest
+- **Rain.** When the hour under way, or one starting within two hours, has a 50% or higher chance of precipitation, the hero becomes that chance with the hour's symbol (rain, snow, thunderstorm) and when it starts: "Now", or the hour ("3 PM" on a 12-hour clock, "15:00" on a 24-hour one). The first such hour is shown, not the wettest. Both are measured from the clock, not from when the forecast was fetched, so "from 15:00" turns to "Now" at 15:00 even while refreshes fail
   - 1x1: the rain alone, its start in the lower-right corner in place of the wind symbol
   - 2x1: the rain on the left with its start after it; the wind, smaller, with its arrow, sits left of the temperature on the right
-- Fetched from WeatherKit at the rider's position when a location fix arrives and the forecast is 10 minutes old. A failed request is retried after a minute; the last forecast is kept until it is 30 minutes old
-- Empty state "—": no location, WeatherKit unreachable, or a forecast gone stale. Always on the dashboard
+- Fetched from WeatherKit at the rider's position when a location fix arrives and the forecast is 10 minutes old. A failed request is retried after a minute, and a request with no answer after 10 minutes is replaced. The last forecast is kept until it is an hour old, checked against the clock each minute, so it goes even when no fix arrives (tunnel, GPS lost)
+- Empty state "—": no location, WeatherKit unreachable, or a forecast over an hour old. Always on the dashboard
 - VoiceOver: "Weather, 14 kilometers per hour, headwind, 18 degrees Celsius"; in rain, "Rain, 70% chance, from 3 PM", and on the 2x1 the wind and temperature after it
 - Sheet: Weather — the sky, then Wind (with the same arrow), From (compass point), Temperature and Humidity as sheet readings; the next three hours as S05.1's hourly strip; WeatherKit's attribution in the footer. "Weather unavailable" in the footer with nothing to show
 - Not yet: a wind map over the route (#561, shared with S20's overlay, #204)
