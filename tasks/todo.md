@@ -2299,7 +2299,7 @@ Plan: `~/.claude/plans/velvety-dancing-bubble.md`. Decided this session: 1×1 an
 - [x] Brian runs it
 - [x] Snapshots recorded and checked by eye (14 widget, 3 sheet); `AddWidgetSheetTests`, `DashboardLayoutTests`, `AppPreferencesTests`, `WidgetAccessibilityTests` updated; both snapshot suites on CI's skip-list
 - [x] UX.md §W10 / §S08, PRD §12 + changelog 0.6.16, TCA.md §8, in-app privacy text ("and during a ride")
-- [ ] Draft the wind-map issue for Brian's OK
+- [x] Wind-map issue filed as #561, static first (Brian: "probably not animated right now")
 - [x] Full `CyclometerTests`: 2714 passed, 0 failed; commit + PR
 - [x] Brian's first run: card label is "Weather" (the widget's name), not "Wind". Arrow confirmed on the simulator; hidden while walking is the 2 m/s course floor, left as is
 - [x] Smart rain state (Brian's ask): `RainOutlook` — any hour within 2 h at ≥ 50% chance — swaps both sizes from wind to rain chance, symbol and start hour ("Now" / the hour); `RainOutlookTests`

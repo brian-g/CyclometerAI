@@ -788,7 +788,7 @@ As built (#534): **Speed Gauge** in S08's Ride section, after Speed; W1 itself i
 - Empty state "—": no location, WeatherKit unreachable, or a forecast gone stale. Always on the dashboard
 - VoiceOver: "Weather, 14 kilometers per hour, headwind, 18 degrees Celsius"; in rain, "Rain, 70% chance, from 3 PM", and on the 2x1 the wind and temperature after it
 - Sheet: Weather — the sky, then Wind (with the same arrow), From (compass point), Temperature and Humidity as sheet readings; the next three hours as S05.1's hourly strip; WeatherKit's attribution in the footer. "Weather unavailable" in the footer with nothing to show
-- Not yet: a wind map over the route (separate issue, shared with S20's overlay, #204)
+- Not yet: a wind map over the route (#561, shared with S20's overlay, #204)
 
 ---
 
