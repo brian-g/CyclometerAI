@@ -24,6 +24,13 @@ struct WeatherReading: Equatable, Sendable {
     var isDaylight: Bool
 }
 
+extension WeatherReading {
+    /// The wind in whole units of the rider's speed unit, as every weather surface quotes it.
+    func wholeWindSpeed(in unit: UnitSystem) -> Double {
+        unit.speed(fromMPS: windSpeed.converted(to: .metersPerSecond).value).rounded()
+    }
+}
+
 extension Measurement where UnitType == UnitTemperature {
     /// Whole degrees in `unit`, as a forecast quotes them. A cold morning's -0.3° is 0, not "-0".
     func wholeDegrees(in unit: UnitTemperature) -> Double {

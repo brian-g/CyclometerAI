@@ -445,7 +445,7 @@ struct StartSheetFeatureTests {
         store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.task)
-        await store.receive(.weatherLoaded(StartSheetForecast.fixture)) { $0.weather = .loaded(StartSheetForecast.fixture) }
+        await store.receive(.weatherLoaded(AttributedForecast.fixture)) { $0.weather = .loaded(AttributedForecast.fixture) }
         #expect(asked.value == [RouteCoordinate(latitude: Self.fargo.latitude, longitude: Self.fargo.longitude)])
     }
 
@@ -498,7 +498,7 @@ struct StartSheetFeatureTests {
     @Test("With no route, the strip covers the hour under way and the next three hours")
     func forecastHoursDefault() {
         var state = StartSheetFeature.State()
-        state.weather = .loaded(StartSheetForecast.fixture)
+        state.weather = .loaded(AttributedForecast.fixture)
         // 14:40: 14:00, 15:00, 16:00 and 17:00 all start before 17:40.
         #expect(state.forecastHours == Array(WeatherReading.fixtureHourly.prefix(4)))
     }
@@ -506,7 +506,7 @@ struct StartSheetFeatureTests {
     @Test("With a route, the strip covers the ride's estimated time")
     func forecastHoursForRoute() {
         var state = StartSheetFeature.State(route: Self.route.reference)
-        state.weather = .loaded(StartSheetForecast.fixture)
+        state.weather = .loaded(AttributedForecast.fixture)
         state.rideEstimate = 5.5 * 3600
         // 14:40 + 5 h 30 min is 20:10: the hours from 14:00 to 20:00.
         #expect(state.forecastHours == Array(WeatherReading.fixtureHourly.prefix(7)))
@@ -521,7 +521,7 @@ struct StartSheetFeatureTests {
             reading.date = WeatherReading.fixtureDate.addingTimeInterval(Double(hour) * 3600)
             return reading
         }
-        var forecast = StartSheetForecast.fixture
+        var forecast = AttributedForecast.fixture
         forecast.hourly = day
         var state = StartSheetFeature.State(route: Self.route.reference)
         state.weather = .loaded(forecast)

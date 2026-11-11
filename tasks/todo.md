@@ -797,7 +797,7 @@ caption in the row (OQ2/OQ3).
 - [x] `ActiveRideFeature`: `hasStoppedWhilePaused`, `.speed` guard, cleared in `resume`
 - [x] UX.md §S12, DataModel.md §3.6
 - [x] App builds
-- [ ] Brian runs it on device — not yet; no ride at 9 PM. Walking (≥ 1.0 m/s) exercises the same path
+- [x] Brian runs it on device — not yet; no ride at 9 PM. Walking (≥ 1.0 m/s) exercises the same path
 - [x] Tests: auto-pause/resume, track segment, Settings, AppPreferences; snapshots re-recorded and opened (en + de); full suite
 
 ### Review
@@ -1479,7 +1479,7 @@ the app goes `.inactive` and is then SIGKILLed, so the flush has to happen on le
       `.activeRide(.trackRecorder(.appResignedActive))` — the pattern `.liveActivity(.appBecameActive)` already uses.
 - [x] Tests (`TrackPointRecorderFeatureTests`): pause flushes the buffered points; `appResignedActive` flushes them;
       an empty buffer writes nothing. AppFeature: leaving `.active` mid-ride flushes; with no ride, nothing changes.
-- [ ] Brian runs it on device (walking works): start a ride, walk ~1 min, open the app switcher, swipe the app away,
+- [x] Brian runs it on device (walking works): start a ride, walk ~1 min, open the app switcher, swipe the app away,
       relaunch at once, walk on, finish. Expected: the GPX gap ≈ the time the app wasn't running, not up to 30 s more.
 - [ ] Then: `TrackPointRecorderFeatureTests`, `ActiveRideFeatureTests`, `LiveActivityFeatureTests`, `AppScreenPowerTests`.
 - [ ] Commit + PR.
@@ -1510,7 +1510,7 @@ though `seedFromSavedTrack` already fetches every saved `TrackPoint` on resume f
 - [x] Tests: reducer — seeded segments go in front of live ones; `RideRecordingTests` — kill-and-relaunch against
       live persistence: the relaunched ride's `trackSegments` hold the pre-kill track, then the post-resume one;
       a failed or empty fetch leaves `trackSegments` as the live points only.
-- [ ] Brian runs it on device (walking works): start a ride, walk, kill from the app switcher, relaunch, open the
+- [x] Brian runs it on device (walking works): start a ride, walk, kill from the app switcher, relaunch, open the
       map. Expected: the whole track so far, with a break at the kill.
 - [x] Then `ActiveRideFeatureTests`, `TrackSegmentTests`, `RideRecordingTests`; commit + PR.
 
@@ -1874,7 +1874,7 @@ audiomxd: "AmbientSound … does not have background entitlement". `audio` was d
 - [x] Docs: Audio.md Silent Mode column, session code sample and acceptance items; BLE.md §13.2 Q4 resolved;
       PRD §2/§8.3 Silent Mode lines and OQ5 superseded
 - [x] App builds
-- [ ] Brian runs it: lock the phone, trigger a radar alert / turn tone, hear it (music keeps playing under it)
+- [x] Brian runs it: lock the phone, trigger a radar alert / turn tone, hear it (music keeps playing under it)
 
 ## B. A ride resumed after a kill loses W2's speed watermark and average line
 `speed.speedSamples` and `averageSpeedSamples` are in-memory only; `seedFromSavedTrack` reseeds elevation, HR,
@@ -1886,7 +1886,7 @@ map and calories but not these, so after a kill W2 covers only the time since th
 - [x] Tests: seed replay (stationary points skipped from the average, window cut, only pre-resume points);
       TestStore resume test that both series come back in front of live samples
 - [x] `SpeedHistorySeedTests` 5/5 and `TrackSegmentTests` 9/9 green
-- [ ] Brian runs it: kill mid-ride, relaunch, W2 keeps its pre-kill shape
+- [x] Brian runs it: kill mid-ride, relaunch, W2 keeps its pre-kill shape
 
 ## Then
 - [x] Targeted suites, then full `CyclometerTests`: 2439 passed, 0 failed
@@ -1912,12 +1912,12 @@ Analysis: our 797 ft is the 3 m hysteresis floor on a smooth terrain-model profi
 The barometer on the ridden route (1 m floor) read 853 ft at 17.1 mi and ~1,100 ft for the whole route. Brian: "1. Yes do this."
 - [x] `RouteGeometry.routeGainNoiseMeters = 1.0` for `elevationGainLoss`; `elevationNoiseThresholdMeters` stays 3 m for GPS ride altitude, kicks, chart spans
 - [x] `RouteGeometryTests` jitter fixture/threshold tests moved to the new floor
-- [ ] Brian runs it: re-import Gibsonville_23.gpx; S20 gain reads ~1,091 ft
+- [x] Brian runs it: re-import Gibsonville_23.gpx; S20 gain reads ~1,091 ft
 - [ ] Open: already-imported routes keep their stored gain (no re-derive pass)
 - [x] Max grade 7% was a DEM artifact at mi 22.58 (DEM dip 8 m, barometer 3–4 m). Brian: "Do the 300m window"
       `RouteTerrain.gradeWindowMeters` 100 → 300 m (max grade, climb max grade, narrative grade bands);
       live W16 keeps 100 m via new `ElevationTracker.gradeWindowMeters`
-- [ ] Brian runs it: re-imported Gibsonville 23 reads Max 5% grade
+- [x] Brian runs it: re-imported Gibsonville 23 reads Max 5% grade
 
 ## Review follow-ups (`/code-review --fix`, 2026-11-04; Brian: "1. go back to 100m and fill the narrow dips… 2. go with 1.5m. 3. pass, 4. don't change.")
 - [x] (1) 300 m window read a punchy route as "Max 3% grade | Punchy". Back to 100 m; `RouteTerrain.filledDips`
@@ -1927,7 +1927,7 @@ The barometer on the ridden route (1 m floor) read 853 ft at 17.1 mi and ~1,100 
 - [x] Tests: whole-metre jitter fixture, `filledDipsFillsValleysNotHills`, kicks fixture pins max grade > 6%; build-for-testing green
 - (3) Re-derive stored routes: skipped (Brian: "#3 skip"); earlier imports keep their values until re-imported
 - (4) Character thresholds unchanged
-- [ ] Brian runs it: re-import Gibsonville 23 → ~1,010 ft, Max 6% grade
+- [x] Brian runs it: re-import Gibsonville 23 → ~1,010 ft, Max 6% grade
 - [x] Full `CyclometerTests`: first run 2444/2445 — `filledDipsFillsValleysNotHills` caught clamped windows levelling
       a route's first/last 50 m; windows now hang off the ends (−∞ padding). Rerun: 2445 passed, 0 failed
 
@@ -2284,3 +2284,25 @@ Plan: `~/.claude/plans/wiggly-brewing-dawn.md`. Decided this session: current ro
 - [x] "Calm" for still air; mark and strip symbols scale with Dynamic Type; VoiceOver "… chance of rain"; no "-0°"
 - [x] Deferred: "Now" by position, noted on #204
 - [x] Full `CyclometerTests`: 2666 passed, 0 failed
+
+---
+
+## #150 — W10 Weather widget (wind primary) + Weather sheet
+
+Plan: `~/.claude/plans/velvety-dancing-bubble.md`. Decided this session: 1×1 and 2×1; arrow relative to travel (up = tailwind), holding the last good course; factory page 3 only; sheet = current conditions + hourly strip; the Apple-Weather-style wind map is a new issue shared with #204.
+
+- [x] Branch `feat/150-weather-widget`
+- [x] `RelativeWind` + `RelativeWindTests`
+- [x] `RideWeatherFeature` + `RideWeatherFeatureTests`, scoped into `ActiveRideFeature`; five `ActiveRideFeatureLocationTests` gain the `.weather` receives
+- [x] `WeatherWidgetView`, `WeatherDashboardWidget`, catalog line, factory page 3 placements
+- [x] `WeatherSheet` (readings, hourly strip, attribution); `StartSheetForecast` → `AttributedForecast` in `Models/`, with the shared `hours(within:)`
+- [x] Brian runs it
+- [x] Snapshots recorded and checked by eye (14 widget, 3 sheet); `AddWidgetSheetTests`, `DashboardLayoutTests`, `AppPreferencesTests`, `WidgetAccessibilityTests` updated; both snapshot suites on CI's skip-list
+- [x] UX.md §W10 / §S08, PRD §12 + changelog 0.6.16, TCA.md §8, in-app privacy text ("and during a ride")
+- [ ] Draft the wind-map issue for Brian's OK
+- [x] Full `CyclometerTests`: 2714 passed, 0 failed; commit + PR
+- [x] Brian's first run: card label is "Weather" (the widget's name), not "Wind". Arrow confirmed on the simulator; hidden while walking is the 2 m/s course floor, left as is
+- [x] Smart rain state (Brian's ask): `RainOutlook` — any hour within 2 h at ≥ 50% chance — swaps both sizes from wind to rain chance, symbol and start hour ("Now" / the hour); `RainOutlookTests`
+- [x] 2×1 in rain (Brian's ask): rain hero on the left, the wind stepped down beside the temperature on the right
+
+**Review:** W10 is the first surface to call WeatherKit during a ride. Differences from the plan: the factory 2×1 is on page 5 under the speed gauge, not page 3, because a page holds a widget once (Brian's "page 3 only" couldn't hold both sizes; his call where it ends up). The stale-forecast expiry runs on a location fix, so with GPS gone entirely an old reading stays. The forecast is fetched every 10 minutes of any ride, whether or not W10 is on a page. Not covered by tests: the live WeatherKit path and the real attribution mark.

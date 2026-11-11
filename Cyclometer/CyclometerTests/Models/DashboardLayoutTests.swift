@@ -88,8 +88,8 @@ struct DashboardLayoutTests {
 
     @Test("A widget id the catalog doesn't have is rejected")
     func unknownWidget() {
-        let weather = WidgetPlacement(widgetID: "weather", size: .oneByOne, row: 0, column: 0)
-        #expect(DashboardLayoutValidator.violations(in: page(weather)) == [.unknownWidget(weather)])
+        let unknown = WidgetPlacement(widgetID: "noSuchWidget", size: .oneByOne, row: 0, column: 0)
+        #expect(DashboardLayoutValidator.violations(in: page(unknown)) == [.unknownWidget(unknown)])
     }
 
     /// One bad placement costs that widget, not the rider's layout (#139 review): every kind of
@@ -97,7 +97,7 @@ struct DashboardLayoutTests {
     @Test("Salvage drops only the placements that break a rule, keeping pages and their ids")
     func keepingValidPlacements() {
         let pace = WidgetPlacement(PaceDashboardWidget.self, size: .oneByOne, row: 0, column: 0)
-        let unknown = WidgetPlacement(widgetID: "weather", size: .oneByOne, row: 0, column: 1)
+        let unknown = WidgetPlacement(widgetID: "noSuchWidget", size: .oneByOne, row: 0, column: 1)
         let outOfBounds = WidgetPlacement(MapDashboardWidget.self, size: .twoByTwo, row: 6, column: 0)
         let unsupported = WidgetPlacement(HeartRateDashboardWidget.self, size: .twoByTwo, row: 2, column: 0)
         let overlapping = WidgetPlacement(CadenceDashboardWidget.self, size: .twoByOne, row: 0, column: 0)

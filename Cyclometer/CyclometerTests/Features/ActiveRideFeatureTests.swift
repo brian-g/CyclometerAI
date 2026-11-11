@@ -403,6 +403,28 @@ struct ActiveRideFeatureLocationTests {
         }
     }
 
+    /// #150: every fix also reaches the weather, which keeps the rider's course and, on the first,
+    /// fetches the forecast (`WeatherClient.testValue`'s fixture). `course` is nil for a fix whose
+    /// speed gives none.
+    private func receiveWeather(
+        _ store: TestStoreOf<ActiveRideFeature>, course: Double? = 192, fetches: Bool = true
+    ) async {
+        await store.receive(\.weather.locationUpdated) {
+            $0.weather.course = course
+            if fetches {
+                $0.weather.isFetching = true
+                $0.weather.lastAttemptAt = testDate
+            }
+        }
+        guard fetches else { return }
+        await store.receive(\.weather.forecastLoaded) {
+            $0.weather.forecast = AttributedForecast(
+                current: .fixture, hourly: WeatherReading.fixtureHourly, attribution: .fixture, fetchedAt: testDate
+            )
+            $0.weather.isFetching = false
+        }
+    }
+
     @Test("Location update populates state")
     func locationUpdatePopulatesState() async {
         let store = makeStore()
@@ -428,6 +450,7 @@ struct ActiveRideFeatureLocationTests {
             $0.calibration.isGPSUsable = true
             $0.calibration.lastFixTimestamp = Self.sampleUpdate.timestamp
         }
+        await receiveWeather(store)
     }
 
     /// #197 review: with turn-by-turn off the route is drawn on the map but not followed, so — as
@@ -484,6 +507,7 @@ struct ActiveRideFeatureLocationTests {
             $0.calibration.isGPSUsable = true
             $0.calibration.lastFixTimestamp = Self.sampleUpdate.timestamp
         }
+        await receiveWeather(store)
     }
 
     @Test("A poor-accuracy fix moves the marker but is kept out of the recorded track")
@@ -519,6 +543,7 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
         }
         await store.receive(\.calibration.locationUpdated)
+        await receiveWeather(store)
     }
 
     /// #462: W21 reads `sunsetFix`, so it re-renders once a minute rather than on every fix.
@@ -620,6 +645,7 @@ struct ActiveRideFeatureLocationTests {
             $0.calibration.isGPSUsable = true
             $0.calibration.lastFixTimestamp = Self.sampleUpdate.timestamp
         }
+        await receiveWeather(store)
         await store.send(.pauseTapped) {
             $0.recordingState = .paused
             $0.pausedAt = testDate
@@ -660,6 +686,7 @@ struct ActiveRideFeatureLocationTests {
         await store.receive(\.calibration.locationUpdated) {
             $0.calibration.lastFixTimestamp = pausedUpdate.timestamp
         }
+        await receiveWeather(store, course: 45, fetches: false)
     }
 
     @Test("Invalid location speed clears SpeedFeature state")
@@ -699,6 +726,7 @@ struct ActiveRideFeatureLocationTests {
         }
         // An invalid-speed fix is rejected outright, so nothing about the window moves.
         await store.receive(\.calibration.locationUpdated)
+        await receiveWeather(store, course: nil)
     }
 
     @Test("Authorization denied sets isLocationAvailable false")

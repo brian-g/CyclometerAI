@@ -72,18 +72,11 @@ struct StartSheetFeature {
         static let defaultForecastWindow: TimeInterval = 3 * 3600
         /// The most the strip covers, however long the estimate: a day's riding.
         static let maximumForecastWindow: TimeInterval = 12 * 3600
-        /// WeatherKit forecasts by the hour; each entry is dated at the start of its hour.
-        static let forecastHourLength: TimeInterval = 3600
-
         /// The strip's hours: the one under way when the weather was fetched, then each hour that
         /// starts before the ride is expected to end.
         var forecastHours: [WeatherReading] {
             guard case let .loaded(forecast) = weather else { return [] }
-            let window = min(rideEstimate ?? Self.defaultForecastWindow, Self.maximumForecastWindow)
-            let end = forecast.fetchedAt.addingTimeInterval(window)
-            return forecast.hourly.filter {
-                $0.date.addingTimeInterval(Self.forecastHourLength) > forecast.fetchedAt && $0.date < end
-            }
+            return forecast.hours(within: min(rideEstimate ?? Self.defaultForecastWindow, Self.maximumForecastWindow))
         }
 
         /// What the Route row pushes: S05.2, opened on the sheet's current answer so that answer is the
@@ -127,7 +120,7 @@ struct StartSheetFeature {
         case rideCreated(rideId: UUID, route: RouteReference?)
         case rideCreationFailed
         case turnByTurnChanged(Bool)
-        case weatherLoaded(StartSheetForecast)
+        case weatherLoaded(AttributedForecast)
         case weatherUnavailable(StartSheetWeather.Unavailable)
         case rideEstimateLoaded(TimeInterval?)
         case alert(PresentationAction<Alert>)
@@ -328,7 +321,7 @@ struct StartSheetFeature {
                 async let weather = weatherClient.forecast(coordinate)
                 async let attribution = weatherClient.attribution()
                 let fetched = try await weather
-                let forecast = StartSheetForecast(
+                let forecast = AttributedForecast(
                     current: fetched.current,
                     hourly: fetched.hourly,
                     attribution: try await attribution,
@@ -408,7 +401,7 @@ extension StartSheetFeature.State {
 enum StartSheetWeather: Equatable {
     case loading
     case unavailable(Unavailable)
-    case loaded(StartSheetForecast)
+    case loaded(AttributedForecast)
 
     enum Unavailable: Equatable {
         /// Location is off for the app: the one case the rider can fix by turning it on.
@@ -417,26 +410,6 @@ enum StartSheetWeather: Equatable {
         /// WeatherKit didn't answer (offline, or the App ID lacks its App Service).
         case failed
     }
-}
-
-/// What the Weather group shows once WeatherKit has answered.
-struct StartSheetForecast: Equatable {
-    var current: WeatherReading
-    /// WeatherKit's whole forecast; `StartSheetFeature.State.forecastHours` picks the ride's hours.
-    var hourly: [WeatherReading]
-    var attribution: WeatherSourceAttribution
-    /// When it was fetched, which is the strip's "Now".
-    var fetchedAt: Date
-}
-
-extension StartSheetForecast {
-    /// `WeatherClient.testValue`'s answer, fetched at `WeatherReading.fixtureNow`.
-    static let fixture = StartSheetForecast(
-        current: .fixture,
-        hourly: WeatherReading.fixtureHourly,
-        attribution: .fixture,
-        fetchedAt: WeatherReading.fixtureNow
-    )
 }
 
 /// A single sensor row in the Start sheet's Sensors group.

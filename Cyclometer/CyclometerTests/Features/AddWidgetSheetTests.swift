@@ -22,9 +22,9 @@ struct AddWidgetSheetTests {
         #expect(names(AddWidgetEntry.entries(in: .elevation)) == [
             "elevation twoByOne", "ascent oneByOne", "descent oneByOne", "grade oneByOne",
         ])
-        // No widgets yet (#517): the picker draws neither section.
+        // No widgets yet (#517): the picker doesn't draw the section.
         #expect(AddWidgetEntry.entries(in: .power).isEmpty)
-        #expect(AddWidgetEntry.entries(in: .weather).isEmpty)
+        #expect(names(AddWidgetEntry.entries(in: .weather)) == ["weather twoByOne", "weather oneByOne"])
         #expect(names(AddWidgetEntry.entries(in: .route)) == [
             "map twoByTwo", "directions twoByOne", "routeElevation twoByOne", "climb twoByOne",
             "directions oneByOne", "distanceRemaining oneByOne", "eta oneByOne",

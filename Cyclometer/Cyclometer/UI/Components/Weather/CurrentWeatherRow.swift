@@ -43,7 +43,7 @@ struct WindLabel: View {
     var body: some View {
         let from = reading.windDirection.converted(to: .degrees).value
         let point = CompassPoint(degrees: from)
-        let speed = unit.speed(fromMPS: reading.windSpeed.converted(to: .metersPerSecond).value).rounded()
+        let speed = reading.wholeWindSpeed(in: unit)
         Group {
             if speed == 0 {
                 Text("Calm")
