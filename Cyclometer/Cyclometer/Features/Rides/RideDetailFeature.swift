@@ -197,7 +197,7 @@ struct RideDetailFeature {
                             await send(.trackLoadFailed)
                         }
                     },
-                    .run { [persistenceClient] send in
+                    .run { [persistenceClient, weatherClient] send in
                         let stats: RideStats
                         do {
                             stats = try await persistenceClient.fetchRideStats(id)
@@ -216,6 +216,14 @@ struct RideDetailFeature {
                             }
                         }
                         await send(.statsLoaded(stats, route: route))
+                        // Only the attribution, and only for a ride with weather to credit: the weather
+                        // itself is the ride's, stored at the time, and a ride without any shows no
+                        // Weather section. Failures are logged in WeatherClient, and the section shows
+                        // without a footer.
+                        guard !stats.weather.isEmpty,
+                              let attribution = try? await weatherClient.attribution()
+                        else { return }
+                        await send(.weatherAttributionLoaded(attribution))
                     },
                     .run { [persistenceClient] send in
                         do {
@@ -231,13 +239,6 @@ struct RideDetailFeature {
                         async let zoneCeilings = try? healthKitClient.fetchHeartRateZoneCeilings()
                         let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
                         await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM, zoneCeilingsBPM: await zoneCeilings))
-                    },
-                    // Only the attribution: the weather itself is the ride's, stored at the time.
-                    // Failures are logged in WeatherClient, and the section shows without a footer.
-                    .run { [weatherClient] send in
-                        if let attribution = try? await weatherClient.attribution() {
-                            await send(.weatherAttributionLoaded(attribution))
-                        }
                     }
                 )
 

@@ -198,9 +198,7 @@ extension WeatherReading {
 
     /// "18 degrees Celsius".
     func spokenTemperature(in unit: UnitTemperature) -> String {
-        Measurement(value: temperature.wholeDegrees(in: unit), unit: unit).formatted(
-            .measurement(width: .wide, usage: .asProvided, numberFormatStyle: .number.precision(.fractionLength(0)))
-        )
+        temperature.spokenWholeDegrees(in: unit)
     }
 }
 

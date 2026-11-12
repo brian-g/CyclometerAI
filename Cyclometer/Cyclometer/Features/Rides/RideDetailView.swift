@@ -379,8 +379,8 @@ extension RideStats {
 // MARK: - Metric sections
 
 /// The dashboard's metric sheets over the whole ride (#536), in UX.md §S15's order: Speed, Pace,
-/// Time, Active Calories, Cadence, Cadence Zones, Heart Rate, Heart Rate Zones, Elevation (with
-/// the sheet's Climbing and Grade, #548). The sheets' own sections, without their current
+/// Time, Weather (#151), Active Calories, Cadence, Cadence Zones, Heart Rate, Heart Rate Zones,
+/// Elevation (with the sheet's Climbing and Grade, #548). The sheets' own sections, without their current
 /// readings; each is left out when the ride recorded nothing for it.
 private struct RideDetailMetricSections: View {
     let store: StoreOf<RideDetailFeature>

@@ -152,18 +152,40 @@ struct RideDetailFeatureTests {
         #expect(reversed.windExposure == state.windExposure)
     }
 
-    @Test("A ride with no weather has no wind split, and WeatherKit unreachable leaves no attribution")
+    @Test("A ride with no weather has no wind split, and asks WeatherKit for nothing")
     func noWeather() async {
+        let attributionRequests = LockIsolated(0)
         let store = makeStore(persistenceClient: .mock(
             trackPoints: [Self.summary.id: Self.track(count: 120)],
             rideStats: [Self.summary.id: Self.stats]
         ))
-        store.dependencies.weatherClient = .unavailable
+        store.dependencies.weatherClient.attribution = {
+            attributionRequests.withValue { $0 += 1 }
+            return .fixture
+        }
 
         await load(store)
 
         #expect(store.state.stats?.weather.isEmpty == true)
         #expect(store.state.windExposure == nil)
+        #expect(store.state.weatherAttribution == nil)
+        #expect(attributionRequests.value == 0)
+    }
+
+    @Test("WeatherKit unreachable leaves the recorded weather without an attribution")
+    func weatherOffline() async {
+        var stats = Self.stats
+        stats.weather = [RideWeatherSample(date: Self.summary.startedAt, temperatureCelsius: 15, humidity: 0.6,
+                                           windSpeedMPS: 4, windFromDegrees: 0, condition: nil)]
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track(count: 120)],
+            rideStats: [Self.summary.id: stats]
+        ))
+        store.dependencies.weatherClient = .unavailable
+
+        await load(store)
+
+        #expect(store.state.stats?.weather == stats.weather)
         #expect(store.state.weatherAttribution == nil)
     }
 

@@ -41,7 +41,7 @@
 | 0.6.14 | 2026-11-09 | Brian / Claude | WeatherKit client (#148). §12 Privacy records WeatherKit: a coordinate sent to Apple for current conditions or the hourly forecast, nothing else. The client has no caller yet. M10.6's surfaces (#149–#152, #204) each choose which coordinate they send. |
 | 0.6.15 | 2026-11-09 | Brian / Claude | Start sheet weather (#149). §12 Privacy: S05.1 sends the rider's current location to WeatherKit when the sheet opens, only with location already granted. The in-app privacy policy lists it as a second exception after Place Names. |
 | 0.6.16 | 2026-11-11 | Brian / Claude | Live ride weather (#150). §12 Privacy: during a ride the app sends the rider's current location to WeatherKit when a location fix arrives and the forecast is 10 minutes old, for W10. The in-app privacy policy now says "on the New Ride sheet and during a ride". |
-| 0.6.17 | 2026-11-11 | Brian / Claude | Ride weather on S15 (#151). §12 Privacy: the current conditions of each forecast fetched during a ride are stored with the ride on the device for S15's Weather section. No new request and no new coordinate is sent. |
+| 0.6.17 | 2026-11-11 | Brian / Claude | Ride weather on S15 (#151). §12 Privacy: the current conditions of each forecast fetched during a ride are stored with the ride on the device for S15's Weather section. No new coordinate is sent: S15 asks WeatherKit only for its attribution, and only for a ride with weather to credit. |
 
 ---
 

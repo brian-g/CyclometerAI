@@ -17,9 +17,7 @@ struct RideWeatherSummary: Equatable {
             Measurement(value: $0.temperatureCelsius, unit: UnitTemperature.celsius).wholeDegrees(in: unit)
         }
         guard let low = degrees.min(), let high = degrees.max() else { return nil }
-        let spokenHigh = Measurement(value: high, unit: unit).formatted(
-            .measurement(width: .wide, usage: .asProvided, numberFormatStyle: .number.precision(.fractionLength(0)))
-        )
+        let spokenHigh = Measurement(value: high, unit: unit).spokenWholeDegrees(in: unit)
         return MetricReading(
             value: Self.range(low, high),
             unit: unit.symbol,

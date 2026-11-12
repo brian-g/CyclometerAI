@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-11-05 (#536) — §3.1: `Ride` gains `calorieSeriesData`, W23's calorie series stored with #460's total so S15's Active Calories chart doesn't move when the rider's Health body weight changes. Its last point is the stored total. §9 records the migration.
+**Updated:** 2026-11-11 (#151) — §3.1: `Ride.weather` is now a list of `RideWeatherSample`s, one per forecast fetched during the ride, in place of the single `RideWeather` captured at the start. Same `weatherData` column, so no migration: nothing wrote it before.
+**Previously:** 2026-11-05 (#536) — §3.1: `Ride` gains `calorieSeriesData`, W23's calorie series stored with #460's total so S15's Active Calories chart doesn't move when the rider's Health body weight changes. Its last point is the stored total. §9 records the migration.
 **Previously:** 2026-11-05 (#460) — §3.1: `Ride` gains `ascentMeters`, `descentMeters` and `activeKilocalories`, S15's Summary stored once at the finish so a ride's numbers never change afterwards, and `isFinishStatsOwed`, which marks a ride still to have them worked out from its saved track. This partly reverses #284 for elevation: what is stored is the finish's total, not a running value. §9 records the migration and the one-time backfill.
 **Previously:** 2026-11-03 (#517) — §3.6: `AppPreferences` gains `collapsedWidgetCategories`, the S08 picker sections the rider has collapsed.
 **Previously:** 2026-10-20 (#79) — §3.1: W5's four efficiency-zone columns are replaced by `cadenceSecondsByRPMData`, which holds seconds pedalling at each whole rpm. Cadence zones are now the rider's own, set in S12, so #340's "fixed thresholds" reason no longer holds. Like HR's zones (#284), they resolve at read time, so a zone change re-sorts time already recorded. §3.6: `AppPreferences` gains `cadenceZones`. §9 records the migration
@@ -174,13 +175,14 @@ final class Ride {
     var gpxFileURL: URL?
 
     // MARK: - Weather (OQDM10)
-    // Fetched at ride start; stored for post-ride display.
+    // The current conditions of each forecast fetched during the ride (#151), for S15's weather
+    // summary. Written at every checkpoint and at the finish, read back on a resume.
     @Attribute(.externalStorage)
     var weatherData: Data?
 
-    var weather: RideWeather? {
-        get { weatherData.flatMap { try? JSONDecoder().decode(RideWeather.self, from: $0) } }
-        set { weatherData = newValue.flatMap { try? JSONEncoder().encode($0) } }
+    var weather: [RideWeatherSample] {
+        get { weatherData.flatMap { try? JSONDecoder().decode([RideWeatherSample].self, from: $0) } ?? [] }
+        set { weatherData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
     }
 
     // MARK: - Map Thumbnail (#177)
@@ -236,14 +238,15 @@ enum RideRecordingState: String, Codable {
     case active, paused, ended
 }
 
-/// Weather conditions at ride start. Captured once; stored as JSON on Ride.
-struct RideWeather: Codable, Sendable {
-    var temperatureCelsius: Double?
-    var windSpeedKph: Double?
-    var windDirectionDegrees: Double?          // Meteorological: 0=N, 90=E, 180=S, 270=W
-    var conditions: WeatherCondition?
-    var humidityPercent: Double?
-    var capturedAt: Date?
+/// The weather at one moment of a ride (#151): one forecast's current conditions, in plain SI
+/// numbers. A list of them is stored as JSON on Ride.
+struct RideWeatherSample: Codable, Sendable, Equatable {
+    var date: Date                              // WeatherKit's observation time
+    var temperatureCelsius: Double
+    var humidity: Double                        // 0…1
+    var windSpeedMPS: Double
+    var windFromDegrees: Double                 // Meteorological: 0=N, 90=E, 180=S, 270=W
+    var condition: WeatherCondition?
 }
 
 enum WeatherCondition: String, Codable, Sendable {
@@ -1131,7 +1134,7 @@ request.fetchBatchSize = 500
 // NSPredicate on Route.startLatitude / .startLongitude; Haversine distance computed app-side
 //
 // Routes where return is with prevailing winds:
-// Route.bearing vs RideWeather.windDirectionDegrees — computed at query time
+// Route.bearing vs RideWeatherSample.windFromDegrees — computed at query time
 ```
 
 ---
@@ -1245,7 +1248,7 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 | Wheel auto-calibration math | Unit — WheelCalibrationTests | 2% trigger; 10% cap; out-of-range rejection; GPS accuracy gating |
 | PairedSensor role lookup | Unit — AppPreferencesTests | Correct sensor per role; nil when role unpaired; combo sensor at two roles |
 | ConnectedService Keychain round-trip | Integration — ConnectedServiceTests | Token stored in Keychain; keychainIdentifier retrieves correct token |
-| RideWeather encoding/decoding | Unit — RideWeatherTests | Round-trips through JSON; nil fields handled; partial data graceful |
+| RideWeatherSample recording and storage | Unit — RideWeatherRecordingTests | Checkpoint, resume and finish keep the samples; none stored reads back empty; a non-finite reading is never recorded |
 | RideSyncRecord encoding/decoding | Unit — RideSyncTests | Round-trips through JSON; correct status transitions; remoteActivityId stored on success |
 
 ---
@@ -1263,7 +1266,7 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 | OQDM7 | Connected services list is fixed | Resolved. ConnectedService @Model with serviceType: ExternalService. New services add an enum case |
 | OQDM8 | What is mapOrientation for? | Resolved — it is real. PRD section 8.6 specifies heading-up vs north-up as a user-toggleable setting; stored in AppPreferences to persist across sessions. Landed at #199, governing the full-screen map sheet only; the W8 widget is always heading-up |
 | OQDM9 | Store bike information | Deferred to Phase 2, shape recorded in §3.9. A rider owns several bikes; each bike owns its speed/cadence/radar/power sensors and maps to a Strava gear id. Wheel circumference lives on the speed sensor, not on the bike and not on a wheelset entity — a hub-mounted CSC sensor is already bound to one wheel (research: PRD §8.9.1). Heart rate stays rider-scoped. Ride gains `bike` + a `bikeName` snapshot so history always names the bike ridden |
-| OQDM10 | Capture weather conditions for a ride | Resolved. RideWeather Codable value type stored as JSON on Ride. Fields: temperature, wind speed, wind direction, conditions, humidity, capture timestamp |
+| OQDM10 | Capture weather conditions for a ride | Resolved. A list of `RideWeatherSample`s stored as JSON on Ride, one per forecast fetched during the ride (#151). Fields: observation time, temperature, humidity, wind speed, wind direction, condition |
 
 ---
 

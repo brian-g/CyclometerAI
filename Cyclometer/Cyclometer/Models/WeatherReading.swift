@@ -37,6 +37,13 @@ extension Measurement where UnitType == UnitTemperature {
         // Adding zero turns the -0 that rounding leaves into 0.
         converted(to: unit).value.rounded() + 0
     }
+
+    /// Whole degrees in `unit`, in words for VoiceOver: "18 degrees Celsius".
+    func spokenWholeDegrees(in unit: UnitTemperature) -> String {
+        Measurement(value: wholeDegrees(in: unit), unit: unit).formatted(
+            .measurement(width: .wide, usage: .asProvided, numberFormatStyle: .number.precision(.fractionLength(0)))
+        )
+    }
 }
 
 /// What WeatherKit's terms ask for wherever its data is shown: the Apple Weather mark and a link
