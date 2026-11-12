@@ -11,7 +11,7 @@ struct WeatherAttributionFooter: View {
 
     @Environment(\.colorScheme) private var colorScheme
     /// Grows with Dynamic Type, so the mark keeps its size beside "Legal".
-    @ScaledMetric(relativeTo: .caption) private var markHeight = Spacing.weatherMark
+    @ScaledMetric(relativeTo: .caption2) private var markHeight = Spacing.weatherMark
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
@@ -26,7 +26,7 @@ struct WeatherAttributionFooter: View {
             Link("Legal", destination: attribution.legalPageURL)
                 .accessibilityLabel("\(attribution.serviceName) legal attribution")
         }
-        .font(.caption)
+        .font(.caption2)
     }
 }
 

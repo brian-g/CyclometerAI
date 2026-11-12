@@ -11,7 +11,7 @@ struct WeatherReading: Equatable, Sendable {
     var temperature: Measurement<UnitTemperature>
     var windSpeed: Measurement<UnitSpeed>
     /// Where the wind blows *from*, clockwise from true north (meteorological, like
-    /// `RideWeather.windDirectionDegrees`).
+    /// `RideWeatherSample.windFromDegrees`).
     var windDirection: Measurement<UnitAngle>
     /// Relative humidity, 0…1.
     var humidity: Double
@@ -37,6 +37,13 @@ extension Measurement where UnitType == UnitTemperature {
         // Adding zero turns the -0 that rounding leaves into 0.
         converted(to: unit).value.rounded() + 0
     }
+
+    /// Whole degrees in `unit`, in words for VoiceOver: "18 degrees Celsius".
+    func spokenWholeDegrees(in unit: UnitTemperature) -> String {
+        Measurement(value: wholeDegrees(in: unit), unit: unit).formatted(
+            .measurement(width: .wide, usage: .asProvided, numberFormatStyle: .number.precision(.fractionLength(0)))
+        )
+    }
 }
 
 /// What WeatherKit's terms ask for wherever its data is shown: the Apple Weather mark and a link
@@ -44,10 +51,22 @@ extension Measurement where UnitType == UnitTemperature {
 struct WeatherSourceAttribution: Equatable, Sendable {
     var serviceName: String
     var legalPageURL: URL
-    /// The mark for a light background.
-    var combinedMarkLightURL: URL
-    /// The mark for a dark background.
-    var combinedMarkDarkURL: URL
+    /// The mark for a light background. Nil in `offline`, where the footer shows the service name.
+    var combinedMarkLightURL: URL?
+    /// The mark for a dark background. Nil in `offline`.
+    var combinedMarkDarkURL: URL?
+}
+
+extension WeatherSourceAttribution {
+    /// The credit for weather shown without a fresh fetch: S15's stored ride weather, opened offline
+    /// (#151). The terms still ask for the mark and the legal link, so the footer shows the service's
+    /// name in place of the mark, and the legal page's fixed address, which WeatherKit serves.
+    static let offline = WeatherSourceAttribution(
+        serviceName: "Apple Weather",
+        legalPageURL: URL(string: "https://weatherkit.apple.com/legal-attribution.html")!,
+        combinedMarkLightURL: nil,
+        combinedMarkDarkURL: nil
+    )
 }
 
 extension WeatherCondition {

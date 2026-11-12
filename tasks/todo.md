@@ -2310,3 +2310,28 @@ Plan: `~/.claude/plans/velvety-dancing-bubble.md`. Decided this session: 1×1 an
 - [x] Brian's picks from the review: rain "Now" and its window measured from the clock, not the fetch; "15:00" on a 24-hour clock; a forecast goes at an hour old by the clock (`forecast(at:)`, checked each minute), even with no fixes. Kept: lowercase units, fetching with W10 unplaced (#151 records it), permanent-failure retries, attribution re-fetch, .5 rounding
 - [x] The review's shared fetch read `\.date` up front, failing `StartSheetFeatureTests.weatherFails` (no date provided); `now` is a closure now
 - [x] Full `CyclometerTests`: 2716 passed, 0 failed
+
+---
+
+## #151 — S15 Ride Detail weather summary (temperature, humidity, wind split)
+
+Plan: `~/.claude/plans/151-shimmering-moonbeam.md`. Brian's picks: capture every W10 fetch; wind as head/cross/tail share of moving time; S20 conditions left for #204.
+
+- [x] `RideWeatherSample` replaces `RideWeather`; `Ride.weather` is a sample list in the same `weatherData` column (no schema change)
+- [x] `RideWeatherFeature` keeps `samples`; threaded through `RideSummaryUpdate` → `apply` → `summarySnapshot` → `init(resuming:)`
+- [x] `RideDetailTrack.movingHeadings` + `RideWindExposure`
+- [x] `RideStats.weather`; S15 attribution fetch; `windExposure` on state
+- [x] Sketch check: S15 has a "weather placeholder" in the title block, so Brian picked the title block + split bar over a separate section; `RideWeatherBlock` + previews; weather snapshot recorded and checked by eye (not yet approved)
+- [x] Brian moved it: a standalone Weather section after Time (attribution in its footer), not the title block; snapshot re-recorded and checked by eye
+- [x] Brian: attribution smaller everywhere — `Spacing.weatherMark` 16 → 12 pt, footer `.caption` → `.caption2`; Start sheet (6) and Weather sheet (2) references re-recorded, only the footer moved
+- [x] Build; Brian runs it
+- [x] Tests: `RideWeatherFeatureTests` (+1, four receives record the sample), new `RideWeatherRecordingTests` (6) and `RideWindExposureTests` (10), `RideDetailFeatureTests` (+3); snapshots checked by eye
+- [x] UX.md §S15 as-built + Updated line, PRD §12 + changelog 0.6.17, TCA.md §8
+- [x] Full `CyclometerTests`: first run 5 failures in `ActiveRideFeatureLocationTests` (its exhaustive weather receive now records a sample; helper updated); rerun 2737 passed, 0 failed
+- [x] Commit → PR
+
+**Review:** Two changes from the plan, both Brian's: the weather sits in its own section after Time, not in Sketch's title-block placeholder; and WeatherKit's footer is smaller everywhere (12 pt mark, caption2). A U-turn leaves a few seconds with no direction, or one second pointing the old way, while the 20 m baseline swings round. Not covered by tests: the live WeatherKit path, and the real attribution mark (the snapshots show the service name).
+- [x] `/code-review --fix` (xhigh): S15 asks WeatherKit for its attribution only for a ride with weather, after the stats; shared `spokenWholeDegrees`; PRD 0.6.17 no longer says "no new request"; DataModel.md §3.1 / OQDM10 updated from `RideWeather`; stale comments. Skipped, for Brian: an offline attribution fallback (service name + fixed legal URL); the 0.5 m/s calm threshold vs W10's "rounds to 0"; silent decode failure and 30 s re-encode (shared with `pauses`, better fixed for every JSON column at once); `movingHeadings` kept in state
+- [x] Full `CyclometerTests` after the review: 2738 passed, 0 failed
+- [x] Brian's picks from the review: offline, S15 credits stored weather as "Apple Weather" with WeatherKit's fixed legal URL (`WeatherSourceAttribution.offline`, mark URLs now optional); 0.5 m/s calm kept; silent JSON decode/encode filed as #563 (M11) for every column; `movingHeadings` left as is
+- [x] Full `CyclometerTests` after the fallback: 2738 passed, 0 failed

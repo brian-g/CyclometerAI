@@ -92,8 +92,8 @@ struct RouteDetailList<MapRow: View>: View {
                     ForEach(store.previousRides) { ride in
                         // Opens S15 on whichever tab's stack S20 is on (#426).
                         NavigationLink(state: RideRoutePath.State.ride(RideDetailFeature.State(summary: RideListSummary(ride)))) {
-                            // UX.md also lists conditions, which arrive with ride weather in M10.6:
-                            // nothing writes `Ride.weather` yet.
+                            // UX.md also lists conditions: `Ride.weather` holds them since #151, and
+                            // this row shows them with #204.
                             LabeledContent {
                                 Text(Int(ride.durationSeconds).formattedElapsed)
                                     .font(.subheadline.weight(.semibold))

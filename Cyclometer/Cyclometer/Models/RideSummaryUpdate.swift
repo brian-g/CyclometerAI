@@ -32,6 +32,9 @@ struct RideSummaryUpdate: Sendable, Equatable {
     /// See `Ride.pauses` (#537), carried across a kill so a ride resumed paused closes the
     /// pause it was killed in.
     var pauses: [RidePause] = []
+    /// See `Ride.weather` (#151), carried across a kill so a resumed ride keeps the conditions it
+    /// had already recorded.
+    var weather: [RideWeatherSample] = []
     /// The route the ride was started on (#197), read back so a resumed ride is still following
     /// it. `RidePersistenceActor.apply` never writes it: a ride's route is set once, by
     /// `createRide`, and no checkpoint may change it.

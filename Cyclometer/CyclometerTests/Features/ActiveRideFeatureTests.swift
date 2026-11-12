@@ -421,6 +421,8 @@ struct ActiveRideFeatureLocationTests {
             $0.weather.forecast = AttributedForecast(
                 current: .fixture, hourly: WeatherReading.fixtureHourly, attribution: .fixture, fetchedAt: testDate
             )
+            // Recorded for S15 (#151).
+            $0.weather.samples = [RideWeatherSample(WeatherReading.fixture)!]
             $0.weather.isFetching = false
         }
     }

@@ -53,6 +53,15 @@ struct RideDetailFeature {
         /// Nil until it loads, and nil for good if the read fails.
         var stats: RideStats?
 
+        /// How the recorded wind met the rider (#151). Worked out once both the track and the
+        /// stats are in, rather than by the view on every body pass. Nil without either, or for a
+        /// ride with no weather or no moving track.
+        var windExposure: RideWindExposure?
+
+        /// WeatherKit's mark and legal link for the Weather section's footer (#151). Nil until
+        /// it loads, and for a ride with no weather; `.offline` when WeatherKit can't be reached.
+        var weatherAttribution: WeatherSourceAttribution?
+
         /// The saved route the ride followed, S15's link to S20 (#426). Nil for a free ride,
         /// and for one whose route has since been deleted — `stats.routeName` still names it.
         var route: RouteSummary?
@@ -115,6 +124,11 @@ struct RideDetailFeature {
             guard let track, let stats else { return nil }
             return .wholeRide(track: track, stats: stats, unit: unitSystem)
         }
+
+        mutating func updateWindExposure() {
+            guard let track, let stats else { return }
+            windExposure = RideWindExposure(headings: track.movingHeadings, samples: stats.weather)
+        }
     }
 
     enum Action: Equatable {
@@ -125,6 +139,7 @@ struct RideDetailFeature {
         /// after it is on screen.
         case statsLoaded(RideStats, route: RouteSummary?)
         case vehiclePassesLoaded([VehiclePassEventDTO])
+        case weatherAttributionLoaded(WeatherSourceAttribution)
         case healthProfileFetched(restingBPM: Int?, maxBPM: Int?, zoneCeilingsBPM: [Int]?)
         case mapTapped
         case passesTapped
@@ -154,6 +169,7 @@ struct RideDetailFeature {
     @Dependency(\.persistenceClient) var persistenceClient
     @Dependency(\.healthKitClient) var healthKitClient
     @Dependency(\.altimeterClient) var altimeterClient
+    @Dependency(\.weatherClient) var weatherClient
     @Dependency(\.date) var date
 
     var body: some ReducerOf<Self> {
@@ -181,7 +197,7 @@ struct RideDetailFeature {
                             await send(.trackLoadFailed)
                         }
                     },
-                    .run { [persistenceClient] send in
+                    .run { [persistenceClient, weatherClient] send in
                         let stats: RideStats
                         do {
                             stats = try await persistenceClient.fetchRideStats(id)
@@ -200,6 +216,13 @@ struct RideDetailFeature {
                             }
                         }
                         await send(.statsLoaded(stats, route: route))
+                        // Only the attribution, and only for a ride with weather to credit: the weather
+                        // itself is the ride's, stored at the time, and a ride without any shows no
+                        // Weather section. Offline, the footer still credits it, by name and with the
+                        // fixed legal link. Failures are logged in WeatherClient.
+                        guard !stats.weather.isEmpty else { return }
+                        let attribution = (try? await weatherClient.attribution()) ?? .offline
+                        await send(.weatherAttributionLoaded(attribution))
                     },
                     .run { [persistenceClient] send in
                         do {
@@ -221,6 +244,7 @@ struct RideDetailFeature {
             case let .trackLoaded(segments, track):
                 state.trackSegments = segments
                 state.track = track
+                state.updateWindExposure()
                 return .none
 
             case .trackLoadFailed:
@@ -230,6 +254,7 @@ struct RideDetailFeature {
             case let .statsLoaded(stats, route):
                 state.stats = stats
                 state.route = route
+                state.updateWindExposure()
                 if let title = stats.title { state.summary.title = title }
                 // A map sheet opened before the stats landed has no stops and no pass layer yet.
                 if case var .mapSheet(sheet) = state.destination {
@@ -237,6 +262,10 @@ struct RideDetailFeature {
                     sheet.hasRadar = stats.vehiclePassCount != nil
                     state.destination = .mapSheet(sheet)
                 }
+                return .none
+
+            case .weatherAttributionLoaded(let attribution):
+                state.weatherAttribution = attribution
                 return .none
 
             case .vehiclePassesLoaded(let passes):
