@@ -172,7 +172,7 @@ struct RideDetailFeatureTests {
         #expect(attributionRequests.value == 0)
     }
 
-    @Test("WeatherKit unreachable leaves the recorded weather without an attribution")
+    @Test("WeatherKit unreachable still credits the recorded weather, by name and legal link")
     func weatherOffline() async {
         var stats = Self.stats
         stats.weather = [RideWeatherSample(date: Self.summary.startedAt, temperatureCelsius: 15, humidity: 0.6,
@@ -186,7 +186,7 @@ struct RideDetailFeatureTests {
         await load(store)
 
         #expect(store.state.stats?.weather == stats.weather)
-        #expect(store.state.weatherAttribution == nil)
+        #expect(store.state.weatherAttribution == .offline)
     }
 
     @Test("a ride with no HR or cadence sensor has no HR or cadence sections — never zeros")

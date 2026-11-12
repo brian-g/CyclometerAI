@@ -137,12 +137,13 @@ private struct WindShareBar: View {
 private struct RideWeatherSectionPreview: View {
     var samples: [RideWeatherSample] = RideWeatherSample.fixtureRide
     var exposure: RideWindExposure? = .shares(headwind: 40, crosswind: 25, tailwind: 35)
+    var attribution: WeatherSourceAttribution = .fixture
 
     var body: some View {
         List {
             RideWeatherSection(
                 summary: RideWeatherSummary(samples: samples, exposure: exposure),
-                attribution: .fixture
+                attribution: attribution
             )
         }
     }
@@ -160,6 +161,10 @@ private struct RideWeatherSectionPreview: View {
 #Preview("Metric") {
     RideWeatherSectionPreview()
         .environment(\.locale, Locale(identifier: "en_GB"))
+}
+
+#Preview("Offline") {
+    RideWeatherSectionPreview(attribution: .offline)
 }
 
 #Preview("Calm") {

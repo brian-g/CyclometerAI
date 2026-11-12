@@ -51,10 +51,22 @@ extension Measurement where UnitType == UnitTemperature {
 struct WeatherSourceAttribution: Equatable, Sendable {
     var serviceName: String
     var legalPageURL: URL
-    /// The mark for a light background.
-    var combinedMarkLightURL: URL
-    /// The mark for a dark background.
-    var combinedMarkDarkURL: URL
+    /// The mark for a light background. Nil in `offline`, where the footer shows the service name.
+    var combinedMarkLightURL: URL?
+    /// The mark for a dark background. Nil in `offline`.
+    var combinedMarkDarkURL: URL?
+}
+
+extension WeatherSourceAttribution {
+    /// The credit for weather shown without a fresh fetch: S15's stored ride weather, opened offline
+    /// (#151). The terms still ask for the mark and the legal link, so the footer shows the service's
+    /// name in place of the mark, and the legal page's fixed address, which WeatherKit serves.
+    static let offline = WeatherSourceAttribution(
+        serviceName: "Apple Weather",
+        legalPageURL: URL(string: "https://weatherkit.apple.com/legal-attribution.html")!,
+        combinedMarkLightURL: nil,
+        combinedMarkDarkURL: nil
+    )
 }
 
 extension WeatherCondition {

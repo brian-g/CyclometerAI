@@ -59,7 +59,7 @@ struct RideDetailFeature {
         var windExposure: RideWindExposure?
 
         /// WeatherKit's mark and legal link for the Weather section's footer (#151). Nil until
-        /// it loads, and for good if it can't, offline.
+        /// it loads, and for a ride with no weather; `.offline` when WeatherKit can't be reached.
         var weatherAttribution: WeatherSourceAttribution?
 
         /// The saved route the ride followed, S15's link to S20 (#426). Nil for a free ride,
@@ -218,11 +218,10 @@ struct RideDetailFeature {
                         await send(.statsLoaded(stats, route: route))
                         // Only the attribution, and only for a ride with weather to credit: the weather
                         // itself is the ride's, stored at the time, and a ride without any shows no
-                        // Weather section. Failures are logged in WeatherClient, and the section shows
-                        // without a footer.
-                        guard !stats.weather.isEmpty,
-                              let attribution = try? await weatherClient.attribution()
-                        else { return }
+                        // Weather section. Offline, the footer still credits it, by name and with the
+                        // fixed legal link. Failures are logged in WeatherClient.
+                        guard !stats.weather.isEmpty else { return }
+                        let attribution = (try? await weatherClient.attribution()) ?? .offline
                         await send(.weatherAttributionLoaded(attribution))
                     },
                     .run { [persistenceClient] send in
