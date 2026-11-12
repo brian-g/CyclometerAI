@@ -36,6 +36,9 @@ struct RideWeatherFeature {
         /// moving fast enough for it to mean something (`NavigationFeature.courseSpeedFloorMPS`).
         /// Held through a stop, so W10's arrow doesn't swing at a light. Nil until the first.
         var course: Double?
+        /// The current conditions of every forecast fetched this ride (#151), for S15's weather
+        /// summary. Saved at each checkpoint and at the finish, and restored on a resume.
+        var samples: [RideWeatherSample] = []
 
         /// W10's sheet shows the next few hours: enough to see what the ride is heading into.
         static let forecastWindow: TimeInterval = 3 * 3600
@@ -102,6 +105,7 @@ struct RideWeatherFeature {
 
             case .forecastLoaded(let forecast):
                 state.forecast = forecast
+                state.samples.record(forecast.current)
                 state.isFetching = false
                 state.didLastAttemptFail = false
                 return .none

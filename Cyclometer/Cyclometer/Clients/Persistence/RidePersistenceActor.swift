@@ -311,7 +311,8 @@ actor RidePersistenceActor {
             // Only a file still there: the rider can delete it from Files, as `replaceGPXFile`
             // allows for, and S15 must not offer to share a file that is gone.
             gpxFileURL: ride.gpxFileURL.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil },
-            pauses: ride.pauses
+            pauses: ride.pauses,
+            weather: ride.weather
         )
     }
 
@@ -479,6 +480,7 @@ actor RidePersistenceActor {
         ride.cadenceCoastingSeconds = update.cadenceCoastingSeconds
         ride.trackSegmentIndex = update.trackSegmentIndex
         ride.pauses = update.pauses
+        ride.weather = update.weather
         // `update.route` is deliberately not written: the route is `createRide`'s alone.
         ride.routeProgressMeters = update.routeProgressMeters
         ride.isRouteComplete = update.isRouteComplete

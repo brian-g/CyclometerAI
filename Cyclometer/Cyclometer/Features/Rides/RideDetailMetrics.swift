@@ -23,6 +23,9 @@ struct RideDetailTrack: Equatable, Sendable {
     /// The Pace section's splits (#547), for each unit system, so a change of units needn't reread
     /// the track.
     var paceSplits: [UnitSystem: [PaceSplit]] = [:]
+    /// The direction of travel at each moving second, which the Weather section sets the
+    /// recorded wind against (#151).
+    var movingHeadings: [TimedHeading] = []
 }
 
 // In an extension, so the struct keeps its memberwise initializer.
@@ -47,6 +50,7 @@ extension RideDetailTrack {
         paceSplits = Dictionary(uniqueKeysWithValues: UnitSystem.allCases.map { unit in
             (unit, PaceSplits.splits(points, metersPerSplit: PaceSplits.metersPerSplit(unit)))
         })
+        movingHeadings = TimedHeading.movingHeadings(points)
     }
 }
 

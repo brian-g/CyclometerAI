@@ -1024,7 +1024,8 @@ Cyclometer/
 │   │   ├── SensorHealth/                  // SensorHealthFeature (#391), SensorsButton + SensorsSheet (#464, #466)
 │   │   └── Calibration/                   // WheelCalibrationFeature, WheelCalibration
 │   ├── Rides/                             // RidesFeature/View, RideDetail*, RideSummary*,
-│   │                                      // StartSheet*, RoutePicker*
+│   │                                      // StartSheet*, RoutePicker*, RideWeatherSummary +
+│   │                                      // RideWindExposure (S15 Weather, #151)
 │   ├── Routes/                            // RoutesFeature/View, RouteDetail*, RouteFilter,
 │   │                                      // RouteLibrary, RoutesMapCamera
 │   ├── Settings/                          // SettingsFeature/View, DeviceManagement*

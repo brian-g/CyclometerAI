@@ -11,7 +11,7 @@ struct WeatherReading: Equatable, Sendable {
     var temperature: Measurement<UnitTemperature>
     var windSpeed: Measurement<UnitSpeed>
     /// Where the wind blows *from*, clockwise from true north (meteorological, like
-    /// `RideWeather.windDirectionDegrees`).
+    /// `RideWeatherSample.windFromDegrees`).
     var windDirection: Measurement<UnitAngle>
     /// Relative humidity, 0…1.
     var humidity: Double

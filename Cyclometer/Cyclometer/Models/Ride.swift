@@ -84,13 +84,15 @@ final class Ride {
     var gpxFileURL: URL?
 
     // MARK: - Weather (OQDM10)
-    // Fetched at ride start; stored for post-ride display.
+    /// The conditions from each forecast fetched during the ride (#151), for S15's weather summary.
+    /// Written at every checkpoint and at the finish. JSON, read and written through `weather`.
+    /// Nothing wrote this column before #151, so no stored ride holds an older shape.
     @Attribute(.externalStorage)
     var weatherData: Data?
 
-    var weather: RideWeather? {
-        get { weatherData.flatMap { try? JSONDecoder().decode(RideWeather.self, from: $0) } }
-        set { weatherData = newValue.flatMap { try? JSONEncoder().encode($0) } }
+    var weather: [RideWeatherSample] {
+        get { weatherData.flatMap { try? JSONDecoder().decode([RideWeatherSample].self, from: $0) } ?? [] }
+        set { weatherData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
     }
 
     // MARK: - Map Thumbnail (#177)
@@ -241,22 +243,13 @@ extension Ride {
             cadenceCoastingSeconds: cadenceCoastingSeconds,
             trackSegmentIndex: trackSegmentIndex,
             pauses: pauses,
+            weather: weather,
             // `createRide` writes the id and name together, so this is both or neither.
             route: routeId.flatMap { id in routeName.map { RouteReference(id: id, name: $0) } },
             routeProgressMeters: routeProgressMeters,
             isRouteComplete: isRouteComplete
         )
     }
-}
-
-/// Weather conditions at ride start. Captured once; stored as JSON on Ride.
-struct RideWeather: Codable, Sendable {
-    var temperatureCelsius: Double?
-    var windSpeedKph: Double?
-    var windDirectionDegrees: Double?          // Meteorological: 0=N, 90=E, 180=S, 270=W
-    var conditions: WeatherCondition?
-    var humidityPercent: Double?
-    var capturedAt: Date?
 }
 
 enum WeatherCondition: String, Codable, Sendable {

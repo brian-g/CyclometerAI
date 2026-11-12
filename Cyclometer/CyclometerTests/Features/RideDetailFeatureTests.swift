@@ -106,6 +106,67 @@ struct RideDetailFeatureTests {
         #expect(store.state.vehiclePasses == [Self.pass])
     }
 
+    // MARK: Weather (#151)
+
+    @Test("The recorded weather arrives with the stats, the wind split once the track is in too")
+    func weatherLoads() async {
+        let points = Self.track(count: 120)
+        var stats = Self.stats
+        // `track` heads north: a northerly is all headwind.
+        stats.weather = [RideWeatherSample(date: Self.summary.startedAt, temperatureCelsius: 15, humidity: 0.6,
+                                           windSpeedMPS: 4, windFromDegrees: 0, condition: .cloudy)]
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: points],
+            rideStats: [Self.summary.id: stats]
+        ))
+
+        await load(store)
+
+        #expect(store.state.stats?.weather == stats.weather)
+        #expect(store.state.windExposure == .shares(headwind: 100, crosswind: 0, tailwind: 0))
+        #expect(store.state.weatherAttribution == .fixture)
+    }
+
+    @Test("Track and stats can land in either order; the wind split waits for both")
+    func windExposureWaitsForBoth() {
+        let points = Self.track(count: 120)
+        var stats = Self.stats
+        stats.weather = [RideWeatherSample(date: Self.summary.startedAt, temperatureCelsius: 15, humidity: 0.6,
+                                           windSpeedMPS: 4, windFromDegrees: 180, condition: nil)]
+        let track = RideDetailTrack(points: points, altitudeSource: .gps)
+
+        var state = RideDetailFeature.State(summary: Self.summary)
+        state.stats = stats
+        state.updateWindExposure()
+        #expect(state.windExposure == nil)
+        state.track = track
+        state.updateWindExposure()
+        #expect(state.windExposure == .shares(headwind: 0, crosswind: 0, tailwind: 100))
+
+        var reversed = RideDetailFeature.State(summary: Self.summary)
+        reversed.track = track
+        reversed.updateWindExposure()
+        #expect(reversed.windExposure == nil)
+        reversed.stats = stats
+        reversed.updateWindExposure()
+        #expect(reversed.windExposure == state.windExposure)
+    }
+
+    @Test("A ride with no weather has no wind split, and WeatherKit unreachable leaves no attribution")
+    func noWeather() async {
+        let store = makeStore(persistenceClient: .mock(
+            trackPoints: [Self.summary.id: Self.track(count: 120)],
+            rideStats: [Self.summary.id: Self.stats]
+        ))
+        store.dependencies.weatherClient = .unavailable
+
+        await load(store)
+
+        #expect(store.state.stats?.weather.isEmpty == true)
+        #expect(store.state.windExposure == nil)
+        #expect(store.state.weatherAttribution == nil)
+    }
+
     @Test("a ride with no HR or cadence sensor has no HR or cadence sections — never zeros")
     func noSensorsLoadEmptyNotZero() async {
         let noSensorStats = RideStats(averageSpeedMPS: 6, maxSpeedMPS: 11)

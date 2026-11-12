@@ -1505,6 +1505,7 @@ struct ActiveRideFeature {
             cadenceCoastingSeconds: state.cadence.coastingSeconds,
             trackSegmentIndex: state.trackSegmentIndex,
             pauses: state.pauses,
+            weather: state.weather.samples,
             route: state.route,
             routeProgressMeters: state.navigation.progressMeters,
             isRouteComplete: state.navigation.isRouteComplete
@@ -1793,6 +1794,8 @@ extension ActiveRideFeature.State {
         // A ride killed while paused comes back with its pause open, for the resume to close.
         // One killed while recording has none open: nobody paused for the gap.
         pauses = summary.pauses
+        // The rest of W10's state starts over: the next fix fetches a fresh forecast (#151).
+        weather.samples = summary.weather
         elapsedSeconds = Int(summary.durationSeconds)
         distanceMeters = summary.distanceMeters
         // W23 waits for the saved track before estimating anything (#465).

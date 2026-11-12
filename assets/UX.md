@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-11-11 — §S15 Weather built (#151): its own section after Time, with the ride's temperature and humidity ranges and a headwind / crosswind / tailwind bar of moving time. Not in §S10. WeatherKit's attribution footer is now smaller everywhere: the mark `Spacing.weatherMark` (12 pt) high, "Legal" in caption2.  
 **Updated:** 2026-11-11 — §W10 Weather built (#150): wind first, with an arrow relative to the direction of travel; 2×1 and 1×1; rain within two hours takes over the card; "Sheet: Weather" added. §S08's Weather section lists it.  
 **Updated:** 2026-11-04 — "Sheet: Heart rate" gains Average and Max under Heart Rate and Zone (#531), as §W5's Cadence sheet has.  
 **Updated:** 2026-10-23 — Ride metrics pass. New widgets, none built yet: §W19 Distance Remaining and §W20 ETA (#461), §W21 Sunset (#462), §W22 Climb (#463), §W23 Active Calories with its Calories sheet (#465). §S05's Bottom Toolbar gains the Sensors sheet that the Sensor button (#466) and a new quiet Low Battery indicator (#464) both open. §S10 points to that indicator. §S15's Stats gain average and max HR, ascent, descent and calories (#460).  
@@ -1444,6 +1445,13 @@ Sections appear on screen in the order listed below.
       - **Late loads:** passes, stops and Health's heart rate zones that land after the sheet opened reach it.
       - **Not built:** the wind layer (M10.6).
 - Weather summary (not implemented until M10.6): The weather summary should list the temperature range of the ride, the humidity range, and the wind over the route ridden. It might be appropriate to summarize the weather with iOS foundation models. The weather should be captured at intervals during the ride. A capture that fails, such as with no data connection, is skipped silently: the ride never waits on it and the rider is never told.
+  - **As built (#151):**
+    - **Capture:** the current conditions of every forecast W10 already fetches during the ride (about every 10 minutes, whether or not W10 is on a page), so no extra WeatherKit requests. A refetch that returns the same observation adds nothing. Saved at every checkpoint and at the finish, and kept through a kill.
+    - **Place:** its own Weather section, after Time (Brian moved it there from Sketch's title-block placeholder). Shown even when the Speed, Pace and Time sections aren't. Absent for a ride with no weather: one from before #151, or one where every fetch failed.
+    - **Temperature and Humidity:** the lowest to the highest reading, "57–63 °F" and "58–70 %"; one value when the range rounds flat. Temperature in the locale's weather unit, as §S05.1.
+    - **Wind:** a bar of the ride's moving time spent in headwind, crosswind and tailwind (`cyRatingBad`, `cyRatingOkay`, `cyRatingGood`), then each share as a whole percent, the three adding to 100. Each moving second's direction of travel comes from the track, from the point at least 20 m back in the same stretch of riding, and is set against the latest sample at or before it. Headwind, crosswind and tailwind each cover 45° either side of dead ahead, abeam and astern, W10's quarters (`RelativeWind`). Seconds under a wind below 0.5 m/s don't count; if every sample was that light the row is a single Wind reading, "Calm". With no track, there's no wind row.
+    - **Footer:** WeatherKit's mark and Legal link once the attribution loads. Offline, the section shows without it.
+    - **Not built:** the Foundation Models summary; the wind layer on the map sheet (#561); S20's Previous Rides conditions (#204).
 - Summary: This shows some at a glance metrics in hero numbers. Ascent, Descent, Average Speed, Average Heart Rate, Average Cadence, Average Power (hidden until Phase 3), Calories.
   - Each value is hidden when the ride recorded no data for it (no "—").
   - Ascent and Descent are stored on the `Ride` at the finish, not recounted from the track on open (#460).

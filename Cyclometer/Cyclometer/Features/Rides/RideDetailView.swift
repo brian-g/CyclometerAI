@@ -395,6 +395,14 @@ private struct RideDetailMetricSections: View {
                 RideTimeSection(metrics: metrics)
             }
         }
+        // After Time (#151). Gone for a ride that recorded no weather: one from before #151, or one
+        // where every forecast failed.
+        if let samples = store.stats?.weather, !samples.isEmpty {
+            RideWeatherSection(
+                summary: RideWeatherSummary(samples: samples, exposure: store.windExposure),
+                attribution: store.weatherAttribution
+            )
+        }
         if let metrics = store.caloriesMetrics {
             Section {
                 CaloriesReadings(metrics: metrics)

@@ -48,7 +48,8 @@ final class RideDetailSnapshotTests: XCTestCase {
 
     /// The `Ride` row as the finish stores it for `points`, with the dashboard's own averages.
     private static func stats(_ points: [TrackPointDTO], route: RouteSummary? = nil,
-                              bodyMass: Bool = true, radar: Bool = true, notes: String = "") -> RideStats {
+                              bodyMass: Bool = true, radar: Bool = true, notes: String = "",
+                              weather: [RideWeatherSample] = []) -> RideStats {
         let finish = RideFinishStats(savedTrack: points, altitudeSource: .barometric,
                                      movingSeconds: summary.durationSeconds, distanceMeters: summary.distanceMeters,
                                      rider: bodyMass ? RideEnergy.Rider(kilograms: 75, age: 40, sex: .male) : nil)
@@ -68,9 +69,22 @@ final class RideDetailSnapshotTests: XCTestCase {
             cadenceSecondsByRPM: cadence.isEmpty ? [:] : [72: 300, 84: 600, 91: 450, 99: 150],
             cadenceCoastingSeconds: cadence.isEmpty ? 0 : 150,
             endedAt: summary.startedAt.addingTimeInterval(2_100),
-            notes: notes
+            notes: notes,
+            weather: weather
         )
     }
+
+    /// Three forecasts 10 minutes apart on the northbound `points`: the wind from the north
+    /// (head), then the east (cross), then the south (tail), warming 14 to 17 °C as the humidity
+    /// falls from 70 to 58 % (#151).
+    private static let weather: [RideWeatherSample] = [(0.0, 14.0, 0.70), (90, 16, 0.64), (180, 17, 0.58)]
+        .enumerated().map { step, reading in
+            RideWeatherSample(
+                date: summary.startedAt.addingTimeInterval(Double(step) * 600),
+                temperatureCelsius: reading.1, humidity: reading.2,
+                windSpeedMPS: 4, windFromDegrees: reading.0, condition: .partlyCloudy
+            )
+        }
 
     /// Imperial units, and the state `.task` would have produced seeded directly.
     private func screen(_ points: [TrackPointDTO], stats: RideStats, route: RouteSummary? = nil,
@@ -86,6 +100,8 @@ final class RideDetailSnapshotTests: XCTestCase {
             state.track = RideDetailTrack(points: points, altitudeSource: .barometric)
             state.stats = stats
             state.route = route
+            state.updateWindExposure()
+            if !stats.weather.isEmpty { state.weatherAttribution = .fixture }
             return Store(initialState: state) {
                 RideDetailFeature()
             } withDependencies: {
@@ -161,6 +177,13 @@ final class RideDetailSnapshotTests: XCTestCase {
         let points = Self.points()
         assertBothSchemes(screen(points, stats: Self.stats(points, notes: "Headwind on the way out, tailwind home.")),
                           named: "notes")
+    }
+
+    /// Weather recorded during the ride (#151): the temperature and humidity ranges under the
+    /// hero numbers, the head / cross / tail bar and its shares, and WeatherKit's attribution.
+    func testRideDetailWeather() {
+        let points = Self.points()
+        assertBothSchemes(screen(points, stats: Self.stats(points, weather: Self.weather)), named: "weather")
     }
 
     /// A trainer ride, with no drawable track: no map header, and the title block first under

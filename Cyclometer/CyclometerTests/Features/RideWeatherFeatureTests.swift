@@ -4,7 +4,8 @@ import Testing
 @testable import Cyclometer
 
 /// #150 — the weather during a ride: fetched on a location fix when due, kept through failures
-/// until stale, with the rider's course held through a stop.
+/// until stale, with the rider's course held through a stop. #151 — each forecast's current
+/// conditions recorded for S15; a failed fetch records nothing (the exhaustive stores below).
 @MainActor
 @Suite("RideWeatherFeature")
 struct RideWeatherFeatureTests {
@@ -21,6 +22,9 @@ struct RideWeatherFeatureTests {
             timestamp: start
         )
     }
+
+    /// What a load of `.fixture` records (#151).
+    private static let sample = RideWeatherSample(WeatherReading.fixture)!
 
     private static func forecast(at date: Date) -> AttributedForecast {
         AttributedForecast(current: .fixture, hourly: WeatherReading.fixtureHourly, attribution: .fixture, fetchedAt: date)
@@ -52,6 +56,7 @@ struct RideWeatherFeatureTests {
         }
         await store.receive(.forecastLoaded(Self.forecast(at: Self.start))) {
             $0.forecast = Self.forecast(at: Self.start)
+            $0.samples = [Self.sample]
             $0.isFetching = false
         }
         #expect(store.state.forecast?.current == .fixture)
@@ -77,6 +82,7 @@ struct RideWeatherFeatureTests {
         }
         await store.receive(.forecastLoaded(Self.forecast(at: due))) {
             $0.forecast = Self.forecast(at: due)
+            $0.samples = [Self.sample]
             $0.isFetching = false
         }
     }
@@ -122,6 +128,7 @@ struct RideWeatherFeatureTests {
         }
         await store.receive(.forecastLoaded(Self.forecast(at: replaced))) {
             $0.forecast = Self.forecast(at: replaced)
+            $0.samples = [Self.sample]
             $0.isFetching = false
         }
     }
@@ -153,6 +160,7 @@ struct RideWeatherFeatureTests {
         }
         await store.receive(.forecastLoaded(Self.forecast(at: retry))) {
             $0.forecast = Self.forecast(at: retry)
+            $0.samples = [Self.sample]
             $0.isFetching = false
             $0.didLastAttemptFail = false
         }
@@ -221,5 +229,27 @@ struct RideWeatherFeatureTests {
         // A clock set back an hour doesn't keep it either.
         #expect(state.forecast(at: Self.start.addingTimeInterval(-RideWeatherFeature.maxAge)) == nil)
         #expect(RideWeatherFeature.maxAge == 3600)
+    }
+
+    @Test("Each new observation is recorded once; a refetch of the same one adds nothing")
+    func recordsEachObservationOnce() async {
+        let store = makeStore(now: LockIsolated(Self.start))
+        await store.send(.forecastLoaded(Self.forecast(at: Self.start))) {
+            $0.forecast = Self.forecast(at: Self.start)
+            $0.samples = [Self.sample]
+        }
+        // WeatherKit serves the same observation again inside its update interval.
+        let refetch = Self.forecast(at: Self.start.addingTimeInterval(RideWeatherFeature.refreshInterval))
+        await store.send(.forecastLoaded(refetch)) {
+            $0.forecast = refetch
+        }
+        var later = refetch
+        later.current.date = WeatherReading.fixture.date.addingTimeInterval(RideWeatherFeature.refreshInterval)
+        later.current.temperature = Measurement(value: 21, unit: .celsius)
+        await store.send(.forecastLoaded(later)) {
+            $0.forecast = later
+            $0.samples.append(RideWeatherSample(later.current)!)
+        }
+        #expect(store.state.samples.map(\.temperatureCelsius) == [18, 21])
     }
 }

@@ -49,4 +49,7 @@ struct RideStats: Sendable, Equatable {
     /// Every pause, manual or auto, for the map sheet's stops (#537). Empty for a ride recorded
     /// before pauses were.
     var pauses: [RidePause] = []
+    /// The conditions recorded during the ride (#151), for S15's Weather section. Empty for a ride
+    /// recorded before #151, or one where every forecast failed.
+    var weather: [RideWeatherSample] = []
 }
