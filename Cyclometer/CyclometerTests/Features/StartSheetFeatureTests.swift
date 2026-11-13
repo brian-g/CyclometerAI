@@ -385,6 +385,9 @@ struct StartSheetFeatureTests {
         let store = TestStore(initialState: StartSheetFeature.State()) {
             StartSheetFeature()
         }
+        // The route's weather (#559) races its estimate; `estimateFollowsTheRoute` and the Weather
+        // tests below hold each.
+        store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.path(.push(id: 0, state: .routePicker(RoutePickerFeature.State())))) {
             $0.path[id: 0] = .routePicker(RoutePickerFeature.State())
@@ -418,6 +421,9 @@ struct StartSheetFeatureTests {
             $0.route = nil
             $0.path = StackState()
         }
+        // A free ride's weather is the rider's again (#559): location granted, but no position
+        // from `LocationClient.testValue`.
+        await store.receive(.weatherUnavailable(.failed)) { $0.weather = .unavailable(.failed) }
     }
 
     // MARK: - Weather (#149)
@@ -511,6 +517,138 @@ struct StartSheetFeatureTests {
         await store.receive(.weatherUnavailable(.offline)) { $0.weather = .unavailable(.offline) }
     }
 
+    // MARK: Weather at the route's start (#559)
+
+    /// "Summit Climb", and the first point of its preview geometry.
+    private static let summitStart = RouteDetail.previewRouteDetails[route.id]!.coordinates[0]
+    private static let fargoStart = RouteCoordinate(latitude: fargo.latitude, longitude: fargo.longitude)
+
+    /// A WeatherKit client that records each coordinate it is asked about.
+    private static func recordingWeather(_ asked: LockIsolated<[RouteCoordinate]>) -> WeatherClient {
+        var weather = WeatherClient.testValue
+        weather.forecast = { coordinate in
+            asked.withValue { $0.append(coordinate) }
+            return WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly)
+        }
+        return weather
+    }
+
+    /// The rider may be at home, nowhere near the trailhead — and needn't have location on at all.
+    @Test("With a route, the sheet shows the weather at the route's start, without reading location")
+    func weatherAtRouteStart() async {
+        let asked = LockIsolated<[RouteCoordinate]>([])
+        let store = TestStore(initialState: StartSheetFeature.State(route: Self.route.reference)) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.date = .constant(WeatherReading.fixtureNow)
+            $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes, routeDetails: RouteDetail.previewRouteDetails)
+            $0.permissionsClient.status = { _ in Issue.record("A route's start needs no location"); return .denied }
+            $0.locationClient.currentCoordinate = { Issue.record("A route's start needs no position"); return Self.fargo }
+            $0.weatherClient = Self.recordingWeather(asked)
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await store.receive(.weatherLoaded(AttributedForecast.fixture)) { $0.weather = .loaded(AttributedForecast.fixture) }
+        #expect(asked.value == [Self.summitStart])
+    }
+
+    /// The rider's position instead would put another place's weather under this route.
+    @Test("A route with no readable start shows the unavailable state, not the rider's weather")
+    func weatherAtRouteWithoutStart() async {
+        let store = TestStore(initialState: StartSheetFeature.State(route: Self.route.reference)) {
+            StartSheetFeature()
+        } withDependencies: {
+            // `PersistenceClient.testValue` resolves no route.
+            $0.locationClient.currentCoordinate = { Issue.record("No fallback to the rider's position"); return Self.fargo }
+            $0.weatherClient.forecast = { _ in Issue.record("No start, nothing to ask WeatherKit"); return WeatherForecast(current: .fixture, hourly: []) }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await store.receive(.weatherUnavailable(.failed)) { $0.weather = .unavailable(.failed) }
+    }
+
+    @Test("Picking a route moves the weather to its start; None moves it back to the rider")
+    func weatherFollowsTheRoute() async {
+        let asked = LockIsolated<[RouteCoordinate]>([])
+        var initial = StartSheetFeature.State()
+        initial.weather = .unavailable(.offline)
+        let store = TestStore(initialState: initial) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.date = .constant(WeatherReading.fixtureNow)
+            $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes, routeDetails: RouteDetail.previewRouteDetails)
+            $0.locationClient.currentCoordinate = { Self.fargo }
+            $0.weatherClient = Self.recordingWeather(asked)
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.path(.push(id: 0, state: .routePicker(RoutePickerFeature.State()))))
+        // The last start's weather is no answer for this one: loading until it lands.
+        await store.send(.path(.element(id: 0, action: .routePicker(.delegate(.routeSelected(Self.route.reference)))))) {
+            $0.weather = .loading
+        }
+        await store.receive(.weatherLoaded(AttributedForecast.fixture)) { $0.weather = .loaded(AttributedForecast.fixture) }
+        #expect(asked.value == [Self.summitStart])
+
+        await store.send(.path(.push(id: 1, state: .routePicker(RoutePickerFeature.State(selection: Self.route.reference)))))
+        await store.send(.path(.element(id: 1, action: .routePicker(.delegate(.routeSelected(nil)))))) {
+            $0.weather = .loading
+        }
+        await store.receive(.weatherLoaded(AttributedForecast.fixture))
+        #expect(asked.value == [Self.summitStart, Self.fargoStart])
+    }
+
+    @Test("Re-picking the sheet's route keeps its weather, with no new request")
+    func weatherKeptForTheSameRoute() async {
+        var initial = StartSheetFeature.State(route: Self.route.reference)
+        initial.weather = .loaded(AttributedForecast.fixture)
+        let store = TestStore(initialState: initial) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes, routeDetails: RouteDetail.previewRouteDetails)
+            $0.weatherClient.forecast = { _ in Issue.record("Same start, same weather"); return WeatherForecast(current: .fixture, hourly: []) }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        let picker = RoutePickerFeature.State(selection: Self.route.reference)
+        await store.send(.path(.push(id: 0, state: .routePicker(picker))))
+        await store.send(.path(.element(id: 0, action: .routePicker(.delegate(.routeSelected(Self.route.reference))))))
+        await store.finish()
+        #expect(store.state.weather == .loaded(AttributedForecast.fixture))
+    }
+
+    @Test("A slow forecast for the last route can't land on the newly picked one")
+    func staleWeatherCancelled() async {
+        let first = RouteSummary.previewRoutes[0]
+        let firstStart = RouteDetail.previewRouteDetails[first.id]!.coordinates[0]
+        let gate = AsyncStream<Void>.makeStream()
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.date = .constant(WeatherReading.fixtureNow)
+            $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes, routeDetails: RouteDetail.previewRouteDetails)
+            $0.weatherClient.forecast = { coordinate in
+                guard coordinate == firstStart else {
+                    return WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly)
+                }
+                for await _ in gate.stream { break }
+                return WeatherForecast(current: .fixture, hourly: [])
+            }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.path(.push(id: 0, state: .routePicker(RoutePickerFeature.State()))))
+        await store.send(.path(.element(id: 0, action: .routePicker(.delegate(.routeSelected(first.reference))))))
+        await store.send(.path(.push(id: 1, state: .routePicker(RoutePickerFeature.State()))))
+        await store.send(.path(.element(id: 1, action: .routePicker(.delegate(.routeSelected(Self.route.reference))))))
+        await store.receive(.weatherLoaded(AttributedForecast.fixture)) { $0.weather = .loaded(AttributedForecast.fixture) }
+        gate.continuation.yield()
+        await store.finish()
+        #expect(store.state.weather == .loaded(AttributedForecast.fixture))
+    }
+
     @Test("With no route, the strip covers the hour under way and the next three hours")
     func forecastHoursDefault() {
         var state = StartSheetFeature.State()
@@ -577,6 +715,8 @@ struct StartSheetFeatureTests {
         } withDependencies: {
             $0.persistenceClient = .mock(rides: recent, routes: [summary])
         }
+        // The weather follows the route too (#559), racing the estimate: the Weather tests hold it.
+        store.exhaustivity = .off(showSkippedAssertions: false)
 
         await store.send(.path(.push(id: 0, state: .routePicker(RoutePickerFeature.State())))) {
             $0.path[id: 0] = .routePicker(RoutePickerFeature.State())

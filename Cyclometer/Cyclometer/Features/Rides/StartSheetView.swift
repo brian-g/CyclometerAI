@@ -234,7 +234,7 @@ private extension DependencyValues {
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
                 $0.bleCSCClient = .testValue
-                $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+                $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes, routeDetails: RouteDetail.previewRouteDetails)
                 $0.previewWeather()
             }
         )
@@ -275,7 +275,7 @@ private extension DependencyValues {
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
                 $0.bleCSCClient = .testValue
-                $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+                $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes, routeDetails: RouteDetail.previewRouteDetails)
                 $0.previewWeather()
             }
         )
@@ -293,7 +293,7 @@ private extension DependencyValues {
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
                 $0.bleCSCClient = .testValue
-                $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+                $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes, routeDetails: RouteDetail.previewRouteDetails)
                 $0.previewWeather()
             }
         )
@@ -342,7 +342,7 @@ private extension DependencyValues {
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
                 $0.bleCSCClient = .testValue
-                $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes)
+                $0.persistenceClient = .mock(routes: RouteSummary.previewRoutes, routeDetails: RouteDetail.previewRouteDetails)
                 $0.previewWeather()
             }
         )
