@@ -2335,3 +2335,24 @@ Plan: `~/.claude/plans/151-shimmering-moonbeam.md`. Brian's picks: capture every
 - [x] Full `CyclometerTests` after the review: 2738 passed, 0 failed
 - [x] Brian's picks from the review: offline, S15 credits stored weather as "Apple Weather" with WeatherKit's fixed legal URL (`WeatherSourceAttribution.offline`, mark URLs now optional); 0.5 m/s calm kept; silent JSON decode/encode filed as #563 (M11) for every column; `movingHeadings` left as is
 - [x] Full `CyclometerTests` after the fallback: 2738 passed, 0 failed
+
+---
+
+## #204 — S20 Route Detail weather (live conditions, hourly strip, Previous Rides conditions)
+
+Plan: `~/.claude/plans/delegated-frolicking-babbage.md`. Brian's picks: the map's wind overlay moves to #561 (forecast at arrival time); S20 shows the hourly strip with the "Now" fix; Previous Rides conditions are in scope.
+
+- [x] `HourlyForecastStrip` takes `now`; "Now" on the hour containing it (`isNow(_:at:)`); S05.1 and W10 pass theirs
+- [x] Ride window moves to `AttributedForecast.rideHours(estimate:from:)` (constants + the min/default rule, shared by S05.1 and S20)
+- [x] `RouteDetailFeature`: `RouteWeather` state, weather fetched at the route's start after `routeLoaded`, `forecastHours(at:)`
+- [x] S20 view: `TimelineView` shell, `RouteWeatherSection`, previews
+- [x] Previous Rides conditions: `RouteRideSummary.weather`, `prevailingCondition`, the row's second line
+- [x] UX.md §S20 / §S15; edit #204, comment on #561
+- [ ] Build; Brian runs it
+- [x] Brian: offline says "Offline: Weather unavailable", anything else "Weather unavailable". New `NetworkStatusClient` (`NWPathMonitor`), asked only after WeatherKit throws (its `WeatherError` has no offline case); `RouteWeather.Unavailable` `.offline` / `.failed`; UX.md §S20
+- [x] Brian: S05.1 and W10 too. S05.1: `StartSheetWeather.Unavailable.offline`. W10: `fetchFailed(offline:)` → `isLastFailureOffline` (cleared by the next answer); the sheet's footer says Offline only with no forecast left; the card keeps "—". UX.md §S05.1 / §W10
+- [x] Tests: `RouteDetailFeatureTests` (+6 incl. arguments: weather at the start, online/offline failure, no geometry, strip by the clock and by the route's rides), `RideWeatherFeatureTests` (+3, offline threaded through the existing three), `StartSheetFeatureTests` (+1 offline), new `WeatherDisplayTests` (5: `isNow`, `prevailingCondition`), `RoutePersistenceTests` (route rides carry `weather`). `RoutesNavigationTests` needed `\.date` pinned: a pushed S20 now fetches weather. Snapshots: S20's 12 re-recorded + 6 new (loading, offline, unavailable), S05.1 and W10 offline added and checked by eye; every existing S05.1 and W10 reference passed unchanged. Targeted run: 124 passed, 0 failed
+- [x] Full `CyclometerTests`: 2758 passed, 0 failed
+- [x] Commit → PR
+
+**Review:** S20's weather is live at the route's start, with the hourly strip sized by the route's own rides; Previous Rides rows carry their conditions. Changes from the plan, all Brian's: offline is named ("Offline: Weather unavailable") on S20, S05.1 and W10's sheet, through a new `NetworkStatusClient` asked only after WeatherKit fails; the ride window became one `AttributedForecast.rideHours` rather than two moved constants. The map's wind overlay moved to #561. Not covered by tests: the live WeatherKit and `NWPathMonitor` paths (whether iterating the monitor starts it is [Likely], to be seen on device in airplane mode). The narrative S20 reference is unchanged: its Weather section is below the canvas.

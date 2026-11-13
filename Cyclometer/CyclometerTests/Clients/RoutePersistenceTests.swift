@@ -322,6 +322,13 @@ struct RoutePersistenceTests {
         let newer = UUID()
         let otherRouteRide = UUID()
         let stillRiding = UUID()
+        // The conditions S20's row shows (#204); the older ride has none, as one from before #151.
+        let conditions = [
+            RideWeatherSample(date: base.addingTimeInterval(86_400), temperatureCelsius: 14, humidity: 0.5,
+                              windSpeedMPS: 3, windFromDegrees: 270, condition: .partlyCloudy),
+            RideWeatherSample(date: base.addingTimeInterval(87_000), temperatureCelsius: 17, humidity: 0.45,
+                              windSpeedMPS: 4, windFromDegrees: 260, condition: .cloudy),
+        ]
 
         for (id, startedAt, reference) in [
             (older, base, route),
@@ -334,11 +341,14 @@ struct RoutePersistenceTests {
         for (id, endedAt) in [(older, base.addingTimeInterval(3_600)),
                               (newer, base.addingTimeInterval(90_000)),
                               (otherRouteRide, base.addingTimeInterval(7_200))] {
-            let summary = RideSummaryUpdate(
+            var summary = RideSummaryUpdate(
                 rideId: id, recordingState: .ended,
                 durationSeconds: 3_600, distanceMeters: 42_000,
                 averageSpeedMPS: 6, maxSpeedMPS: 12
             )
+            if id == newer {
+                summary.weather = conditions
+            }
             try await client.finalizeRide(id, endedAt, summary, nil)
         }
         try await client.renameRide(newer, "Saturday Climb")
@@ -355,6 +365,7 @@ struct RoutePersistenceTests {
         #expect(rides.first?.durationSeconds == 3_600)
         #expect(rides.first?.distanceMeters == 42_000)
         #expect(rides.allSatisfy { $0.endedAt != nil })
+        #expect(rides.map(\.weather) == [conditions, []])
     }
 
     @Test("fetchRouteRides for a route with no rides returns empty")

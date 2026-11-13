@@ -21,6 +21,18 @@ struct AttributedForecast: Equatable, Sendable {
         let end = start.addingTimeInterval(window)
         return hourly.filter { $0.date.addingTimeInterval(Self.hourLength) > start && $0.date < end }
     }
+
+    /// A ride's worth of forecast when nothing says how long the ride is.
+    static let defaultRideWindow: TimeInterval = 3 * 3600
+    /// The most a ride's strip covers, however long the estimate: a day's riding.
+    static let maximumRideWindow: TimeInterval = 12 * 3600
+
+    /// The hours a ride will see (S05.1, S20): the hour under way at `start`, then each hour that
+    /// starts before a ride of `estimate` would end. With no estimate, `defaultRideWindow`; never
+    /// more than `maximumRideWindow`.
+    func rideHours(estimate: TimeInterval?, from start: Date? = nil) -> [WeatherReading] {
+        hours(within: min(estimate ?? Self.defaultRideWindow, Self.maximumRideWindow), from: start)
+    }
 }
 
 extension AttributedForecast {

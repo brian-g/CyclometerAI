@@ -153,9 +153,11 @@ extension RouteDetail {
 /// S20's Previous Rides (#195): three finished rides of "River Loop", newest first — the order
 /// `fetchRouteRides` returns. Fixed dates rather than `.now`, so a snapshot reference recorded
 /// today still matches next month; one ride runs past an hour so both elapsed formats render.
+/// Conditions (#204): a range on the newest, one reading on the next, and none on the oldest, as a
+/// ride from before #151 has.
 extension RouteRideSummary {
     private static func preview(_ suffix: String, title: String, daysAgo: Double, seconds: TimeInterval,
-                                meters: Double) -> RouteRideSummary {
+                                meters: Double, weather: [RideWeatherSample] = []) -> RouteRideSummary {
         let startedAt = Date(timeIntervalSince1970: 1_800_000_000 - daysAgo * 86_400)
         return RouteRideSummary(
             rideId: UUID(uuidString: "00000000-0000-0000-0000-0000000000\(suffix)")!,
@@ -163,13 +165,28 @@ extension RouteRideSummary {
             startedAt: startedAt,
             endedAt: startedAt.addingTimeInterval(seconds),
             durationSeconds: seconds,
-            distanceMeters: meters
+            distanceMeters: meters,
+            weather: weather.map {
+                var sample = $0
+                sample.date = startedAt.addingTimeInterval(sample.date.timeIntervalSince1970)
+                return sample
+            }
         )
     }
 
+    /// A sample `offset` seconds into the ride (`preview` dates it from the ride's start).
+    private static func sample(_ offset: TimeInterval, _ celsius: Double, _ condition: WeatherCondition) -> RideWeatherSample {
+        RideWeatherSample(date: Date(timeIntervalSince1970: offset), temperatureCelsius: celsius, humidity: 0.55,
+                          windSpeedMPS: 4, windFromDegrees: 270, condition: condition)
+    }
+
     static let previewRides: [RouteRideSummary] = [
-        preview("A1", title: "River Loop", daysAgo: 2, seconds: 4_712, meters: 36_050),
-        preview("A2", title: "River Loop", daysAgo: 16, seconds: 4_868, meters: 36_050),
+        preview("A1", title: "River Loop", daysAgo: 2, seconds: 4_712, meters: 36_050, weather: [
+            sample(0, 14.2, .partlyCloudy), sample(600, 16.0, .partlyCloudy), sample(1_200, 18.4, .cloudy)
+        ]),
+        preview("A2", title: "River Loop", daysAgo: 16, seconds: 4_868, meters: 36_050, weather: [
+            sample(0, 11.1, .rain)
+        ]),
         preview("A3", title: "River Loop Short Cut", daysAgo: 37, seconds: 3_287, meters: 24_900)
     ]
 }

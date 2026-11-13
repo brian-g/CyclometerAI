@@ -1,10 +1,15 @@
 import SwiftUI
 
-/// The forecast hour by hour across the ride (#149): one column per hour, the first labelled
-/// "Now", each with its sky, temperature and chance of rain. A few hours spread across the row's
-/// full width; a long ride with more than fit scrolls sideways instead.
+/// The forecast hour by hour across the ride (#149): one column per hour, each with its sky,
+/// temperature and chance of rain. The column whose hour contains `now` reads "Now" (#204), so a
+/// forecast that starts later, or one left on screen past the hour, never labels the wrong hour.
+/// A few hours spread across the row's full width; a long ride with more than fit scrolls sideways
+/// instead.
 struct HourlyForecastStrip: View {
     let hours: [WeatherReading]
+    /// The moment "Now" is read against: the fetch time on a short-lived sheet (S05.1), or the
+    /// clock on a screen that stays up (W10's sheet, S20).
+    let now: Date
 
     /// Follows the device's 12- or 24-hour setting, which iOS folds into the current locale.
     @Environment(\.locale) private var locale
@@ -27,7 +32,7 @@ struct HourlyForecastStrip: View {
     private func columns(fillingWidth: Bool) -> some View {
         HStack(alignment: .top, spacing: Spacing.lg) {
             ForEach(hours, id: \.date) { hour in
-                column(hour, isNow: hour.date == hours.first?.date)
+                column(hour, isNow: Self.isNow(hour, at: now))
                     .frame(maxWidth: fillingWidth ? .infinity : nil)
             }
         }
@@ -58,6 +63,11 @@ struct HourlyForecastStrip: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// Whether `hour` is the one under way at `now`: forecast hours are dated at their start.
+    static func isNow(_ hour: WeatherReading, at now: Date) -> Bool {
+        hour.date <= now && now < hour.date.addingTimeInterval(AttributedForecast.hourLength)
+    }
+
     private var temperatureUnit: UnitTemperature { UnitTemperature(forLocale: locale, usage: .weather) }
 
     private var hourStyle: Date.FormatStyle {
@@ -70,11 +80,15 @@ struct HourlyForecastStrip: View {
 // MARK: - Previews
 
 #Preview("Three hours") {
-    List { HourlyForecastStrip(hours: Array(WeatherReading.fixtureHourly.prefix(4))) }
+    List { HourlyForecastStrip(hours: Array(WeatherReading.fixtureHourly.prefix(4)), now: WeatherReading.fixtureNow) }
 }
 
 #Preview("A long ride, scrolls") {
-    List { HourlyForecastStrip(hours: WeatherReading.fixtureHourly) }
+    List { HourlyForecastStrip(hours: WeatherReading.fixtureHourly, now: WeatherReading.fixtureNow) }
+}
+
+#Preview("Starts later, no \"Now\"") {
+    List { HourlyForecastStrip(hours: Array(WeatherReading.fixtureHourly.dropFirst(2).prefix(4)), now: WeatherReading.fixtureNow) }
 }
 
 #Preview("Night, 24-hour, dark") {
@@ -83,7 +97,7 @@ struct HourlyForecastStrip: View {
             var hour = $0
             hour.isDaylight = false
             return hour
-        })
+        }, now: WeatherReading.fixtureNow)
     }
     .environment(\.locale, Locale(identifier: "de_DE"))
     .preferredColorScheme(.dark)

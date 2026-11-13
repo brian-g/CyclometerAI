@@ -10,6 +10,7 @@ import Foundation
 struct RideWeatherFeature {
     @Dependency(\.weatherClient) var weatherClient
     @Dependency(\.date) var date
+    @Dependency(\.networkStatus) var networkStatus
 
     /// How old a forecast gets before the next fix refetches it. WeatherKit's current conditions
     /// change over minutes, not seconds, and every request counts against the app's quota.
@@ -31,6 +32,9 @@ struct RideWeatherFeature {
         /// When WeatherKit was last asked, whether or not it answered.
         var lastAttemptAt: Date?
         var didLastAttemptFail = false
+        /// Whether the last failed request failed with no usable network (#204), so W10's sheet,
+        /// with nothing left to show, can say "Offline". Cleared by the next answer.
+        var isLastFailureOffline = false
         var isFetching = false
         /// The rider's direction of travel, degrees from true north: the last one GPS gave while
         /// moving fast enough for it to mean something (`NavigationFeature.courseSpeedFloorMPS`).
@@ -69,7 +73,7 @@ struct RideWeatherFeature {
     enum Action: Equatable {
         case locationUpdated(LocationUpdate)
         case forecastLoaded(AttributedForecast)
-        case fetchFailed
+        case fetchFailed(offline: Bool)
     }
 
     var body: some ReducerOf<Self> {
@@ -97,8 +101,9 @@ struct RideWeatherFeature {
                         await send(.forecastLoaded(forecast))
                     } catch {
                         // Logged in WeatherClient. A stalled request the next one replaced is
-                        // cancelled, and a cancelled effect's send goes nowhere.
-                        await send(.fetchFailed)
+                        // cancelled, and a cancelled effect's send goes nowhere. WeatherKit's error
+                        // can't say whether the device is offline, so the network path is asked.
+                        await send(.fetchFailed(offline: await networkStatus.isOffline()))
                     }
                 }
                 .cancellable(id: CancelID.fetch, cancelInFlight: true)
@@ -108,12 +113,14 @@ struct RideWeatherFeature {
                 state.samples.record(forecast.current)
                 state.isFetching = false
                 state.didLastAttemptFail = false
+                state.isLastFailureOffline = false
                 return .none
 
-            case .fetchFailed:
+            case .fetchFailed(let offline):
                 // The last forecast stays until it is `maxAge` old.
                 state.isFetching = false
                 state.didLastAttemptFail = true
+                state.isLastFailureOffline = offline
                 return .none
             }
         }

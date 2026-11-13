@@ -30,19 +30,23 @@ struct RideWeatherFeatureTests {
         AttributedForecast(current: .fixture, hourly: WeatherReading.fixtureHourly, attribution: .fixture, fetchedAt: date)
     }
 
-    /// A store whose clock the test moves with `now`, and whose WeatherKit fails while `isOffline`.
+    /// A store whose clock the test moves with `now`, and whose WeatherKit fails while `isOffline`,
+    /// the network path then reporting offline too (#204). `failsOnline` fails WeatherKit with the
+    /// network up.
     private func makeStore(
         _ state: RideWeatherFeature.State = RideWeatherFeature.State(),
         now: LockIsolated<Date>,
-        isOffline: LockIsolated<Bool> = LockIsolated(false)
+        isOffline: LockIsolated<Bool> = LockIsolated(false),
+        failsOnline: Bool = false
     ) -> TestStoreOf<RideWeatherFeature> {
         TestStore(initialState: state) {
             RideWeatherFeature()
         } withDependencies: {
             $0.date = DateGenerator { now.value }
             $0.weatherClient.forecast = { coordinate in
-                try await (isOffline.value ? WeatherClient.unavailable : WeatherClient.testValue).forecast(coordinate)
+                try await (isOffline.value || failsOnline ? WeatherClient.unavailable : WeatherClient.testValue).forecast(coordinate)
             }
+            $0.networkStatus.isOffline = { isOffline.value }
         }
     }
 
@@ -143,9 +147,10 @@ struct RideWeatherFeatureTests {
             $0.isFetching = true
             $0.lastAttemptAt = Self.start
         }
-        await store.receive(.fetchFailed) {
+        await store.receive(.fetchFailed(offline: true)) {
             $0.isFetching = false
             $0.didLastAttemptFail = true
+            $0.isLastFailureOffline = true
         }
 
         now.setValue(Self.start.addingTimeInterval(RideWeatherFeature.retryInterval - 1))
@@ -163,6 +168,7 @@ struct RideWeatherFeatureTests {
             $0.samples = [Self.sample]
             $0.isFetching = false
             $0.didLastAttemptFail = false
+            $0.isLastFailureOffline = false
         }
     }
 
@@ -181,9 +187,10 @@ struct RideWeatherFeatureTests {
             $0.isFetching = true
             $0.lastAttemptAt = refresh
         }
-        await store.receive(.fetchFailed) {
+        await store.receive(.fetchFailed(offline: true)) {
             $0.isFetching = false
             $0.didLastAttemptFail = true
+            $0.isLastFailureOffline = true
         }
         #expect(store.state.forecast?.current == .fixture)
 
@@ -194,7 +201,7 @@ struct RideWeatherFeatureTests {
             $0.isFetching = true
             $0.lastAttemptAt = stale
         }
-        await store.receive(.fetchFailed) {
+        await store.receive(.fetchFailed(offline: true)) {
             $0.isFetching = false
         }
         #expect(store.state.forecast?.current == nil)
@@ -251,5 +258,56 @@ struct RideWeatherFeatureTests {
             $0.samples.append(RideWeatherSample(later.current)!)
         }
         #expect(store.state.samples.map(\.temperatureCelsius) == [18, 21])
+    }
+
+    // MARK: Offline (#204)
+
+    @Test("A request that fails with the network up is not offline")
+    func onlineFailureIsNotOffline() async {
+        let store = makeStore(now: LockIsolated(Self.start), failsOnline: true)
+        await store.send(.locationUpdated(Self.fix())) {
+            $0.course = 192
+            $0.isFetching = true
+            $0.lastAttemptAt = Self.start
+        }
+        await store.receive(.fetchFailed(offline: false)) {
+            $0.isFetching = false
+            $0.didLastAttemptFail = true
+        }
+    }
+
+    @Test("An online failure after an offline one clears Offline")
+    func onlineFailureClearsOffline() async {
+        var state = RideWeatherFeature.State()
+        state.lastAttemptAt = Self.start
+        state.didLastAttemptFail = true
+        state.isLastFailureOffline = true
+        let retry = Self.start.addingTimeInterval(RideWeatherFeature.retryInterval)
+        let store = makeStore(state, now: LockIsolated(retry), failsOnline: true)
+        await store.send(.locationUpdated(Self.fix())) {
+            $0.course = 192
+            $0.isFetching = true
+            $0.lastAttemptAt = retry
+        }
+        await store.receive(.fetchFailed(offline: false)) {
+            $0.isFetching = false
+            $0.isLastFailureOffline = false
+        }
+    }
+
+    @Test("The sheet says Offline only with no forecast left to show")
+    func sheetOfflineOnlyWithoutForecast() {
+        var state = RideWeatherFeature.State()
+        state.isLastFailureOffline = true
+        #expect(state.metrics(at: Self.start, unit: .metric).isOffline)
+
+        // A forecast still under an hour old is shown instead.
+        state.forecast = Self.forecast(at: Self.start)
+        #expect(!state.metrics(at: Self.start, unit: .metric).isOffline)
+        // Once it has gone, Offline again.
+        #expect(state.metrics(at: Self.start.addingTimeInterval(RideWeatherFeature.maxAge), unit: .metric).isOffline)
+
+        state.isLastFailureOffline = false
+        #expect(!state.metrics(at: Self.start.addingTimeInterval(RideWeatherFeature.maxAge), unit: .metric).isOffline)
     }
 }

@@ -89,13 +89,16 @@ struct StartSheetWeatherSection: View {
                 centered { ProgressView() }
             case .unavailable(.noLocation):
                 centered { message("Turn on Location to see the weather here") }
+            case .unavailable(.offline):
+                centered { message("Offline: Weather unavailable") }
             case .unavailable(.failed):
                 centered { message("Weather unavailable") }
             case .loaded(let forecast):
                 CurrentWeatherRow(reading: forecast.current, unit: unit)
                 // A forecast with no hour in the ride's window would be an empty, padded row.
                 if !hours.isEmpty {
-                    HourlyForecastStrip(hours: hours)
+                    // Fetched as the sheet opened, and the hours start there.
+                    HourlyForecastStrip(hours: hours, now: forecast.fetchedAt)
                 }
             }
         } header: {
@@ -314,6 +317,10 @@ private extension DependencyValues {
 
 #Preview("Weather — no location") {
     List { StartSheetWeatherSection(weather: .unavailable(.noLocation), hours: [], unit: .metric) }
+}
+
+#Preview("Weather — offline") {
+    List { StartSheetWeatherSection(weather: .unavailable(.offline), hours: [], unit: .metric) }
 }
 
 #Preview("Weather — failed, dark") {
