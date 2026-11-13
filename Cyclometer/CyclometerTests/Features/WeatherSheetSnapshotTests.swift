@@ -25,6 +25,7 @@ final class WeatherSheetSnapshotTests: XCTestCase {
     private static let loaded = WeatherMetrics(
         forecast: .fixture,
         hours: AttributedForecast.fixture.hours(within: RideWeatherFeature.State.forecastWindow),
+        now: WeatherReading.fixtureNow,
         course: 0
     )
 
@@ -47,6 +48,14 @@ final class WeatherSheetSnapshotTests: XCTestCase {
     func testWeatherSheetNoWeather() {
         assertSnapshot(
             of: makeList(WeatherMetrics(), scheme: .light),
+            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+        )
+    }
+
+    /// #204: nothing to show because the last request failed offline.
+    func testWeatherSheetOffline() {
+        assertSnapshot(
+            of: makeList(WeatherMetrics(isOffline: true), scheme: .light),
             as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
         )
     }

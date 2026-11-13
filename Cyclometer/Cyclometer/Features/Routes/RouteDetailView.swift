@@ -6,11 +6,12 @@ import SwiftUI
 /// row on the Rides tab (#426).
 ///
 /// The layout is the prototype's that UX.md §S20 points at, now reading a persisted `Route`: the
-/// route on a map with its direction of travel, distance and climb, the elevation profile,
-/// placeholders for the two sections whose data is not in MVP, and the rides ridden on it.
+/// route on a map with its direction of travel, distance and climb, the elevation profile, the
+/// weather at its start (#204), a placeholder for Strava segments (Phase 2), and the rides ridden
+/// on it.
 ///
-/// This view owns only what a snapshot must not run — the loading and the toolbar. The screen
-/// itself is `RouteDetailList`.
+/// This view owns only what a snapshot must not run — the loading, the clock and the toolbar. The
+/// screen itself is `RouteDetailList`.
 struct RouteDetailView: View {
     let store: StoreOf<RouteDetailFeature>
     /// Mirrors Start Ride, which every tab hides while a ride records: "Use This Route" opens the
@@ -24,7 +25,11 @@ struct RouteDetailView: View {
     static let elevationChartHeight: CGFloat = 120
 
     var body: some View {
-        RouteDetailList(store: store)
+        // Once a minute, as W10's sheet: the forecast strip's "Now" moves on the hour while S20
+        // stays up (#204).
+        TimelineView(.everyMinute) { context in
+            RouteDetailList(store: store, now: context.date)
+        }
             .toolbar {
                 if !isUseRouteHidden {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -39,8 +44,8 @@ struct RouteDetailView: View {
     }
 }
 
-/// S20's content: everything except the loading and the toolbar, so a snapshot renders it from
-/// seeded state without starting a read.
+/// S20's content: everything except the loading, the clock and the toolbar, so a snapshot renders
+/// it from seeded state at a fixed time without starting a read.
 ///
 /// Generic over the map row for the same reason. A live `Map` renders its tiles asynchronously,
 /// and the first render in a process differs from later ones, so it cannot be pixel-snapshotted
@@ -49,6 +54,8 @@ struct RouteDetailView: View {
 struct RouteDetailList<MapRow: View>: View {
     let store: StoreOf<RouteDetailFeature>
     let mapRow: MapRow
+    /// The clock the weather's strip is read against.
+    let now: Date
 
     var body: some View {
         let unit = store.unitSystem
@@ -78,11 +85,12 @@ struct RouteDetailList<MapRow: View>: View {
                     }
                 }
             }
-            // Live weather is WeatherKit, M10.6 (#204); Strava segments need Accounts, Phase 2.
-            // Both keep their place in the layout and say plainly that nothing is missing by mistake.
-            Section("Current Weather") {
-                comingSoon
-            }
+            // Called in this body, so it tracks the fields it reads; never handed down as a
+            // snapshot (lessons, #537).
+            RouteWeatherSection(weather: store.weather, hours: store.state.forecastHours(at: now),
+                                now: now, unit: unit)
+            // Strava segments need Accounts, Phase 2. The section keeps its place in the layout
+            // and says plainly that nothing is missing by mistake.
             Section("Strava Segments") {
                 LabeledContent("Connect Strava") { comingSoon }
             }
@@ -92,13 +100,12 @@ struct RouteDetailList<MapRow: View>: View {
                     ForEach(store.previousRides) { ride in
                         // Opens S15 on whichever tab's stack S20 is on (#426).
                         NavigationLink(state: RideRoutePath.State.ride(RideDetailFeature.State(summary: RideListSummary(ride)))) {
-                            // UX.md also lists conditions: `Ride.weather` holds them since #151, and
-                            // this row shows them with #204.
                             LabeledContent {
                                 Text(Int(ride.durationSeconds).formattedElapsed)
                                     .font(.subheadline.weight(.semibold))
                             } label: {
                                 Text(ride.startedAt, format: .dateTime.month(.abbreviated).day().year())
+                                PreviousRideConditions(summary: RideWeatherSummary(samples: ride.weather, exposure: nil))
                             }
                         }
                     }
@@ -116,8 +123,37 @@ struct RouteDetailList<MapRow: View>: View {
 }
 
 extension RouteDetailList where MapRow == RouteDetailMap {
-    init(store: StoreOf<RouteDetailFeature>) {
-        self.init(store: store, mapRow: RouteDetailMap(summary: store.summary, coordinates: store.coordinates))
+    init(store: StoreOf<RouteDetailFeature>, now: Date) {
+        self.init(store: store, mapRow: RouteDetailMap(summary: store.summary, coordinates: store.coordinates), now: now)
+    }
+}
+
+/// A Previous Rides row's second line (#204): the sky the ride saw most and its temperature range,
+/// "Partly Cloudy · 14–18 °C", in the locale's weather unit as S15 quotes it. Nothing for a ride
+/// with no conditions recorded.
+///
+/// Words rather than a symbol: the samples don't record whether the sun was up, so a night ride
+/// would get a sun.
+private struct PreviousRideConditions: View {
+    let summary: RideWeatherSummary
+
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        if let temperature = summary.temperature(in: UnitTemperature(forLocale: locale, usage: .weather)) {
+            Group {
+                if let condition = summary.prevailingCondition {
+                    Text("\(condition.displayName) · \(temperature.shown)")
+                        .accessibilityLabel("\(condition.displayName), \(temperature.spoken)")
+                } else {
+                    Text("\(temperature.shown)")
+                        .accessibilityLabel(temperature.spoken)
+                }
+            }
+            .font(.subheadline)
+            .foregroundStyle(Color.cyTextSecondary)
+            .monospacedDigit()
+        }
     }
 }
 
@@ -180,7 +216,9 @@ struct RouteDetailMap: View {
 
 /// S20 already pushed on the Routes tab's own stack, as the app hosts it: a Previous Rides row is a
 /// `NavigationLink(state:)`, which reports "not presentable" in a plain `NavigationStack` (#426).
-private func routeDetailPreview(_ route: RouteSummary, persistenceClient: PersistenceClient) -> some View {
+private func routeDetailPreview(_ route: RouteSummary, persistenceClient: PersistenceClient,
+                                weatherClient: WeatherClient = .previewAtNow,
+                                networkStatus: NetworkStatusClient = .previewValue) -> some View {
     withDependencies {
         $0.defaultFileStorage = .inMemory
     } operation: {
@@ -190,8 +228,23 @@ private func routeDetailPreview(_ route: RouteSummary, persistenceClient: Persis
             RoutesFeature()
         } withDependencies: {
             $0.persistenceClient = persistenceClient
+            $0.weatherClient = weatherClient
+            $0.networkStatus = networkStatus
         })
     }
+}
+
+private extension WeatherClient {
+    /// The fixture forecast moved to the real clock: S20's strip reads the hours from it, and the
+    /// fixture's fixed date would leave none.
+    static let previewAtNow = WeatherClient(
+        current: { _ in AttributedForecast.fixture(at: Date()).current },
+        forecast: { _ in
+            let forecast = AttributedForecast.fixture(at: Date())
+            return WeatherForecast(current: forecast.current, hourly: forecast.hourly)
+        },
+        attribution: { .fixture }
+    )
 }
 
 #Preview("Route Detail — climb, ridden") {
@@ -209,4 +262,13 @@ private func routeDetailPreview(_ route: RouteSummary, persistenceClient: Persis
         routes: RouteSummary.previewRoutes,
         routeDetails: RouteDetail.previewRouteDetails
     ))
+}
+
+#Preview("Route Detail — offline") {
+    let route = RouteSummary.previewRoutes[1]
+    routeDetailPreview(route, persistenceClient: .mock(
+        routes: RouteSummary.previewRoutes,
+        routeDetails: RouteDetail.previewRouteDetails,
+        ridesByRoute: [route.id: RouteRideSummary.previewRides]
+    ), weatherClient: .unavailable, networkStatus: .offline)
 }

@@ -21,6 +21,7 @@ struct StartSheetFeature {
     @Dependency(\.uuid) var uuid
     @Dependency(\.date) var date
     @Dependency(\.weatherClient) var weatherClient
+    @Dependency(\.networkStatus) var networkStatus
     @Dependency(\.locationClient) var locationClient
     @Dependency(\.permissionsClient) var permissionsClient
 
@@ -65,18 +66,14 @@ struct StartSheetFeature {
 
         /// How long a ride on the chosen route will take, from the rider's own rides
         /// (`RideDurationEstimate`). Nil with no route, or nothing to estimate from, and then the
-        /// forecast covers `defaultForecastWindow`.
+        /// forecast covers `AttributedForecast.defaultRideWindow`.
         var rideEstimate: TimeInterval?
 
-        /// A ride's worth of forecast when there is no route to say how long the ride is.
-        static let defaultForecastWindow: TimeInterval = 3 * 3600
-        /// The most the strip covers, however long the estimate: a day's riding.
-        static let maximumForecastWindow: TimeInterval = 12 * 3600
         /// The strip's hours: the one under way when the weather was fetched, then each hour that
         /// starts before the ride is expected to end.
         var forecastHours: [WeatherReading] {
             guard case let .loaded(forecast) = weather else { return [] }
-            return forecast.hours(within: min(rideEstimate ?? Self.defaultForecastWindow, Self.maximumForecastWindow))
+            return forecast.rideHours(estimate: rideEstimate)
         }
 
         /// What the Route row pushes: S05.2, opened on the sheet's current answer so that answer is the
@@ -321,8 +318,9 @@ struct StartSheetFeature {
                 let forecast = try await weatherClient.attributedForecast(coordinate, now: { date.now })
                 await send(.weatherLoaded(forecast))
             } catch {
-                // Logged in WeatherClient.
-                await send(.weatherUnavailable(.failed))
+                // Logged in WeatherClient. WeatherKit's error can't say whether the device is
+                // offline, so the network path is asked, and only now.
+                await send(.weatherUnavailable(await networkStatus.isOffline() ? .offline : .failed))
             }
         }
     }
@@ -396,10 +394,12 @@ enum StartSheetWeather: Equatable {
     case loaded(AttributedForecast)
 
     enum Unavailable: Equatable {
-        /// Location is off for the app: the one case the rider can fix by turning it on.
+        /// Location is off for the app: the rider can fix it by turning it on.
         case noLocation
+        /// WeatherKit failed with no usable network (#204): the rider can fix it by going online.
+        case offline
         /// No weather to show for any other reason: location is on but gave no fix in time, or
-        /// WeatherKit didn't answer (offline, or the App ID lacks its App Service).
+        /// WeatherKit failed online (or the App ID lacks its App Service).
         case failed
     }
 }

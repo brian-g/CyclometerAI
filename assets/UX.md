@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-11-12 — §S20 Weather built (#204): live conditions at the route's start and the hourly strip for a ride on it, fetched each time S20 appears; Previous Rides rows gain their conditions. The forecast strip's "Now" now labels the hour containing the current time, on S05.1 and W10 too. Offline is named: "Offline: Weather unavailable" on §S20, §S05.1 and W10's sheet, "Weather unavailable" for any other failure. The map's wind overlay moves to #561.  
 **Updated:** 2026-11-11 — §S15 Weather built (#151): its own section after Time, with the ride's temperature and humidity ranges and a headwind / crosswind / tailwind bar of moving time. Not in §S10. WeatherKit's attribution footer is now smaller everywhere: the mark `Spacing.weatherMark` (12 pt) high, "Legal" in caption2.  
 **Updated:** 2026-11-11 — §W10 Weather built (#150): wind first, with an arrow relative to the direction of travel; 2×1 and 1×1; rain within two hours takes over the card; "Sheet: Weather" added. §S08's Weather section lists it.  
 **Updated:** 2026-11-04 — "Sheet: Heart rate" gains Average and Max under Heart Rate and Zone (#531), as §W5's Cadence sheet has.  
@@ -383,7 +384,7 @@ the screen differs only in its title, the **Next** button, and the helper text, 
   - The strip covers the hours the ride will take. With a route chosen, that is the route's distance at the median speed of the rider's earlier rides of it that covered at least 25% of the route, or failing those, the overall speed of their last 10 rides, read only when needed (`RideDurationEstimate`). With no route, or nothing to estimate from, it covers 3 hours, and never more than 12. Choosing a route on S05.2 re-estimates
   - Temperature is in the locale's weather unit, which follows iOS's Temperature setting, not the S12 metric/imperial choice: the UK reads mph and °C. Wind follows S12
   - Symbols are hierarchical in `cyTextSecondary`. Multicolor draws clouds and moons in fixed white, which vanishes on a light row. Clear and partly cloudy skies use their moon forms after dark
-  - Location is read, never requested (S01 owns the prompt). With location off the group reads "Turn on Location to see the weather here". With location on but no fix in time, or WeatherKit unreachable, it reads "Weather unavailable": turning on location would fix neither. The rest of the sheet works either way
+  - Location is read, never requested (S01 owns the prompt). With location off the group reads "Turn on Location to see the weather here". When WeatherKit fails with no usable network (airplane mode, no Wi-Fi or cellular) it reads "Offline: Weather unavailable" (#204). With location on but no fix in time, or WeatherKit failing online, it reads "Weather unavailable": turning on location would fix neither. The rest of the sheet works either way
   - Footer, only under WeatherKit data: the Apple Weather mark (`Spacing.weatherMark` high, scaled with Dynamic Type; the service's name until it loads) and a "Legal" link on the mark's baseline (the mark is cropped to its glyphs, which have no descenders, so its bottom edge is the baseline), as WeatherKit's terms require
 
 - Group: Sensors
@@ -788,7 +789,7 @@ As built (#534): **Speed Gauge** in S08's Ride section, after Speed; W1 itself i
 - Fetched from WeatherKit at the rider's position when a location fix arrives and the forecast is 10 minutes old. A failed request is retried after a minute, and a request with no answer after 10 minutes is replaced. The last forecast is kept until it is an hour old, checked against the clock each minute, so it goes even when no fix arrives (tunnel, GPS lost)
 - Empty state "—": no location, WeatherKit unreachable, or a forecast over an hour old. Always on the dashboard
 - VoiceOver: "Weather, 14 kilometers per hour, headwind, 18 degrees Celsius"; in rain, "Rain, 70% chance, from 3 PM", and on the 2x1 the wind and temperature after it
-- Sheet: Weather — the sky, then Wind (with the same arrow), From (compass point), Temperature and Humidity as sheet readings; the next three hours as S05.1's hourly strip; WeatherKit's attribution in the footer. "Weather unavailable" in the footer with nothing to show
+- Sheet: Weather — the sky, then Wind (with the same arrow), From (compass point), Temperature and Humidity as sheet readings; the next three hours as S05.1's hourly strip; WeatherKit's attribution in the footer. With nothing to show, the footer reads "Offline: Weather unavailable" when the last request failed with no usable network (#204), otherwise "Weather unavailable". The card keeps its "—"
 - Not yet: a wind map over the route (#561, shared with S20's overlay, #204)
 
 ---
@@ -1451,7 +1452,7 @@ Sections appear on screen in the order listed below.
     - **Temperature and Humidity:** the lowest to the highest reading, "57–63 °F" and "58–70 %"; one value when the range rounds flat. Temperature in the locale's weather unit, as §S05.1.
     - **Wind:** a bar of the ride's moving time spent in headwind, crosswind and tailwind (`cyRatingBad`, `cyRatingOkay`, `cyRatingGood`), then each share as a whole percent, the three adding to 100. Each moving second's direction of travel comes from the track, from the point at least 20 m back in the same stretch of riding, and is set against the latest sample at or before it. Headwind, crosswind and tailwind each cover 45° either side of dead ahead, abeam and astern, W10's quarters (`RelativeWind`). Seconds under a wind below 0.5 m/s don't count; if every sample was that light the row is a single Wind reading, "Calm". With no track, there's no wind row.
     - **Footer:** WeatherKit's mark and Legal link once the attribution loads. Offline, "Apple Weather" stands in for the mark, with the Legal link to WeatherKit's fixed legal page, so stored weather is never shown uncredited.
-    - **Not built:** the Foundation Models summary; the wind layer on the map sheet (#561); S20's Previous Rides conditions (#204).
+    - **Not built:** the Foundation Models summary; the wind layer on the map sheet (#561).
 - Summary: This shows some at a glance metrics in hero numbers. Ascent, Descent, Average Speed, Average Heart Rate, Average Cadence, Average Power (hidden until Phase 3), Calories.
   - Each value is hidden when the ride recorded no data for it (no "—").
   - Ascent and Descent are stored on the `Ride` at the finish, not recounted from the track on open (#460).
@@ -1560,16 +1561,21 @@ Sections appear on screen in the order listed below.
 > *Refer to RouteDetailView` — Protyped In source code.*
 
 ### Key Components
-- `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag). Route should show the direction of travel. Forcasted wind direction and vectors should be overlayed (deferred to weather integration)
+- `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag). Route should show the direction of travel. Forecast wind direction and vectors over the route are #561's shared wind layer, which S20 will reuse: the forecast at each sample point for when the rider would reach it (moved there from #204)
 - Direction-of-travel arrows (#341), the same on S19, S20 and W8 and its sheet: filled triangles in the line's own colour, lying flat on the map and drawn beneath the rider's location dot. They are sized in screen points, not on the ground, so a pinch never grows them: about 16 pt at street level, stepping up a point at a time to about 22 pt as the view widens. They are spaced so about a dozen are in view
   - Zoomed out past 50 m per point (about 20 km across a phone-width map), no arrows draw. The cutoff is one map scale for every route on screen, so routes side by side show or hide their arrows together, never route by route
   - **Accepted gap (#341):** S20's 220 pt map frames any route more than about 7 km north to south past the cutoff, so a large route opens with no arrows until the rider zooms in. The live sheet's route overview does the same for a large route
 - Distance and elevation gain/loss summary (`LabeledContent`)
 - Summary section (#252), after the map: the route's summary line of at most 80 characters, then Character, Max Grade, Hardest Climb (FIETS), one row per categorized climb (category, length, average grade) and a Surface row with its shares, captioned "Surface data © OpenStreetMap contributors". Hidden for a route with neither elevation nor a surface. Values use tabular digits. Under the summary line, where Apple Intelligence is available, the on-device route narrative (#203): one sentence per section of the route (one to five), in `textSecondary`, describing the ride's shape in riding order, with no figures. Absent without it, and the section is otherwise unchanged
 - Elevation profile: Swift Charts `AreaMark` + `LineMark` in `brPrimary`, catmullRom interpolation
-- Current weather section: temperature, wind direction (`WindDirectionView` — rotated arrow SF Symbol + compass label + degrees), wind speed
+- Weather section (#204), at the route's start, as S05.1's Weather group draws it: the sky and its name, the wind under it (an arrow the way it blows, the compass point it comes from, its speed in the S12 units, or "Calm"), and the temperature trailing in the locale's weather unit; then the hourly strip for as long as a ride on the route is estimated to take, from its own previous rides (S05.1's estimate; 3 h when it has none, never more than 12 h). WeatherKit's attribution in the footer
+  - Fetched live each time S20 appears, never cached from import: it is a planning screen. One WeatherKit request per appearance
+  - The strip reads against the clock, once a minute: "Now" labels the column whose hour contains the current time, and past hours drop off while S20 stays up. The current conditions are not refetched until S20 appears again
+  - The route's start is a fixed coordinate, so location permission plays no part. Centred, in `textSecondary`: "Offline: Weather unavailable" when WeatherKit fails with no usable network (airplane mode, no Wi-Fi or cellular); "Weather unavailable" for any other failure, or a route with no geometry. A spinner while it loads
+  - Replaces the prototype's `WindDirectionView`; the compass label carries no degrees, as on S05.1 and W10
 - Strava segments: name, distance, best time, best time date
 - Previous rides: date, elapsed time, conditions. Each row opens that ride's S15 (#426)
+  - Conditions (#204) are the date's second line in `textSecondary`: the sky recorded most often during the ride (the earliest on a tie) and its temperature range, "Partly Cloudy · 14–18 °C", as S15 quotes it. Words rather than a symbol, since the recorded conditions don't say whether the sun was up. A ride with none recorded (before #151, or every request failed) shows the date alone
 - "Use Route" CTA — sets active route in Start Sheet and navigates to S05.1
 
 ### Open UX Questions

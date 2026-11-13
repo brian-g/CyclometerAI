@@ -960,3 +960,15 @@ hero. Brian: "I think this widget should be called weather." The card then also 
 
 **Rule.** Label a card with the widget's `title`, not with whichever reading it leads with. Reference the
 adapter's `title` rather than retyping a string, so the two can't drift.
+
+## An unavailable state names the cause the rider can fix (2026-11-13, #204)
+
+**What happened.** S20's weather showed "Weather unavailable" for every failure. Brian: it should say
+"Offline: Weather unavailable" when offline, and only the other failures "Weather unavailable".
+
+**Why I was wrong.** S05.1 already separated the case the rider can fix (location off) from a generic failure.
+I dropped that idea along with the location case, rather than asking which cause S20's rider *can* fix.
+
+**Rule.** When designing an empty or unavailable state, list the failure causes and give each one the rider can
+act on (offline, permission off) its own message; the rest share the generic one. WeatherKit's `WeatherError`
+has no offline case, so ask the network path (`NetworkStatusClient`) after the failure, never guess from the error.

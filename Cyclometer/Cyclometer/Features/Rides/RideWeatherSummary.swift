@@ -36,6 +36,15 @@ struct RideWeatherSummary: Equatable {
         )
     }
 
+    /// The sky the ride saw most (#204, S20's Previous Rides): the condition recorded most often,
+    /// the earliest of those on a tie. Nil with no samples, or none with a known condition.
+    var prevailingCondition: WeatherCondition? {
+        let conditions = samples.sorted { $0.date < $1.date }.compactMap(\.condition)
+        let counts = Dictionary(conditions.map { ($0, 1) }, uniquingKeysWith: +)
+        guard let most = counts.values.max() else { return nil }
+        return conditions.first { counts[$0] == most }
+    }
+
     private static func range(_ low: Double, _ high: Double) -> String {
         low == high ? whole(high) : "\(whole(low))–\(whole(high))"
     }

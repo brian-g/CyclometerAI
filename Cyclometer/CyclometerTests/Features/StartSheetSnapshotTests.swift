@@ -183,6 +183,11 @@ final class StartSheetSnapshotTests: XCTestCase {
         assertBothSchemes(weather(.unavailable(.failed)), named: "failed", layout: weatherCanvas)
     }
 
+    /// #204: WeatherKit failed with no network, the failure the rider can fix.
+    func testStartSheetWeatherOffline() {
+        assertBothSchemes(weather(.unavailable(.offline)), named: "offline", layout: weatherCanvas)
+    }
+
     // MARK: Route row (#196)
 
     /// The Route row inside a plain `NavigationLink`, so the reference carries a disclosure chevron.

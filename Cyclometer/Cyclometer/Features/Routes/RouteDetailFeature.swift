@@ -4,7 +4,8 @@ import os
 
 private let logger = Logger.cyclometer(.routes)
 
-/// S20 — Route Detail: one saved route's map, elevation, and the rides ridden on it.
+/// S20 — Route Detail: one saved route's map, elevation, the weather at its start, and the rides
+/// ridden on it.
 ///
 /// Seeded with the `RouteSummary` S19's row already holds, so the name, distance and climb are on
 /// screen from the first frame. The polyline and the previous rides are a second read, because
@@ -12,7 +13,7 @@ private let logger = Logger.cyclometer(.routes)
 ///
 /// An element of `RoutesFeature`'s navigation stack (#195). Nothing here hangs off
 /// `onDisappear` — a popped element's state is gone before SwiftUI runs it (`tasks/lessons.md`) —
-/// and nothing needs tearing down: both reads run from `.task`, and `.forEach` cancels a popped
+/// and nothing needs tearing down: every read runs from `.task`, and `.forEach` cancels a popped
 /// element's effects.
 @Reducer
 struct RouteDetailFeature {
@@ -45,17 +46,34 @@ struct RouteDetailFeature {
         /// has never been ridden.
         var previousRides: [RouteRideSummary] = []
 
+        /// The weather at the route's start (#204), fetched live each time S20 appears: this is a
+        /// planning screen, so a value cached at import would defeat it (UX.md §S20).
+        var weather: RouteWeather = .loading
+
         init(summary: RouteSummary) {
             self.summary = summary
         }
 
         var unitSystem: UnitSystem { preferences.preferredUnit }
+
+        /// The strip's hours at `now`: the hour under way, then each that starts before a ride of
+        /// this route would end, estimated from the rides already ridden on it as S05.1 does.
+        /// Read against the clock, not the fetch, so the strip moves on while S20 stays up.
+        func forecastHours(at now: Date) -> [WeatherReading] {
+            guard case let .loaded(forecast) = weather else { return [] }
+            let estimate = RideDurationEstimate.fromRouteRides(
+                routeDistanceMeters: summary.distanceMeters, rides: previousRides
+            )
+            return forecast.rideHours(estimate: estimate, from: now)
+        }
     }
 
     enum Action: Equatable {
         case task
         case routeLoaded(coordinates: [RouteCoordinate], elevationProfile: [Double]?)
         case previousRidesLoaded([RouteRideSummary])
+        case weatherLoaded(AttributedForecast)
+        case weatherUnavailable(RouteWeather.Unavailable)
         case useRouteButtonTapped
         case delegate(Delegate)
 
@@ -68,6 +86,9 @@ struct RouteDetailFeature {
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
+    @Dependency(\.weatherClient) var weatherClient
+    @Dependency(\.networkStatus) var networkStatus
+    @Dependency(\.date) var date
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -79,13 +100,19 @@ struct RouteDetailFeature {
                 // queued. A failure in either leaves the screen on what it already shows: the
                 // summary it was seeded with, and a Previous Rides section that stays hidden —
                 // which is also what a never-ridden route looks like.
+                //
+                // The weather follows the route's read, because its start is in the geometry. It
+                // stays in the same effect, so leaving S20 cancels it and coming back fetches it
+                // again: the "live at view time" UX.md §S20 asks for.
                 return .merge(
-                    .run { [persistenceClient] send in
+                    .run { [persistenceClient, weatherClient, networkStatus] send in
+                        let coordinates: [RouteCoordinate]
                         do {
                             guard let detail = try await persistenceClient.fetchRoute(id) else {
                                 // Only a route deleted out from under this screen resolves to nil,
                                 // and S20 offers no way to do that.
                                 logger.error("fetchRoute found no route \(id, privacy: .public)")
+                                await send(.weatherUnavailable(.failed))
                                 return
                             }
                             // Derived here, once per load, rather than by the view on every body pass.
@@ -93,8 +120,25 @@ struct RouteDetailFeature {
                                 detail.coordinates, sampleCount: Self.elevationProfileSampleCount
                             )
                             await send(.routeLoaded(coordinates: detail.coordinates, elevationProfile: profile))
+                            coordinates = detail.coordinates
                         } catch {
                             logger.error("fetchRoute failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                            await send(.weatherUnavailable(.failed))
+                            return
+                        }
+                        // A polyline that could not be decoded has no start to ask about.
+                        guard let start = coordinates.first else {
+                            await send(.weatherUnavailable(.failed))
+                            return
+                        }
+                        do {
+                            // `date` is read only once the forecast lands, never in the capture
+                            // list, so a test of a failed read needn't provide it.
+                            await send(.weatherLoaded(try await weatherClient.attributedForecast(start, now: { date.now })))
+                        } catch {
+                            // Logged in WeatherClient. WeatherKit's error can't say whether the
+                            // device is offline, so the network path is asked, and only now.
+                            await send(.weatherUnavailable(await networkStatus.isOffline() ? .offline : .failed))
                         }
                     },
                     .run { [persistenceClient] send in
@@ -115,6 +159,14 @@ struct RouteDetailFeature {
                 state.previousRides = rides
                 return .none
 
+            case .weatherLoaded(let forecast):
+                state.weather = .loaded(forecast)
+                return .none
+
+            case .weatherUnavailable(let reason):
+                state.weather = .unavailable(reason)
+                return .none
+
             case .useRouteButtonTapped:
                 return .send(.delegate(.useRoute(state.summary.reference)))
 
@@ -122,5 +174,22 @@ struct RouteDetailFeature {
                 return .none
             }
         }
+    }
+}
+
+/// S20's Weather section (#204).
+enum RouteWeather: Equatable {
+    case loading
+    /// The route's start is a fixed coordinate, so unlike S05.1 there is no location permission
+    /// to ask for.
+    case unavailable(Unavailable)
+    case loaded(AttributedForecast)
+
+    enum Unavailable: Equatable {
+        /// WeatherKit failed with no usable network: the one case the rider can fix.
+        case offline
+        /// Anything else: WeatherKit failed online (or the App ID lacks its App Service), or the
+        /// route has no start to ask about.
+        case failed
     }
 }

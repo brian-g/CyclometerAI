@@ -495,6 +495,22 @@ struct StartSheetFeatureTests {
         await store.receive(.weatherUnavailable(.failed)) { $0.weather = .unavailable(.failed) }
     }
 
+    /// #204: offline is the one WeatherKit failure the rider can fix, so it is named.
+    @Test("A WeatherKit request that fails offline shows the offline state")
+    func weatherFailsOffline() async {
+        let store = TestStore(initialState: StartSheetFeature.State()) {
+            StartSheetFeature()
+        } withDependencies: {
+            $0.locationClient.currentCoordinate = { Self.fargo }
+            $0.weatherClient = .unavailable
+            $0.networkStatus = .offline
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.task)
+        await store.receive(.weatherUnavailable(.offline)) { $0.weather = .unavailable(.offline) }
+    }
+
     @Test("With no route, the strip covers the hour under way and the next three hours")
     func forecastHoursDefault() {
         var state = StartSheetFeature.State()

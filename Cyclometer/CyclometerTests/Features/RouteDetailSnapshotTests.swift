@@ -34,8 +34,10 @@ final class RouteDetailSnapshotTests: XCTestCase {
     // MARK: Harness
 
     /// Imperial units, and the state `.task` would have produced seeded directly — a snapshot
-    /// captures one layout pass and never awaits an effect.
-    private func screen(_ route: RouteSummary, rides: [RouteRideSummary]) -> some View {
+    /// captures one layout pass and never awaits an effect. The weather (#204) is the fixture
+    /// forecast, read at the fixture's own clock, unless a test seeds another state.
+    private func screen(_ route: RouteSummary, rides: [RouteRideSummary],
+                        weather: RouteWeather = .loaded(.fixture)) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
@@ -49,6 +51,7 @@ final class RouteDetailSnapshotTests: XCTestCase {
                 coordinates, sampleCount: RouteDetailFeature.elevationProfileSampleCount
             )
             state.previousRides = rides
+            state.weather = weather
             return Store(initialState: state) {
                 RouteDetailFeature()
             } withDependencies: {
@@ -65,7 +68,7 @@ final class RouteDetailSnapshotTests: XCTestCase {
         // TCA's links where they push, so the type a store-powered one would set is set here;
         // without it every Previous Rides row reports "not presentable" and fails the test.
         return NavigationStack {
-            RouteDetailList(store: store, mapRow: Color.cyBgTertiary)
+            RouteDetailList(store: store, mapRow: Color.cyBgTertiary, now: WeatherReading.fixtureNow)
                 .toolbar(.hidden, for: .navigationBar)
         }
             .environment(\.navigationDestinationType, RideRoutePath.State.self)
@@ -104,6 +107,7 @@ final class RouteDetailSnapshotTests: XCTestCase {
     // MARK: Tests
 
     /// "Summit Climb": elevation on every point, and three previous rides, one of them over an hour.
+    /// The rides carry conditions (#204): a range, one reading, and none for the oldest.
     func testWithElevationAndPreviousRides() {
         assertBothSchemes(screen(RouteSummary.previewRoutes[1], rides: RouteRideSummary.previewRides),
                           named: "elevation-rides")
@@ -119,6 +123,22 @@ final class RouteDetailSnapshotTests: XCTestCase {
         var route = RouteSummary.previewRoutes[1]
         route.narrative = RouteSummary.previewNarrative
         assertBothSchemes(screen(route, rides: []), named: "elevation-narrative")
+    }
+
+    // MARK: Weather (#204)
+
+    func testRouteDetailWeatherLoading() {
+        assertBothSchemes(screen(RouteSummary.previewRoutes[3], rides: [], weather: .loading), named: "weather-loading")
+    }
+
+    func testRouteDetailWeatherOffline() {
+        assertBothSchemes(screen(RouteSummary.previewRoutes[3], rides: [], weather: .unavailable(.offline)),
+                          named: "weather-offline")
+    }
+
+    func testRouteDetailWeatherUnavailable() {
+        assertBothSchemes(screen(RouteSummary.previewRoutes[3], rides: [], weather: .unavailable(.failed)),
+                          named: "weather-unavailable")
     }
 
     /// "Coffee Spin": a GPX with no `<ele>`, so the whole elevation section is absent.

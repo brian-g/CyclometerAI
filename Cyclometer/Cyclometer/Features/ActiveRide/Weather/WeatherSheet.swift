@@ -8,6 +8,11 @@ struct WeatherMetrics: Equatable {
     var forecast: AttributedForecast? = nil
     /// `RideWeatherFeature.State.forecastHours`: the strip's hours.
     var hours: [WeatherReading] = []
+    /// The clock the metrics were read at, which is the strip's "Now". Only an empty sheet
+    /// (no hours) leaves it at its default.
+    var now: Date = .distantPast
+    /// With no forecast to show, whether that is because the device is offline (#204).
+    var isOffline = false
     /// The rider's direction of travel, for the wind's arrow; nil before they have moved.
     var course: Double? = nil
     var unit: UnitSystem = .metric
@@ -54,6 +59,8 @@ extension RideWeatherFeature.State {
         return WeatherMetrics(
             forecast: forecast,
             hours: forecast?.hours(within: Self.forecastWindow, from: now) ?? [],
+            now: now,
+            isOffline: forecast == nil && isLastFailureOffline,
             course: course,
             unit: unit
         )
@@ -113,14 +120,18 @@ struct WeatherList: View {
                 }
             } footer: {
                 if metrics.forecast == nil {
-                    Text("Weather unavailable")
+                    if metrics.isOffline {
+                        Text("Offline: Weather unavailable")
+                    } else {
+                        Text("Weather unavailable")
+                    }
                 }
             }
             if let forecast = metrics.forecast {
                 // A forecast with no hour in the window would be an empty, padded row.
                 Section {
                     if !metrics.hours.isEmpty {
-                        HourlyForecastStrip(hours: metrics.hours)
+                        HourlyForecastStrip(hours: metrics.hours, now: metrics.now)
                     }
                 } header: {
                     Text("Forecast")
@@ -138,8 +149,13 @@ struct WeatherList: View {
     WeatherList(metrics: WeatherMetrics(
         forecast: .fixture,
         hours: AttributedForecast.fixture.hours(within: RideWeatherFeature.State.forecastWindow),
+        now: WeatherReading.fixtureNow,
         course: 90
     ))
+}
+
+#Preview("Offline") {
+    WeatherList(metrics: WeatherMetrics(isOffline: true))
 }
 
 #Preview("No Weather — Dark") {

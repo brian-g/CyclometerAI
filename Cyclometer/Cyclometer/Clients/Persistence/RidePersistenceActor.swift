@@ -382,7 +382,8 @@ actor RidePersistenceActor {
                     startedAt: $0.startedAt,
                     endedAt: $0.endedAt,
                     durationSeconds: $0.durationSeconds,
-                    distanceMeters: $0.distanceMeters
+                    distanceMeters: $0.distanceMeters,
+                    weather: $0.weather
                 )
             }
         } catch {

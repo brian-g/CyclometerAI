@@ -25,6 +25,8 @@ struct RoutesNavigationTests {
             } withDependencies: {
                 $0.persistenceClient = persistenceClient
                 $0.defaultFileStorage = storage
+                // A pushed S20 fetches the weather at the route's start (#204), dated by the clock.
+                $0.date = .constant(WeatherReading.fixtureNow)
             }
         }
     }
