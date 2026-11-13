@@ -1,10 +1,13 @@
 import ComposableArchitecture
 import Foundation
+import os
 import SwiftUI
+
+private let logger = Logger.cyclometer(.routes)
 
 /// S05.1 — Start Ride sheet. Global (app-level) setup screen: the ride's route — which S05.2,
 /// pushed on the sheet's own stack, changes — the Phase 2 bike placeholder, the weather where the
-/// rider is over the hours the ride will take (#149), and a live Sensors group. Presented by `AppFeature` via `@Presents`; the "Start Ride" CTA bubbles up as
+/// ride starts over the hours it will take (#149, #559), and a live Sensors group. Presented by `AppFeature` via `@Presents`; the "Start Ride" CTA bubbles up as
 /// `.delegate(.startRide)`, carrying the route, for the parent to begin the ride.
 ///
 /// The CTA writes the ride's `Ride` row before that delegate is sent (#344). A ride without its
@@ -25,7 +28,7 @@ struct StartSheetFeature {
     @Dependency(\.locationClient) var locationClient
     @Dependency(\.permissionsClient) var permissionsClient
 
-    private enum CancelID { case rideEstimate }
+    private enum CancelID { case rideEstimate, weather }
 
     @ObservableState
     struct State: Equatable {
@@ -61,7 +64,9 @@ struct StartSheetFeature {
         /// The rider's units for the wind.
         var unitSystem: UnitSystem { preferences.preferredUnit }
 
-        /// The weather where the rider is (#149), fetched once as the sheet opens.
+        /// The weather where the ride starts (#149): the route's first point when one is chosen
+        /// (#559), else the rider's position. Fetched as the sheet opens and again when the route
+        /// changes.
         var weather: StartSheetWeather = .loading
 
         /// How long a ride on the chosen route will take, from the rider's own rides
@@ -156,7 +161,7 @@ struct StartSheetFeature {
                 // process. Only the owner of the presentation knows both ends of the
                 // lifetime.
                 return .merge(
-                    fetchWeather(),
+                    fetchWeather(state.route),
                     // A route S20's "Use This Route" opened the sheet on.
                     estimateRide(state.route),
                     .run { send in
@@ -271,11 +276,15 @@ struct StartSheetFeature {
             case let .path(.element(id: id, action: .routePicker(.delegate(.routeSelected(route))))):
                 // The sheet pops rather than the picker dismissing itself, so the answer and the
                 // navigation land in the same pass — and a test can assert both.
+                let isNewStart = route?.id != state.route?.id
                 state.route = route
                 state.path.pop(from: id)
                 // The last route's estimate is no answer for this one: the default until it lands.
                 state.rideEstimate = nil
-                return estimateRide(route)
+                // Re-picking the same route starts in the same place: its weather stands (#559).
+                guard isNewStart else { return estimateRide(route) }
+                state.weather = .loading
+                return .merge(estimateRide(route), fetchWeather(route))
 
             case .weatherLoaded(let forecast):
                 state.weather = .loaded(forecast)
@@ -297,25 +306,19 @@ struct StartSheetFeature {
         .forEach(\.path, action: \.path)
     }
 
-    /// The weather at the rider's position (#149). Location *status*, never a request: S01 owns the
-    /// location prompt, and a sheet that opens with location off still works without it.
-    ///
-    /// Only location that is off reads as `.noLocation`, whose message asks the rider to turn it on.
-    /// Location that is on but gave no fix in time (indoors, say) is `.failed`: turning on what is
-    /// already on would fix nothing.
-    private func fetchWeather() -> Effect<Action> {
+    /// The weather where the ride starts (#149). A newer route cancels an older one's fetch, so a
+    /// slow answer for the last start can't land on this one.
+    private func fetchWeather(_ route: RouteReference?) -> Effect<Action> {
         .run { send in
-            guard await permissionsClient.status(.locationWhenInUse).isGranted else {
-                await send(.weatherUnavailable(.noLocation))
+            let start: RouteCoordinate
+            do throws(StartSheetWeather.Unavailable) {
+                start = if let route { try await routeStart(route) } else { try await riderPosition() }
+            } catch {
+                await send(.weatherUnavailable(error))
                 return
             }
-            guard let position = await locationClient.currentCoordinate() else {
-                await send(.weatherUnavailable(.failed))
-                return
-            }
-            let coordinate = RouteCoordinate(latitude: position.latitude, longitude: position.longitude)
             do {
-                let forecast = try await weatherClient.attributedForecast(coordinate, now: { date.now })
+                let forecast = try await weatherClient.attributedForecast(start, now: { date.now })
                 await send(.weatherLoaded(forecast))
             } catch {
                 // Logged in WeatherClient. WeatherKit's error can't say whether the device is
@@ -323,6 +326,39 @@ struct StartSheetFeature {
                 await send(.weatherUnavailable(await networkStatus.isOffline() ? .offline : .failed))
             }
         }
+        .cancellable(id: CancelID.weather, cancelInFlight: true)
+    }
+
+    /// A route's first point (#559), as S20 asks about it: where the ride begins, wherever the
+    /// rider is now — at home, say, before driving to the trailhead. A route's start is a fixed
+    /// coordinate, so it needs no location permission. A route that can't be read, or whose
+    /// polyline didn't decode, has no start: `.failed`, never the rider's position instead, which
+    /// would put another place's weather under this route.
+    private func routeStart(_ route: RouteReference) async throws(StartSheetWeather.Unavailable) -> RouteCoordinate {
+        let detail: RouteDetail?
+        do {
+            detail = try await persistenceClient.fetchRoute(route.id)
+        } catch {
+            logger.error("fetchRoute failed for \(route.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            throw .failed
+        }
+        guard let start = detail?.coordinates.first else {
+            logger.error("fetchRoute found no start for route \(route.id, privacy: .public)")
+            throw .failed
+        }
+        return start
+    }
+
+    /// The rider's position, for a free ride. Location *status*, never a request: S01 owns the
+    /// location prompt, and a sheet that opens with location off still works without it.
+    ///
+    /// Only location that is off reads as `.noLocation`, whose message asks the rider to turn it on.
+    /// Location that is on but gave no fix in time (indoors, say) is `.failed`: turning on what is
+    /// already on would fix nothing.
+    private func riderPosition() async throws(StartSheetWeather.Unavailable) -> RouteCoordinate {
+        guard await permissionsClient.status(.locationWhenInUse).isGranted else { throw .noLocation }
+        guard let position = await locationClient.currentCoordinate() else { throw .failed }
+        return RouteCoordinate(latitude: position.latitude, longitude: position.longitude)
     }
 
     /// How long a ride on `route` will take, for how far ahead the forecast looks (#149). A failed
@@ -393,13 +429,16 @@ enum StartSheetWeather: Equatable {
     case unavailable(Unavailable)
     case loaded(AttributedForecast)
 
-    enum Unavailable: Equatable {
-        /// Location is off for the app: the rider can fix it by turning it on.
+    /// An `Error` so that each start — a route's, the rider's — can say why it has none (#559).
+    enum Unavailable: Error, Equatable {
+        /// A free ride with location off for the app: the rider can fix it by turning it on. A
+        /// route's start needs no location, so a ride on one never reads this (#559).
         case noLocation
         /// WeatherKit failed with no usable network (#204): the rider can fix it by going online.
         case offline
-        /// No weather to show for any other reason: location is on but gave no fix in time, or
-        /// WeatherKit failed online (or the App ID lacks its App Service).
+        /// No weather to show for any other reason: location is on but gave no fix in time, the
+        /// chosen route has no start that could be read (#559), or WeatherKit failed online (or
+        /// the App ID lacks its App Service).
         case failed
     }
 }
