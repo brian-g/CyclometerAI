@@ -364,30 +364,11 @@ struct StartSheetFeature {
     /// How long a ride on `route` will take, for how far ahead the forecast looks (#149). A failed
     /// read is no estimate, and the forecast keeps its default. A newer pick cancels an older one's
     /// read, so a slow answer for the last route can't land on this one.
-    ///
-    /// The rider's whole ride history is read only when the route's own rides can't answer.
     private func estimateRide(_ route: RouteReference?) -> Effect<Action> {
         guard let route else { return .cancel(id: CancelID.rideEstimate) }
         return .run { send in
-            var estimate: TimeInterval?
-            do {
-                if let summary = try await persistenceClient.fetchRouteSummary(route.id) {
-                    let distance = summary.distanceMeters
-                    estimate = try await RideDurationEstimate.fromRouteRides(
-                        routeDistanceMeters: distance,
-                        rides: persistenceClient.fetchRouteRides(route.id)
-                    )
-                    if estimate == nil {
-                        estimate = try await RideDurationEstimate.fromRecentRides(
-                            routeDistanceMeters: distance,
-                            rides: persistenceClient.fetchRides()
-                        )
-                    }
-                }
-            } catch {
-                // No estimate: the forecast keeps its default.
-            }
-            await send(.rideEstimateLoaded(estimate))
+            // A failed read is no estimate: the forecast keeps its default.
+            await send(.rideEstimateLoaded(try? await persistenceClient.rideEstimate(forRoute: route.id)))
         }
         .cancellable(id: CancelID.rideEstimate, cancelInFlight: true)
     }

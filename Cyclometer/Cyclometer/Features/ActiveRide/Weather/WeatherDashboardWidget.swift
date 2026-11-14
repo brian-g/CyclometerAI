@@ -27,7 +27,11 @@ struct WeatherDashboardWidget: DashboardWidget {
             course: store.weather.course,
             unit: store.unitSystem,
             rain: forecast.flatMap { RainOutlook($0, now: now) },
-            metrics: { date in store.weather.metrics(at: date, unit: store.unitSystem) },
+            metrics: { date in
+                store.weather.metrics(at: date, unit: store.unitSystem, rider: store.coordinate,
+                                      route: store.navigation.activeRoute?.coordinates ?? [])
+            },
+            onSheetAppear: { store.send(.weatherSheetOpened) },
             size: size
         )
     }

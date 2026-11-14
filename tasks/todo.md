@@ -2356,3 +2356,25 @@ Plan: `~/.claude/plans/delegated-frolicking-babbage.md`. Brian's picks: the map'
 - [x] Commit → PR
 
 **Review:** S20's weather is live at the route's start, with the hourly strip sized by the route's own rides; Previous Rides rows carry their conditions. Changes from the plan, all Brian's: offline is named ("Offline: Weather unavailable") on S20, S05.1 and W10's sheet, through a new `NetworkStatusClient` asked only after WeatherKit fails; the ride window became one `AttributedForecast.rideHours` rather than two moved constants. The map's wind overlay moved to #561. Not covered by tests: the live WeatherKit and `NWPathMonitor` paths (whether iterating the monitor starts it is [Likely], to be seen on device in airplane mode). The narrative S20 reference is unchanged: its Weather section is below the canvas.
+
+---
+
+# #561 — Wind map: wind direction over the map and route
+
+Plan: `~/.claude/plans/velvet-wandering-lampson.md` (approved 2026-11-13). Brian's calls: no route → W10's one reading drawn as an even field (no extra requests); route → 1 sample per 10 km, 2–8, the screen's existing forecast as sample 0, each at the forecast hour the rider reaches it; the map tops W10's sheet at 220 pt; mid-ride arrivals at this ride's average moving speed after 5 km, the route estimate before.
+
+- [x] Branch `feat/561-wind-map` from `origin/main`
+- [x] Pure model (`WindSample`, `WindSampling`, `WindArrowGeometry`) + `AttributedForecast` ride-window refactor, with tests
+- [x] `WeatherClient.wind(at:)` + `RouteWindFeature`, with TestStore tests
+- [x] `WindLayer` map content
+- [x] S20 wiring + tests
+- [x] Shared ride-estimate helper (S05.1 unchanged)
+- [x] W10 wiring: sheet map row, `ActiveRideFeature` tests
+- [x] Snapshots: placeholder map row; two new W10 references recorded and checked by eye (existing ones unchanged: no rider → no map row)
+- [x] Docs: UX.md §W10, §S20, header; TCA.md §8
+- [x] Hand over to Brian to run
+- [x] Targeted run: 138 passed, 0 failed. First run caught floating-point noise adding a sample (a 20 km fixture measured 20 000.0001 m): fixed in the model with a 1 m tolerance (`spacingToleranceMeters`), not in the tests
+- [x] Full `CyclometerTests`: 2808 passed, 0 failed
+- [x] Commit → PR
+
+**Review:** The wind map is one `WindLayer` overlay and one `RouteWindFeature` reducer, drawn on W10's sheet and S20's map. A free ride spends no extra requests; a route spends one fewer than its samples (2–8), since the screen's forecast is the first. Changes from the plan: W10 with a route frames the whole route plus the rider (the view doesn't know progress); the free-ride field uses 4 columns so no arrow sits under the rider's dot. Known gaps: with turn-by-turn off, `progressMeters` is never set, so W10 samples from the route's start; on a route, W10's own arrow sits under the rider's dot; arrow colour (`cyTextPrimary` edged `cyBgPrimary`) is unconfirmed on device; S15's recorded-weather layer is a follow-up. Not covered by tests: the live `Map` rendering and WeatherKit's live path.
