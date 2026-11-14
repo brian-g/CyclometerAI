@@ -50,6 +50,15 @@ struct RouteDetailFeature {
         /// planning screen, so a value cached at import would defeat it (UX.md §S20).
         var weather: RouteWeather = .loading
 
+        /// The forecast along the route for when a ride starting now reaches each point (#561),
+        /// drawn over the map by `WindLayer`.
+        var wind = RouteWindFeature.State()
+        /// Whether this appearance's forecast and rides have landed. The wind waits for both: the
+        /// forecast is its first sample, and the rides time the rest. Reset each time S20 appears,
+        /// so a return samples once, on the fresh answers.
+        var hasFreshForecast = false
+        var hasFreshRides = false
+
         init(summary: RouteSummary) {
             self.summary = summary
         }
@@ -74,6 +83,7 @@ struct RouteDetailFeature {
         case previousRidesLoaded([RouteRideSummary])
         case weatherLoaded(AttributedForecast)
         case weatherUnavailable(RouteWeather.Unavailable)
+        case wind(RouteWindFeature.Action)
         case useRouteButtonTapped
         case delegate(Delegate)
 
@@ -91,11 +101,16 @@ struct RouteDetailFeature {
     @Dependency(\.date) var date
 
     var body: some ReducerOf<Self> {
+        Scope(state: \.wind, action: \.wind) {
+            RouteWindFeature()
+        }
         Reduce { state, action in
             switch action {
 
             case .task:
                 let id = state.summary.id
+                state.hasFreshForecast = false
+                state.hasFreshRides = false
                 // Two independent reads against two different actors, so merged rather than
                 // queued. A failure in either leaves the screen on what it already shows: the
                 // summary it was seeded with, and a Previous Rides section that stays hidden —
@@ -146,6 +161,9 @@ struct RouteDetailFeature {
                             await send(.previousRidesLoaded(try await persistenceClient.fetchRouteRides(id)))
                         } catch {
                             logger.error("fetchRouteRides failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                            // Still hidden, as a route never ridden is; the wind map, which waits
+                            // on the rides, times the route by its default instead.
+                            await send(.previousRidesLoaded([]))
                         }
                     }
                 )
@@ -157,14 +175,19 @@ struct RouteDetailFeature {
 
             case .previousRidesLoaded(let rides):
                 state.previousRides = rides
-                return .none
+                state.hasFreshRides = true
+                return loadWind(&state)
 
             case .weatherLoaded(let forecast):
                 state.weather = .loaded(forecast)
-                return .none
+                state.hasFreshForecast = true
+                return loadWind(&state)
 
             case .weatherUnavailable(let reason):
                 state.weather = .unavailable(reason)
+                return .none
+
+            case .wind:
                 return .none
 
             case .useRouteButtonTapped:
@@ -174,6 +197,32 @@ struct RouteDetailFeature {
                 return .none
             }
         }
+    }
+}
+
+extension RouteDetailFeature {
+    /// Samples the wind along the route once this appearance's forecast and rides have both
+    /// landed (#561): the forecast for a ride starting now, at the speed that rides it in S05.1's
+    /// estimate, as the hourly strip assumes. The forecast at the start is the first sample, so a
+    /// route costs one request fewer than it has samples.
+    private func loadWind(_ state: inout State) -> Effect<Action> {
+        guard state.hasFreshForecast, state.hasFreshRides,
+              case let .loaded(forecast) = state.weather,
+              let start = state.coordinates.first, let finish = state.coordinates.last
+        else { return .none }
+        state.hasFreshForecast = false
+        let estimate = RideDurationEstimate.fromRouteRides(
+            routeDistanceMeters: state.summary.distanceMeters, rides: state.previousRides
+        )
+        let points = WindSampling.points(
+            coordinates: state.coordinates,
+            cumulative: RouteGeometry.cumulativeDistances(state.coordinates),
+            isLoop: RouteGeometry.distanceMeters([start, finish]) <= NavigationFeature.loopClosureMeters,
+            start: date.now,
+            speedMPS: WindSampling.speedMPS(routeDistanceMeters: state.summary.distanceMeters, estimate: estimate)
+        )
+        let known = WindSample(coordinate: start, reading: forecast.current)
+        return .send(.wind(.load(known: known, ahead: Array(points.dropFirst()))))
     }
 }
 

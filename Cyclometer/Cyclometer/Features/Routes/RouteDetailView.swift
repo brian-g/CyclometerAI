@@ -124,7 +124,8 @@ struct RouteDetailList<MapRow: View>: View {
 
 extension RouteDetailList where MapRow == RouteDetailMap {
     init(store: StoreOf<RouteDetailFeature>, now: Date) {
-        self.init(store: store, mapRow: RouteDetailMap(summary: store.summary, coordinates: store.coordinates), now: now)
+        self.init(store: store, mapRow: RouteDetailMap(summary: store.summary, coordinates: store.coordinates,
+                                                       wind: store.wind.samples), now: now)
     }
 }
 
@@ -166,6 +167,8 @@ private struct PreviousRideConditions: View {
 struct RouteDetailMap: View {
     let summary: RouteSummary
     let coordinates: [RouteCoordinate]
+    /// The forecast wind along the route for a ride starting now (#561); empty until it lands.
+    var wind: [WindSample] = []
 
     /// What the camera shows. The arrows space themselves from it, and nil means none at all.
     @State private var visibleBounds: RouteBounds?
@@ -187,6 +190,7 @@ struct RouteDetailMap: View {
             Map(initialPosition: .region(framing), interactionModes: [.pan, .zoom]) {
                 RouteMapContent(coordinates: coordinates, startTitle: "Start", finishTitle: "Finish",
                                 arrows: arrows, metersPerPoint: metersPerPoint)
+                WindLayer(samples: wind, metersPerPoint: metersPerPoint)
             }
             .mapStyle(.standard(elevation: .realistic))
             .mapControls {

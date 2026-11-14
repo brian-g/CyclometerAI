@@ -21,6 +21,8 @@ struct WeatherWidget: View {
     /// The Weather sheet's data. A closure so the card never reads the forecast itself; only the
     /// open sheet does, in its own body (#144).
     var metrics: (Date) -> WeatherMetrics = { _ in WeatherMetrics() }
+    /// Each time the sheet opens, so the ride can sample the wind along the route ahead (#561).
+    var onSheetAppear: () -> Void = {}
     var size: WidgetSize = .oneByOne   // only .oneByOne / .twoByOne used by W10
 
     @Environment(\.locale) private var locale
@@ -44,7 +46,7 @@ struct WeatherWidget: View {
         }
         .background(Color.cyBgSecondary)
         .widgetDetail(label: WeatherDashboardWidget.title, value: accessibilityValue) {
-            WeatherSheet(metrics: metrics)
+            WeatherSheet(metrics: metrics, onAppear: onSheetAppear)
         }
     }
 

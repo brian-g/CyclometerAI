@@ -48,3 +48,22 @@ enum RideDurationEstimate {
         return sorted.count.isMultiple(of: 2) ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
     }
 }
+
+extension PersistenceClient {
+    /// How long a ride on route `id` will take, read from the rider's history in
+    /// `RideDurationEstimate`'s order: the route's own rides, then their recent riding, then nil
+    /// for the caller's default. S05.1 sizes its forecast by it (#149), and W10's wind map times the
+    /// route ahead by it until the ride's own average means something (#561).
+    ///
+    /// The rider's whole ride history is read only when the route's own rides can't answer.
+    func rideEstimate(forRoute id: UUID) async throws -> TimeInterval? {
+        guard let summary = try await fetchRouteSummary(id) else { return nil }
+        let distance = summary.distanceMeters
+        if let estimate = RideDurationEstimate.fromRouteRides(
+            routeDistanceMeters: distance, rides: try await fetchRouteRides(id)
+        ) {
+            return estimate
+        }
+        return RideDurationEstimate.fromRecentRides(routeDistanceMeters: distance, rides: try await fetchRides())
+    }
+}
