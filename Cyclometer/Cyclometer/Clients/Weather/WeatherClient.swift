@@ -29,6 +29,13 @@ struct WeatherForecast: Equatable, Sendable {
     var hourly: [WeatherReading]
 }
 
+/// One place along a route and `WeatherClient.forecast`'s answer there, from
+/// `WeatherClient.forecasts(at:)`.
+struct PointForecast: Equatable, Sendable {
+    var point: WindSamplePoint
+    var forecast: WeatherForecast
+}
+
 enum WeatherClientError: Error, Equatable {
     /// `WeatherClient.unavailable`'s answer, for testing and previewing the failure path.
     case unavailable
@@ -95,29 +102,36 @@ extension WeatherClient {
 }
 
 extension WeatherClient {
-    /// The wind at each of `points` for the hour the rider reaches it, for the wind map (#561):
-    /// one `forecast` request per point, all sent at once.
+    /// The forecast at each of `points`: one `forecast` request per point, all sent at once. Used
+    /// for the wind map (#561) and rain along the route (#152).
     ///
-    /// A point whose request fails, or that the rider reaches after the forecast ends, is left out,
-    /// and the map draws the rest: one missing arrow beats none. Failures are logged in
-    /// `liveValue`. The answers come back in route order, whatever order they arrive in.
-    func wind(at points: [WindSamplePoint]) async -> [WindSample] {
-        await withTaskGroup(of: (Int, WindSample?).self) { group in
+    /// A point whose request fails is left out, and the caller works with the rest: one missing
+    /// point beats none. Failures are logged in `liveValue`. The answers come back in route order,
+    /// whatever order they arrive in.
+    func forecasts(at points: [WindSamplePoint]) async -> [PointForecast] {
+        await withTaskGroup(of: (Int, PointForecast?).self) { group in
             for (index, point) in points.enumerated() {
                 group.addTask {
-                    guard let forecast = try? await self.forecast(point.coordinate),
-                          let reading = WindSampling.reading(
-                              at: point.arrival, current: forecast.current, hourly: forecast.hourly
-                          )
-                    else { return (index, nil) }
-                    return (index, WindSample(coordinate: point.coordinate, reading: reading))
+                    let forecast = try? await self.forecast(point.coordinate)
+                    return (index, forecast.map { PointForecast(point: point, forecast: $0) })
                 }
             }
-            var answered: [(index: Int, sample: WindSample)] = []
-            for await (index, sample) in group {
-                if let sample { answered.append((index, sample)) }
+            var answered: [(index: Int, answer: PointForecast)] = []
+            for await (index, answer) in group {
+                if let answer { answered.append((index, answer)) }
             }
-            return answered.sorted { $0.index < $1.index }.map(\.sample)
+            return answered.sorted { $0.index < $1.index }.map(\.answer)
+        }
+    }
+
+    /// The wind at each of `points` for the hour the rider reaches it, for the wind map (#561).
+    /// A point the rider reaches after its forecast ends is left out, as is one whose request
+    /// fails (`forecasts(at:)`).
+    func wind(at points: [WindSamplePoint]) async -> [WindSample] {
+        await forecasts(at: points).compactMap { answer in
+            WindSampling.reading(
+                at: answer.point.arrival, current: answer.forecast.current, hourly: answer.forecast.hourly
+            ).map { WindSample(coordinate: answer.point.coordinate, reading: $0) }
         }
     }
 }

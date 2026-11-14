@@ -1013,8 +1013,9 @@ Cyclometer/
 │   │   ├── Sunset/                        // SunsetWidgetView (W21, #462) — the NOAA sunset lives in
 │   │   │                                  // Models/Sunset
 │   │   ├── Weather/                       // RideWeatherFeature, WeatherWidgetView (W10, #150),
-│   │   │                                  // WeatherSheet, WeatherMap + ActiveRideFeature+RouteWind (#561)
-│   │   │                                  // — RelativeWind, RainOutlook, WindSampling in Models/
+│   │   │                                  // WeatherSheet, WeatherMap + ActiveRideFeature+RouteWind (#561),
+│   │   │                                  // ActiveRideFeature+RainAhead (#152)
+│   │   │                                  // — RelativeWind, RainOutlook, RainAhead, WindSampling in Models/
 │   │   ├── Calories/                      // CaloriesWidgetView (W23, #465), CaloriesSheet — the series
 │   │   │                                  // lives on ActiveRideFeature; rebuilds in Models/CalorieSeries
 │   │   ├── LiveActivity/                  // RideActivityAttributes, RideLockScreenView (PRD §8.10) — shared with the extension;

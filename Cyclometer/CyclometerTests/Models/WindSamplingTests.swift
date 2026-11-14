@@ -54,6 +54,39 @@ struct WindSamplingTests {
         #expect(WindSampling.distances(totalMeters: 0) == [0])
     }
 
+    /// #152: rain along the route asks only about the stretch reached within two hours.
+    @Test("A cap stops sampling there, at the same spacing")
+    func capped() {
+        #expect(WindSampling.distances(totalMeters: 100_000, fromMeters: 5_000, toMeters: 35_000)
+            == [5_000, 15_000, 25_000, 35_000])
+        #expect(WindSampling.distances(totalMeters: 100_000, toMeters: 300_000)
+            == WindSampling.distances(totalMeters: 100_000), "a cap past the finish is the finish")
+        #expect(WindSampling.distances(totalMeters: 100_000, toMeters: .infinity)
+            == WindSampling.distances(totalMeters: 100_000), "a non-finite cap is no cap")
+        #expect(WindSampling.distances(totalMeters: 100_000, fromMeters: 30_000, toMeters: 20_000) == [30_000],
+                "a cap behind the rider is where the rider is")
+    }
+
+    /// The loop rule is about a finish that is the start; a cap short of it is somewhere else.
+    @Test("A loop capped short of its finish keeps its last sample; capped at the finish it doesn't")
+    func cappedLoop() {
+        #expect(WindSampling.distances(totalMeters: 40_000, toMeters: 20_000, isLoop: true) == [0, 10_000, 20_000])
+        #expect(WindSampling.distances(totalMeters: 40_000, toMeters: 40_000, isLoop: true)
+            == WindSampling.distances(totalMeters: 40_000, isLoop: true))
+    }
+
+    @Test("Capped points are timed from where sampling starts")
+    func cappedPoints() {
+        let route = RouteFixtures.path(legs: [(0, 60_000)], spacingMeters: 100)
+        let start = WeatherReading.fixtureNow
+        let points = WindSampling.points(
+            coordinates: route, cumulative: RouteGeometry.cumulativeDistances(route),
+            fromMeters: 10_000, toMeters: 30_000, start: start, speedMPS: 5
+        )
+        #expect(points.map(\.distanceMeters) == [10_000, 20_000, 30_000])
+        #expect(points.last?.arrival == start.addingTimeInterval(4_000))
+    }
+
     // MARK: - When
 
     @Test("Each point is timed at the speed from where sampling starts")

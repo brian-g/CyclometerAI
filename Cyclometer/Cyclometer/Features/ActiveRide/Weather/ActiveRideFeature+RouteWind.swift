@@ -21,8 +21,8 @@ extension ActiveRideFeature {
               state.weather.forecast(at: now) != nil,
               !state.weather.routeWind.isFresh(at: now)
         else { return .none }
-        if state.distanceMeters >= Self.routeWindOwnSpeedMeters, state.averageSpeedMPS > 0 {
-            return loadRouteWind(&state, speedMPS: state.averageSpeedMPS)
+        if let speedMPS = Self.ownSpeedMPS(state) {
+            return loadRouteWind(&state, speedMPS: speedMPS)
         }
         guard let routeID = state.route?.id else {
             return loadRouteWind(&state, estimate: nil)
@@ -55,7 +55,7 @@ extension ActiveRideFeature {
         let points = WindSampling.points(
             coordinates: route.coordinates,
             cumulative: route.cumulativeDistances,
-            fromMeters: Self.routeWindProgressMeters(
+            fromMeters: Self.routeAheadProgressMeters(
                 of: rider, on: route, navigation: state.navigation, course: state.weather.course
             ),
             isLoop: route.isLoop,
@@ -66,12 +66,19 @@ extension ActiveRideFeature {
         return .send(.weather(.routeWind(.load(known: known, ahead: Array(points.dropFirst())))))
     }
 
+    /// The ride's own average moving speed, once it has gone `routeWindOwnSpeedMeters`; nil before,
+    /// when the route's estimate stands in. The wind map and rain along the route (#152) time the
+    /// route ahead by it.
+    static func ownSpeedMPS(_ state: State) -> Double? {
+        state.distanceMeters >= routeWindOwnSpeedMeters && state.averageSpeedMPS > 0 ? state.averageSpeedMPS : nil
+    }
+
     /// How far along `route` the rider is, where the route ahead starts: navigation's match while it
     /// follows the route, else the rider projected onto it. With turn-by-turn off nothing is matched,
     /// and `progressMeters` is nil or a stale restored value: the route's start would have the map
     /// ask about, and time as still ahead, ground the rider has already ridden. The course keeps a
     /// rider on the way back of an out-and-back off the way out.
-    private static func routeWindProgressMeters(
+    static func routeAheadProgressMeters(
         of rider: RouteCoordinate, on route: NavigationRoute,
         navigation: NavigationFeature.State, course: Double?
     ) -> Double {

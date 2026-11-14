@@ -1349,6 +1349,10 @@ struct ActiveRideFeature {
                 return openWeatherSheet(&state)
             case .routeWindEstimated(let estimate):
                 return loadRouteWind(&state, estimate: estimate)
+            case .weather(.forecastLoaded):
+                // Each fresh forecast where the rider is also checks the route ahead for rain
+                // (#152). Matched after `RideWeatherFeature` has stored it, which the check reads.
+                return checkRainAhead(&state)
             case .calibration, .sensorHealth, .weather:
                 return .none
             case .navigation(.delegate(.turnAnnounced(let direction))):

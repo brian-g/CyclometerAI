@@ -120,6 +120,21 @@ struct RouteWindFeatureTests {
 
     // MARK: - WeatherClient.wind(at:)
 
+    // MARK: - WeatherClient.forecasts(at:) (#152)
+
+    @Test("forecasts(at:) answers each point with its own forecast, in route order")
+    func forecastsInRouteOrder() async {
+        let answers = await Self.client().forecasts(at: Self.ahead)
+        #expect(answers.map(\.point) == Self.ahead)
+        #expect(answers[1].forecast.hourly.first == Self.reading(2, hour: 0))
+    }
+
+    @Test("forecasts(at:) leaves out a point whose request fails")
+    func forecastsDropFailures() async {
+        let answers = await Self.client(failing: [2]).forecasts(at: Self.ahead)
+        #expect(answers.map(\.point) == [Self.ahead[0], Self.ahead[2]])
+    }
+
     @Test("wind(at:) asks once per point and answers in route order")
     func clientAsksEachPointOnce() async {
         let asked = LockIsolated<[RouteCoordinate]>([])

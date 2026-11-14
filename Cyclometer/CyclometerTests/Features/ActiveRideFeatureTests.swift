@@ -510,6 +510,10 @@ struct ActiveRideFeatureLocationTests {
             $0.calibration.lastFixTimestamp = Self.sampleUpdate.timestamp
         }
         await receiveWeather(store)
+        // #152: a loaded route is checked for rain on each fresh forecast, followed or not. The
+        // fixture's hours are in 2026, so nothing is wet at `testDate` and no banner goes up.
+        await store.receive(\.weather.checkRainAhead)
+        await store.receive(.weather(.rainAheadChecked(nil)))
     }
 
     @Test("A poor-accuracy fix moves the marker but is kept out of the recorded track")

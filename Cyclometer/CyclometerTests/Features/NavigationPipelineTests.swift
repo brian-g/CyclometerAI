@@ -281,6 +281,7 @@ struct NavigationPipelineTests {
                 RideDashboardView.banner(
                     sourceSwitch: nil,
                     calibration: nil,
+                    rain: nil,
                     isOffRoute: store.state.activeRide?.navigation.isOffRoute ?? false
                 )?.text
             }

@@ -22,6 +22,13 @@ struct AttributedForecast: Equatable, Sendable {
         return hourly.filter { $0.date.addingTimeInterval(Self.hourLength) > start && $0.date < end }
     }
 
+    /// The hour of `hourly` that `date` falls in: from its start, up to the next hour's. Nil before
+    /// the first hour or past the last. The wind map (#561) and rain along the route (#152) both
+    /// read a point's forecast for the hour the rider gets there.
+    static func hour(containing date: Date, in hourly: [WeatherReading]) -> WeatherReading? {
+        hourly.first { $0.date <= date && date < $0.date.addingTimeInterval(hourLength) }
+    }
+
     /// A ride's worth of forecast when nothing says how long the ride is.
     static let defaultRideWindow: TimeInterval = 3 * 3600
     /// The most a ride's strip covers, however long the estimate: a day's riding.

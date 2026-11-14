@@ -27,19 +27,24 @@ enum WindSampling {
 
     // MARK: - Along a route
 
-    /// The distances along a route of `totalMeters` to sample, from `fromMeters` to the finish,
-    /// evenly spaced.
+    /// The distances along a route of `totalMeters` to sample, from `fromMeters` to the finish, or
+    /// to `toMeters` when it comes first, evenly spaced. Rain along the route (#152) stops at
+    /// `toMeters`: it asks only about the stretch the rider reaches within `RainOutlook.window`.
     ///
-    /// A loop sampled from its start ends where it began, so its finish would ask about the start
-    /// again: it is left out, and two samples on a loop are the start and halfway. From anywhere
-    /// else on a loop the finish is still ahead, so it counts.
-    static func distances(totalMeters: Double, fromMeters: Double = 0, isLoop: Bool = false) -> [Double] {
+    /// A loop sampled from its start to its finish ends where it began, so its finish would ask
+    /// about the start again: it is left out, and two samples on a loop are the start and halfway.
+    /// From anywhere else on a loop, or to a point short of its finish, the end is somewhere else,
+    /// so it counts.
+    static func distances(
+        totalMeters: Double, fromMeters: Double = 0, toMeters: Double? = nil, isLoop: Bool = false
+    ) -> [Double] {
         guard totalMeters.isFinite, totalMeters > 0 else { return [0] }
         let start = min(max(fromMeters.isFinite ? fromMeters : 0, 0), totalMeters)
-        let remaining = totalMeters - start
+        let end = toMeters.flatMap { $0.isFinite ? min(max($0, start), totalMeters) : nil } ?? totalMeters
+        let remaining = end - start
         guard remaining > 0 else { return [start] }
         let intervals = Int(((remaining - spacingToleranceMeters) / spacingMeters).rounded(.up))
-        if isLoop && start == 0 {
+        if isLoop && start == 0 && end == totalMeters {
             let count = clamped(intervals)
             return (0..<count).map { start + remaining * Double($0) / Double(count) }
         }
@@ -53,6 +58,7 @@ enum WindSampling {
         coordinates: [RouteCoordinate],
         cumulative: [Double],
         fromMeters: Double = 0,
+        toMeters: Double? = nil,
         isLoop: Bool = false,
         start: Date,
         speedMPS: Double
@@ -60,7 +66,7 @@ enum WindSampling {
         guard let total = cumulative.last else { return [] }
         // As `distances` clamps it, so a non-finite progress times from the start, not NaN.
         let origin = min(max(fromMeters.isFinite ? fromMeters : 0, 0), total)
-        return distances(totalMeters: total, fromMeters: origin, isLoop: isLoop).compactMap { distance in
+        return distances(totalMeters: total, fromMeters: origin, toMeters: toMeters, isLoop: isLoop).compactMap { distance in
             guard let coordinate = RouteGeometry.coordinate(coordinates, atMeters: distance, cumulative: cumulative)
             else { return nil }
             let seconds = speedMPS > 0 ? (distance - origin) / speedMPS : 0
@@ -79,15 +85,12 @@ enum WindSampling {
     /// they were observed in is under way (observed beats forecast), else the forecast hour
     /// containing `date`. Nil past the end of the forecast.
     static func reading(at date: Date, current: WeatherReading, hourly: [WeatherReading]) -> WeatherReading? {
-        func contains(_ hour: WeatherReading, _ instant: Date) -> Bool {
-            hour.date <= instant && instant < hour.date.addingTimeInterval(AttributedForecast.hourLength)
-        }
-        guard let hour = hourly.first(where: { contains($0, date) }) else {
+        guard let hour = AttributedForecast.hour(containing: date, in: hourly) else {
             // Before the forecast's first hour is now, which the current conditions describe.
             let isBeforeForecast = hourly.first.map { date < $0.date } ?? true
             return isBeforeForecast ? current : nil
         }
-        return contains(hour, current.date) ? current : hour
+        return AttributedForecast.hour(containing: current.date, in: hourly) == hour ? current : hour
     }
 
     // MARK: - With no route
