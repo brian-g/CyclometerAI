@@ -52,7 +52,7 @@ struct RideDashboardView: View {
                     grabber()
                 }
                 if let banner {
-                    RideBanner(text: banner.text, icon: banner.icon, spokenText: banner.spokenText)
+                    banner
                         .transition(bannerTransition)
                         // A notice, not a control. In edit mode it sits over the top row's remove
                         // buttons (#141 review), so touches pass through to them.
@@ -201,20 +201,15 @@ struct RideDashboardView: View {
         reduceMotion ? .opacity : .scale(scale: 0.85).combined(with: .opacity)
     }
 
-    private var activeBanner: Banner? {
+    private var activeBanner: RideBanner? {
         Self.banner(
             sourceSwitch: store.speed.sourceSwitchBanner,
-            calibration: store.calibration.banner,
-            rain: store.weather.rainAhead.map {
-                ($0.bannerText(unitSystem: store.unitSystem), $0.symbolName, $0.spokenText(unitSystem: store.unitSystem))
-            },
+            calibrationMM: store.calibration.bannerMM,
+            rain: store.weather.rainAhead,
+            unitSystem: store.unitSystem,
             isOffRoute: store.navigation.isOffRoute
         )
     }
-
-    /// One notice for the banner slot. `spokenText` is what VoiceOver reads instead of `text`, for
-    /// one whose text carries unit symbols (#568); only rain sets one.
-    typealias Banner = (text: String, icon: String, spokenText: String?)
 
     /// The banner slot holds exactly one notice. Four sources can be armed at once, so they
     /// are resolved to a single value here rather than each rendering its own capsule and
@@ -229,17 +224,31 @@ struct RideDashboardView: View {
     ///    four seconds.
     ///
     /// Takes the inputs rather than the state, so the view keeps observing exactly those and
-    /// the order can be tested without rendering a dashboard.
+    /// the order can be tested without rendering a dashboard. Only the winner's text is built.
+    /// A notice whose text carries a unit symbol is spoken with the unit in words (#568).
     static func banner(
         sourceSwitch: String?,
-        calibration: String?,
-        rain: Banner?,
+        calibrationMM: Int?,
+        rain: RainAhead?,
+        unitSystem: UnitSystem,
         isOffRoute: Bool
-    ) -> Banner? {
-        if let sourceSwitch { return (sourceSwitch, "shuffle", nil) }
-        if let calibration { return (calibration, "ruler", nil) }
-        if let rain { return rain }
-        if isOffRoute { return (NavigationFeature.offRouteBannerText, "exclamationmark.triangle", nil) }
+    ) -> RideBanner? {
+        if let sourceSwitch { return RideBanner(text: sourceSwitch, icon: "shuffle") }
+        if let mm = calibrationMM {
+            return RideBanner(
+                text: WheelCalibration.bannerText(mm: mm),
+                icon: "ruler",
+                spokenText: WheelCalibration.spokenBannerText(mm: mm)
+            )
+        }
+        if let rain {
+            return RideBanner(
+                text: rain.bannerText(unitSystem: unitSystem),
+                icon: rain.symbolName,
+                spokenText: rain.spokenText(unitSystem: unitSystem)
+            )
+        }
+        if isOffRoute { return RideBanner(text: NavigationFeature.offRouteBannerText, icon: "exclamationmark.triangle") }
         return nil
     }
 }

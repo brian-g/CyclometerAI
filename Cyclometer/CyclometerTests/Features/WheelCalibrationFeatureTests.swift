@@ -335,7 +335,7 @@ struct WheelCalibrationFeatureTests {
             $0.$preferences.withLock { $0.wheelCircumferenceMM = expected }
             $0.commitCount = 1
             $0.lastCalibrationAt = Self.start
-            $0.banner = WheelCalibration.bannerText(mm: expected)
+            $0.bannerMM = expected
             // Window cleared, streak cleared — but the fix that closed the window
             // still seeds the next interval, so no riding is lost between windows.
             $0.gpsMeters = 0
@@ -344,7 +344,7 @@ struct WheelCalibrationFeatureTests {
             $0.pendingOverReading = nil
             $0.lastFixTimestamp = Self.start.addingTimeInterval(closingFix)
         }
-        await store.receive(\.bannerDismissed) { $0.banner = nil }
+        await store.receive(\.bannerDismissed) { $0.bannerMM = nil }
 
         await store.finish(timeout: effectDrainTimeout)
         #expect(pushed.value == [expected])
@@ -382,7 +382,7 @@ struct WheelCalibrationFeatureTests {
 
         #expect(store.state.commitCount == WheelCalibration.maxCommitsPerRide)
         #expect(store.state.preferences.wheelCircumferenceMM == Self.storedMM)
-        #expect(store.state.banner == nil)
+        #expect(store.state.bannerMM == nil)
     }
 
     @Test("A window that agrees with the stored circumference leaves it alone")

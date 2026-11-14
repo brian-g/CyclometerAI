@@ -78,8 +78,9 @@ struct WheelCalibrationFeature {
 
         var commitCount = 0
         var lastCalibrationAt: Date?
-        /// Transient banner text; nil means hidden.
-        var banner: String?
+        /// The wheel size the transient banner reports; nil means hidden. The dashboard words it,
+        /// shown and spoken (`WheelCalibration.bannerText(mm:)`, `spokenBannerText(mm:)`).
+        var bannerMM: Int?
 
         /// Both accumulators advance only while every gate is open.
         var isAccumulating: Bool { isSensorActive && isGPSUsable && !isSuspended }
@@ -199,7 +200,7 @@ struct WheelCalibrationFeature {
                 return .none
 
             case .bannerDismissed:
-                state.banner = nil
+                state.bannerMM = nil
                 return .none
             }
         }
@@ -323,7 +324,7 @@ struct WheelCalibrationFeature {
         state.$preferences.withLock { $0.wheelCircumferenceMM = mm }
         state.lastCalibrationAt = now
         state.commitCount += 1
-        state.banner = WheelCalibration.bannerText(mm: mm)
+        state.bannerMM = mm
         resetWindow(&state)
 
         let windows = measurements

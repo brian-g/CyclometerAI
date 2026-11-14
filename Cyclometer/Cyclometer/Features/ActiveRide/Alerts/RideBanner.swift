@@ -6,6 +6,10 @@ import SwiftUI
 /// presentational — the owning feature's reducer sets and clears it: a cancellable
 /// clock-sleep effect for the transient ones (see `SpeedFeature.fallBackToGPS`), rejoining
 /// the route for off-route.
+///
+/// For VoiceOver (#568) the capsule is one element reading `spokenText ?? text`; the icon only
+/// repeats what the words say. VoiceOver also announces it as it appears, or when its words
+/// change: a rider with the phone mounted can't swipe onto a notice that's gone in four seconds.
 struct RideBanner: View {
     let text: String
     /// Defaults to the source-switch glyph, which is what the majority of these
@@ -22,14 +26,21 @@ struct RideBanner: View {
             Text(text)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Color.cyTextPrimary)
-                .accessibilityLabel(spokenText ?? text)
         }
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.sm)
         .background(Color.cyBgElevated, in: Capsule())
         .overlay(Capsule().strokeBorder(Color.cyBorder, lineWidth: Spacing.strokeThin))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenWords)
+        .task(id: spokenWords) {
+            AccessibilityNotification.Announcement(spokenWords).post()
+        }
         .padding(.horizontal, Spacing.lg)
     }
+
+    /// What VoiceOver reads and announces.
+    var spokenWords: String { spokenText ?? text }
 }
 
 // MARK: - Previews
@@ -42,7 +53,11 @@ struct RideBanner: View {
 }
 
 #Preview("Wheel calibration") {
-    RideBanner(text: WheelCalibration.bannerText(mm: 2145), icon: "ruler")
+    RideBanner(
+        text: WheelCalibration.bannerText(mm: 2145),
+        icon: "ruler",
+        spokenText: WheelCalibration.spokenBannerText(mm: 2145)
+    )
         .padding(.top, Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)

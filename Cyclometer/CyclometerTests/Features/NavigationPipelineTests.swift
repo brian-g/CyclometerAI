@@ -280,8 +280,9 @@ struct NavigationPipelineTests {
             let banner = {
                 RideDashboardView.banner(
                     sourceSwitch: nil,
-                    calibration: nil,
+                    calibrationMM: nil,
                     rain: nil,
+                    unitSystem: .metric,
                     isOffRoute: store.state.activeRide?.navigation.isOffRoute ?? false
                 )?.text
             }

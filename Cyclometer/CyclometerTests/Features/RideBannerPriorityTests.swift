@@ -3,46 +3,54 @@ import Testing
 @testable import Cyclometer
 
 /// #197 — the dashboard's one banner slot, contested by four notices. The order is
-/// `RideDashboardView.banner(sourceSwitch:calibration:rain:isOffRoute:)`'s doc comment. A turn is
+/// `RideDashboardView.banner(sourceSwitch:calibrationMM:rain:unitSystem:isOffRoute:)`'s doc comment. A turn is
 /// not one of them since the review: it has the centred `TurnInstructionOverlay`.
 @MainActor
 @Suite("Ride dashboard — banner priority")
 struct RideBannerPriorityTests {
-    private let rain: RideDashboardView.Banner = (
-        text: "Rain 70% · 18.4 km ahead", icon: "cloud.rain.fill", spokenText: "Rain, 70% chance, 18.4 kilometers ahead"
+    private let rain = RainAhead(
+        chance: 0.7, condition: .rain, isDaylight: true, distanceAheadMeters: 18_400, arrival: .now
     )
+
+    private func banner(
+        sourceSwitch: String? = nil, calibrationMM: Int? = nil, rain: RainAhead? = nil, isOffRoute: Bool = false
+    ) -> RideBanner? {
+        RideDashboardView.banner(
+            sourceSwitch: sourceSwitch, calibrationMM: calibrationMM, rain: rain, unitSystem: .metric, isOffRoute: isOffRoute
+        )
+    }
 
     @Test("a speed-source switch outranks calibration, rain and off route")
     func sourceSwitchOutranksCalibrationAndOffRoute() {
-        let banner = RideDashboardView.banner(sourceSwitch: "switch", calibration: "wheel", rain: rain, isOffRoute: true)
+        let banner = banner(sourceSwitch: "switch", calibrationMM: 2145, rain: rain, isOffRoute: true)
         #expect(banner?.text == "switch")
         #expect(banner?.icon == "shuffle")
-        #expect(banner?.spokenText == nil, "#568: never the outranked rain's words")
+        #expect(banner?.spokenWords == "switch", "#568: never an outranked notice's words")
     }
 
-    @Test("calibration outranks rain and off route")
+    @Test("calibration outranks rain and off route, and speaks its unit in words")
     func calibrationOutranksOffRoute() {
-        let banner = RideDashboardView.banner(sourceSwitch: nil, calibration: "wheel", rain: rain, isOffRoute: true)
-        #expect(banner?.text == "wheel")
+        let banner = banner(calibrationMM: 2145, rain: rain, isOffRoute: true)
+        #expect(banner?.text == WheelCalibration.bannerText(mm: 2145))
         #expect(banner?.icon == "ruler")
-        #expect(banner?.spokenText == nil, "#568: never the outranked rain's words")
+        #expect(banner?.spokenWords == WheelCalibration.spokenBannerText(mm: 2145), "#568")
     }
 
     /// #152: rain is up for four seconds; off route lasts until the rider rejoins.
-    @Test("rain ahead outranks off route")
+    @Test("rain ahead outranks off route, and speaks its distance in words")
     func rainOutranksOffRoute() {
-        let banner = RideDashboardView.banner(sourceSwitch: nil, calibration: nil, rain: rain, isOffRoute: true)
-        #expect(banner?.text == rain.text)
-        #expect(banner?.icon == rain.icon)
-        #expect(banner?.spokenText == rain.spokenText, "#568: VoiceOver reads the distance in words")
+        let banner = banner(rain: rain, isOffRoute: true)
+        #expect(banner?.text == rain.bannerText(unitSystem: .metric))
+        #expect(banner?.icon == rain.symbolName)
+        #expect(banner?.spokenWords == rain.spokenText(unitSystem: .metric), "#568")
     }
 
     @Test("off route shows once nothing else is up, and nothing shows when nothing is")
     func offRouteShowsLast() {
-        let offRoute = RideDashboardView.banner(sourceSwitch: nil, calibration: nil, rain: nil, isOffRoute: true)
+        let offRoute = banner(isOffRoute: true)
         #expect(offRoute?.text == NavigationFeature.offRouteBannerText)
         #expect(offRoute?.icon == "exclamationmark.triangle")
-        #expect(offRoute?.spokenText == nil, "#568: read as written, as before")
-        #expect(RideDashboardView.banner(sourceSwitch: nil, calibration: nil, rain: nil, isOffRoute: false) == nil)
+        #expect(offRoute?.spokenWords == NavigationFeature.offRouteBannerText, "#568: read as written")
+        #expect(banner() == nil)
     }
 }
