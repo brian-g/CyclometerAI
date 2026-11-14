@@ -35,16 +35,27 @@ struct RainOutlook: Equatable, Sendable {
     /// The hour's own symbol when its sky is precipitation; rain otherwise, since an hour can be
     /// "Cloudy" overall and still more likely wet than not.
     var symbolName: String {
-        precipitation?.symbolName(isDaylight: isDaylight) ?? Self.rainSymbolName
+        Self.symbolName(for: condition, isDaylight: isDaylight)
     }
 
     /// "Snow", "Thunderstorms"; "Rain" for an hour whose sky isn't precipitation.
     var name: String {
-        precipitation?.displayName ?? "Rain"
+        Self.name(for: condition)
+    }
+
+    /// `symbolName` for any wet hour's sky. Shared with rain along the route (#152), so the banner
+    /// and W10 name and draw an hour the same way.
+    static func symbolName(for condition: WeatherCondition?, isDaylight: Bool) -> String {
+        precipitation(condition)?.symbolName(isDaylight: isDaylight) ?? rainSymbolName
+    }
+
+    /// `name` for any wet hour's sky.
+    static func name(for condition: WeatherCondition?) -> String {
+        precipitation(condition)?.displayName ?? "Rain"
     }
 
     /// The hour's sky when it is precipitation, which the card names and draws; nil for any other.
-    private var precipitation: WeatherCondition? {
+    private static func precipitation(_ condition: WeatherCondition?) -> WeatherCondition? {
         switch condition {
         case .drizzle, .rain, .heavyRain, .snow, .thunderstorm: condition
         case .clear, .partlyCloudy, .cloudy, .foggy, nil: nil

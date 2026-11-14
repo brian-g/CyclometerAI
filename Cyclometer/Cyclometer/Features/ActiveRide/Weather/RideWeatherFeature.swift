@@ -11,6 +11,7 @@ struct RideWeatherFeature {
     @Dependency(\.weatherClient) var weatherClient
     @Dependency(\.date) var date
     @Dependency(\.networkStatus) var networkStatus
+    @Dependency(\.continuousClock) var clock
 
     /// How old a forecast gets before the next fix refetches it. WeatherKit's current conditions
     /// change over minutes, not seconds, and every request counts against the app's quota.
@@ -23,7 +24,11 @@ struct RideWeatherFeature {
     /// (`forecast(at:)`), so it holds with no fixes arriving too.
     static let maxAge: TimeInterval = 60 * 60
 
-    private enum CancelID { case fetch }
+    /// How long the rain-ahead banner stays up (#152). Matches `SpeedFeature` and
+    /// `WheelCalibrationFeature`: one glance, then the slot is free again.
+    static let rainBannerDismissDelay: Duration = .seconds(4)
+
+    private enum CancelID { case fetch, rainCheck, rainBanner }
 
     @ObservableState
     struct State: Equatable {
@@ -47,6 +52,8 @@ struct RideWeatherFeature {
         /// the sheet opens, not on this feature's timer: each sample is a request, and a rider who
         /// never opens the sheet shouldn't spend them. Not saved: a resumed ride samples afresh.
         var routeWind = RouteWindFeature.State()
+        /// Rain on the route ahead (#152) while its banner is up; nil means hidden. Not saved.
+        var rainAhead: RainAhead?
 
         /// W10's sheet shows the next few hours: enough to see what the ride is heading into.
         static let forecastWindow: TimeInterval = 3 * 3600
@@ -79,6 +86,12 @@ struct RideWeatherFeature {
         case forecastLoaded(AttributedForecast)
         case fetchFailed(offline: Bool)
         case routeWind(RouteWindFeature.Action)
+        /// Ask about `ahead` and judge them, with `rider` answered by this feature's own forecast
+        /// (#152). The parent decides where and when, as for `routeWind`: it holds the route.
+        /// Replaces a check still in flight.
+        case checkRainAhead(rider: WindSamplePoint, ahead: [WindSamplePoint])
+        case rainAheadChecked(RainAhead?)
+        case rainBannerDismissed
     }
 
     var body: some ReducerOf<Self> {
@@ -132,6 +145,33 @@ struct RideWeatherFeature {
                 return .none
 
             case .routeWind:
+                return .none
+
+            case let .checkRainAhead(rider, ahead):
+                guard let forecast = state.forecast(at: date.now) else { return .none }
+                let known = PointForecast(
+                    point: rider,
+                    forecast: WeatherForecast(current: forecast.current, hourly: forecast.hourly)
+                )
+                // Not through `forecastLoaded`: these answers are places the rider hasn't been,
+                // and S15's samples are the weather where they rode.
+                return .run { [weatherClient] send in
+                    await send(.rainAheadChecked(RainAhead(rider: known, ahead: await weatherClient.forecasts(at: ahead))))
+                }
+                .cancellable(id: CancelID.rainCheck, cancelInFlight: true)
+
+            case .rainAheadChecked(let rain):
+                // Every wet check shows the banner again (Brian, #152); a dry one leaves it alone.
+                guard let rain else { return .none }
+                state.rainAhead = rain
+                return .run { send in
+                    try await clock.sleep(for: Self.rainBannerDismissDelay)
+                    await send(.rainBannerDismissed)
+                }
+                .cancellable(id: CancelID.rainBanner, cancelInFlight: true)
+
+            case .rainBannerDismissed:
+                state.rainAhead = nil
                 return .none
             }
         }

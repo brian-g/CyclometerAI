@@ -64,22 +64,21 @@ struct AppFeatureTests {
         }
         // Presenting takes the screen (#110), which arms the auto-dim countdown;
         // minimizing again releases it so the countdown doesn't outlive the test.
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await store.send(.dashboardDismissed) {
             $0.isDashboardPresented = false
         }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
     }
 
     /// Minimising tears the dashboard view down, so the page lives in the ride's
     /// state: reopening lands where the rider left off (#333 PR review).
     @Test("Reopening the dashboard returns to the page it was minimised from")
     func reopeningKeepsThePage() async {
+        var ride = ActiveRideFeature.State(recordingState: .active)
+        ride.isDashboardVisible = true  // Already on screen, as AppFeature would have told it (#152).
         let store = TestStore(
-            initialState: AppFeature.State(
-                activeRide: ActiveRideFeature.State(recordingState: .active),
-                isDashboardPresented: true
-            )
+            initialState: AppFeature.State(activeRide: ride, isDashboardPresented: true)
         ) {
             AppFeature()
         } withDependencies: {
@@ -91,13 +90,13 @@ struct AppFeatureTests {
             $0.activeRide?.dashboardPage = 1
         }
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         #expect(store.state.activeRide?.dashboardPage == 1)
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
     }
 
     /// With no active ride, `dashboardOpened` is a no-op (accessory can't be shown).

@@ -2380,3 +2380,25 @@ Plan: `~/.claude/plans/velvet-wandering-lampson.md` (approved 2026-11-13). Brian
 **Review:** The wind map is one `WindLayer` overlay and one `RouteWindFeature` reducer, drawn on W10's sheet and S20's map. A free ride spends no extra requests; a route spends one fewer than its samples (2–8), since the screen's forecast is the first. Changes from the plan: W10 with a route frames the whole route plus the rider (the view doesn't know progress); the free-ride field uses 4 columns so no arrow sits under the rider's dot. Known gaps: with turn-by-turn off, `progressMeters` is never set, so W10 samples from the route's start; on a route, W10's own arrow sits under the rider's dot; arrow colour (`cyTextPrimary` edged `cyBgPrimary`) is unconfirmed on device; S15's recorded-weather layer is a follow-up. Not covered by tests: the live `Map` rendering and WeatherKit's live path.
 
 **Code review (73bdc74):** the turn-by-turn-off gap above is fixed: W10 now places the rider on the route by projection. S20 clears stale arrows on a failed refetch and keeps rides on a failed read. `WeatherMap` takes only what it draws. Full suite: 2811/2811.
+
+---
+
+## #152 — Rain-along-route alerts during a ride (M10.6)
+
+Plan: rain chance ≥ 50% at any route point reached within 2 h (rider's spot included, each point judged by its arrival hour), checked on every W10 refresh, shown as a silent 4 s banner in the top slot. Re-fires on each check while wet. No toggle. Never through `AlertOrchestratorFeature`.
+
+- [x] `AttributedForecast.hour(containing:in:)`; `WindSampling.reading` uses it
+- [x] `WindSampling` `toMeters:` cap (loop rule only when the end is the total)
+- [x] `RainAhead` model + shared precipitation name/symbol with `RainOutlook`
+- [x] `WeatherClient.forecasts(at:)` → `PointForecast`; `wind(at:)` rebuilt on it
+- [x] `RideWeatherFeature`: `rainAhead`, `checkRainAhead`, `rainAheadChecked`, `rainBannerDismissed` (not via `forecastLoaded`)
+- [x] `ActiveRideFeature+RainAhead`: on `.weather(.forecastLoaded)`, sample the 2 h ahead; share progress + own-speed helpers with route wind
+- [x] `RideDashboardView.banner(…rain:…)`; whole-number distance on `UnitSystem`; copy "Rain 70% · 18.4 km ahead" / "· here" (reused `turnDistance`, not a new whole-number formatter: it already handles metres close in)
+- [x] Docs: PRD §12 + changelog, in-app privacy text, UX.md banner slot + W10, TCA.md file map
+- [x] Tests: RainAhead, WindSampling, forecasts(at:), ActiveRideRainAhead, RideBannerPriority, NavigationPipeline call site
+- [x] Build + targeted suites (93/93)
+- [x] Brian verified → full suite → commit → PR
+
+**Review:** Rain along the route reuses the wind map's sampling, capped at the stretch reached within `RainOutlook.window`, and the client's per-point fan-out (`forecasts(at:)`, which `wind(at:)` now wraps). Each point is judged by the hourly entry containing its arrival, because current conditions carry no chance of rain. The banner state lives in `RideWeatherFeature` beside the forecast, and the fetches bypass `forecastLoaded` so S15 records only where the rider rode. Changes from the plan: the distance reuses W9's `turnDistance` (one decimal, metres close in) instead of a new whole-number formatter. PRD §12 now also records #561's points ahead, which were missing. Full suite: 2836/2837; the one failure was `turnByTurnOffKeepsFixesFromNavigation`, an exhaustive test with a route loaded that now also receives the rain check. Updated to expect it, and it passes. Not covered by tests: live WeatherKit answers along a real route.
+
+**Code review (7194f10 → follow-up):** the review applied four small fixes: `reading(at:)` compares hour dates, not whole readings; the failable init moved to an extension; a "Rain here" preview; test headings reordered. Brian asked for three more. (1) No check while off route. (2) No check while no one can see the dashboard: AppFeature now copies `isDashboardVisible` into the ride on each `screenVisibilityChanged`, so paused, locked, minimised and background rides spend nothing. (3) Points within `RainAhead.hereMeters` (1 km) of the rider aren't asked about, so no "0 m ahead". VoiceOver phrasing is filed as #568. Full suite: 2839/2839.

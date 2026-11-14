@@ -204,18 +204,21 @@ struct RideDashboardView: View {
         Self.banner(
             sourceSwitch: store.speed.sourceSwitchBanner,
             calibration: store.calibration.banner,
+            rain: store.weather.rainAhead.map { ($0.bannerText(unitSystem: store.unitSystem), $0.symbolName) },
             isOffRoute: store.navigation.isOffRoute
         )
     }
 
-    /// The banner slot holds exactly one notice. Three sources can be armed at once, so they
+    /// The banner slot holds exactly one notice. Four sources can be armed at once, so they
     /// are resolved to a single value here rather than each rendering its own capsule and
     /// stacking. A turn is not one of them: it has the centred `TurnInstructionOverlay` (#197).
     ///
     /// 1. **A speed-source switch** — it changes what the rider is currently reading.
     /// 2. **A wheel auto-calibration.**
-    /// 3. **Off route** — last because it is the only one that lasts. It stays up until the
-    ///    rider rejoins, so ranking it higher would hide either of the others for their whole
+    /// 3. **Rain on the route ahead** (#152) — informational, so below the two that change the
+    ///    numbers on screen.
+    /// 4. **Off route** — last because it is the only one that lasts. It stays up until the
+    ///    rider rejoins, so ranking it higher would hide any of the others for their whole
     ///    four seconds.
     ///
     /// Takes the inputs rather than the state, so the view keeps observing exactly those and
@@ -223,10 +226,12 @@ struct RideDashboardView: View {
     static func banner(
         sourceSwitch: String?,
         calibration: String?,
+        rain: (text: String, icon: String)?,
         isOffRoute: Bool
     ) -> (text: String, icon: String)? {
         if let sourceSwitch { return (sourceSwitch, "shuffle") }
         if let calibration { return (calibration, "ruler") }
+        if let rain { return rain }
         if isOffRoute { return (NavigationFeature.offRouteBannerText, "exclamationmark.triangle") }
         return nil
     }
