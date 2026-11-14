@@ -17,6 +17,7 @@ struct RideBannerPriorityTests {
         let banner = RideDashboardView.banner(sourceSwitch: "switch", calibration: "wheel", rain: rain, isOffRoute: true)
         #expect(banner?.text == "switch")
         #expect(banner?.icon == "shuffle")
+        #expect(banner?.spokenText == nil, "#568: never the outranked rain's words")
     }
 
     @Test("calibration outranks rain and off route")
@@ -24,6 +25,7 @@ struct RideBannerPriorityTests {
         let banner = RideDashboardView.banner(sourceSwitch: nil, calibration: "wheel", rain: rain, isOffRoute: true)
         #expect(banner?.text == "wheel")
         #expect(banner?.icon == "ruler")
+        #expect(banner?.spokenText == nil, "#568: never the outranked rain's words")
     }
 
     /// #152: rain is up for four seconds; off route lasts until the rider rejoins.

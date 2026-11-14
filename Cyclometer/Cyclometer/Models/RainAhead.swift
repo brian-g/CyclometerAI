@@ -34,21 +34,19 @@ struct RainAhead: Equatable, Sendable {
     /// The dashboard banner's line: "Rain 70% · 18.4 km ahead", or "Rain 70% · here". The distance
     /// reads as W9's does (`UnitSystem.turnDistance`), metres or feet close in.
     func bannerText(unitSystem: UnitSystem) -> String {
+        let percent = chance.formatted(.percent.precision(.fractionLength(0)))
         guard !isHere else { return "\(name) \(percent) · here" }
         let distance = unitSystem.turnDistance(fromMeters: distanceAheadMeters)
         return "\(name) \(percent) · \(distance.value) \(distance.unit) ahead"
     }
 
-    /// The banner as VoiceOver reads it (#568): "Rain, 70 percent chance, 18.4 kilometers ahead", or
-    /// "…, here". Phrased as W10's rain (`WeatherWidgetView.accessibilityValue`), with the distance
-    /// in words (`UnitSystem.spokenTurnDistance`) so no unit symbol or "·" is read as written.
+    /// The banner as VoiceOver reads it (#568): "Rain, 70% chance, 18.4 kilometers ahead", or
+    /// "…, here". Begun as W10's rain is (`RainOutlook.spokenChance`), with the distance in words
+    /// (`UnitSystem.spokenTurnDistance`) so no unit symbol or "·" is read as written.
     func spokenText(unitSystem: UnitSystem) -> String {
         let place = isHere ? "here" : "\(unitSystem.spokenTurnDistance(fromMeters: distanceAheadMeters)) ahead"
-        return "\(name), \(percent) chance, \(place)"
+        return "\(RainOutlook.spokenChance(chance, for: condition)), \(place)"
     }
-
-    /// "70%": VoiceOver reads the sign as "percent".
-    private var percent: String { chance.formatted(.percent.precision(.fractionLength(0))) }
 }
 
 // In an extension, so the struct keeps its synthesized memberwise initialiser.

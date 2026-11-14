@@ -54,6 +54,12 @@ struct RainOutlook: Equatable, Sendable {
         precipitation(condition)?.displayName ?? "Rain"
     }
 
+    /// "Rain, 70% chance", VoiceOver reading the sign as "percent": how W10 (#361) and the rain
+    /// banner (#568) both begin speaking a wet hour, so the two phrase it alike.
+    static func spokenChance(_ chance: Double, for condition: WeatherCondition?) -> String {
+        "\(name(for: condition)), \(chance.formatted(.percent.precision(.fractionLength(0)))) chance"
+    }
+
     /// The hour's sky when it is precipitation, which the card names and draws; nil for any other.
     private static func precipitation(_ condition: WeatherCondition?) -> WeatherCondition? {
         switch condition {

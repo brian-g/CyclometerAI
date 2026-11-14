@@ -139,8 +139,8 @@ struct WeatherWidget: View {
     /// Celsius"; with rain forecast, "Rain, 70 percent chance, from 3 PM"; or that there is no reading.
     var accessibilityValue: String {
         if let rain {
-            let percent = rain.chance.formatted(.percent.precision(.fractionLength(0)))
-            let spokenRain = "\(rain.name), \(percent) chance, \(rain.isUnderWay ? "now" : "from \(rainStartText(rain))")"
+            let chance = RainOutlook.spokenChance(rain.chance, for: rain.condition)
+            let spokenRain = "\(chance), \(rain.isUnderWay ? "now" : "from \(rainStartText(rain))")"
             // The 2×1 still shows the wind and temperature; the 1×1 shows the rain alone.
             guard size == .twoByOne, let reading else { return spokenRain }
             return [spokenRain, spokenConditions(reading)].joined(separator: ", ")

@@ -45,12 +45,13 @@ struct RideDashboardView: View {
         // push page content down. The overlay keeps the safe area, so the grabber
         // sits just below the Dynamic Island while the pages bleed up behind it.
         .overlay(alignment: .top) {
+            let banner = activeBanner
             VStack(spacing: Spacing.xs) {
                 // Edit mode can't be minimised (#141), so the grabber, a minimise cue, steps aside.
                 if !store.isEditingDashboard {
                     grabber()
                 }
-                if let banner = activeBanner {
+                if let banner {
                     RideBanner(text: banner.text, icon: banner.icon, spokenText: banner.spokenText)
                         .transition(bannerTransition)
                         // A notice, not a control. In edit mode it sits over the top row's remove
@@ -58,7 +59,7 @@ struct RideDashboardView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .animation(.default, value: activeBanner?.text)
+            .animation(.default, value: banner?.text)
         }
         // The dots share the ride controls' row, flush with the buttons' bottom edge (#447), and
         // sit beneath them: a long indicator can be drawn over, but never takes a button's touch.
@@ -212,7 +213,7 @@ struct RideDashboardView: View {
     }
 
     /// One notice for the banner slot. `spokenText` is what VoiceOver reads instead of `text`, for
-    /// one whose text carries unit symbols (#568); only rain's does.
+    /// one whose text carries unit symbols (#568); only rain sets one.
     typealias Banner = (text: String, icon: String, spokenText: String?)
 
     /// The banner slot holds exactly one notice. Four sources can be armed at once, so they
