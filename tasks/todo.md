@@ -2378,3 +2378,5 @@ Plan: `~/.claude/plans/velvet-wandering-lampson.md` (approved 2026-11-13). Brian
 - [x] Commit → PR
 
 **Review:** The wind map is one `WindLayer` overlay and one `RouteWindFeature` reducer, drawn on W10's sheet and S20's map. A free ride spends no extra requests; a route spends one fewer than its samples (2–8), since the screen's forecast is the first. Changes from the plan: W10 with a route frames the whole route plus the rider (the view doesn't know progress); the free-ride field uses 4 columns so no arrow sits under the rider's dot. Known gaps: with turn-by-turn off, `progressMeters` is never set, so W10 samples from the route's start; on a route, W10's own arrow sits under the rider's dot; arrow colour (`cyTextPrimary` edged `cyBgPrimary`) is unconfirmed on device; S15's recorded-weather layer is a follow-up. Not covered by tests: the live `Map` rendering and WeatherKit's live path.
+
+**Code review (73bdc74):** the turn-by-turn-off gap above is fixed: W10 now places the rider on the route by projection. S20 clears stale arrows on a failed refetch and keeps rides on a failed read. `WeatherMap` takes only what it draws. Full suite: 2811/2811.
