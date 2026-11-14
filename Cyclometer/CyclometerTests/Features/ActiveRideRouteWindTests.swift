@@ -32,9 +32,9 @@ struct ActiveRideRouteWindTests {
     }
 
     private func makeStore(_ state: ActiveRideFeature.State,
-                           persistence: PersistenceClient = .mock()) -> TestStoreOf<ActiveRideFeature> {
-        let storage = FileStorage.inMemory
-        return withDependencies {
+                           persistence: PersistenceClient = .mock(),
+                           storage: FileStorage = .inMemory) -> TestStoreOf<ActiveRideFeature> {
+        withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
             TestStore(initialState: state) {
@@ -95,6 +95,28 @@ struct ActiveRideRouteWindTests {
         let speed = WindSampling.speedMPS(routeDistanceMeters: RouteGeometry.distanceMeters(Self.path), estimate: nil)
         await store.receive(.weather(.routeWind(.load(known: Self.known, ahead: Self.ahead(from: 1_000, speedMPS: speed)))))
         #expect(store.state.weather.routeWind.requestedAt == Self.now)
+    }
+
+    /// With turn-by-turn off nothing matches the rider to the route, so `progressMeters` (a stale
+    /// 1 km here) says nothing: the route ahead starts where the rider projects onto it, ~5.6 km in.
+    @Test("With turn-by-turn off the route ahead starts where the rider is on it, not at a stale progress")
+    func turnByTurnOff() async throws {
+        let storage = FileStorage.inMemory
+        let state = try withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.isTurnByTurnEnabled = false }
+            return try self.state(progress: 1_000, ridden: 6_000)
+        }
+        let progress = try #require(RouteGeometry.projection(
+            of: Self.known.coordinate, onto: Self.path, cumulative: RouteGeometry.cumulativeDistances(Self.path)
+        )).distanceAlongRouteMeters
+        #expect(progress > 5_000, "the rider is past the stale progress")
+        let store = makeStore(state, storage: storage)
+        store.exhaustivity = .off
+        await store.send(.weatherSheetOpened)
+        await store.receive(.weather(.routeWind(.load(known: Self.known, ahead: Self.ahead(from: progress, speedMPS: 6)))))
     }
 
     @Test("Sampled within ten minutes, reopening the sheet asks for nothing")

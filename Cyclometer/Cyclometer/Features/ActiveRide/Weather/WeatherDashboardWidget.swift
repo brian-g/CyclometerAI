@@ -28,7 +28,9 @@ struct WeatherDashboardWidget: DashboardWidget {
             unit: store.unitSystem,
             rain: forecast.flatMap { RainOutlook($0, now: now) },
             metrics: { date in
-                store.weather.metrics(at: date, unit: store.unitSystem, rider: store.coordinate,
+                // The minute's fix, as W21 reads it: the map only opens on the rider, and the live
+                // coordinate would redraw it, route and all, on every fix.
+                store.weather.metrics(at: date, unit: store.unitSystem, rider: store.sunsetFix?.coordinate,
                                       route: store.navigation.activeRoute?.coordinates ?? [])
             },
             onSheetAppear: { store.send(.weatherSheetOpened) },

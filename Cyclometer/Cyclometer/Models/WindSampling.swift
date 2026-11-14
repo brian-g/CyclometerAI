@@ -58,7 +58,8 @@ enum WindSampling {
         speedMPS: Double
     ) -> [WindSamplePoint] {
         guard let total = cumulative.last else { return [] }
-        let origin = min(max(fromMeters, 0), total)
+        // As `distances` clamps it, so a non-finite progress times from the start, not NaN.
+        let origin = min(max(fromMeters.isFinite ? fromMeters : 0, 0), total)
         return distances(totalMeters: total, fromMeters: origin, isLoop: isLoop).compactMap { distance in
             guard let coordinate = RouteGeometry.coordinate(coordinates, atMeters: distance, cumulative: cumulative)
             else { return nil }

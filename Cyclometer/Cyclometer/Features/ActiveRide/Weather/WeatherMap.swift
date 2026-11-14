@@ -12,7 +12,13 @@ import SwiftUI
 /// Opens on the rider at `riderSpanMeters` across, or on the whole route with the rider on it. The
 /// rider can pan and zoom; the arrows keep their size in points (`measuresMapScale`).
 struct WeatherMap: View {
-    let metrics: WeatherMetrics
+    /// Only what the map draws, not the sheet's whole `WeatherMetrics`: those change with the course
+    /// on every fix and with the strip every minute, and each change would re-walk the route here
+    /// (`framing`, the polyline).
+    let reading: WeatherReading?
+    let riderCoordinate: RouteCoordinate?
+    let route: [RouteCoordinate]
+    let routeWind: [WindSample]
 
     /// Wide enough to read the wind's direction against roads, close enough to know where you are.
     static let riderSpanMeters = 5_000.0
@@ -24,10 +30,10 @@ struct WeatherMap: View {
     var body: some View {
         MapReader { proxy in
             Map(initialPosition: .region(framing), interactionModes: [.pan, .zoom]) {
-                if metrics.route.count > 1 {
-                    RouteMapContent(coordinates: metrics.route)
-                    WindLayer(samples: metrics.routeWind, metersPerPoint: metersPerPoint)
-                } else if let reading = metrics.forecast?.current, let visibleBounds {
+                if route.count > 1 {
+                    RouteMapContent(coordinates: route)
+                    WindLayer(samples: routeWind, metersPerPoint: metersPerPoint)
+                } else if let reading, let visibleBounds {
                     WindLayer(reading: reading, at: WindSampling.field(in: visibleBounds), metersPerPoint: metersPerPoint)
                 }
                 UserAnnotation()
@@ -47,14 +53,21 @@ struct WeatherMap: View {
     }
 
     private var framing: MKCoordinateRegion {
-        guard metrics.route.count > 1 else {
-            let center = metrics.riderCoordinate ?? RouteCoordinate(RoutesMapCamera.fallbackCenter)
+        guard route.count > 1 else {
+            let center = riderCoordinate ?? RouteCoordinate(RoutesMapCamera.fallbackCenter)
             return MKCoordinateRegion(center: center.coordinate2D,
                                       latitudinalMeters: Self.riderSpanMeters,
                                       longitudinalMeters: Self.riderSpanMeters)
         }
-        let points = metrics.route + (metrics.riderCoordinate.map { [$0] } ?? [])
+        let points = route + (riderCoordinate.map { [$0] } ?? [])
         return RoutesMapCamera.region(fitting: RouteGeometry.boundingBox(points))
+    }
+}
+
+extension WeatherMap {
+    init(metrics: WeatherMetrics) {
+        self.init(reading: metrics.forecast?.current, riderCoordinate: metrics.riderCoordinate,
+                  route: metrics.route, routeWind: metrics.routeWind)
     }
 }
 

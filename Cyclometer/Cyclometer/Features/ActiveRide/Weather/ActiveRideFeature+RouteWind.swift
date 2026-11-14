@@ -51,16 +51,35 @@ extension ActiveRideFeature {
         guard let route = state.navigation.activeRoute, let coordinate = state.coordinate,
               let forecast = state.weather.forecast(at: now)
         else { return .none }
+        let rider = RouteCoordinate(latitude: coordinate.latitude, longitude: coordinate.longitude, elevationMeters: nil)
         let points = WindSampling.points(
             coordinates: route.coordinates,
             cumulative: route.cumulativeDistances,
-            fromMeters: state.navigation.progressMeters ?? 0,
+            fromMeters: Self.routeWindProgressMeters(
+                of: rider, on: route, navigation: state.navigation, course: state.weather.course
+            ),
             isLoop: route.isLoop,
             start: now,
             speedMPS: speedMPS
         )
-        let rider = RouteCoordinate(latitude: coordinate.latitude, longitude: coordinate.longitude, elevationMeters: nil)
         let known = WindSample(coordinate: rider, reading: forecast.current)
         return .send(.weather(.routeWind(.load(known: known, ahead: Array(points.dropFirst())))))
+    }
+
+    /// How far along `route` the rider is, where the route ahead starts: navigation's match while it
+    /// follows the route, else the rider projected onto it. With turn-by-turn off nothing is matched,
+    /// and `progressMeters` is nil or a stale restored value: the route's start would have the map
+    /// ask about, and time as still ahead, ground the rider has already ridden. The course keeps a
+    /// rider on the way back of an out-and-back off the way out.
+    private static func routeWindProgressMeters(
+        of rider: RouteCoordinate, on route: NavigationRoute,
+        navigation: NavigationFeature.State, course: Double?
+    ) -> Double {
+        if navigation.isFollowingRoute, let progress = navigation.progressMeters { return progress }
+        let nearest = RouteGeometry.candidates(
+            of: rider, onto: route.coordinates, cumulative: route.cumulativeDistances, heading: course
+        ).min { $0.offsetMeters < $1.offsetMeters }
+            ?? RouteGeometry.projection(of: rider, onto: route.coordinates, cumulative: route.cumulativeDistances)
+        return nearest?.distanceAlongRouteMeters ?? 0
     }
 }

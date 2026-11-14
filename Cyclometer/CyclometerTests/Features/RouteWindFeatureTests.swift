@@ -57,13 +57,11 @@ struct RouteWindFeatureTests {
         let store = makeStore(Self.client())
         await store.send(.load(known: Self.known, ahead: Self.ahead)) {
             $0.requestedAt = Self.now
-            $0.isFetching = true
             $0.samples = [Self.known]
         }
         // The fixture's hours start at 14:00 and the clock reads 14:40: 10 km is reached at 15:13
         // (the 15:00 hour), 20 km at 15:46, 30 km at 16:20.
         await store.receive(\.loaded) {
-            $0.isFetching = false
             $0.samples = [
                 Self.known,
                 WindSample(coordinate: Self.points[1].coordinate, reading: Self.reading(1, hour: 1)),
@@ -89,7 +87,6 @@ struct RouteWindFeatureTests {
         await store.send(.load(known: Self.known, ahead: Self.ahead))
         await store.receive(\.loaded)
         #expect(store.state.samples == [Self.known])
-        #expect(!store.state.isFetching)
     }
 
     @Test("A refetch keeps the last samples on screen until the new ones land")

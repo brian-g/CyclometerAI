@@ -22,7 +22,6 @@ struct RouteWindFeature {
         var samples: [WindSample] = []
         /// When the last load began, whether or not its requests answered.
         var requestedAt: Date?
-        var isFetching = false
 
         /// Whether a load began less than `RideWeatherFeature.refreshInterval` ago: W10's sheet
         /// doesn't ask again each time it opens. Two-sided, so a clock set back doesn't hold it.
@@ -43,7 +42,6 @@ struct RouteWindFeature {
             switch action {
             case let .load(known, ahead):
                 state.requestedAt = date.now
-                state.isFetching = true
                 if state.samples.isEmpty {
                     state.samples = [known]
                 }
@@ -56,7 +54,6 @@ struct RouteWindFeature {
 
             case .loaded(let samples):
                 state.samples = samples
-                state.isFetching = false
                 return .none
             }
         }

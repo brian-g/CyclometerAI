@@ -181,8 +181,7 @@ struct RouteDetailFeatureTests {
         return WindSampling.points(
             coordinates: coordinates,
             cumulative: RouteGeometry.cumulativeDistances(coordinates),
-            isLoop: RouteGeometry.distanceMeters([coordinates[0], coordinates[coordinates.count - 1]])
-                <= NavigationFeature.loopClosureMeters,
+            isLoop: NavigationRoute.isLoop(coordinates),
             start: WeatherReading.fixtureNow,
             speedMPS: WindSampling.speedMPS(
                 routeDistanceMeters: summary.distanceMeters,
@@ -217,7 +216,6 @@ struct RouteDetailFeatureTests {
         // points ahead.
         #expect(store.state.wind.samples.first == WindSample(coordinate: detail.coordinates[0], reading: .fixture))
         #expect(store.state.wind.samples.dropFirst().map(\.coordinate) == points.dropFirst().map(\.coordinate))
-        #expect(!store.state.wind.isFetching)
         // One request per sample: the start's forecast is the first, not asked for again.
         #expect(asked.value.count == points.count)
     }
@@ -277,6 +275,69 @@ struct RouteDetailFeatureTests {
         }
 
         #expect(asked.value == 2 * Self.windPoints(detail, summary: route).count)
+    }
+
+    /// The arrows extend the start's forecast: a return that can't fetch it can't keep them.
+    @Test("A return whose forecast fails clears the last appearance's wind")
+    func failedRefetchClearsWind() async {
+        let route = Self.withElevation
+        let detail = Self.detail(route)
+        let isOnline = LockIsolated(true)
+        var weather = WeatherClient.testValue
+        weather.forecast = { _ in
+            guard isOnline.value else { throw WeatherClientError.unavailable }
+            return WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly)
+        }
+        let store = makeStore(summary: route, persistenceClient: .mock(routeDetails: [route.id: detail]),
+                              weatherClient: weather)
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+        #expect(!store.state.wind.samples.isEmpty)
+
+        isOnline.setValue(false)
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+
+        #expect(store.state.weather == .unavailable(.failed))
+        #expect(store.state.wind.samples.isEmpty)
+    }
+
+    /// A failed read leaves the screen on what it already shows, Previous Rides included.
+    @Test("A return whose rides read fails keeps the rides already shown, and still samples the wind")
+    func failedRidesRefetchKeepsRides() async {
+        let route = Self.withElevation
+        let detail = Self.detail(route)
+        let rides = RouteRideSummary.previewRides
+        let isReadable = LockIsolated(true)
+        var client = PersistenceClient.mock(routeDetails: [route.id: detail], ridesByRoute: [route.id: rides])
+        let fetchRouteRides = client.fetchRouteRides
+        client.fetchRouteRides = { id in
+            guard isReadable.value else { throw PersistenceError.rideNotFound }
+            return try await fetchRouteRides(id)
+        }
+        let asked = LockIsolated(0)
+        var weather = WeatherClient.testValue
+        weather.forecast = { _ in
+            asked.withValue { $0 += 1 }
+            return WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly)
+        }
+        let store = makeStore(summary: route, persistenceClient: client, weatherClient: weather)
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+        isReadable.setValue(false)
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+
+        #expect(store.state.previousRides == rides)
+        #expect(asked.value == 2 * Self.windPoints(detail, rides: rides, summary: route).count)
     }
 
     @Test("WeatherKit failing online is unavailable; failing offline says so", arguments: [false, true])

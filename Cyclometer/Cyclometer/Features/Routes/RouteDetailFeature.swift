@@ -81,6 +81,8 @@ struct RouteDetailFeature {
         case task
         case routeLoaded(coordinates: [RouteCoordinate], elevationProfile: [Double]?)
         case previousRidesLoaded([RouteRideSummary])
+        /// The rides read failed: the section keeps what it shows, and the wind stops waiting.
+        case previousRidesUnavailable
         case weatherLoaded(AttributedForecast)
         case weatherUnavailable(RouteWeather.Unavailable)
         case wind(RouteWindFeature.Action)
@@ -161,9 +163,8 @@ struct RouteDetailFeature {
                             await send(.previousRidesLoaded(try await persistenceClient.fetchRouteRides(id)))
                         } catch {
                             logger.error("fetchRouteRides failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                            // Still hidden, as a route never ridden is; the wind map, which waits
-                            // on the rides, times the route by its default instead.
-                            await send(.previousRidesLoaded([]))
+                            // The wind map waits on the rides, so it still has to hear back.
+                            await send(.previousRidesUnavailable)
                         }
                     }
                 )
@@ -178,6 +179,12 @@ struct RouteDetailFeature {
                 state.hasFreshRides = true
                 return loadWind(&state)
 
+            case .previousRidesUnavailable:
+                // Previous Rides keeps what it shows, hidden on a first appearance; the wind is
+                // timed by those rides, as the strip is, or by the default with none.
+                state.hasFreshRides = true
+                return loadWind(&state)
+
             case .weatherLoaded(let forecast):
                 state.weather = .loaded(forecast)
                 state.hasFreshForecast = true
@@ -185,6 +192,9 @@ struct RouteDetailFeature {
 
             case .weatherUnavailable(let reason):
                 state.weather = .unavailable(reason)
+                // An earlier appearance's arrows extend a forecast that is gone, for a ride that
+                // started then: with no forecast at the start, no arrows (UX.md §S20).
+                state.wind.samples = []
                 return .none
 
             case .wind:
@@ -202,13 +212,14 @@ struct RouteDetailFeature {
 
 extension RouteDetailFeature {
     /// Samples the wind along the route once this appearance's forecast and rides have both
-    /// landed (#561): the forecast for a ride starting now, at the speed that rides it in S05.1's
-    /// estimate, as the hourly strip assumes. The forecast at the start is the first sample, so a
+    /// landed (#561): the forecast for a ride starting now, at the speed that rides it in the
+    /// estimate from its own rides, as the hourly strip assumes (not S05.1's, which falls back to
+    /// the rider's recent riding). The forecast at the start is the first sample, so a
     /// route costs one request fewer than it has samples.
     private func loadWind(_ state: inout State) -> Effect<Action> {
         guard state.hasFreshForecast, state.hasFreshRides,
               case let .loaded(forecast) = state.weather,
-              let start = state.coordinates.first, let finish = state.coordinates.last
+              let start = state.coordinates.first
         else { return .none }
         state.hasFreshForecast = false
         let estimate = RideDurationEstimate.fromRouteRides(
@@ -217,7 +228,7 @@ extension RouteDetailFeature {
         let points = WindSampling.points(
             coordinates: state.coordinates,
             cumulative: RouteGeometry.cumulativeDistances(state.coordinates),
-            isLoop: RouteGeometry.distanceMeters([start, finish]) <= NavigationFeature.loopClosureMeters,
+            isLoop: NavigationRoute.isLoop(state.coordinates),
             start: date.now,
             speedMPS: WindSampling.speedMPS(routeDistanceMeters: state.summary.distanceMeters, estimate: estimate)
         )
