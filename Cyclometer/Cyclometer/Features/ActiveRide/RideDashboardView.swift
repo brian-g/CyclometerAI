@@ -51,7 +51,7 @@ struct RideDashboardView: View {
                     grabber()
                 }
                 if let banner = activeBanner {
-                    RideBanner(text: banner.text, icon: banner.icon)
+                    RideBanner(text: banner.text, icon: banner.icon, spokenText: banner.spokenText)
                         .transition(bannerTransition)
                         // A notice, not a control. In edit mode it sits over the top row's remove
                         // buttons (#141 review), so touches pass through to them.
@@ -200,14 +200,20 @@ struct RideDashboardView: View {
         reduceMotion ? .opacity : .scale(scale: 0.85).combined(with: .opacity)
     }
 
-    private var activeBanner: (text: String, icon: String)? {
+    private var activeBanner: Banner? {
         Self.banner(
             sourceSwitch: store.speed.sourceSwitchBanner,
             calibration: store.calibration.banner,
-            rain: store.weather.rainAhead.map { ($0.bannerText(unitSystem: store.unitSystem), $0.symbolName) },
+            rain: store.weather.rainAhead.map {
+                ($0.bannerText(unitSystem: store.unitSystem), $0.symbolName, $0.spokenText(unitSystem: store.unitSystem))
+            },
             isOffRoute: store.navigation.isOffRoute
         )
     }
+
+    /// One notice for the banner slot. `spokenText` is what VoiceOver reads instead of `text`, for
+    /// one whose text carries unit symbols (#568); only rain's does.
+    typealias Banner = (text: String, icon: String, spokenText: String?)
 
     /// The banner slot holds exactly one notice. Four sources can be armed at once, so they
     /// are resolved to a single value here rather than each rendering its own capsule and
@@ -226,13 +232,13 @@ struct RideDashboardView: View {
     static func banner(
         sourceSwitch: String?,
         calibration: String?,
-        rain: (text: String, icon: String)?,
+        rain: Banner?,
         isOffRoute: Bool
-    ) -> (text: String, icon: String)? {
-        if let sourceSwitch { return (sourceSwitch, "shuffle") }
-        if let calibration { return (calibration, "ruler") }
+    ) -> Banner? {
+        if let sourceSwitch { return (sourceSwitch, "shuffle", nil) }
+        if let calibration { return (calibration, "ruler", nil) }
         if let rain { return rain }
-        if isOffRoute { return (NavigationFeature.offRouteBannerText, "exclamationmark.triangle") }
+        if isOffRoute { return (NavigationFeature.offRouteBannerText, "exclamationmark.triangle", nil) }
         return nil
     }
 }

@@ -8,7 +8,9 @@ import Testing
 @MainActor
 @Suite("Ride dashboard — banner priority")
 struct RideBannerPriorityTests {
-    private let rain = (text: "Rain 70% · 18.4 km ahead", icon: "cloud.rain.fill")
+    private let rain: RideDashboardView.Banner = (
+        text: "Rain 70% · 18.4 km ahead", icon: "cloud.rain.fill", spokenText: "Rain, 70% chance, 18.4 kilometers ahead"
+    )
 
     @Test("a speed-source switch outranks calibration, rain and off route")
     func sourceSwitchOutranksCalibrationAndOffRoute() {
@@ -30,6 +32,7 @@ struct RideBannerPriorityTests {
         let banner = RideDashboardView.banner(sourceSwitch: nil, calibration: nil, rain: rain, isOffRoute: true)
         #expect(banner?.text == rain.text)
         #expect(banner?.icon == rain.icon)
+        #expect(banner?.spokenText == rain.spokenText, "#568: VoiceOver reads the distance in words")
     }
 
     @Test("off route shows once nothing else is up, and nothing shows when nothing is")
@@ -37,6 +40,7 @@ struct RideBannerPriorityTests {
         let offRoute = RideDashboardView.banner(sourceSwitch: nil, calibration: nil, rain: nil, isOffRoute: true)
         #expect(offRoute?.text == NavigationFeature.offRouteBannerText)
         #expect(offRoute?.icon == "exclamationmark.triangle")
+        #expect(offRoute?.spokenText == nil, "#568: read as written, as before")
         #expect(RideDashboardView.banner(sourceSwitch: nil, calibration: nil, rain: nil, isOffRoute: false) == nil)
     }
 }

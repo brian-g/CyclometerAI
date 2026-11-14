@@ -11,6 +11,9 @@ struct RideBanner: View {
     /// Defaults to the source-switch glyph, which is what the majority of these
     /// notices are.
     var icon: String = "shuffle"
+    /// What VoiceOver reads in place of `text`, for a notice whose text carries unit symbols
+    /// (#568). Nil reads `text` as written.
+    var spokenText: String?
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
@@ -19,6 +22,7 @@ struct RideBanner: View {
             Text(text)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Color.cyTextPrimary)
+                .accessibilityLabel(spokenText ?? text)
         }
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.sm)
@@ -48,7 +52,11 @@ struct RideBanner: View {
     let rain = RainAhead(
         chance: 0.7, condition: .rain, isDaylight: true, distanceAheadMeters: 18_400, arrival: .now
     )
-    RideBanner(text: rain.bannerText(unitSystem: .metric), icon: rain.symbolName)
+    RideBanner(
+        text: rain.bannerText(unitSystem: .metric),
+        icon: rain.symbolName,
+        spokenText: rain.spokenText(unitSystem: .metric)
+    )
         .padding(.top, Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
@@ -58,7 +66,11 @@ struct RideBanner: View {
     let rain = RainAhead(
         chance: 0.6, condition: .rain, isDaylight: true, distanceAheadMeters: 0, arrival: .now
     )
-    RideBanner(text: rain.bannerText(unitSystem: .metric), icon: rain.symbolName)
+    RideBanner(
+        text: rain.bannerText(unitSystem: .metric),
+        icon: rain.symbolName,
+        spokenText: rain.spokenText(unitSystem: .metric)
+    )
         .padding(.top, Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.cyBgSecondary)
