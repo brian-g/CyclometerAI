@@ -114,8 +114,8 @@ struct RainAheadTests {
         #expect(ahead.bannerText(unitSystem: .metric) == "Rain 70% · 18.4 km ahead")
         #expect(ahead.bannerText(unitSystem: .imperial) == "Rain 70% · 11.4 mi ahead")
         var near = ahead
-        near.distanceAheadMeters = 640
-        #expect(near.bannerText(unitSystem: .metric) == "Rain 70% · 640 m ahead")
+        near.distanceAheadMeters = RainAhead.hereMeters
+        #expect(near.bannerText(unitSystem: .metric) == "Rain 70% · 1.0 km ahead", "the nearest a point ahead can be")
         var here = ahead
         here.distanceAheadMeters = 0
         #expect(here.bannerText(unitSystem: .metric) == "Rain 70% · here")

@@ -90,7 +90,7 @@ enum WindSampling {
             let isBeforeForecast = hourly.first.map { date < $0.date } ?? true
             return isBeforeForecast ? current : nil
         }
-        return AttributedForecast.hour(containing: current.date, in: hourly) == hour ? current : hour
+        return AttributedForecast.hour(containing: current.date, in: hourly)?.date == hour.date ? current : hour
     }
 
     // MARK: - With no route

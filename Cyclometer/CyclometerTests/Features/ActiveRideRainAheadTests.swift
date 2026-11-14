@@ -44,11 +44,15 @@ struct ActiveRideRainAheadTests {
         return client
     }
 
-    private func state(ridden: Double = 6_000, route: Bool = true) throws -> ActiveRideFeature.State {
+    /// A ride 6 km along the route (or `progress`), with the dashboard in front of the rider.
+    private func state(
+        ridden: Double = 6_000, progress: Double = 6_000, route: Bool = true, visible: Bool = true
+    ) throws -> ActiveRideFeature.State {
         var state = ActiveRideFeature.State(recordingState: .active)
+        state.isDashboardVisible = visible
         if route {
             state.navigation.activeRoute = try #require(NavigationRoute(coordinates: Self.path, maneuvers: []))
-            state.navigation.progressMeters = 6_000
+            state.navigation.progressMeters = progress
             state.route = RouteReference(id: UUID(0), name: "Out")
         }
         state.coordinate = Self.rider
@@ -84,10 +88,15 @@ struct ActiveRideRainAheadTests {
     /// The points the check should ask about: the route from 6 km to 49.2 km, the rider's own
     /// point left to W10's forecast.
     private static func expectedAhead(speedMPS: Double = 6) -> [WindSamplePoint] {
-        Array(WindSampling.points(
+        Array(points(from: 6_000, speedMPS: speedMPS).dropFirst())
+    }
+
+    /// The route sampled from `progress` for two hours at `speedMPS`, the rider's point first.
+    private static func points(from progress: Double, speedMPS: Double = 6) -> [WindSamplePoint] {
+        WindSampling.points(
             coordinates: path, cumulative: RouteGeometry.cumulativeDistances(path),
-            fromMeters: 6_000, toMeters: 6_000 + speedMPS * RainOutlook.window, start: now, speedMPS: speedMPS
-        ).dropFirst())
+            fromMeters: progress, toMeters: progress + speedMPS * RainOutlook.window, start: now, speedMPS: speedMPS
+        )
     }
 
     @Test("A free ride's forecast checks nothing ahead")
@@ -98,6 +107,47 @@ struct ActiveRideRainAheadTests {
         await store.finish()
         #expect(asked.value.isEmpty)
         #expect(store.state.weather.rainAhead == nil, "no route, no banner, even with rain where the rider is")
+    }
+
+    /// Paused, locked, in the background or minimised: AppFeature says no one can see it.
+    @Test("With the dashboard out of sight, a fresh forecast checks nothing ahead")
+    func notVisible() async throws {
+        let asked = LockIsolated<[RouteCoordinate]>([])
+        let store = makeStore(try state(visible: false), client: Self.client(wet: [2: 0.9], asked: asked))
+        await store.send(.weather(.forecastLoaded(Self.forecast(wet: [0: 0.9]))))
+        await store.finish()
+        #expect(asked.value.isEmpty)
+        #expect(store.state.weather.rainAhead == nil)
+    }
+
+    /// Distances along a route the rider has left would mislead, and "Off route" matters more.
+    @Test("Off route, a fresh forecast checks nothing ahead")
+    func offRoute() async throws {
+        let asked = LockIsolated<[RouteCoordinate]>([])
+        var state = try state()
+        state.navigation.isOffRoute = true
+        let store = makeStore(state, client: Self.client(wet: [2: 0.9], asked: asked))
+        await store.send(.weather(.forecastLoaded(Self.forecast(wet: [0: 0.9]))))
+        await store.finish()
+        #expect(asked.value.isEmpty)
+        #expect(store.state.weather.rainAhead == nil)
+    }
+
+    /// Sampling always adds the finish, however close: within a kilometre of it, that point is
+    /// where the rider is, and W10's own forecast answers for it.
+    @Test("Within a kilometre of the finish, nothing ahead is asked about; the rider's own spot still counts")
+    func nearTheFinish() async throws {
+        let asked = LockIsolated<[RouteCoordinate]>([])
+        let total = RouteGeometry.distanceMeters(Self.path)
+        let store = makeStore(try state(progress: total - 3), client: Self.client(wet: [2: 0.9], asked: asked))
+        await store.send(.weather(.forecastLoaded(Self.forecast(wet: [0: 0.6]))))
+        await store.receive(.weather(.checkRainAhead(
+            rider: try #require(Self.points(from: total - 3).first), ahead: []
+        )))
+        await store.receive(\.weather.rainAheadChecked)
+        #expect(asked.value.isEmpty)
+        #expect(store.state.weather.rainAhead?.isHere == true)
+        await store.skipInFlightEffects()
     }
 
     @Test("With a route, only the stretch reached within two hours is asked about")

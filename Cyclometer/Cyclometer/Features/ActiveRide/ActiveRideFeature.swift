@@ -304,6 +304,11 @@ struct ActiveRideFeature {
         var calibration = WheelCalibrationFeature.State()
         /// The weather where the rider is, for W10 (#150).
         var weather = RideWeatherFeature.State()
+        /// Whether the rider can see the dashboard: presented, recording and in the foreground. Set by
+        /// `AppFeature`, which owns that (`AppFeature.State.isDashboardVisible`, #110). Rain along the
+        /// route (#152) checks only while it is true: its banner is all the check is for, and each
+        /// check spends WeatherKit requests.
+        var isDashboardVisible = false
         /// Each paired sensor's battery and link over the ride, for the verdict saved at ride
         /// end (#391), and its live status for the Sensors button and sheet (#464, #466).
         var sensorHealth = SensorHealthFeature.State()

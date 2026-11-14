@@ -801,6 +801,8 @@ As built (#534): **Speed Gauge** in S08's Ride section, after Speed; W1 itself i
 - **Rain along the route (#152):** with a route loaded, each forecast W10 fetches also checks the route ahead. The points are sampled as the wind map samples them (one per 10 km, 2 to 8), but only over the stretch the rider reaches within two hours, timed the same way. A point counts as wet when the hour the rider gets there has a 50% or higher chance of precipitation, read from the hourly forecast. The rider's own position counts, for the hour under way. The first wet place shows in the dashboard's top banner, not on the card: "Rain 70% · 18.4 km ahead", or "Rain 70% · here", named and drawn as the rain state above (Snow, Thunderstorms). The distance reads as W9's does
   - Silent: no tone or haptic, and nothing in the radar alert path (#135). It shows dimmed and never wakes the screen. It lasts four seconds, the same as the other transient banners. It ranks below a speed-source switch and a calibration and above off-route
   - It shows again on every check while rain is still ahead, about every 10 minutes. A free ride has no checks. A failed point is left out; with every point failing, only the rider's own position is checked
+  - No checks while no one can see the dashboard (paused, locked, minimised to the pill, or in the background), and none while off route: distances along a route the rider has left would mislead, and "Off route" matters more then
+  - Points less than 1 km ahead count as the rider's own position and aren't asked about, so the banner reads "here" or at least "1.0 km ahead"
 
 ---
 

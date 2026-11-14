@@ -80,10 +80,10 @@ struct AppScreenPowerTests {
         let store = Self.makeStore(clock: clock, calls: calls)
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await store.finish()
 
         // The ride is still running behind the pill — only the wake lock was released.
@@ -144,7 +144,7 @@ struct AppScreenPowerTests {
         let store = Self.makeStore(clock: clock, calls: calls)
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
 
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
         await store.receive(\.dimTimerFired)
@@ -155,6 +155,7 @@ struct AppScreenPowerTests {
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged) {
+            $0.mirrorDashboardVisibility()
             $0.isDimmed = false
             $0.preDimBrightness = nil
         }
@@ -174,7 +175,7 @@ struct AppScreenPowerTests {
         let store = Self.makeStore(clock: clock, calls: calls)
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
 
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds - 1))
         await store.send(.touchBegan) { $0.isTouchDown = true }
@@ -194,6 +195,7 @@ struct AppScreenPowerTests {
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged) {
+            $0.mirrorDashboardVisibility()
             $0.isDimmed = false
             $0.preDimBrightness = nil
         }
@@ -208,7 +210,7 @@ struct AppScreenPowerTests {
         let store = Self.makeStore(clock: clock, calls: calls)
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
         await store.receive(\.dimTimerFired)
         await store.receive(\.preDimBrightnessCaptured) {
@@ -232,6 +234,7 @@ struct AppScreenPowerTests {
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged) {
+            $0.mirrorDashboardVisibility()
             $0.isDimmed = false
             $0.preDimBrightness = nil
         }
@@ -248,7 +251,9 @@ struct AppScreenPowerTests {
         let store = Self.makeStore(clock: clock, calls: calls)
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
+        // #152: the ride is told, so it checks the route ahead for rain only while it can be seen.
+        #expect(store.state.activeRide?.isDashboardVisible == true)
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
         await store.receive(\.dimTimerFired)
         await store.receive(\.preDimBrightnessCaptured) {
@@ -261,6 +266,7 @@ struct AppScreenPowerTests {
         // The ride writes its buffered track points on the way out (#505).
         await store.receive(\.activeRide.trackRecorder.appResignedActive)
         await store.receive(\.screenVisibilityChanged) {
+            $0.mirrorDashboardVisibility()
             $0.isDimmed = false
             $0.preDimBrightness = nil
         }
@@ -268,6 +274,7 @@ struct AppScreenPowerTests {
 
         // The dashboard is still "presented", but the app no longer owns the screen.
         #expect(store.state.isDashboardPresented == true)
+        #expect(store.state.activeRide?.isDashboardVisible == false, "a backgrounded ride checks no rain (#152)")
         #expect(calls.value.contains(.setBrightness(0.8)))
         #expect(calls.value.contains(.idleTimerDisabled(false)))
     }
@@ -282,7 +289,7 @@ struct AppScreenPowerTests {
         let store = Self.makeStore(clock: clock, calls: calls, isAutoDimEnabled: false)
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
 
         // Well past the timeout, with a touch in the middle for good measure.
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds * 2))
@@ -294,7 +301,7 @@ struct AppScreenPowerTests {
 
         // The wake lock was still taken, and is still released on the way out.
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await store.finish()
         #expect(calls.value == [.idleTimerDisabled(true), .idleTimerDisabled(false)])
     }
@@ -307,7 +314,7 @@ struct AppScreenPowerTests {
         let store = Self.makeStore(clock: clock, calls: calls, autoDimBrightness: 0.3)
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
         await store.receive(\.dimTimerFired)
         await store.receive(\.preDimBrightnessCaptured) {
@@ -317,6 +324,7 @@ struct AppScreenPowerTests {
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged) {
+            $0.mirrorDashboardVisibility()
             $0.isDimmed = false
             $0.preDimBrightness = nil
         }
@@ -334,7 +342,7 @@ struct AppScreenPowerTests {
         let store = Self.makeStore(clock: clock, calls: calls, brightness: 0.05)
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
         await store.receive(\.dimTimerFired)
         await store.receive(\.preDimBrightnessCaptured) {
@@ -347,6 +355,7 @@ struct AppScreenPowerTests {
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged) {
+            $0.mirrorDashboardVisibility()
             $0.isDimmed = false
             $0.preDimBrightness = nil
         }
@@ -364,7 +373,7 @@ struct AppScreenPowerTests {
         let store = Self.makeStore(clock: clock, calls: calls)
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
 
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds - 1))
         await store.send(.touchBegan) { $0.isTouchDown = true }
@@ -383,6 +392,7 @@ struct AppScreenPowerTests {
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged) {
+            $0.mirrorDashboardVisibility()
             $0.isDimmed = false
             $0.preDimBrightness = nil
         }
@@ -399,7 +409,7 @@ struct AppScreenPowerTests {
         let store = Self.makeStore(clock: clock, calls: calls)
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
         await store.receive(\.dimTimerFired)
         await store.receive(\.preDimBrightnessCaptured) {
@@ -416,7 +426,7 @@ struct AppScreenPowerTests {
         #expect(calls.value.last == .setBrightness(0.8))
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await store.finish()
     }
 
@@ -436,7 +446,7 @@ struct AppScreenPowerTests {
         }
 
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds))
         await store.receive(\.dimTimerFired)
 
@@ -447,7 +457,7 @@ struct AppScreenPowerTests {
 
         // No `preDimBrightnessCaptured`: an exhaustive store fails on one it wasn't told about.
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await store.finish()
         #expect(store.state.isDimmed == false)
         #expect(!calls.value.contains { if case .setBrightness = $0 { true } else { false } })
@@ -463,7 +473,7 @@ struct AppScreenPowerTests {
 
         await store.send(.touchBegan) { $0.isTouchDown = true }
         await store.send(.dashboardOpened) { $0.isDashboardPresented = true }
-        await store.receive(\.screenVisibilityChanged)
+        await store.receive(\.screenVisibilityChanged) { $0.mirrorDashboardVisibility() }
         await clock.advance(by: .seconds(AppFeature.dimAfterSeconds * 2))
         #expect(store.state.isDimmed == false)
 
@@ -477,9 +487,19 @@ struct AppScreenPowerTests {
 
         await store.send(.dashboardDismissed) { $0.isDashboardPresented = false }
         await store.receive(\.screenVisibilityChanged) {
+            $0.mirrorDashboardVisibility()
             $0.isDimmed = false
             $0.preDimBrightness = nil
         }
         await store.finish()
+    }
+}
+
+extension AppFeature.State {
+    /// #152: on each visibility change the ride is told whether its dashboard can be seen. In a
+    /// `screenVisibilityChanged` receive, `isDashboardVisible` already holds the new value.
+    mutating func mirrorDashboardVisibility() {
+        let isVisible = isDashboardVisible
+        activeRide?.isDashboardVisible = isVisible
     }
 }

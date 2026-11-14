@@ -408,6 +408,8 @@ struct AppFeature {
                 return .merge(settings, .send(.activeRide(.liveActivity(.appBecameActive))))
 
             case .screenVisibilityChanged(let isVisible):
+                // The ride checks the route ahead for rain only while its banner can be seen (#152).
+                state.activeRide?.isDashboardVisible = isVisible
                 guard isVisible else {
                     // Everything the app took from the system goes back here, in one
                     // place: the idle timer, the pending timer, and the backlight.

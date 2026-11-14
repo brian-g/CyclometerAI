@@ -118,8 +118,6 @@ struct RouteWindFeatureTests {
         #expect(!state.isFresh(at: Self.now.addingTimeInterval(-RideWeatherFeature.refreshInterval)))
     }
 
-    // MARK: - WeatherClient.wind(at:)
-
     // MARK: - WeatherClient.forecasts(at:) (#152)
 
     @Test("forecasts(at:) answers each point with its own forecast, in route order")
@@ -134,6 +132,8 @@ struct RouteWindFeatureTests {
         let answers = await Self.client(failing: [2]).forecasts(at: Self.ahead)
         #expect(answers.map(\.point) == [Self.ahead[0], Self.ahead[2]])
     }
+
+    // MARK: - WeatherClient.wind(at:)
 
     @Test("wind(at:) asks once per point and answers in route order")
     func clientAsksEachPointOnce() async {

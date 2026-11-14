@@ -54,6 +54,16 @@ struct RideBanner: View {
         .background(Color.cyBgSecondary)
 }
 
+#Preview("Rain here") {
+    let rain = RainAhead(
+        chance: 0.6, condition: .rain, isDaylight: true, distanceAheadMeters: 0, arrival: .now
+    )
+    RideBanner(text: rain.bannerText(unitSystem: .metric), icon: rain.symbolName)
+        .padding(.top, Spacing.xl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.cyBgSecondary)
+}
+
 #Preview("Off route") {
     RideBanner(text: NavigationFeature.offRouteBannerText, icon: "exclamationmark.triangle")
         .padding(.top, Spacing.xl)

@@ -12,10 +12,16 @@ extension ActiveRideFeature {
 
     /// Checks the route the rider reaches within `RainOutlook.window`, on each fresh forecast where
     /// the rider is: about every `RideWeatherFeature.refreshInterval`. Nothing to do on a free ride
-    /// or before the first fix.
+    /// or before the first fix, and nothing while:
+    /// - **No one can see the dashboard** (`isDashboardVisible`): paused, locked, in the background
+    ///   or minimised. The banner is all a check is for, and each one spends WeatherKit requests.
+    ///   The next fresh forecast after the rider looks again checks as usual.
+    /// - **Off route:** distances along a route the rider has left would mislead, and the banner
+    ///   would push aside "Off route", which is the one that matters then.
     func checkRainAhead(_ state: inout State) -> Effect<Action> {
         let now = date.now
-        guard let route = state.navigation.activeRoute, let coordinate = state.coordinate,
+        guard state.isDashboardVisible, !state.navigation.isOffRoute,
+              let route = state.navigation.activeRoute, let coordinate = state.coordinate,
               state.weather.forecast(at: now) != nil
         else { return .none }
         let rider = RouteCoordinate(latitude: coordinate.latitude, longitude: coordinate.longitude, elevationMeters: nil)
@@ -44,7 +50,9 @@ extension ActiveRideFeature {
 
     /// The stretch from `progress` to as far as `speedMPS` gets in `RainOutlook.window`, sampled as
     /// the wind map samples. Its first point is where the rider is, which W10's own forecast
-    /// answers, so only the points ahead cost requests.
+    /// answers, so only the points ahead cost requests. A point within `RainAhead.hereMeters` of
+    /// the rider is where the rider is too: near the finish, sampling always adds the finish
+    /// however close it is, and asking about it would spend a request to say "0 m ahead".
     static func rainAheadCheck(
         route: NavigationRoute, progress: Double, start: Date, speedMPS: Double
     ) -> Action? {
@@ -58,6 +66,7 @@ extension ActiveRideFeature {
             speedMPS: speedMPS
         )
         guard let rider = points.first else { return nil }
-        return .weather(.checkRainAhead(rider: rider, ahead: Array(points.dropFirst())))
+        let ahead = points.dropFirst().filter { $0.distanceMeters - rider.distanceMeters >= RainAhead.hereMeters }
+        return .weather(.checkRainAhead(rider: rider, ahead: ahead))
     }
 }

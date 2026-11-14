@@ -18,6 +18,31 @@ struct RainAhead: Equatable, Sendable {
     /// When the rider is expected there.
     var arrival: Date
 
+    /// Places nearer the rider than this along the route aren't asked about: they're where the
+    /// rider is as far as the banner goes, and the rider's own forecast already answers for it.
+    /// The banner reads "here" or a distance of at least a kilometre, never "0 m ahead".
+    static let hereMeters = 1_000.0
+
+    /// "Rain", "Snow", "Thunderstorms", as W10 names it.
+    var name: String { RainOutlook.name(for: condition) }
+
+    var symbolName: String { RainOutlook.symbolName(for: condition, isDaylight: isDaylight) }
+
+    /// Wet where the rider is now.
+    var isHere: Bool { distanceAheadMeters == 0 }
+
+    /// The dashboard banner's line: "Rain 70% · 18.4 km ahead", or "Rain 70% · here". The distance
+    /// reads as W9's does (`UnitSystem.turnDistance`), metres or feet close in.
+    func bannerText(unitSystem: UnitSystem) -> String {
+        let percent = chance.formatted(.percent.precision(.fractionLength(0)))
+        guard !isHere else { return "\(name) \(percent) · here" }
+        let distance = unitSystem.turnDistance(fromMeters: distanceAheadMeters)
+        return "\(name) \(percent) · \(distance.value) \(distance.unit) ahead"
+    }
+}
+
+// In an extension, so the struct keeps its synthesized memberwise initialiser.
+extension RainAhead {
     /// Nil when no place reached within the window is wet. `rider` is the forecast where the rider
     /// is, timed now; `ahead` is the route ahead in order.
     init?(rider: PointForecast, ahead: [PointForecast]) {
@@ -34,30 +59,5 @@ struct RainAhead: Equatable, Sendable {
             return
         }
         return nil
-    }
-
-    /// "Rain", "Snow", "Thunderstorms", as W10 names it.
-    var name: String { RainOutlook.name(for: condition) }
-
-    var symbolName: String { RainOutlook.symbolName(for: condition, isDaylight: isDaylight) }
-
-    init(chance: Double, condition: WeatherCondition?, isDaylight: Bool, distanceAheadMeters: Double, arrival: Date) {
-        self.chance = chance
-        self.condition = condition
-        self.isDaylight = isDaylight
-        self.distanceAheadMeters = distanceAheadMeters
-        self.arrival = arrival
-    }
-
-    /// Wet where the rider is now.
-    var isHere: Bool { distanceAheadMeters == 0 }
-
-    /// The dashboard banner's line: "Rain 70% · 18.4 km ahead", or "Rain 70% · here". The distance
-    /// reads as W9's does (`UnitSystem.turnDistance`), metres or feet close in.
-    func bannerText(unitSystem: UnitSystem) -> String {
-        let percent = chance.formatted(.percent.precision(.fractionLength(0)))
-        guard !isHere else { return "\(name) \(percent) · here" }
-        let distance = unitSystem.turnDistance(fromMeters: distanceAheadMeters)
-        return "\(name) \(percent) · \(distance.value) \(distance.unit) ahead"
     }
 }
