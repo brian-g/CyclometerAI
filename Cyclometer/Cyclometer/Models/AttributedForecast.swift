@@ -31,7 +31,14 @@ struct AttributedForecast: Equatable, Sendable {
     /// starts before a ride of `estimate` would end. With no estimate, `defaultRideWindow`; never
     /// more than `maximumRideWindow`.
     func rideHours(estimate: TimeInterval?, from start: Date? = nil) -> [WeatherReading] {
-        hours(within: min(estimate ?? Self.defaultRideWindow, Self.maximumRideWindow), from: start)
+        hours(within: Self.rideWindow(estimate: estimate), from: start)
+    }
+
+    /// How long a ride takes for the forecast's purposes: `estimate`, `defaultRideWindow` without
+    /// one, never more than `maximumRideWindow`. The wind map times its samples by it too (#561),
+    /// so the strip and the map agree on when the rider gets where.
+    static func rideWindow(estimate: TimeInterval?) -> TimeInterval {
+        min(estimate ?? defaultRideWindow, maximumRideWindow)
     }
 }
 

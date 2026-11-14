@@ -167,7 +167,177 @@ struct RouteDetailFeatureTests {
         await store.skipReceivedActions()
 
         #expect(store.state.weather == .loaded(.fixture))
-        #expect(asked.value == [detail.coordinates[0]])
+        // The wind map (#561) asks about the points ahead; the start is asked once, and first.
+        #expect(asked.value.first == detail.coordinates[0])
+        #expect(asked.value.filter { $0 == detail.coordinates[0] }.count == 1)
+    }
+
+    // MARK: Wind (#561)
+
+    /// The points the wind map samples for `detail`'s route, ridden from now.
+    private static func windPoints(_ detail: RouteDetail, rides: [RouteRideSummary] = [],
+                                   summary: RouteSummary) -> [WindSamplePoint] {
+        let coordinates = detail.coordinates
+        return WindSampling.points(
+            coordinates: coordinates,
+            cumulative: RouteGeometry.cumulativeDistances(coordinates),
+            isLoop: NavigationRoute.isLoop(coordinates),
+            start: WeatherReading.fixtureNow,
+            speedMPS: WindSampling.speedMPS(
+                routeDistanceMeters: summary.distanceMeters,
+                estimate: RideDurationEstimate.fromRouteRides(routeDistanceMeters: summary.distanceMeters, rides: rides)
+            )
+        )
+    }
+
+    @Test("Once the forecast and the rides land, the wind is sampled along the route, the start's forecast first")
+    func windAlongTheRoute() async {
+        let route = Self.withElevation
+        let detail = Self.detail(route)
+        let rides = RouteRideSummary.previewRides
+        let asked = LockIsolated<[RouteCoordinate]>([])
+        var weather = WeatherClient.testValue
+        weather.forecast = { coordinate in
+            asked.withValue { $0.append(coordinate) }
+            return WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly)
+        }
+        let store = makeStore(summary: route, persistenceClient: .mock(
+            routeDetails: [route.id: detail], ridesByRoute: [route.id: rides]
+        ), weatherClient: weather)
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+
+        let points = Self.windPoints(detail, rides: rides, summary: route)
+        #expect(points.count >= WindSampling.minimumSamples)
+        // The first sample is the route's own start point, elevation and all; the rest are the
+        // points ahead.
+        #expect(store.state.wind.samples.first == WindSample(coordinate: detail.coordinates[0], reading: .fixture))
+        #expect(store.state.wind.samples.dropFirst().map(\.coordinate) == points.dropFirst().map(\.coordinate))
+        // One request per sample: the start's forecast is the first, not asked for again.
+        #expect(asked.value.count == points.count)
+    }
+
+    @Test("With no forecast at the start there is no wind")
+    func noForecastNoWind() async {
+        let route = Self.withElevation
+        let store = makeStore(summary: route, persistenceClient: .mock(routeDetails: [route.id: Self.detail(route)]),
+                              weatherClient: .unavailable)
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+
+        #expect(store.state.wind.samples.isEmpty)
+        #expect(store.state.wind.requestedAt == nil)
+    }
+
+    /// The rides only time the route; failing to read them leaves the default ride window.
+    @Test("A failed rides read still samples the wind, timed by the default ride window")
+    func windWithoutRides() async {
+        let route = Self.withElevation
+        let detail = Self.detail(route)
+        var client = PersistenceClient.mock(routeDetails: [route.id: detail])
+        client.fetchRouteRides = { _ in throw PersistenceError.rideNotFound }
+        let store = makeStore(summary: route, persistenceClient: client)
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+
+        #expect(store.state.wind.samples.dropFirst().map(\.coordinate)
+                == Self.windPoints(detail, summary: route).dropFirst().map(\.coordinate))
+    }
+
+    /// S20 refetches each time it appears; the second appearance's two answers sample once.
+    @Test("Each appearance samples the wind once, on that appearance's answers")
+    func windOncePerAppearance() async {
+        let route = Self.withElevation
+        let detail = Self.detail(route)
+        let asked = LockIsolated(0)
+        var weather = WeatherClient.testValue
+        weather.forecast = { _ in
+            asked.withValue { $0 += 1 }
+            return WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly)
+        }
+        let store = makeStore(summary: route, persistenceClient: .mock(routeDetails: [route.id: detail]),
+                              weatherClient: weather)
+        store.exhaustivity = .off
+
+        for _ in 0..<2 {
+            await store.send(.task)
+            await store.finish()
+            await store.skipReceivedActions()
+        }
+
+        #expect(asked.value == 2 * Self.windPoints(detail, summary: route).count)
+    }
+
+    /// The arrows extend the start's forecast: a return that can't fetch it can't keep them.
+    @Test("A return whose forecast fails clears the last appearance's wind")
+    func failedRefetchClearsWind() async {
+        let route = Self.withElevation
+        let detail = Self.detail(route)
+        let isOnline = LockIsolated(true)
+        var weather = WeatherClient.testValue
+        weather.forecast = { _ in
+            guard isOnline.value else { throw WeatherClientError.unavailable }
+            return WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly)
+        }
+        let store = makeStore(summary: route, persistenceClient: .mock(routeDetails: [route.id: detail]),
+                              weatherClient: weather)
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+        #expect(!store.state.wind.samples.isEmpty)
+
+        isOnline.setValue(false)
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+
+        #expect(store.state.weather == .unavailable(.failed))
+        #expect(store.state.wind.samples.isEmpty)
+    }
+
+    /// A failed read leaves the screen on what it already shows, Previous Rides included.
+    @Test("A return whose rides read fails keeps the rides already shown, and still samples the wind")
+    func failedRidesRefetchKeepsRides() async {
+        let route = Self.withElevation
+        let detail = Self.detail(route)
+        let rides = RouteRideSummary.previewRides
+        let isReadable = LockIsolated(true)
+        var client = PersistenceClient.mock(routeDetails: [route.id: detail], ridesByRoute: [route.id: rides])
+        let fetchRouteRides = client.fetchRouteRides
+        client.fetchRouteRides = { id in
+            guard isReadable.value else { throw PersistenceError.rideNotFound }
+            return try await fetchRouteRides(id)
+        }
+        let asked = LockIsolated(0)
+        var weather = WeatherClient.testValue
+        weather.forecast = { _ in
+            asked.withValue { $0 += 1 }
+            return WeatherForecast(current: .fixture, hourly: WeatherReading.fixtureHourly)
+        }
+        let store = makeStore(summary: route, persistenceClient: client, weatherClient: weather)
+        store.exhaustivity = .off
+
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+        isReadable.setValue(false)
+        await store.send(.task)
+        await store.finish()
+        await store.skipReceivedActions()
+
+        #expect(store.state.previousRides == rides)
+        #expect(asked.value == 2 * Self.windPoints(detail, rides: rides, summary: route).count)
     }
 
     @Test("WeatherKit failing online is unavailable; failing offline says so", arguments: [false, true])

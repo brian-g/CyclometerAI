@@ -94,6 +94,34 @@ extension WeatherClient {
     }
 }
 
+extension WeatherClient {
+    /// The wind at each of `points` for the hour the rider reaches it, for the wind map (#561):
+    /// one `forecast` request per point, all sent at once.
+    ///
+    /// A point whose request fails, or that the rider reaches after the forecast ends, is left out,
+    /// and the map draws the rest: one missing arrow beats none. Failures are logged in
+    /// `liveValue`. The answers come back in route order, whatever order they arrive in.
+    func wind(at points: [WindSamplePoint]) async -> [WindSample] {
+        await withTaskGroup(of: (Int, WindSample?).self) { group in
+            for (index, point) in points.enumerated() {
+                group.addTask {
+                    guard let forecast = try? await self.forecast(point.coordinate),
+                          let reading = WindSampling.reading(
+                              at: point.arrival, current: forecast.current, hourly: forecast.hourly
+                          )
+                    else { return (index, nil) }
+                    return (index, WindSample(coordinate: point.coordinate, reading: reading))
+                }
+            }
+            var answered: [(index: Int, sample: WindSample)] = []
+            for await (index, sample) in group {
+                if let sample { answered.append((index, sample)) }
+            }
+            return answered.sorted { $0.index < $1.index }.map(\.sample)
+        }
+    }
+}
+
 extension DependencyValues {
     var weatherClient: WeatherClient {
         get { self[WeatherClient.self] }

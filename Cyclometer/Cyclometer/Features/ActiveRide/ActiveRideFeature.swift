@@ -531,6 +531,12 @@ struct ActiveRideFeature {
         case speed(SpeedFeature.Action)
         case calibration(WheelCalibrationFeature.Action)
         case weather(RideWeatherFeature.Action)
+        /// W10's sheet opened (#561): sample the wind along the route ahead, unless it was sampled
+        /// within the last `RideWeatherFeature.refreshInterval`.
+        case weatherSheetOpened
+        /// The route's ride estimate, for timing the route ahead before this ride's own average
+        /// means anything (#561). Nil with nothing to estimate from.
+        case routeWindEstimated(TimeInterval?)
         case sensorHealth(SensorHealthFeature.Action)
         case navigation(NavigationFeature.Action)
         case trackRecorder(TrackPointRecorderFeature.Action)
@@ -1339,6 +1345,10 @@ struct ActiveRideFeature {
                     state.maxSpeedMPS = max(state.maxSpeedMPS, speedMPS)
                 }
                 return effect
+            case .weatherSheetOpened:
+                return openWeatherSheet(&state)
+            case .routeWindEstimated(let estimate):
+                return loadRouteWind(&state, estimate: estimate)
             case .calibration, .sensorHealth, .weather:
                 return .none
             case .navigation(.delegate(.turnAnnounced(let direction))):

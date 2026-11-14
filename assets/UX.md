@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-11-13 — Wind map (#561): §W10's sheet opens on a map of the wind (an even field of arrows from W10's reading on a free ride; the forecast along the route ahead while following one), and §S20's map draws the forecast wind along the route. One sample per 10 km, 2 to 8, each the forecast for the hour the rider gets there. §S15's map-sheet wind layer is left for a follow-up.  
 **Updated:** 2026-11-13 — §S05.1 Weather follows the route (#559): with a route chosen, the weather is at the route's start, not where the rider is, and needs no location access. Choosing a different route on S05.2 fetches it again; None goes back to the rider's position.  
 **Updated:** 2026-11-12 — §S20 Weather built (#204): live conditions at the route's start and the hourly strip for a ride on it, fetched each time S20 appears; Previous Rides rows gain their conditions. The forecast strip's "Now" now labels the hour containing the current time, on S05.1 and W10 too. Offline is named: "Offline: Weather unavailable" on §S20, §S05.1 and W10's sheet, "Weather unavailable" for any other failure. The map's wind overlay moves to #561.  
 **Updated:** 2026-11-11 — §S15 Weather built (#151): its own section after Time, with the ride's temperature and humidity ranges and a headwind / crosswind / tailwind bar of moving time. Not in §S10. WeatherKit's attribution footer is now smaller everywhere: the mark `Spacing.weatherMark` (12 pt) high, "Legal" in caption2.  
@@ -792,7 +793,10 @@ As built (#534): **Speed Gauge** in S08's Ride section, after Speed; W1 itself i
 - Empty state "—": no location, WeatherKit unreachable, or a forecast over an hour old. Always on the dashboard
 - VoiceOver: "Weather, 14 kilometers per hour, headwind, 18 degrees Celsius"; in rain, "Rain, 70% chance, from 3 PM", and on the 2x1 the wind and temperature after it
 - Sheet: Weather — the sky, then Wind (with the same arrow), From (compass point), Temperature and Humidity as sheet readings; the next three hours as S05.1's hourly strip; WeatherKit's attribution in the footer. With nothing to show, the footer reads "Offline: Weather unavailable" when the last request failed with no usable network (#204), otherwise "Weather unavailable". The card keeps its "—"
-- Not yet: a wind map over the route (#561, shared with S20's overlay, #204)
+- **Wind map (#561):** the sheet's first section, a map at S20's height (220 pt), only when there is weather and a fix to centre on. Arrows point the way the wind blows, longer for a stronger wind (16 to 34 pt, full length from about 43 km/h), in `textPrimary` edged in `bgPrimary`; none in a calm (under 0.5 m/s). They are sized in screen points and lie on the map plane, beneath the rider's dot. Static: animation is a later issue
+  - **Free ride:** W10's own reading, drawn as an even field (four columns, rows to the map's shape) over whatever the map shows, about 5 km across at first. No extra WeatherKit requests: its wind barely changes across a few kilometres
+  - **Following a route:** the route, framed whole with the rider on it, and the forecast wind along it from the rider to the finish, one sample per 10 km of what is left, 2 to 8 of them. Each is the forecast for the hour the rider is expected there: the rest of the route at this ride's average moving speed once it has gone 5 km, and before that in S05.1's estimate for the route. W10's reading is the sample where the rider is, so a route costs one request fewer than it has samples. Sampled when the sheet opens, and not again within 10 minutes; a failed point is left out
+  - Rendered in the shared `WindLayer`, which §S20 draws too
 
 ---
 
@@ -1446,7 +1450,7 @@ Sections appear on screen in the order listed below.
         - **Short stretches:** a stretch under 50 m takes the band of the stretch before it, so a reading flickering at a band edge doesn't break the line into slivers. Short stretches in a row that together pass 50 m draw as one, in the band they covered most of, so a long stretch ridden at a band edge keeps its own color.
       - **Legend:** a glass card at the bottom of the map: the coloring's name and unit, then five swatches with their ranges. VoiceOver reads it as one element, low to high.
       - **Late loads:** passes, stops and Health's heart rate zones that land after the sheet opened reach it.
-      - **Not built:** the wind layer (M10.6).
+      - **Not built:** the wind layer. #561 built the live one for W10 and §S20; a ride's own recorded weather is a different source, left for a follow-up.
 - Weather summary (not implemented until M10.6): The weather summary should list the temperature range of the ride, the humidity range, and the wind over the route ridden. It might be appropriate to summarize the weather with iOS foundation models. The weather should be captured at intervals during the ride. A capture that fails, such as with no data connection, is skipped silently: the ride never waits on it and the rider is never told.
   - **As built (#151):**
     - **Capture:** the current conditions of every forecast W10 already fetches during the ride (about every 10 minutes, whether or not W10 is on a page), so no extra WeatherKit requests. A refetch that returns the same observation adds nothing. Saved at every checkpoint and at the finish, and kept through a kill.
@@ -1454,7 +1458,7 @@ Sections appear on screen in the order listed below.
     - **Temperature and Humidity:** the lowest to the highest reading, "57–63 °F" and "58–70 %"; one value when the range rounds flat. Temperature in the locale's weather unit, as §S05.1.
     - **Wind:** a bar of the ride's moving time spent in headwind, crosswind and tailwind (`cyRatingBad`, `cyRatingOkay`, `cyRatingGood`), then each share as a whole percent, the three adding to 100. Each moving second's direction of travel comes from the track, from the point at least 20 m back in the same stretch of riding, and is set against the latest sample at or before it. Headwind, crosswind and tailwind each cover 45° either side of dead ahead, abeam and astern, W10's quarters (`RelativeWind`). Seconds under a wind below 0.5 m/s don't count; if every sample was that light the row is a single Wind reading, "Calm". With no track, there's no wind row.
     - **Footer:** WeatherKit's mark and Legal link once the attribution loads. Offline, "Apple Weather" stands in for the mark, with the Legal link to WeatherKit's fixed legal page, so stored weather is never shown uncredited.
-    - **Not built:** the Foundation Models summary; the wind layer on the map sheet (#561).
+    - **Not built:** the Foundation Models summary; the wind layer on the map sheet (a follow-up to #561, which built the live layer).
 - Summary: This shows some at a glance metrics in hero numbers. Ascent, Descent, Average Speed, Average Heart Rate, Average Cadence, Average Power (hidden until Phase 3), Calories.
   - Each value is hidden when the ride recorded no data for it (no "—").
   - Ascent and Descent are stored on the `Ride` at the finish, not recounted from the track on open (#460).
@@ -1563,7 +1567,7 @@ Sections appear on screen in the order listed below.
 > *Refer to RouteDetailView` — Protyped In source code.*
 
 ### Key Components
-- `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag). Route should show the direction of travel. Forecast wind direction and vectors over the route are #561's shared wind layer, which S20 will reuse: the forecast at each sample point for when the rider would reach it (moved there from #204)
+- `Map` with route polyline (green, 5pt stroke); start marker (green flag) and finish marker (blue checkered flag). Route should show the direction of travel. Forecast wind direction and vectors over the route (#561, moved there from #204): W10's wind map arrows, along the route for a ride starting now. One sample per 10 km, 2 to 8 (a loop's finish is its start, so two on a loop are the start and halfway), each the forecast for the hour a rider would reach it in the route's estimate (the Weather section's, 3 h with none). The Weather section's forecast at the start is the first sample, so it costs no request. Sampled each time S20 appears, once its forecast and its rides have loaded; with no forecast at the start, no arrows
 - Direction-of-travel arrows (#341), the same on S19, S20 and W8 and its sheet: filled triangles in the line's own colour, lying flat on the map and drawn beneath the rider's location dot. They are sized in screen points, not on the ground, so a pinch never grows them: about 16 pt at street level, stepping up a point at a time to about 22 pt as the view widens. They are spaced so about a dozen are in view
   - Zoomed out past 50 m per point (about 20 km across a phone-width map), no arrows draw. The cutoff is one map scale for every route on screen, so routes side by side show or hide their arrows together, never route by route
   - **Accepted gap (#341):** S20's 220 pt map frames any route more than about 7 km north to south past the cutoff, so a large route opens with no arrows until the rider zooms in. The live sheet's route overview does the same for a large route

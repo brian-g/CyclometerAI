@@ -43,6 +43,10 @@ struct RideWeatherFeature {
         /// The current conditions of every forecast fetched this ride (#151), for S15's weather
         /// summary. Saved at each checkpoint and at the finish, and restored on a resume.
         var samples: [RideWeatherSample] = []
+        /// The forecast wind along the route ahead, for the map in W10's sheet (#561). Sampled when
+        /// the sheet opens, not on this feature's timer: each sample is a request, and a rider who
+        /// never opens the sheet shouldn't spend them. Not saved: a resumed ride samples afresh.
+        var routeWind = RouteWindFeature.State()
 
         /// W10's sheet shows the next few hours: enough to see what the ride is heading into.
         static let forecastWindow: TimeInterval = 3 * 3600
@@ -74,9 +78,13 @@ struct RideWeatherFeature {
         case locationUpdated(LocationUpdate)
         case forecastLoaded(AttributedForecast)
         case fetchFailed(offline: Bool)
+        case routeWind(RouteWindFeature.Action)
     }
 
     var body: some ReducerOf<Self> {
+        Scope(state: \.routeWind, action: \.routeWind) {
+            RouteWindFeature()
+        }
         Reduce { state, action in
             switch action {
             case .locationUpdated(let update):
@@ -121,6 +129,9 @@ struct RideWeatherFeature {
                 state.isFetching = false
                 state.didLastAttemptFail = true
                 state.isLastFailureOffline = offline
+                return .none
+
+            case .routeWind:
                 return .none
             }
         }

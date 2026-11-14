@@ -16,6 +16,16 @@ struct WeatherMetrics: Equatable {
     /// The rider's direction of travel, for the wind's arrow; nil before they have moved.
     var course: Double? = nil
     var unit: UnitSystem = .metric
+    /// Where the rider is, which the wind map centres on (#561); nil before the first fix.
+    var riderCoordinate: RouteCoordinate? = nil
+    /// The route being ridden, empty on a free ride. With one, the map shows the wind along it.
+    var route: [RouteCoordinate] = []
+    /// The forecast wind along the route ahead, W10's own reading first (#561). Empty on a free
+    /// ride, where the map draws W10's reading as an even field instead.
+    var routeWind: [WindSample] = []
+
+    /// Whether the sheet has a wind map: a forecast, and a place to centre it.
+    var hasWindMap: Bool { forecast != nil && riderCoordinate != nil }
 
     var wind: MetricReading {
         guard let reading = forecast?.current else { return .missing }
@@ -53,8 +63,9 @@ struct WeatherMetrics: Equatable {
 
 extension RideWeatherFeature.State {
     /// The Weather sheet's inputs at `now`: nothing once the forecast is an hour old, and the strip
-    /// from the hour under way.
-    func metrics(at now: Date, unit: UnitSystem) -> WeatherMetrics {
+    /// from the hour under way. The rider's position and the route are the ride's, for the wind map.
+    func metrics(at now: Date, unit: UnitSystem, rider: Coordinate? = nil,
+                 route: [RouteCoordinate] = []) -> WeatherMetrics {
         let forecast = forecast(at: now)
         return WeatherMetrics(
             forecast: forecast,
@@ -62,7 +73,10 @@ extension RideWeatherFeature.State {
             now: now,
             isOffline: forecast == nil && isLastFailureOffline,
             course: course,
-            unit: unit
+            unit: unit,
+            riderCoordinate: rider.map { RouteCoordinate(latitude: $0.latitude, longitude: $0.longitude, elevationMeters: nil) },
+            route: route,
+            routeWind: route.isEmpty ? [] : routeWind.samples
         )
     }
 }
@@ -75,6 +89,8 @@ extension RideWeatherFeature.State {
 /// open sheet follows the ride (see `RideMetricsSheet`, #144).
 struct WeatherSheet: View {
     var metrics: (Date) -> WeatherMetrics = { _ in WeatherMetrics() }
+    /// Each time the sheet opens: the ride samples the wind along the route ahead (#561).
+    var onAppear: () -> Void = {}
 
     @State private var detent = PresentationDetent.medium
 
@@ -89,17 +105,34 @@ struct WeatherSheet: View {
                 .sheetCloseButton()
         }
         .presentationDetents([.medium, .large], selection: $detent)
+        .onAppear(perform: onAppear)
     }
 }
 
-/// The sheet's readings and forecast, apart from its navigation chrome so a snapshot can pin them.
-struct WeatherList: View {
+/// The sheet's map, readings and forecast, apart from its navigation chrome so a snapshot can pin
+/// them.
+///
+/// Generic over the map row, as `RouteDetailList` is: a live `Map` renders its tiles
+/// asynchronously and can't be pixel-snapshotted reproducibly, so tests pass a placeholder of the
+/// same height and the reference pins everything around it.
+struct WeatherList<MapRow: View>: View {
     let metrics: WeatherMetrics
+    let mapRow: MapRow
 
     @Environment(\.locale) private var locale
 
     var body: some View {
         List {
+            // First, at S20's height (#561, Brian). Only with weather to show: the unavailable sheet
+            // is unchanged.
+            if metrics.hasWindMap {
+                Section {
+                    mapRow
+                        .frame(height: RouteDetailView.mapHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerMd, style: .continuous))
+                        .listRowInsets(EdgeInsets())
+                }
+            }
             Section {
                 if let reading = metrics.forecast?.current {
                     Label {
@@ -140,6 +173,12 @@ struct WeatherList: View {
                 }
             }
         }
+    }
+}
+
+extension WeatherList where MapRow == WeatherMap {
+    init(metrics: WeatherMetrics) {
+        self.init(metrics: metrics, mapRow: WeatherMap(metrics: metrics))
     }
 }
 

@@ -575,13 +575,20 @@ struct NavigationRoute: Equatable, Sendable {
     /// Nil for a polyline with no segment to follow: a one-point GPX imports fine
     /// (`GPXRouteImporter` rejects only an empty one).
     init?(coordinates: [RouteCoordinate], maneuvers: [Maneuver], terrain: RouteTerrainAnalysis? = nil) {
-        guard coordinates.count > 1, let first = coordinates.first, let last = coordinates.last else { return nil }
+        guard coordinates.count > 1 else { return nil }
         self.coordinates = coordinates
         self.cumulativeDistances = RouteGeometry.cumulativeDistances(coordinates)
         self.maneuvers = maneuvers
-        self.isLoop = RouteGeometry.distanceMeters([first, last]) <= NavigationFeature.loopClosureMeters
+        self.isLoop = Self.isLoop(coordinates)
         self.elevationProfile = RouteGeometry.elevationProfile(coordinates, sampleCount: Self.elevationProfileSamples)
         self.climbs = RouteClimb.climbs(of: terrain, on: coordinates)
+    }
+
+    /// Whether `coordinates` end within `NavigationFeature.loopClosureMeters` of where they start:
+    /// `isLoop`'s rule, shared with S20's wind map (#561), which samples a route without loading it.
+    static func isLoop(_ coordinates: [RouteCoordinate]) -> Bool {
+        guard let first = coordinates.first, let last = coordinates.last else { return false }
+        return RouteGeometry.distanceMeters([first, last]) <= NavigationFeature.loopClosureMeters
     }
 
     /// Twice the 2×1 watermark's resolution (`Watermark.bucketCount`): a route is often
