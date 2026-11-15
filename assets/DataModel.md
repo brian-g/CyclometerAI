@@ -229,21 +229,22 @@ final class Ride {
     // Crash resume (#175): a ride killed mid-recording resumes from its last checkpoint, so these
     // persist live state the aggregates above can't reconstruct. Each is non-optional, so each
     // carries a declaration-site default — §9's first key rule (#186); an `init` assignment alone
-    // fails the store load for anyone with an older store.
+    // fails the store load for anyone with an older store. speedSampleCount is also W3's moving
+    // seconds, which S15's Time section shows (#536).
     var isAutoPaused: Bool = false             // the current .paused was auto-triggered (stoplight, #102), not a Pause tap — auto-resume-on-motion applies only to the former
     var zeroSpeedSeconds: Int = 0              // consecutive zero-speed seconds, so a kill near the auto-pause/auto-end threshold doesn't hand a resumed ride a fresh grace window
     var speedSampleCount: Int = 0              // The sample counts behind averageSpeedMPS / averageHeartRateBPM /
     var hrSampleCount: Int = 0                 // averageCadenceRPM, so a resumed ride seeds its true prior weight:
     var cadenceSampleCount: Int = 0            // an average alone can't be un-averaged back into a (sum, count) pair
     // W5's time pedalling at each whole rpm, and time coasting (#340; per rpm since #79), so a
-    // resumed ride's detail sheet still covers the time before the kill. Written at every
-    // checkpoint and at ride end. JSON [Int: TimeInterval], read and written through
-    // `cadenceSecondsByRPM`; optional, so #186's backfill trap doesn't apply to it.
+    // resumed ride's detail sheet still covers the time before the kill; S15's Cadence sections
+    // read them too. Written at every checkpoint and at ride end. JSON [Int: TimeInterval], read
+    // and written through `cadenceSecondsByRPM`; optional, so #186's backfill trap doesn't apply.
     var cadenceSecondsByRPMData: Data?
     var cadenceCoastingSeconds: TimeInterval = 0
     // How many times this ride has been resumed: the index of the track segment being recorded
-    // (#263). Persisted so a resume doesn't restart the numbering at 0 and merge the new stretch of
-    // riding into the ride's first segment.
+    // (#263). Persisted so a ride resumed after a kill doesn't restart the numbering at 0 and merge
+    // the new stretch of riding into the ride's first segment.
     var trackSegmentIndex: Int = 0
     // Every pause, manual or auto, in order (#537), for S15's stops. Written at every checkpoint and
     // at the finish. JSON [RidePause] (startedAt, endedAt?, isAuto), read and written through
