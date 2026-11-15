@@ -141,11 +141,17 @@ enum GPXExporter {
         rideStartedAt: Date,
         documentsDirectory: URL = .documentsDirectory
     ) throws -> URL {
-        let ridesDirectory = documentsDirectory.appendingPathComponent("Rides", isDirectory: true)
+        let ridesDirectory = ridesDirectory(in: documentsDirectory)
         try FileManager.default.createDirectory(at: ridesDirectory, withIntermediateDirectories: true)
         let url = uniqueURL(in: ridesDirectory, stem: filenameStem(for: rideStartedAt))
         try Data(xml.utf8).write(to: url, options: .atomic)
         return url
+    }
+
+    /// The folder every export is written to, and the only place a ride's export is looked for
+    /// (#546): `RidePersistenceActor.exportURL(for:)` joins it to the stored file name.
+    static func ridesDirectory(in documentsDirectory: URL) -> URL {
+        documentsDirectory.appending(component: "Rides", directoryHint: .isDirectory)
     }
 
     /// The unsuffixed name wins when free, preserving the documented convention for

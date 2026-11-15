@@ -16,17 +16,21 @@ struct RideDeletionTests {
         let swiftDataStack: SwiftDataStack
         let rideId: UUID
         let directory: URL
-        var fileURL: URL { directory.appendingPathComponent("Cyclometer_ride.gpx") }
+        /// Where the export really is: `Documents/Rides/` under `directory`.
+        var fileURL: URL { GPXExporter.ridesDirectory(in: directory).appendingPathComponent("AcmeRide_ride.gpx") }
     }
 
     /// A finalized ride with three track points, two pass events and a real file on disk.
     /// `writesFile: false` is the ride whose export failed — `gpxFileURL` stays nil.
-    private static func makeRide(writesFile: Bool = true) async throws -> Fixture {
-        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+    /// `movedContainer` stores the URL the file had before iOS moved the app's container (#546).
+    private static func makeRide(writesFile: Bool = true, movedContainer: Bool = false) async throws -> Fixture {
         let rideId = UUID()
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("RideDeletionTests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: GPXExporter.ridesDirectory(in: directory), withIntermediateDirectories: true
+        )
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient(documentsDirectory: directory)
         let fixture = Fixture(
             client: client, swiftDataStack: swiftDataStack, rideId: rideId, directory: directory
         )
@@ -55,11 +59,12 @@ struct RideDeletionTests {
         if writesFile {
             try Data("<gpx/>".utf8).write(to: fixture.fileURL)
         }
+        let storedURL = movedContainer ? PersistenceClientTests.movedContainerURL(of: fixture.fileURL) : fixture.fileURL
         let summary = RideSummaryUpdate(
             rideId: rideId, recordingState: .ended,
             durationSeconds: 3, distanceMeters: 12, averageSpeedMPS: 4, maxSpeedMPS: 4
         )
-        try await client.finalizeRide(rideId, base.addingTimeInterval(3), summary, writesFile ? fixture.fileURL : nil)
+        try await client.finalizeRide(rideId, base.addingTimeInterval(3), summary, writesFile ? storedURL : nil)
 
         return fixture
     }
@@ -82,6 +87,19 @@ struct RideDeletionTests {
         #expect(FileManager.default.fileExists(atPath: fixture.fileURL.path) == false)
         #expect(try await fixture.client.fetchTrackPoints(fixture.rideId).isEmpty)
         #expect(try await fixture.client.fetchVehiclePassEvents(fixture.rideId).isEmpty)
+        #expect(try Self.rideExists(fixture.rideId, in: fixture.swiftDataStack) == false)
+    }
+
+    /// Before #546 the remove missed at the stale path, read that as "already gone", and left the
+    /// file for the next launch's sweep.
+    @Test("Deleting a ride removes its export after iOS moves the app's container (#546)")
+    func deleteRemovesExportInMovedContainer() async throws {
+        let fixture = try await Self.makeRide(movedContainer: true)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        try await fixture.client.deleteRide(fixture.rideId)
+
+        #expect(FileManager.default.fileExists(atPath: fixture.fileURL.path) == false)
         #expect(try Self.rideExists(fixture.rideId, in: fixture.swiftDataStack) == false)
     }
 

@@ -2402,3 +2402,21 @@ Plan: rain chance ≥ 50% at any route point reached within 2 h (rider's spot in
 **Review:** Rain along the route reuses the wind map's sampling, capped at the stretch reached within `RainOutlook.window`, and the client's per-point fan-out (`forecasts(at:)`, which `wind(at:)` now wraps). Each point is judged by the hourly entry containing its arrival, because current conditions carry no chance of rain. The banner state lives in `RideWeatherFeature` beside the forecast, and the fetches bypass `forecastLoaded` so S15 records only where the rider rode. Changes from the plan: the distance reuses W9's `turnDistance` (one decimal, metres close in) instead of a new whole-number formatter. PRD §12 now also records #561's points ahead, which were missing. Full suite: 2836/2837; the one failure was `turnByTurnOffKeepsFixesFromNavigation`, an exhaustive test with a route loaded that now also receives the rain check. Updated to expect it, and it passes. Not covered by tests: live WeatherKit answers along a real route.
 
 **Code review (7194f10 → follow-up):** the review applied four small fixes: `reading(at:)` compares hour dates, not whole readings; the failable init moved to an extension; a "Rain here" preview; test headings reordered. Brian asked for three more. (1) No check while off route. (2) No check while no one can see the dashboard: AppFeature now copies `isDashboardVisible` into the ride on each `screenVisibilityChanged`, so paused, locked, minimised and background rides spend nothing. (3) Points within `RainAhead.hereMeters` (1 km) of the rider aren't asked about, so no "0 m ahead". VoiceOver phrasing is filed as #568. Full suite: 2839/2839.
+
+---
+
+## #546 — S15 share button missing: stored GPX URLs point at old containers (#358 closed as duplicate)
+
+Root cause (device, 2026-11-14): all 10 rides store absolute `file:///var/mobile/Containers/Data/Application/<UUID>/Documents/Rides/…` URLs across **9 different container UUIDs**; every named file exists in the current `Documents/Rides/`. `RidePersistenceActor`'s stats mapping drops `gpxFileURL` when `fileExists(atPath:)` fails on the stale path, so S15's `ShareLink` is never built. Same cause breaks delete (orphans) and rename (#286).
+
+Plan: resolve at the point of use — keep `gpxFileURL` (no migration), exports stay in `Documents/Rides/` (moving to the `Documents` root fixes nothing: it is inside the same moving container).
+
+- [x] `GPXExporter.ridesDirectory(in:)`, used by `write`
+- [x] `RidePersistenceActor.exportURL(for:)` via `@Dependency(\.gpxDocumentsDirectory)`; stats, `removeGPXFile`, `replaceGPXFile` go through it
+- [x] Tests: moved-container URL → stats offer Share, delete removes the file, rename rewrites it (row keeps its URL); fixtures now lay files out under `Documents/Rides/`
+- [x] Device evidence posted on #546; #358 closed as duplicate
+- [x] Targeted suites 132/132; mutation check: the 3 new tests fail without the resolver
+- [x] Brian verifies on device → full suite → commit → PR
+- [x] Also (Brian's request): S15's Edit button is a `pencil` symbol, "Edit" as its VoiceOver label
+
+**Review:** One resolver, `RidePersistenceActor.exportURL(for:)`, joins the stored file name to the current `Documents/Rides/` (`GPXExporter.ridesDirectory(in:)`), read from `gpxDocumentsDirectory`. S15's stats, delete and rename go through it; the sweep already compared names. No migration: rows keep the URL they were written with, and the ride-end marker needs nothing, since every reader resolves by name. Moving exports to the `Documents` root was considered and dropped: it lives in the same container, so it would not have fixed anything. Verified on device by Brian. Full suite: 2843/2843.
