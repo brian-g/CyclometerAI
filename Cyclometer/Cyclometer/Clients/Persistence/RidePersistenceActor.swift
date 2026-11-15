@@ -1,4 +1,4 @@
-import Dependencies
+import ComposableArchitecture
 import Foundation
 import SwiftData
 import os
@@ -236,7 +236,9 @@ actor RidePersistenceActor {
         do {
             try FileManager.default.removeItem(at: fileURL)
         } catch CocoaError.fileNoSuchFile {
-            // Already gone — the rider may have deleted it from Files themselves.
+            // Already gone — the rider may have deleted it from Files themselves. Noted, not
+            // silent: a resolver miss looked exactly like this and hid #546.
+            logger.notice("removeGPXFile(\(id, privacy: .public)): no \(fileURL.lastPathComponent, privacy: .public) in Documents/Rides")
         } catch {
             logger.error("removeGPXFile(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -251,9 +253,12 @@ actor RidePersistenceActor {
     /// would leave the orphan #261 removed. `.atomic` writes a temporary file and swaps it in,
     /// so a failed write leaves the previous file untouched.
     func replaceGPXFile(id: UUID, contents: Data) throws {
-        guard let fileURL = try rideRow(id: id).flatMap(exportURL(for:)),
-              FileManager.default.fileExists(atPath: fileURL.path)
-        else { return }
+        guard let fileURL = try rideRow(id: id).flatMap(exportURL(for:)) else { return }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            // Noted, not silent: a resolver miss looked exactly like this and hid #546.
+            logger.notice("replaceGPXFile(\(id, privacy: .public)): no \(fileURL.lastPathComponent, privacy: .public) in Documents/Rides")
+            return
+        }
         do {
             try contents.write(to: fileURL, options: .atomic)
         } catch {
@@ -442,9 +447,6 @@ actor RidePersistenceActor {
         }
     }
 
-    /// The row itself for the callers that need the object rather than a DTO, and nil
-    /// rather than a throw when it is missing — named apart from `fetchRide(id:)` for the
-    /// same reason `RoutePersistenceActor.routeRow` is.
     /// Where this ride's export is now, or nil when it has none (#546). Every reader that
     /// touches the file goes through here. `gpxFileURL` is absolute, and iOS moves the app's
     /// container: on an update, a restore, or a reinstall from Xcode, where one device's rides
@@ -456,6 +458,9 @@ actor RidePersistenceActor {
         }
     }
 
+    /// The row itself for the callers that need the object rather than a DTO, and nil
+    /// rather than a throw when it is missing — named apart from `fetchRide(id:)` for the
+    /// same reason `RoutePersistenceActor.routeRow` is.
     private func rideRow(id: UUID) throws -> Ride? {
         var descriptor = FetchDescriptor<Ride>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1

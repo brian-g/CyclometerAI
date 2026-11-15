@@ -62,8 +62,9 @@ enum GPXExporter {
         return try write(xml: buildXML(inputs), rideStartedAt: inputs.ride.startedAt, documentsDirectory: documentsDirectory)
     }
 
-    /// Rebuilds a ride's GPX and replaces its file at the same URL, after a rename (#286).
-    /// The file is written at ride end, so without this it keeps the name the ride had then.
+    /// Rebuilds a ride's GPX and replaces its file in place, after a rename (#286). The file is
+    /// found by name (#546), and written at ride end, so without this it keeps the name the ride
+    /// had then.
     /// The inputs haven't changed since that export, so only the name differs. Replacing the
     /// file is the persistence actor's job, so it can't race a delete of the same ride.
     static func rewrite(rideId: UUID) async throws {
@@ -141,15 +142,16 @@ enum GPXExporter {
         rideStartedAt: Date,
         documentsDirectory: URL = .documentsDirectory
     ) throws -> URL {
-        let ridesDirectory = ridesDirectory(in: documentsDirectory)
-        try FileManager.default.createDirectory(at: ridesDirectory, withIntermediateDirectories: true)
-        let url = uniqueURL(in: ridesDirectory, stem: filenameStem(for: rideStartedAt))
+        let folder = ridesDirectory(in: documentsDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = uniqueURL(in: folder, stem: filenameStem(for: rideStartedAt))
         try Data(xml.utf8).write(to: url, options: .atomic)
         return url
     }
 
     /// The folder every export is written to, and the only place a ride's export is looked for
-    /// (#546): `RidePersistenceActor.exportURL(for:)` joins it to the stored file name.
+    /// (#546): `RidePersistenceActor.exportURL(for:)` joins it to the stored file name, and the
+    /// launch sweep lists it.
     static func ridesDirectory(in documentsDirectory: URL) -> URL {
         documentsDirectory.appending(component: "Rides", directoryHint: .isDirectory)
     }
