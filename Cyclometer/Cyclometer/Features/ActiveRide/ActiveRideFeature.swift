@@ -118,6 +118,7 @@ struct ActiveRideFeature {
     @Dependency(\.continuousClock) var clock
     @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.variaRadarClient) var variaRadarClient
+    @Dependency(\.bleCSCClient) var bleCSCClient
     @Dependency(\.locationClient) var locationClient
     @Dependency(\.altimeterClient) var altimeterClient
     @Dependency(\.permissionsClient) var permissionsClient
@@ -931,13 +932,18 @@ struct ActiveRideFeature {
                         // which waits for the finalize above to land and refreshes the list after
                         // it (#248).
                     },
-                    .run { [bleHRClient, variaRadarClient, locationClient, audioClient] _ in
+                    .run { [bleHRClient, variaRadarClient, bleCSCClient, locationClient, audioClient] _ in
                         async let hr: Void = bleHRClient.disconnect()
                         async let radar: Void = variaRadarClient.disconnect()
+                        // Speed and cadence are started by their child features, but end here
+                        // with the others: left connected, a sleeping sensor sets off the
+                        // reconnect ladder in the background (#417). The paired assignments
+                        // survive, so the next ride's scan reconnects them.
+                        async let csc: Void = bleCSCClient.disconnect()
                         async let loc: Void = locationClient.stopUpdates()
                         // Or the engine holds the app awake in the background (`AudioClient.stop`).
                         async let audio: Void = audioClient.stop()
-                        _ = await (hr, radar, loc, audio)
+                        _ = await (hr, radar, csc, loc, audio)
                     }
                 )
             case .finishAlert:

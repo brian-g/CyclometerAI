@@ -806,6 +806,47 @@ struct BLECSCIntegrationTests {
         #expect(harness.connectCount.value == countBefore)
     }
 
+    /// Ride finish calls `disconnect()` (#417). A sensor that went to sleep a moment
+    /// earlier is already on the reconnect ladder, which has no cap since #557 — the
+    /// teardown has to stop it, and must leave the pairing for the next ride's scan.
+    @Test("Disconnect mid-reconnect stops the ladder and the next scan reconnects the paired sensor")
+    func disconnectStopsLadderAndKeepsPairing() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+        await harness.client.startScanning()
+
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .scanning)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        #expect(await speedStates.next() == .connecting)
+        #expect(await connects.next() == id)
+        harness.bringToActive(id)
+        #expect(await speedStates.next() == .connected)
+        #expect(await speedStates.next() == .active)
+
+        harness.events.yield(.disconnected(id: id, error: nil))
+        #expect(await speedStates.next() == .reconnecting)
+        #expect(await harness.clock.advanceToNextSleep() == .seconds(1))
+        #expect(await connects.next() == id)              // first ladder attempt
+
+        await harness.client.disconnect()
+        #expect(await speedStates.next() == .disconnected)
+        #expect(harness.clock.isIdle)
+        let countAfterDisconnect = harness.connectCount.value
+        await harness.clock.advance(by: .seconds(120))
+        #expect(harness.connectCount.value == countAfterDisconnect)
+
+        // The next ride: its scan finds the sensor and reconnects it with its roles.
+        await harness.client.startScanning()
+        #expect(await speedStates.next() == .scanning)
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        #expect(await speedStates.next() == .connecting)
+        #expect(await connects.next() == id)
+    }
+
     @Test("setWheelCircumference scales subsequent speed")
     func wheelCircumferenceScalesSpeed() async {
         let harness = Harness()
