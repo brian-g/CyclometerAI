@@ -464,7 +464,7 @@ Zone boundaries:
 - **`maxHeartRate` cannot be read from Apple Health — there is no max-heart-rate type.** Only `heartRate`, `restingHeartRate`, `walkingHeartRateAverage`, `heartRateVariabilitySDNN` and `heartRateRecoveryOneMinute` exist. A `.discreteMax` query over historical samples returns *highest ever observed*, which understates any rider who has not gone near their limit wearing a watch, so it is not used. Max HR comes from the 220 − age estimate (§9.4) or manual entry
 - If Apple Health does not have these values, the user is prompted to enter them manually in the HR Zones section of S12 (S03 and S13 are both retired; see UX.md §S12)
 - **Zone boundaries come from Apple Health first (#238).** iOS 27's `HKHealthStore.preferredWorkoutZoneConfiguration(for: .heartRate)` returns the rider's zones: ones they set in Health, or Apple's own from their health data. Each boundary resolves `S12 override ?? Health ?? Karvonen`. A resting or max HR override means the rider disagrees with Health, so Karvonen from their values applies instead. Health's zones are used only in a shape the table can hold: five zones, rising, above resting. Otherwise Karvonen applies whole. They are not capped at the app's max, which is an estimate; zone 5's top rises to meet them instead
-- App-stored values are always considered overrides; Apple Health is the source of truth unless the user has manually overridden. **This is literal since #96**: `RiderProfile` (DataModel.md §3.5) stores *only* overrides, as two optionals, and resolves `override ?? healthKit ?? default` at read time. A rider who never disagrees with Health persists nothing at all. M10 ships the storage and the Karvonen derivation; M5 supplies the Apple Health term
+- App-stored values are always considered overrides; Apple Health is the source of truth unless the user has manually overridden. **This is literal since #96**: `RiderProfile` (DataModel.md §3.5) stores *only* overrides, as six optionals (resting, max and the four zone boundaries), and resolves `override ?? healthKit ?? default` at read time. A rider who never disagrees with Health persists nothing at all. M10 ships the storage and the Karvonen derivation; M5 supplies the Apple Health term
 
 **Color Mapping:**
 | Zone | Token | Hex (Light) |
@@ -1206,7 +1206,7 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 
 ### Persistence Strategy
 
-> **Hybrid persistence:** In-memory ring buffer (`RideDataBuffer`) during active rides, flushed to CoreData via `NSBatchInsertRequest` at ride end for raw `TrackPoint` time-series. SwiftData with `@Query` for `Ride` summaries, `UserProfile`, and history screens.
+> **Hybrid persistence:** In-memory ring buffer (`RideDataBuffer`) during active rides, flushed to CoreData via `NSBatchInsertRequest` at ride end for raw `TrackPoint` time-series. SwiftData with `@Query` for `Ride` summaries and history screens. The rider's profile and preferences are not SwiftData: each is a single JSON document (see Rider Profile, Preferences and Paired Sensors below).
 
 ---
 
@@ -1334,29 +1334,15 @@ enum VehicleSize: String, Codable {
 
 ---
 
-### UserProfile
+### Rider Profile, Preferences and Paired Sensors
 
-```swift
-@Model class UserProfile {
-    var id: UUID
-    
-    var restingHeartRate: Int
-    var maxHeartRate: Int
-    var heartRateSourceIsAppleHealth: Bool
-    var dateOfBirth: DateComponents?
-    
-    var preferredUnit: UnitSystem
-    var wheelCircumferenceMM: Int      // default 2096; updated by auto-calibration
-    var mapOrientation: MapOrientation
-    
-    var pairedRadarIdentifier: UUID?
-    var pairedHRSensorIdentifier: UUID?
-    var pairedSpeedCadenceSensorIdentifier: UUID?
-}
+> Replaces the `UserProfile` entity of earlier revisions (OQDM5, #67, #96). The shapes are specified in `DataModel.md`, which is canonical for them; this section only names them.
 
-enum UnitSystem: String, Codable { case metric, imperial }
-enum MapOrientation: String, Codable { case headingUp, northUp }
-```
+- **`RiderProfile`** (`DataModel.md` §3.5) — heart-rate *overrides* only: resting, max and the four zone boundaries. Each is `nil` until the rider disagrees with Health, and values resolve `override ?? healthKit ?? default` at read time (§8.5).
+- **`AppPreferences`** (`DataModel.md` §3.6) — every other setting the rider makes: unit system, wheel circumference, map orientation, ride and display toggles, and the paired sensors.
+- **`PairedSensor`** (`DataModel.md` §3.7) — one BLE sensor in one `SensorRole` (radar, heart rate, speed, cadence; power in Phase 3), held as an array inside `AppPreferences`. One sensor per role; a combo CSC sensor assigned both roles appears twice, once as speed and once as cadence.
+
+`RiderProfile` and `AppPreferences` are not SwiftData `@Model`s: each is a `Codable` struct stored as one JSON document through `@Shared(.fileStorage)`.
 
 ---
 
@@ -1388,7 +1374,8 @@ AppFeature
 ├── ActiveRideFeature
 │   ├── RadarFeature                    ← BLE stream, alert level, vehicle pass detection
 │   ├── HeartRateFeature
-│   ├── SpeedCadenceFeature
+│   ├── SpeedFeature
+│   ├── CadenceFeature
 │   ├── NavigationFeature               ← route following, turn alerts, off-route
 │   ├── TrackPointRecorderFeature       ← 1Hz track points + vehicle pass event recording
 │   ├── WheelCalibrationFeature         ← GPS vs BLE auto-calibration
@@ -1419,10 +1406,11 @@ Cyclometer/
 ├── App/
 ├── Features/
 │   ├── ActiveRide/
+│   │   ├── HeartRate/
+│   │   ├── Speed/
+│   │   ├── Cadence/
+│   │   └── Navigation/
 │   ├── Radar/
-│   ├── HeartRate/
-│   ├── SpeedCadence/
-│   ├── Navigation/
 │   ├── TrackPointRecorder/
 │   ├── WheelCalibration/
 │   ├── AlertOrchestrator/
@@ -1445,7 +1433,10 @@ Cyclometer/
 │   ├── RadarEvent.swift
 │   ├── RadarVehicle.swift
 │   ├── VehiclePassEvent.swift
-│   └── UserProfile.swift
+│   ├── RiderProfile.swift
+│   ├── AppPreferences.swift
+│   ├── PairedSensor.swift
+│   └── SensorRole.swift
 ├── Export/
 │   └── GPXExporter.swift
 ├── DesignSystem/
@@ -1456,7 +1447,8 @@ Cyclometer/
     ├── RadarFeatureTests.swift
     ├── VehiclePassDetectionTests.swift
     ├── HeartRateFeatureTests.swift
-    ├── SpeedCadenceFeatureTests.swift
+    ├── SpeedFeatureTests.swift
+    ├── CadenceFeatureTests.swift
     ├── WheelCalibrationTests.swift
     ├── AlertOrchestratorTests.swift
     ├── AudioAlertTests.swift
@@ -1506,7 +1498,7 @@ Cyclometer/
 
 ### Localization (MVP)
 - English only at launch
-- Unit system: metric / imperial toggle in UserProfile
+- Unit system: metric / imperial toggle in AppPreferences (`DataModel.md` §3.6)
 - Date/time: respects device locale
 - GPX timestamps: UTC per GPX 1.1 spec
 
