@@ -262,6 +262,24 @@ struct WidgetAccessibilityTests {
         #expect(host.presentedText().contains("North up"))
     }
 
+    // MARK: - Ride banner
+
+    /// #568: the banner is one element, its icon silent, reading its words with units spelled out;
+    /// one without a spoken version reads its text as shown.
+    @Test func rideBannerReadsItsWords() throws {
+        let rain = RideBanner(
+            text: "Rain 70% · 18.4 km ahead", icon: "cloud.rain.fill",
+            spokenText: "Rain, 70% chance, 18.4 kilometers ahead"
+        )
+        let offRoute = RideBanner(text: NavigationFeature.offRouteBannerText, icon: "exclamationmark.triangle")
+        for (banner, spoken) in [(rain, "Rain, 70% chance, 18.4 kilometers ahead"), (offRoute, NavigationFeature.offRouteBannerText)] {
+            let host = try Host(banner, height: 60)
+            defer { host.tearDown() }
+            let element = try host.onlyElement()
+            #expect(element.accessibilityLabel == spoken)
+        }
+    }
+
     // MARK: - S05.3 mini-player
 
     /// #404: the strip is one button, and its ring reads as route progress rather than a bare

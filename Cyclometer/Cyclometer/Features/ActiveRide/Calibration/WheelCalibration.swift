@@ -115,4 +115,11 @@ enum WheelCalibration {
     static func bannerText(mm: Int) -> String {
         "Wheel size auto-adjusted to \(mm) mm"
     }
+
+    /// `bannerText(mm:)` as VoiceOver reads it, the unit in words (#568): "…to 2,145 millimeters".
+    static func spokenBannerText(mm: Int) -> String {
+        let size = Measurement(value: Double(mm), unit: UnitLength.millimeters)
+            .formatted(.measurement(width: .wide, usage: .asProvided))
+        return "Wheel size auto-adjusted to \(size)"
+    }
 }

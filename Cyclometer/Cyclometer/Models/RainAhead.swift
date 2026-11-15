@@ -39,6 +39,14 @@ struct RainAhead: Equatable, Sendable {
         let distance = unitSystem.turnDistance(fromMeters: distanceAheadMeters)
         return "\(name) \(percent) · \(distance.value) \(distance.unit) ahead"
     }
+
+    /// The banner as VoiceOver reads it (#568): "Rain, 70% chance, 18.4 kilometers ahead", or
+    /// "…, here". Begun as W10's rain is (`RainOutlook.spokenChance`), with the distance in words
+    /// (`UnitSystem.spokenTurnDistance`) so no unit symbol or "·" is read as written.
+    func spokenText(unitSystem: UnitSystem) -> String {
+        let place = isHere ? "here" : "\(unitSystem.spokenTurnDistance(fromMeters: distanceAheadMeters)) ahead"
+        return "\(RainOutlook.spokenChance(chance, for: condition)), \(place)"
+    }
 }
 
 // In an extension, so the struct keeps its synthesized memberwise initialiser.

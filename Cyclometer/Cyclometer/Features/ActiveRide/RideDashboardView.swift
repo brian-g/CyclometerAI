@@ -45,20 +45,21 @@ struct RideDashboardView: View {
         // push page content down. The overlay keeps the safe area, so the grabber
         // sits just below the Dynamic Island while the pages bleed up behind it.
         .overlay(alignment: .top) {
+            let banner = activeBanner
             VStack(spacing: Spacing.xs) {
                 // Edit mode can't be minimised (#141), so the grabber, a minimise cue, steps aside.
                 if !store.isEditingDashboard {
                     grabber()
                 }
-                if let banner = activeBanner {
-                    RideBanner(text: banner.text, icon: banner.icon)
+                if let banner {
+                    banner
                         .transition(bannerTransition)
                         // A notice, not a control. In edit mode it sits over the top row's remove
                         // buttons (#141 review), so touches pass through to them.
                         .allowsHitTesting(false)
                 }
             }
-            .animation(.default, value: activeBanner?.text)
+            .animation(.default, value: banner?.text)
         }
         // The dots share the ride controls' row, flush with the buttons' bottom edge (#447), and
         // sit beneath them: a long indicator can be drawn over, but never takes a button's touch.
@@ -200,11 +201,12 @@ struct RideDashboardView: View {
         reduceMotion ? .opacity : .scale(scale: 0.85).combined(with: .opacity)
     }
 
-    private var activeBanner: (text: String, icon: String)? {
+    private var activeBanner: RideBanner? {
         Self.banner(
             sourceSwitch: store.speed.sourceSwitchBanner,
-            calibration: store.calibration.banner,
-            rain: store.weather.rainAhead.map { ($0.bannerText(unitSystem: store.unitSystem), $0.symbolName) },
+            calibrationMM: store.calibration.bannerMM,
+            rain: store.weather.rainAhead,
+            unitSystem: store.unitSystem,
             isOffRoute: store.navigation.isOffRoute
         )
     }
@@ -222,17 +224,31 @@ struct RideDashboardView: View {
     ///    four seconds.
     ///
     /// Takes the inputs rather than the state, so the view keeps observing exactly those and
-    /// the order can be tested without rendering a dashboard.
+    /// the order can be tested without rendering a dashboard. Only the winner's text is built.
+    /// A notice whose text carries a unit symbol is spoken with the unit in words (#568).
     static func banner(
         sourceSwitch: String?,
-        calibration: String?,
-        rain: (text: String, icon: String)?,
+        calibrationMM: Int?,
+        rain: RainAhead?,
+        unitSystem: UnitSystem,
         isOffRoute: Bool
-    ) -> (text: String, icon: String)? {
-        if let sourceSwitch { return (sourceSwitch, "shuffle") }
-        if let calibration { return (calibration, "ruler") }
-        if let rain { return rain }
-        if isOffRoute { return (NavigationFeature.offRouteBannerText, "exclamationmark.triangle") }
+    ) -> RideBanner? {
+        if let sourceSwitch { return RideBanner(text: sourceSwitch, icon: "shuffle") }
+        if let mm = calibrationMM {
+            return RideBanner(
+                text: WheelCalibration.bannerText(mm: mm),
+                icon: "ruler",
+                spokenText: WheelCalibration.spokenBannerText(mm: mm)
+            )
+        }
+        if let rain {
+            return RideBanner(
+                text: rain.bannerText(unitSystem: unitSystem),
+                icon: rain.symbolName,
+                spokenText: rain.spokenText(unitSystem: unitSystem)
+            )
+        }
+        if isOffRoute { return RideBanner(text: NavigationFeature.offRouteBannerText, icon: "exclamationmark.triangle") }
         return nil
     }
 }

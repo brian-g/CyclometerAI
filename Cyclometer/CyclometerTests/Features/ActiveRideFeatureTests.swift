@@ -3963,7 +3963,7 @@ struct ActiveRideFeatureSharedPeripheralTests {
         // roles share a peripheral. Tracked separately; asserted here so the gap is
         // visible at the assertion rather than only in a tracker.
         #expect(store.state.speed.sourceSwitchBanner != nil)
-        #expect(store.state.calibration.banner == nil)
+        #expect(store.state.calibration.bannerMM == nil)
 
         await clock.advance(by: SpeedFeature.bannerDismissDelay)
         await store.receive(\.speed.bannerDismissed) {

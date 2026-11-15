@@ -135,4 +135,9 @@ struct WheelCalibrationTests {
     func bannerText() {
         #expect(WheelCalibration.bannerText(mm: 2145) == "Wheel size auto-adjusted to 2145 mm")
     }
+
+    @Test("VoiceOver reads the banner's unit in words (#568)")
+    func spokenBannerText() {
+        #expect(WheelCalibration.spokenBannerText(mm: 2145) == "Wheel size auto-adjusted to 2,145 millimeters")
+    }
 }

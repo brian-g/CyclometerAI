@@ -120,4 +120,15 @@ struct RainAheadTests {
         here.distanceAheadMeters = 0
         #expect(here.bannerText(unitSystem: .metric) == "Rain 70% · here")
     }
+
+    /// #568: VoiceOver reads W10's rain phrasing, the distance in words, never "km" or "·".
+    @Test("VoiceOver reads the chance and how far ahead in words, or here")
+    func spokenText() {
+        let ahead = RainAhead(chance: 0.7, condition: .rain, isDaylight: true, distanceAheadMeters: 18_400, arrival: Self.now)
+        #expect(ahead.spokenText(unitSystem: .metric) == "Rain, 70% chance, 18.4 kilometers ahead")
+        #expect(ahead.spokenText(unitSystem: .imperial) == "Rain, 70% chance, 11.4 miles ahead")
+        var here = ahead
+        here.distanceAheadMeters = 0
+        #expect(here.spokenText(unitSystem: .metric) == "Rain, 70% chance, here")
+    }
 }
