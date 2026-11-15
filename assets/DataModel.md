@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-11-11 (#151) — §3.1: `Ride.weather` is now a list of `RideWeatherSample`s, one per forecast fetched during the ride, in place of the single `RideWeather` captured at the start. Same `weatherData` column, so no migration: nothing wrote it before.
+**Updated:** 2026-11-15 (#245) — §3.1 reconciled with `Ride.swift`, the source of truth: it gains the ten stored properties it was missing (#175's crash-resume fields, W5's cadence columns, `trackSegmentIndex`, `isRouteComplete`, `isHealthWorkoutOwed`) and drops the `radarEvents` and `vehiclePassEvents` `@Relationship` arrays, which #172 replaced with `rideId` foreign keys. `recordingState` is typed `Ride.RecordingState`, distinct from `ActiveRideFeature`'s unpersisted `RideRecordingState`. §2's ERD marks the `rideId` links as foreign keys. §9 states the declaration-site-default rule that §3.1 and §3.10 already cited. Documentation only; no schema change.
+**Previously:** 2026-11-11 (#151) — §3.1: `Ride.weather` is now a list of `RideWeatherSample`s, one per forecast fetched during the ride, in place of the single `RideWeather` captured at the start. Same `weatherData` column, so no migration: nothing wrote it before.
 **Previously:** 2026-11-05 (#536) — §3.1: `Ride` gains `calorieSeriesData`, W23's calorie series stored with #460's total so S15's Active Calories chart doesn't move when the rider's Health body weight changes. Its last point is the stored total. §9 records the migration.
 **Previously:** 2026-11-05 (#460) — §3.1: `Ride` gains `ascentMeters`, `descentMeters` and `activeKilocalories`, S15's Summary stored once at the finish so a ride's numbers never change afterwards, and `isFinishStatsOwed`, which marks a ride still to have them worked out from its saved track. This partly reverses #284 for elevation: what is stored is the finish's total, not a running value. §9 records the migration and the one-time backfill.
 **Previously:** 2026-11-03 (#517) — §3.6: `AppPreferences` gains `collapsedWidgetCategories`, the S08 picker sections the rider has collapsed.
@@ -79,9 +80,9 @@ RiderProfile (1)          AppPreferences (1) [JSON document]
                                 ┆  routeId (FK, no @Relationship)
 (∞) Ride ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘
     ⇢ Phase 2: gains bike: Bike? + bikeName snapshot
-    │
-    ├──────────────┬────────────────┐
-    │              │                │
+    ┆  rideId (FK, no @Relationship)
+    ├┄┄┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
+    ┆              ┆                ┆
   (∞)            (∞)             (∞)
 TrackPoint    RadarEvent   VehiclePassEvent
 [CoreData]
@@ -95,6 +96,7 @@ TrackPoint    RadarEvent   VehiclePassEvent
 - AppPreferences is no longer a SwiftData entity, so it cannot own a SwiftData `@Relationship`. #67 settled PairedSensor by folding it into the AppPreferences JSON document as a nested `Codable` array; ConnectedService is still open — see §3.6
 - **PairedSensor is app-wide only for MVP.** In Phase 2 sensors belong to a bike: each bike has its own speed, cadence, radar and power sensors, and the speed sensor also carries that wheel's circumference. Heart rate is the exception and stays rider-scoped, since the strap follows the rider across bikes. The MVP ownership #67 picked has to survive gaining that bike dimension — as a nested value it does: the array grows a `bikeID` field and the lookup key becomes (bike, role), which is a decode shim rather than a schema stage — see §3.9
 - Ride and RiderProfile have no relationship — single rider; rides queried by date range. Since #96 RiderProfile is its own JSON document (§3.5), so a relationship is not expressible in any case
+- **TrackPoint, VehiclePassEvent and RadarEvent link to Ride by `rideId` only** — no SwiftData `@Relationship` array on Ride (#172), following TrackPoint's CoreData FK pattern. RadarEvent is not built yet (the live schema is `[Ride, VehiclePassEvent, Route]`); it follows the same pattern when it lands
 - RadarVehicle is a value type embedded as JSON in RadarEvent, not a separate table
 - **Route is a first-class entity in MVP** (§3.10, M8), but Ride links to it by id — `Ride.routeId: UUID?` — not by a SwiftData `@Relationship`, matching how TrackPoint and VehiclePassEvent link back to Ride. A `Ride.route: Route?` relationship stays deferred; see OQDM1
 
@@ -126,8 +128,8 @@ final class Ride {
     var maxSpeedMPS: Double
     // No stored HR zone seconds (#284): zones resolve at read time (§8), so a stored breakdown
     // would go stale. Elevation is stored again (#460), but only the finish's totals, below.
-    // W5's cadence seconds and coasting seconds *are* stored (#340): written at every checkpoint
-    // and at ride end, read back on resume. They are kept per whole rpm, not per zone (#79), so the
+    // W5's cadence seconds and coasting seconds *are* stored (#340, under State below): written at
+    // every checkpoint and at ride end, read back on resume. They are kept per whole rpm, not per zone (#79), so the
     // S12 cadence zones resolve at read time, as HR's do, and a stored tally can't go stale.
 
     // MARK: - Finish Stats (#460)
@@ -145,7 +147,6 @@ final class Ride {
     // finish second whose energy is activeKilocalories. JSON [CaloriePoint], read through
     // `calorieSeries`; written with the three above, by finalizeRide or the backfill.
     var calorieSeriesData: Data?               // nil exactly when activeKilocalories is
-    var pausesData: Data?                      // #537: [RidePause] JSON (startedAt, endedAt?, isAuto), every manual and auto pause, for S15's stops; written with every checkpoint and the finish
 
     // MARK: - Heart Rate
     var averageHeartRateBPM: Int?
@@ -172,6 +173,11 @@ final class Ride {
     // out-and-back, is the difference between the way out and the way back. Written by every
     // updateRideSummary and finalizeRide, read back through fetchResumableRide.
     var routeProgressMeters: Double?
+    // Whether the ride had finished its route by the last checkpoint (#406), so a resumed ride stays
+    // finished: its ring full, and no off-route for riding on past the end.
+    var isRouteComplete: Bool = false          // the declaration default is what migration gives older rides
+    // Absolute as written, but iOS moves the app's container, so only its file name holds (#546).
+    // Read the file through RidePersistenceActor.exportURL(for:), never this path.
     var gpxFileURL: URL?
 
     // MARK: - Weather (OQDM10)
@@ -197,6 +203,13 @@ final class Ride {
     @Attribute(.externalStorage)
     var mapThumbnailDark: Data?
 
+    // MARK: - Apple Health (#277)
+    // Set by finalizeRide, cleared once the ride's HKWorkout is written or skipped as a duplicate;
+    // RideHealthWorkout.backfill writes every ride still owed one. The declaration default is what
+    // migration gives rides that ended before this existed, so they are not owed: the ones since
+    // #250 already have their workout.
+    var isHealthWorkoutOwed: Bool = false
+
     // MARK: - Sync Status
     // Per-service sync tracking. Written by RideSyncSheetFeature after upload.
     @Attribute(.externalStorage)
@@ -212,12 +225,36 @@ final class Ride {
     }
 
     // MARK: - State
-    var recordingState: RideRecordingState     // .active | .paused | .ended
+    var recordingState: Ride.RecordingState    // .active | .paused | .ended — nested enum, below
+    // Crash resume (#175): a ride killed mid-recording resumes from its last checkpoint, so these
+    // persist live state the aggregates above can't reconstruct. Each is non-optional, so each
+    // carries a declaration-site default — §9's first key rule (#186); an `init` assignment alone
+    // fails the store load for anyone with an older store. speedSampleCount is also W3's moving
+    // seconds, which S15's Time section shows (#536).
+    var isAutoPaused: Bool = false             // the current .paused was auto-triggered (stoplight, #102), not a Pause tap — auto-resume-on-motion applies only to the former
+    var zeroSpeedSeconds: Int = 0              // consecutive zero-speed seconds, so a kill near the auto-pause/auto-end threshold doesn't hand a resumed ride a fresh grace window
+    var speedSampleCount: Int = 0              // The sample counts behind averageSpeedMPS / averageHeartRateBPM /
+    var hrSampleCount: Int = 0                 // averageCadenceRPM, so a resumed ride seeds its true prior weight:
+    var cadenceSampleCount: Int = 0            // an average alone can't be un-averaged back into a (sum, count) pair
+    // W5's time pedalling at each whole rpm, and time coasting (#340; per rpm since #79), so a
+    // resumed ride's detail sheet still covers the time before the kill; S15's Cadence sections
+    // read them too. Written at every checkpoint and at ride end. JSON [Int: TimeInterval], read
+    // and written through `cadenceSecondsByRPM`; optional, so #186's backfill trap doesn't apply.
+    var cadenceSecondsByRPMData: Data?
+    var cadenceCoastingSeconds: TimeInterval = 0
+    // How many times this ride has been resumed: the index of the track segment being recorded
+    // (#263). Persisted so a ride resumed after a kill doesn't restart the numbering at 0 and merge
+    // the new stretch of riding into the ride's first segment.
+    var trackSegmentIndex: Int = 0
+    // Every pause, manual or auto, in order (#537), for S15's stops. Written at every checkpoint and
+    // at the finish. JSON [RidePause] (startedAt, endedAt?, isAuto), read and written through
+    // `pauses`; optional, so a ride recorded before it has none.
+    var pausesData: Data?
 
     // MARK: - Relationships
-    var radarEvents: [RadarEvent]
-    var vehiclePassEvents: [VehiclePassEvent]
-    // TrackPoints stored in CoreData, linked by rideId
+    // No SwiftData @Relationship arrays. TrackPoints (CoreData) and VehiclePassEvents (§3.4) link
+    // back here by rideId only — TrackPoint's FK pattern (#172). RadarEvent (§3.2, not yet built)
+    // follows the same pattern when it lands: it carries a rideId, and Ride gains no array.
 
     init(id: UUID = UUID(), startedAt: Date = .now) {
         self.id = id
@@ -229,13 +266,21 @@ final class Ride {
         self.averageSpeedMPS = 0
         self.maxSpeedMPS = 0
         self.recordingState = .active
-        self.radarEvents = []
-        self.vehiclePassEvents = []
+        self.isAutoPaused = false
+        self.zeroSpeedSeconds = 0
+        self.speedSampleCount = 0
+        self.hrSampleCount = 0
+        self.cadenceSampleCount = 0
+        self.cadenceCoastingSeconds = 0
+        self.trackSegmentIndex = 0
     }
-}
 
-enum RideRecordingState: String, Codable {
-    case active, paused, ended
+    /// The persisted recording state. Nested rather than top-level so it doesn't collide with
+    /// ActiveRideFeature's `RideRecordingState`, a different, unpersisted TCA enum whose extra
+    /// `.idle` case has no on-disk meaning: a Ride record doesn't exist until a ride starts.
+    enum RecordingState: String, Codable {
+        case active, paused, ended
+    }
 }
 
 /// The weather at one moment of a ride (#151): one forecast's current conditions, in plain SI
@@ -271,13 +316,19 @@ enum SyncStatus: String, Codable, Sendable {
 }
 ```
 
+> **`Ride.RecordingState` is not `RideRecordingState`.** The persisted `recordingState` is the nested,
+> `String`-backed `Ride.RecordingState` (`active`, `paused`, `ended`). `RideRecordingState` in
+> `ActiveRideFeature.swift` is a separate top-level enum for the live ride, never persisted, with an
+> extra `idle` case for before a ride starts.
+
 > **OQDM2 resolved — speedSourceAtEnd removed.** The active speed source is recorded per TrackPoint in speedSourceRaw. Derivable from the last TrackPoint; no separate persisted field needed.
 
 > **OQDM1 — partly resolved (M8).** `Route` is a first-class entity in MVP (§3.10), and a Ride
 > names its route by `routeId` plus the denormalized `routeName`. Only the `Ride.route: Route?`
 > *relationship* stays deferred — superseded, not scheduled: `routeId` does the job and survives the
-> route being deleted, which a relationship would not. All three route fields are optional, so
-> §9's mandatory-attribute backfill trap does not apply to any of them.
+> route being deleted, which a relationship would not. `routeId`, `routeName` and
+> `routeProgressMeters` are optional, so §9's mandatory-attribute backfill trap does not apply to
+> them; #406's `isRouteComplete` is not, so it carries its declaration-site default.
 
 > **`RideSummaryUpdate.route`** carries a `RouteReference` on the checkpoint path, but
 > `RidePersistenceActor.apply` never writes it — a ride's route is set once, by `createRide`. It is
@@ -1219,6 +1270,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 
 Key rules:
+- **Any non-optional attribute added to a SwiftData `@Model` needs a declaration-site default** (`= 0`, not just an `init` assignment). SwiftData takes the attribute's store-level default from the declaration, and inferred lightweight migration can't backfill a mandatory attribute that has none — it fails the entire store load, crashing at launch for anyone with an older store (#186). Optional attributes are exempt. `RideSchemaMigrationTests` guards it for `Ride`
 - Never rename SwiftData properties without a SchemaMigrationPlan stage
 - AppPreferences **and RiderProfile** are outside the SwiftData schema (§3.6, §3.5), but **adding a field is only free because they have a hand-written `init(from:)`**. The synthesised `Decodable` does *not* fall back to a property's default when its key is absent — it throws `keyNotFound`, `.fileStorage` swallows that and hands back a default-constructed value, and the rider silently loses every *other* preference in the document. #67 found this the first time a second field was added. Every field is decoded with `decodeIfPresent` and an explicit default; new fields must follow. Renaming or removing one still needs a shim on top of that
 - CoreData TrackPoint changes require a NSMigrationManager mapping model
