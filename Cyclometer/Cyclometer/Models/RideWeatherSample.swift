@@ -19,7 +19,7 @@ struct RideWeatherSample: Codable, Sendable, Equatable {
 
 extension RideWeatherSample {
     /// Nil when WeatherKit sent a non-finite number: JSON can't encode one, and `Ride.weather`'s
-    /// setter would then drop every sample of the ride (lessons, #191).
+    /// setter would then refuse every later write of the ride's samples (lessons, #191, #563).
     init?(_ reading: WeatherReading) {
         let temperature = reading.temperature.converted(to: .celsius).value
         let windSpeed = reading.windSpeed.converted(to: .metersPerSecond).value

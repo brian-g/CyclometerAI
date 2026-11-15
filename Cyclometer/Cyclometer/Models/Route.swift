@@ -61,12 +61,16 @@ final class Route {
     /// for good on a route with no terrain analysis. Optional, so an older store migrates lightly.
     var terrainNarrative: String?
 
+    // The JSON columns are read, and written in `init`, through `JSONColumn` (#563), which logs a
+    // value that doesn't decode or encode rather than passing it off as absent.
+
+    /// Nil also for the empty value `backfillRouteTerrain` stores, which `JSONColumn` reads as none.
     var terrain: RouteTerrainAnalysis? {
-        terrainData.flatMap { try? JSONDecoder().decode(RouteTerrainAnalysis.self, from: $0) }
+        Self.column("terrainData", of: id).read(RouteTerrainAnalysis.self, from: terrainData)
     }
 
     var surface: RouteSurfaceBreakdown? {
-        surfaceData.flatMap { try? JSONDecoder().decode(RouteSurfaceBreakdown.self, from: $0) }
+        Self.column("surfaceData", of: id).read(RouteSurfaceBreakdown.self, from: surfaceData)
     }
 
     // MARK: - Bounding box
@@ -82,17 +86,21 @@ final class Route {
     var polylineData: Data?
 
     /// Get-only: a route is written once at import and never edited, so there is no
-    /// setter to misuse — and no `try?` on the encode side to swallow a failure into a
-    /// silently empty polyline. `init` writes the blob directly.
+    /// setter to misuse. `init` writes the blob directly.
     var coordinates: [RouteCoordinate] {
-        polylineData.flatMap { try? JSONDecoder().decode([RouteCoordinate].self, from: $0) } ?? []
+        Self.column("polylineData", of: id).read([RouteCoordinate].self, from: polylineData) ?? []
     }
 
     @Attribute(.externalStorage)
     var cuePointsData: Data?
 
     var cuePoints: [RouteCuePoint] {
-        cuePointsData.flatMap { try? JSONDecoder().decode([RouteCuePoint].self, from: $0) } ?? []
+        Self.column("cuePointsData", of: id).read([RouteCuePoint].self, from: cuePointsData) ?? []
+    }
+
+    /// Static so `init` can use it before every stored property is set.
+    private static func column(_ name: String, of id: UUID) -> JSONColumn {
+        JSONColumn(entity: "Route", name: name, owner: id)
     }
 
     // MARK: - Map Thumbnail (#273)
@@ -129,14 +137,16 @@ final class Route {
         self.minLongitude = summary.bounds.minLongitude
         self.maxLongitude = summary.bounds.maxLongitude
 
-        self.terrainData = summary.terrain.flatMap { try? JSONEncoder().encode($0) }
+        // The stored blobs directly, not the computed accessors above: those are
+        // unavailable until every stored property is initialised. A new row has no earlier
+        // value to keep, so a failed encode (logged) stores nil; `GPXRouteImporter` drops the
+        // non-finite numbers that would cause one (#191).
+        self.terrainData = summary.terrain.flatMap { Self.column("terrainData", of: summary.id).encode($0) }
         self.surfaceData = nil
         self.terrainNarrative = nil
 
-        // The stored blobs directly, not the computed accessors above: those are
-        // unavailable until every stored property is initialised.
-        self.polylineData = try? JSONEncoder().encode(imported.coordinates)
-        self.cuePointsData = try? JSONEncoder().encode(imported.cuePoints)
+        self.polylineData = Self.column("polylineData", of: summary.id).encode(imported.coordinates)
+        self.cuePointsData = Self.column("cuePointsData", of: summary.id).encode(imported.cuePoints)
 
         // Rendered after the save, from the network (`RouteMapThumbnail`).
         self.mapThumbnailLight = nil

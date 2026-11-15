@@ -180,9 +180,10 @@ final class Ride {
     @Attribute(.externalStorage)
     var weatherData: Data?
 
+    // Every JSON column's accessor goes through JSONColumn (#563); see "JSON columns" below.
     var weather: [RideWeatherSample] {
-        get { weatherData.flatMap { try? JSONDecoder().decode([RideWeatherSample].self, from: $0) } ?? [] }
-        set { weatherData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+        get { column("weatherData").read([RideWeatherSample].self, from: weatherData) ?? [] }
+        set { column("weatherData").write(newValue.isEmpty ? nil : newValue, over: weatherData) { weatherData = $0 } }
     }
 
     // MARK: - Map Thumbnail (#177)
@@ -203,8 +204,8 @@ final class Ride {
     var syncRecordsData: Data?
 
     var syncRecords: [RideSyncRecord] {
-        get { syncRecordsData.flatMap { try? JSONDecoder().decode([RideSyncRecord].self, from: $0) } ?? [] }
-        set { syncRecordsData = try? JSONEncoder().encode(newValue) }
+        get { column("syncRecordsData").read([RideSyncRecord].self, from: syncRecordsData) ?? [] }
+        set { column("syncRecordsData").write(newValue, over: syncRecordsData) { syncRecordsData = $0 } }
     }
 
     func syncRecord(for service: ExternalService) -> RideSyncRecord? {
@@ -282,6 +283,21 @@ enum SyncStatus: String, Codable, Sendable {
 > **`RideSummaryUpdate.route`** carries a `RouteReference` on the checkpoint path, but
 > `RidePersistenceActor.apply` never writes it — a ride's route is set once, by `createRide`. It is
 > there to be *read back*, so a ride resumed after a kill still knows what it was following.
+
+> **JSON columns (#563).** `weatherData`, `pausesData`, `cadenceSecondsByRPMData`,
+> `calorieSeriesData` and `syncRecordsData` on `Ride`, and `terrainData`, `surfaceData`,
+> `polylineData` and `cuePointsData` on `Route` (§3.10), are read and written only through
+> `JSONColumn`. A stored value that doesn't decode reads as empty (or nil) but is never
+> overwritten: its accessor's setter refuses every write while the stored bytes don't decode. So a
+> ride resumed after an update that changed a Codable shape resumes with that column empty, and its
+> checkpoints and finish leave the stored bytes as they were, where a later build can still read
+> them. What the resumed ride adds to that column is lost, since it can't be merged into bytes
+> the build can't read; the drop is logged. A value that doesn't encode (JSON has no NaN or
+> infinity) leaves the column as it was. A value that encodes to the bytes already stored isn't
+> written again, so `weather` and `pauses` aren't rewritten at every checkpoint. Each failure is
+> logged to `persistence` once per column per row per launch, with the column and the row's id,
+> never the payload. An empty `Data` reads as no value without a log: that is the marker
+> `backfillRouteTerrain` stores for a route it couldn't analyse. No schema change.
 
 ---
 
