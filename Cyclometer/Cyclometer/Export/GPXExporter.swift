@@ -274,9 +274,14 @@ enum GPXExporter {
             .replacingOccurrences(of: "'", with: "&apos;")
     }
 
+    /// Milliseconds on every `<time>` (#416). Track points are stamped on a 1 s timer tick,
+    /// and jitter can put two consecutive ticks inside one whole second; whole seconds then
+    /// export them with the same `<time>`, and a reader deriving speed from time deltas
+    /// divides by zero. `xsd:dateTime` allows the fraction. `<metadata>` gets it too, so the
+    /// document has one time format.
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
 
