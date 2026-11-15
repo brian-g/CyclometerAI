@@ -1299,6 +1299,115 @@ struct BLECSCIntegrationTests {
         #expect(harness.disconnected.value.isEmpty)
     }
 
+    // MARK: - Slot release (#558)
+
+    /// Events are handled one at a time on the client's own task, so once an event yielded
+    /// after the one under test has visibly landed, everything the earlier handler did —
+    /// including its transport calls after the last state change — has happened.
+    private func settle(_ harness: Harness) async {
+        let marker = UUID()
+        harness.events.yield(.discovered(id: marker, name: nil, rssi: -90, services: [cscServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == marker } }
+    }
+
+    /// The rider tapped Pair and left Sensors before choosing a role. With no attempt cap,
+    /// a dropped interrogation would be chased forever; and a released slot whose "csc"
+    /// owner stayed registered is how the 2026-11-09 link came up with no subscription.
+    @Test("An interrogating sensor that drops is released and disconnected, not reconnected")
+    func interrogatingDropIsReleased() async {
+        let harness = Harness()
+        let candidate = UUID()
+        harness.events.yield(.discovered(id: candidate, name: "Wahoo RPM", rssi: -55, services: [cscServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == candidate } }
+
+        await harness.client.pair(candidate)
+        harness.events.yield(.connected(id: candidate))
+        _ = await harness.devices { $0.first { $0.id == candidate }?.connectionState == .connected }
+
+        harness.events.yield(.disconnected(id: candidate, error: nil))
+        await settle(harness)
+
+        let listed = await harness.devices { _ in true }
+        #expect(listed.first { $0.id == candidate }?.connectionState == nil)   // no slot left
+        #expect(harness.disconnected.value.map(\.0) == [candidate])
+        #expect(harness.disconnected.value.map(\.1) == ["csc"])
+        #expect(harness.clock.isIdle)                                          // no ladder
+        #expect(harness.connectCount.value == 1)                               // pair's own
+
+        // A connect completing after the release is not adopted: no service discovery.
+        harness.events.yield(.connected(id: candidate))
+        await settle(harness)
+        #expect(harness.servicesDiscovered.value.count == 1)
+    }
+
+    /// The release rule keys on the role set, not on `isInterrogating`: a sensor the rider
+    /// is using keeps reconnecting even if it is mid-way through a capability read.
+    @Test("A sensor re-interrogated while holding a role still reconnects when it drops")
+    func reinterrogatedSensorWithRolesReconnects() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.setRoles(id, [.speed])
+        await harness.client.pair(id)
+
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .connecting)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+        #expect(await connects.next() == id)               // setRoles
+        #expect(await connects.next() == id)               // pair
+
+        harness.events.yield(.disconnected(id: id, error: nil))
+        #expect(await speedStates.next() == .reconnecting)
+        #expect(await harness.clock.advanceToNextSleep() == .seconds(1))
+        #expect(await connects.next() == id)
+        #expect(harness.disconnected.value.isEmpty)
+
+        harness.events.yield(.connected(id: id))
+        #expect(await speedStates.next() == .connected)
+        #expect(harness.clock.isIdle)
+    }
+
+    @Test("Moving a sensor's only role to another sensor disconnects it")
+    func strippedSensorIsDisconnected() async {
+        let harness = Harness()
+        let incumbent = UUID()
+        let replacement = UUID()
+        await harness.client.setRoles(incumbent, [.speed])
+
+        await harness.client.setRoles(replacement, [.speed])
+
+        #expect(harness.disconnected.value.map(\.0) == [incumbent])
+        #expect(harness.disconnected.value.map(\.1) == ["csc"])
+    }
+
+    @Test("Capabilities that leave a sensor no role disconnect it")
+    func capabilitiesEmptyingASlotDisconnect() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.setRoles(id, [.cadence])
+        harness.bringToActive(id)
+
+        harness.reportCapabilities(wheel: true, crank: false, from: id)
+        await settle(harness)
+
+        #expect(harness.disconnected.value.map(\.0) == [id])
+        #expect(harness.disconnected.value.map(\.1) == ["csc"])
+    }
+
+    @Test("Standing down for Bluetooth off releases the csc owner of every slot")
+    func standingDownReleasesOwners() async {
+        let harness = Harness()
+        let speed = UUID()
+        let cadence = UUID()
+        await harness.client.setRoles(speed, [.speed])
+        await harness.client.setRoles(cadence, [.cadence])
+
+        harness.events.yield(.stateChanged(.poweredOff))
+        await settle(harness)
+
+        #expect(Set(harness.disconnected.value.map(\.0)) == [speed, cadence])
+        #expect(harness.disconnected.value.map(\.1) == ["csc", "csc"])
+    }
+
     @Test("Committing the rider's choice takes the role off the incumbent")
     func settingRolesReassignsFromIncumbent() async {
         let harness = Harness()

@@ -170,9 +170,10 @@ struct VariaRadarClient: Sendable {
         UUID(uuidString: "C0000000-0000-0000-0000-000000000008")!,
     ]
 
-    /// Reconnection backoff ladder: 1s, 2s, 4s, 8s, 16s, then capped at 30s.
+    /// Reconnection backoff ladder: 1s, 2s, 4s, 8s, 16s, then capped at 30s. The shared
+    /// `BLEReconnectLadder` owns it (BLE.md §6.1); this names the timing this client runs.
     static func reconnectDelay(attempt: Int) -> Duration {
-        .seconds(min(1 << min(attempt, 5), 30))
+        BLEReconnectLadder.reconnectDelay(attempt: attempt)
     }
 }
 
@@ -746,17 +747,18 @@ private final class RadarClientState: @unchecked Sendable {
         // was cleared (e.g. the radio cycled off and on); the PRD §9.1 ladder
         // bounds how often it is re-issued. BLECentral retains discovered
         // peripherals, so reconnect-by-UUID works without rescanning.
-        let task = Task { [weak self] in
-            var attempt = 0
-            while !Task.isCancelled {
-                guard let self else { return }
-                try? await self.clock.sleep(for: VariaRadarClient.reconnectDelay(attempt: attempt))
-                guard !Task.isCancelled else { return }
-                guard let id = self.lock.withLock({ self.targetPeripheralID }) else { return }
-                logger.notice("reconnect attempt \(attempt + 1)")
-                await self.bleClient.connect(id, radarOwnerID)
-                attempt += 1
-            }
+        let task = Task { [weak self, clock] in
+            await BLEReconnectLadder.run(
+                clock: clock,
+                isStillReconnecting: { [weak self] in
+                    self?.lock.withLock { self?.targetPeripheralID } != nil
+                },
+                connect: { [weak self] attempt in
+                    guard let self, let id = self.lock.withLock({ self.targetPeripheralID }) else { return }
+                    logger.notice("reconnect attempt \(attempt)")
+                    await self.bleClient.connect(id, radarOwnerID)
+                }
+            )
         }
         lock.withLock { reconnectTask = task }
     }

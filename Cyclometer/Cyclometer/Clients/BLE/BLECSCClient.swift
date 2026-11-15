@@ -114,10 +114,10 @@ struct BLECSCClient: Sendable {
     /// subscribe, same as `connectionState`.
     var batteryLevel:          @Sendable (SensorRole) -> AsyncStream<Int?>
 
-    /// Reconnection backoff ladder: 1s, 2s, 4s, 8s, 16s, then capped at 30s.
-    /// Identical policy to VariaRadarClient (BLE.md §6.1).
+    /// Reconnection backoff ladder: 1s, 2s, 4s, 8s, 16s, then capped at 30s. The shared
+    /// `BLEReconnectLadder` owns it (BLE.md §6.1); this names the timing this client runs.
     static func reconnectDelay(attempt: Int) -> Duration {
-        .seconds(min(1 << min(attempt, 5), 30))
+        BLEReconnectLadder.reconnectDelay(attempt: attempt)
     }
 }
 
@@ -343,7 +343,8 @@ private final class CSCClientState: @unchecked Sendable {
         var logGate = LogSampleGate()
         /// Connected solely to read 0x2A5C, holding no roles until the rider decides.
         /// An interrogating slot is exempt from the "no roles means gone" rule that
-        /// otherwise reaps a peripheral the moment it holds nothing.
+        /// otherwise reaps a peripheral the moment it holds nothing — but not from a drop:
+        /// a slot with no roles is released when its link drops, never reconnected.
         var isInterrogating = false
     }
 
@@ -991,9 +992,22 @@ private final class CSCClientState: @unchecked Sendable {
             if outcome.emptiedSlot { await bleClient.disconnect(id, cscOwnerID) }
 
         case .disconnected(let id, _):
+            enum Drop { case notOurs, release, reconnect }
             // Only unexpected disconnects match — user disconnect() removes the slot first.
-            let wasTarget = lock.withLock { () -> Bool in
-                guard slots[id] != nil else { return false }
+            let drop = lock.withLock { () -> Drop in
+                guard let slot = slots[id] else { return .notOurs }
+                // A slot holding no roles was connected only to read 0x2A5C — the rider
+                // tapped Pair and hasn't chosen a role. Nothing on the dashboard depends on
+                // it, and with no attempt cap the ladder would chase it forever, so it is
+                // released instead (#558). Keyed on the role set, not `isInterrogating`: a
+                // sensor re-interrogated while it holds roles still reconnects. If the rider
+                // then chooses a role, `setRoles` makes a new slot and connects it.
+                if slot.roles.isEmpty {
+                    slot.reconnectTask?.cancel()
+                    slots.removeValue(forKey: id)
+                    recomputeRoleStatesLocked()
+                    return .release
+                }
                 slots[id]?.connectionState = .reconnecting
                 // Reset calculators: a sample from before the gap would yield a bogus
                 // rate against the first post-reconnect sample.
@@ -1003,21 +1017,38 @@ private final class CSCClientState: @unchecked Sendable {
                 // publish a level that may be hours old.
                 slots[id]?.batteryPercent = nil
                 recomputeRoleStatesLocked()
-                return true
+                return .reconnect
             }
-            guard wasTarget else { return }
-            startReconnect(peripheralID: id)
+            switch drop {
+            case .notOurs:
+                return
+            case .release:
+                // Every path that removes a slot releases the "csc" owner, so `BLECentral`
+                // never lists this client against a peripheral it no longer holds, and a
+                // connect request it placed can't complete into a link nobody subscribes
+                // to (BLE.md §6.1).
+                logger.notice("interrogating \(id, privacy: .public) dropped before a role was chosen — released")
+                await bleClient.disconnect(id, cscOwnerID)
+            case .reconnect:
+                startReconnect(peripheralID: id)
+            }
 
         case .stateChanged(let managerState):
             switch managerState {
             case .poweredOff, .unauthorized, .unsupported:
                 // Permission denied / radio off: stand down cleanly, never crash.
-                lock.withLock {
+                let released: [UUID] = lock.withLock {
                     for slot in slots.values { slot.reconnectTask?.cancel() }
+                    let ids = Array(slots.keys)
                     slots.removeAll()
                     isScanning = false
                     recomputeRoleStatesLocked()
+                    return ids
                 }
+                // CoreBluetooth has already dropped the links, but `BLECentral` still lists
+                // "csc" as an owner of each. Releasing them keeps the rule every other slot
+                // removal follows: a slot never goes without its owner going too (#558).
+                for id in released { await bleClient.disconnect(id, cscOwnerID) }
             default:
                 break
             }
@@ -1043,20 +1074,18 @@ private final class CSCClientState: @unchecked Sendable {
         // the pending connect still completed when the rider walked back into range,
         // and `.connected` for a released slot is ignored — so the link came up with no
         // notify subscription and the sensors stayed dark for the rest of the ride.
-        let task = Task { [weak self] in
-            var attempt = 0
-            while !Task.isCancelled {
-                guard let self else { return }
-                try? await self.clock.sleep(for: BLECSCClient.reconnectDelay(attempt: attempt))
-                guard !Task.isCancelled else { return }
-                let stillReconnecting = self.lock.withLock {
-                    self.slots[peripheralID]?.connectionState == .reconnecting
+        let task = Task { [weak self, clock] in
+            await BLEReconnectLadder.run(
+                clock: clock,
+                isStillReconnecting: { [weak self] in
+                    self?.lock.withLock { self?.slots[peripheralID]?.connectionState == .reconnecting } ?? false
+                },
+                connect: { [weak self] attempt in
+                    guard let self else { return }
+                    logger.notice("reconnect attempt \(attempt) for \(peripheralID, privacy: .public)")
+                    await self.bleClient.connect(peripheralID, cscOwnerID)
                 }
-                guard stillReconnecting else { return }
-                logger.notice("reconnect attempt \(attempt + 1) for \(peripheralID, privacy: .public)")
-                await self.bleClient.connect(peripheralID, cscOwnerID)
-                attempt += 1
-            }
+            )
         }
         lock.withLock {
             slots[peripheralID]?.reconnectTask?.cancel()
