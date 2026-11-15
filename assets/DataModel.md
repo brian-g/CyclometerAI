@@ -285,16 +285,20 @@ enum SyncStatus: String, Codable, Sendable {
 > there to be *read back*, so a ride resumed after a kill still knows what it was following.
 
 > **JSON columns (#563).** `weatherData`, `pausesData`, `cadenceSecondsByRPMData`,
-> `calorieSeriesData` and `syncRecordsData` on `Ride`, and `terrainData`, `surfaceData`,
-> `polylineData` and `cuePointsData` on `Route` (§3.10), are read and written only through
-> `JSONColumn`. A stored value that doesn't decode reads as empty (or nil) but is never
-> overwritten: its accessor's setter refuses every write while the stored bytes don't decode. So a
-> ride resumed after an update that changed a Codable shape resumes with that column empty, and its
-> checkpoints and finish leave the stored bytes as they were, where a later build can still read
+> `calorieSeriesData` and `syncRecordsData` on `Ride` are read and written only through
+> `JSONColumn`. A stored value in one of them that doesn't decode reads as empty (or nil) but is
+> never overwritten: its accessor's setter refuses every write while the stored bytes don't decode.
+> So a ride resumed after an update that changed a Codable shape resumes with that column empty, and
+> its checkpoints and finish leave the stored bytes as they were, where a later build can still read
 > them. What the resumed ride adds to that column is lost, since it can't be merged into bytes
 > the build can't read; the drop is logged. A value that doesn't encode (JSON has no NaN or
 > infinity) leaves the column as it was. A value that encodes to the bytes already stored isn't
-> written again, so `weather` and `pauses` aren't rewritten at every checkpoint. Each failure is
+> written again, so `weather` and `pauses` aren't rewritten at every checkpoint. `Route`'s
+> `terrainData`, `surfaceData`, `polylineData` and `cuePointsData` (§3.10) have no setters: they
+> are read through `JSONColumn`, and encoded through it in `init`. Two writers outside `Route`
+> assign them directly. `saveRouteSurface` may replace a `surfaceData` that doesn't decode with a
+> fresh lookup, which is wanted, since the surface can be looked up again at any time.
+> `backfillRouteTerrain` writes only where `terrainData` is nil. Each failure is
 > logged to `persistence` once per column per row per launch, with the column and the row's id,
 > never the payload. An empty `Data` reads as no value without a log: that is the marker
 > `backfillRouteTerrain` stores for a route it couldn't analyse. No schema change.

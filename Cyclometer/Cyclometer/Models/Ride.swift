@@ -87,7 +87,7 @@ final class Ride {
 
     // MARK: - Weather (OQDM10)
     /// The conditions from each forecast fetched during the ride (#151), for S15's weather summary.
-    /// Written at every checkpoint and at the finish. JSON, read and written through `weather`.
+    /// Written at a checkpoint or the finish when it has changed. JSON, read and written through `weather`.
     /// Nothing wrote this column before #151, so no stored ride holds an older shape.
     @Attribute(.externalStorage)
     var weatherData: Data?
@@ -150,7 +150,8 @@ final class Ride {
     var cadenceSampleCount: Int = 0
     /// W5's time pedalling at each whole rpm and time coasting, mirroring `CadenceFeature.State`
     /// (#340) — persisted so a resumed ride's detail sheet still covers the time before the
-    /// kill. Written at every checkpoint and at ride end, so a finished ride keeps its final
+    /// kill. Written at every checkpoint and at ride end (the per-rpm JSON only when it has
+    /// changed), so a finished ride keeps its final
     /// values. Bounded to the same one-checkpoint-window staleness as every other resumed
     /// aggregate. Per rpm rather than per zone (#79), so the S12 cadence zones resolve at read
     /// time, as #284 has HR's do; a stored per-zone breakdown would go stale when they change.
@@ -163,8 +164,8 @@ final class Ride {
     /// is: a kill and resume mid-ride would otherwise restart the numbering at 0 and merge
     /// the new stretch of riding into the ride's first segment.
     var trackSegmentIndex: Int = 0
-    /// Every pause, manual or auto, in order (#537), for S15's stops. Written at every checkpoint
-    /// and at the finish. JSON, read and written through `pauses`; optional, so #186's
+    /// Every pause, manual or auto, in order (#537), for S15's stops. Written at a checkpoint or
+    /// the finish when it has changed. JSON, read and written through `pauses`; optional, so #186's
     /// mandatory-attribute backfill trap doesn't apply, and a ride recorded before it has none.
     var pausesData: Data?
 
