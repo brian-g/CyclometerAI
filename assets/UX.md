@@ -1500,8 +1500,8 @@ Sections appear on screen in the order listed below.
     - **Toolbar title:** once the block's bottom passes under the toolbar, the ride name fades in and rises into the bar, as S14's inline title does.
   - **Toolbar:**
     - **Share and Edit:** two buttons, rather than Sketch's "…" menu.
-    - **Share:** absent when the GPX file isn't there, for example after a failed export or a delete from Files. A container move also hides it; that is #546.
-    - **Edit:** opens a sheet with Title and Notes. Off until the stats load, so the sheet never opens without the stored notes. Save is off for a blank title, and while neither field has changed. With changes, the close asks "Discard Changes?" (Discard Changes / Keep Editing), and the sheet can't be swiped away.
+    - **Share:** absent when the GPX file isn't there, for example after a failed export or a delete from Files. The file is found by name in `Documents/Rides/`, so a move of the app's container doesn't hide it (#546).
+    - **Edit:** a pencil (SF Symbol `pencil`), with "Edit" as its VoiceOver label. Opens a sheet with Title and Notes. Off until the stats load, so the sheet never opens without the stored notes. Save is off for a blank title, and while neither field has changed. With changes, the close asks "Discard Changes?" (Discard Changes / Keep Editing), and the sheet can't be swiped away.
     - **Saving an edit:** the change shows at once, and S14 reloads. Every S15 reads the stored title with its stats each time it appears, and S20 rereads its Previous Rides. So other copies of the ride, further up the stack or on the other tab, show the new title when they come back. The GPX is rewritten only when the title changed (#286). If a write fails, the screen reads the stored values back.
     - **Make Route:** not built, as its behaviour is still TBD.
   - **Summary:** hero numbers in a card. Each is absent with no data, and Average Speed is absent with no moving second.

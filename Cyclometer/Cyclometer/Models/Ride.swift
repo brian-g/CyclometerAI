@@ -81,6 +81,8 @@ final class Ride {
     // finished: its ring full, and no off-route for riding on past the end. The declaration default
     // is what migration gives rides from before it.
     var isRouteComplete: Bool = false
+    /// Absolute as written, but iOS moves the app's container, so only its file name holds
+    /// (#546). Read the file through `RidePersistenceActor.exportURL(for:)`, never this path.
     var gpxFileURL: URL?
 
     // MARK: - Weather (OQDM10)

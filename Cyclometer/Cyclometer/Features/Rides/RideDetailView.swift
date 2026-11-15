@@ -143,7 +143,7 @@ struct RideDetailList<MapHeader: View>: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 // Off until the stats bring the stored notes (`RideDetailFeature.editTapped`).
-                Button("Edit") { store.send(.editTapped) }
+                Button("Edit", systemImage: "pencil") { store.send(.editTapped) }
                     .disabled(store.stats == nil)
             }
         }

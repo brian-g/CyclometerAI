@@ -21,6 +21,25 @@ struct PersistenceClientTests {
         return (client, swiftDataStack)
     }
 
+    /// A live client whose ride exports resolve under `documentsDirectory`, as the app's resolve
+    /// under the real `Documents/` (#546).
+    static func makeLiveClient(
+        documentsDirectory: URL
+    ) -> (client: PersistenceClient, swiftDataStack: SwiftDataStack) {
+        withDependencies {
+            $0.gpxDocumentsDirectory = documentsDirectory
+        } operation: {
+            makeLiveClient()
+        }
+    }
+
+    /// The URL a row stored for `fileURL` before iOS moved the app's container (#546): the same
+    /// file name, under a container that no longer exists.
+    static func movedContainerURL(of fileURL: URL) -> URL {
+        URL(filePath: "/var/mobile/Containers/Data/Application/\(UUID().uuidString)/Documents/Rides", directoryHint: .isDirectory)
+            .appending(component: fileURL.lastPathComponent)
+    }
+
     @Test("flushed points are queryable by rideId, ordered by timestamp")
     func flushAndFetchRoundTrip() async throws {
         let (client, _) = Self.makeLiveClient()
@@ -599,15 +618,31 @@ struct PersistenceClientTests {
 
     @Test("fetchRideStats offers the GPX export only while the file is there (#538)")
     func fetchRideStatsChecksTheGPXFile() async throws {
-        let (client, _) = Self.makeLiveClient()
+        try await Self.fetchRideStatsOffersExport(storing: { $0 })
+    }
+
+    /// One device's rides named nine different containers: S15 showed Share for none of them.
+    @Test("fetchRideStats finds the export after iOS moves the app's container (#546)")
+    func fetchRideStatsFindsExportInMovedContainer() async throws {
+        try await Self.fetchRideStatsOffersExport(storing: Self.movedContainerURL(of:))
+    }
+
+    /// The row stores `storing(file)`; Share is offered at the file's real place until the rider
+    /// deletes it from Files.
+    private static func fetchRideStatsOffersExport(storing: (URL) -> URL) async throws {
+        let documents = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fetchRideStats-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: documents) }
+        let (client, _) = makeLiveClient(documentsDirectory: documents)
         let rideId = UUID()
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(rideId).gpx")
+        let rides = GPXExporter.ridesDirectory(in: documents)
+        try FileManager.default.createDirectory(at: rides, withIntermediateDirectories: true)
+        let url = rides.appendingPathComponent("\(rideId).gpx")
         try Data("<gpx/>".utf8).write(to: url)
-        defer { try? FileManager.default.removeItem(at: url) }
         try await client.createRide(rideId, Date(), nil)
         try await client.finalizeRide(rideId, Date(), RideSummaryUpdate(
             rideId: rideId, durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
-        ), url)
+        ), storing(url))
 
         #expect(try await client.fetchRideStats(rideId).gpxFileURL == url)
         // Deleted from Files.

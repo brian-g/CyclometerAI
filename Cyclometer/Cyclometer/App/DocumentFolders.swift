@@ -44,7 +44,7 @@ enum DocumentFolders {
         documentsDirectory: URL = .documentsDirectory,
         referencedFileNames: () async throws -> Set<String>
     ) async {
-        let ridesDirectory = documentsDirectory.appending(component: "Rides", directoryHint: .isDirectory)
+        let ridesDirectory = GPXExporter.ridesDirectory(in: documentsDirectory)
         let exports: [URL]
         do {
             exports = try FileManager.default

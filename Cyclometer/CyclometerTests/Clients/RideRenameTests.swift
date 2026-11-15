@@ -14,17 +14,21 @@ struct RideRenameTests {
         let swiftDataStack: SwiftDataStack
         let rideId: UUID
         let directory: URL
-        var fileURL: URL { directory.appendingPathComponent("Cyclometer_ride.gpx") }
+        /// Where the export really is: `Documents/Rides/` under `directory`.
+        var fileURL: URL { GPXExporter.ridesDirectory(in: directory).appendingPathComponent("AcmeRide_ride.gpx") }
     }
 
     /// A finalized ride with a real export on disk: built by `GPXExporter.buildXML` from the
     /// client's own reads, the same inputs the rewrite reads back.
-    private static func makeRide() async throws -> Fixture {
-        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+    /// `movedContainer` stores the URL the file had before iOS moved the app's container (#546).
+    private static func makeRide(movedContainer: Bool = false) async throws -> Fixture {
         let rideId = UUID()
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("RideRenameTests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: GPXExporter.ridesDirectory(in: directory), withIntermediateDirectories: true
+        )
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient(documentsDirectory: directory)
         let fixture = Fixture(
             client: client, swiftDataStack: swiftDataStack, rideId: rideId, directory: directory
         )
@@ -59,7 +63,8 @@ struct RideRenameTests {
             rideId: rideId, recordingState: .ended,
             durationSeconds: 3, distanceMeters: 12, averageSpeedMPS: 4, maxSpeedMPS: 4
         )
-        try await client.finalizeRide(rideId, base.addingTimeInterval(3), summary, fixture.fileURL)
+        let storedURL = movedContainer ? PersistenceClientTests.movedContainerURL(of: fixture.fileURL) : fixture.fileURL
+        try await client.finalizeRide(rideId, base.addingTimeInterval(3), summary, storedURL)
         return fixture
     }
 
@@ -108,6 +113,20 @@ struct RideRenameTests {
         #expect(try Self.storedRide(fixture.rideId, in: fixture.swiftDataStack).gpxFileURL == fixture.fileURL)
     }
 
+    /// Before #546 the rewrite found nothing at the stale path and skipped, with nothing logged.
+    /// The row keeps the URL it was written with: nothing is migrated.
+    @Test("A rename rewrites the export after iOS moves the app's container (#546)")
+    func renameRewritesExportInMovedContainer() async throws {
+        let fixture = try await Self.makeRide(movedContainer: true)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let stored = try Self.storedRide(fixture.rideId, in: fixture.swiftDataStack).gpxFileURL
+
+        try await Self.rename(fixture, to: "Morning Loop")
+
+        #expect(try GPXParsing.parse(Self.contents(of: fixture.fileURL)).trackName == "Morning Loop")
+        #expect(try Self.storedRide(fixture.rideId, in: fixture.swiftDataStack).gpxFileURL == stored)
+    }
+
     @Test("A second rename replaces the name rather than adding another")
     func secondRenameReplacesName() async throws {
         let fixture = try await Self.makeRide()
@@ -130,9 +149,10 @@ struct RideRenameTests {
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
         let original = try Self.contents(of: fixture.fileURL)
         // An atomic write needs to create its temporary file next to the target.
-        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: fixture.directory.path)
+        let folder = fixture.fileURL.deletingLastPathComponent().path
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder)
         defer {
-            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fixture.directory.path)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder)
         }
 
         await #expect(throws: (any Error).self) {

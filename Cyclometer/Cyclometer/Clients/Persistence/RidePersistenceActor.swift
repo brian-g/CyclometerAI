@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import Foundation
 import SwiftData
 import os
@@ -11,6 +12,10 @@ private let logger = Logger.cyclometer(.persistence)
 /// `ModelContext` isn't safe to share across concurrent callers without one.
 @ModelActor
 actor RidePersistenceActor {
+    /// Where exports live now. Captured when the actor is made, as `@Dependency` does, so the
+    /// app's client resolves the real `Documents/`; a caller's own override still wins.
+    @Dependency(\.gpxDocumentsDirectory) private var documentsDirectory
+
     /// Takes the whole `RouteReference` rather than a bare id so `routeId` and the
     /// denormalized `routeName` are written together and can never disagree — and so this
     /// actor never has to read the `Route` table, which is what keeps it and
@@ -227,17 +232,19 @@ actor RidePersistenceActor {
     /// owns is gone. See `PersistenceClient.live`'s `deleteRide` for why that ordering is the
     /// point. On this actor, not beside it, so it can't interleave with `replaceGPXFile`.
     func removeGPXFile(id: UUID) throws {
-        guard let fileURL = try rideRow(id: id)?.gpxFileURL else { return }
+        guard let fileURL = try rideRow(id: id).flatMap(exportURL(for:)) else { return }
         do {
             try FileManager.default.removeItem(at: fileURL)
         } catch CocoaError.fileNoSuchFile {
-            // Already gone — the rider may have deleted it from Files themselves.
+            // Already gone — the rider may have deleted it from Files themselves. Noted, not
+            // silent: a resolver miss looked exactly like this and hid #546.
+            logger.notice("removeGPXFile(\(id, privacy: .public)): no \(fileURL.lastPathComponent, privacy: .public) in Documents/Rides")
         } catch {
             logger.error("removeGPXFile(\(id, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
-    /// Replaces this ride's exported file in place, at the URL it already has (#286). A no-op
+    /// Replaces this ride's exported file in place, where `exportURL(for:)` finds it (#286, #546). A no-op
     /// when there is nothing to replace: no row, no export, or a file the rider deleted from
     /// Files, which a rename shouldn't bring back.
     ///
@@ -246,9 +253,12 @@ actor RidePersistenceActor {
     /// would leave the orphan #261 removed. `.atomic` writes a temporary file and swaps it in,
     /// so a failed write leaves the previous file untouched.
     func replaceGPXFile(id: UUID, contents: Data) throws {
-        guard let fileURL = try rideRow(id: id)?.gpxFileURL,
-              FileManager.default.fileExists(atPath: fileURL.path)
-        else { return }
+        guard let fileURL = try rideRow(id: id).flatMap(exportURL(for:)) else { return }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            // Noted, not silent: a resolver miss looked exactly like this and hid #546.
+            logger.notice("replaceGPXFile(\(id, privacy: .public)): no \(fileURL.lastPathComponent, privacy: .public) in Documents/Rides")
+            return
+        }
         do {
             try contents.write(to: fileURL, options: .atomic)
         } catch {
@@ -310,7 +320,7 @@ actor RidePersistenceActor {
             notes: ride.notes,
             // Only a file still there: the rider can delete it from Files, as `replaceGPXFile`
             // allows for, and S15 must not offer to share a file that is gone.
-            gpxFileURL: ride.gpxFileURL.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil },
+            gpxFileURL: exportURL(for: ride).flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil },
             pauses: ride.pauses,
             weather: ride.weather
         )
@@ -434,6 +444,17 @@ actor RidePersistenceActor {
                 riderSpeedKph: $0.riderSpeedKph,
                 estimatedPassSpeedKph: $0.estimatedPassSpeedKph
             )
+        }
+    }
+
+    /// Where this ride's export is now, or nil when it has none (#546). Every reader that
+    /// touches the file goes through here. `gpxFileURL` is absolute, and iOS moves the app's
+    /// container: on an update, a restore, or a reinstall from Xcode, where one device's rides
+    /// named nine different containers. So only the stored file name is trusted, and
+    /// `Documents/Rides/` comes from now. Rows keep their URL as written; none need migrating.
+    private func exportURL(for ride: Ride) -> URL? {
+        ride.gpxFileURL.map {
+            GPXExporter.ridesDirectory(in: documentsDirectory).appending(component: $0.lastPathComponent)
         }
     }
 

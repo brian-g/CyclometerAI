@@ -33,8 +33,9 @@ struct PersistenceClient: Sendable {
     var renameRide: @Sendable (UUID, String) async throws -> Void
     /// Sets a finished ride's notes — S15's Edit sheet (#538).
     var updateRideNotes: @Sendable (UUID, String) async throws -> Void
-    /// Replaces a ride's exported GPX with new contents at the same URL — a rename's rewrite
-    /// (#286). A no-op for a ride with no file, including one the rider deleted from Files.
+    /// Replaces a ride's exported GPX with new contents in place, found by name in
+    /// `Documents/Rides/` (#546) — a rename's rewrite (#286). A no-op for a ride with no file,
+    /// including one the rider deleted from Files.
     var replaceRideGPX: @Sendable (UUID, Data) async throws -> Void
     /// Stores S14's map thumbnail, light then dark, rendered after the ride ended (#177).
     var saveRideMapThumbnail: @Sendable (UUID, Data, Data) async throws -> Void
