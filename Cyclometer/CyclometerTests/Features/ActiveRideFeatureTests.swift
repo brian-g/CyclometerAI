@@ -443,7 +443,7 @@ struct ActiveRideFeatureLocationTests {
             $0.heading = 192.0
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
-            $0.maxSpeedMPS = 8.5
+            // The ride's first reading: shown, but with nothing before it, not a max (#540).
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -502,7 +502,7 @@ struct ActiveRideFeatureLocationTests {
             $0.heading = 192.0
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
-            $0.maxSpeedMPS = 8.5
+            // The ride's first reading: shown, but with nothing before it, not a max (#540).
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -543,7 +543,7 @@ struct ActiveRideFeatureLocationTests {
         // The Doppler speed on that same fix is position-independent, and calibration runs
         // its own gate on the same data — both still see it.
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
-            $0.maxSpeedMPS = 8.5
+            // The ride's first reading: shown, but with nothing before it, not a max (#540).
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -643,7 +643,7 @@ struct ActiveRideFeatureLocationTests {
             $0.heading = 192.0
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
-            $0.maxSpeedMPS = 8.5
+            // The ride's first reading: shown, but with nothing before it, not a max (#540).
             $0.speed.speedMPS = 8.5
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
@@ -683,7 +683,8 @@ struct ActiveRideFeatureLocationTests {
         }
         await store.receive(.speed(.gpsSpeedReceived(12.0))) {
             // The live speed follows the fix, but the ride's average and max don't: paused
-            // time is not part of the ride (#379). They stay at the active fix's values.
+            // time is not part of the ride (#379). The max is pinned with readings a second
+            // apart, which it needs (#540), in `ActiveRideFeatureTimerTests.pauseAndResumeRecover`.
             $0.speed.speedMPS = 12.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 12.0
@@ -1092,7 +1093,11 @@ struct ActiveRideFeatureTimerTests {
         let store = TestStore(
             initialState: ActiveRideFeature.State(
                 recordingState: .active,
-                speed: SpeedFeature.State(activeSpeedSource: .bleWheel)
+                // Already riding: a wheel reading a second ago, for this one to be judged against (#540).
+                speed: SpeedFeature.State(
+                    activeSpeedSource: .bleWheel,
+                    speedSamples: [SpeedSample(time: testDate.addingTimeInterval(-1), mps: wheelMPS)]
+                )
             )
         ) {
             ActiveRideFeature()
@@ -1145,10 +1150,11 @@ struct ActiveRideFeatureTimerTests {
 
     @Test("Max speed catches a peak that is replaced before the next tick")
     func maxSpeedCatchesAPeakBetweenTicks() async {
-        let store = makeStore()
-        store.exhaustivity = .off
-        await store.send(.speed(.gpsSpeedReceived(52.0 / 3.6)))
-        await store.send(.speed(.gpsSpeedReceived(49.0 / 3.6)))
+        // Fixes a second apart, as GPS delivers them, so each is judged against the last (#540).
+        let (store, now) = makeGatedStore()
+        await fix(store, now, 48.0 / 3.6)
+        await fix(store, now, 52.0 / 3.6)
+        await fix(store, now, 49.0 / 3.6)
         await store.send(.elapsedTick)
         #expect(store.state.maxSpeedMPS == 52.0 / 3.6)
     }
@@ -1166,7 +1172,8 @@ struct ActiveRideFeatureTimerTests {
         let moving = speeds.filter { $0 > ActiveRideFeature.stationarySpeedMPS }
         #expect(store.state.speedSampleCount == moving.count)
         #expect(abs(store.state.averageSpeedMPS - moving.reduce(0, +) / Double(moving.count)) < 1e-9)
-        #expect(store.state.maxSpeedMPS == 12.0)
+        // No max here: these readings share one instant and jump from 0 to 12 m/s, which is what
+        // `MaxSpeedGate` refuses (#540). The max has its own tests below.
     }
 
     // MARK: - What can become the max (#540)
@@ -1175,11 +1182,12 @@ struct ActiveRideFeatureTimerTests {
     // goes through `.locationUpdated`, so its `speedAccuracy` takes the app's own path.
 
     private func makeGatedStore(
-        source: SensorSource = .gps
+        source: SensorSource = .gps,
+        state: ActiveRideFeature.State? = nil
     ) -> (store: TestStoreOf<ActiveRideFeature>, now: LockIsolated<Date>) {
         let now = LockIsolated(testDate)
         let store = TestStore(
-            initialState: ActiveRideFeature.State(
+            initialState: state ?? ActiveRideFeature.State(
                 recordingState: .active, speed: SpeedFeature.State(activeSpeedSource: source)
             )
         ) {
@@ -1266,6 +1274,8 @@ struct ActiveRideFeatureTimerTests {
     @Test("A GPS speed whose speedAccuracy is invalid or poor isn't counted")
     func untrustworthyAccuracyIsNotCounted() async {
         let (store, now) = makeGatedStore()
+        // Two good fixes: the ride's first reading is never a max on its own.
+        await fix(store, now, 8)
         await fix(store, now, 8)
         #expect(store.state.maxSpeedMPS == 8)
 
@@ -1280,8 +1290,8 @@ struct ActiveRideFeatureTimerTests {
         #expect(store.state.speed.speedMPS == 9)
         #expect(store.state.maxSpeedMPS == 8)
 
-        // Valid, but wider than the gate's slack.
-        await fix(store, now, 9.5, accuracy: MaxSpeedGate.readingSlackMPS + 0.5)
+        // Valid, but wider than the GPS ceiling.
+        await fix(store, now, 9.5, accuracy: MaxSpeedGate.maxGPSSpeedAccuracyMPS + 0.5)
         #expect(store.state.maxSpeedMPS == 8)
 
         await fix(store, now, 9.6)
@@ -1307,16 +1317,78 @@ struct ActiveRideFeatureTimerTests {
         #expect(store.state.maxSpeedMPS == 12.7)
     }
 
-    @Test("After a GPS dropout, the first fix back raises the max")
+    /// A tunnel: fixes without a speed, then none at all, for 25 s.
+    private func dropout(_ store: TestStoreOf<ActiveRideFeature>, _ now: LockIsolated<Date>) async {
+        for _ in 0..<5 { await fix(store, now, -1, accuracy: nil) }
+        now.withValue { $0 += 20 }
+    }
+
+    @Test("The ride's first reading doesn't set the max; the second, judged against it, does")
+    func firstReadingOfARideWaits() async {
+        let (store, now) = makeGatedStore()
+        await fix(store, now, 8)
+        #expect(store.state.speed.speedMPS == 8)
+        #expect(store.state.maxSpeedMPS == 0)
+        await fix(store, now, 8.4)
+        #expect(store.state.maxSpeedMPS == 8.4)
+    }
+
+    @Test("After a GPS dropout, the first fix back waits and the next one raises the max")
     func dropoutRecovers() async {
         let (store, now) = makeGatedStore()
         for _ in 0..<3 { await fix(store, now, 8) }
-        // A tunnel: fixes without a speed, then none at all.
-        for _ in 0..<5 { await fix(store, now, -1, accuracy: nil) }
-        now.withValue { $0 += 20 }
-        // Nothing displayed in the window to measure it against, so only its accuracy is checked.
+        await dropout(store, now)
+        // Nothing displayed in the last 5 s to measure it against.
         await fix(store, now, 11)
-        #expect(store.state.maxSpeedMPS == 11)
+        #expect(store.state.maxSpeedMPS == 8)
+        await fix(store, now, 11.2)
+        #expect(store.state.maxSpeedMPS == 11.2)
+    }
+
+    @Test("A spike as the first fix after a dropout, with a good accuracy, doesn't become the max")
+    func spikeAfterADropoutIsRefused() async {
+        let (store, now) = makeGatedStore()
+        for _ in 0..<3 { await fix(store, now, 8) }
+        await dropout(store, now)
+        // Reacquisition: 33 m/s with an accuracy that passes.
+        await fix(store, now, 33, accuracy: 0.5)
+        #expect(store.state.maxSpeedMPS == 8)
+        // The honest fix after it is judged against the spike, which it can't exceed, and counts.
+        await fix(store, now, 9)
+        #expect(store.state.maxSpeedMPS == 9)
+    }
+
+    @Test("After a wheel-sensor reconnect, a spike as the first reading is refused and honest readings count from the second")
+    func wheelReconnectWaitsOneReading() async {
+        let (store, now) = makeGatedStore(source: .bleWheel)
+        for _ in 0..<3 { await wheel(store, now, 8) }
+        // The link drops and comes back 20 s later: `CSCCalculator` re-primes, nothing is shown.
+        now.withValue { $0 += 20 }
+        await wheel(store, now, 30)
+        #expect(store.state.maxSpeedMPS == 8)
+        await wheel(store, now, 9)
+        #expect(store.state.maxSpeedMPS == 9)
+
+        // And an honest first reading after another gap waits one reading too.
+        now.withValue { $0 += 20 }
+        await wheel(store, now, 10)
+        #expect(store.state.maxSpeedMPS == 9)
+        await wheel(store, now, 10.2)
+        #expect(store.state.maxSpeedMPS == 10.2)
+    }
+
+    @Test("After the app is killed and the ride resumed, the stored max stands and the first new reading can't raise it alone")
+    func resumeAfterKillKeepsTheMax() async {
+        let summary = RideSummaryUpdate(
+            rideId: UUID(), recordingState: .active, durationSeconds: 600, distanceMeters: 4_000,
+            averageSpeedMPS: 6.5, maxSpeedMPS: 12
+        )
+        let (store, now) = makeGatedStore(state: ActiveRideFeature.State(resuming: summary))
+        #expect(store.state.maxSpeedMPS == 12)
+        await fix(store, now, 33, accuracy: 0.5)
+        #expect(store.state.maxSpeedMPS == 12)
+        await fix(store, now, 12.5)
+        #expect(store.state.maxSpeedMPS == 12.5)
     }
 
     @Test("Across a pause, a hard start from a standstill after the resume raises the max")
@@ -1324,6 +1396,9 @@ struct ActiveRideFeatureTimerTests {
         let (store, now) = makeGatedStore()
         for _ in 0..<3 { await fix(store, now, 8) }
         await store.send(.pauseTapped)
+        // Rolling on after Pause: shown, judged reachable, but paused time isn't the ride's (#379).
+        await fix(store, now, 12)
+        #expect(store.state.maxSpeedMPS == 8)
         for _ in 0..<20 { await fix(store, now, 0) }
         await store.send(.resumeTapped)
         #expect(store.state.recordingState == .active)
@@ -2318,7 +2393,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.heading = 0
         }
         await store.receive(.speed(.gpsSpeedReceived(8.0))) {
-            $0.maxSpeedMPS = 8.0
+            // The ride's first reading: not a max (#540).
             $0.speed.speedMPS = 8.0
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.0
@@ -4068,8 +4143,11 @@ struct ActiveRideFeatureSharedPeripheralTests {
             latestGPSSpeedMPS: 5.0,
             pairedSensorName: "Wahoo SPEED"
         )
-        // The fix behind `latestGPSSpeedMPS`, good enough for its speed to be a max (#540).
+        // The fix behind `latestGPSSpeedMPS`, good enough for its speed to be a max, and the wheel
+        // reading on screen, displayed a second ago, for the fallback's GPS speed to be judged
+        // against (#540).
         state.speedAccuracy = 0.3
+        state.speed.speedSamples = [SpeedSample(time: testDate.addingTimeInterval(-1), mps: 6.0)]
         state.cadence = CadenceFeature.State(cadenceRPM: 82)
         state.calibration.isSensorActive = true
         state.calibration.isGPSUsable = true

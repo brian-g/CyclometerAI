@@ -4,6 +4,9 @@ import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.recording)
+/// Rate limit for the "max speed refused" line (#540). Diagnostic only, so it lives outside
+/// `State`: process-wide, at most one line a minute.
+private let maxRefusalLogGate = LockIsolated(LogSampleGate(bucketSeconds: 60))
 
 enum RideRecordingState: Equatable, Sendable {
     case idle, active, paused, ended
@@ -1361,23 +1364,26 @@ struct ActiveRideFeature {
                 if state.recordingState == .active,
                    let speedMPS = Self.newlyDisplayedSpeed(speedAction, state.speed),
                    speedMPS > Self.stationarySpeedMPS, speedMPS > state.maxSpeedMPS {
-                    if MaxSpeedGate.admits(
+                    let verdict = MaxSpeedGate.verdict(
                         speedMPS, from: state.speed.activeSpeedSource, speedAccuracy: state.speedAccuracy,
                         at: date.now, after: state.speed.speedSamples
-                    ) {
+                    )
+                    if verdict == .admitted {
                         state.maxSpeedMPS = speedMPS
-                    } else {
-                        // Only a reading that would have raised the max, so it stays rare unless
-                        // the gate is refusing honest ones: then this line says which check did.
+                    } else if maxRefusalLogGate.withValue({ $0.admit(uptime: ProcessInfo.processInfo.systemUptime) }) {
+                        // Says which check refused, so `log collect` shows a gate refusing honest
+                        // readings. At most one a minute: a ride whose every fix has an invalid
+                        // accuracy refuses every reading that would raise the max.
                         let source = state.speed.activeSpeedSource.rawValue
                         let accuracy = state.speedAccuracy ?? -1
                         let maxSpeedMPS = state.maxSpeedMPS
                         logger.notice(
                             """
                             max speed refused \(speedMPS, format: .fixed(precision: 2), privacy: .public) m/s \
-                            from \(source, privacy: .public), gps speed accuracy \
-                            \(accuracy, format: .fixed(precision: 2), privacy: .public) m/s — max stays \
-                            \(maxSpeedMPS, format: .fixed(precision: 2), privacy: .public) m/s
+                            from \(source, privacy: .public): \(verdict.rawValue, privacy: .public) \
+                            (gps speed accuracy \(accuracy, format: .fixed(precision: 2), privacy: .public) m/s) \
+                            — max stays \(maxSpeedMPS, format: .fixed(precision: 2), privacy: .public) m/s; \
+                            at most one line a minute
                             """
                         )
                     }
