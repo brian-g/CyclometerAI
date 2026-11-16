@@ -297,8 +297,15 @@ struct GPXExporterTests {
     /// pins the wire format rather than echoing whatever the exporter produced.
     private static func iso(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: date)
+    }
+
+    /// Reads a `<time>` back the way a reader of these files has to: accepting both the
+    /// millisecond form exported since #416 and the whole-second form of older exports and
+    /// other tools' files. `ISO8601DateFormatter` accepts only the form it is configured for.
+    private static func date(_ time: String?) throws -> Date {
+        try Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(try #require(time))
     }
 
     /// Pinned to `en_US_POSIX` + Gregorian, matching `GPXExporter.filenameStem`'s own
@@ -390,6 +397,77 @@ struct GPXExporterTests {
 
         #expect(parsed.metadataName == Self.filenameStem(for: Self.start))
         #expect(parsed.metadataTime == Self.iso(Self.start))
+    }
+
+    // MARK: - Fractional seconds (#416)
+
+    /// The shape #416 was filed from: a tick 1.02 s late after a 2 s gap, then one 0.98 s
+    /// later that lands in the same whole second. Whole-second `<time>`s wrote `…:44Z` twice.
+    @Test("track points 0.98 s apart inside one whole second export distinct, ordered <time>s")
+    func jitteredTicksExportDistinctOrderedTimes() throws {
+        let offsets: [TimeInterval] = [42.990, 44.010, 44.990]
+        let points = offsets.map { Self.point(time: Self.start.addingTimeInterval($0)) }
+
+        let parsed = try GPXParsing.parse(
+            GPXExporter.buildXML(ride: Self.ride, trackPoints: points, vehiclePassEvents: [])
+        )
+
+        let times = parsed.trackPoints.map(\.time)
+        #expect(times.count == 3)
+        #expect(Set(times).count == 3)
+        let dates = try times.map(Self.date)
+        #expect(zip(dates, dates.dropFirst()).allSatisfy { $0 < $1 })
+        // The pair that collided: 0.98 s apart on the page as well.
+        #expect(abs(dates[2].timeIntervalSince(dates[1]) - 0.98) < 0.001)
+    }
+
+    @Test("an exported ride's <time>s parse back to the stored timestamps, to the millisecond")
+    func roundTripPreservesTimestampsToTheMillisecond() throws {
+        // Millisecond fractions that whole seconds would lose, and one (`.0004`) finer than
+        // a millisecond, which is all a 3-digit fraction keeps.
+        let pointOffsets: [TimeInterval] = [0.250, 1.237, 2.019, 2.9994]
+        let eventOffset: TimeInterval = 1.500
+        let ride = RideExportMetadata(title: "Morning Ride", startedAt: Self.start.addingTimeInterval(0.125))
+        let points = pointOffsets.map { Self.point(time: Self.start.addingTimeInterval($0)) }
+        let event = Self.passEvent(time: Self.start.addingTimeInterval(eventOffset))
+
+        let parsed = try GPXParsing.parse(
+            GPXExporter.buildXML(ride: ride, trackPoints: points, vehiclePassEvents: [event])
+        )
+
+        #expect(parsed.trackPoints.count == points.count)
+        for (actual, expected) in zip(parsed.trackPoints, points) {
+            let read = try Self.date(actual.time)
+            #expect(abs(read.timeIntervalSince(expected.timestamp)) < 0.001)
+        }
+        let waypoint = try Self.date(try #require(parsed.waypoints.first).time)
+        #expect(abs(waypoint.timeIntervalSince(event.timestamp)) < 0.001)
+        let metadata = try Self.date(parsed.metadataTime)
+        #expect(abs(metadata.timeIntervalSince(ride.startedAt)) < 0.001)
+    }
+
+    /// Exports already on riders' phones, and other tools' files, carry whole seconds.
+    @Test("GPXParsing reads whole-second and millisecond <time>s alike")
+    func parsingReadsWholeSecondAndFractionalTimes() throws {
+        func document(_ time: String) -> String {
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1">
+              <trk><trkseg>
+                <trkpt lat="36.0726" lon="-79.7920"><time>\(time)</time></trkpt>
+              </trkseg></trk>
+            </gpx>
+            """
+        }
+        let whole = try GPXParsing.parse(document("2026-03-03T07:55:44Z"))
+        let fractional = try GPXParsing.parse(document("2026-03-03T07:55:44.990Z"))
+
+        #expect(whole.trackPoints.first?.time == "2026-03-03T07:55:44Z")
+        #expect(fractional.trackPoints.first?.time == "2026-03-03T07:55:44.990Z")
+        let wholeDate = try Self.date(whole.trackPoints.first?.time)
+        let fractionalDate = try Self.date(fractional.trackPoints.first?.time)
+        #expect(wholeDate == Self.start.addingTimeInterval(44))
+        #expect(abs(fractionalDate.timeIntervalSince(Self.start.addingTimeInterval(44.990))) < 0.001)
     }
 
     @Test("an empty ride still emits a well-formed document with no track points and no waypoints")

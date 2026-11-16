@@ -550,7 +550,7 @@ Routes are pre-planned by the rider before the ride. The following sources are s
 |---|---|---|
 | Latitude, Longitude | CoreLocation | `<trkpt lat="..." lon="...">` |
 | Elevation | Barometric altimeter (`CMAltimeter`); CoreLocation altitude where there is none (#387) | `<ele>` |
-| Timestamp | System clock (UTC) | `<time>` |
+| Timestamp | System clock (UTC), to the millisecond (#416) | `<time>` |
 | Heart Rate | Active HR source (BPM) | `<gpxtpx:hr>` |
 | Cadence | BLE cadence sensor (RPM) | `<gpxtpx:cad>` |
 | Speed | Active speed source (m/s) | `<gpxtpx:speed>` |
@@ -579,7 +579,7 @@ Vehicle pass events are recorded as GPX `<wpt>` (waypoint) elements rather than 
 | Field | GPX Element | Notes |
 |---|---|---|
 | Location at pass | `<wpt lat="..." lon="...">` | Rider position when vehicle cleared |
-| Timestamp | `<time>` | UTC timestamp of pass |
+| Timestamp | `<time>` | UTC timestamp of pass, to the millisecond |
 | Event type | `<type>vehiclePass</type>` | Standard GPX type element for filtering |
 | Alert level | `<cyc:alertLevel>` | danger / caution / advisory — the ride-level alert at the vehicle's **peak closing speed**, not at the instant it drew level |
 | Rider speed | `<cyc:riderSpeedKph>` | Rider speed at moment of pass (km/h) |
@@ -1625,13 +1625,13 @@ Every ride exports a GPX 1.1 file with biometric track point extensions and vehi
 
   <metadata>
     <name>Cyclometer_2026-03-31_08-15</name>
-    <time>2026-03-31T08:15:00Z</time>
+    <time>2026-03-31T08:15:00.000Z</time>
   </metadata>
 
   <!-- Vehicle pass events recorded as waypoints at rider position when vehicle cleared -->
   <!-- Apps that don't support cyc: namespace will read these as generic waypoints -->
   <wpt lat="36.0726" lon="-79.7920">
-    <time>2026-03-31T08:15:23Z</time>
+    <time>2026-03-31T08:15:23.418Z</time>
     <name>Vehicle Pass</name>
     <type>vehiclePass</type>
     <extensions>
@@ -1652,7 +1652,7 @@ Every ride exports a GPX 1.1 file with biometric track point extensions and vehi
 
       <trkpt lat="36.0726" lon="-79.7920">
         <ele>220.1</ele>
-        <time>2026-03-31T08:15:01Z</time>
+        <time>2026-03-31T08:15:01.004Z</time>
         <extensions>
           <gpxtpx:TrackPointExtension>
             <gpxtpx:hr>142</gpxtpx:hr>       <!-- BPM; omitted if no HR source -->
@@ -1671,6 +1671,7 @@ Every ride exports a GPX 1.1 file with biometric track point extensions and vehi
 **Schema Notes:**
 - `gpxtpx:speed` is in **m/s**; `gpxtpx:cad` is **RPM**; `gpxtpx:hr` is integer **BPM**
 - Elements are **omitted** (not zero-valued) when no sensor is active
+- Every `<time>` is UTC with a 3-digit fraction of a second (#416). Track points are stamped on a 1 s timer tick whose jitter can put two consecutive points in one whole second; whole-second times would give them the same `<time>`, and a reader deriving speed from time deltas would divide by zero. A reader of these files must also accept whole seconds: exports made before #416, and other tools' files, carry them
 - `cyc:VehiclePassEvent` is a Cyclometer-defined extension. No industry standard exists for vehicle pass events as of v0.4.
 - The `cyc:` namespace URI (`http://cyclometerapp.com/xmlschemas/VehicleEvent/v1`) does not need to resolve to a live schema document; it serves as a unique identifier
 - Third-party apps that cannot parse `cyc:` elements will still read the `<wpt>` as a generic waypoint with name "Vehicle Pass", preserving basic compatibility
