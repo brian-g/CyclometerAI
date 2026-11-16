@@ -597,7 +597,8 @@ private final class CSCClientState: @unchecked Sendable {
     /// knock the first one offline before the rider had chosen anything.
     ///
     /// The slot survives with an empty role set because `isInterrogating` exempts it
-    /// from the reaping rule. It leaves that state via `setRoles` or `unpair`.
+    /// from the reaping rule. It leaves that state via `setRoles` or `unpair`, or by
+    /// dropping: a slot with no roles is released on a drop, not reconnected (#558).
     func pair(peripheralID: UUID) async {
         lock.withLock {
             if var slot = slots[peripheralID] {

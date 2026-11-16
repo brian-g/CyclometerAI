@@ -1373,11 +1373,12 @@ struct BLECSCIntegrationTests {
         await settle(harness)
 
         let listed = await harness.devices { _ in true }
-        #expect(listed.first { $0.id == candidate }?.connectionState == nil)   // no slot left
+        // No slot left (a reconnecting one would read `.reconnecting`), and the owner
+        // released. These carry the regression check: the stepped clock never advances
+        // on its own, so a ladder's absence can't be shown by counting its connects.
+        #expect(listed.first { $0.id == candidate }?.connectionState == nil)
         #expect(harness.disconnected.value.map(\.0) == [candidate])
         #expect(harness.disconnected.value.map(\.1) == ["csc"])
-        #expect(harness.clock.isIdle)                                          // no ladder
-        #expect(harness.connectCount.value == 1)                               // pair's own
 
         // A connect completing after the release is not adopted: no service discovery.
         harness.events.yield(.connected(id: candidate))
