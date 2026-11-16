@@ -408,6 +408,14 @@ struct BLECSCIntegrationTests {
             await client.setPairedSensors([id: roles])
         }
 
+        /// The role's state right now, from a fresh subscription's replay. Never waits on
+        /// a transition, so a check for a state the client failed to enter fails rather
+        /// than hangs.
+        func currentState(_ role: SensorRole) async -> BLECSCClient.ConnectionState? {
+            var states = client.connectionState(role).makeAsyncIterator()
+            return await states.next()
+        }
+
         /// Wait until the device list satisfies `predicate`, and return it.
         ///
         /// Events are handled on the client's own task, so yielding one and reading
@@ -847,6 +855,78 @@ struct BLECSCIntegrationTests {
         #expect(await connects.next() == id)
     }
 
+    /// The Start sheet's pairing scan connects whichever paired sensor is awake. With
+    /// separate speed and cadence sensors that can be just one of them. The ride's scan
+    /// must still start, or the sheet's scan ending stops the radio and the other sensor
+    /// is never seen that ride (#417 review).
+    @Test("The ride scan starts beside a live slot while another paired role has none")
+    func rideScanStartsWhileAPairedRoleIsUnheld() async {
+        let harness = Harness()
+        let speedSensor = UUID()
+        let cadenceSensor = UUID()
+        await harness.client.setPairedSensors([speedSensor: [.speed], cadenceSensor: [.cadence]])
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        // The Start sheet, with only the speed sensor awake.
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: speedSensor, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        #expect(await speedStates.next() == .connecting)
+        #expect(await connects.next() == speedSensor)
+        harness.bringToActive(speedSensor)
+        #expect(await speedStates.next() == .connected)
+        #expect(await speedStates.next() == .active)
+
+        // Start: the ride takes its scan, then the sheet releases its own.
+        await harness.client.startScanning()
+        #expect(harness.scanned.value.count == 2)            // the sheet's, then the ride's
+        await harness.client.endPairingScan()
+        #expect(harness.scanStopped.value.isEmpty)
+
+        // The live slot is untouched: still active, never released.
+        #expect(await harness.currentState(.speed) == .active)
+        #expect(harness.disconnected.value.isEmpty)
+
+        // The cadence sensor wakes mid-ride and is connected.
+        var cadenceStates = harness.client.connectionState(.cadence).makeAsyncIterator()
+        #expect(await cadenceStates.next() == .scanning)     // replay
+        harness.events.yield(.discovered(id: cadenceSensor, name: "Wahoo CADENCE", rssi: -60, services: [cscServiceUUID]))
+        #expect(await cadenceStates.next() == .connecting)
+        #expect(await connects.next() == cadenceSensor)
+    }
+
+    /// Unchanged behaviour: with every paired role held there is nothing to look for, so
+    /// the ride takes no scan and the radio stops when the sheet's scan ends.
+    @Test("No ride scan when every paired role is already held", arguments: [false, true])
+    func noRideScanWhenEveryPairedRoleIsHeld(combo: Bool) async {
+        let harness = Harness()
+        let first = UUID()
+        let second = UUID()
+        let assignments: [UUID: Set<SensorRole>] = combo
+            ? [first: [.speed, .cadence]]
+            : [first: [.speed], second: [.cadence]]
+        await harness.client.setPairedSensors(assignments)
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        var cadenceStates = harness.client.connectionState(.cadence).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+        #expect(await cadenceStates.next() == .disconnected) // replay
+
+        await harness.client.beginPairingScan()
+        for id in assignments.keys {
+            harness.events.yield(.discovered(id: id, name: nil, rssi: -55, services: [cscServiceUUID]))
+        }
+        #expect(await speedStates.next() == .connecting)
+        #expect(await cadenceStates.next() == .connecting)
+
+        await harness.client.startScanning()
+        #expect(harness.scanned.value.count == 1)            // the sheet's only
+        await harness.client.endPairingScan()
+        #expect(harness.scanStopped.value == [[cscServiceUUID]])
+        #expect(await harness.currentState(.speed) == .connecting)
+        #expect(await harness.currentState(.cadence) == .connecting)
+    }
+
     @Test("setWheelCircumference scales subsequent speed")
     func wheelCircumferenceScalesSpeed() async {
         let harness = Harness()
@@ -1070,7 +1150,7 @@ struct BLECSCIntegrationTests {
         await harness.client.setRoles(connected, [.speed, .cadence])
         harness.bringToActive(connected)
 
-        // The ambient scan refuses once a slot exists — that guard is deliberate.
+        // The ambient scan refuses: a slot exists and no paired role is left without one.
         await harness.client.startScanning()
         #expect(harness.scanned.value.isEmpty)
 

@@ -1872,6 +1872,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.recordingState = .ended
             $0.finishAlert = nil
         }
+        await store.finish()
         #expect(disconnectCalled.value == true)
         #expect(disconnectedSensors.value == ["hr", "radar", "csc"])
         #expect(finalizedRide.value?.0 == rideId)

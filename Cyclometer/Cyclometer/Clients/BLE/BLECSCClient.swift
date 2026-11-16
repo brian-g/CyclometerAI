@@ -521,17 +521,26 @@ private final class CSCClientState: @unchecked Sendable {
     // MARK: Public control
 
     func startScanning() async {
-        // Only start a fresh scan from a cold state. Re-entering (a feature's .task
-        // re-running on view re-appear, while this object is process-global) must
-        // not stomp live connections back to .scanning.
+        // Start a ride scan unless one is already running, or every paired role is
+        // already held. Re-entering (a feature's .task re-running on view re-appear,
+        // while this object is process-global) is a no-op. Scanning beside a live slot
+        // is safe: recompute flips only unheld roles to .scanning, and the scan request
+        // doesn't touch connections — `beginPairingScan` already does the same.
+        //
+        // A slot alone isn't enough to skip: with separate speed and cadence sensors,
+        // the Start sheet's pairing scan may have connected only the one that was awake.
+        // Skipping here let that scan's end stop the radio, and the other sensor was
+        // never seen for the whole ride (#417).
         let shouldScan = lock.withLock { () -> Bool in
-            guard slots.isEmpty, !isScanning else { return false }
+            let pairedRoles = pairedAssignments.values.reduce(into: Set<SensorRole>()) { $0.formUnion($1) }
+            let heldRoles = slots.values.reduce(into: Set<SensorRole>()) { $0.formUnion($1.roles) }
+            guard !isScanning, slots.isEmpty || !pairedRoles.isSubset(of: heldRoles) else { return false }
             isScanning = true
             recomputeRoleStatesLocked()
             return true
         }
         guard shouldScan else {
-            logger.notice("startScanning skipped — not in cold state")
+            logger.notice("startScanning skipped — already scanning, or every paired role is held")
             return
         }
         await bleClient.startScanning([cscServiceUUID])
