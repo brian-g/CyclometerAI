@@ -1180,10 +1180,15 @@ struct ActiveRideFeatureTimerTests {
     //
     // Synthetic, ride-shaped sequences: readings a second apart, as the sensors deliver them. GPS
     // goes through `.locationUpdated`, so its `speedAccuracy` takes the app's own path.
+    //
+    // The clock moves on every read, as the real one does: `SpeedFeature` stamps a reading's
+    // sample and the ride reads the clock again a moment later. A clock frozen between steps hid
+    // that a reading could count its own sample as the reference it needs (#540 review).
 
     private func makeGatedStore(
         source: SensorSource = .gps,
-        state: ActiveRideFeature.State? = nil
+        state: ActiveRideFeature.State? = nil,
+        clock: TestClock<Duration> = TestClock()
     ) -> (store: TestStoreOf<ActiveRideFeature>, now: LockIsolated<Date>) {
         let now = LockIsolated(testDate)
         let store = TestStore(
@@ -1193,8 +1198,9 @@ struct ActiveRideFeatureTimerTests {
         ) {
             ActiveRideFeature()
         } withDependencies: {
-            $0.continuousClock = TestClock()
-            $0.date = DateGenerator { now.value }
+            $0.continuousClock = clock
+            // A millisecond later on every read.
+            $0.date = DateGenerator { now.withValue { $0 += 0.001; return $0 } }
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
@@ -1389,6 +1395,53 @@ struct ActiveRideFeatureTimerTests {
         #expect(store.state.maxSpeedMPS == 12)
         await fix(store, now, 12.5)
         #expect(store.state.maxSpeedMPS == 12.5)
+    }
+
+    @Test("A stale-sensor fallback's promoted fix never counts; the max resumes on the second GPS reading")
+    func staleFallbackWaitsForGPS() async {
+        let clock = TestClock()
+        let (store, now) = makeGatedStore(source: .bleWheel, clock: clock)
+        await wheel(store, now, 8)
+        await wheel(store, now, 8)
+        await fix(store, now, 8.1)   // GPS behind the sensor: a silent shadow
+        await wheel(store, now, 8)
+        #expect(store.state.maxSpeedMPS == 8)
+        // The sensor goes quiet. The watchdog wakes `staleDataWindow` after the last reading was
+        // stamped, and a little later, as a real sleep does: the last wheel reading is out of the
+        // window by then, so the promoted fix has nothing to be measured against.
+        now.withValue { $0 += 5 }
+        await clock.advance(by: SpeedFeature.staleDataWindow)
+        await store.receive(\.speed.bleFallbackTimedOut)
+        #expect(store.state.speed.activeSpeedSource == .gps)
+        #expect(store.state.speed.speedMPS == 8.1)
+        #expect(store.state.maxSpeedMPS == 8)
+        // The fallback recorded no sample, so the first GPS reading waits too.
+        await fix(store, now, 9)
+        #expect(store.state.maxSpeedMPS == 8)
+        await fix(store, now, 9.2)
+        #expect(store.state.maxSpeedMPS == 9.2)
+    }
+
+    @Test("A disconnect after the stale fallback doesn't judge the fix on screen again, against itself")
+    func disconnectAfterStaleFallbackDoesNotRejudge() async {
+        let clock = TestClock()
+        let (store, now) = makeGatedStore(source: .bleWheel, clock: clock)
+        await wheel(store, now, 8)
+        await wheel(store, now, 8)
+        await fix(store, now, 8.1)
+        await wheel(store, now, 8)
+        now.withValue { $0 += 5 }
+        await clock.advance(by: SpeedFeature.staleDataWindow)
+        await store.receive(\.speed.bleFallbackTimedOut)
+        // The first fix after the fallback is a spike: refused, with nothing recent before it.
+        await fix(store, now, 33, accuracy: 0.5)
+        #expect(store.state.maxSpeedMPS == 8)
+        // The link then drops. GPS is already on screen, so there is nothing new to judge; judged
+        // again a moment later, the spike's own sample would be its reference.
+        await store.send(.speed(.bleConnectionChanged(.disconnected)))
+        #expect(store.state.maxSpeedMPS == 8)
+        await fix(store, now, 9)
+        #expect(store.state.maxSpeedMPS == 9)
     }
 
     @Test("Across a pause, a hard start from a standstill after the resume raises the max")

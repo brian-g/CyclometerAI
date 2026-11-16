@@ -83,24 +83,27 @@ enum MaxSpeedGate {
         case tooFast = "faster than a bicycle could have reached"
     }
 
-    /// Whether `mps`, displayed now from `source`, may become the ride's max.
+    /// Whether `mps`, displayed at `time` from `source`, may become the ride's max.
     ///
     /// - Parameters:
     ///   - speedAccuracy: the GPS fix's `speedAccuracy`, nil when CoreLocation marked it invalid.
     ///     Ignored for a wheel-sensor reading.
-    ///   - samples: the displayed readings so far, oldest first (`SpeedFeature.speedSamples`).
-    ///     Ones at `now` or later are ignored, which includes this reading's own.
+    ///   - time: when the reading was displayed: its own sample's time, or when a fallback
+    ///     showed it.
+    ///   - priorReadings: the readings displayed *before* this one, oldest first, never including
+    ///     its own sample: a reading that could see itself would always have a reference and
+    ///     always be reachable (#540 review). A prior reading at the same instant, which only a
+    ///     frozen test clock produces, gives no time to measure from and is skipped.
     static func verdict(
         _ mps: Double,
         from source: SensorSource,
         speedAccuracy: Double?,
-        at now: Date,
-        after samples: [SpeedSample]
+        at time: Date,
+        priorReadings: some BidirectionalCollection<SpeedSample>
     ) -> Verdict {
         if source == .gps, !isTrustworthy(speedAccuracy: speedAccuracy) { return .untrustworthyGPSAccuracy }
-        return reachability(mps, at: now, from: samples)
+        return reachability(mps, at: time, priorReadings: priorReadings)
     }
-
 
     /// Whether a GPS speed with this accuracy is good enough to be a max.
     static func isTrustworthy(speedAccuracy: Double?) -> Bool {
@@ -110,18 +113,22 @@ enum MaxSpeedGate {
         return speedAccuracy <= maxGPSSpeedAccuracyMPS
     }
 
-    /// Whether a bicycle could have reached `mps` by `now` from every reading of the last
+    /// Whether a bicycle could have reached `mps` by `time` from every prior reading of the last
     /// `window`, of which there must be at least one.
-    static func isReachable(_ mps: Double, at now: Date, from samples: [SpeedSample]) -> Bool {
-        reachability(mps, at: now, from: samples) == .admitted
+    static func isReachable(
+        _ mps: Double, at time: Date, priorReadings: some BidirectionalCollection<SpeedSample>
+    ) -> Bool {
+        reachability(mps, at: time, priorReadings: priorReadings) == .admitted
     }
 
-    private static func reachability(_ mps: Double, at now: Date, from samples: [SpeedSample]) -> Verdict {
-        let cutoff = now.addingTimeInterval(-window)
+    private static func reachability(
+        _ mps: Double, at time: Date, priorReadings: some BidirectionalCollection<SpeedSample>
+    ) -> Verdict {
+        let cutoff = time.addingTimeInterval(-window)
         var hasReference = false
-        for sample in samples.reversed() {
+        for sample in priorReadings.reversed() {
             guard sample.time >= cutoff else { break }
-            let elapsed = now.timeIntervalSince(sample.time)
+            let elapsed = time.timeIntervalSince(sample.time)
             guard elapsed > 0 else { continue }
             if mps > sample.mps + maxAccelerationMPS2 * elapsed + readingSlackMPS { return .tooFast }
             hasReference = true

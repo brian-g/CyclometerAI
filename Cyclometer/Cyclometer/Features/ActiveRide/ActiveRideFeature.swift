@@ -4,9 +4,10 @@ import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.recording)
-/// Rate limit for the "max speed refused" line (#540). Diagnostic only, so it lives outside
-/// `State`: process-wide, at most one line a minute.
-private let maxRefusalLogGate = LockIsolated(LogSampleGate(bucketSeconds: 60))
+/// Rate limits for the "max speed refused" line (#540), one per verdict, so a benign
+/// `noRecentReading` line can't hide an isolated accuracy or acceleration refusal. Diagnostic
+/// only, so they live outside `State`: process-wide, at most one line a minute per verdict.
+private let maxRefusalLogGates = LockIsolated([MaxSpeedGate.Verdict: LogSampleGate]())
 
 enum RideRecordingState: Equatable, Sendable {
     case idle, active, paused, ended
@@ -1362,18 +1363,22 @@ struct ActiveRideFeature {
                 // a banner or a link change showing the same value again is not a new reading,
                 // and `MaxSpeedGate` judges a reading against the ones before it (#540).
                 if state.recordingState == .active,
-                   let speedMPS = Self.newlyDisplayedSpeed(speedAction, state.speed),
-                   speedMPS > Self.stationarySpeedMPS, speedMPS > state.maxSpeedMPS {
+                   let reading = Self.newlyDisplayedReading(speedAction, state.speed, now: date.now),
+                   reading.mps > Self.stationarySpeedMPS, reading.mps > state.maxSpeedMPS {
+                    let speedMPS = reading.mps
                     let verdict = MaxSpeedGate.verdict(
                         speedMPS, from: state.speed.activeSpeedSource, speedAccuracy: state.speedAccuracy,
-                        at: date.now, after: state.speed.speedSamples
+                        at: reading.time, priorReadings: reading.priorReadings
                     )
                     if verdict == .admitted {
                         state.maxSpeedMPS = speedMPS
-                    } else if maxRefusalLogGate.withValue({ $0.admit(uptime: ProcessInfo.processInfo.systemUptime) }) {
+                    } else if maxRefusalLogGates.withValue({
+                        $0[verdict, default: LogSampleGate(bucketSeconds: 60)]
+                            .admit(uptime: ProcessInfo.processInfo.systemUptime)
+                    }) {
                         // Says which check refused, so `log collect` shows a gate refusing honest
-                        // readings. At most one a minute: a ride whose every fix has an invalid
-                        // accuracy refuses every reading that would raise the max.
+                        // readings. At most one a minute per check: a ride whose every fix has an
+                        // invalid accuracy refuses every reading that would raise the max.
                         let source = state.speed.activeSpeedSource.rawValue
                         let accuracy = state.speedAccuracy ?? -1
                         let maxSpeedMPS = state.maxSpeedMPS
@@ -1383,7 +1388,7 @@ struct ActiveRideFeature {
                             from \(source, privacy: .public): \(verdict.rawValue, privacy: .public) \
                             (gps speed accuracy \(accuracy, format: .fixed(precision: 2), privacy: .public) m/s) \
                             — max stays \(maxSpeedMPS, format: .fixed(precision: 2), privacy: .public) m/s; \
-                            at most one line a minute
+                            at most one line a minute for this reason
                             """
                         )
                     }
@@ -1435,20 +1440,47 @@ struct ActiveRideFeature {
         LiveActivityFeature()
     }
 
-    /// The speed a `SpeedFeature` action has just put on the dashboard (#540): a reading, or the
-    /// latest GPS speed a fallback from the wheel sensor promotes (#381). Nil for GPS's silent
-    /// shadow behind a wheel sensor, and for a banner or a link change that shows nothing new.
-    /// A disconnect after the stale-data fallback already switched to GPS judges the current fix
-    /// a second time, a moment later, against a bound only that moment's 4 m/s² wider.
-    private static func newlyDisplayedSpeed(_ action: SpeedFeature.Action, _ speed: SpeedFeature.State) -> Double? {
+    /// A speed `SpeedFeature` has just put on the dashboard, when, and the readings displayed
+    /// before it: what `MaxSpeedGate` judges (#540).
+    private struct DisplayedReading {
+        var mps: Double
+        var time: Date
+        var priorReadings: ArraySlice<SpeedSample>
+    }
+
+    /// The reading a `SpeedFeature` action has just put on the dashboard (#540). Nil for GPS's
+    /// silent shadow behind a wheel sensor, and for a banner or a link change that shows nothing new.
+    private static func newlyDisplayedReading(
+        _ action: SpeedFeature.Action, _ speed: SpeedFeature.State, now: Date
+    ) -> DisplayedReading? {
         switch action {
         case .bleSpeedReceived:
-            speed.speedMPS
-        case .gpsSpeedReceived, .bleFallbackTimedOut, .bleConnectionChanged(.disconnected):
-            speed.activeSpeedSource == .gps ? speed.speedMPS : nil
+            return appendedReading(speed)
+        case .gpsSpeedReceived:
+            return speed.activeSpeedSource == .gps ? appendedReading(speed) : nil
+        case .bleFallbackTimedOut, .bleConnectionChanged(.disconnected):
+            // A fallback shows the latest fix without recording it as a sample (#381), so it is
+            // judged as of now against every reading so far. A disconnect after the stale timeout
+            // already switched to GPS promotes nothing: the fix on screen is already the last
+            // sample, judged when it arrived, and must not be judged again with itself as a
+            // reference. A promoted fix that happens to equal the last sample is skipped too,
+            // which can only leave the max where it is.
+            guard speed.activeSpeedSource == .gps, let mps = speed.speedMPS,
+                  speed.speedSamples.last?.mps != mps
+            else { return nil }
+            return DisplayedReading(mps: mps, time: now, priorReadings: speed.speedSamples[...])
         default:
-            nil
+            return nil
         }
+    }
+
+    /// The reading `SpeedFeature` appended this action. Its own sample is the last one, so it is
+    /// judged at that sample's time against the samples before it. Never against the whole list
+    /// at a second read of the clock: a moment later its own sample would be in the window, and
+    /// would always pass and always count as the reference it needs (#540 review).
+    private static func appendedReading(_ speed: SpeedFeature.State) -> DisplayedReading? {
+        guard let own = speed.speedSamples.last else { return nil }
+        return DisplayedReading(mps: own.mps, time: own.time, priorReadings: speed.speedSamples.dropLast())
     }
 
     /// The only place the dashboard layout is written (#139 review). An edit that breaks a layout
