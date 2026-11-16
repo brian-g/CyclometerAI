@@ -431,6 +431,12 @@ Wrist haptics are significantly more noticeable than pocket haptics. The same pa
 - A brief non-intrusive banner displays on source switch during an active ride: "Switched to GPS for speed — <sensor> not responding" when readings stop, or "Switched to GPS for speed — <sensor> disconnected" when the sensor disconnects. A flapping sensor is announced at most once per 5 minutes; a disconnect always is (BLE.md §6.2, #390)
 - The rider is never left staring at a stale value; all metrics display "—" when no source is active
 
+**Ride max speed (#540):** the ride's max is the highest displayed speed while recording and moving, from whichever source is displayed. Because it only ever rises, a reading has to be plausible to become it (`MaxSpeedGate`). The displayed speed itself is never gated.
+- **GPS:** CoreLocation's `speedAccuracy` must be valid (not negative) and no wider than **2.5 m/s** (`readingSlackMPS`).
+- **Both sources:** the reading must be reachable from every displayed reading of the last **5 s** (`window`): no more than **4 m/s²** (`maxAccelerationMPS2`) times the seconds since that reading, plus 2.5 m/s, above it. 4 m/s² (0.4 g) is about where a road bike's front wheel lifts, and what a 1,500 W sprint gives at 5 m/s. 2.5 m/s is one wheel revolution per second on the largest common wheel, the step a wheel sensor's count can honestly make between seconds. A wheel sensor gets only this check, since CSC has no accuracy field.
+- The gate keeps no state: each reading is judged against the readings before it, so a refused reading can't hold the max down past 5 s, and a resumed ride needs nothing restored. A reading with no displayed reading in the last 5 s (the first of a ride or of a resume, or the first after a gap) has nothing to be measured against, and only the GPS accuracy check applies.
+- Replayed over the 8 rides of 2026-10-07 to 2026-11-03 (28,000 per-second readings, mostly wheel sensor), the gate refused none of them, and every ride's max was unchanged. The largest real rise in one second was 3.9 m/s, under the 6.5 m/s the gate allows. GPS `speedAccuracy` is not recorded in the ride store or the GPX export, so its threshold has not been replayed.
+
 **Cadence Notes:**
 - Cadence has no fallback source; if no BLE cadence sensor is paired, the cadence tile displays "--" with a "Pair Sensor" affordance (tapping navigates to S11)
 - Cadence is recorded as absent (element omitted) in GPX export when no sensor is present for that track point
@@ -438,6 +444,7 @@ Wrist haptics are significantly more noticeable than pocket haptics. The same pa
 **Acceptance Criteria:**
 - [ ] HR switches from BLE strap to Apple Watch within 5 seconds of strap disconnection
 - [ ] Speed switches from BLE sensor to GPS within 5 seconds of sensor disconnection
+- [x] A single 1 s speed spike well beyond the rider's speed, or a GPS reading with an invalid or wider than 2.5 m/s `speedAccuracy`, doesn't become the ride's max; a real sprint or descent still does (#540)
 - [ ] Source badge updates correctly on all transitions
 - [ ] Banner notification appears on source switch during active ride
 - [ ] GPX export correctly records the active source for each track point (see §10 and Appendix B)

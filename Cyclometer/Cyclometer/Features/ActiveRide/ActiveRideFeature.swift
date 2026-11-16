@@ -318,6 +318,7 @@ struct ActiveRideFeature {
         var liveActivity = LiveActivityState()
         /// The highest displayed speed while recording and moving (#381) — taken on every
         /// reading in `.speed`, not once a second, so a peak between two ticks still counts.
+        /// Only a reading `MaxSpeedGate` admits (#540).
         var maxSpeedMPS: Double = 0
         /// Moving seconds: ticks whose displayed speed cleared `stationarySpeedMPS`, the same
         /// sample and threshold `distanceMeters` integrates (#381). Persisted (#175).
@@ -409,6 +410,9 @@ struct ActiveRideFeature {
         var elevation = ElevationTracker()
         var heading: Double = -1
         var horizontalAccuracy: Double = 0
+        /// The latest fix's `speedAccuracy`, nil when CoreLocation marked it invalid: whether the
+        /// GPS speed that fix sends to `SpeedFeature` may become the max (#540).
+        var speedAccuracy: Double? = nil
         /// Whether the fix behind `coordinate` is good enough to record (#210). Sticky
         /// between fixes, so the once-a-second track point inherits the verdict of the fix
         /// it is actually made of. False until the first fix arrives.
@@ -1237,6 +1241,7 @@ struct ActiveRideFeature {
                     state.sunsetFix = SunsetFix(coordinate: update.coordinate, takenAt: date.now)
                 }
                 state.horizontalAccuracy = update.horizontalAccuracy
+                state.speedAccuracy = update.speedAccuracy
                 let sinceRecorded = date.now.timeIntervalSince(
                     state.lastRecordablePositionAt ?? date.now
                 )
@@ -1324,7 +1329,7 @@ struct ActiveRideFeature {
             case .locationAuthorizationResult(let status):
                 state.isLocationAvailable = status.isGranted
                 return .none
-            case .speed:
+            case .speed(let speedAction):
                 // A pause auto-pause itself made is eligible to auto-resume. One the rider
                 // tapped needs a manual Resume (#102), unless Resume When Moving is on, the ride
                 // has stopped since (#267) or `manualPauseGraceSeconds` have passed (#504), and
@@ -1350,10 +1355,32 @@ struct ActiveRideFeature {
                 }
                 // Every displayed reading, after the resume above so the one that resumes
                 // counts too. Same "moving" bar as distance; the source is `SpeedFeature`'s
-                // choice, so a wheel sensor beats GPS (#381).
-                if state.recordingState == .active, let speedMPS = state.speed.speedMPS,
-                   speedMPS > Self.stationarySpeedMPS {
-                    state.maxSpeedMPS = max(state.maxSpeedMPS, speedMPS)
+                // choice, so a wheel sensor beats GPS (#381). Each reading once, as it arrives:
+                // a banner or a link change showing the same value again is not a new reading,
+                // and `MaxSpeedGate` judges a reading against the ones before it (#540).
+                if state.recordingState == .active,
+                   let speedMPS = Self.newlyDisplayedSpeed(speedAction, state.speed),
+                   speedMPS > Self.stationarySpeedMPS, speedMPS > state.maxSpeedMPS {
+                    if MaxSpeedGate.admits(
+                        speedMPS, from: state.speed.activeSpeedSource, speedAccuracy: state.speedAccuracy,
+                        at: date.now, after: state.speed.speedSamples
+                    ) {
+                        state.maxSpeedMPS = speedMPS
+                    } else {
+                        // Only a reading that would have raised the max, so it stays rare unless
+                        // the gate is refusing honest ones: then this line says which check did.
+                        let source = state.speed.activeSpeedSource.rawValue
+                        let accuracy = state.speedAccuracy ?? -1
+                        let maxSpeedMPS = state.maxSpeedMPS
+                        logger.notice(
+                            """
+                            max speed refused \(speedMPS, format: .fixed(precision: 2), privacy: .public) m/s \
+                            from \(source, privacy: .public), gps speed accuracy \
+                            \(accuracy, format: .fixed(precision: 2), privacy: .public) m/s — max stays \
+                            \(maxSpeedMPS, format: .fixed(precision: 2), privacy: .public) m/s
+                            """
+                        )
+                    }
                 }
                 return effect
             case .weatherSheetOpened:
@@ -1400,6 +1427,22 @@ struct ActiveRideFeature {
         .ifLet(\.$finishAlert, action: \.finishAlert)
         // Last, so it reads each tick's values once the ride has applied them (#308).
         LiveActivityFeature()
+    }
+
+    /// The speed a `SpeedFeature` action has just put on the dashboard (#540): a reading, or the
+    /// latest GPS speed a fallback from the wheel sensor promotes (#381). Nil for GPS's silent
+    /// shadow behind a wheel sensor, and for a banner or a link change that shows nothing new.
+    /// A disconnect after the stale-data fallback already switched to GPS judges the current fix
+    /// a second time, a moment later, against a bound only that moment's 4 m/s² wider.
+    private static func newlyDisplayedSpeed(_ action: SpeedFeature.Action, _ speed: SpeedFeature.State) -> Double? {
+        switch action {
+        case .bleSpeedReceived:
+            speed.speedMPS
+        case .gpsSpeedReceived, .bleFallbackTimedOut, .bleConnectionChanged(.disconnected):
+            speed.activeSpeedSource == .gps ? speed.speedMPS : nil
+        default:
+            nil
+        }
     }
 
     /// The only place the dashboard layout is written (#139 review). An edit that breaks a layout

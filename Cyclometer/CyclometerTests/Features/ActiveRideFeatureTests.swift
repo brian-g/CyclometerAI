@@ -383,6 +383,7 @@ struct ActiveRideFeatureLocationTests {
         coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
         altitude: 280.0,
         speed: 8.5,
+        speedAccuracy: 0.3,
         horizontalAccuracy: 5.0,
         heading: 192.0,
         timestamp: Date(timeIntervalSince1970: 1_000_000)
@@ -436,6 +437,7 @@ struct ActiveRideFeatureLocationTests {
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
+            $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
@@ -494,6 +496,7 @@ struct ActiveRideFeatureLocationTests {
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
+            $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
@@ -519,6 +522,7 @@ struct ActiveRideFeatureLocationTests {
             coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
             altitude: 280.0,
             speed: 8.5,
+            speedAccuracy: 0.3,
             // The accuracy the log archive recorded at 11:56:51 on 2026-09-06 (#210).
             horizontalAccuracy: 13.2,
             heading: 192.0,
@@ -530,6 +534,7 @@ struct ActiveRideFeatureLocationTests {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.horizontalAccuracy = 13.2
+            $0.speedAccuracy = 0.3
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.heading = 192.0
         }
@@ -632,6 +637,7 @@ struct ActiveRideFeatureLocationTests {
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
+            $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
@@ -672,6 +678,7 @@ struct ActiveRideFeatureLocationTests {
             // recorded during the active update above.
             $0.altitudeResolver.gpsFix(altitude: 300.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 3.0
+            $0.speedAccuracy = nil
             $0.heading = 45.0
         }
         await store.receive(.speed(.gpsSpeedReceived(12.0))) {
@@ -699,7 +706,7 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
-            $0.maxSpeedMPS = 8.5
+            // No fix behind it, so no `speedAccuracy`: not a max (#540).
         }
 
         let invalidUpdate = LocationUpdate(
@@ -813,15 +820,16 @@ struct ActiveRideFeatureTimerTests {
         speedMPS: Double = 0,
         persistenceClient: PersistenceClient = .testValue
     ) -> TestStoreOf<ActiveRideFeature> {
-        TestStore(
-            initialState: ActiveRideFeature.State(
-                recordingState: .active,
-                speed: SpeedFeature.State(
-                    speedMPS: speedMPS >= 0 ? speedMPS : nil,
-                    activeSpeedSource: speedMPS >= 0 ? .gps : .none
-                )
+        var state = ActiveRideFeature.State(
+            recordingState: .active,
+            speed: SpeedFeature.State(
+                speedMPS: speedMPS >= 0 ? speedMPS : nil,
+                activeSpeedSource: speedMPS >= 0 ? .gps : .none
             )
-        ) {
+        )
+        // A good fix behind the GPS speed, so a reading sent straight to `.speed` can be a max (#540).
+        state.speedAccuracy = 0.3
+        return TestStore(initialState: state) {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
@@ -1159,6 +1167,187 @@ struct ActiveRideFeatureTimerTests {
         #expect(store.state.speedSampleCount == moving.count)
         #expect(abs(store.state.averageSpeedMPS - moving.reduce(0, +) / Double(moving.count)) < 1e-9)
         #expect(store.state.maxSpeedMPS == 12.0)
+    }
+
+    // MARK: - What can become the max (#540)
+    //
+    // Synthetic, ride-shaped sequences: readings a second apart, as the sensors deliver them. GPS
+    // goes through `.locationUpdated`, so its `speedAccuracy` takes the app's own path.
+
+    private func makeGatedStore(
+        source: SensorSource = .gps
+    ) -> (store: TestStoreOf<ActiveRideFeature>, now: LockIsolated<Date>) {
+        let now = LockIsolated(testDate)
+        let store = TestStore(
+            initialState: ActiveRideFeature.State(
+                recordingState: .active, speed: SpeedFeature.State(activeSpeedSource: source)
+            )
+        ) {
+            ActiveRideFeature()
+        } withDependencies: {
+            $0.continuousClock = TestClock()
+            $0.date = DateGenerator { now.value }
+            $0.hapticsClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.locationClient = .testValue
+            $0.persistenceClient = .testValue
+        }
+        store.exhaustivity = .off
+        return (store, now)
+    }
+
+    /// A GPS fix one second after the last reading.
+    private func fix(
+        _ store: TestStoreOf<ActiveRideFeature>, _ now: LockIsolated<Date>, _ mps: Double,
+        accuracy: Double? = 0.3
+    ) async {
+        now.withValue { $0 += 1 }
+        await store.send(.locationUpdated(LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0, longitude: -89.0), altitude: 280,
+            speed: mps, speedAccuracy: accuracy, horizontalAccuracy: 5, heading: 0, timestamp: now.value
+        )))
+        await store.receive(\.speed.gpsSpeedReceived)
+    }
+
+    /// A wheel-sensor reading one second after the last.
+    private func wheel(_ store: TestStoreOf<ActiveRideFeature>, _ now: LockIsolated<Date>, _ mps: Double) async {
+        now.withValue { $0 += 1 }
+        await store.send(.speed(.bleSpeedReceived(mps)))
+    }
+
+    @Test("A GPS spike well beyond the rider's speed never becomes the max", arguments: [1, 2, 4])
+    func gpsSpikeIsRefused(seconds: Int) async {
+        let (store, now) = makeGatedStore()
+        for _ in 0..<5 { await fix(store, now, 8) }
+        // Multipath reporting 33 m/s (119 km/h), with an accuracy that looks fine: the
+        // acceleration bound is what refuses it, however many seconds it lasts up to the window.
+        for _ in 0..<seconds {
+            await fix(store, now, 33)
+            // Shown as reported: only the max is gated.
+            #expect(store.state.speed.speedMPS == 33)
+            #expect(store.state.maxSpeedMPS == 8)
+        }
+        await fix(store, now, 8.2)
+        #expect(store.state.maxSpeedMPS == 8.2)
+    }
+
+    @Test("A wheel-sensor spike is refused too, with no accuracy to go on")
+    func wheelSpikeIsRefused() async {
+        let (store, now) = makeGatedStore(source: .bleWheel)
+        for _ in 0..<3 { await wheel(store, now, 8) }
+        // Under `CSCCalculator`'s 15 rev/s cap (31 m/s on a 2096 mm wheel), so the client passes it.
+        await wheel(store, now, 30)
+        #expect(store.state.maxSpeedMPS == 8)
+        // No fix has given an accuracy, and the wheel's readings count regardless.
+        #expect(store.state.speedAccuracy == nil)
+        await wheel(store, now, 8.3)
+        #expect(store.state.maxSpeedMPS == 8.3)
+    }
+
+    @Test("A sprint from a standstill at the physical limit, then a long descent, raises the max")
+    func sprintAndDescentRaiseTheMax() async {
+        let (store, now) = makeGatedStore()
+        for _ in 0..<3 { await fix(store, now, 0) }
+        // 4 m/s more every second: as hard as a bicycle accelerates (`maxAccelerationMPS2`).
+        for mps in [4.0, 8.0, 12.0] {
+            await fix(store, now, mps)
+            #expect(store.state.maxSpeedMPS == mps)
+        }
+        // Then a descent gaining 0.5 m/s a second, sustained to 20 m/s (72 km/h).
+        var mps = 12.0
+        while mps < 20 {
+            mps += 0.5
+            await fix(store, now, mps)
+        }
+        #expect(store.state.maxSpeedMPS == 20)
+    }
+
+    @Test("A GPS speed whose speedAccuracy is invalid or poor isn't counted")
+    func untrustworthyAccuracyIsNotCounted() async {
+        let (store, now) = makeGatedStore()
+        await fix(store, now, 8)
+        #expect(store.state.maxSpeedMPS == 8)
+
+        // CoreLocation's own "invalid" −1, through `LocationUpdate(CLLocation)`.
+        now.withValue { $0 += 1 }
+        await store.send(.locationUpdated(LocationUpdate(CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 43.0, longitude: -89.0), altitude: 280,
+            horizontalAccuracy: 5, verticalAccuracy: 3, course: 0, courseAccuracy: 5,
+            speed: 9, speedAccuracy: -1, timestamp: now.value
+        ))))
+        await store.receive(\.speed.gpsSpeedReceived)
+        #expect(store.state.speed.speedMPS == 9)
+        #expect(store.state.maxSpeedMPS == 8)
+
+        // Valid, but wider than the gate's slack.
+        await fix(store, now, 9.5, accuracy: MaxSpeedGate.readingSlackMPS + 0.5)
+        #expect(store.state.maxSpeedMPS == 8)
+
+        await fix(store, now, 9.6)
+        #expect(store.state.maxSpeedMPS == 9.6)
+    }
+
+    @Test("A refused reading doesn't hold the max down, after a spike or after a low glitch")
+    func refusalDoesNotLatch() async {
+        let (store, now) = makeGatedStore(source: .bleWheel)
+        for _ in 0..<3 { await wheel(store, now, 8) }
+        await wheel(store, now, 30)
+        // Judged against the readings before them, never against the refused one alone.
+        for mps in [8.5, 9.0, 9.5, 12.0] {
+            await wheel(store, now, mps)
+            #expect(store.state.maxSpeedMPS == mps)
+        }
+        // A low glitch holds faster readings off only until a bicycle could have recovered from it.
+        await wheel(store, now, 0)
+        await wheel(store, now, 12.5)   // 0 + 4 + 2.5 = 6.5
+        await wheel(store, now, 12.6)   // 0 + 8 + 2.5 = 10.5
+        #expect(store.state.maxSpeedMPS == 12)
+        await wheel(store, now, 12.7)   // 0 + 12 + 2.5 = 14.5
+        #expect(store.state.maxSpeedMPS == 12.7)
+    }
+
+    @Test("After a GPS dropout, the first fix back raises the max")
+    func dropoutRecovers() async {
+        let (store, now) = makeGatedStore()
+        for _ in 0..<3 { await fix(store, now, 8) }
+        // A tunnel: fixes without a speed, then none at all.
+        for _ in 0..<5 { await fix(store, now, -1, accuracy: nil) }
+        now.withValue { $0 += 20 }
+        // Nothing displayed in the window to measure it against, so only its accuracy is checked.
+        await fix(store, now, 11)
+        #expect(store.state.maxSpeedMPS == 11)
+    }
+
+    @Test("Across a pause, a hard start from a standstill after the resume raises the max")
+    func pauseAndResumeRecover() async {
+        let (store, now) = makeGatedStore()
+        for _ in 0..<3 { await fix(store, now, 8) }
+        await store.send(.pauseTapped)
+        for _ in 0..<20 { await fix(store, now, 0) }
+        await store.send(.resumeTapped)
+        #expect(store.state.recordingState == .active)
+        await fix(store, now, 4)
+        await fix(store, now, 8)
+        #expect(store.state.maxSpeedMPS == 8)
+        // 4 m/s more every second from the light, past the max set before the pause.
+        await fix(store, now, 12)
+        #expect(store.state.maxSpeedMPS == 12)
+    }
+
+    @Test("A switch from the wheel sensor to GPS isn't mistaken for a spike")
+    func sourceSwitchIsNotASpike() async {
+        let (store, now) = makeGatedStore(source: .bleWheel)
+        for _ in 0..<3 { await wheel(store, now, 10) }
+        // GPS behind the sensor is a silent shadow: neither shown nor judged.
+        await fix(store, now, 12)
+        #expect(store.state.maxSpeedMPS == 10)
+        // The fallback shows that fix, 2 m/s over the sensor's last reading, and it counts (#381).
+        await store.send(.speed(.bleConnectionChanged(.disconnected)))
+        #expect(store.state.speed.activeSpeedSource == .gps)
+        #expect(store.state.maxSpeedMPS == 12)
+        await fix(store, now, 12.5)
+        #expect(store.state.maxSpeedMPS == 12.5)
     }
 }
 
@@ -2112,6 +2301,7 @@ struct ActiveRideFeatureStateMachineTests {
             coordinate: Coordinate(latitude: 43.0, longitude: -89.0),
             altitude: 280.0,
             speed: 8.0,
+            speedAccuracy: 0.3,
             horizontalAccuracy: 5.0,
             heading: 0,
             timestamp: testDate
@@ -2122,6 +2312,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.trackSegments = [[Coordinate(latitude: 43.0, longitude: -89.0)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
+            $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
             $0.lastRecordablePositionAt = testDate
             $0.heading = 0
@@ -3877,6 +4068,8 @@ struct ActiveRideFeatureSharedPeripheralTests {
             latestGPSSpeedMPS: 5.0,
             pairedSensorName: "Wahoo SPEED"
         )
+        // The fix behind `latestGPSSpeedMPS`, good enough for its speed to be a max (#540).
+        state.speedAccuracy = 0.3
         state.cadence = CadenceFeature.State(cadenceRPM: 82)
         state.calibration.isSensorActive = true
         state.calibration.isGPSUsable = true

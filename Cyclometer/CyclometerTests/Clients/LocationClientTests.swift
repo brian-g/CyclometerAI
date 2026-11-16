@@ -92,6 +92,31 @@ struct LocationClientTests {
         ))
     }
 
+    // MARK: - speedAccuracy (#540)
+
+    private static func clLocation(speedAccuracy: Double) -> CLLocation {
+        CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 43.0731, longitude: -89.4012),
+            altitude: 0, horizontalAccuracy: 5, verticalAccuracy: 3,
+            course: 90, courseAccuracy: 5, speed: 8.5, speedAccuracy: speedAccuracy,
+            timestamp: Date(timeIntervalSince1970: 1_000_000)
+        )
+    }
+
+    @Test("a speed accuracy CoreLocation marks invalid arrives as nil")
+    func invalidSpeedAccuracyIsNil() {
+        let update = LocationUpdate(Self.clLocation(speedAccuracy: -1))
+        #expect(update.speedAccuracy == nil)
+        // The speed itself is still delivered: it's the dashboard's, only the max is gated.
+        #expect(update.speed == 8.5)
+    }
+
+    @Test("a valid speed accuracy arrives as measured")
+    func validSpeedAccuracyIsKept() {
+        #expect(LocationUpdate(Self.clLocation(speedAccuracy: 0.4)).speedAccuracy == 0.4)
+        #expect(LocationUpdate(Self.clLocation(speedAccuracy: 0)).speedAccuracy == 0)
+    }
+
     // MARK: - testValue behaviour
 
     @Test("testValue startUpdates stream completes immediately")
