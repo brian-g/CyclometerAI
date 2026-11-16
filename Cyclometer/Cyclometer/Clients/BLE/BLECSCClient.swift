@@ -521,8 +521,8 @@ private final class CSCClientState: @unchecked Sendable {
     // MARK: Public control
 
     func startScanning() async {
-        // Start a ride scan unless one is already running, or every paired role is
-        // already held. Re-entering (a feature's .task re-running on view re-appear,
+        // Start a ride scan unless one is already running, or a slot exists and every
+        // paired role holds one. With no slots it always scans, paired or not. Re-entering (a feature's .task re-running on view re-appear,
         // while this object is process-global) is a no-op. Scanning beside a live slot
         // is safe: recompute flips only unheld roles to .scanning, and the scan request
         // doesn't touch connections — `beginPairingScan` already does the same.
@@ -540,7 +540,7 @@ private final class CSCClientState: @unchecked Sendable {
             return true
         }
         guard shouldScan else {
-            logger.notice("startScanning skipped — already scanning, or every paired role is held")
+            logger.notice("startScanning skipped — already scanning, or a slot exists and every paired role holds one")
             return
         }
         await bleClient.startScanning([cscServiceUUID])
