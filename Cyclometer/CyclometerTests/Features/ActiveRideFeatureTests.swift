@@ -1827,6 +1827,7 @@ struct ActiveRideFeatureStateMachineTests {
     @Test("finishConfirmed transitions to ended and disconnects sensors")
     func finishConfirmedEndsRide() async {
         let disconnectCalled = LockIsolated(false)
+        let disconnectedSensors = LockIsolated<Set<String>>([])
         let finalizedRide = LockIsolated<(UUID, Date, RideSummaryUpdate, URL?)?>(nil)
         let rideId = UUID()
         let store = TestStore(
@@ -1838,7 +1839,13 @@ struct ActiveRideFeatureStateMachineTests {
             $0.date = .constant(testDate)
             $0.hapticsClient = .testValue
             $0.variaRadarClient = .testValue
+            $0.variaRadarClient.disconnect = { disconnectedSensors.withValue { _ = $0.insert("radar") } }
             $0.bleHRClient = .testValue
+            $0.bleHRClient.disconnect = { disconnectedSensors.withValue { _ = $0.insert("hr") } }
+            // Left connected, a sleeping speed/cadence sensor runs the reconnect ladder
+            // in the background after the ride is over (#417).
+            $0.bleCSCClient = .testValue
+            $0.bleCSCClient.disconnect = { disconnectedSensors.withValue { _ = $0.insert("csc") } }
             $0.permissionsClient = .mock(initial: [.locationWhenInUse: .granted])
             $0.locationClient = LocationClient(
                 startUpdates: { AsyncStream { $0.finish() } },
@@ -1865,7 +1872,9 @@ struct ActiveRideFeatureStateMachineTests {
             $0.recordingState = .ended
             $0.finishAlert = nil
         }
+        await store.finish()
         #expect(disconnectCalled.value == true)
+        #expect(disconnectedSensors.value == ["hr", "radar", "csc"])
         #expect(finalizedRide.value?.0 == rideId)
         #expect(finalizedRide.value?.1 == testDate)
         #expect(finalizedRide.value?.2.rideId == rideId)
