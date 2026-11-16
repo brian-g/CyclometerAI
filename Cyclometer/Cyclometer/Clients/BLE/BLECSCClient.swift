@@ -823,7 +823,18 @@ private final class CSCClientState: @unchecked Sendable {
             await setRoles(peripheralID: id, roles: roles)
 
         case .connected(let id):
-            guard lock.withLock({ slots[id] != nil }) else { return }
+            guard lock.withLock({ slots[id] != nil }) else {
+                // A link came up for a peripheral this client holds no slot for. Releasing a
+                // slot disconnects it, but a connect can still be placed *after* that: a
+                // ladder rung, or `setRoles`, checks the slot under the lock and calls
+                // `connect` once the lock is dropped, and a release can land in between.
+                // That connect leaves "csc" registered with nothing subscribing, which is how
+                // the 2026-11-09 link stayed dark. Releasing the owner here closes the gap
+                // whatever the ordering (#558). It is a no-op for a peripheral another client
+                // owns: `BLECentral` cancels only when no owner is left.
+                await bleClient.disconnect(id, cscOwnerID)
+                return
+            }
             lock.withLock {
                 slots[id]?.reconnectTask?.cancel()
                 slots[id]?.reconnectTask = nil

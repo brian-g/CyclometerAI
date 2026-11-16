@@ -31,6 +31,46 @@ private func cscPayload(
     return Data([flags] + bytes)
 }
 
+/// Holds one `connect` call between the client's decision to connect and the transport
+/// receiving it, the window a ladder rung or `setRoles` has after checking its slot under
+/// the lock and before `connect` lands. Unarmed it passes every call straight through.
+private final class ConnectGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var armed = false
+    private var opened = false
+    private var held: CheckedContinuation<Void, Never>?
+    /// Yields once when a call reaches the armed gate.
+    let reached: AsyncStream<Void>
+    private let reachedContinuation: AsyncStream<Void>.Continuation
+
+    init() { (reached, reachedContinuation) = AsyncStream<Void>.makeStream() }
+
+    func arm() { lock.withLock { armed = true; opened = false } }
+
+    func pass() async {
+        guard lock.withLock({ armed }) else { return }
+        reachedContinuation.yield()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow = lock.withLock { () -> Bool in
+                if opened { return true }
+                held = continuation
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            armed = false
+            opened = true
+            defer { held = nil }
+            return held
+        }
+        continuation?.resume()
+    }
+}
+
 // MARK: - Payload parsing
 
 @Suite("BLECSCClient — measurement parsing")
@@ -324,6 +364,8 @@ struct BLECSCIntegrationTests {
         /// service is retained so a read can be pinned to the service it belongs to.
         let reads: LockIsolated<[(UUID, CBUUID, CBUUID)]>
         let clock: SteppedClock
+        /// Arm to hold the next `connect` before the transport sees it.
+        let connectGate: ConnectGate
 
         init() {
             let (eventStream, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
@@ -337,11 +379,13 @@ struct BLECSCIntegrationTests {
             let characteristicsDiscovered = LockIsolated<[[CBUUID]?]>([])
             let reads = LockIsolated<[(UUID, CBUUID, CBUUID)]>([])
             let clock = SteppedClock()
+            let connectGate = ConnectGate()
 
             let bleClient = BLEClient(
                 startScanning: { uuids in scanned.withValue { $0.append(uuids) } },
                 stopScanning: { uuids in scanStopped.withValue { $0.append(uuids) } },
                 connect: { id, _ in
+                    await connectGate.pass()
                     connectCount.withValue { $0 += 1 }
                     connectContinuation.yield(id)
                 },
@@ -375,6 +419,7 @@ struct BLECSCIntegrationTests {
             self.characteristicsDiscovered = characteristicsDiscovered
             self.reads = reads
             self.clock = clock
+            self.connectGate = connectGate
         }
 
         /// Drive a peripheral through the discovery handshake to `.active`. Reports
@@ -1406,6 +1451,47 @@ struct BLECSCIntegrationTests {
 
         #expect(Set(harness.disconnected.value.map(\.0)) == [speed, cadence])
         #expect(harness.disconnected.value.map(\.1) == ["csc", "csc"])
+    }
+
+    /// The window disconnecting on release can't close by itself: a ladder rung that has
+    /// passed its still-reconnecting check, but whose `connect` hasn't reached the transport
+    /// yet, places that connect *after* the release's cancel. When it completes, the link
+    /// must not be left up with "csc" registered and nothing subscribing.
+    @Test("A connect placed after its slot was released is let go when it completes")
+    func connectRacingAReleaseIsLetGo() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.setRoles(id, [.speed])
+
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .connecting)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+        #expect(await connects.next() == id)               // initial connect
+
+        harness.events.yield(.disconnected(id: id, error: nil))
+        #expect(await speedStates.next() == .reconnecting)
+
+        // The first rung wakes, finds the slot reconnecting, and is held on its way to
+        // the transport.
+        harness.connectGate.arm()
+        var reached = harness.connectGate.reached.makeAsyncIterator()
+        #expect(await harness.clock.advanceToNextSleep() == .seconds(1))
+        _ = await reached.next()
+
+        // Ride end releases every slot while that connect is in flight...
+        await harness.client.disconnect()
+        #expect(await speedStates.next() == .disconnected)
+        #expect(harness.disconnected.value.map(\.0) == [id])
+
+        // ...and the connect lands after the cancel, then completes.
+        harness.connectGate.open()
+        #expect(await connects.next() == id)
+        harness.events.yield(.connected(id: id))
+        await settle(harness)
+
+        #expect(harness.disconnected.value.map(\.0) == [id, id])
+        #expect(harness.disconnected.value.map(\.1) == ["csc", "csc"])
+        #expect(harness.servicesDiscovered.value.isEmpty)
     }
 
     @Test("Committing the rider's choice takes the role off the incumbent")

@@ -614,7 +614,15 @@ private final class RadarClientState: @unchecked Sendable {
             await bleClient.connect(id, radarOwnerID)
 
         case .connected(let id):
-            guard lock.withLock({ targetPeripheralID }) == id else { return }
+            guard lock.withLock({ targetPeripheralID }) == id else {
+                // Not our target, but possibly our connect: a ladder rung reads the target and
+                // then calls `connect` after the lock is dropped, so `disconnect()` or a gate
+                // change can clear the target in between and the connect lands after the
+                // cancel. Releasing the "radar" owner here closes that gap whatever the
+                // ordering (#558). It is a no-op for a peripheral another client owns.
+                await bleClient.disconnect(id, radarOwnerID)
+                return
+            }
             cancelReconnect()
             setConnectionState(.connected)
             // One call for both services: didDiscoverServices reports the peripheral's
