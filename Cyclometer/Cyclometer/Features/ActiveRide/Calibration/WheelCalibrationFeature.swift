@@ -186,7 +186,9 @@ struct WheelCalibrationFeature {
                 // neither does one that arrives while some other gate is shut.
                 guard wasUsable, let previous = state.lastFixTimestamp, state.isAccumulating
                 else {
-                    if state.isSensorActive { state.probe.fixSkipped() }
+                    if state.isSensorActive {
+                        state.probe.fixSkipped(isReseed: !wasUsable || state.lastFixTimestamp == nil)
+                    }
                     return .none
                 }
 

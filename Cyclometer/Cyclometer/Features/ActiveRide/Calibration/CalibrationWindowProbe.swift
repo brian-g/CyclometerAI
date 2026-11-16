@@ -13,6 +13,10 @@ import Foundation
 /// `TestStore` diff. Every state change the calibration *decides* is still compared
 /// field by field. The instrumentation is not part of what those tests pin, and it must
 /// not be able to break them. Tests that check the probe read it with `#expect`.
+///
+/// So it must never drive a view or a decision. `State.==` ignores it, and so does
+/// observation: `@ObservableState` skips notifying when old and new compare equal, so
+/// assigning a whole new probe (the reset) notifies nobody.
 struct CalibrationWindowProbe: Equatable {
     /// Metres between consecutive fixes' coordinates over the accepted intervals:
     /// `RouteGeometry.segmentMeters`, the app's own distance formula.
@@ -25,14 +29,17 @@ struct CalibrationWindowProbe: Equatable {
     /// gate went from open to shut.
     private(set) var rejectedFixes = 0
     private(set) var gpsGateShuts = 0
-    /// Usable fixes that added nothing: the re-seed after a pause, or a fix that landed
-    /// while the sensor or suspension gate was shut.
-    private(set) var skippedFixes = 0
+    /// Usable fixes that added nothing, by reason: a re-seed (the first fix after a GPS-gate
+    /// shut or after the window reset, which only starts the next interval), or a fix that
+    /// landed while the sensor or suspension gate was shut.
+    private(set) var reseedFixes = 0
+    private(set) var fixesSkippedWhileGated = 0
     /// Revolutions the window counted for a fix interval whose GPS distance it did not
-    /// count, split by which gate dropped the interval. The GPS gate decides only when the
+    /// count, split by why the interval was dropped. The GPS gate decides only when the
     /// *next* fix lands, so the revolutions of the interval it rejects are already in.
     private(set) var unpairedRevolutionsAtGPSGate = 0.0
-    private(set) var unpairedRevolutionsAtOtherGates = 0.0
+    private(set) var unpairedRevolutionsWhileGated = 0.0
+    private(set) var unpairedRevolutionsAtReseeds = 0.0
     /// Fix times bounding the accepted intervals: the start of the first, the end of the last.
     private(set) var startedAt: Date?
     private(set) var endedAt: Date?
@@ -72,10 +79,16 @@ struct CalibrationWindowProbe: Equatable {
         revolutionsSinceLastFix = 0
     }
 
-    /// A usable fix that added no distance.
-    mutating func fixSkipped() {
-        skippedFixes += 1
-        unpairedRevolutionsAtOtherGates += revolutionsSinceLastFix
+    /// A usable fix that added no distance: a re-seed, or one that landed while the sensor
+    /// or suspension gate was shut.
+    mutating func fixSkipped(isReseed: Bool) {
+        if isReseed {
+            reseedFixes += 1
+            unpairedRevolutionsAtReseeds += revolutionsSinceLastFix
+        } else {
+            fixesSkippedWhileGated += 1
+            unpairedRevolutionsWhileGated += revolutionsSinceLastFix
+        }
         revolutionsSinceLastFix = 0
     }
 
@@ -102,7 +115,9 @@ struct CalibrationWindowProbe: Equatable {
             + "stored \(storedMM) mm; "
             + "unpaired rev \(f(unpairedRevolutionsAtGPSGate, 1)) at gps gate "
             + "(\(gpsGateShuts) shuts, \(rejectedFixes) fixes rejected), "
-            + "\(f(unpairedRevolutionsAtOtherGates, 1)) at other gates (\(skippedFixes) fixes skipped); "
+            + "\(f(unpairedRevolutionsWhileGated, 1)) while the sensor or suspension gate was shut "
+            + "(\(fixesSkippedWhileGated) fixes skipped), "
+            + "\(f(unpairedRevolutionsAtReseeds, 1)) at re-seeds (\(reseedFixes) re-seed fixes); "
             + "\(usedIntervals) intervals, \(f(integratedSeconds, 1)) s integrated of a \(span) span"
     }
 

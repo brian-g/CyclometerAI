@@ -129,7 +129,8 @@ extension WheelCalibrationFeatureTests {
         #expect(probe.usedIntervals == path.count - 3)
         #expect(probe.rejectedFixes == 1)
         #expect(probe.gpsGateShuts == 1)
-        #expect(probe.skippedFixes == 2)   // the first fix's seed, and the re-seed after the rejection
+        #expect(probe.reseedFixes == 2)   // the first fix's seed, and the re-seed after the rejection
+        #expect(probe.fixesSkippedWhileGated == 0)
 
         // The asymmetry #419 names, pinned as the code behaves today: the revolutions of
         // the interval the GPS gate rejected stay in the window. The gate decides only
@@ -205,6 +206,26 @@ extension WheelCalibrationFeatureTests {
         #expect(still.pushedMM == [committed])
     }
 
+    @Test("A fix during suspension counts as skipped while gated, not as a re-seed")
+    func probeSuspensionSkipIsLabelledAsGated() async {
+        let store = makeProbeStore()
+        store.exhaustivity = .off
+        await store.send(.bleConnectionChanged(.active))
+        let path = curve(points: 6)
+        await ride(store, Array(path.prefix(4)))
+
+        // Revolutions land, then suspension shuts before the next fix.
+        await store.send(.wheelRevolutionsReceived(2.5))
+        await store.send(.suspensionChanged(true))
+        await store.send(.locationUpdated(probeFix(path[4], at: 4, speed: meters(path[3], path[4]))))
+
+        let probe = store.state.probe
+        #expect(probe.fixesSkippedWhileGated == 1)
+        #expect(probe.unpairedRevolutionsWhileGated == 2.5)
+        #expect(probe.reseedFixes == 1)   // only the first fix's seed
+        #expect(probe.unpairedRevolutionsAtGPSGate == 0)
+    }
+
     @Test("The probe resets with the window")
     func probeResetsWithWindow() async {
         let store = makeProbeStore()
@@ -229,12 +250,17 @@ extension WheelCalibrationFeatureTests {
         probe.intervalUsed(from: a, at: Self.probeStart, to: b, at: Self.probeStart.addingTimeInterval(1))
         probe.revolutionsCounted(1)
         probe.fixRejected(gateWasOpen: true)
+        probe.fixSkipped(isReseed: true)
+        probe.revolutionsCounted(0.5)
+        probe.fixSkipped(isReseed: false)
 
         let line = probe.summary(dopplerMeters: 9.8, revolutions: 6, storedMM: 2096)
         #expect(line.contains("doppler 9.8 m"))
         #expect(line.contains("positional 10.0 m"))
         #expect(line.contains("doppler/positional \(String(format: "%.4f", 9.8 / meters(a, b)))"))
         #expect(line.contains("unpaired rev 1.0 at gps gate (1 shuts, 1 fixes rejected)"))
+        #expect(line.contains("0.5 while the sensor or suspension gate was shut (1 fixes skipped)"))
+        #expect(line.contains("0.0 at re-seeds (1 re-seed fixes)"))
         #expect(line.contains("doppler without gps-gate-unpaired rev 1960 mm"))
         #expect(!line.contains("45.1"))
         #expect(!line.contains("7.65"))
