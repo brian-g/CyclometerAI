@@ -1,6 +1,7 @@
 import ComposableArchitecture
 import Foundation
 import SwiftData
+import SwiftUI
 import os
 
 // Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
@@ -94,7 +95,9 @@ struct AppFeature {
         case resumableRideFetched(RideSummaryUpdate)
 
         // ── Screen power management (#110) ───────────────────────────────────────
-        case scenePhaseChanged(isActive: Bool)
+        /// The whole phase, not just active or not: pairing scans come off the radio only
+        /// at `.background` (#418), while the rest of this path acts on leaving `.active`.
+        case scenePhaseChanged(ScenePhase)
         case screenVisibilityChanged(Bool)
         /// The first finger down and the last one up, anywhere in the app window
         /// (#333). They pause and restart the countdown. While dimmed the blocker
@@ -389,19 +392,29 @@ struct AppFeature {
                 Self.presentActiveRide(ActiveRideFeature.State(resuming: summary), in: &state)
                 return .merge(releaseStartSheetScan, .send(.activeRide(.task)))
 
-            case .scenePhaseChanged(let isActive):
+            case .scenePhaseChanged(let phase):
+                let isActive = phase == .active
                 state.isForeground = isActive
                 // A S12 dim preview cut off by leaving the app gives the rider's brightness back (#471).
                 // A ride writes its buffered track points: a swipe-kill from the app switcher
                 // goes no further than `.inactive` (#505).
                 guard isActive else {
-                    let dimPreviewEnded = Effect<Action>.send(.settings(.dimPreviewEnded))
-                    guard state.activeRide != nil else { return dimPreviewEnded }
-                    return .merge(dimPreviewEnded, .send(.activeRide(.trackRecorder(.appResignedActive))))
+                    // Only at `.background`: Notification Centre, the app switcher and an incoming
+                    // call pass through `.inactive` and straight back, and would otherwise restart
+                    // every scan on the way (#418).
+                    let pairingScans = phase == .background ? setPairingScansSuspended(true) : .none
+                    let leaving = Effect<Action>.merge(.send(.settings(.dimPreviewEnded)), pairingScans)
+                    guard state.activeRide != nil else { return leaving }
+                    return .merge(leaving, .send(.activeRide(.trackRecorder(.appResignedActive))))
                 }
                 // S12 rereads the system's Live Activities setting, which the rider may just have
-                // changed in iOS Settings (#313).
-                let settings = Effect<Action>.send(.settings(.appBecameActive))
+                // changed in iOS Settings (#313). Whatever screen holds a pairing scan gets it back,
+                // and shows live sensor status again (#418) — a no-op unless returning from
+                // `.background`.
+                let settings = Effect<Action>.merge(
+                    .send(.settings(.appBecameActive)),
+                    setPairingScansSuspended(false)
+                )
                 // ActivityKit refuses a request from the background, so a ride that started or
                 // resumed there gets its Live Activity now (#308). The ride decides whether it needs one.
                 guard state.activeRide != nil else { return settings }
@@ -576,6 +589,23 @@ struct AppFeature {
             await bleCSCClient.endPairingScan()
             await variaRadarClient.endPairingScan()
             await bleHRClient.endPairingScan()
+        }
+    }
+
+    /// Pairing scans are for screens, and nobody sees a screen in the background (#418): a
+    /// Start sheet or Sensors list left up as the rider pocketed the phone otherwise kept all
+    /// three clients scanning, and the app awake, until they came back.
+    ///
+    /// Suspended inside the clients rather than released by each holder: the refcount never
+    /// moves, so every holder's begin/end pair — the Start sheet's here, the Sensors list's in
+    /// `DeviceManagementFeature`, its 10 s sweep — stays balanced on every path, including a
+    /// sheet dismissed or a ride started while backgrounded. A ride's own scan is not a pairing
+    /// scan and is untouched (BLE.md §13.3).
+    private func setPairingScansSuspended(_ suspended: Bool) -> Effect<Action> {
+        .run { [bleCSCClient, variaRadarClient, bleHRClient] _ in
+            await bleCSCClient.setPairingScansSuspended(suspended)
+            await variaRadarClient.setPairingScansSuspended(suspended)
+            await bleHRClient.setPairingScansSuspended(suspended)
         }
     }
 

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import ComposableArchitecture
+import SwiftUI
 @testable import Cyclometer
 
 /// Screen power management during a ride (#110): the wake lock and the idle
@@ -261,7 +262,7 @@ struct AppScreenPowerTests {
             $0.preDimBrightness = 0.8
         }
 
-        await store.send(.scenePhaseChanged(isActive: false)) { $0.isForeground = false }
+        await store.send(.scenePhaseChanged(.background)) { $0.isForeground = false }
         await store.receive(\.settings.dimPreviewEnded)
         // The ride writes its buffered track points on the way out (#505).
         await store.receive(\.activeRide.trackRecorder.appResignedActive)

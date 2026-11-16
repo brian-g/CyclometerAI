@@ -1193,6 +1193,47 @@ struct BLECSCIntegrationTests {
         #expect(harness.scanStopped.value == [[cscServiceUUID]])
     }
 
+    // MARK: - Pairing scans in the background (#418)
+    // `BLEHRClientTests` covers every ordering; these pin the same decision here.
+
+    @Test("Backgrounding withdraws an open pairing scan and returning reissues it")
+    func suspensionWithdrawsAndReissuesThePairingScan() async {
+        let harness = Harness()
+        await harness.client.beginPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(harness.scanStopped.value == [[cscServiceUUID]])
+
+        await harness.client.setPairingScansSuspended(false)
+        #expect(harness.scanned.value == [[cscServiceUUID], [cscServiceUUID]])
+
+        await harness.client.endPairingScan()
+        #expect(harness.scanStopped.value.count == 2)
+    }
+
+    @Test("Backgrounding with no pairing scan open touches nothing")
+    func suspensionWithNothingOpenIsSilent() async {
+        let harness = Harness()
+        await harness.client.setPairingScansSuspended(true)
+        await harness.client.setPairingScansSuspended(false)
+        #expect(harness.scanned.value.isEmpty)
+        #expect(harness.scanStopped.value.isEmpty)
+    }
+
+    @Test("A ride's scan stays on through a suspension, and its stop is not held up by one")
+    func suspensionLeavesTheAmbientScan() async {
+        let harness = Harness()
+        await harness.client.startScanning()      // ambient, from a cold state
+        await harness.client.beginPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(harness.scanStopped.value.isEmpty)
+
+        // The ride ends while backgrounded: the suspended pairing scan doesn't want the radio.
+        await harness.client.disconnect()
+        #expect(harness.scanStopped.value == [[cscServiceUUID]])
+    }
+
     /// The reported bug: a cadence sensor switched off stayed in Available for the life
     /// of the process, because `discoveredIDs` was never pruned.
     @Test("A sensor that stops advertising leaves the list on the next sweep")

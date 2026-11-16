@@ -933,6 +933,7 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | The Start sheet scans while it is open | One `beginPairingScan` per client on appear, so its Connected / Searching badge reports something the rider can act on |
 | That scan is balanced on every exit | Cancel, swipe and Start Ride all release it. Owned by `AppFeature` around the presentation — a release sent from inside a `@Presents` child arrives after the state is nil and is dropped |
 | The ride scans for a paired role the sheet didn't connect | `BLECSCClient.startScanning` skips only when it is already scanning, or a slot exists and every paired role holds one; with no slots it always scans. With separate speed and cadence sensors the sheet may connect only the one that is awake; the ride's scan keeps the radio on for the other after the sheet's scan ends (#417) |
+| Pairing scans stop in the background | At `.background` every client withdraws its pairing scan unless a ride's scan holds the radio, and reissues it at `.active`; `.inactive` alone moves nothing, and the refcount is never touched (§13.3, #418) |
 | One pairing is interrogated at a time | A Pair tap while `pendingPairing` is set is refused, so a cancel cannot release the wrong peripheral |
 | A CSC answer does not displace a strap | Unambiguous roles fold into the role prompt's answer only where unoccupied; an occupied one is left alone rather than raising a prompt about a role the rider never chose |
 | Combo sensor assigned Both | SpeedFeature and CadenceFeature both connect to same peripheral UUID |
@@ -1053,6 +1054,33 @@ also cheap to reverse, being one options dictionary at a single call site.
 
 > **Revisit trigger:** M7, when TrackPoint recording and CoreData checkpointing land. Restoration
 > becomes worthwhile at exactly the point where a terminated ride is recoverable.
+
+**4. Pairing scans stop in the background. — Done, #418.**
+
+`bluetooth-central` lets *any* scan run in the background, not just the ride's. A pairing scan exists to
+feed a screen — the Start sheet's sensor rows, the Sensors list — and nobody sees a screen in the
+background, so it has no business on the radio there. Before this, a Sensors list left open after a ride
+kept all three clients scanning for 24 minutes with the phone pocketed, its 10 s sweep restarting the scan
+each time the system woke the app.
+
+The rule: **with no ride active, nothing scans while the scene is in `.background`; a ride's own scan is
+untouched.** `AppFeature.scenePhaseChanged` calls `setPairingScansSuspended(true)` on all three clients at
+`.background` and `false` at `.active`. A suspended client withdraws its service UUID from the radio unless
+its ambient scan (`isScanning`, the ride's) still wants it, and reissues it on return if any pairing scan is
+still open — so a screen that was showing sensor status shows it live again.
+
+- **Suspended in the clients, not released by each holder.** `pairingScanCount` never moves, so every
+  holder's begin/end pair — the Start sheet's in `AppFeature`, S11's `.task` / `.onDisappear`, its sweep —
+  balances on every path, including a sheet closed or a ride started while backgrounded. Releasing and
+  re-taking per holder would have put a "do I hold it right now?" flag on every release path.
+- **`.background`, not `.inactive`.** Notification Centre, the app switcher, an incoming call and system
+  alerts pass through `.inactive` and straight back; stopping and restarting every scan on each would be
+  churn for nothing. Every real exit from the app reaches `.background`.
+- While suspended, `beginPairingScan` only counts — it issues no scan and rotates no generation, which with
+  no scan running would sweep away every row — and `stopScanning`, `disconnect` and `endPairingScan` treat a
+  suspended pairing scan as not wanting the radio.
+- Connections are not touched. A sensor a pairing scan connected (the paired gate admits it on discovery)
+  stays connected through the suspension, exactly as it does when the screen closes in the foreground.
 
 ### 13.4 What adopting restoration would require
 

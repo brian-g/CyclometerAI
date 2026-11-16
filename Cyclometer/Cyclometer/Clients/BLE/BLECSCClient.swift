@@ -76,6 +76,13 @@ struct BLECSCClient: Sendable {
     /// Balance a `beginPairingScan`. The hardware scan stops only when no pairing
     /// scan and no ambient scan remain.
     var endPairingScan:        @Sendable () async -> Void
+    /// Take every open pairing scan off the radio while the app is in the background, and
+    /// put them back on return (#418). A pairing scan exists to feed a screen, and nobody
+    /// sees one in the background. The refcount is untouched, so every holder's begin/end
+    /// pair stays balanced whatever happens while suspended — a sheet dismissed or a ride
+    /// started meanwhile needs no special case — and the ambient scan a ride holds is never
+    /// stopped by it (BLE.md §13.3).
+    var setPairingScansSuspended: @Sendable (Bool) async -> Void
     /// The rider tapped Pair. Connects the peripheral holding *no* roles, purely to
     /// read its capabilities — taking roles here would strip them off whichever
     /// sensor currently holds them, before the rider has decided anything. The
@@ -276,6 +283,7 @@ extension BLECSCClient: DependencyKey {
             discoveredDevices:     { state.makeDiscoveredDevicesStream() },
             beginPairingScan:      { await state.beginPairingScan() },
             endPairingScan:        { await state.endPairingScan() },
+            setPairingScansSuspended: { await state.setPairingScansSuspended($0) },
             pair:                  { id in await state.pair(peripheralID: id) },
             unpair:                { id in await state.unpair(peripheralID: id) },
             setWheelCircumference: { mm in await state.setWheelCircumference(mm) },
@@ -299,6 +307,7 @@ extension BLECSCClient: DependencyKey {
         discoveredDevices:     { AsyncStream { $0.finish() } },
         beginPairingScan:      { },
         endPairingScan:        { },
+        setPairingScansSuspended: { _ in },
         pair:                  { _ in },
         unpair:                { _ in },
         setWheelCircumference: { _ in },
@@ -400,6 +409,12 @@ private final class CSCClientState: @unchecked Sendable {
     /// must be able to scan while sensors are connected, and its scan must not make
     /// dashboard role tiles read `.scanning` (see `recomputeRoleStatesLocked`).
     private var pairingScanCount = 0
+    /// The app is in the background, so the open pairing scans are off the radio (#418).
+    /// They stay counted — only the hardware request is withdrawn — so the holders'
+    /// begin/end pairs balance whatever happens meanwhile.
+    private var pairingScansSuspended = false
+    /// Whether an open pairing scan currently wants the radio. Must hold the lock.
+    private var pairingScanWantsRadioLocked: Bool { pairingScanCount > 0 && !pairingScansSuspended }
 
     private var speedContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
     private var cadenceContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
@@ -550,7 +565,7 @@ private final class CSCClientState: @unchecked Sendable {
         let shouldStopHardware = lock.withLock { () -> Bool in
             isScanning = false
             recomputeRoleStatesLocked()
-            return pairingScanCount == 0
+            return !pairingScanWantsRadioLocked
         }
         // `BLEClient.requestedServices` is a plain set with no per-caller refcount,
         // so dropping the CSC UUID here would cancel a pairing scan too.
@@ -568,9 +583,19 @@ private final class CSCClientState: @unchecked Sendable {
     /// is connected. Deliberately does not touch `isScanning`, so dashboard role
     /// tiles don't flip to `.scanning` behind a settings screen.
     func beginPairingScan() async {
-        lock.withLock {
+        let suspended = lock.withLock { () -> Bool in
             pairingScanCount += 1
+            // No scan runs while suspended, so a new generation would only sweep away
+            // everything still listed. `setPairingScansSuspended(false)` rotates instead.
+            guard !pairingScansSuspended else { return true }
             rotateDiscoveryGenerationLocked()
+            return false
+        }
+        // Counted, and issued on return to the foreground. `.debug`: the Sensors screen's
+        // sweep lands here every 10 s whenever the backgrounded app is awake.
+        guard !suspended else {
+            logger.debug("pairing scan deferred (\(self.pairingScanCountSnapshot) open) — app in background")
+            return
         }
         // Re-issuing the scan restarts the CoreBluetooth session, so peripherals
         // already seen are re-advertised to us rather than being suppressed as
@@ -583,11 +608,40 @@ private final class CSCClientState: @unchecked Sendable {
     func endPairingScan() async {
         let shouldStopHardware = lock.withLock { () -> Bool in
             pairingScanCount = max(0, pairingScanCount - 1)
-            return pairingScanCount == 0 && !isScanning
+            // Suspended: the radio was already given back by `setPairingScansSuspended`,
+            // or the ambient scan is holding it.
+            return pairingScanCount == 0 && !isScanning && !pairingScansSuspended
         }
         guard shouldStopHardware else { return }
         await bleClient.stopScanning([cscServiceUUID])
         logger.notice("pairing scan stopped")
+    }
+
+    /// Withdraw the open pairing scans from the radio, or reissue them (#418). Only the
+    /// hardware request moves; the count is the holders' business. The ambient scan a ride
+    /// holds keeps the radio on through a suspension, and connections are left alone.
+    func setPairingScansSuspended(_ suspended: Bool) async {
+        let change: PairingScanSuspension = lock.withLock {
+            guard pairingScansSuspended != suspended else { return .none }
+            pairingScansSuspended = suspended
+            guard pairingScanCount > 0 else { return .none }
+            if suspended { return isScanning ? .keptByAmbientScan : .stop }
+            // A restarted scan is a new generation, exactly as `beginPairingScan` makes one.
+            rotateDiscoveryGenerationLocked()
+            return .start
+        }
+        switch change {
+        case .none:
+            return
+        case .keptByAmbientScan:
+            logger.notice("pairing scan suspended — app in background, the ride's scan keeps the radio")
+        case .stop:
+            await bleClient.stopScanning([cscServiceUUID])
+            logger.notice("pairing scan stopped — app in background, \(self.pairingScanCountSnapshot) held")
+        case .start:
+            await bleClient.startScanning([cscServiceUUID])
+            logger.notice("pairing scan started (\(self.pairingScanCountSnapshot) open) — app in foreground")
+        }
     }
 
     /// The rider tapped Pair. Connects holding *no* roles: capabilities aren't known
@@ -759,7 +813,7 @@ private final class CSCClientState: @unchecked Sendable {
             slots.removeAll()
             isScanning = false
             recomputeRoleStatesLocked()
-            return (ids, pairingScanCount == 0)
+            return (ids, !pairingScanWantsRadioLocked)
         }
         for id in ids { await bleClient.disconnect(id, cscOwnerID) }
         // Leave the radio scanning if the pairing UI still wants it — the shared
