@@ -65,6 +65,9 @@ struct WheelCalibrationFeature {
         var gpsMeters = 0.0
         var revolutions = 0.0
         var lastFixTimestamp: Date?
+        /// Diagnostics for the window's log line (#419). In memory only, reset with the
+        /// accumulators, and read by nothing that decides.
+        var probe = CalibrationWindowProbe()
 
         /// Direction the last qualifying window pointed, and the measurement from
         /// every consecutive window that has agreed with it. Reset by a sign flip or a
@@ -145,6 +148,7 @@ struct WheelCalibrationFeature {
                 // zero-mean error into a systematic one-notification undercount.
                 guard state.isAccumulating else { return .none }
                 state.revolutions += revolutions
+                state.probe.revolutionsCounted(revolutions)
                 return .none
 
             case .locationUpdated(let update):
@@ -153,6 +157,9 @@ struct WheelCalibrationFeature {
                     // consistent stretch, and clearing the timestamp means the first
                     // fix after recovery re-seeds the interval instead of integrating
                     // across the gap.
+                    if state.isSensorActive, !state.isSuspended {
+                        state.probe.fixRejected(gateWasOpen: state.isGPSUsable)
+                    }
                     if state.isGPSUsable {
                         logger.notice(
                             """
@@ -170,12 +177,18 @@ struct WheelCalibrationFeature {
                 let wasUsable = state.isGPSUsable
                 if !wasUsable { logger.notice("calibration gps gate open") }
                 state.isGPSUsable = true
-                defer { state.lastFixTimestamp = update.timestamp }
+                defer {
+                    state.lastFixTimestamp = update.timestamp
+                    state.probe.lastFixCoordinate = update.coordinate
+                }
 
                 // A fix that only re-seeds the interval contributes no distance, and
                 // neither does one that arrives while some other gate is shut.
                 guard wasUsable, let previous = state.lastFixTimestamp, state.isAccumulating
-                else { return .none }
+                else {
+                    if state.isSensorActive { state.probe.fixSkipped() }
+                    return .none
+                }
 
                 // Doppler speed integrated over the interval, not the distance between
                 // successive coordinates: position differencing measures |true + noise|,
@@ -183,6 +196,14 @@ struct WheelCalibrationFeature {
                 // threshold itself at realistic fix noise. Speed error is zero-mean and
                 // averages out across the window.
                 state.gpsMeters += update.speed * update.timestamp.timeIntervalSince(previous)
+                // Instrumentation only (#419): the same interval measured between the two
+                // fixes' coordinates. Nothing reads it back.
+                if let previousCoordinate = state.probe.lastFixCoordinate {
+                    state.probe.intervalUsed(
+                        from: previousCoordinate, at: previous,
+                        to: update.coordinate, at: update.timestamp
+                    )
+                }
 
                 guard state.gpsMeters >= WheelCalibration.windowThresholdMeters else { return .none }
                 return evaluateWindow(&state)
@@ -225,6 +246,7 @@ struct WheelCalibrationFeature {
         state.gpsMeters = 0
         state.revolutions = 0
         state.lastFixTimestamp = nil
+        state.probe = CalibrationWindowProbe()
     }
 
     /// Abandon the window *and* the streak. Used when the data is untrustworthy
@@ -262,6 +284,12 @@ struct WheelCalibrationFeature {
             of the \(WheelCalibration.discrepancyThreshold * 100, format: .fixed(precision: 0), privacy: .public)% threshold)
             """
         )
+        // #419: the same window's positional distance and gate accounting, so a collected
+        // log can say whether a short measurement comes from the GPS side or the wheel side.
+        let probeSummary = state.probe.summary(
+            dopplerMeters: gpsMeters, revolutions: revolutions, storedMM: storedMM
+        )
+        logger.notice("calibration window probe: \(probeSummary, privacy: .public)")
 
         guard WheelCalibration.exceedsThreshold(storedMM: storedMM, measuredMM: measuredMM) else {
             resetWindow(&state)
