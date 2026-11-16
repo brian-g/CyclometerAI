@@ -616,6 +616,84 @@ struct PersistenceClientTests {
         #expect(try await client.fetchRideStats(rideId).pauses == [closed, open])
     }
 
+    @Test("weather and pauses that no longer decode survive a resume, checkpoints adding to them, and the finish, byte for byte (#563)")
+    func undecodableColumnsSurviveResumeCheckpointAndFinish() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let rideId = UUID()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        // What an older build's shapes would leave behind: valid JSON whose keys these types
+        // no longer have.
+        let storedWeather = Data(#"[{"date":0,"temperature":21.5,"humidity":0.4}]"#.utf8)
+        let storedPauses = Data(#"[{"start":0,"end":60,"automatic":false}]"#.utf8)
+        // Written outside the client's own context, so the resume reads it from the store.
+        let context = ModelContext(swiftDataStack.container)
+        let ride = Ride(id: rideId, startedAt: start)
+        ride.weatherData = storedWeather
+        ride.pausesData = storedPauses
+        context.insert(ride)
+        try context.save()
+
+        let resumed = try #require(try await client.fetchResumableRide())
+        #expect(resumed.weather.isEmpty)
+        #expect(resumed.pauses.isEmpty)
+
+        // The resumed ride carries on and records more of both, as ActiveRideFeature would.
+        var checkpoint = resumed
+        checkpoint.durationSeconds = 900
+        checkpoint.weather = [RideWeatherSample(date: start.addingTimeInterval(900), temperatureCelsius: 22,
+                                                humidity: 0.5, windSpeedMPS: 3, windFromDegrees: 180, condition: .clear)]
+        checkpoint.pauses = [RidePause(startedAt: start.addingTimeInterval(800), endedAt: start.addingTimeInterval(860), isAuto: true)]
+        try await client.updateRideSummary(checkpoint)
+        try await client.updateRideSummary(checkpoint)
+        #expect(try Self.fetchRide(rideId, from: swiftDataStack).weatherData == storedWeather)
+        #expect(try Self.fetchRide(rideId, from: swiftDataStack).pausesData == storedPauses)
+
+        var finish = checkpoint
+        finish.recordingState = .ended
+        try await client.finalizeRide(rideId, start.addingTimeInterval(1_000), finish, nil)
+        let finished = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(finished.weatherData == storedWeather)
+        #expect(finished.pausesData == storedPauses)
+        // The rest of the finish still landed.
+        #expect(finished.recordingState == .ended)
+        #expect(finished.durationSeconds == 900)
+
+        for name in ["weatherData", "pausesData"] {
+            let column = JSONColumn(entity: "Ride", name: name, owner: rideId)
+            #expect(column.hasReported(.unreadable), "\(name)")
+            #expect(column.hasReported(.writeDropped), "\(name)")
+        }
+    }
+
+    @Test("a NaN in a checkpoint's weather leaves the stored weather as it was, rather than clearing it (#563)")
+    func unencodableWeatherKeepsTheStoredValue() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let rideId = UUID()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let sample = RideWeatherSample(date: start, temperatureCelsius: 18, humidity: 0.6,
+                                       windSpeedMPS: 4, windFromDegrees: 270, condition: .cloudy)
+        try await client.createRide(rideId, start, nil)
+
+        var checkpoint = RideSummaryUpdate(rideId: rideId, durationSeconds: 300, distanceMeters: 2_000,
+                                           averageSpeedMPS: 6, maxSpeedMPS: 9)
+        checkpoint.weather = [sample]
+        try await client.updateRideSummary(checkpoint)
+        let stored = try #require(try Self.fetchRide(rideId, from: swiftDataStack).weatherData)
+
+        var poisoned = sample
+        poisoned.date = start.addingTimeInterval(600)
+        poisoned.windSpeedMPS = .nan
+        checkpoint.durationSeconds = 600
+        checkpoint.weather = [sample, poisoned]
+        try await client.updateRideSummary(checkpoint)
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(ride.weatherData == stored)
+        #expect(ride.durationSeconds == 600)
+        #expect(try await client.fetchRideStats(rideId).weather == [sample])
+        #expect(JSONColumn(entity: "Ride", name: "weatherData", owner: rideId).hasReported(.unencodable))
+    }
+
     @Test("fetchRideStats offers the GPX export only while the file is there (#538)")
     func fetchRideStatsChecksTheGPXFile() async throws {
         try await Self.fetchRideStatsOffersExport(storing: { $0 })

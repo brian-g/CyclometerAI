@@ -87,14 +87,14 @@ final class Ride {
 
     // MARK: - Weather (OQDM10)
     /// The conditions from each forecast fetched during the ride (#151), for S15's weather summary.
-    /// Written at every checkpoint and at the finish. JSON, read and written through `weather`.
+    /// Written at a checkpoint or the finish when it has changed. JSON, read and written through `weather`.
     /// Nothing wrote this column before #151, so no stored ride holds an older shape.
     @Attribute(.externalStorage)
     var weatherData: Data?
 
     var weather: [RideWeatherSample] {
-        get { weatherData.flatMap { try? JSONDecoder().decode([RideWeatherSample].self, from: $0) } ?? [] }
-        set { weatherData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+        get { column("weatherData").read([RideWeatherSample].self, from: weatherData) ?? [] }
+        set { column("weatherData").write(newValue.isEmpty ? nil : newValue, over: weatherData) { weatherData = $0 } }
     }
 
     // MARK: - Map Thumbnail (#177)
@@ -121,8 +121,8 @@ final class Ride {
     var syncRecordsData: Data?
 
     var syncRecords: [RideSyncRecord] {
-        get { syncRecordsData.flatMap { try? JSONDecoder().decode([RideSyncRecord].self, from: $0) } ?? [] }
-        set { syncRecordsData = try? JSONEncoder().encode(newValue) }
+        get { column("syncRecordsData").read([RideSyncRecord].self, from: syncRecordsData) ?? [] }
+        set { column("syncRecordsData").write(newValue, over: syncRecordsData) { syncRecordsData = $0 } }
     }
 
     func syncRecord(for service: ExternalService) -> RideSyncRecord? {
@@ -150,7 +150,8 @@ final class Ride {
     var cadenceSampleCount: Int = 0
     /// W5's time pedalling at each whole rpm and time coasting, mirroring `CadenceFeature.State`
     /// (#340) — persisted so a resumed ride's detail sheet still covers the time before the
-    /// kill. Written at every checkpoint and at ride end, so a finished ride keeps its final
+    /// kill. Written at every checkpoint and at ride end (the per-rpm JSON only when it has
+    /// changed), so a finished ride keeps its final
     /// values. Bounded to the same one-checkpoint-window staleness as every other resumed
     /// aggregate. Per rpm rather than per zone (#79), so the S12 cadence zones resolve at read
     /// time, as #284 has HR's do; a stored per-zone breakdown would go stale when they change.
@@ -163,8 +164,8 @@ final class Ride {
     /// is: a kill and resume mid-ride would otherwise restart the numbering at 0 and merge
     /// the new stretch of riding into the ride's first segment.
     var trackSegmentIndex: Int = 0
-    /// Every pause, manual or auto, in order (#537), for S15's stops. Written at every checkpoint
-    /// and at the finish. JSON, read and written through `pauses`; optional, so #186's
+    /// Every pause, manual or auto, in order (#537), for S15's stops. Written at a checkpoint or
+    /// the finish when it has changed. JSON, read and written through `pauses`; optional, so #186's
     /// mandatory-attribute backfill trap doesn't apply, and a ride recorded before it has none.
     var pausesData: Data?
 
@@ -192,19 +193,32 @@ final class Ride {
         self.trackSegmentIndex = 0
     }
 
+    // The JSON columns' accessors all go through `JSONColumn` (#563): a value that doesn't decode
+    // reads as empty but is never overwritten, so a resumed ride's checkpoints and finish can't
+    // replace it with only what came after the resume, and a value that doesn't encode leaves the
+    // column as it was. Both are logged.
+
     var cadenceSecondsByRPM: [Int: TimeInterval] {
-        get { cadenceSecondsByRPMData.flatMap { try? JSONDecoder().decode([Int: TimeInterval].self, from: $0) } ?? [:] }
-        set { cadenceSecondsByRPMData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+        get { column("cadenceSecondsByRPMData").read([Int: TimeInterval].self, from: cadenceSecondsByRPMData) ?? [:] }
+        set {
+            column("cadenceSecondsByRPMData").write(newValue.isEmpty ? nil : newValue, over: cadenceSecondsByRPMData) {
+                cadenceSecondsByRPMData = $0
+            }
+        }
     }
 
     var pauses: [RidePause] {
-        get { pausesData.flatMap { try? JSONDecoder().decode([RidePause].self, from: $0) } ?? [] }
-        set { pausesData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+        get { column("pausesData").read([RidePause].self, from: pausesData) ?? [] }
+        set { column("pausesData").write(newValue.isEmpty ? nil : newValue, over: pausesData) { pausesData = $0 } }
     }
 
     var calorieSeries: [CaloriePoint]? {
-        get { calorieSeriesData.flatMap { try? JSONDecoder().decode([CaloriePoint].self, from: $0) } }
-        set { calorieSeriesData = newValue.flatMap { try? JSONEncoder().encode($0) } }
+        get { column("calorieSeriesData").read([CaloriePoint].self, from: calorieSeriesData) }
+        set { column("calorieSeriesData").write(newValue, over: calorieSeriesData) { calorieSeriesData = $0 } }
+    }
+
+    private func column(_ name: String) -> JSONColumn {
+        JSONColumn(entity: "Ride", name: name, owner: id)
     }
 
     /// Nested rather than top-level to avoid colliding with the TCA-side
