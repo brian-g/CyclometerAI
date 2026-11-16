@@ -4,7 +4,8 @@
 enum PairingScanSuspension {
     /// Nothing changed, or no pairing scan is open.
     case none
-    /// Suspended, but a ride's ambient scan still wants the radio, so it stays on.
+    /// Suspended, but the client's own ambient scan (`isScanning`, set by `startScanning`)
+    /// still wants the radio, so it stays on.
     case keptByAmbientScan
     /// Suspended: withdraw the scan.
     case stop

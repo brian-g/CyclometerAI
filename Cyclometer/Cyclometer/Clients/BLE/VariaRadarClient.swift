@@ -460,14 +460,14 @@ private final class RadarClientState: @unchecked Sendable {
             pairingScansSuspended = suspended
             guard pairingScanCount > 0 else { return .none }
             if suspended { return isScanning ? .keptByAmbientScan : .stop }
-            rotateDiscoveryGenerationLocked()
+            // No rotation — see `CSCClientState.setPairingScansSuspended`.
             return .start
         }
         switch change {
         case .none:
             return
         case .keptByAmbientScan:
-            logger.notice("pairing scan suspended — app in background, the ride's scan keeps the radio")
+            logger.notice("pairing scan suspended — app in background, this client's ambient scan keeps the radio")
         case .stop:
             await bleClient.stopScanning([radarServiceUUID])
             logger.notice("pairing scan stopped — app in background, \(self.pairingScanCountSnapshot) held")

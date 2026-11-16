@@ -80,8 +80,8 @@ struct BLECSCClient: Sendable {
     /// put them back on return (#418). A pairing scan exists to feed a screen, and nobody
     /// sees one in the background. The refcount is untouched, so every holder's begin/end
     /// pair stays balanced whatever happens while suspended — a sheet dismissed or a ride
-    /// started meanwhile needs no special case — and the ambient scan a ride holds is never
-    /// stopped by it (BLE.md §13.3).
+    /// started meanwhile needs no special case — and this client's own ambient scan
+    /// (`startScanning`, which a ride makes) is never stopped by it (BLE.md §13.3).
     var setPairingScansSuspended: @Sendable (Bool) async -> Void
     /// The rider tapped Pair. Connects the peripheral holding *no* roles, purely to
     /// read its capabilities — taking roles here would strip them off whichever
@@ -586,7 +586,7 @@ private final class CSCClientState: @unchecked Sendable {
         let suspended = lock.withLock { () -> Bool in
             pairingScanCount += 1
             // No scan runs while suspended, so a new generation would only sweep away
-            // everything still listed. `setPairingScansSuspended(false)` rotates instead.
+            // everything still listed. The current one carries on through the suspension.
             guard !pairingScansSuspended else { return true }
             rotateDiscoveryGenerationLocked()
             return false
@@ -618,23 +618,26 @@ private final class CSCClientState: @unchecked Sendable {
     }
 
     /// Withdraw the open pairing scans from the radio, or reissue them (#418). Only the
-    /// hardware request moves; the count is the holders' business. The ambient scan a ride
-    /// holds keeps the radio on through a suspension, and connections are left alone.
+    /// hardware request moves; the count is the holders' business. An ambient scan
+    /// (`isScanning`) keeps the radio on through a suspension, and connections are left alone.
     func setPairingScansSuspended(_ suspended: Bool) async {
         let change: PairingScanSuspension = lock.withLock {
             guard pairingScansSuspended != suspended else { return .none }
             pairingScansSuspended = suspended
             guard pairingScanCount > 0 else { return .none }
             if suspended { return isScanning ? .keptByAmbientScan : .stop }
-            // A restarted scan is a new generation, exactly as `beginPairingScan` makes one.
-            rotateDiscoveryGenerationLocked()
+            // No rotation: the generation open at backgrounding may be well under a second
+            // old (a sweep can land just before), and judging staleness over that window
+            // would drop every row not re-sighted in it, only for it to reappear a moment
+            // after the restarted scan reports it. The generation carries on, and the next
+            // sweep judges it over its full interval (#418).
             return .start
         }
         switch change {
         case .none:
             return
         case .keptByAmbientScan:
-            logger.notice("pairing scan suspended — app in background, the ride's scan keeps the radio")
+            logger.notice("pairing scan suspended — app in background, this client's ambient scan keeps the radio")
         case .stop:
             await bleClient.stopScanning([cscServiceUUID])
             logger.notice("pairing scan stopped — app in background, \(self.pairingScanCountSnapshot) held")

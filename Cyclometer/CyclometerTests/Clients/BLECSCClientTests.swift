@@ -1234,6 +1234,28 @@ struct BLECSCIntegrationTests {
         #expect(harness.scanStopped.value == [[cscServiceUUID]])
     }
 
+    /// Resume starts no new generation — see the HR twin for the flicker it prevents.
+    @Test("Returning to the foreground keeps the list; the next sweep still judges it")
+    func resumeKeepsTheListForTheNextSweep() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -60, services: [cscServiceUUID]))
+        _ = await harness.devices { $0.map(\.id) == [id] }
+        await harness.client.beginPairingScan()   // a sweep just before backgrounding
+        await harness.client.endPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        await harness.client.setPairingScansSuspended(false)
+
+        var late = harness.client.discoveredDevices().makeAsyncIterator()
+        #expect(await late.next()?.map(\.id) == [id])
+
+        await harness.client.beginPairingScan()
+        await harness.client.endPairingScan()
+        _ = await harness.devices { $0.isEmpty }
+    }
+
     /// The reported bug: a cadence sensor switched off stayed in Available for the life
     /// of the process, because `discoveredIDs` was never pruned.
     @Test("A sensor that stops advertising leaves the list on the next sweep")
