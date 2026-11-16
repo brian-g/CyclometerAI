@@ -1071,8 +1071,8 @@ from the radio unless its ambient scan (`isScanning`) still wants it — it then
 the radio — and on return reissues the scan if any pairing scan is still open, so a screen that was showing
 sensor status shows it live again.
 
-So what scans in the background is exactly what holds an ambient flag, and each flag is meant to belong to a
-ride:
+So what scans in the background is what holds an ambient flag, with one exception below, and each flag is
+meant to belong to a ride:
 
 | Client | `isScanning` set by | Cleared by |
 |---|---|---|
@@ -1086,6 +1086,11 @@ outlived the Sensors screen and survived backgrounding as if it were ambient. Si
 scan only if one is already wanted (the ambient scan, or a pairing scan that isn't suspended) and never sets the
 flag; mid-ride nothing changes, because the ride's `startScanning` holds the flag until finish. The CSC and
 radar reconnect ladders only `connect` and never scan.
+
+The exception is CSC across a Bluetooth cycle. When the radio goes off, CSC clears its flag but leaves its
+service in `BLECentral`'s requested set, and the central rescans that set on power-on. So after a Bluetooth
+off/on mid-ride, CSC scans with no flag set until something withdraws the service; with #575's finish
+`disconnect()` that is ride finish, so it is a mid-ride edge only.
 
 CSC's flag is cleared at ride finish only once PR #575 (#417) adds the finish `disconnect()`. Until then a ride that
 started with no CSC sensor connected leaves CSC's flag set, and its scan running — foreground and background —
