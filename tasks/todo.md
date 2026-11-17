@@ -2455,9 +2455,13 @@ Plan: resolve at the point of use — keep `gpxFileURL` (no migration), exports 
 **Finding.** `AppView`'s `.tabViewBottomAccessory` closure reads the ride clock, distance, speed and route progress inside `AppView.body`, so the app root re-runs every second. TCA notifies an Equatable field only on change, so nothing else in `AppView` or the dashboard body ticks at 1 Hz. The chrome split is structural, plus narrower event-driven invalidation.
 
 ### Plan
-- [ ] Pin the chrome first: `RideDashboardSnapshotTests`, full screen, light + dark, riding / paused + sensor / banner / edit mode, recorded on unchanged code
-- [ ] `AppView`: private `ActiveRideAccessory(store:onOpen:)` reads the metrics, so the root observes only presence + `recordingState`
-- [ ] `Dashboard/DashboardChrome.swift`: `DashboardTopBar`, `DashboardTurnOverlay`, `DashboardPageIndicator`, `RideControls`, `DashboardEditControls` (+ `RideControlButton`, `EditModeButton`), moved verbatim, previews
-- [ ] `RideDashboardView` keeps the pages, overlay order, presentations and `banner(...)`
-- [ ] TCA.md §8 + the LiveActivity comment
-- [ ] Build → Brian runs on device + Instruments trace (main vs branch) → full suite → commit → PR
+- [x] Pin the chrome first: `RideDashboardSnapshotTests`, full screen, light + dark, riding / paused + sensor / banner / edit mode, recorded on unchanged code
+- [x] `AppView`: private `ActiveRideAccessory(store:onOpen:)` reads the metrics, so the root observes only presence + `recordingState`
+- [x] `Dashboard/DashboardChrome.swift`: `DashboardTopBar`, `DashboardTurnOverlay`, `DashboardPageIndicator`, `RideControls`, `DashboardEditControls` (+ `RideControlButton`, `EditModeButton`), moved verbatim, previews
+- [x] `RideDashboardView` keeps the pages, overlay order, presentations and `banner(...)`
+- [x] TCA.md §8 + the LiveActivity comment
+- [x] Build → Brian runs on device → full suite → commit → PR
+
+**Progress (2026-11-17):** Refactor built. The new dashboard snapshots were flaky in the glass control band on *unchanged* code (6 of 12 captures). Waiting 1 s before capture (`.wait(for: 1, on:)`) fixed it: 16/16 on the baseline. After the refactor, all 8 dashboard and 16 accessory snapshot cases pass byte-for-byte. Brian's device run, the trace and the full suite are still open.
+
+**Review:** `AppView` no longer reads ride metrics in its body. The private `ActiveRideAccessory` reads them, so the root observes only whether a ride exists, `recordingState`, and the dashboard and dim flags. The dashboard's chrome is in `Dashboard/DashboardChrome.swift`, moved verbatim. `RideDashboardView` keeps the pages, overlay order, presentations and `banner(...)`. The new `RideDashboardSnapshotTests` was recorded before the refactor and passes byte-for-byte after it. Brian ran it on device. Full suite: 2976/2976. The Instruments trace (main vs branch, `AppView` body updates) is still to be recorded on device.

@@ -72,15 +72,8 @@ struct AppView: View {
             // Visible only while a ride is active or paused (S05.3), not during the
             // brief .idle window before `.task` starts the ride.
             .tabViewBottomAccessory(isEnabled: hasVisibleRide) {
-                if let ride = store.activeRide, hasVisibleRide {
-                    ActiveRideAccessoryView(
-                        progress: ride.navigation.routeProgressFraction,
-                        distanceMeters: ride.distanceMeters,
-                        speedMPS: ride.speedMPS,
-                        elapsedSeconds: ride.elapsedSeconds,
-                        unit: ride.unitSystem,
-                        onOpen: { store.send(.dashboardOpened) }
-                    )
+                if hasVisibleRide, let rideStore = store.scope(state: \.activeRide, action: \.activeRide) {
+                    ActiveRideAccessory(store: rideStore) { store.send(.dashboardOpened) }
                     .padding(.horizontal, 4)
                     .matchedTransitionSource(id: DashboardZoom.sourceID, in: dashboardZoom)
                 }
@@ -156,6 +149,24 @@ struct AppView: View {
 /// The dashboard's zoom-transition source, shared by the accessory and the cover.
 private enum DashboardZoom {
     static let sourceID = "activeRideDashboard"
+}
+
+/// The accessory's ride metrics, read here rather than in `AppView.body` (#352). They change
+/// every second, and a read in the root's body would re-run the whole app shell with them.
+private struct ActiveRideAccessory: View {
+    let store: StoreOf<ActiveRideFeature>
+    let onOpen: () -> Void
+
+    var body: some View {
+        ActiveRideAccessoryView(
+            progress: store.navigation.routeProgressFraction,
+            distanceMeters: store.distanceMeters,
+            speedMPS: store.speedMPS,
+            elapsedSeconds: store.elapsedSeconds,
+            unit: store.unitSystem,
+            onOpen: onOpen
+        )
+    }
 }
 
 // MARK: - Previews
