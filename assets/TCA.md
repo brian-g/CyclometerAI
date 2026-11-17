@@ -999,7 +999,8 @@ Cyclometer/
 │   │   │                                  // (protocol + catalog) — #139; each widget folder has its adapter
 │   │   ├── Speed/                         // SpeedFeature, SpeedWidgetView (W1), AverageSpeed (W2),
 │   │   │                                  // Duration (W3), Distance (W6), PaceWidgetView (W11),
-│   │   │                                  // RideMetricsSheet + RideMetricsCharts (#144)
+│   │   │                                  // RideMetricsSheet + RideMetricsCharts (#144),
+│   │   │                                  // MaxSpeedGate (#540)
 │   │   ├── HeartRate/                     // HeartRateWidgetView (W4, W12), HeartRateSheet — HR state lives
 │   │   │                                  // on ActiveRideFeature (§3)
 │   │   ├── Cadence/                       // CadenceFeature, CadenceWidgetView (W5)

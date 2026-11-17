@@ -185,6 +185,8 @@ struct SpeedFeature {
     }
 
     private func appendSample(_ mps: Double, to state: inout State) {
+        // Appended last and never trimmed by the cutoff below: `ActiveRideFeature` judges the new
+        // reading as `speedSamples.last` against the samples before it (#540).
         state.speedSamples.append(SpeedSample(time: now, mps: mps))
         let cutoff = now.addingTimeInterval(-Self.historyWindow)
         state.speedSamples.removeAll { $0.time < cutoff }

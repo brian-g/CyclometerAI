@@ -18,6 +18,10 @@ struct LocationUpdate: Sendable, Equatable {
     /// Metres, one sigma; nil exactly when `altitude` is. Defaulted so a test fix needn't say.
     var verticalAccuracy: Double? = nil
     let speed: Double                 // m/s; -1 if invalid
+    /// m/s; nil when CoreLocation marks it invalid. What decides whether `speed` may become the
+    /// ride's max (#540). Defaulted so a test fix needn't say: an unknown accuracy, which leaves its
+    /// speed to the acceleration bound alone.
+    var speedAccuracy: Double? = nil
     let horizontalAccuracy: Double    // meters; lower is better
     let heading: Double               // degrees from true north (0–360); -1 if unavailable
     let timestamp: Date
@@ -37,6 +41,7 @@ extension LocationUpdate {
             altitude: location.verticalAccuracy < 0 ? nil : location.altitude,
             verticalAccuracy: location.verticalAccuracy < 0 ? nil : location.verticalAccuracy,
             speed: location.speed,
+            speedAccuracy: location.speedAccuracy < 0 ? nil : location.speedAccuracy,
             horizontalAccuracy: location.horizontalAccuracy,
             heading: location.course,
             timestamp: location.timestamp
