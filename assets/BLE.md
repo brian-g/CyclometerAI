@@ -933,6 +933,8 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | The Start sheet scans while it is open | One `beginPairingScan` per client on appear, so its Connected / Searching badge reports something the rider can act on |
 | That scan is balanced on every exit | Cancel, swipe and Start Ride all release it. Owned by `AppFeature` around the presentation — a release sent from inside a `@Presents` child arrives after the state is nil and is dropped |
 | The ride scans for a paired role the sheet didn't connect | `BLECSCClient.startScanning` skips only when it is already scanning, or a slot exists and every paired role holds one; with no slots it always scans. With separate speed and cadence sensors the sheet may connect only the one that is awake; the ride's scan keeps the radio on for the other after the sheet's scan ends (#417) |
+| Pairing scans stop in the background | At `.background` every client withdraws its pairing scan unless its own ambient scan (`isScanning`) holds the radio, and reissues it at `.active` without starting a new generation; `.inactive` alone moves nothing, and the refcount is never touched (§13.3, #418) |
+| A dropped strap creates no scan | HR's `.disconnected` rescans only if its ambient scan or an unsuspended pairing scan already wants the radio, and never sets `isScanning` (§13.3, #418) |
 | One pairing is interrogated at a time | A Pair tap while `pendingPairing` is set is refused, so a cancel cannot release the wrong peripheral |
 | A CSC answer does not displace a strap | Unambiguous roles fold into the role prompt's answer only where unoccupied; an occupied one is left alone rather than raising a prompt about a role the rider never chose |
 | Combo sensor assigned Both | SpeedFeature and CadenceFeature both connect to same peripheral UUID |
@@ -1053,6 +1055,65 @@ also cheap to reverse, being one options dictionary at a single call site.
 
 > **Revisit trigger:** M7, when TrackPoint recording and CoreData checkpointing land. Restoration
 > becomes worthwhile at exactly the point where a terminated ride is recoverable.
+
+**4. Pairing scans stop in the background. — Done, #418.**
+
+`bluetooth-central` lets *any* scan run in the background, not just the ride's. A pairing scan exists to
+feed a screen — the Start sheet's sensor rows, the Sensors list — and nobody sees a screen in the
+background, so it has no business on the radio there. Before this, a Sensors list left open after a ride
+kept all three clients scanning for 24 minutes with the phone pocketed, its 10 s sweep restarting the scan
+each time the system woke the app.
+
+The rule: **no pairing scan stays on the radio while the scene is in `.background`; a client's own ambient
+scan, if one is running, is left alone.** `AppFeature.scenePhaseChanged` calls `setPairingScansSuspended(true)`
+on all three clients at `.background` and `false` at `.active`. A suspended client withdraws its service UUID
+from the radio unless its ambient scan (`isScanning`) still wants it — it then logs that its ambient scan keeps
+the radio — and on return reissues the scan if any pairing scan is still open, so a screen that was showing
+sensor status shows it live again.
+
+So what scans in the background is what holds an ambient flag, with one exception below, and each flag is
+meant to belong to a ride:
+
+| Client | `isScanning` set by | Cleared by |
+|---|---|---|
+| HR | `startScanning()`, from `ActiveRideFeature`'s `.task` | `stopScanning()`; `disconnect()` at ride finish |
+| Radar | `startScanning()`, from `ActiveRideFeature`'s `.task`, only from `.disconnected` | `stopScanning()`; `disconnect()` at ride finish |
+| CSC | `startScanning()`, from `SpeedFeature` / `CadenceFeature` at ride start, unless already scanning or a slot exists and every paired role holds one — so also beside a slot the Start sheet connected when another paired role has none (#417) | `stopScanning()`; `disconnect()` at ride finish (#417); the radio going off, unauthorized or unsupported |
+
+Nothing else sets a flag. HR's `.disconnected` handler used to: a strap dropping set `isScanning` and rescanned,
+ride or no ride, so a strap a pairing scan had connected after a ride left behind a scan nobody owned — it
+outlived the Sensors screen and survived backgrounding as if it were ambient. Since #418 a drop restarts the
+scan only if one is already wanted (the ambient scan, or a pairing scan that isn't suspended) and never sets the
+flag; mid-ride nothing changes, because the ride's `startScanning` holds the flag until finish. The CSC and
+radar reconnect ladders only `connect` and never scan.
+
+All three flags are cleared at ride finish: `ActiveRideFeature`'s finish effect calls `disconnect()` on the HR,
+radar and CSC clients (CSC since #417), and each `disconnect()` withdraws its service unless an unsuspended
+pairing scan still wants it. So a ride leaves no ambient scan behind, and a Sensors list opened afterwards holds
+the only scan — which backgrounding then takes off the radio.
+
+The exception is CSC across a Bluetooth cycle. When the radio goes off, CSC clears its flag but leaves its
+service in `BLECentral`'s requested set, and the central rescans that set on power-on. So after a Bluetooth
+off/on mid-ride, CSC scans with no flag set until something withdraws the service — at the latest ride
+finish's `disconnect()` — so it is a mid-ride edge only.
+
+- **Suspended in the clients, not released by each holder.** `pairingScanCount` never moves, so every
+  holder's begin/end pair — the Start sheet's in `AppFeature`, S11's `.task` / `.onDisappear`, its sweep —
+  balances on every path, including a sheet closed or a ride started while backgrounded. Releasing and
+  re-taking per holder would have put a "do I hold it right now?" flag on every release path.
+- **`.background`, not `.inactive`.** Notification Centre, the app switcher, an incoming call and system
+  alerts pass through `.inactive` and straight back; stopping and restarting every scan on each would be
+  churn for nothing. Every real exit from the app reaches `.background`.
+- While suspended, `beginPairingScan` only counts — it issues no scan and rotates no generation, which with
+  no scan running would sweep away every row — and `stopScanning`, `disconnect` and `endPairingScan` treat a
+  suspended pairing scan as not wanting the radio.
+- **Resume restarts the scan without starting a new generation.** The generation open at backgrounding can be
+  under a second old, and judging staleness over it would drop every row not re-sighted in that window, to
+  reappear a moment later. It carries on through the suspension and the next sweep judges it.
+- Connections are not touched. A sensor a pairing scan connected (the paired gate admits it on discovery)
+  stays connected through the suspension, exactly as it does when the screen closes in the foreground, and
+  if it drops the CSC and radar ladders keep reconnecting it by UUID, in the background too. That is a known
+  gap, not part of this rule.
 
 ### 13.4 What adopting restoration would require
 

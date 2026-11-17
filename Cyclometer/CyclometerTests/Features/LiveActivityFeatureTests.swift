@@ -1,4 +1,5 @@
 import ComposableArchitecture
+import SwiftUI
 import Foundation
 import Testing
 @testable import Cyclometer
@@ -503,16 +504,16 @@ struct LiveActivityFeatureTests {
         await store.receive(\.activeRide.liveActivity.started)
         #expect(store.state.activeRide?.liveActivity.phase == .notShowing)
 
-        await store.send(.scenePhaseChanged(isActive: false))
+        await store.send(.scenePhaseChanged(.background))
         #expect(starts() == 1, "not in the background")
 
-        await store.send(.scenePhaseChanged(isActive: true))
+        await store.send(.scenePhaseChanged(.active))
         await store.receive(\.activeRide.liveActivity.started)
         #expect(starts() == 2)
         #expect(store.state.activeRide?.liveActivity.phase == .showing)
 
-        await store.send(.scenePhaseChanged(isActive: false))
-        await store.send(.scenePhaseChanged(isActive: true))
+        await store.send(.scenePhaseChanged(.background))
+        await store.send(.scenePhaseChanged(.active))
         #expect(starts() == 2, "a showing activity isn't started again")
     }
 

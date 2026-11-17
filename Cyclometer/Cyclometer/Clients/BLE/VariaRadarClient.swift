@@ -73,6 +73,9 @@ struct VariaRadarClient: Sendable {
     /// with no per-caller refcount, so whoever releases last has to be the one to
     /// release the radio.
     var endPairingScan: @Sendable () async -> Void
+    /// Take every open pairing scan off the radio while the app is in the background, and
+    /// put them back on return (#418). Mirrors `BLECSCClient.setPairingScansSuspended`.
+    var setPairingScansSuspended: @Sendable (Bool) async -> Void
     var radarTargets:    @Sendable () -> AsyncStream<[RadarTarget]>
     var connectionState: @Sendable () -> AsyncStream<ConnectionState>
     /// Battery percentage of the connected radar, or `nil` when unknown — nothing
@@ -192,6 +195,7 @@ extension VariaRadarClient: DependencyKey {
             discoveredDevices: { state.makeDiscoveredDevicesStream() },
             beginPairingScan:  { await state.beginPairingScan() },
             endPairingScan:    { await state.endPairingScan() },
+            setPairingScansSuspended: { await state.setPairingScansSuspended($0) },
             radarTargets:    { state.makeTargetsStream() },
             connectionState: { state.makeConnectionStateStream() },
             batteryLevel:    { state.makeBatteryStream() }
@@ -209,6 +213,7 @@ extension VariaRadarClient: DependencyKey {
         discoveredDevices: { AsyncStream { $0.finish() } },
         beginPairingScan:  { },
         endPairingScan:    { },
+        setPairingScansSuspended: { _ in },
         radarTargets:    { AsyncStream { $0.finish() } },
         connectionState: { AsyncStream { $0.finish() } },
         batteryLevel:    { AsyncStream { $0.finish() } }
@@ -274,6 +279,11 @@ private final class RadarClientState: @unchecked Sendable {
     /// the two answer different questions, and only their sum decides whether the
     /// radio may be released. Mirrors `BLECSCClient.pairingScanCount`.
     private var pairingScanCount = 0
+    /// The app is in the background, so the open pairing scans are off the radio (#418).
+    /// They stay counted — only the hardware request is withdrawn. Mirrors `CSCClientState`.
+    private var pairingScansSuspended = false
+    /// Whether an open pairing scan currently wants the radio. Must hold the lock.
+    private var pairingScanWantsRadioLocked: Bool { pairingScanCount > 0 && !pairingScansSuspended }
 
     /// Every radar seen this session. The inventory the pairing list is built from, and
     /// what lets `setPairedSensor` connect a device discovered before it was paired —
@@ -395,7 +405,7 @@ private final class RadarClientState: @unchecked Sendable {
     func stopScanning() async {
         let shouldStopHardware = lock.withLock { () -> Bool in
             isScanning = false
-            return pairingScanCount == 0
+            return !pairingScanWantsRadioLocked
         }
         // `BLEClient.requestedServices` is a plain set with no per-caller refcount, so
         // dropping the radar UUID here would cancel the Sensors screen's scan too.
@@ -413,9 +423,16 @@ private final class RadarClientState: @unchecked Sendable {
     /// Deliberately does not touch `connectionState`, so the ride sidebar doesn't flip
     /// to "Searching" behind a settings screen.
     func beginPairingScan() async {
-        lock.withLock {
+        let suspended = lock.withLock { () -> Bool in
             pairingScanCount += 1
+            // No scan runs while suspended — see `CSCClientState.beginPairingScan`.
+            guard !pairingScansSuspended else { return true }
             rotateDiscoveryGenerationLocked()
+            return false
+        }
+        guard !suspended else {
+            logger.debug("pairing scan deferred (\(self.pairingScanCountSnapshot) open) — app in background")
+            return
         }
         // Re-issuing the scan restarts the CoreBluetooth session, so peripherals
         // already seen are re-advertised to us rather than suppressed as duplicates.
@@ -427,11 +444,37 @@ private final class RadarClientState: @unchecked Sendable {
     func endPairingScan() async {
         let shouldStopHardware = lock.withLock { () -> Bool in
             pairingScanCount = max(0, pairingScanCount - 1)
-            return pairingScanCount == 0 && !isScanning
+            // Suspended: the radio was already given back, or the ambient scan holds it.
+            return pairingScanCount == 0 && !isScanning && !pairingScansSuspended
         }
         guard shouldStopHardware else { return }
         await bleClient.stopScanning([radarServiceUUID])
         logger.notice("pairing scan stopped")
+    }
+
+    /// Withdraw the open pairing scans from the radio, or reissue them (#418). Same
+    /// decision as `CSCClientState.setPairingScansSuspended`.
+    func setPairingScansSuspended(_ suspended: Bool) async {
+        let change: PairingScanSuspension = lock.withLock {
+            guard pairingScansSuspended != suspended else { return .none }
+            pairingScansSuspended = suspended
+            guard pairingScanCount > 0 else { return .none }
+            if suspended { return isScanning ? .keptByAmbientScan : .stop }
+            // No rotation — see `CSCClientState.setPairingScansSuspended`.
+            return .start
+        }
+        switch change {
+        case .none:
+            return
+        case .keptByAmbientScan:
+            logger.notice("pairing scan suspended — app in background, this client's ambient scan keeps the radio")
+        case .stop:
+            await bleClient.stopScanning([radarServiceUUID])
+            logger.notice("pairing scan stopped — app in background, \(self.pairingScanCountSnapshot) held")
+        case .start:
+            await bleClient.startScanning([radarServiceUUID])
+            logger.notice("pairing scan started (\(self.pairingScanCountSnapshot) open) — app in foreground")
+        }
     }
 
     private var pairingScanCountSnapshot: Int { lock.withLock { pairingScanCount } }
@@ -490,7 +533,7 @@ private final class RadarClientState: @unchecked Sendable {
         // holding open — same shared-`requestedServices` hazard as `stopScanning`.
         let shouldStopHardware = lock.withLock { () -> Bool in
             isScanning = false
-            return pairingScanCount == 0
+            return !pairingScanWantsRadioLocked
         }
         guard shouldStopHardware else { return }
         await bleClient.stopScanning([radarServiceUUID])

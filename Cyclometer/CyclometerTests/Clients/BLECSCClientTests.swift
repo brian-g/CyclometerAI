@@ -1193,6 +1193,105 @@ struct BLECSCIntegrationTests {
         #expect(harness.scanStopped.value == [[cscServiceUUID]])
     }
 
+    // MARK: - Pairing scans in the background (#418)
+    // `BLEHRClientTests` covers every ordering; these pin the same decision here.
+
+    @Test("Backgrounding withdraws an open pairing scan and returning reissues it")
+    func suspensionWithdrawsAndReissuesThePairingScan() async {
+        let harness = Harness()
+        await harness.client.beginPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(harness.scanStopped.value == [[cscServiceUUID]])
+
+        await harness.client.setPairingScansSuspended(false)
+        #expect(harness.scanned.value == [[cscServiceUUID], [cscServiceUUID]])
+
+        await harness.client.endPairingScan()
+        #expect(harness.scanStopped.value.count == 2)
+    }
+
+    @Test("Backgrounding with no pairing scan open touches nothing")
+    func suspensionWithNothingOpenIsSilent() async {
+        let harness = Harness()
+        await harness.client.setPairingScansSuspended(true)
+        await harness.client.setPairingScansSuspended(false)
+        #expect(harness.scanned.value.isEmpty)
+        #expect(harness.scanStopped.value.isEmpty)
+    }
+
+    @Test("A ride's scan stays on through a suspension, and its stop is not held up by one")
+    func suspensionLeavesTheAmbientScan() async {
+        let harness = Harness()
+        await harness.client.startScanning()      // ambient, from a cold state
+        await harness.client.beginPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(harness.scanStopped.value.isEmpty)
+
+        // The ride ends while backgrounded: the suspended pairing scan doesn't want the radio.
+        await harness.client.disconnect()
+        #expect(harness.scanStopped.value == [[cscServiceUUID]])
+    }
+
+    /// #417's guard and #418's suspension together. A ride whose Start sheet connected only
+    /// one of two sensors holds CSC's ambient scan beside the live slot; backgrounding
+    /// mid-ride with the Sensors list open must keep that scan (it is the ride's), and
+    /// finishing the ride while backgrounded must still release the radio.
+    @Test("A ride scan beside a live slot survives backgrounding, and finish releases it")
+    func rideScanBesideASlotSurvivesSuspension() async {
+        let harness = Harness()
+        let speedSensor = UUID()
+        let cadenceSensor = UUID()
+        await harness.client.setPairedSensors([speedSensor: [.speed], cadenceSensor: [.cadence]])
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+
+        // The Start sheet, with only the speed sensor awake.
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: speedSensor, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        #expect(await speedStates.next() == .connecting)
+        harness.bringToActive(speedSensor)
+        #expect(await speedStates.next() == .connected)
+        #expect(await speedStates.next() == .active)
+
+        // Start: the ride takes its scan (the cadence role has no slot), the sheet lets go,
+        // and the rider opens the Sensors list mid-ride.
+        await harness.client.startScanning()
+        await harness.client.endPairingScan()
+        await harness.client.beginPairingScan()
+        #expect(harness.scanStopped.value.isEmpty)
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(harness.scanStopped.value.isEmpty)
+
+        // Finished from the Lock Screen while still backgrounded.
+        await harness.client.disconnect()
+        #expect(harness.scanStopped.value == [[cscServiceUUID]])
+    }
+
+    /// Resume starts no new generation — see the HR twin for the flicker it prevents.
+    @Test("Returning to the foreground keeps the list; the next sweep still judges it")
+    func resumeKeepsTheListForTheNextSweep() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -60, services: [cscServiceUUID]))
+        _ = await harness.devices { $0.map(\.id) == [id] }
+        await harness.client.beginPairingScan()   // a sweep just before backgrounding
+        await harness.client.endPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        await harness.client.setPairingScansSuspended(false)
+
+        var late = harness.client.discoveredDevices().makeAsyncIterator()
+        #expect(await late.next()?.map(\.id) == [id])
+
+        await harness.client.beginPairingScan()
+        await harness.client.endPairingScan()
+        _ = await harness.devices { $0.isEmpty }
+    }
+
     /// The reported bug: a cadence sensor switched off stayed in Available for the life
     /// of the process, because `discoveredIDs` was never pruned.
     @Test("A sensor that stops advertising leaves the list on the next sweep")

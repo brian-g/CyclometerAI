@@ -663,6 +663,257 @@ struct BLEHRIntegrationTests {
         #expect(harness.calls.value.contains(.stopScanning([hrServiceUUID])))
     }
 
+    // MARK: - Pairing scans in the background (#418)
+
+    private func starts(_ harness: Harness) -> Int {
+        harness.calls.value.filter { $0 == .startScanning([hrServiceUUID]) }.count
+    }
+
+    private func stops(_ harness: Harness) -> Int {
+        harness.calls.value.filter { $0 == .stopScanning([hrServiceUUID]) }.count
+    }
+
+    /// The reported bug: a Sensors screen or Start sheet left up as the app went to the
+    /// background kept the radio scanning for as long as it stayed there.
+    @Test("Backgrounding withdraws an open pairing scan and returning reissues it")
+    func suspensionWithdrawsAndReissuesThePairingScan() async {
+        let harness = Harness()
+        await harness.client.beginPairingScan()
+        #expect(starts(harness) == 1)
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(stops(harness) == 1)
+
+        await harness.client.setPairingScansSuspended(false)
+        #expect(starts(harness) == 2)
+
+        // The holder's own release still balances: the refcount never moved.
+        await harness.client.endPairingScan()
+        #expect(stops(harness) == 2)
+    }
+
+    @Test("Backgrounding with no pairing scan open touches nothing")
+    func suspensionWithNothingOpenIsSilent() async {
+        let harness = Harness()
+        await harness.client.setPairingScansSuspended(true)
+        await harness.client.setPairingScansSuspended(false)
+        #expect(harness.calls.value.isEmpty)
+    }
+
+    /// BLE.md §13.3: a ride scans in the background on purpose. A pairing scan open
+    /// alongside it must not take it down when it is suspended.
+    @Test("A ride's scan stays on through a suspension")
+    func suspensionLeavesTheAmbientScan() async {
+        let harness = Harness()
+        await harness.client.startScanning()
+        await harness.client.beginPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(stops(harness) == 0)
+
+        await harness.client.endPairingScan()
+        #expect(stops(harness) == 0)
+        await harness.client.setPairingScansSuspended(false)
+        #expect(stops(harness) == 0)
+    }
+
+    /// A ride ended in the background — from the Lock Screen — while a suspended pairing
+    /// scan is still counted: the pairing scan doesn't want the radio, so it goes.
+    @Test("A ride ending in the background releases a radio only a suspended pairing scan holds")
+    func ambientStopWhileSuspendedReleasesTheRadio() async {
+        let harness = Harness()
+        await harness.client.startScanning()
+        await harness.client.beginPairingScan()
+        await harness.client.setPairingScansSuspended(true)
+
+        await harness.client.stopScanning()
+        #expect(stops(harness) == 1)
+
+        // Back in the foreground, the screen still holding its scan gets it back.
+        await harness.client.setPairingScansSuspended(false)
+        #expect(starts(harness) == 3)
+    }
+
+    /// A holder that lets go while backgrounded (the Start sheet closed by a resumed
+    /// ride) must not leave a scan to be reissued on return, nor stop the radio twice.
+    @Test("A pairing scan ended while backgrounded is not reissued on return")
+    func endWhileSuspendedIsNotReissued() async {
+        let harness = Harness()
+        await harness.client.beginPairingScan()
+        await harness.client.setPairingScansSuspended(true)
+
+        await harness.client.endPairingScan()
+        await harness.client.setPairingScansSuspended(false)
+
+        #expect(starts(harness) == 1)
+        #expect(stops(harness) == 1)
+    }
+
+    @Test("A pairing scan taken while backgrounded waits for the foreground")
+    func beginWhileSuspendedWaits() async {
+        let harness = Harness()
+        await harness.client.setPairingScansSuspended(true)
+
+        await harness.client.beginPairingScan()
+        #expect(starts(harness) == 0)
+
+        await harness.client.setPairingScansSuspended(false)
+        #expect(starts(harness) == 1)
+    }
+
+    /// The Sensors screen's 10 s sweep keeps arriving whenever the backgrounded app is
+    /// awake. With no scan running, a new generation would see nothing and empty the list.
+    @Test("A sweep while backgrounded leaves the list alone")
+    func sweepWhileSuspendedKeepsTheList() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "HRM-Dual", rssi: -55, services: [hrServiceUUID]))
+        _ = await harness.devices { $0.map(\.id) == [id] }
+
+        await harness.client.setPairingScansSuspended(true)
+        for _ in 0..<2 {
+            await harness.client.beginPairingScan()
+            await harness.client.endPairingScan()
+        }
+
+        var late = harness.client.discoveredDevices().makeAsyncIterator()
+        #expect(await late.next()?.map(\.id) == [id])
+        #expect(starts(harness) == 1)
+    }
+
+    /// Resume restarts the scan without starting a new generation. The one open at
+    /// backgrounding may be under a second old — the issue's log has a sweep 0.7 s before —
+    /// and judging staleness over it would drop every row not re-sighted in that window,
+    /// only for it to reappear a moment after return: a flicker on the Sensors list.
+    @Test("Returning to the foreground keeps the list; the next sweep still judges it")
+    func resumeKeepsTheListForTheNextSweep() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "HRM-Dual", rssi: -55, services: [hrServiceUUID]))
+        _ = await harness.devices { $0.map(\.id) == [id] }
+        // A sweep just before backgrounding: a new generation the strap hasn't re-reported in.
+        await harness.client.beginPairingScan()
+        await harness.client.endPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        await harness.client.setPairingScansSuspended(false)
+
+        var late = harness.client.discoveredDevices().makeAsyncIterator()
+        #expect(await late.next()?.map(\.id) == [id])
+
+        // Staleness still works: a full sweep in which it never re-reports drops it.
+        await harness.client.beginPairingScan()
+        await harness.client.endPairingScan()
+        _ = await harness.devices { $0.isEmpty }
+    }
+
+    // MARK: - A drop with no ride creates no scan (#418)
+
+    /// The event loop handles events in order, so a stranger's discovery yielded after a
+    /// drop is listed only once the drop's handler — including any rescan it issues — has
+    /// finished. That is what lets the tests below assert a rescan did *not* happen.
+    private func drainEvents(_ harness: Harness) async {
+        let stranger = UUID()
+        harness.events.yield(.discovered(id: stranger, name: "Partner", rssi: -70, services: [hrServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == stranger } }
+    }
+
+    /// No ride; the Sensors list is open, its pairing scan connected the paired strap, and
+    /// the strap drops in the foreground. The pairing scan wants the radio, so the rescan
+    /// happens — but it must not turn into an ambient scan, or backgrounding finds
+    /// `isScanning` set and keeps HR scanning with no ride, as in the issue's log.
+    @Test("No ride, Sensors open: a drop rescans, and backgrounding still stops the scan")
+    func dropWithOnlyAPairingScanStaysAPairingScan() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        await harness.client.beginPairingScan()
+        harness.bringToPaired(id)
+        await expectEventually { harness.calls.value.contains(.connect(id)) }
+
+        harness.events.yield(.disconnected(id: id, error: nil))
+        await expectEventually {
+            harness.calls.value.filter { $0 == .startScanning([hrServiceUUID]) }.count == 2
+        }
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(stops(harness) == 1)
+
+        // And the holder's own release, back in the foreground, is the last word.
+        await harness.client.setPairingScansSuspended(false)
+        await harness.client.endPairingScan()
+        #expect(stops(harness) == 2)
+    }
+
+    /// No ride and nothing holding a scan — the strap was connected by a Start sheet since
+    /// cancelled, or a Sensors list since closed. Before #418 the drop started a scan nobody
+    /// owned, and it rescanned and reconnected for the rest of the process.
+    @Test("No ride, no pairing scan: a drop starts no scan")
+    func dropWithNothingWantingTheRadioDoesNotRescan() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        await harness.client.beginPairingScan()
+        harness.bringToPaired(id)
+        await expectEventually { harness.calls.value.contains(.connect(id)) }
+        await harness.client.endPairingScan()
+        #expect(stops(harness) == 1)
+
+        harness.events.yield(.disconnected(id: id, error: nil))
+        await drainEvents(harness)
+
+        #expect(starts(harness) == 1)
+        let scanCalls = harness.calls.value.filter {
+            $0 == .startScanning([hrServiceUUID]) || $0 == .stopScanning([hrServiceUUID])
+        }
+        #expect(scanCalls.last == .stopScanning([hrServiceUUID]))
+
+        // Nothing is left holding the radio: a later pairing scan opens and closes cleanly.
+        await harness.client.beginPairingScan()
+        await harness.client.endPairingScan()
+        #expect(stops(harness) == 2)
+    }
+
+    /// No ride; the app is backgrounded with the Sensors list open and the strap drops
+    /// there. The suspended pairing scan doesn't want the radio, so nothing scans until the
+    /// rider returns — and then the pairing scan comes back and can find the strap again.
+    @Test("No ride, backgrounded: a drop starts no scan, and return reissues the pairing scan")
+    func dropWhileSuspendedWaitsForTheForeground() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        await harness.client.beginPairingScan()
+        harness.bringToPaired(id)
+        await expectEventually { harness.calls.value.contains(.connect(id)) }
+        await harness.client.setPairingScansSuspended(true)
+        #expect(stops(harness) == 1)
+
+        harness.events.yield(.disconnected(id: id, error: nil))
+        await drainEvents(harness)
+        #expect(starts(harness) == 1)
+
+        await harness.client.setPairingScansSuspended(false)
+        #expect(starts(harness) == 2)
+    }
+
+    /// Notification Centre and the app switcher can fire repeated transitions; only a
+    /// real change of state moves the radio.
+    @Test("Repeated suspensions and resumptions act once")
+    func suspensionIsIdempotent() async {
+        let harness = Harness()
+        await harness.client.beginPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        await harness.client.setPairingScansSuspended(true)
+        #expect(stops(harness) == 1)
+
+        await harness.client.setPairingScansSuspended(false)
+        await harness.client.setPairingScansSuspended(false)
+        #expect(starts(harness) == 2)
+    }
+
     /// A strap that drops mid-ride reconnects by rescanning, and that rescan bypasses
     /// `startScanning()`. If it did not register as an ambient scan, closing the Sensors
     /// screen would release the radio and strand the reconnect.
@@ -671,19 +922,22 @@ struct BLEHRIntegrationTests {
         let harness = Harness()
         let id = UUID()
         await harness.pair(id)
+        // Mid-ride: the ride's own scan, as `ActiveRideFeature` starts it. Without it this
+        // pinned the no-ride rescan #418 removed — a drop no longer creates a scan.
+        await harness.client.startScanning()
         await harness.client.beginPairingScan()
         harness.bringToPaired(id)
         _ = await harness.devices { $0.contains { $0.id == id } }
 
         harness.events.yield(.disconnected(id: id, error: nil))
         // The reconnect *is* a rescan (`BLEHRClient.swift`'s `.disconnected` case), so
-        // the **second** `startScanning` is the sync point. Waiting for the last call to
-        // merely be a `startScanning` — what this did before — is satisfied by the
-        // pairing scan's own opening call, which is already in the log before the
+        // the **third** `startScanning` (after the ride's and the pairing scan's) is the
+        // sync point. Waiting for the last call to merely be a `startScanning` — what this
+        // did before — is satisfied by an opening call already in the log before the
         // disconnect is handled at all: the wait then returned instantly, `endPairingScan`
         // released a radio the reconnect still needed, and the assertion below failed.
         await expectEventually {
-            harness.calls.value.filter { $0 == .startScanning([hrServiceUUID]) }.count == 2
+            harness.calls.value.filter { $0 == .startScanning([hrServiceUUID]) }.count == 3
         }
 
         await harness.client.endPairingScan()

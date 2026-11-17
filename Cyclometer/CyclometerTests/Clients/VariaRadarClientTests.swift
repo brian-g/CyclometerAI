@@ -955,6 +955,72 @@ struct VariaRadarIntegrationTests {
         #expect(!harness.calls.value.contains(.stopScanning([radarServiceUUID])))
     }
 
+    // MARK: - Pairing scans in the background (#418)
+    // `BLEHRClientTests` covers every ordering; these pin the same decision here.
+
+    private func count(_ call: BLECall, in harness: Harness) -> Int {
+        harness.calls.value.filter { $0 == call }.count
+    }
+
+    @Test("Backgrounding withdraws an open pairing scan and returning reissues it")
+    func suspensionWithdrawsAndReissuesThePairingScan() async {
+        let harness = Harness()
+        await harness.client.beginPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(count(.stopScanning([radarServiceUUID]), in: harness) == 1)
+
+        await harness.client.setPairingScansSuspended(false)
+        #expect(count(.startScanning([radarServiceUUID]), in: harness) == 2)
+
+        await harness.client.endPairingScan()
+        #expect(count(.stopScanning([radarServiceUUID]), in: harness) == 2)
+    }
+
+    @Test("Backgrounding with no pairing scan open touches nothing")
+    func suspensionWithNothingOpenIsSilent() async {
+        let harness = Harness()
+        await harness.client.setPairingScansSuspended(true)
+        await harness.client.setPairingScansSuspended(false)
+        #expect(harness.calls.value.isEmpty)
+    }
+
+    @Test("A ride's scan stays on through a suspension, and its stop is not held up by one")
+    func suspensionLeavesTheAmbientScan() async {
+        let harness = Harness()
+        await harness.client.startScanning()      // ambient, from a cold state
+        await harness.client.beginPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(count(.stopScanning([radarServiceUUID]), in: harness) == 0)
+
+        // The ride ends while backgrounded: the suspended pairing scan doesn't want the radio.
+        await harness.client.disconnect()
+        #expect(count(.stopScanning([radarServiceUUID]), in: harness) == 1)
+    }
+
+    /// Resume starts no new generation — see the HR twin for the flicker it prevents.
+    @Test("Returning to the foreground keeps the list; the next sweep still judges it")
+    func resumeKeepsTheListForTheNextSweep() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Varia", rssi: -60, services: [radarServiceUUID]))
+        _ = await harness.devices { $0.map(\.id) == [id] }
+        await harness.client.beginPairingScan()   // a sweep just before backgrounding
+        await harness.client.endPairingScan()
+
+        await harness.client.setPairingScansSuspended(true)
+        await harness.client.setPairingScansSuspended(false)
+
+        var late = harness.client.discoveredDevices().makeAsyncIterator()
+        #expect(await late.next()?.map(\.id) == [id])
+
+        await harness.client.beginPairingScan()
+        await harness.client.endPairingScan()
+        _ = await harness.devices { $0.isEmpty }
+    }
+
     /// The reported bug: a radar switched off stayed in Available for the life of the
     /// process, because `discoveredIDs` was never pruned.
     @Test("A radar that stops advertising leaves the list on the next sweep")

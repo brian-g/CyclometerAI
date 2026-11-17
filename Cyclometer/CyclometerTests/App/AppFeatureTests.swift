@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import ComposableArchitecture
+import SwiftUI
 @testable import Cyclometer
 
 @MainActor
@@ -130,7 +131,7 @@ struct AppFeatureTests {
         }
         store.exhaustivity = .off
 
-        await store.send(.scenePhaseChanged(isActive: false))
+        await store.send(.scenePhaseChanged(.inactive))
         await store.receive(\.activeRide.trackRecorder.appResignedActive)
         await store.finish()
 

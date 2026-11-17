@@ -139,7 +139,7 @@ struct AppView: View {
             )
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
-            store.send(.scenePhaseChanged(isActive: phase == .active))
+            store.send(.scenePhaseChanged(phase))
         }
         // Hands the rider's persisted pairings to BLECSCClient, which connects
         // nothing it hasn't been told about.
