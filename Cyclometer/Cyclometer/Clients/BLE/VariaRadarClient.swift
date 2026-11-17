@@ -173,9 +173,10 @@ struct VariaRadarClient: Sendable {
         UUID(uuidString: "C0000000-0000-0000-0000-000000000008")!,
     ]
 
-    /// Reconnection backoff ladder: 1s, 2s, 4s, 8s, 16s, then capped at 30s.
+    /// Reconnection backoff ladder: 1s, 2s, 4s, 8s, 16s, then capped at 30s. The shared
+    /// `BLEReconnectLadder` owns it (BLE.md §6.1); this names the timing this client runs.
     static func reconnectDelay(attempt: Int) -> Duration {
-        .seconds(min(1 << min(attempt, 5), 30))
+        BLEReconnectLadder.reconnectDelay(attempt: attempt)
     }
 }
 
@@ -656,7 +657,15 @@ private final class RadarClientState: @unchecked Sendable {
             await bleClient.connect(id, radarOwnerID)
 
         case .connected(let id):
-            guard lock.withLock({ targetPeripheralID }) == id else { return }
+            guard lock.withLock({ targetPeripheralID }) == id else {
+                // Not our target, but possibly our connect: a ladder rung reads the target and
+                // then calls `connect` after the lock is dropped, so `disconnect()` or a gate
+                // change can clear the target in between and the connect lands after the
+                // cancel. Releasing the "radar" owner here closes that gap whatever the
+                // ordering (#558). It is a no-op for a peripheral another client owns.
+                await bleClient.disconnect(id, radarOwnerID)
+                return
+            }
             cancelReconnect()
             setConnectionState(.connected)
             // One call for both services: didDiscoverServices reports the peripheral's
@@ -789,17 +798,18 @@ private final class RadarClientState: @unchecked Sendable {
         // was cleared (e.g. the radio cycled off and on); the PRD §9.1 ladder
         // bounds how often it is re-issued. BLECentral retains discovered
         // peripherals, so reconnect-by-UUID works without rescanning.
-        let task = Task { [weak self] in
-            var attempt = 0
-            while !Task.isCancelled {
-                guard let self else { return }
-                try? await self.clock.sleep(for: VariaRadarClient.reconnectDelay(attempt: attempt))
-                guard !Task.isCancelled else { return }
-                guard let id = self.lock.withLock({ self.targetPeripheralID }) else { return }
-                logger.notice("reconnect attempt \(attempt + 1)")
-                await self.bleClient.connect(id, radarOwnerID)
-                attempt += 1
-            }
+        let task = Task { [weak self, clock] in
+            await BLEReconnectLadder.run(
+                clock: clock,
+                isStillReconnecting: { [weak self] in
+                    self?.lock.withLock { self?.targetPeripheralID } != nil
+                },
+                connect: { [weak self] attempt in
+                    guard let self, let id = self.lock.withLock({ self.targetPeripheralID }) else { return }
+                    logger.notice("reconnect attempt \(attempt)")
+                    await self.bleClient.connect(id, radarOwnerID)
+                }
+            )
         }
         lock.withLock { reconnectTask = task }
     }

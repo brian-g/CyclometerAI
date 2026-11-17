@@ -536,6 +536,36 @@ struct VariaRadarIntegrationTests {
         #expect(harness.connectCount.value == countBefore)
     }
 
+    /// A ladder rung reads the target and calls `connect` once the lock is dropped, so a
+    /// `disconnect()` in between leaves that connect landing after the cancel (#558).
+    /// Whatever placed it, a link that completes for a radar this client no longer
+    /// targets must have its "radar" owner released, or it stays up with nothing reading it.
+    @Test("A connect that completes for a radar no longer targeted is let go")
+    func strayConnectIsLetGo() async {
+        let harness = Harness()
+        let peripheralID = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()  // .disconnected
+        await harness.client.connect(peripheralID)
+        _ = await states.next()  // .connecting
+        await harness.client.disconnect()
+        #expect(await states.next() == .disconnected)
+
+        harness.events.yield(.connected(id: peripheralID))
+        // Events are handled in order: once a later discovery is listed, the `.connected`
+        // handler has finished, transport calls included.
+        let marker = UUID()
+        harness.events.yield(.discovered(id: marker, name: nil, rssi: -90, services: [radarServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == marker } }
+
+        let disconnects = harness.calls.value.filter {
+            if case .disconnect = $0 { return true } else { return false }
+        }
+        #expect(disconnects == [.disconnect(peripheralID, "radar"), .disconnect(peripheralID, "radar")])
+        #expect(harness.servicesDiscovered.value.isEmpty)
+    }
+
     @Test("Discovery of a non-radar peripheral is ignored")
     func nonRadarDiscoveryIgnored() async {
         let harness = Harness()

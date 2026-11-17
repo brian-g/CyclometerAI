@@ -1195,6 +1195,121 @@ struct DeviceManagementFeatureTests {
         #expect(store.state.pendingPairing == Self.availableID)
     }
 
+    // MARK: A sensor that drops while pairing (#558)
+
+    /// The CSC client releases a sensor that drops mid-interrogation rather than chasing
+    /// it, so its capabilities are never coming. The pairing has to end with it, or every
+    /// later Pair tap is refused for the rest of the session with no prompt up to cancel.
+    @Test("A sensor released before its capabilities arrive ends the pairing, and Pair works again")
+    func releasedInterrogationEndsThePairing() async {
+        let paired = LockIsolated<[UUID]>([])
+        var ble = BLECSCClient.testValue
+        ble.pair = { id in paired.withValue { $0.append(id) } }
+
+        let store = makeStore(devices: Self.rowToPair(name: "GSC-10"), bleCSCClient: ble)
+        await store.send(.pairButtonTapped(Self.availableID)) {
+            $0.pendingPairing = Self.availableID
+        }
+
+        let connected = [Self.sensor(id: Self.availableID, name: "GSC-10", state: .connected)]
+        await store.send(.devicesUpdated(.speedCadence, connected)) {
+            $0.sources[.speedCadence] = connected
+        }
+
+        // The link drops before 0x2A5C answers: the client drops the slot, so the row
+        // loses its connection state and still carries no capabilities.
+        let released = [Self.sensor(id: Self.availableID, name: "GSC-10")]
+        await store.send(.devicesUpdated(.speedCadence, released)) {
+            $0.sources[.speedCadence] = released
+            $0.pendingPairing = nil
+        }
+
+        // The rider can try again.
+        await store.send(.pairButtonTapped(Self.availableID)) {
+            $0.pendingPairing = Self.availableID
+        }
+        await store.finish()
+        #expect(paired.value == [Self.availableID, Self.availableID])
+    }
+
+    @Test("Capabilities that arrive as the link drops still raise the role prompt")
+    func capabilitiesArrivingAtTheDropStillPrompt() async {
+        let store = makeStore(devices: Self.rowToPair(name: "Wahoo RPM"))
+        await store.send(.pairButtonTapped(Self.availableID)) {
+            $0.pendingPairing = Self.availableID
+        }
+
+        let connected = [Self.sensor(id: Self.availableID, name: "Wahoo RPM", state: .connected)]
+        await store.send(.devicesUpdated(.speedCadence, connected)) {
+            $0.sources[.speedCadence] = connected
+        }
+
+        // The read answered before the release: the answer is what the prompt needs, so
+        // the pairing carries on to it.
+        let answered = [Self.sensor(id: Self.availableID, name: "Wahoo RPM", capabilities: Self.combo)]
+        await store.send(.devicesUpdated(.speedCadence, answered)) {
+            $0.sources[.speedCadence] = answered
+            $0.roleDialog = Self.expectedDialog(for: Self.availableID, name: "Wahoo RPM")
+        }
+        #expect(store.state.pendingPairing == Self.availableID)
+
+        await store.send(.roleDialog(.dismiss)) {
+            $0.roleDialog = nil
+            $0.pendingPairing = nil
+        }
+        await store.finish()
+    }
+
+    /// A sensor that holds roles keeps its slot through a drop — the client reconnects it,
+    /// and its row reads `.reconnecting`, never nil — so its pairing is still going.
+    @Test("A pairing on a sensor that holds roles survives the sensor reconnecting")
+    func reconnectingSensorKeepsItsPairing() async {
+        let store = makeStore(devices: [
+            Self.sensor(id: Self.availableID, name: "GSC-10", roles: [.speed], state: .active)
+        ])
+        await store.send(.pairButtonTapped(Self.availableID)) {
+            $0.pendingPairing = Self.availableID
+        }
+
+        for state in [SensorConnectionState.reconnecting, .connected] {
+            let update = [Self.sensor(id: Self.availableID, name: "GSC-10", roles: [.speed], state: state)]
+            await store.send(.devicesUpdated(.speedCadence, update)) {
+                $0.sources[.speedCadence] = update
+            }
+        }
+        #expect(store.state.pendingPairing == Self.availableID)
+        await store.finish()
+    }
+
+    @Test("Another sensor being released leaves the pairing in flight")
+    func unrelatedReleaseLeavesThePairing() async {
+        let store = makeStore(devices: [
+            Self.sensor(id: Self.availableID, name: "GSC-10"),
+            Self.sensor(id: Self.otherPairedID, name: "Wahoo RPM", state: .active)
+        ])
+        await store.send(.pairButtonTapped(Self.availableID)) {
+            $0.pendingPairing = Self.availableID
+        }
+
+        let connected = [
+            Self.sensor(id: Self.availableID, name: "GSC-10", state: .connected),
+            Self.sensor(id: Self.otherPairedID, name: "Wahoo RPM", state: .active)
+        ]
+        await store.send(.devicesUpdated(.speedCadence, connected)) {
+            $0.sources[.speedCadence] = connected
+        }
+
+        let otherGone = [
+            Self.sensor(id: Self.availableID, name: "GSC-10", state: .connected),
+            Self.sensor(id: Self.otherPairedID, name: "Wahoo RPM")
+        ]
+        await store.send(.devicesUpdated(.speedCadence, otherGone)) {
+            $0.sources[.speedCadence] = otherGone
+        }
+        #expect(store.state.pendingPairing == Self.availableID)
+        await store.finish()
+    }
+
     // MARK: A CSC answer is not consent to displace another sensor
 
     /// A combo advertising CSC and heart rate is paired by answering a question about
