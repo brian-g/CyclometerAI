@@ -1024,7 +1024,7 @@ Cyclometer/
 │   │   ├── Alerts/                        // AlertOrchestratorFeature, VehiclePassDetector,
 │   │   │                                  // RideBanner
 │   │   ├── SensorHealth/                  // SensorHealthFeature (#391), SensorsButton + SensorsSheet (#464, #466)
-│   │   └── Calibration/                   // WheelCalibrationFeature, WheelCalibration
+│   │   └── Calibration/                   // WheelCalibrationFeature, WheelCalibration, CalibrationWindowProbe
 │   ├── Rides/                             // RidesFeature/View, RideDetail*, RideSummary*,
 │   │                                      // StartSheet*, RoutePicker*, RideWeatherSummary +
 │   │                                      // RideWindExposure (S15 Weather, #151)

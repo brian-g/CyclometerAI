@@ -363,6 +363,13 @@ private final class CSCClientState: @unchecked Sendable {
         var speed: Double?
         var cadence: Double?
         var wheelRevolutions: Double = 0
+        /// The frame's raw wheel counter and event time, for the log line only (#419). The
+        /// counter is a cumulative `UInt32`, so any two log lines give the exact revolutions
+        /// between them, however many frames the log gate skipped. The event time is a
+        /// `UInt16` in 1/1024 s and wraps every 64 s: it gives the sensor's elapsed time only
+        /// between lines under 64 s apart, summed modulo 65536, and never across a stop,
+        /// where the calculator itself treats the delta as unknowable.
+        var wheelCounter: (revolutions: UInt32, eventTime: UInt16)?
         /// The roles this peripheral holds, so the log line names only the values this
         /// sensor was ever going to produce. Empty on the paths that emit nothing.
         var roles: Set<SensorRole> = []
@@ -1002,6 +1009,7 @@ private final class CSCClientState: @unchecked Sendable {
                     // rate on samples whose revolutions still count as travel (#70).
                     let rps = slot.wheel.update(revs: revs, eventTime: time)
                     revolutions = slot.wheel.lastCountedRevolutions
+                    outcome.wheelCounter = (revs, time)
                     if let rps { s = rps * Double(wheelCircumferenceMM) / 1000.0 }
                 }
                 if slot.roles.contains(.cadence),
@@ -1040,6 +1048,11 @@ private final class CSCClientState: @unchecked Sendable {
                 if outcome.roles.contains(.speed) {
                     parts.append(outcome.speed.map { String(format: "speed %.2f m/s", $0) }
                         ?? "speed —")
+                    // #419: lets a collected log compare the sensor's event-time clock with the
+                    // log's wall clock over moving stretches (see `wheelCounter`).
+                    if let counter = outcome.wheelCounter {
+                        parts.append("wheel \(counter.revolutions) rev @ \(counter.eventTime)/1024 s")
+                    }
                 }
                 if outcome.roles.contains(.cadence) {
                     parts.append(outcome.cadence.map { String(format: "cadence %.0f rpm", $0) }
