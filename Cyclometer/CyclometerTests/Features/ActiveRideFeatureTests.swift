@@ -1277,7 +1277,7 @@ struct ActiveRideFeatureTimerTests {
         #expect(store.state.maxSpeedMPS == 20)
     }
 
-    @Test("A GPS speed whose speedAccuracy is invalid or poor isn't counted")
+    @Test("A GPS speed whose valid speedAccuracy is past the ceiling isn't counted")
     func untrustworthyAccuracyIsNotCounted() async {
         let (store, now) = makeGatedStore()
         // Two good fixes: the ride's first reading is never a max on its own.
@@ -1285,23 +1285,43 @@ struct ActiveRideFeatureTimerTests {
         await fix(store, now, 8)
         #expect(store.state.maxSpeedMPS == 8)
 
-        // CoreLocation's own "invalid" −1, through `LocationUpdate(CLLocation)`.
-        now.withValue { $0 += 1 }
-        await store.send(.locationUpdated(LocationUpdate(CLLocation(
-            coordinate: CLLocationCoordinate2D(latitude: 43.0, longitude: -89.0), altitude: 280,
-            horizontalAccuracy: 5, verticalAccuracy: 3, course: 0, courseAccuracy: 5,
-            speed: 9, speedAccuracy: -1, timestamp: now.value
-        ))))
-        await store.receive(\.speed.gpsSpeedReceived)
-        #expect(store.state.speed.speedMPS == 9)
-        #expect(store.state.maxSpeedMPS == 8)
-
         // Valid, but wider than the GPS ceiling.
         await fix(store, now, 9.5, accuracy: MaxSpeedGate.maxGPSSpeedAccuracyMPS + 0.5)
+        #expect(store.state.speed.speedMPS == 9.5)
         #expect(store.state.maxSpeedMPS == 8)
 
         await fix(store, now, 9.6)
         #expect(store.state.maxSpeedMPS == 9.6)
+    }
+
+    /// A fix with CoreLocation's own "invalid" −1 accuracy, through `LocationUpdate(CLLocation)`,
+    /// one second after the last reading: what the simulator's simulated location sends.
+    private func fixWithInvalidAccuracy(
+        _ store: TestStoreOf<ActiveRideFeature>, _ now: LockIsolated<Date>, _ mps: Double
+    ) async {
+        now.withValue { $0 += 1 }
+        await store.send(.locationUpdated(LocationUpdate(CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 43.0, longitude: -89.0), altitude: 280,
+            horizontalAccuracy: 5, verticalAccuracy: 3, course: 0, courseAccuracy: 5,
+            speed: mps, speedAccuracy: -1, timestamp: now.value
+        ))))
+        await store.receive(\.speed.gpsSpeedReceived)
+    }
+
+    @Test("A GPS speed with an invalid speedAccuracy is unknown: held to the acceleration bound, not refused")
+    func unknownAccuracyIsHeldToTheBound() async {
+        let (store, now) = makeGatedStore()
+        // A ride whose every fix has no valid accuracy, as in the simulator, still sets a max.
+        await fixWithInvalidAccuracy(store, now, 8)
+        await fixWithInvalidAccuracy(store, now, 9)
+        #expect(store.state.speedAccuracy == nil)
+        #expect(store.state.maxSpeedMPS == 9)
+        // And a spike among them is refused by the bound: 9 + 4 + 2.5 = 15.5.
+        await fixWithInvalidAccuracy(store, now, 33)
+        #expect(store.state.speed.speedMPS == 33)
+        #expect(store.state.maxSpeedMPS == 9)
+        await fixWithInvalidAccuracy(store, now, 9.4)
+        #expect(store.state.maxSpeedMPS == 9.4)
     }
 
     @Test("A refused reading doesn't hold the max down, after a spike or after a low glitch")

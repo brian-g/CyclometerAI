@@ -15,12 +15,13 @@ struct MaxSpeedGateTests {
 
     // MARK: - GPS speedAccuracy
 
-    @Test("A GPS speed CoreLocation marks invalid is never trustworthy")
-    func invalidAccuracyIsNotTrustworthy() {
-        #expect(!MaxSpeedGate.isTrustworthy(speedAccuracy: nil))
+    @Test("A GPS speed with no valid accuracy isn't refused for it")
+    func unknownAccuracyIsNotRefused() {
+        // Unknown, not poor: left to the acceleration bound (the owner's decision on #540).
+        #expect(MaxSpeedGate.isTrustworthy(speedAccuracy: nil))
         // `LocationUpdate` turns CoreLocation's −1 into nil; a negative that got through anyway
         // means the same.
-        #expect(!MaxSpeedGate.isTrustworthy(speedAccuracy: -1))
+        #expect(MaxSpeedGate.isTrustworthy(speedAccuracy: -1))
     }
 
     @Test("A GPS speed is trustworthy up to maxGPSSpeedAccuracyMPS, and not past it")
@@ -102,12 +103,15 @@ struct MaxSpeedGateTests {
         #expect(MaxSpeedGate.verdict(30, from: .bleWheel, speedAccuracy: nil, at: Self.now, priorReadings: before) != .admitted)
     }
 
-    @Test("A GPS reading needs both: a good accuracy and a reachable speed")
+    @Test("A GPS reading needs both: no accuracy past the ceiling, and a reachable speed")
     func gpsNeedsBoth() {
         let before = [Self.sample(8, secondsAgo: 1)]
         #expect(MaxSpeedGate.verdict(9, from: .gps, speedAccuracy: 0.3, at: Self.now, priorReadings: before) == .admitted)
-        #expect(MaxSpeedGate.verdict(9, from: .gps, speedAccuracy: nil, at: Self.now, priorReadings: before) != .admitted)
+        #expect(MaxSpeedGate.verdict(9, from: .gps, speedAccuracy: 3, at: Self.now, priorReadings: before) != .admitted)
         #expect(MaxSpeedGate.verdict(33, from: .gps, speedAccuracy: 0.3, at: Self.now, priorReadings: before) != .admitted)
+        // An unknown accuracy leaves it to the bound alone.
+        #expect(MaxSpeedGate.verdict(9, from: .gps, speedAccuracy: nil, at: Self.now, priorReadings: before) == .admitted)
+        #expect(MaxSpeedGate.verdict(33, from: .gps, speedAccuracy: nil, at: Self.now, priorReadings: before) != .admitted)
     }
 
     @Test("The verdict names the check that refused")
@@ -117,7 +121,8 @@ struct MaxSpeedGateTests {
             MaxSpeedGate.verdict(mps, from: source, speedAccuracy: accuracy, at: Self.now, priorReadings: samples)
         }
         #expect(verdict(9, .gps, 0.3, before) == .admitted)
-        #expect(verdict(9, .gps, nil, before) == .untrustworthyGPSAccuracy)
+        #expect(verdict(9, .gps, nil, before) == .admitted)
+        #expect(verdict(33, .gps, nil, before) == .tooFast)
         #expect(verdict(9, .gps, 3, before) == .untrustworthyGPSAccuracy)
         #expect(verdict(33, .bleWheel, nil, before) == .tooFast)
         #expect(verdict(9, .bleWheel, nil, []) == .noRecentReading)

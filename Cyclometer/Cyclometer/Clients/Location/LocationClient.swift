@@ -19,7 +19,8 @@ struct LocationUpdate: Sendable, Equatable {
     var verticalAccuracy: Double? = nil
     let speed: Double                 // m/s; -1 if invalid
     /// m/s; nil when CoreLocation marks it invalid. What decides whether `speed` may become the
-    /// ride's max (#540). Defaulted so a test fix needn't say, which leaves its speed out of the max.
+    /// ride's max (#540). Defaulted so a test fix needn't say: an unknown accuracy, which leaves its
+    /// speed to the acceleration bound alone.
     var speedAccuracy: Double? = nil
     let horizontalAccuracy: Double    // meters; lower is better
     let heading: Double               // degrees from true north (0–360); -1 if unavailable

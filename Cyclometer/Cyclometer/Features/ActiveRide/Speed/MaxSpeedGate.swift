@@ -11,10 +11,11 @@ import Foundation
 ///
 /// - **GPS reports its own error.** CoreLocation: "`speedAccuracy` — Returns the speed accuracy
 ///   of the location in m/s. Returns -1 if invalid", and "The lower the value the more precise
-///   the speed is. A negative accuracy value indicates an invalid speed." A reading whose
-///   accuracy is invalid, or wider than `maxGPSSpeedAccuracyMPS`, never counts. The simulator's
-///   simulated location (`simctl location`) reports a valid speed with `speedAccuracy` −1, so a
-///   GPS-only ride there never sets a max.
+///   the speed is. A negative accuracy value indicates an invalid speed." A reading whose valid
+///   accuracy is wider than `maxGPSSpeedAccuracyMPS` never counts. One with no valid accuracy is
+///   *unknown*, not poor, and is held to the acceleration bound like any other reading: the
+///   owner's decision on #540. The simulator's simulated location (`simctl location`) reports a
+///   valid speed with `speedAccuracy` −1, and a GPS-only ride there sets a real max.
 /// - **A bicycle can only speed up so fast.** A reading must be reachable from every displayed
 ///   reading of the last `window`: no more than `maxAccelerationMPS2` per second above it, plus
 ///   `readingSlackMPS`. And there must be at least one such reading to measure it against. This
@@ -105,11 +106,12 @@ enum MaxSpeedGate {
         return reachability(mps, at: time, priorReadings: priorReadings)
     }
 
-    /// Whether a GPS speed with this accuracy is good enough to be a max.
+    /// Whether a GPS speed's stated accuracy lets it be a max.
     static func isTrustworthy(speedAccuracy: Double?) -> Bool {
-        // An invalid accuracy is refused: #540's acceptance criteria. Counting it instead, and
-        // leaving it to the acceleration bound, is this one `return`.
-        guard let speedAccuracy, speedAccuracy >= 0 else { return false }
+        // No valid accuracy (nil, or CoreLocation's negative "invalid") is unknown, not poor: the
+        // reading is left to the acceleration bound, as a wheel-sensor reading is (#540, the
+        // owner's decision). Only a valid accuracy wider than the ceiling refuses it.
+        guard let speedAccuracy, speedAccuracy >= 0 else { return true }
         return speedAccuracy <= maxGPSSpeedAccuracyMPS
     }
 

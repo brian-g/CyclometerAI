@@ -1378,7 +1378,7 @@ struct ActiveRideFeature {
                     }) {
                         // Says which check refused, so `log collect` shows a gate refusing honest
                         // readings. At most one a minute per check: a ride whose every fix has an
-                        // invalid accuracy refuses every reading that would raise the max.
+                        // accuracy past the ceiling refuses every reading that would raise the max.
                         let source = state.speed.activeSpeedSource.rawValue
                         let accuracy = state.speedAccuracy ?? -1
                         let maxSpeedMPS = state.maxSpeedMPS
