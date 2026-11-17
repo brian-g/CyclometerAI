@@ -333,6 +333,11 @@ struct AppFeature {
                 // the ride being started, not one a kill left behind: leave it to the sheet.
                 let startingRideId = state.startSheet?.pendingRideId
                 if summary.rideId == startingRideId { return .none }
+                // The rider already ended this ride and only its finalize write failed (#188).
+                // Read once for both close-outs below.
+                let pendingEnd = rideEndIntentClient.load().flatMap {
+                    $0.rideId == summary.rideId ? $0 : nil
+                }
                 // `.task`'s two effects race: the rider can start a brand-new ride
                 // through the normal start-sheet flow before this async fetch
                 // resolves. Don't clobber that ride — but the orphaned one still
@@ -341,10 +346,19 @@ struct AppFeature {
                 // A start still mid-write counts: resuming here would close the sheet and
                 // strand its row (#344).
                 guard state.activeRide == nil, startingRideId == nil else {
-                    return .run { [persistenceClient, date] send in
-                        try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
-                        // No Apple Health workout (#277): its end is the relaunch, not when the
-                        // rider stopped, so a workout would span every hour between the two.
+                    return .run { [persistenceClient, rideEndIntentClient, date] send in
+                        // One the rider had ended keeps its end and its export (#357): closed with
+                        // nil, the export is unreferenced and the launch sweep deletes it (#346).
+                        if let pendingEnd {
+                            try? await Self.finalizeEndedRide(
+                                pendingEnd, summary, persistenceClient, rideEndIntentClient
+                            )
+                        } else {
+                            try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
+                        }
+                        // No Apple Health workout (#277): without a marker its end is the relaunch,
+                        // not when the rider stopped, so a workout would span every hour between
+                        // the two. One with a marker is settled too, as before #357.
                         // Settled before the backfill below, the only one that could see it.
                         try? await persistenceClient.settleRideHealthWorkout(summary.rideId)
                         await send(.rides(.reloadRides))
@@ -356,13 +370,12 @@ struct AppFeature {
                 // so it is resumable purely because `endedAt` never got set. Close it
                 // out instead of resuming a ride that is over (#188) — otherwise the
                 // recorder restarts and sensors reconnect on a finished ride.
-                if let pending = rideEndIntentClient.load(), pending.rideId == summary.rideId {
+                if let pendingEnd {
                     return .run { [persistenceClient, rideEndIntentClient] send in
                         do {
-                            try await persistenceClient.finalizeRide(
-                                pending.rideId, pending.endedAt, summary, pending.gpxFileURL
+                            try await Self.finalizeEndedRide(
+                                pendingEnd, summary, persistenceClient, rideEndIntentClient
                             )
-                            rideEndIntentClient.clear()
                             await send(.rides(.reloadRides))
                             await Self.backfillFinishedRides(send: send)
                         } catch {
@@ -622,6 +635,24 @@ struct AppFeature {
             await send(.rides(.mapThumbnailsCaptured))
         }
         _ = await (workouts, finishStats)
+    }
+
+    /// Closes out a ride the rider had already ended (#188), with the end and the export its marker
+    /// recorded, then drops the marker. Only once the write lands: a failed finalize keeps it, the
+    /// one record of that end, for the next launch. And only while it is still this ride's: one
+    /// started since can have ended and written its own in the meantime (#357).
+    private static func finalizeEndedRide(
+        _ pendingEnd: PendingRideEnd,
+        _ summary: RideSummaryUpdate,
+        _ persistenceClient: PersistenceClient,
+        _ rideEndIntentClient: RideEndIntentClient
+    ) async throws {
+        try await persistenceClient.finalizeRide(
+            pendingEnd.rideId, pendingEnd.endedAt, summary, pendingEnd.gpxFileURL
+        )
+        if rideEndIntentClient.load()?.rideId == pendingEnd.rideId {
+            rideEndIntentClient.clear()
+        }
     }
 
     /// Clears exports no ride references (#346). At launch, and only once the fetch has found no

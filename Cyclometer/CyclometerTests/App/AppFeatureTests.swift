@@ -363,6 +363,164 @@ struct AppFeatureTests {
         #expect(finalized.value?.3 == nil)
     }
 
+    /// A launch whose fetch lands while a new ride is under way: started (`midWrite == false`), or
+    /// its row still being written by S05.1 (`midWrite == true`, #344). Either sends the leftover
+    /// ride down the close-out branch instead of resuming it.
+    private static func stateWithStartInFlight(midWrite: Bool) -> AppFeature.State {
+        guard midWrite else {
+            return AppFeature.State(
+                activeRide: ActiveRideFeature.State(rideId: UUID(), recordingState: .active),
+                isDashboardPresented: true
+            )
+        }
+        var sheet = StartSheetFeature.State()
+        sheet.pendingRideId = UUID()
+        var state = AppFeature.State()
+        state.startSheet = sheet
+        return state
+    }
+
+    private static let leftoverRide = RideSummaryUpdate(
+        rideId: UUID(), recordingState: .active,
+        durationSeconds: 300, distanceMeters: 2_000, averageSpeedMPS: 5, maxSpeedMPS: 9
+    )
+
+    /// #357: the leftover ride was one the rider had ended, and only its finalize failed — after the
+    /// export was written (#188). Its close-out keeps the marker's end and export rather than the
+    /// relaunch's time and nil, which left the export for #346's sweep, and discharges the marker.
+    @Test("A close-out racing a start keeps a ride-end marker's end and export, then clears it", arguments: [false, true])
+    func resumableRideFetchedDuringAStartUsesTheRideEndMarker(midWrite: Bool) async {
+        let marker = PendingRideEnd(
+            rideId: Self.leftoverRide.rideId,
+            endedAt: Date(timeIntervalSince1970: 1_500_000),
+            gpxFileURL: URL(filePath: "/Documents/Rides/leftover.gpx")
+        )
+        let rideEndIntent = RideEndIntentClient.inMemory(initial: marker)
+        let finalized = LockIsolated<[(UUID, Date, URL?)]>([])
+        let settled = LockIsolated<[UUID]>([])
+        let store = TestStore(initialState: Self.stateWithStartInFlight(midWrite: midWrite)) {
+            AppFeature()
+        } withDependencies: {
+            $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
+            $0.rideEndIntentClient = rideEndIntent
+            $0.persistenceClient = .mock(
+                onFinalizeRide: { id, endedAt, _, url in finalized.withValue { $0.append((id, endedAt, url)) } },
+                onSettleRideHealthWorkout: { id in settled.withValue { $0.append(id) } }
+            )
+        }
+        store.exhaustivity = .off
+
+        await store.send(.resumableRideFetched(Self.leftoverRide))
+        #expect(store.state.activeRide?.rideId != Self.leftoverRide.rideId, "the leftover ride was resumed")
+        // Sent after the finalize and the clear, so both have run by now.
+        await store.receive(\.rides.reloadRides)
+        await store.finish(timeout: effectDrainTimeout)
+
+        #expect(finalized.value.count == 1)
+        #expect(finalized.value.first?.0 == marker.rideId)
+        #expect(finalized.value.first?.1 == marker.endedAt)
+        #expect(finalized.value.first?.2 == marker.gpxFileURL)
+        #expect(rideEndIntent.load() == nil)
+        // The rest of the branch is as before: still no Apple Health workout (#277).
+        #expect(settled.value == [marker.rideId])
+    }
+
+    /// #357: with no marker, or one some other ride left, the close-out is what it always was —
+    /// closed at the relaunch with no export — and the marker is left alone.
+    @Test("A close-out racing a start without this ride's marker closes it with nil and leaves the marker", arguments: [false, true])
+    func resumableRideFetchedDuringAStartWithoutItsMarker(otherRideMarker: Bool) async {
+        let marker = otherRideMarker
+            ? PendingRideEnd(rideId: UUID(), endedAt: Date(timeIntervalSince1970: 1_500_000),
+                             gpxFileURL: URL(filePath: "/Documents/Rides/other.gpx"))
+            : nil
+        let rideEndIntent = RideEndIntentClient.inMemory(initial: marker)
+        let finalized = LockIsolated<[(UUID, Date, URL?)]>([])
+        let relaunch = Date(timeIntervalSince1970: 2_000_000)
+        let store = TestStore(initialState: Self.stateWithStartInFlight(midWrite: false)) {
+            AppFeature()
+        } withDependencies: {
+            $0.date = .constant(relaunch)
+            $0.rideEndIntentClient = rideEndIntent
+            $0.persistenceClient = .mock(
+                onFinalizeRide: { id, endedAt, _, url in finalized.withValue { $0.append((id, endedAt, url)) } }
+            )
+        }
+        store.exhaustivity = .off
+
+        await store.send(.resumableRideFetched(Self.leftoverRide))
+        await store.receive(\.rides.reloadRides)
+        await store.finish(timeout: effectDrainTimeout)
+
+        #expect(finalized.value.count == 1)
+        #expect(finalized.value.first?.0 == Self.leftoverRide.rideId)
+        #expect(finalized.value.first?.1 == relaunch)
+        #expect(finalized.value.first?.2 == nil)
+        #expect(rideEndIntent.load() == marker)
+    }
+
+    /// #357: the marker exists to survive a failed finalize (#188), so a close-out whose write fails
+    /// keeps it for the next launch. The rest of the branch still runs, as it did before.
+    @Test("A close-out racing a start whose finalize fails keeps the ride-end marker")
+    func resumableRideFetchedDuringAStartKeepsTheMarkerWhenFinalizeFails() async {
+        let marker = PendingRideEnd(
+            rideId: Self.leftoverRide.rideId,
+            endedAt: Date(timeIntervalSince1970: 1_500_000),
+            gpxFileURL: URL(filePath: "/Documents/Rides/leftover.gpx")
+        )
+        let rideEndIntent = RideEndIntentClient.inMemory(initial: marker)
+        let attempts = LockIsolated(0)
+        let store = TestStore(initialState: Self.stateWithStartInFlight(midWrite: false)) {
+            AppFeature()
+        } withDependencies: {
+            $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
+            $0.rideEndIntentClient = rideEndIntent
+            var client = PersistenceClient.mock()
+            client.finalizeRide = { _, _, _, _ in
+                attempts.withValue { $0 += 1 }
+                throw PersistenceError.rideNotFound
+            }
+            $0.persistenceClient = client
+        }
+        store.exhaustivity = .off
+
+        await store.send(.resumableRideFetched(Self.leftoverRide))
+        await store.receive(\.rides.reloadRides)
+        await store.finish(timeout: effectDrainTimeout)
+
+        #expect(attempts.value == 1)
+        #expect(rideEndIntent.load() == marker)
+    }
+
+    /// #357: the marker is cleared only while it is still the leftover ride's. The ride just started
+    /// can have ended — its Finish writes its own marker first — while this finalize was in flight,
+    /// and that marker is the only record of its end if its own finalize fails.
+    @Test("A close-out racing a start leaves a marker the new ride wrote while it was finalizing")
+    func resumableRideFetchedDuringAStartLeavesTheNewRidesMarker() async {
+        let marker = PendingRideEnd(
+            rideId: Self.leftoverRide.rideId,
+            endedAt: Date(timeIntervalSince1970: 1_500_000),
+            gpxFileURL: URL(filePath: "/Documents/Rides/leftover.gpx")
+        )
+        let newRidesMarker = PendingRideEnd(
+            rideId: UUID(), endedAt: Date(timeIntervalSince1970: 2_000_100), gpxFileURL: nil
+        )
+        let rideEndIntent = RideEndIntentClient.inMemory(initial: marker)
+        let store = TestStore(initialState: Self.stateWithStartInFlight(midWrite: false)) {
+            AppFeature()
+        } withDependencies: {
+            $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
+            $0.rideEndIntentClient = rideEndIntent
+            $0.persistenceClient = .mock(onFinalizeRide: { _, _, _, _ in rideEndIntent.save(newRidesMarker) })
+        }
+        store.exhaustivity = .off
+
+        await store.send(.resumableRideFetched(Self.leftoverRide))
+        await store.receive(\.rides.reloadRides)
+        await store.finish(timeout: effectDrainTimeout)
+
+        #expect(rideEndIntent.load() == newRidesMarker)
+    }
+
     /// #344: S05.1 writes a new ride's row before `activeRide` exists, so the launch-time fetch can
     /// land mid-write. Found a row a kill left behind, it closes that one out and leaves the start
     /// alone. Found the row being written, it does nothing: that is the new ride, not an orphan.
