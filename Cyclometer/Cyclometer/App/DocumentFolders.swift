@@ -28,12 +28,31 @@ enum DocumentFolders {
 
     // MARK: - Ride exports
 
+    /// The app's own exports: files in `Rides` itself whose names match `GPXExporter`'s exactly.
+    /// Anything else there was put in through Files and is the rider's. Empty when nothing has
+    /// been exported yet, so there is no folder.
+    ///
+    /// What the #346 sweep may remove, and what a history reset retains (#206), so the two
+    /// can't disagree about which files are the app's.
+    static func rideExports(documentsDirectory: URL) throws -> [URL] {
+        do {
+            return try FileManager.default
+                .contentsOfDirectory(
+                    at: GPXExporter.ridesDirectory(in: documentsDirectory),
+                    includingPropertiesForKeys: [.isRegularFileKey]
+                )
+                .filter { url in
+                    GPXExporter.isExportFileName(url.lastPathComponent)
+                        && (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                }
+        } catch CocoaError.fileReadNoSuchFile {
+            return []
+        }
+    }
+
     /// Deletes the exports in `Rides` that no ride references (#346). Deleting a ride removes
     /// its file first and carries on if that fails (#261), so a file can outlive its rows; this
-    /// is what eventually clears it.
-    ///
-    /// Only the app's own exports are candidates: files in `Rides` itself whose names match
-    /// `GPXExporter`'s exactly. Anything else there was put in through Files and is the rider's.
+    /// is what eventually clears it. Only `rideExports` are candidates.
     ///
     /// The folder is listed *before* `referencedFileNames` is read, so a file written after the
     /// listing is never a candidate. One written before it is kept once its ride-end marker or
@@ -44,17 +63,9 @@ enum DocumentFolders {
         documentsDirectory: URL = .documentsDirectory,
         referencedFileNames: () async throws -> Set<String>
     ) async {
-        let ridesDirectory = GPXExporter.ridesDirectory(in: documentsDirectory)
         let exports: [URL]
         do {
-            exports = try FileManager.default
-                .contentsOfDirectory(at: ridesDirectory, includingPropertiesForKeys: [.isRegularFileKey])
-                .filter { url in
-                    GPXExporter.isExportFileName(url.lastPathComponent)
-                        && (try?url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
-                }
-        } catch CocoaError.fileReadNoSuchFile {
-            return // Nothing exported yet.
+            exports = try rideExports(documentsDirectory: documentsDirectory)
         } catch {
             logger.error("export sweep could not list Documents/Rides: \(error.localizedDescription, privacy: .public)")
             return

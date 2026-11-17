@@ -559,8 +559,14 @@ struct AppFeature {
                 return .merge(.send(.rides(.reloadRides)), .send(.routes(.reloadRoutes)))
 
             case .storeResetFinished(.failure):
-                state.storeReset = .resetFailed
-                return .none
+                // A reset can fail part-way: history moved aside and reopened, then the track
+                // store's move threw. What it did stands, so the screens follow the stores as
+                // they are now, not as they were before it.
+                let storeStatus = persistenceClient.storeStatus()
+                let isUnchanged = storeStatus == state.storeStatus
+                state.$storeStatus.withLock { $0 = storeStatus }
+                state.storeReset = .resetFailed(nothingChanged: isUnchanged)
+                return isUnchanged ? .none : .merge(.send(.rides(.reloadRides)), .send(.routes(.reloadRoutes)))
 
             case .settings(.delegate(.liveActivityToggled)):
                 // A ride already running follows S12's toggle now, not from the next ride (#313).

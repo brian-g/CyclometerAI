@@ -252,6 +252,45 @@ struct StoreLoadRecoveryTests {
         }
     }
 
+    /// A past ride's points are in the track store that didn't open. Its finish stats and Apple
+    /// Health workout, worked out from the empty stand-in, would be stored for good.
+    @Test("while tracks are on a stand-in, only rides with points on hand are owed backfills")
+    func backfillsWaitForUnavailableTracks() async throws {
+        try await Self.withDirectory { directory in
+            let tracksURL = directory.appending(component: "CyclometerTimeSeries.sqlite")
+            try Self.writeCorruptStore(at: tracksURL)
+            let documents = try Self.documentsWithExport(in: directory)
+            let client = PersistenceClient.live(stores: Self.stores(
+                history: SwiftDataStack(inMemory: true),
+                tracks: CoreDataStack(storeURL: tracksURL),
+                in: directory, documents: documents
+            ))
+            #expect(client.storeStatus().tracks != nil)
+
+            let start = Date(timeIntervalSince1970: 1_772_524_500)
+            let past = UUID()
+            let recorded = UUID()
+            for rideId in [past, recorded] {
+                try await client.createRide(rideId, start, nil)
+                // No live finish stats, so the ride is owed them from its track.
+                let summary = RideSummaryUpdate(
+                    rideId: rideId, recordingState: .ended,
+                    durationSeconds: 600, distanceMeters: 4_200, averageSpeedMPS: 7, maxSpeedMPS: 9
+                )
+                try await client.finalizeRide(rideId, start.addingTimeInterval(600), summary, nil)
+            }
+            // Only the ride recorded since launch has points on the stand-in.
+            try await client.flushTrackPoints([TrackPointDTO(
+                id: UUID(), rideId: recorded, timestamp: start, latitude: 36.07, longitude: -79.79,
+                altitudeMeters: nil, horizontalAccuracyMeters: 5, speedMPS: 7, speedSource: .gps,
+                heartRateBPM: nil, heartRateSource: .none, cadenceRPM: nil, powerWatts: nil, segmentIndex: 0
+            )])
+
+            #expect(try await client.fetchRidesOwedHealthWorkout().map(\.rideId) == [recorded])
+            #expect(try await client.fetchRidesOwedFinishStats().map(\.rideId) == [recorded])
+        }
+    }
+
     // MARK: Ride GPX files are never deleted
 
     @Test("the launch sweep deletes nothing while history is on its stand-in")
@@ -321,6 +360,10 @@ struct StoreLoadRecoveryTests {
             let url = directory.appending(component: "default.store")
             try Self.writeCorruptStore(at: url)
             try Data("wal".utf8).write(to: URL(filePath: url.path(percentEncoded: false) + "-wal"))
+            // An external-storage payload, where SwiftData keeps `@Attribute(.externalStorage)` values.
+            let blobs = directory.appending(component: ".default_SUPPORT/_EXTERNAL_DATA", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: blobs, withIntermediateDirectories: true)
+            try Data("polyline".utf8).write(to: blobs.appending(component: "blob"))
             let documents = try Self.documentsWithExport(in: directory)
             let stores = Self.stores(history: SwiftDataStack(storeURL: url), in: directory, documents: documents)
 
@@ -331,6 +374,12 @@ struct StoreLoadRecoveryTests {
             #expect(reset.preservedStores.map(\.standardizedFileURL) == [preserved.standardizedFileURL])
             #expect(try Data(contentsOf: preserved) == Self.corruptBytes)
             #expect(FileManager.default.fileExists(atPath: preserved.path(percentEncoded: false) + "-wal"))
+            // The payloads go with the store, under the name it now opens them by.
+            let preservedBlob = directory.appending(
+                component: "Support/Preserved Stores/.default-failed-20261117-101500_SUPPORT/_EXTERNAL_DATA/blob"
+            )
+            #expect(try Data(contentsOf: preservedBlob) == Data("polyline".utf8))
+            #expect(!FileManager.default.fileExists(atPath: blobs.path(percentEncoded: false)))
             #expect(reset.status == .available)
             #expect(stores.status == .available)
             // The fresh store is where launch will look, and takes writes.

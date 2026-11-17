@@ -138,7 +138,11 @@ final class PersistentStores: @unchecked Sendable {
         try current.withValue { current in
             var preserved: [URL] = []
             if let failure = current.history.failure {
-                try retainedExports.insert(try exportNames())
+                // An empty folder, or none at all, is nothing to retain. Anything else
+                // unreadable throws and stops the reset.
+                try retainedExports.insert(
+                    DocumentFolders.rideExports(documentsDirectory: documentsDirectory).map(\.lastPathComponent)
+                )
                 if let moved = try PersistentStoreFiles.moveAside(failure.storeURL, into: preservedDirectory, at: now) {
                     preserved.append(moved)
                 }
@@ -152,19 +156,6 @@ final class PersistentStores: @unchecked Sendable {
             }
             logger.notice("store reset preserved \(preserved.map(\.lastPathComponent), privacy: .public)")
             return PersistentStoreReset(preservedStores: preserved, status: current.status)
-        }
-    }
-
-    /// The app's own exports in `Documents/Rides/`, by name, the files the sweep would
-    /// consider. An empty folder, or none at all, is nothing to retain. Anything else unreadable
-    /// throws and stops the reset.
-    private func exportNames() throws -> [String] {
-        let directory = GPXExporter.ridesDirectory(in: documentsDirectory)
-        do {
-            return try FileManager.default.contentsOfDirectory(atPath: directory.path(percentEncoded: false))
-                .filter(GPXExporter.isExportFileName)
-        } catch CocoaError.fileReadNoSuchFile {
-            return []
         }
     }
 }
@@ -212,6 +203,11 @@ enum PersistentStoreFiles {
     /// copied through SQLite: a corrupt file may not open, and the bytes are what diagnosis
     /// needs. The timestamp is UTC.
     ///
+    /// The store's external-storage folder goes with it, renamed to match: `@Attribute(.externalStorage)`
+    /// values (route polylines, map thumbnails) live in a sibling `.<name>_SUPPORT` folder, not
+    /// in the SQLite file. Left behind, the preserved store would open without them, and the
+    /// fresh store would sit beside blobs nothing references.
+    ///
     /// Nil when there is no file at `storeURL`: one that failed for want of disk can have none,
     /// and then there is nothing to preserve. Any companion left behind goes too, so the fresh
     /// store doesn't open onto the old one's log.
@@ -228,14 +224,18 @@ enum PersistentStoreFiles {
                 calendar: Calendar(identifier: .gregorian)
             )
         )
-        let destination = directory.appending(component: "\(stem)-failed-\(stamp)" + (ext.isEmpty ? "" : ".\(ext)"))
-        for suffix in [""] + companionSuffixes {
-            let source = URL(filePath: storeURL.path(percentEncoded: false) + suffix)
-            guard fileManager.fileExists(atPath: source.path(percentEncoded: false)) else { continue }
-            try fileManager.moveItem(
-                at: source,
-                to: URL(filePath: destination.path(percentEncoded: false) + suffix)
-            )
+        let preservedStem = "\(stem)-failed-\(stamp)"
+        let destination = directory.appending(component: preservedStem + (ext.isEmpty ? "" : ".\(ext)"))
+        let storePath = storeURL.path(percentEncoded: false)
+        let destinationPath = destination.path(percentEncoded: false)
+        let storeDirectory = storeURL.deletingLastPathComponent()
+        let moves = ([""] + companionSuffixes).map { (storePath + $0, destinationPath + $0) }
+            + [(
+                storeDirectory.appending(component: ".\(stem)_SUPPORT").path(percentEncoded: false),
+                directory.appending(component: ".\(preservedStem)_SUPPORT").path(percentEncoded: false)
+            )]
+        for (source, target) in moves where fileManager.fileExists(atPath: source) {
+            try fileManager.moveItem(atPath: source, toPath: target)
         }
         return storeExists ? destination : nil
     }

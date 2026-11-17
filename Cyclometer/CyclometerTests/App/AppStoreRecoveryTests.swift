@@ -120,8 +120,31 @@ struct AppStoreRecoveryTests {
             $0.storeReset = nil
         }
         await store.receive(\.storeResetFinished.failure) {
-            $0.storeReset = .resetFailed
+            $0.storeReset = .resetFailed(nothingChanged: true)
         }
+    }
+
+    @Test("a reset that fails part-way shows the stores as they now stand")
+    func resetFailsPartWay() async {
+        var state = AppFeature.State()
+        state.storeReset = .confirmReset(Self.historyFailed)
+        let store = TestStore(initialState: state) {
+            AppFeature()
+        } withDependencies: {
+            // History was reset before the throw, so the stores now report it open.
+            $0.persistenceClient.storeStatus = { .available }
+            $0.persistenceClient.resetUnavailableStores = { throw WriteFailed() }
+        }
+        Self.seed(Self.historyFailed, in: store)
+        store.exhaustivity = .off
+
+        await store.send(.storeReset(.presented(.confirm)))
+        await store.receive(\.storeResetFinished.failure)
+        await store.receive(\.rides.reloadRides)
+        await store.receive(\.routes.reloadRoutes)
+        #expect(store.state.storeStatus == .available)
+        #expect(store.state.rides.storeStatus == .available)
+        #expect(store.state.storeReset == .resetFailed(nothingChanged: false))
     }
 
     @Test("nothing to reset when both stores opened")

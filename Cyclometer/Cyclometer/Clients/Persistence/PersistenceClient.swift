@@ -147,9 +147,13 @@ extension PersistenceClient: DependencyKey {
             saveRideMapThumbnail: { try await stores.rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
             fetchRideIdsMissingMapThumbnail: { try await stores.rideActor.rideIdsMissingMapThumbnail() },
             fetchRideMapThumbnail: { try await stores.rideActor.fetchMapThumbnail(id: $0) },
-            fetchRidesOwedHealthWorkout: { try await stores.rideActor.ridesOwedHealthWorkout() },
+            fetchRidesOwedHealthWorkout: {
+                try await ridesWithTrackOnHand(try await stores.rideActor.ridesOwedHealthWorkout(), rideId: \.rideId, stores: stores)
+            },
             settleRideHealthWorkout: { try await stores.rideActor.settleHealthWorkout(id: $0) },
-            fetchRidesOwedFinishStats: { try await stores.rideActor.ridesOwedFinishStats() },
+            fetchRidesOwedFinishStats: {
+                try await ridesWithTrackOnHand(try await stores.rideActor.ridesOwedFinishStats(), rideId: \.rideId, stores: stores)
+            },
             saveRideFinishStats: { try await stores.rideActor.saveFinishStats(id: $0, stats: $1) },
             appendVehiclePassEvents: { try await stores.rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await stores.rideActor.fetchVehiclePassEvents(rideId: $0) },
@@ -319,6 +323,37 @@ private func batchDeleteTrackPoints(rideId: UUID, container: NSPersistentContain
         request.resultType = .resultTypeStatusOnly
         let result = try context.execute(request) as! NSBatchDeleteResult
         guard result.result as? Bool == true else { throw PersistenceError.batchDeleteFailed }
+    }
+}
+
+/// The owed rides whose track can be read (#206). While tracks are on their stand-in, that is
+/// only the rides recorded since launch: every other ride's points are in the store that didn't
+/// open. A backfill reading none there would store finish stats and write an Apple Health
+/// workout from an empty track, for good. Those rides stay owed until the store opens again or
+/// is reset.
+private func ridesWithTrackOnHand<Owed: Sendable>(
+    _ owed: [Owed],
+    rideId: (Owed) -> UUID,
+    stores: PersistentStores
+) async throws -> [Owed] {
+    guard stores.status.tracks != nil else { return owed }
+    let container = stores.trackContainer
+    var onHand: [Owed] = []
+    for ride in owed {
+        if try await hasTrackPoints(rideId: rideId(ride), container: container) {
+            onHand.append(ride)
+        }
+    }
+    return onHand
+}
+
+private func hasTrackPoints(rideId: UUID, container: NSPersistentContainer) async throws -> Bool {
+    let context = container.newBackgroundContext()
+    return try await context.perform {
+        let request = NSFetchRequest<TrackPointMO>(entityName: "TrackPoint")
+        request.predicate = NSPredicate(format: "rideId == %@", rideId as CVarArg)
+        request.fetchLimit = 1
+        return try context.count(for: request) > 0
     }
 }
 

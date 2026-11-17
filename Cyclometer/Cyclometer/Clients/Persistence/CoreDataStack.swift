@@ -28,8 +28,6 @@ final class CoreDataStack: @unchecked Sendable {
     let failure: StoreFailure?
     /// Nil for the default location, which is where launch looks.
     private let storeURL: URL?
-    /// Nil for `Self.model`. Only a test opens another.
-    private let model: NSManagedObjectModel?
 
     #if DEBUG
     /// Test-only: an isolated, ephemeral store instead of `.shared`'s. Deliberately still
@@ -54,12 +52,10 @@ final class CoreDataStack: @unchecked Sendable {
         self.container = container
         failure = nil
         storeURL = container.persistentStoreDescriptions.first?.url
-        model = container.managedObjectModel
     }
 
     private init(location storeURL: URL?, model: NSManagedObjectModel? = nil) {
         self.storeURL = storeURL
-        self.model = model
         let primary = Self.makeContainer(url: storeURL, model: model)
         do {
             try Self.load(primary)
@@ -75,9 +71,10 @@ final class CoreDataStack: @unchecked Sendable {
     }
 
     /// A fresh stack at the same location — after a reset has moved the failed store aside, an
-    /// empty store in its place. It can fail again, and then reports so.
+    /// empty store in its place, on the model this one has (only a test opens another). It can
+    /// fail again, and then reports so.
     func reopened() -> CoreDataStack {
-        CoreDataStack(location: storeURL, model: model)
+        CoreDataStack(location: storeURL, model: container.managedObjectModel)
     }
 
     private static func makeContainer(url: URL?, model: NSManagedObjectModel?) -> NSPersistentContainer {

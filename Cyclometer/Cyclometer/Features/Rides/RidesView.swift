@@ -274,3 +274,41 @@ struct ElevationPoint: Identifiable, Equatable {
         )
     }
 }
+
+/// The history store didn't open (#206). Its own in-memory storage, so the status can't leak
+/// into the other previews.
+#Preview("Rides — history unavailable") {
+    withDependencies {
+        $0.defaultInMemoryStorage = InMemoryStorage()
+        $0.persistenceClient = .mock()
+    } operation: {
+        @Shared(.persistentStoreStatus) var storeStatus
+        $storeStatus.withLock {
+            $0 = PersistentStoreStatus(history: StoreFailure(storeURL: URL(filePath: "/dev/null"), reason: "preview"))
+        }
+        return RidesNavigationStack(
+            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+            onStartRide: {}
+        )
+    }
+}
+
+/// Only the track store didn't open (#206): the list, led by its notice.
+#Preview("Rides — tracks unavailable") {
+    withDependencies {
+        $0.defaultInMemoryStorage = InMemoryStorage()
+        $0.persistenceClient = .mock(rides: [
+            RideListSummary(id: UUID(), title: "River Loop", startedAt: .now.addingTimeInterval(-86_400),
+                            distanceMeters: 36_050, durationSeconds: 4_712)
+        ])
+    } operation: {
+        @Shared(.persistentStoreStatus) var storeStatus
+        $storeStatus.withLock {
+            $0 = PersistentStoreStatus(tracks: StoreFailure(storeURL: URL(filePath: "/dev/null"), reason: "preview"))
+        }
+        return RidesNavigationStack(
+            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+            onStartRide: {}
+        )
+    }
+}

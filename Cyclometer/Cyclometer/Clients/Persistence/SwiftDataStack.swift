@@ -26,7 +26,6 @@ final class SwiftDataStack: @unchecked Sendable {
     /// What `reopened()` opens again: the store's own configuration, so a reset puts the fresh
     /// store exactly where launch looks for it.
     private let configuration: ModelConfiguration
-    private let storeSchema: Schema
 
     #if DEBUG
     /// Test-only: an isolated, ephemeral store instead of `.shared`'s. Unlike
@@ -54,7 +53,6 @@ final class SwiftDataStack: @unchecked Sendable {
         failure = nil
         configuration = container.configurations.first
             ?? ModelConfiguration(schema: container.schema, isStoredInMemoryOnly: true)
-        storeSchema = container.schema
     }
 
     /// The one schema production loads. Exposed so migration tests open a store
@@ -64,7 +62,6 @@ final class SwiftDataStack: @unchecked Sendable {
 
     private init(configuration: ModelConfiguration, schema: Schema = SwiftDataStack.schema) {
         self.configuration = configuration
-        self.storeSchema = schema
         do {
             container = try ModelContainer(for: schema, configurations: [configuration])
             failure = nil
@@ -79,7 +76,7 @@ final class SwiftDataStack: @unchecked Sendable {
     /// aside, an empty store in its place. It can fail again, on a disk still full, and then
     /// reports so.
     func reopened() -> SwiftDataStack {
-        SwiftDataStack(configuration: configuration, schema: storeSchema)
+        SwiftDataStack(configuration: configuration, schema: container.schema)
     }
 
     /// An in-memory container can't fail for any reason a store can: there is no file, no

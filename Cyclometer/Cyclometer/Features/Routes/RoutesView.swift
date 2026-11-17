@@ -729,3 +729,17 @@ private struct RoutesMapView: View {
     })
 }
 
+
+/// The history store, which routes live in, didn't open (#206). Its own in-memory storage, so
+/// the status can't leak into the other previews.
+#Preview("Routes — history unavailable") {
+    withDependencies {
+        $0.defaultInMemoryStorage = InMemoryStorage()
+    } operation: {
+        @Shared(.persistentStoreStatus) var storeStatus
+        $storeStatus.withLock {
+            $0 = PersistentStoreStatus(history: StoreFailure(storeURL: URL(filePath: "/dev/null"), reason: "preview"))
+        }
+        return RoutesNavigationStack(store: Store(initialState: RoutesFeature.State()) { RoutesFeature() })
+    }
+}

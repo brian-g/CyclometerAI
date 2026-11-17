@@ -43,9 +43,15 @@ extension AlertState where Action == AppFeature.Action.StoreReset {
         }
     }
 
-    static let resetFailed = AlertState {
-        TextState("Couldn't Reset")
-    } message: {
-        TextState("Nothing was changed. Try again.")
+    /// `nothingChanged` is false when the reset failed part-way, one store reset and the other
+    /// not, and "nothing was changed" would then be untrue.
+    static func resetFailed(nothingChanged: Bool) -> Self {
+        AlertState {
+            TextState("Couldn't Reset")
+        } message: {
+            TextState(nothingChanged
+                ? "Nothing was changed. Try again."
+                : "Only part of the reset finished. Try again to finish it.")
+        }
     }
 }
