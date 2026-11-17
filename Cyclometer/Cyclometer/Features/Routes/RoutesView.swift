@@ -47,7 +47,12 @@ struct RoutesView: View {
 
     var body: some View {
         Group {
-            if store.showsMap {
+            if store.storeStatus.history != nil {
+                // Ahead of the map, which would show an empty library as if it were real.
+                HistoryUnavailableView(isResetDisabled: isStartRideHidden) {
+                    store.send(.resetStoreButtonTapped)
+                }
+            } else if store.showsMap {
                 mapView
             } else if store.hasLoaded && store.routes.isEmpty {
                 emptyLibrary
@@ -103,12 +108,15 @@ struct RoutesView: View {
         // ride's accessory both belong to this view's bottom safe area, so the control stays
         // above whichever is showing (#331).
         .safeAreaInset(edge: .bottom, alignment: .trailing) {
-            MapSheetButton(title: store.showsMap ? "Show as List" : "Show on Map",
-                           systemImage: store.showsMap ? "list.bullet" : "map") {
-                store.send(.mapToggled)
+            // Nothing to map while history is unavailable (#206).
+            if store.storeStatus.history == nil {
+                MapSheetButton(title: store.showsMap ? "Show as List" : "Show on Map",
+                               systemImage: store.showsMap ? "list.bullet" : "map") {
+                    store.send(.mapToggled)
+                }
+                .padding(.trailing, Spacing.lg)
+                .padding(.bottom, Spacing.sm)
             }
-            .padding(.trailing, Spacing.lg)
-            .padding(.bottom, Spacing.sm)
         }
         .fileImporter(
             isPresented: $store.isImporterPresented.sending(\.importerPresentationChanged),

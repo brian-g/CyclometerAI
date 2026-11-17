@@ -65,6 +65,10 @@ struct RidesFeature {
         /// row (#426) — the same shape as `RoutesFeature.path`, for the same reason.
         var path = StackState<RideRoutePath.State>()
 
+        /// Which store failed to open at launch (#206). The list is replaced when history did,
+        /// and led by a notice when only tracks did.
+        @SharedReader(.persistentStoreStatus) var storeStatus
+
         var unitSystem: UnitSystem { preferences.preferredUnit }
     }
 
@@ -97,6 +101,7 @@ struct RidesFeature {
         /// The delete is over, whether it succeeded or not. Sent before `deleteFailed`.
         case deleteFinished(UUID)
         case deleteFailed
+        case resetStoreButtonTapped
         case path(StackActionOf<RideRoutePath>)
         case delegate(Delegate)
 
@@ -105,6 +110,9 @@ struct RidesFeature {
             /// "Use Route" from an S20 opened on this tab's stack (#426), on its way to
             /// `AppFeature` — `RoutesFeature`'s delegate of the same name.
             case useRoute(RouteReference)
+            /// The rider asked to reset a store that failed to open (#206). `AppFeature`
+            /// confirms and runs it, since it knows whether a ride is writing to it.
+            case resetHistoryRequested
         }
     }
 
@@ -251,6 +259,9 @@ struct RidesFeature {
             // store, which is the authority on what survived the failed write.
             case .deleteFailed:
                 return .send(.reloadRides)
+
+            case .resetStoreButtonTapped:
+                return .send(.delegate(.resetHistoryRequested))
 
             case .path(.element(id: _, action: .route(.delegate(.useRoute(let route))))):
                 return .send(.delegate(.useRoute(route)))

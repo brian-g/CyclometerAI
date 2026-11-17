@@ -105,12 +105,19 @@ struct PersistenceClient: Sendable {
     /// One route's map thumbnail, or nil when it has none yet. Read per row, like
     /// `fetchRideMapThumbnail`, so `fetchRoutes` never pulls every route's images (#273).
     var fetchRouteMapThumbnail: @Sendable (UUID) async throws -> RideMapThumbnailData?
+    /// Which store, if either, failed to open at launch and is running on a stand-in (#206).
+    var storeStatus: @Sendable () -> PersistentStoreStatus
+    /// The rider's reset (#206): moves each failed store aside and opens a fresh one where it
+    /// was. A no-op when both opened.
+    var resetUnavailableStores: @Sendable () async throws -> PersistentStoreReset
 }
 
 enum PersistenceError: Error, Equatable {
     case batchInsertFailed
     case batchDeleteFailed
     case rideNotFound
+    /// History is on its in-memory stand-in (#206), so it can't say which exports are a ride's.
+    case storeUnavailable
 }
 
 // MARK: - DependencyKey
@@ -119,52 +126,76 @@ extension PersistenceClient: DependencyKey {
     /// Factory with injectable storage, matching BLEHRClient.live(bleClient:), so tests
     /// can drive real NSBatchInsertRequest/NSFetchRequest and SwiftData behavior against
     /// in-memory containers instead of the shared singletons.
-    static func live(coreDataContainer: NSPersistentContainer, modelContainer: ModelContainer) -> PersistenceClient {
-        let rideActor = RidePersistenceActor(modelContainer: modelContainer)
-        let routeActor = RoutePersistenceActor(modelContainer: modelContainer)
-        return PersistenceClient(
-            flushTrackPoints: { try await batchInsertTrackPoints($0, container: coreDataContainer) },
-            fetchTrackPoints: { try await fetchTrackPointsLive(rideId: $0, container: coreDataContainer) },
-            fetchRide: { try await rideActor.fetchRideExportMetadata(id: $0) },
-            fetchRideStats: { try await rideActor.fetchRideStats(id: $0) },
-            createRide: { try await rideActor.createRide(id: $0, startedAt: $1, route: $2) },
-            updateRideSummary: { try await rideActor.updateRideSummary($0) },
-            finalizeRide: { try await rideActor.finalizeRide(id: $0, endedAt: $1, summary: $2, gpxFileURL: $3) },
-            renameRide: { try await rideActor.renameRide(id: $0, title: $1) },
-            updateRideNotes: { try await rideActor.updateRideNotes(id: $0, notes: $1) },
-            replaceRideGPX: { try await rideActor.replaceGPXFile(id: $0, contents: $1) },
-            saveRideMapThumbnail: { try await rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
-            fetchRideIdsMissingMapThumbnail: { try await rideActor.rideIdsMissingMapThumbnail() },
-            fetchRideMapThumbnail: { try await rideActor.fetchMapThumbnail(id: $0) },
-            fetchRidesOwedHealthWorkout: { try await rideActor.ridesOwedHealthWorkout() },
-            settleRideHealthWorkout: { try await rideActor.settleHealthWorkout(id: $0) },
-            fetchRidesOwedFinishStats: { try await rideActor.ridesOwedFinishStats() },
-            saveRideFinishStats: { try await rideActor.saveFinishStats(id: $0, stats: $1) },
-            appendVehiclePassEvents: { try await rideActor.appendVehiclePassEvents($0) },
-            fetchVehiclePassEvents: { try await rideActor.fetchVehiclePassEvents(rideId: $0) },
-            deleteRide: { try await deleteRideLive(id: $0, rideActor: rideActor, container: coreDataContainer) },
-            fetchRideGPXFileNames: { try await rideActor.gpxFileNames() },
-            fetchResumableRide: { try await rideActor.fetchResumableRide() },
-            fetchRides: { try await rideActor.fetchRides() },
-            importRoute: { try await routeActor.importRoute($0) },
-            fetchRoutes: { try await routeActor.fetchRoutes() },
-            fetchRoute: { try await routeActor.fetchRoute(id: $0) },
-            fetchRouteSummary: { try await routeActor.fetchRouteSummary(id: $0) },
-            deleteRoute: { try await routeActor.deleteRoute(id: $0) },
-            fetchRouteRides: { try await rideActor.fetchRides(routeId: $0) },
-            saveRouteSurface: { try await routeActor.saveRouteSurface(id: $0, surface: $1) },
-            saveRouteNarrative: { try await routeActor.saveRouteNarrative(id: $0, narrative: $1) },
-            backfillRouteTerrain: { try await routeActor.backfillRouteTerrain() },
-            saveRouteMapThumbnail: { try await routeActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
-            fetchRouteIdsMissingMapThumbnail: { try await routeActor.routeIdsMissingMapThumbnail() },
-            fetchRouteMapThumbnail: { try await routeActor.fetchMapThumbnail(id: $0) }
+    ///
+    /// Every call reads the current stores from `stores` once, rather than capturing them
+    /// here, so a reset can replace them in place (#206).
+    static func live(stores: PersistentStores) -> PersistenceClient {
+        PersistenceClient(
+            flushTrackPoints: { try await batchInsertTrackPoints($0, container: stores.trackContainer) },
+            fetchTrackPoints: { try await fetchTrackPointsLive(rideId: $0, container: stores.trackContainer) },
+            fetchRide: { try await stores.rideActor.fetchRideExportMetadata(id: $0) },
+            fetchRideStats: { try await stores.rideActor.fetchRideStats(id: $0) },
+            createRide: { try await stores.rideActor.createRide(id: $0, startedAt: $1, route: $2) },
+            updateRideSummary: { try await stores.rideActor.updateRideSummary($0) },
+            finalizeRide: { id, endedAt, summary, gpxFileURL in
+                try stores.retainExportIfHistoryUnavailable(gpxFileURL)
+                try await stores.rideActor.finalizeRide(id: id, endedAt: endedAt, summary: summary, gpxFileURL: gpxFileURL)
+            },
+            renameRide: { try await stores.rideActor.renameRide(id: $0, title: $1) },
+            updateRideNotes: { try await stores.rideActor.updateRideNotes(id: $0, notes: $1) },
+            replaceRideGPX: { try await stores.rideActor.replaceGPXFile(id: $0, contents: $1) },
+            saveRideMapThumbnail: { try await stores.rideActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
+            fetchRideIdsMissingMapThumbnail: { try await stores.rideActor.rideIdsMissingMapThumbnail() },
+            fetchRideMapThumbnail: { try await stores.rideActor.fetchMapThumbnail(id: $0) },
+            fetchRidesOwedHealthWorkout: { try await stores.rideActor.ridesOwedHealthWorkout() },
+            settleRideHealthWorkout: { try await stores.rideActor.settleHealthWorkout(id: $0) },
+            fetchRidesOwedFinishStats: { try await stores.rideActor.ridesOwedFinishStats() },
+            saveRideFinishStats: { try await stores.rideActor.saveFinishStats(id: $0, stats: $1) },
+            appendVehiclePassEvents: { try await stores.rideActor.appendVehiclePassEvents($0) },
+            fetchVehiclePassEvents: { try await stores.rideActor.fetchVehiclePassEvents(rideId: $0) },
+            deleteRide: { try await deleteRideLive(id: $0, rideActor: stores.rideActor, container: stores.trackContainer) },
+            fetchRideGPXFileNames: { try await stores.gpxFileNamesToKeep() },
+            fetchResumableRide: { try await stores.rideActor.fetchResumableRide() },
+            fetchRides: { try await stores.rideActor.fetchRides() },
+            importRoute: { try await stores.routeActor.importRoute($0) },
+            fetchRoutes: { try await stores.routeActor.fetchRoutes() },
+            fetchRoute: { try await stores.routeActor.fetchRoute(id: $0) },
+            fetchRouteSummary: { try await stores.routeActor.fetchRouteSummary(id: $0) },
+            deleteRoute: { try await stores.routeActor.deleteRoute(id: $0) },
+            fetchRouteRides: { try await stores.rideActor.fetchRides(routeId: $0) },
+            saveRouteSurface: { try await stores.routeActor.saveRouteSurface(id: $0, surface: $1) },
+            saveRouteNarrative: { try await stores.routeActor.saveRouteNarrative(id: $0, narrative: $1) },
+            backfillRouteTerrain: { try await stores.routeActor.backfillRouteTerrain() },
+            saveRouteMapThumbnail: { try await stores.routeActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
+            fetchRouteIdsMissingMapThumbnail: { try await stores.routeActor.routeIdsMissingMapThumbnail() },
+            fetchRouteMapThumbnail: { try await stores.routeActor.fetchMapThumbnail(id: $0) },
+            storeStatus: { stores.status },
+            resetUnavailableStores: {
+                @Dependency(\.date) var date
+                return try stores.resetUnavailableStores(now: date.now)
+            }
         )
     }
 
-    static let liveValue = PersistenceClient.live(
-        coreDataContainer: CoreDataStack.shared.container,
-        modelContainer: SwiftDataStack.shared.container
-    )
+    /// Already-open containers, as the tests build them. No store failed, so there is nothing
+    /// to reset.
+    static func live(coreDataContainer: NSPersistentContainer, modelContainer: ModelContainer) -> PersistenceClient {
+        @Dependency(\.gpxDocumentsDirectory) var documentsDirectory
+        return live(stores: PersistentStores(
+            history: SwiftDataStack(container: modelContainer),
+            tracks: CoreDataStack(container: coreDataContainer),
+            supportDirectory: FileManager.default.temporaryDirectory
+                .appending(component: "PersistentStores-\(UUID().uuidString)", directoryHint: .isDirectory),
+            documentsDirectory: documentsDirectory
+        ))
+    }
+
+    static let liveValue = PersistenceClient.live(stores: PersistentStores(
+        history: .shared,
+        tracks: .shared,
+        supportDirectory: .applicationSupportDirectory,
+        documentsDirectory: .documentsDirectory
+    ))
 
     static let testValue = PersistenceClient(
         flushTrackPoints: { _ in },
@@ -201,7 +232,9 @@ extension PersistenceClient: DependencyKey {
         backfillRouteTerrain: { 0 },
         saveRouteMapThumbnail: { _, _, _ in },
         fetchRouteIdsMissingMapThumbnail: { [] },
-        fetchRouteMapThumbnail: { _ in nil }
+        fetchRouteMapThumbnail: { _ in nil },
+        storeStatus: { .available },
+        resetUnavailableStores: { PersistentStoreReset(preservedStores: [], status: .available) }
     )
 }
 

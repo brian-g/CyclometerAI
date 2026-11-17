@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-11-17 — History unavailable (#206): when a store fails to open at launch, the app runs on a stand-in instead of crashing. S14 and S19 then say history is unavailable and offer Reset; the track store alone failing leads S14 with a notice. §S14 History Unavailable.  
 **Updated:** 2026-11-14 — Rain along the route (#152): with a route loaded, the dashboard's top banner says when rain is ahead ("Rain 70% · 18.4 km ahead", or "· here"). It is silent, lasts four seconds and shows on every check (about 10 minutes apart) while rain is ahead. It ranks below source switch and calibration and above off-route. §S05 and §W10.  
 **Updated:** 2026-11-13 — Wind map (#561): §W10's sheet opens on a map of the wind (an even field of arrows from W10's reading on a free ride; the forecast along the route ahead while following one), and §S20's map draws the forecast wind along the route. One sample per 10 km, 2 to 8, each the forecast for the hour the rider gets there. §S15's map-sheet wind layer is left for a follow-up.  
 **Updated:** 2026-11-13 — §S05.1 Weather follows the route (#559): with a route chosen, the weather is at the route's start, not where the rider is, and needs no location access. Choosing a different route on S05.2 fetches it again; None goes back to the rider's position.  
@@ -1420,6 +1421,15 @@ ContentUnavailableView {
 .frame(maxWidth: .infinity, minHeight: 220)
 .listRowBackground(Color.clear)
 ```
+
+### History Unavailable (#206)
+
+A store that fails to open at launch (a migration it refuses, a corrupt file, a full disk) no longer crashes the app. It runs on an in-memory stand-in, so a ride still records, and the failed file stays where it is, so a later launch may open it again.
+
+- **History store failed** (rides and routes): S14 and S19 show a `ContentUnavailableView` in place of the list, "History Unavailable", which says history is still on the iPhone, GPX files in Files are safe, and rides still record. Its action is **Reset Ride History…** (`brDestructive`, bordered). S19 hides its Show on Map button while this shows.
+- **Track store only failed**: S14's list as normal, led by a notice row, "Ride Tracks Unavailable" (glyph in `brRatingOkay`): past rides show no map or charts, and the rides and GPX files are safe. Its action is **Reset Ride Tracks…**.
+- **Reset** asks first with an alert. It then moves the failed store aside (in the app's *Preserved Stores* folder, under a timestamped name), opens a fresh one without a relaunch, and says what the old one was kept as. It resets only the store that failed. It is disabled during a ride ("Finish your ride to reset.").
+- **GPX files are never deleted by any of this.** The launch sweep (#346) is skipped while history is unavailable, and every export present at a reset, or written while history was unavailable, is kept.
 
 ---
 

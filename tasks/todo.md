@@ -2420,3 +2420,28 @@ Plan: resolve at the point of use — keep `gpxFileURL` (no migration), exports 
 - [x] Also (Brian's request): S15's Edit button is a `pencil` symbol, "Edit" as its VoiceOver label
 
 **Review:** One resolver, `RidePersistenceActor.exportURL(for:)`, joins the stored file name to the current `Documents/Rides/` (`GPXExporter.ridesDirectory(in:)`), read from `gpxDocumentsDirectory`. S15's stats, delete and rename go through it; the sweep already compared names. No migration: rows keep the URL they were written with, and the ride-end marker needs nothing, since every reader resolves by name. Moving exports to the `Documents` root was considered and dropped: it lives in the same container, so it would not have fixed anything. Verified on device by Brian. Full suite: 2843/2843.
+
+---
+
+## #206 — Recover from a persistent-store load failure instead of fatalError (M11)
+
+**Decisions (Brian, 2026-11-17):** a store that fails is moved aside only when the rider resets, not at the moment it fails; the notice goes in S14/S19's list state; Reset swaps the store in place, with no relaunch.
+
+**Spec reconciliation.** UX.md has no screen for this; the issue says it needs a design decision, and the options above settle it. No OQ involved. Issue vs code: both `fatalError`s are as the issue describes (`SwiftDataStack.swift:42`, `CoreDataStack.swift:34` → now `load`). Nothing reads `.modelContainer(...)` on the WindowGroup (no `@Query`, no `modelContext` in views), so it gets removed rather than left pinning the fallback container.
+
+**Hazard the issue missed.** The #346 launch sweep deletes every export no `Ride` row names. A fallback store or a freshly reset store names none, so it would delete **every GPX in Files**. And once the store opens again, an export written while it was unavailable would also be deleted. Both are handled below.
+
+### Plan
+- [x] `PersistentStoreFiles` (Clients/Persistence): move a SQLite store and its `-wal`/`-shm` files to `Application Support/Preserved Stores/<name>-failed-<yyyyMMdd-HHmmss>.<ext>`; return the new URL
+- [x] `SwiftDataStack` / `CoreDataStack`: `open(storeURL:)` returns the container plus an optional `StoreFailure` (store URL, error). On failure: log, fall back to in-memory (SwiftData `isStoredInMemoryOnly`, CoreData SQLite at `/dev/null`), leave the files untouched. No `fatalError`. Test-only init takes a URL and a schema/model
+- [x] `PersistenceClient.live`: actors and containers live in one `LockIsolated` box. New endpoints `storeStatus()` → `PersistentStoreStatus` (rides/routes unavailable, track detail unavailable, preserved locations) and `resetUnavailableStores()`, which moves each failed store aside, opens a fresh one, and rebuilds the box. Only the failed stack is reset; the stacks are handled separately, per the issue
+- [x] Sweep guards: `fetchRideGPXFileNames` throws while SwiftData is on the fallback store (the sweep already skips when it throws). It also returns a **retained-exports list**, a JSON file outside both stores (the `RideEndIntentClient` precedent), which gets every export present at reset and every export finalized while SwiftData is on the fallback store
+- [x] S14 `RidesFeature`/`RidesView`: read `storeStatus` on load. When history is unavailable, show a `ContentUnavailableView` in place of the list (what happened, that history was kept, where it goes on reset) with "Reset Ride History…" behind a confirmation dialog. When only the track store failed: the list as normal, plus a notice row that past rides' maps/tracks are unavailable, with the same reset
+- [x] S19 `RoutesFeature`/`RoutesView`: the same state when SwiftData is unavailable (routes live there)
+- [x] Reset is sent up as a delegate. `AppFeature` runs it only with no active or starting ride, then reloads Rides and Routes. The button is disabled during a ride
+- [x] Copy and VoiceOver; previews for each state; snapshot tests for the new S14/S19 states
+- [x] UX.md: add the degraded-history state to §S14/§S19 and Updated line
+- [x] Tests: each stack with (a) a corrupt store file and (b) a schema that can't migrate (a new mandatory attribute with no default) → fallback + failure reported + original file still in place; reset → files moved under a timestamped name, fresh store writable; recording a ride (create → flush → finalize) works on the fallback; sweep skips while unavailable and keeps retained exports after reset; reducer tests for the S14/S19 states and the reset guard. `RideSchemaMigrationTests` / `TimeSeriesMigrationTests` stay unchanged
+- [ ] Brian runs it first (simulate by corrupting the store on the sim), then full suite → commit → PR
+
+**Progress (2026-11-17):** Built and in place: stand-ins in both stacks, `PersistentStores` (box, reset, retained exports), the client endpoints, `AppFeature`'s reset flow, the S14/S19 states, UX.md §S14. Targeted suites pass (185, on a fresh DerivedData with caching off). The mutation check confirms both GPX guards are caught: dropping either the stand-in throw or the retained list fails the two sweep tests. The full suite has not been run. That waits for Brian's run.

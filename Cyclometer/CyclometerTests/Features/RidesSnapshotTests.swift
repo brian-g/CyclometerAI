@@ -83,13 +83,19 @@ final class RidesSnapshotTests: XCTestCase {
     // MARK: Harness
 
     /// Imperial, pinned through the S12 preference the row reads its units from.
-    private func screen(rides: [RideListSummary]) -> some View {
+    private func screen(
+        rides: [RideListSummary],
+        storeStatus: PersistentStoreStatus = .available,
+        isRideInProgress: Bool = true
+    ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
             $preferences.withLock { $0.preferredUnit = .imperial }
+            @Shared(.persistentStoreStatus) var status
+            $status.withLock { $0 = storeStatus }
             // Seeded rather than left to `.task`: a snapshot never awaits an effect, and the
             // state worth pinning is the one after the first read.
             var state = RidesFeature.State()
@@ -105,8 +111,9 @@ final class RidesSnapshotTests: XCTestCase {
             }
         }
         // The app's own stack, which the rows' `NavigationLink(state:)` needs (#251). Start Ride
-        // hidden, as these references were recorded without it.
-        return RidesNavigationStack(store: store, isStartRideHidden: true, now: Self.now)
+        // hidden, as these references were recorded without it. The same flag says a ride is
+        // recording, which disables #206's reset, so its references turn it off.
+        return RidesNavigationStack(store: store, isStartRideHidden: isRideInProgress, now: Self.now)
         // Explicit rather than ambient: a reference recorded against whatever the host
         // bundle resolved would silently encode that instead of the token.
         .tint(Color.cyPrimary)
@@ -146,5 +153,22 @@ final class RidesSnapshotTests: XCTestCase {
     /// No rides yet: §S14's `ContentUnavailableView` and its Start New Ride action.
     func testEmptyRideHistory() {
         assertBothSchemes(screen(rides: []), named: "empty")
+    }
+
+    /// The history store failed to open (#206): the list is replaced, whatever the stand-in
+    /// holds, by what is safe and the reset.
+    func testRideHistoryUnavailable() {
+        let failure = StoreFailure(storeURL: URL(filePath: "/tmp/default.store"), reason: "corrupt")
+        assertBothSchemes(screen(rides: [], storeStatus: PersistentStoreStatus(history: failure),
+                                 isRideInProgress: false),
+                          named: "history-unavailable")
+    }
+
+    /// Only the track store failed (#206): the list as it is, led by the notice and its reset.
+    func testRideTracksUnavailable() {
+        let failure = StoreFailure(storeURL: URL(filePath: "/tmp/CyclometerTimeSeries.sqlite"), reason: "corrupt")
+        assertBothSchemes(screen(rides: Self.rides, storeStatus: PersistentStoreStatus(tracks: failure),
+                                 isRideInProgress: false),
+                          named: "tracks-unavailable")
     }
 }

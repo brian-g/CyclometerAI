@@ -59,6 +59,10 @@ struct RoutesFeature {
         /// was just cleared — the chip would look like it had done nothing.
         var dismissedMapBounds: RouteBounds?
 
+        /// Which store failed to open at launch (#206). Routes live in the history store, so
+        /// S19 is replaced, as S14 is, when that one did.
+        @SharedReader(.persistentStoreStatus) var storeStatus
+
         /// Which routes survive `mapFilterBounds`, or nil when there is no map filter.
         ///
         /// **Stored rather than computed on read.** The test walks every coordinate of every
@@ -157,6 +161,7 @@ struct RoutesFeature {
 
         case deleteButtonTapped(UUID)
         case deleteFailed
+        case resetStoreButtonTapped
 
         /// S19's leading swipe: "Use Route" without pushing S20 first (#230).
         case useRouteSwiped(RouteReference)
@@ -175,6 +180,9 @@ struct RoutesFeature {
             /// A ride's title or notes changed in an S15 on this tab's stack (#538), for
             /// `AppFeature` to reload S14 on the Rides tab.
             case rideEdited
+            /// The rider asked to reset the history store, which failed to open (#206). S14's
+            /// delegate of the same name.
+            case resetHistoryRequested
         }
     }
 
@@ -487,6 +495,9 @@ struct RoutesFeature {
             // The same delegate S20 sends, so the sheet opens exactly as it does from there.
             case .useRouteSwiped(let route):
                 return .send(.delegate(.useRoute(route)))
+
+            case .resetStoreButtonTapped:
+                return .send(.delegate(.resetHistoryRequested))
 
             case .path(.element(id: _, action: .route(.delegate(.useRoute(let route))))):
                 return .send(.delegate(.useRoute(route)))

@@ -9,10 +9,16 @@ struct RidesView: View {
     /// What the row dates are relative to. Snapshots pin it; the app leaves it nil and each
     /// row follows the clock (#291).
     var now: Date?
+    /// A ride is recording, so the stores can't be reset under it (#206).
+    var isResetDisabled: Bool = false
 
     var body: some View {
         Group {
-            if store.hasLoaded && store.rides.isEmpty {
+            if store.storeStatus.history != nil {
+                HistoryUnavailableView(isResetDisabled: isResetDisabled) {
+                    store.send(.resetStoreButtonTapped)
+                }
+            } else if store.hasLoaded && store.rides.isEmpty {
                 emptyRides
             } else {
                 rideList
@@ -24,6 +30,11 @@ struct RidesView: View {
 
     private var rideList: some View {
         List {
+            if store.storeStatus.tracks != nil {
+                TracksUnavailableNotice(isResetDisabled: isResetDisabled) {
+                    store.send(.resetStoreButtonTapped)
+                }
+            }
             ForEach(store.rides) { ride in
                 NavigationLink(state: RideRoutePath.State.ride(RideDetailFeature.State(summary: ride))) {
                     RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
@@ -90,7 +101,7 @@ struct RidesNavigationStack: View {
 
     var body: some View {
         NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
-            RidesView(store: store, onStartRide: onStartRide, now: now)
+            RidesView(store: store, onStartRide: onStartRide, now: now, isResetDisabled: isStartRideHidden)
                 .startRideToolbarItem(isHidden: isStartRideHidden, action: onStartRide)
         } destination: { pathStore in
             RideRoutePathView(store: pathStore, isUseRouteHidden: isStartRideHidden)
