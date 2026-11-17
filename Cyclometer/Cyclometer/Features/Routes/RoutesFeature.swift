@@ -381,6 +381,8 @@ struct RoutesFeature {
                 return .none
 
             case .importButtonTapped:
+                // The button is hidden while history is unavailable (#206); this is the guard.
+                guard state.storeStatus.history == nil else { return .none }
                 state.isImporterPresented = true
                 return .none
 
@@ -396,6 +398,14 @@ struct RoutesFeature {
 
             case .fileSelected(let url):
                 state.isImporterPresented = false
+                // "Open in Cyclometer" from Files arrives here without the hidden Import
+                // button. A route saved now would be lost at the next quit (#206), so it is
+                // refused out loud. The rider's own file is untouched; only the Inbox copy goes.
+                guard state.storeStatus.history == nil else {
+                    state.alert = Self.alert("Can't Import Right Now",
+                                             "Your route library is unavailable. Reset it from Routes, then open the file again.")
+                    return .run { _ in DocumentFolders.discardInboxCopy(at: url) }
+                }
                 // A 16 MB file is seconds of parsing. Without this a rider who taps Import
                 // again mid-parse gets the same route saved twice.
                 //

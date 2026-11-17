@@ -352,6 +352,45 @@ struct StoreLoadRecoveryTests {
         }
     }
 
+    /// The damaged list is set aside rather than dropped, so a reset still runs, and the sweep
+    /// stays off for good: the set-aside list may have been keeping exports alive.
+    @Test("a damaged retained list is set aside, the reset still runs, and the sweep stays off")
+    func damagedRetainedListSetAside() async throws {
+        try await Self.withDirectory { directory in
+            let historyURL = directory.appending(component: "default.store")
+            try Self.writeCorruptStore(at: historyURL)
+            let documents = try Self.documentsWithExport(in: directory)
+            let preservedDirectory = directory.appending(component: "Support/Preserved Stores", directoryHint: .isDirectory)
+            let retainedURL = preservedDirectory.appending(component: "retained-ride-exports.json")
+            try FileManager.default.createDirectory(at: preservedDirectory, withIntermediateDirectories: true)
+            try Data("not json".utf8).write(to: retainedURL)
+            let client = PersistenceClient.live(stores: Self.stores(
+                history: SwiftDataStack(storeURL: historyURL), in: directory, documents: documents
+            ))
+
+            let reset = try await withDependencies {
+                $0.date = .constant(Date(timeIntervalSince1970: 1_794_910_500))
+            } operation: {
+                try await client.resetUnavailableStores()
+            }
+            #expect(reset.status == .available)
+
+            let files = try FileManager.default.contentsOfDirectory(atPath: preservedDirectory.path(percentEncoded: false))
+            let damaged = try #require(files.first { $0.hasPrefix("retained-ride-exports-damaged-") })
+            #expect(try Data(contentsOf: preservedDirectory.appending(component: damaged)) == Data("not json".utf8))
+            // The fresh list holds the export the reset found.
+            let fresh = try JSONDecoder().decode(Set<String>.self, from: Data(contentsOf: retainedURL))
+            #expect(fresh == [Self.exportName])
+
+            // The sweep never runs again while a damaged list sits set aside.
+            await #expect(throws: RetainedRideExports.Damaged.self) {
+                try await client.fetchRideGPXFileNames()
+            }
+            await Self.sweep(client, documents: documents)
+            #expect(Self.exportExists(in: documents))
+        }
+    }
+
     // MARK: Reset
 
     @Test("a reset moves a failed history store aside under a timestamped name and opens a fresh one")

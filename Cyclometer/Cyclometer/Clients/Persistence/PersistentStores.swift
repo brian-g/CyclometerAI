@@ -168,11 +168,40 @@ final class PersistentStores: @unchecked Sendable {
 /// to survive exactly the stores it protects against.
 ///
 /// Entries are never removed. A name whose file the rider has deleted keeps nothing alive.
+///
+/// A list that can't be read is set aside, not repaired or dropped, and a fresh one carries on
+/// (#206 review). Dropping it would let the sweep delete the exports it kept. Refusing every
+/// write to it, as this first did, would make every reset and every ride end on the stand-in
+/// fail for good, with deleting the app as the only way out. While any list sits set aside,
+/// `load` throws, so the sweep never runs again. That costs only orphans it would have cleared.
 struct RetainedRideExports: Sendable {
+    struct Damaged: Error, Equatable {}
+
     let fileURL: URL
 
-    /// Empty when the file doesn't exist yet. Throws when it exists and can't be read.
+    /// Every name to keep. Empty when there is no list yet. Throws when the list can't be read,
+    /// or when an earlier one was set aside.
     func load() throws -> Set<String> {
+        guard setAside().isEmpty else { throw Damaged() }
+        return try readList()
+    }
+
+    /// Adds `names`, first setting aside a list that can't be read.
+    func insert(_ names: some Sequence<String>) throws {
+        let existing: Set<String>
+        do {
+            existing = try readList()
+        } catch is DecodingError {
+            try setAsideDamagedList()
+            existing = []
+        }
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try JSONEncoder().encode(existing.union(names).sorted()).write(to: fileURL, options: .atomic)
+    }
+
+    private func readList() throws -> Set<String> {
         let data: Data
         do {
             data = try Data(contentsOf: fileURL)
@@ -182,12 +211,32 @@ struct RetainedRideExports: Sendable {
         return try JSONDecoder().decode(Set<String>.self, from: data)
     }
 
-    func insert(_ names: some Sequence<String>) throws {
-        let updated = try load().union(names)
-        try FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
-        )
-        try JSONEncoder().encode(updated.sorted()).write(to: fileURL, options: .atomic)
+    /// `<stem>-damaged-<UUID>.<ext>` beside the list. A UUID rather than a timestamp, so a second
+    /// damaged list can never land on the first's name.
+    private var damagedPrefix: String {
+        fileURL.deletingPathExtension().lastPathComponent + "-damaged-"
+    }
+
+    private func setAsideDamagedList() throws {
+        let ext = fileURL.pathExtension
+        let destination = fileURL.deletingLastPathComponent()
+            .appending(component: damagedPrefix + UUID().uuidString + (ext.isEmpty ? "" : ".\(ext)"))
+        try FileManager.default.moveItem(at: fileURL, to: destination)
+        logger.error("retained-exports list unreadable, set aside as \(destination.lastPathComponent, privacy: .public); the export sweep stays off")
+    }
+
+    /// Lists set aside so far. A directory that can't be listed counts as one, so the sweep
+    /// stays off rather than running without knowing.
+    private func setAside() -> [String] {
+        let directory = fileURL.deletingLastPathComponent()
+        do {
+            return try FileManager.default.contentsOfDirectory(atPath: directory.path(percentEncoded: false))
+                .filter { $0.hasPrefix(damagedPrefix) }
+        } catch CocoaError.fileReadNoSuchFile {
+            return []
+        } catch {
+            return [directory.lastPathComponent]
+        }
     }
 }
 

@@ -77,18 +77,22 @@ struct RoutesView: View {
         }
         .navigationTitle("Routes")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    store.send(.importButtonTapped)
-                } label: {
-                    if store.isImporting {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "square.and.arrow.down")
+            // Not while history is unavailable (#206): an import would land in the stand-in,
+            // out of sight behind this screen, and be gone when the app quits.
+            if store.storeStatus.history == nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        store.send(.importButtonTapped)
+                    } label: {
+                        if store.isImporting {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "square.and.arrow.down")
+                        }
                     }
+                    .disabled(store.isImporting)
+                    .accessibilityLabel("Import Route")
                 }
-                .disabled(store.isImporting)
-                .accessibilityLabel("Import Route")
             }
             // Gated on the domain, not merely on `routes.isEmpty`: `RouteFilterDomain.from`
             // also answers nil when no route has a finite distance, and the button must not
