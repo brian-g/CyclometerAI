@@ -2445,3 +2445,19 @@ Plan: resolve at the point of use — keep `gpxFileURL` (no migration), exports 
 - [ ] Brian runs it first (simulate by corrupting the store on the sim), then full suite → commit → PR
 
 **Progress (2026-11-17):** Built and in place: stand-ins in both stacks, `PersistentStores` (box, reset, retained exports), the client endpoints, `AppFeature`'s reset flow, the S14/S19 states, UX.md §S14. Targeted suites pass (185, on a fresh DerivedData with caching off). The mutation check confirms both GPX guards are caught: dropping either the stand-in throw or the retained list fails the two sweep tests. The full suite has not been run. That waits for Brian's run.
+
+---
+
+## #352 — Split up RideDashboardView and narrow what AppView observes (M11)
+
+**Scope.** #139 already did the page-level split: `DashboardPageView` and the per-widget dispatcher. What's left is the `AppView` accessory subview and the dashboard chrome. This is a pure refactor.
+
+**Finding.** `AppView`'s `.tabViewBottomAccessory` closure reads the ride clock, distance, speed and route progress inside `AppView.body`, so the app root re-runs every second. TCA notifies an Equatable field only on change, so nothing else in `AppView` or the dashboard body ticks at 1 Hz. The chrome split is structural, plus narrower event-driven invalidation.
+
+### Plan
+- [ ] Pin the chrome first: `RideDashboardSnapshotTests`, full screen, light + dark, riding / paused + sensor / banner / edit mode, recorded on unchanged code
+- [ ] `AppView`: private `ActiveRideAccessory(store:onOpen:)` reads the metrics, so the root observes only presence + `recordingState`
+- [ ] `Dashboard/DashboardChrome.swift`: `DashboardTopBar`, `DashboardTurnOverlay`, `DashboardPageIndicator`, `RideControls`, `DashboardEditControls` (+ `RideControlButton`, `EditModeButton`), moved verbatim, previews
+- [ ] `RideDashboardView` keeps the pages, overlay order, presentations and `banner(...)`
+- [ ] TCA.md §8 + the LiveActivity comment
+- [ ] Build → Brian runs on device + Instruments trace (main vs branch) → full suite → commit → PR
