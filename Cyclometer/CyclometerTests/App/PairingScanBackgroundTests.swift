@@ -46,6 +46,8 @@ private final class Radio: Sendable {
     }
 
     var starts: Int { calls.value.filter { if case .start = $0 { true } else { false } }.count }
+
+    func starts(of uuid: CBUUID) -> Int { calls.value.filter { $0 == .start(uuid) }.count }
 }
 
 /// #418: a pairing scan left open as the app went to the background kept all three clients
@@ -79,6 +81,14 @@ struct PairingScanBackgroundTests {
                 $0.defaultFileStorage = storage
                 // S11's sweep timer: never advanced, so only the screen's own begin/end run.
                 $0.continuousClock = TestClock()
+                // What a ride started and finished through `AppFeature` needs, as in
+                // `RideSummaryPresentationTests`.
+                $0.date = .constant(Date(timeIntervalSince1970: 1_000_000))
+                $0.uuid = .incrementing
+                $0.locationClient = .testValue
+                $0.hapticsClient = .testValue
+                $0.persistenceClient = .mock()
+                $0.healthKitClient = .testValue
             }
             // The rest of `scenePhaseChanged` (S12's dim preview, its Live Activities reread)
             // is covered elsewhere; here only the radio is under test.
@@ -148,6 +158,50 @@ struct PairingScanBackgroundTests {
         await store.send(.settings(.deviceManagement(.onDisappear)))
         await store.finish()
         #expect(radio.scanning.isEmpty)
+    }
+
+    // MARK: - After a ride
+
+    /// The issue's own sequence, end to end: a ride starts with no speed/cadence sensor
+    /// connected — so `BLECSCClient.startScanning` starts cold and sets CSC's ambient flag —
+    /// and is finished; the rider opens the Sensors list and pockets the phone. Finish has to
+    /// clear every client's ambient flag (CSC's since #417), or backgrounding finds it set,
+    /// keeps that client scanning as if a ride still wanted it, and the issue recurs for CSC.
+    @Test("After a ride that started with no CSC sensor, backgrounding with Sensors open stops all three")
+    func afterARideBackgroundingStopsEveryScan() async {
+        let radio = Radio()
+        let store = Self.makeStore(radio: radio)
+        let allKinds = Self.allKinds   // a local, for the `@Sendable` conditions below
+
+        await store.send(.startRideButtonTapped)
+        await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
+        await store.receive(\.activeRide.task)
+        // Each service started twice — the sheet's pairing scan, then the ride's own — and
+        // still on once the sheet's scan is released: the ride holds all three ambient scans.
+        await expectEventually {
+            SensorKind.allCases.allSatisfy { radio.starts(of: $0.serviceUUID) >= 2 }
+                && radio.scanning == allKinds
+        }
+
+        await store.send(.activeRide(.pauseTapped))
+        await store.send(.activeRide(.finishTapped))
+        await store.send(.activeRide(.finishAlert(.presented(.confirmFinish))))
+        #expect(store.state.activeRide == nil)
+        await expectEventually { radio.scanning.isEmpty }
+
+        await store.send(.settings(.deviceManagement(.task)))
+        await expectEventually { radio.scanning == allKinds }
+
+        await store.send(.scenePhaseChanged(.background))
+        await expectEventually { radio.scanning.isEmpty }
+
+        await store.send(.scenePhaseChanged(.active))
+        await expectEventually { radio.scanning == allKinds }
+
+        await store.send(.settings(.deviceManagement(.onDisappear)))
+        await expectEventually { radio.scanning.isEmpty }
+        // The Rides tab's post-finish reload waits on a clock this test never advances.
+        await store.skipInFlightEffects()
     }
 
     // MARK: - Nothing held, transient phases, a ride

@@ -1234,6 +1234,42 @@ struct BLECSCIntegrationTests {
         #expect(harness.scanStopped.value == [[cscServiceUUID]])
     }
 
+    /// #417's guard and #418's suspension together. A ride whose Start sheet connected only
+    /// one of two sensors holds CSC's ambient scan beside the live slot; backgrounding
+    /// mid-ride with the Sensors list open must keep that scan (it is the ride's), and
+    /// finishing the ride while backgrounded must still release the radio.
+    @Test("A ride scan beside a live slot survives backgrounding, and finish releases it")
+    func rideScanBesideASlotSurvivesSuspension() async {
+        let harness = Harness()
+        let speedSensor = UUID()
+        let cadenceSensor = UUID()
+        await harness.client.setPairedSensors([speedSensor: [.speed], cadenceSensor: [.cadence]])
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+
+        // The Start sheet, with only the speed sensor awake.
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: speedSensor, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        #expect(await speedStates.next() == .connecting)
+        harness.bringToActive(speedSensor)
+        #expect(await speedStates.next() == .connected)
+        #expect(await speedStates.next() == .active)
+
+        // Start: the ride takes its scan (the cadence role has no slot), the sheet lets go,
+        // and the rider opens the Sensors list mid-ride.
+        await harness.client.startScanning()
+        await harness.client.endPairingScan()
+        await harness.client.beginPairingScan()
+        #expect(harness.scanStopped.value.isEmpty)
+
+        await harness.client.setPairingScansSuspended(true)
+        #expect(harness.scanStopped.value.isEmpty)
+
+        // Finished from the Lock Screen while still backgrounded.
+        await harness.client.disconnect()
+        #expect(harness.scanStopped.value == [[cscServiceUUID]])
+    }
+
     /// Resume starts no new generation — see the HR twin for the flicker it prevents.
     @Test("Returning to the foreground keeps the list; the next sweep still judges it")
     func resumeKeepsTheListForTheNextSweep() async {

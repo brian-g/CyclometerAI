@@ -1078,7 +1078,7 @@ meant to belong to a ride:
 |---|---|---|
 | HR | `startScanning()`, from `ActiveRideFeature`'s `.task` | `stopScanning()`; `disconnect()` at ride finish |
 | Radar | `startScanning()`, from `ActiveRideFeature`'s `.task`, only from `.disconnected` | `stopScanning()`; `disconnect()` at ride finish |
-| CSC | `startScanning()`, from `SpeedFeature` / `CadenceFeature` at ride start, only from a cold state (no slots) | `stopScanning()`; `disconnect()`; the radio going off or unauthorized |
+| CSC | `startScanning()`, from `SpeedFeature` / `CadenceFeature` at ride start, unless already scanning or a slot exists and every paired role holds one — so also beside a slot the Start sheet connected when another paired role has none (#417) | `stopScanning()`; `disconnect()` at ride finish (#417); the radio going off, unauthorized or unsupported |
 
 Nothing else sets a flag. HR's `.disconnected` handler used to: a strap dropping set `isScanning` and rescanned,
 ride or no ride, so a strap a pairing scan had connected after a ride left behind a scan nobody owned — it
@@ -1087,14 +1087,15 @@ scan only if one is already wanted (the ambient scan, or a pairing scan that isn
 flag; mid-ride nothing changes, because the ride's `startScanning` holds the flag until finish. The CSC and
 radar reconnect ladders only `connect` and never scan.
 
+All three flags are cleared at ride finish: `ActiveRideFeature`'s finish effect calls `disconnect()` on the HR,
+radar and CSC clients (CSC since #417), and each `disconnect()` withdraws its service unless an unsuspended
+pairing scan still wants it. So a ride leaves no ambient scan behind, and a Sensors list opened afterwards holds
+the only scan — which backgrounding then takes off the radio.
+
 The exception is CSC across a Bluetooth cycle. When the radio goes off, CSC clears its flag but leaves its
 service in `BLECentral`'s requested set, and the central rescans that set on power-on. So after a Bluetooth
-off/on mid-ride, CSC scans with no flag set until something withdraws the service; with #575's finish
-`disconnect()` that is ride finish, so it is a mid-ride edge only.
-
-CSC's flag is cleared at ride finish only once PR #575 (#417) adds the finish `disconnect()`. Until then a ride that
-started with no CSC sensor connected leaves CSC's flag set, and its scan running — foreground and background —
-after the ride.
+off/on mid-ride, CSC scans with no flag set until something withdraws the service — at the latest ride
+finish's `disconnect()` — so it is a mid-ride edge only.
 
 - **Suspended in the clients, not released by each holder.** `pairingScanCount` never moves, so every
   holder's begin/end pair — the Start sheet's in `AppFeature`, S11's `.task` / `.onDisappear`, its sweep —
