@@ -39,7 +39,8 @@ final class RoutesSnapshotTests: XCTestCase {
         filter: RouteFilter = RouteFilter(),
         mapFilterBounds: RouteBounds? = nil,
         mapFilteredRouteIDs: Set<UUID>? = nil,
-        thumbnails: [UUID: RidesFeature.Thumbnail] = [:]
+        thumbnails: [UUID: RidesFeature.Thumbnail] = [:],
+        storeStatus: PersistentStoreStatus = .available
     ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
@@ -47,6 +48,8 @@ final class RoutesSnapshotTests: XCTestCase {
         } operation: {
             @Shared(.appPreferences) var preferences
             $preferences.withLock { $0.preferredUnit = .imperial }
+            @Shared(.persistentStoreStatus) var status
+            $status.withLock { $0 = storeStatus }
             // Seeded into state rather than left to `.task`: a snapshot captures one layout
             // pass and never awaits an effect, so a fetched list would photograph as empty.
             var state = RoutesFeature.State()
@@ -131,6 +134,13 @@ final class RoutesSnapshotTests: XCTestCase {
     /// whole screen (UX.md §S19).
     func testEmptyState() {
         assertBothSchemes(screen(routes: []), named: "empty")
+    }
+
+    /// The history store, which routes live in, failed to open (#206): S14's unavailable state.
+    func testRouteLibraryUnavailable() {
+        let failure = StoreFailure(storeURL: URL(filePath: "/tmp/default.store"), reason: "corrupt")
+        assertBothSchemes(screen(routes: [], storeStatus: PersistentStoreStatus(history: failure)),
+                          named: "history-unavailable")
     }
 
     // MARK: Filters (#194)

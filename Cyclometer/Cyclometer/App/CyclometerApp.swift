@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 import ComposableArchitecture
 
 @main
@@ -17,6 +16,8 @@ struct CyclometerApp: App {
                 }
             )
         }
-        .modelContainer(SwiftDataStack.shared.container)
+        // No `.modelContainer`: no view reads SwiftData directly (no `@Query`, no
+        // `modelContext`). Every read goes through `PersistenceClient`, whose stores a reset
+        // can replace (#206), and a scene-wide container would pin the one opened at launch.
     }
 }

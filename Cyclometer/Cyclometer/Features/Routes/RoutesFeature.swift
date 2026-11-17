@@ -59,6 +59,10 @@ struct RoutesFeature {
         /// was just cleared — the chip would look like it had done nothing.
         var dismissedMapBounds: RouteBounds?
 
+        /// Which store failed to open at launch (#206). Routes live in the history store, so
+        /// S19 is replaced, as S14 is, when that one did.
+        @SharedReader(.persistentStoreStatus) var storeStatus
+
         /// Which routes survive `mapFilterBounds`, or nil when there is no map filter.
         ///
         /// **Stored rather than computed on read.** The test walks every coordinate of every
@@ -157,6 +161,7 @@ struct RoutesFeature {
 
         case deleteButtonTapped(UUID)
         case deleteFailed
+        case resetStoreButtonTapped
 
         /// S19's leading swipe: "Use Route" without pushing S20 first (#230).
         case useRouteSwiped(RouteReference)
@@ -175,6 +180,9 @@ struct RoutesFeature {
             /// A ride's title or notes changed in an S15 on this tab's stack (#538), for
             /// `AppFeature` to reload S14 on the Rides tab.
             case rideEdited
+            /// The rider asked to reset the history store, which failed to open (#206). S14's
+            /// delegate of the same name.
+            case resetHistoryRequested
         }
     }
 
@@ -373,6 +381,8 @@ struct RoutesFeature {
                 return .none
 
             case .importButtonTapped:
+                // The button is hidden while history is unavailable (#206); this is the guard.
+                guard state.storeStatus.history == nil else { return .none }
                 state.isImporterPresented = true
                 return .none
 
@@ -388,6 +398,14 @@ struct RoutesFeature {
 
             case .fileSelected(let url):
                 state.isImporterPresented = false
+                // "Open in Cyclometer" from Files arrives here without the hidden Import
+                // button. A route saved now would be lost at the next quit (#206), so it is
+                // refused out loud. The rider's own file is untouched; only the Inbox copy goes.
+                guard state.storeStatus.history == nil else {
+                    state.alert = Self.alert("Can't Import Right Now",
+                                             "Your route library is unavailable. Reset it from Routes, then open the file again.")
+                    return .run { _ in DocumentFolders.discardInboxCopy(at: url) }
+                }
                 // A 16 MB file is seconds of parsing. Without this a rider who taps Import
                 // again mid-parse gets the same route saved twice.
                 //
@@ -487,6 +505,9 @@ struct RoutesFeature {
             // The same delegate S20 sends, so the sheet opens exactly as it does from there.
             case .useRouteSwiped(let route):
                 return .send(.delegate(.useRoute(route)))
+
+            case .resetStoreButtonTapped:
+                return .send(.delegate(.resetHistoryRequested))
 
             case .path(.element(id: _, action: .route(.delegate(.useRoute(let route))))):
                 return .send(.delegate(.useRoute(route)))

@@ -103,6 +103,10 @@ struct AppView: View {
                     .presentationDragIndicator(.visible)
             }
 
+            // ── Store reset (#206) ───────────────────────────────────────────────
+            // Its confirmation and its outcome, from S14's or S19's Reset button.
+            .alert($store.scope(state: \.storeReset, action: \.storeReset))
+
             // ── Active Ride Dashboard (#333) ─────────────────────────────────────
             // A system zoom presentation, as Apple Music's player does it: it expands from
             // the accessory, and a drag down anywhere collapses it back in. Hand-built

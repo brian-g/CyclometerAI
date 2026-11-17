@@ -46,6 +46,18 @@ struct AppFeature {
         var routes: RoutesFeature.State = RoutesFeature.State()
         var settings: SettingsFeature.State = SettingsFeature.State()
 
+        // ── Store recovery (#206) ────────────────────────────────────────────────
+        /// Which store failed to open at launch, as S14 and S19 show it.
+        @Shared(.persistentStoreStatus) var storeStatus
+        /// The reset's confirmation, then what it did.
+        @Presents var storeReset: AlertState<Action.StoreReset>? = nil
+
+        /// A ride recording, or one S05.1 is part-way through writing (#344). Either is writing
+        /// to the stores a reset would replace.
+        var isRideInProgress: Bool {
+            activeRide != nil || startSheet?.pendingRideId != nil
+        }
+
         // ── Screen power management (#110) ───────────────────────────────────────
         var isForeground: Bool = true
         var isDimmed: Bool = false
@@ -93,6 +105,12 @@ struct AppFeature {
         /// Sent from `.task` when a kill mid-ride left a non-`.ended` Ride behind
         /// (#175).
         case resumableRideFetched(RideSummaryUpdate)
+        case storeReset(PresentationAction<StoreReset>)
+        case storeResetFinished(Result<PersistentStoreReset, PersistenceFailure>)
+
+        enum StoreReset: Equatable {
+            case confirm
+        }
 
         // ── Screen power management (#110) ───────────────────────────────────────
         /// The whole phase, not just active or not: pairing scans come off the radio only
@@ -121,6 +139,10 @@ struct AppFeature {
         Reduce { state, action in
             switch action {
             case .task:
+                // Read once: the stores open once, and only a reset changes this afterwards.
+                let storeStatus = persistenceClient.storeStatus()
+                state.$storeStatus.withLock { $0 = storeStatus }
+
                 // Presented until the rider completes it; never reconstructed once
                 // `hasCompletedOnboarding` is true, regardless of what permissions do
                 // afterward (#105).
@@ -509,6 +531,43 @@ struct AppFeature {
             case .routes(.delegate(.rideEdited)):
                 return .send(.rides(.reloadRides))
 
+            // Either tab's Reset button (#206). Disabled during a ride, and refused here too:
+            // a reset replaces the stores the ride is writing to.
+            case .rides(.delegate(.resetHistoryRequested)), .routes(.delegate(.resetHistoryRequested)):
+                guard !state.isRideInProgress, state.storeStatus.isDegraded else { return .none }
+                state.storeReset = .confirmReset(state.storeStatus)
+                return .none
+
+            case .storeReset(.presented(.confirm)):
+                // Checked again: a ride can have started while the alert was up.
+                guard !state.isRideInProgress else { return .none }
+                return .run { [persistenceClient] send in
+                    do {
+                        await send(.storeResetFinished(.success(try await persistenceClient.resetUnavailableStores())))
+                    } catch {
+                        logger.error("store reset failed: \(error.localizedDescription, privacy: .public)")
+                        await send(.storeResetFinished(.failure(PersistenceFailure())))
+                    }
+                }
+
+            case .storeReset(.dismiss):
+                return .none
+
+            case .storeResetFinished(.success(let reset)):
+                state.$storeStatus.withLock { $0 = reset.status }
+                state.storeReset = .resetFinished(reset)
+                return .merge(.send(.rides(.reloadRides)), .send(.routes(.reloadRoutes)))
+
+            case .storeResetFinished(.failure):
+                // A reset can fail part-way: history moved aside and reopened, then the track
+                // store's move threw. What it did stands, so the screens follow the stores as
+                // they are now, not as they were before it.
+                let storeStatus = persistenceClient.storeStatus()
+                let isUnchanged = storeStatus == state.storeStatus
+                state.$storeStatus.withLock { $0 = storeStatus }
+                state.storeReset = .resetFailed(nothingChanged: isUnchanged)
+                return isUnchanged ? .none : .merge(.send(.rides(.reloadRides)), .send(.routes(.reloadRoutes)))
+
             case .settings(.delegate(.liveActivityToggled)):
                 // A ride already running follows S12's toggle now, not from the next ride (#313).
                 guard state.activeRide != nil else { return .none }
@@ -527,6 +586,7 @@ struct AppFeature {
         .ifLet(\.$rideSummary, action: \.rideSummary) {
             RideSummaryFeature()
         }
+        .ifLet(\.$storeReset, action: \.storeReset)
         .ifLet(\.onboarding, action: \.onboarding) {
             OnboardingFeature()
         }

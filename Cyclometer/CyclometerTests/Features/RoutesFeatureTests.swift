@@ -1804,3 +1804,52 @@ struct RoutesFeatureFilterTests {
         await store.finish()
     }
 }
+
+/// S19 while the history store, which routes live in, is on its stand-in (#206): nothing is
+/// imported, since it would be gone at the next quit.
+@MainActor
+@Suite("RoutesFeature — history unavailable")
+struct RoutesHistoryUnavailableTests {
+    private static let historyFailed = PersistentStoreStatus(
+        history: StoreFailure(storeURL: URL(filePath: "/tmp/default.store"), reason: "corrupt")
+    )
+
+    private func makeStore(onImportRoute: @escaping @Sendable (ImportedRoute) -> Void) -> TestStoreOf<RoutesFeature> {
+        let storage = InMemoryStorage()
+        return withDependencies {
+            $0.defaultInMemoryStorage = storage
+        } operation: {
+            @Shared(.persistentStoreStatus) var status
+            $status.withLock { $0 = Self.historyFailed }
+            return TestStore(initialState: RoutesFeature.State()) {
+                RoutesFeature()
+            } withDependencies: {
+                $0.defaultInMemoryStorage = storage
+                $0.persistenceClient = .mock(onImportRoute: onImportRoute, storeStatus: Self.historyFailed)
+            }
+        }
+    }
+
+    @Test("Import does nothing")
+    func importButtonDoesNothing() async {
+        let store = makeStore { _ in Issue.record("imported into the stand-in") }
+
+        await store.send(.importButtonTapped)
+    }
+
+    @Test("a .gpx opened from Files is refused out loud, not imported")
+    func openedFileRefused() async {
+        let store = makeStore { _ in Issue.record("imported into the stand-in") }
+        let url = FileManager.default.temporaryDirectory.appending(component: "River Loop.gpx")
+
+        await store.send(.fileSelected(url)) {
+            $0.alert = AlertState {
+                TextState("Can't Import Right Now")
+            } actions: {
+                ButtonState(role: .cancel) { TextState("OK") }
+            } message: {
+                TextState("Your route library is unavailable. Reset it from Routes, then open the file again.")
+            }
+        }
+    }
+}

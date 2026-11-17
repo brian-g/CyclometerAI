@@ -35,7 +35,9 @@ extension PersistenceClient {
         onSaveRouteSurface: @escaping @Sendable (UUID, RouteSurfaceBreakdown) -> Void = { _, _ in },
         onSaveRouteNarrative: @escaping @Sendable (UUID, String) -> Void = { _, _ in },
         onSaveRouteMapThumbnail: @escaping @Sendable (UUID, Data, Data) -> Void = { _, _, _ in },
-        backfilledRouteCount: Int = 0
+        backfilledRouteCount: Int = 0,
+        storeStatus: PersistentStoreStatus = .available,
+        storeReset: PersistentStoreReset = PersistentStoreReset(preservedStores: [], status: .available)
     ) -> PersistenceClient {
         PersistenceClient(
             flushTrackPoints: { onFlush($0) },
@@ -91,7 +93,9 @@ extension PersistenceClient {
             backfillRouteTerrain: { backfilledRouteCount },
             saveRouteMapThumbnail: { onSaveRouteMapThumbnail($0, $1, $2) },
             fetchRouteIdsMissingMapThumbnail: { routeIdsMissingMapThumbnail },
-            fetchRouteMapThumbnail: { routeMapThumbnails[$0] }
+            fetchRouteMapThumbnail: { routeMapThumbnails[$0] },
+            storeStatus: { storeStatus },
+            resetUnavailableStores: { storeReset }
         )
     }
 }

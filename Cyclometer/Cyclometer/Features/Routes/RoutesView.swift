@@ -47,7 +47,12 @@ struct RoutesView: View {
 
     var body: some View {
         Group {
-            if store.showsMap {
+            if store.storeStatus.history != nil {
+                // Ahead of the map, which would show an empty library as if it were real.
+                HistoryUnavailableView(isResetDisabled: isStartRideHidden) {
+                    store.send(.resetStoreButtonTapped)
+                }
+            } else if store.showsMap {
                 mapView
             } else if store.hasLoaded && store.routes.isEmpty {
                 emptyLibrary
@@ -72,18 +77,22 @@ struct RoutesView: View {
         }
         .navigationTitle("Routes")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    store.send(.importButtonTapped)
-                } label: {
-                    if store.isImporting {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "square.and.arrow.down")
+            // Not while history is unavailable (#206): an import would land in the stand-in,
+            // out of sight behind this screen, and be gone when the app quits.
+            if store.storeStatus.history == nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        store.send(.importButtonTapped)
+                    } label: {
+                        if store.isImporting {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "square.and.arrow.down")
+                        }
                     }
+                    .disabled(store.isImporting)
+                    .accessibilityLabel("Import Route")
                 }
-                .disabled(store.isImporting)
-                .accessibilityLabel("Import Route")
             }
             // Gated on the domain, not merely on `routes.isEmpty`: `RouteFilterDomain.from`
             // also answers nil when no route has a finite distance, and the button must not
@@ -103,12 +112,15 @@ struct RoutesView: View {
         // ride's accessory both belong to this view's bottom safe area, so the control stays
         // above whichever is showing (#331).
         .safeAreaInset(edge: .bottom, alignment: .trailing) {
-            MapSheetButton(title: store.showsMap ? "Show as List" : "Show on Map",
-                           systemImage: store.showsMap ? "list.bullet" : "map") {
-                store.send(.mapToggled)
+            // Nothing to map while history is unavailable (#206).
+            if store.storeStatus.history == nil {
+                MapSheetButton(title: store.showsMap ? "Show as List" : "Show on Map",
+                               systemImage: store.showsMap ? "list.bullet" : "map") {
+                    store.send(.mapToggled)
+                }
+                .padding(.trailing, Spacing.lg)
+                .padding(.bottom, Spacing.sm)
             }
-            .padding(.trailing, Spacing.lg)
-            .padding(.bottom, Spacing.sm)
         }
         .fileImporter(
             isPresented: $store.isImporterPresented.sending(\.importerPresentationChanged),
@@ -721,3 +733,17 @@ private struct RoutesMapView: View {
     })
 }
 
+
+/// The history store, which routes live in, didn't open (#206). Its own in-memory storage, so
+/// the status can't leak into the other previews.
+#Preview("Routes — history unavailable") {
+    withDependencies {
+        $0.defaultInMemoryStorage = InMemoryStorage()
+    } operation: {
+        @Shared(.persistentStoreStatus) var storeStatus
+        $storeStatus.withLock {
+            $0 = PersistentStoreStatus(history: StoreFailure(storeURL: URL(filePath: "/dev/null"), reason: "preview"))
+        }
+        return RoutesNavigationStack(store: Store(initialState: RoutesFeature.State()) { RoutesFeature() })
+    }
+}

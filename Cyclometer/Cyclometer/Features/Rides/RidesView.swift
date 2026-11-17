@@ -9,10 +9,16 @@ struct RidesView: View {
     /// What the row dates are relative to. Snapshots pin it; the app leaves it nil and each
     /// row follows the clock (#291).
     var now: Date?
+    /// A ride is recording, so the stores can't be reset under it (#206).
+    var isResetDisabled: Bool = false
 
     var body: some View {
         Group {
-            if store.hasLoaded && store.rides.isEmpty {
+            if store.storeStatus.history != nil {
+                HistoryUnavailableView(isResetDisabled: isResetDisabled) {
+                    store.send(.resetStoreButtonTapped)
+                }
+            } else if store.hasLoaded && store.rides.isEmpty {
                 emptyRides
             } else {
                 rideList
@@ -24,6 +30,11 @@ struct RidesView: View {
 
     private var rideList: some View {
         List {
+            if store.storeStatus.tracks != nil {
+                TracksUnavailableNotice(isResetDisabled: isResetDisabled) {
+                    store.send(.resetStoreButtonTapped)
+                }
+            }
             ForEach(store.rides) { ride in
                 NavigationLink(state: RideRoutePath.State.ride(RideDetailFeature.State(summary: ride))) {
                     RideRow(ride: ride, thumbnail: store.thumbnails[ride.id],
@@ -90,7 +101,7 @@ struct RidesNavigationStack: View {
 
     var body: some View {
         NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
-            RidesView(store: store, onStartRide: onStartRide, now: now)
+            RidesView(store: store, onStartRide: onStartRide, now: now, isResetDisabled: isStartRideHidden)
                 .startRideToolbarItem(isHidden: isStartRideHidden, action: onStartRide)
         } destination: { pathStore in
             RideRoutePathView(store: pathStore, isUseRouteHidden: isStartRideHidden)
@@ -258,6 +269,44 @@ struct ElevationPoint: Identifiable, Equatable {
         $0.persistenceClient = .mock()
     } operation: {
         RidesNavigationStack(
+            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+            onStartRide: {}
+        )
+    }
+}
+
+/// The history store didn't open (#206). Its own in-memory storage, so the status can't leak
+/// into the other previews.
+#Preview("Rides — history unavailable") {
+    withDependencies {
+        $0.defaultInMemoryStorage = InMemoryStorage()
+        $0.persistenceClient = .mock()
+    } operation: {
+        @Shared(.persistentStoreStatus) var storeStatus
+        $storeStatus.withLock {
+            $0 = PersistentStoreStatus(history: StoreFailure(storeURL: URL(filePath: "/dev/null"), reason: "preview"))
+        }
+        return RidesNavigationStack(
+            store: Store(initialState: RidesFeature.State()) { RidesFeature() },
+            onStartRide: {}
+        )
+    }
+}
+
+/// Only the track store didn't open (#206): the list, led by its notice.
+#Preview("Rides — tracks unavailable") {
+    withDependencies {
+        $0.defaultInMemoryStorage = InMemoryStorage()
+        $0.persistenceClient = .mock(rides: [
+            RideListSummary(id: UUID(), title: "River Loop", startedAt: .now.addingTimeInterval(-86_400),
+                            distanceMeters: 36_050, durationSeconds: 4_712)
+        ])
+    } operation: {
+        @Shared(.persistentStoreStatus) var storeStatus
+        $storeStatus.withLock {
+            $0 = PersistentStoreStatus(tracks: StoreFailure(storeURL: URL(filePath: "/dev/null"), reason: "preview"))
+        }
+        return RidesNavigationStack(
             store: Store(initialState: RidesFeature.State()) { RidesFeature() },
             onStartRide: {}
         )
