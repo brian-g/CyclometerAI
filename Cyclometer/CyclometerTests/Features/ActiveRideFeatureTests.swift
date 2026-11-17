@@ -707,7 +707,7 @@ struct ActiveRideFeatureLocationTests {
             $0.speed.activeSpeedSource = .gps
             $0.speed.latestGPSSpeedMPS = 8.5
             $0.speed.speedSamples = [SpeedSample(time: testDate, mps: 8.5)]
-            // No fix behind it, so no `speedAccuracy`: not a max (#540).
+            // The ride's first reading: nothing before it, so not a max (#540).
         }
 
         let invalidUpdate = LocationUpdate(
