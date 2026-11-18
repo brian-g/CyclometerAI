@@ -14,24 +14,53 @@ private final class Radio: Sendable {
     }
 
     let calls: LockIsolated<[Call]>
+    /// Peripherals passed to `connect`, and (peripheral, owner) pairs passed to `disconnect` (#585).
+    let connects: LockIsolated<[UUID]>
+    let disconnects: LockIsolated<[Disconnect]>
     let transport: BLEClient
+    /// One continuation per `events()` subscriber — each client subscribes once, from its own
+    /// task — so an event reaches every client, as `BLECentral` delivers it.
+    private let subscribers: LockIsolated<[AsyncStream<BLEEvent>.Continuation]>
+
+    struct Disconnect: Equatable {
+        let id: UUID
+        let owner: String
+    }
 
     init() {
         let calls = LockIsolated<[Call]>([])
+        let connects = LockIsolated<[UUID]>([])
+        let disconnects = LockIsolated<[Disconnect]>([])
+        let subscribers = LockIsolated<[AsyncStream<BLEEvent>.Continuation]>([])
         self.calls = calls
+        self.connects = connects
+        self.disconnects = disconnects
+        self.subscribers = subscribers
         self.transport = BLEClient(
             startScanning: { uuids in calls.withValue { $0 += uuids.map(Call.start) } },
             stopScanning: { uuids in calls.withValue { $0 += uuids.map(Call.stop) } },
-            connect: { _, _ in },
-            disconnect: { _, _ in },
+            connect: { id, _ in connects.withValue { $0.append(id) } },
+            disconnect: { id, owner in disconnects.withValue { $0.append(Disconnect(id: id, owner: owner)) } },
             discoverServices: { _, _ in },
             discoverCharacteristics: { _, _, _ in },
             setNotifyValue: { _, _, _, _ in },
             readValue: { _, _, _ in },
-            events: { AsyncStream { _ in } },
+            events: { AsyncStream { continuation in subscribers.withValue { $0.append(continuation) } } },
             authorization: { .allowedAlways },
             requestAuthorization: { .allowedAlways }
         )
+    }
+
+    /// Every client is listening. They subscribe from tasks of their own, so an event sent
+    /// before this holds can reach none of them.
+    var allClientsSubscribed: Bool { subscribers.value.count == SensorKind.allCases.count }
+
+    func send(_ event: BLEEvent) {
+        for continuation in subscribers.value { continuation.yield(event) }
+    }
+
+    func dropped(_ id: UUID, by owner: String) -> Bool {
+        disconnects.value.contains(Disconnect(id: id, owner: owner))
     }
 
     /// The service UUIDs currently being scanned for, replaying the log the way
@@ -66,7 +95,11 @@ struct PairingScanBackgroundTests {
 
     private static let allKinds: Set<CBUUID> = Set(SensorKind.allCases.map(\.serviceUUID))
 
-    private static func makeStore(radio: Radio) -> TestStoreOf<AppFeature> {
+    private static func makeStore(
+        radio: Radio,
+        csc: BLECSCClient? = nil,
+        radar: VariaRadarClient? = nil
+    ) -> TestStoreOf<AppFeature> {
         let storage = FileStorage.inMemory
         let transport = radio.transport
         return withDependencies {
@@ -75,8 +108,8 @@ struct PairingScanBackgroundTests {
             let store = TestStore(initialState: AppFeature.State()) {
                 AppFeature()
             } withDependencies: {
-                $0.bleCSCClient = .live(bleClient: transport, clock: TestClock())
-                $0.variaRadarClient = .live(bleClient: transport, clock: TestClock())
+                $0.bleCSCClient = csc ?? .live(bleClient: transport, clock: TestClock())
+                $0.variaRadarClient = radar ?? .live(bleClient: transport, clock: TestClock())
                 $0.bleHRClient = .live(bleClient: transport)
                 $0.defaultFileStorage = storage
                 // S11's sweep timer: never advanced, so only the screen's own begin/end run.
@@ -139,6 +172,74 @@ struct PairingScanBackgroundTests {
         #expect(radio.starts == startsBeforeReturn)
     }
 
+    // MARK: - Start sheet connections (#585)
+
+    nonisolated private static let cscSensor = UUID()
+    nonisolated private static let radarUnit = UUID()
+
+    /// The rider's paired CSC sensor and radar, both awake: the Start sheet's pairing scan
+    /// finds and connects them.
+    private static func connectPairedSensorsUnderTheSheet(
+        _ store: TestStoreOf<AppFeature>, _ radio: Radio,
+        csc: BLECSCClient, radar: VariaRadarClient
+    ) async {
+        await csc.setPairedSensors([cscSensor: [.speed, .cadence]])
+        await radar.setPairedSensor(radarUnit)
+        await expectEventually { radio.allClientsSubscribed }
+
+        await store.send(.startRideButtonTapped)
+        radio.send(.discovered(id: cscSensor, name: "Wahoo SPEED", rssi: -55, services: [SensorKind.speedCadence.serviceUUID]))
+        radio.send(.discovered(id: radarUnit, name: "Varia RTL515", rssi: -60, services: [SensorKind.radar.serviceUUID]))
+        await expectEventually { Set(radio.connects.value) == [cscSensor, radarUnit] }
+    }
+
+    /// Cancel with no ride: what the sheet connected goes with it, so nothing is left for a
+    /// reconnect ladder to redial when a sensor sleeps.
+    @Test("Start sheet cancelled: the sensors it connected are disconnected")
+    func startSheetCancelDropsItsConnections() async {
+        let radio = Radio()
+        let csc = BLECSCClient.live(bleClient: radio.transport, clock: TestClock())
+        let radar = VariaRadarClient.live(bleClient: radio.transport, clock: TestClock())
+        let store = Self.makeStore(radio: radio, csc: csc, radar: radar)
+        await Self.connectPairedSensorsUnderTheSheet(store, radio, csc: csc, radar: radar)
+
+        await store.send(.startSheet(.dismiss))
+        await store.finish()
+        #expect(radio.dropped(Self.cscSensor, by: "csc"))
+        #expect(radio.dropped(Self.radarUnit, by: "radar"))
+    }
+
+    /// Start: the ride begins with the sheet's connections. CSC's ride scan skips (every
+    /// paired role is held) and the radar's skips (not `.disconnected`), so only the ride flag,
+    /// set before the sheet's release, keeps them.
+    @Test("Start sheet → Start: the sensors it connected stay connected into the ride")
+    func startSheetStartKeepsItsConnections() async {
+        let radio = Radio()
+        let liveCSC = BLECSCClient.live(bleClient: radio.transport, clock: TestClock())
+        let liveRadar = VariaRadarClient.live(bleClient: radio.transport, clock: TestClock())
+        // Count the sheet's releases, so "nothing was dropped" is asserted after them.
+        let released = LockIsolated<Set<SensorKind>>([])
+        var csc = liveCSC
+        csc.endPairingScan = {
+            await liveCSC.endPairingScan()
+            released.withValue { _ = $0.insert(.speedCadence) }
+        }
+        var radar = liveRadar
+        radar.endPairingScan = {
+            await liveRadar.endPairingScan()
+            released.withValue { _ = $0.insert(.radar) }
+        }
+        let store = Self.makeStore(radio: radio, csc: csc, radar: radar)
+        await Self.connectPairedSensorsUnderTheSheet(store, radio, csc: csc, radar: radar)
+
+        await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
+        await store.receive(\.activeRide.task)
+        await expectEventually { released.value == [.speedCadence, .radar] }
+        #expect(!radio.dropped(Self.cscSensor, by: "csc"))
+        #expect(!radio.dropped(Self.radarUnit, by: "radar"))
+        await store.skipInFlightEffects()
+    }
+
     // MARK: - Sensors list (S11)
 
     @Test("Sensors list open: backgrounding stops every pairing scan, returning restarts it")
@@ -158,6 +259,60 @@ struct PairingScanBackgroundTests {
         await store.send(.settings(.deviceManagement(.onDisappear)))
         await store.finish()
         #expect(radio.scanning.isEmpty)
+    }
+
+    /// The rider tapped Pair and left Sensors before the 0x2A5C answer: that is the last
+    /// release, so the interrogation is dropped with everything else (#585). Coming back must
+    /// end the pairing it left in flight, or every later Pair tap is refused until relaunch
+    /// (#577 review). `interrogationWasReleased` does it from the replayed device list.
+    @Test("Leaving Sensors mid-interrogation drops it, and Pair works on return")
+    func leavingSensorsMidInterrogationThenPairingAgain() async {
+        let radio = Radio()
+        let store = Self.makeStore(radio: radio)
+        let candidate = UUID()
+        await expectEventually { radio.allClientsSubscribed }
+
+        await store.send(.settings(.deviceManagement(.task)))
+        radio.send(.discovered(id: candidate, name: "Wahoo RPM", rssi: -55, services: [SensorKind.speedCadence.serviceUUID]))
+        await Self.waitFor(store) { $0.settings.deviceManagement.devices.contains { $0.id == candidate } }
+
+        await store.send(.settings(.deviceManagement(.pairButtonTapped(candidate))))
+        #expect(store.state.settings.deviceManagement.pendingPairing == candidate)
+        await Self.waitFor(store) {
+            $0.settings.deviceManagement.sources[.speedCadence]?
+                .first { $0.id == candidate }?.connectionState != nil
+        }
+
+        await store.send(.settings(.deviceManagement(.onDisappear)))
+        await expectEventually { radio.dropped(candidate, by: "csc") }
+
+        await store.send(.settings(.deviceManagement(.task)))
+        await Self.waitFor(store) { $0.settings.deviceManagement.pendingPairing == nil }
+
+        await store.send(.settings(.deviceManagement(.pairButtonTapped(candidate))))
+        #expect(store.state.settings.deviceManagement.pendingPairing == candidate)
+        await expectEventually { radio.connects.value == [candidate, candidate] }
+
+        await store.send(.settings(.deviceManagement(.onDisappear)))
+        await store.finish()
+    }
+
+    /// Wait until the store's state satisfies `condition`. `TestStore.state` shows an
+    /// effect's action only once it has been received, so each pass takes in whatever has
+    /// arrived; `expectEventually`'s `@Sendable` condition can't read main-actor state anyway.
+    private static func waitFor(
+        _ store: TestStoreOf<AppFeature>,
+        sourceLocation: SourceLocation = #_sourceLocation,
+        _ condition: (AppFeature.State) -> Bool
+    ) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(10))
+        while clock.now < deadline {
+            await store.skipReceivedActions(strict: false)
+            if condition(store.state) { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("Condition never held within 10 seconds", sourceLocation: sourceLocation)
     }
 
     // MARK: - After a ride

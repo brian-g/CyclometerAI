@@ -21,6 +21,8 @@ struct StartSheetPresentationTests {
     enum ScanCall: Equatable {
         case begin(SensorKind)
         case end(SensorKind)
+        /// `setRideActive` (#585). In the same log because its order against `end` is the point.
+        case rideActive(SensorKind, Bool)
     }
 
     /// `initialState` is a closure so the state — and the `@Shared` preferences inside it — is
@@ -37,9 +39,11 @@ struct StartSheetPresentationTests {
             var csc = BLECSCClient.testValue
             csc.beginPairingScan = { log.withValue { $0.append(.begin(.speedCadence)) } }
             csc.endPairingScan = { log.withValue { $0.append(.end(.speedCadence)) } }
+            csc.setRideActive = { active in log.withValue { $0.append(.rideActive(.speedCadence, active)) } }
             var radar = VariaRadarClient.testValue
             radar.beginPairingScan = { log.withValue { $0.append(.begin(.radar)) } }
             radar.endPairingScan = { log.withValue { $0.append(.end(.radar)) } }
+            radar.setRideActive = { active in log.withValue { $0.append(.rideActive(.radar, active)) } }
             var hr = BLEHRClient.testValue
             hr.beginPairingScan = { log.withValue { $0.append(.begin(.heartRate)) } }
             hr.endPairingScan = { log.withValue { $0.append(.end(.heartRate)) } }
@@ -66,6 +70,8 @@ struct StartSheetPresentationTests {
 
     private static let begun: [ScanCall] = [.begin(.speedCadence), .begin(.radar), .begin(.heartRate)]
     private static let ended: [ScanCall] = [.end(.speedCadence), .end(.radar), .end(.heartRate)]
+    /// A ride starting tells CSC and radar before anything is released (#585).
+    private static let rideStarted: [ScanCall] = [.rideActive(.speedCadence, true), .rideActive(.radar, true)]
 
     /// Cancel, and the swipe-to-dismiss gesture, both arrive as `.dismiss`.
     @Test("Dismissing the sheet releases every scan it took")
@@ -98,7 +104,9 @@ struct StartSheetPresentationTests {
         await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
         await store.finish()
 
-        #expect(log.value == Self.begun + Self.ended)
+        // The ride flag first: the last release with no ride drops the sheet's connections,
+        // which are the ones the ride starts with (#585).
+        #expect(log.value == Self.begun + Self.rideStarted + Self.ended)
     }
 
     /// Opening the sheet twice must not leave the radio holding two references.
@@ -162,7 +170,7 @@ struct StartSheetPresentationTests {
         #expect(finalized.value.isEmpty)
 
         await store.finish()
-        #expect(log.value == Self.begun + Self.ended)
+        #expect(log.value == Self.begun + Self.rideStarted + Self.ended)
     }
 
     /// #231, order two: the rider gets a brand-new ride started before the fetch resolves.
@@ -185,7 +193,7 @@ struct StartSheetPresentationTests {
         await store.send(.startSheet(.presented(.task)))
         await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
         #expect(store.state.activeRide != nil)
-        #expect(log.value == Self.begun + Self.ended)
+        #expect(log.value == Self.begun + Self.rideStarted + Self.ended)
 
         await store.send(.resumableRideFetched(Self.resumable(orphanedRideId)))
 
@@ -203,7 +211,43 @@ struct StartSheetPresentationTests {
 
         await store.finish()
         // Still exactly one release: the sheet was already gone, so nothing was released twice.
-        #expect(log.value == Self.begun + Self.ended)
+        #expect(log.value == Self.begun + Self.rideStarted + Self.ended)
+    }
+
+    /// A ride resumed on launch with no sheet up: flagged, and nothing released (#585).
+    @Test("A resumed ride with no sheet up sets the ride flag and releases nothing")
+    func resumedRideWithNoSheetSetsTheRideFlag() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let store = Self.makeStore(into: log)
+        store.dependencies.persistenceClient = .mock()
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.resumableRideFetched(Self.resumable(UUID())))
+        await store.finish()
+        #expect(log.value == Self.rideStarted)
+    }
+
+    /// Finish clears the flag, so a Sensors list opened mid-ride drops what it connected when it
+    /// closes after the ride (#585).
+    @Test("Finishing the ride clears the ride flag")
+    func finishingTheRideClearsTheRideFlag() async {
+        let log = LockIsolated<[ScanCall]>([])
+        let store = Self.makeStore(into: log)
+        store.dependencies.persistenceClient = .mock()
+        store.dependencies.healthKitClient = .testValue
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.startRideButtonTapped)
+        await store.send(.startSheet(.presented(.delegate(.startRide(rideId: UUID(0), route: nil)))))
+        await store.send(.activeRide(.pauseTapped))
+        await store.send(.activeRide(.finishTapped))
+        await store.send(.activeRide(.finishAlert(.presented(.confirmFinish))))
+        await expectEventually {
+            log.value == Self.begun + Self.rideStarted + Self.ended
+                + [.rideActive(.speedCadence, false), .rideActive(.radar, false)]
+        }
+        // The Rides tab's post-finish reload waits on a clock this test never advances.
+        await store.skipInFlightEffects()
     }
 
     /// A double tap on Start Ride before the sheet covers the button. The second must not take a scan

@@ -271,11 +271,15 @@ struct AppFeature {
                 // ends. Previously this was driven by RideDashboardView's
                 // `.task`, so minimizing the dashboard cancelled the timer.
                 // The sheet is going away without a `.dismiss`, so its scan is released
-                // here. The ride takes its own scan in `activeRide(.task)`, and the
-                // refcount never reaches zero in between — the connections the sheet
-                // established stay up.
+                // here, and the refcount does reach zero: the ride's own `startScanning`
+                // runs in effects `activeRide(.task)` spawns, unordered with this one, and
+                // skips altogether when the sheet already connected everything. What keeps
+                // the sheet's connections up into the ride is the ride flag, set before the
+                // release in the same effect (#585).
                 return .merge(
-                    Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient),
+                    Self.handOffToRide(
+                        releasingStartSheetScan: true, bleCSCClient, variaRadarClient, bleHRClient
+                    ),
                     .send(.activeRide(.task))
                 )
 
@@ -300,6 +304,13 @@ struct AppFeature {
                 let finishedRideId = state.activeRide?.rideId
                 state.activeRide = nil
                 state.isDashboardPresented = false
+                // No ride now, so the next pairing scan to close drops what it connected — a
+                // Sensors list opened mid-ride, say (#585). Ride finish's own `disconnect()`
+                // already dropped the ride's connections.
+                let endRide: Effect<Action> = .run { [bleCSCClient, variaRadarClient] _ in
+                    await bleCSCClient.setRideActive(false)
+                    await variaRadarClient.setRideActive(false)
+                }
                 // The Rides tab only loads on its own `.task`, which fires once when it
                 // first mounts — not when a ride finishes underneath an already-mounted
                 // tab. Without this, the just-finished ride is invisible until something
@@ -307,11 +318,11 @@ struct AppFeature {
                 // not `reloadRides`: ActiveRideFeature's own finish effect (flush → GPX
                 // export → finalizeRide) is a separate effect racing this one, so the
                 // write is very often still in flight at this exact moment.
-                guard let finishedRideId else { return .none }
+                guard let finishedRideId else { return endRide }
                 // S10 for the ride just ended (#249). It waits for that finalize itself, and
                 // for the dashboard to have slid away (#365).
                 state.pendingRideSummary = RideSummaryFeature.State(rideId: finishedRideId)
-                return .send(.rides(.rideFinished(finishedRideId)))
+                return .merge(endRide, .send(.rides(.rideFinished(finishedRideId))))
 
             case .rideSummary(.dismiss):
                 // The Finish Ride button and a swipe-down both land here, with the child's
@@ -418,14 +429,19 @@ struct AppFeature {
                 // originates rather than something the framework enforces.
                 //
                 // Read before the nil, and only released if a sheet was actually up:
-                // `endStartSheetScan` unconditionally would drive the refcount below zero
-                // on the ordinary launch path, where no sheet ever took a scan.
-                let releaseStartSheetScan = state.startSheet != nil
-                    ? Self.endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
-                    : .none
+                // releasing unconditionally would drive the refcount below zero on the
+                // ordinary launch path, where no sheet ever took a scan. The ride flag is
+                // set either way, before any release (#585).
+                let releasingStartSheetScan = state.startSheet != nil
                 state.startSheet = nil
                 Self.presentActiveRide(ActiveRideFeature.State(resuming: summary), in: &state)
-                return .merge(releaseStartSheetScan, .send(.activeRide(.task)))
+                return .merge(
+                    Self.handOffToRide(
+                        releasingStartSheetScan: releasingStartSheetScan,
+                        bleCSCClient, variaRadarClient, bleHRClient
+                    ),
+                    .send(.activeRide(.task))
+                )
 
             case .scenePhaseChanged(let phase):
                 let isActive = phase == .active
@@ -620,8 +636,9 @@ struct AppFeature {
     /// disconnects, so without this every row would sit at its last known state — in practice
     /// disconnected — until the rider had already pressed Start. The scan is refcounted and
     /// independent of the ride's (BLE.md §8), the clients connect only what the rider has paired
-    /// (#97), and a connection made here survives the scan ending, so the ride begins with its
-    /// sensors already up.
+    /// (#97), and a connection made here survives the scan ending only into a ride, so the ride
+    /// begins with its sensors already up: Start Ride flags the ride before the release, and Cancel
+    /// drops what the sheet connected (`handOffToRide`, #585).
     ///
     /// Here rather than inside the sheet, for the same reason the launch push lives here: the
     /// sheet is a `@Presents` child, and every dismissal path clears `startSheet` *before* SwiftUI
@@ -663,6 +680,27 @@ struct AppFeature {
             await variaRadarClient.endPairingScan()
             await bleHRClient.endPairingScan()
         }
+    }
+
+    /// A ride is starting, new or resumed: tell the CSC and radar clients, then release the Start
+    /// sheet's scan if it was up. Concatenated, not merged, because the last `endPairingScan`
+    /// with no ride drops every connection (#585) — and the sheet's connections are the ones the
+    /// ride starts with. HR has no such rule: it has no reconnect ladder to stop.
+    private static func handOffToRide(
+        releasingStartSheetScan: Bool,
+        _ bleCSCClient: BLECSCClient,
+        _ variaRadarClient: VariaRadarClient,
+        _ bleHRClient: BLEHRClient
+    ) -> Effect<Action> {
+        .concatenate(
+            .run { _ in
+                await bleCSCClient.setRideActive(true)
+                await variaRadarClient.setRideActive(true)
+            },
+            releasingStartSheetScan
+                ? endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
+                : .none
+        )
     }
 
     /// Pairing scans are for screens, and nobody sees a screen in the background (#418): a
