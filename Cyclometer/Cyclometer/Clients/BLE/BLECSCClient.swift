@@ -1143,12 +1143,8 @@ private final class CSCClientState: @unchecked Sendable {
             case .poweredOff, .unauthorized, .unsupported:
                 // Permission denied / radio off: stand down cleanly, never crash.
                 let released: [UUID] = lock.withLock {
-                    for slot in slots.values { slot.reconnectTask?.cancel() }
-                    let ids = Array(slots.keys)
-                    slots.removeAll()
                     isScanning = false
-                    recomputeRoleStatesLocked()
-                    return ids
+                    return dropAllSlotsLocked()
                 }
                 // CoreBluetooth has already dropped the links, but `BLECentral` still lists
                 // "csc" as an owner of each. Releasing them keeps the rule every other slot
@@ -1238,7 +1234,8 @@ private final class CSCClientState: @unchecked Sendable {
 
     /// Cancel every reconnect ladder and remove every slot, interrogating ones too, returning
     /// the peripherals to release with `bleClient.disconnect` once the lock is dropped. Shared by
-    /// `disconnect()` and the last `endPairingScan` with no ride (#585), so the two can't drift.
+    /// `disconnect()`, the last `endPairingScan` with no ride (#585), and standing down when
+    /// Bluetooth goes away, so the three can't drift.
     /// A ladder rung already in flight is caught by `.connected`'s no-slot safety net. Pairings
     /// are untouched. Must hold the lock.
     private func dropAllSlotsLocked() -> [UUID] {

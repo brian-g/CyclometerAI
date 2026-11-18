@@ -307,10 +307,7 @@ struct AppFeature {
                 // No ride now, so the next pairing scan to close drops what it connected — a
                 // Sensors list opened mid-ride, say (#585). Ride finish's own `disconnect()`
                 // already dropped the ride's connections.
-                let endRide: Effect<Action> = .run { [bleCSCClient, variaRadarClient] _ in
-                    await bleCSCClient.setRideActive(false)
-                    await variaRadarClient.setRideActive(false)
-                }
+                let endRide = Self.setRideActive(false, bleCSCClient, variaRadarClient)
                 // The Rides tab only loads on its own `.task`, which fires once when it
                 // first mounts — not when a ride finishes underneath an already-mounted
                 // tab. Without this, the just-finished ride is invisible until something
@@ -685,7 +682,7 @@ struct AppFeature {
     /// A ride is starting, new or resumed: tell the CSC and radar clients, then release the Start
     /// sheet's scan if it was up. Concatenated, not merged, because the last `endPairingScan`
     /// with no ride drops every connection (#585) — and the sheet's connections are the ones the
-    /// ride starts with. HR has no such rule: it has no reconnect ladder to stop.
+    /// ride starts with.
     private static func handOffToRide(
         releasingStartSheetScan: Bool,
         _ bleCSCClient: BLECSCClient,
@@ -693,14 +690,24 @@ struct AppFeature {
         _ bleHRClient: BLEHRClient
     ) -> Effect<Action> {
         .concatenate(
-            .run { _ in
-                await bleCSCClient.setRideActive(true)
-                await variaRadarClient.setRideActive(true)
-            },
+            setRideActive(true, bleCSCClient, variaRadarClient),
             releasingStartSheetScan
                 ? endStartSheetScan(bleCSCClient, variaRadarClient, bleHRClient)
                 : .none
         )
+    }
+
+    /// Tell the CSC and radar clients whether a ride is running (#585): set as one starts, cleared
+    /// at Finish. HR has no such rule: it has no reconnect ladder to stop.
+    private static func setRideActive(
+        _ active: Bool,
+        _ bleCSCClient: BLECSCClient,
+        _ variaRadarClient: VariaRadarClient
+    ) -> Effect<Action> {
+        .run { _ in
+            await bleCSCClient.setRideActive(active)
+            await variaRadarClient.setRideActive(active)
+        }
     }
 
     /// Pairing scans are for screens, and nobody sees a screen in the background (#418): a
