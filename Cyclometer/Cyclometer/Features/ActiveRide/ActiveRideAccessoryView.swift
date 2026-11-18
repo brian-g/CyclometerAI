@@ -2,7 +2,7 @@ import SwiftUI
 
 /// S05.3 — the compact "mini-player" strip shown above the TabBar via
 /// `tabViewBottomAccessory` while the Active Ride Dashboard is minimized.
-/// Stateless display: it renders values passed by `AppView` and reports a tap
+/// Stateless display: it renders values passed by `AppView`'s accessory and reports a tap
 /// anywhere on the strip, which reopens the dashboard (#333, as Apple Music's mini
 /// player does); the ride lifecycle lives in `AppFeature`/`ActiveRideFeature`.
 struct ActiveRideAccessoryView: View {

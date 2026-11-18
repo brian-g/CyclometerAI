@@ -96,15 +96,16 @@ struct DashboardPageIndicator: View {
 
     var body: some View {
         let pageCount = store.dashboardLayout.pages.count
+        let visiblePage = store.visibleDashboardPage
         HStack(spacing: Spacing.xs) {
             ForEach(0..<pageCount, id: \.self) { page in
                 Circle()
-                    .fill(page == store.visibleDashboardPage ? Color.cyPrimary : Color.cyTextTertiary)
+                    .fill(page == visiblePage ? Color.cyPrimary : Color.cyTextTertiary)
                     .frame(width: Spacing.pageIndicatorDot, height: Spacing.pageIndicatorDot)
             }
         }
         .accessibilityElement()
-        .accessibilityLabel("Page \(store.visibleDashboardPage + 1) of \(pageCount)")
+        .accessibilityLabel("Page \(visiblePage + 1) of \(pageCount)")
         // VoiceOver's way into S07 edit mode (#141), which is otherwise only a long press.
         .accessibilityAction(named: "Edit Dashboard") {
             store.send(.dashboardLongPressed, animation: .default)

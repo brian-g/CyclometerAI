@@ -50,7 +50,9 @@ final class RideDashboardSnapshotTests: XCTestCase {
         pairedSensors: [PairedSensor] = [],
         configure: (inout ActiveRideFeature.State) -> Void = { _ in },
         isEditing: Bool = false,
-        testName: String = #function
+        file: StaticString = #filePath,
+        testName: String = #function,
+        line: UInt = #line
     ) {
         let storage = FileStorage.inMemory
         let store = withDependencies {
@@ -94,7 +96,9 @@ final class RideDashboardSnapshotTests: XCTestCase {
                 as: .wait(for: 1, on: .image(drawHierarchyInKeyWindow: true, layout: .device(config: device),
                                              traits: .init(userInterfaceStyle: scheme == .dark ? .dark : .light))),
                 named: scheme == .dark ? "dark" : "light",
-                testName: testName
+                file: file,
+                testName: testName,
+                line: line
             )
         }
     }

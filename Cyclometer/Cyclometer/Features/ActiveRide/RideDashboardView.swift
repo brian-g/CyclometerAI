@@ -27,8 +27,6 @@ struct RideDashboardView: View {
         .tabViewStyle(.page(indexDisplayMode: .never))
         .ignoresSafeArea(.all)
         .onGeometryChange(for: CGSize.self, of: \.size) { canvas = $0 }
-        // The turn the rider is about to make, centred over the whole dashboard (#197, Sketch
-        // "Sxx - Route overlay"). Not hit-testable, so the rider can still page through it.
         .overlay { DashboardTurnOverlay(store: store) }
         // Grabber floats as a top overlay (not a safe-area inset) so it does not
         // push page content down. The overlay keeps the safe area, so the grabber

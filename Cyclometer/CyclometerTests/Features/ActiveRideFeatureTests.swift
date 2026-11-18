@@ -4307,7 +4307,7 @@ struct ActiveRideFeatureSharedPeripheralTests {
         }
 
         // All three children reacted, and exactly one banner is armed —
-        // `RideDashboardView.activeBanner` resolves the slot to a single capsule, so
+        // `DashboardTopBar.activeBanner` resolves the slot to a single capsule, so
         // a second armed banner would be silently dropped rather than stacked.
         //
         // Shipping behaviour, not the spec's: BLE.md §6.2 asks for one *combined*
