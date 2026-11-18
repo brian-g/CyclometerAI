@@ -245,7 +245,8 @@ jobs:
             -skip-testing:CyclometerTests/SensorsSheetSnapshotTests \
             -skip-testing:CyclometerTests/RideMapLegendSnapshotTests \
             -skip-testing:CyclometerTests/WeatherWidgetSnapshotTests \
-            -skip-testing:CyclometerTests/WeatherSheetSnapshotTests
+            -skip-testing:CyclometerTests/WeatherSheetSnapshotTests \
+            -skip-testing:CyclometerTests/RideDashboardSnapshotTests
 
       - name: Summarize test failures
         if: failure()

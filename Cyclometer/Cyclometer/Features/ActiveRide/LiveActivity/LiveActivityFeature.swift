@@ -107,7 +107,7 @@ struct LiveActivityFeature {
         .cancellable(id: CancelID.start)
     }
 
-    /// The mini-player's values, as `AppView` hands them to `ActiveRideAccessoryView`.
+    /// The mini-player's values, as `AppView`'s accessory hands them to `ActiveRideAccessoryView`.
     ///
     /// While riding, `startDate` is `now − elapsedSeconds`, so the Lock Screen's timer reads what
     /// the dashboard does. Riding on, the one already shown is kept while it's within a second of
