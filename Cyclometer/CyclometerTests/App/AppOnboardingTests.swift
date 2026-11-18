@@ -182,6 +182,7 @@ struct AppOnboardingTests {
         await store.send(.onboarding(.sensorPairing(.nextButtonTapped))) {
             $0.onboarding?.$preferences.withLock { $0.hasCompletedOnboarding = true }
         }
+        await store.receive(\.onboarding.sensorPairing.deviceManagement.onDisappear)
         await store.receive(\.onboarding.sensorPairing.delegate.next)
         await store.receive(\.onboarding.delegate.completed) {
             $0.onboarding = nil

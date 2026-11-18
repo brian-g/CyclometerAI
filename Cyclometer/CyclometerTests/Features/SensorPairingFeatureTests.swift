@@ -33,6 +33,8 @@ struct SensorPairingFeatureTests {
         let store = Self.makeStore()
 
         await store.send(.nextButtonTapped)
+        // The device list's pairing scan ends first, while this state still exists (#585).
+        await store.receive(\.deviceManagement.onDisappear)
         await store.receive(\.delegate.next)
     }
 

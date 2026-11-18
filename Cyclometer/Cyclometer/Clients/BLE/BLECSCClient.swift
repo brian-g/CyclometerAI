@@ -434,6 +434,13 @@ private final class CSCClientState: @unchecked Sendable {
     private var rideActive = false
     /// Whether an open pairing scan currently wants the radio. Must hold the lock.
     private var pairingScanWantsRadioLocked: Bool { pairingScanCount > 0 && !pairingScansSuspended }
+    /// Whether anything wants connections: an open pairing scan (suspended or not), this client's
+    /// ambient scan, or a ride. A paired sensor is connected *on its own* — on discovery, or when
+    /// `setPairedSensors` finds it already seen — only while this holds; otherwise a connection
+    /// made after the last pairing scan's drop would have nothing left to drop it (#585).
+    /// Explicit requests (`setRoles`, `pair`) are the caller's decision and aren't gated. Must hold
+    /// the lock.
+    private var wantsConnectionsLocked: Bool { pairingScanCount > 0 || isScanning || rideActive }
 
     private var speedContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
     private var cadenceContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
@@ -733,6 +740,9 @@ private final class CSCClientState: @unchecked Sendable {
             pairedAssignments = assignments
             // Only peripherals already seen this session can be connected now; the
             // rest are picked up by `.discovered` when they next advertise.
+            // And only while something wants connections (#585); the map is cached either way,
+            // so the next scan connects them.
+            guard wantsConnectionsLocked else { return [] }
             return assignments
                 .filter { discoveredIDs.contains($0.key) && slots[$0.key] == nil }
                 .map { ($0.key, $0.value) }
@@ -904,7 +914,10 @@ private final class CSCClientState: @unchecked Sendable {
                 sightedThisGeneration.insert(id)
                 if let name { discoveredNames[id] = name }
                 broadcastDiscoveredLocked()
-                guard slots[id] == nil, let roles = pairedAssignments[id] else { return nil }
+                // Listed either way; connected only while something wants it (#585).
+                guard slots[id] == nil, let roles = pairedAssignments[id], wantsConnectionsLocked else {
+                    return nil
+                }
                 return roles
             }
             guard let roles else { return }

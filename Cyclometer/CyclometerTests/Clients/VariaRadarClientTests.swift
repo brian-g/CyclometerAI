@@ -321,6 +321,7 @@ struct VariaRadarIntegrationTests {
         let peripheralID = UUID()
 
         await harness.client.setPairedSensor(peripheralID)
+        await harness.client.beginPairingScan()   // the Sensors list, which wants connections (#585)
         harness.events.yield(.discovered(
             id: peripheralID, name: "Varia RTL515", rssi: -50, services: [radarServiceUUID]
         ))
@@ -1112,6 +1113,7 @@ struct VariaRadarIntegrationTests {
         let paired = UUID()
         let stranger = UUID()
         await harness.pair(paired)
+        await harness.client.beginPairingScan()   // the Sensors list, which wants connections (#585)
 
         harness.events.yield(.discovered(id: stranger, name: "Someone else's Varia", rssi: -70, services: [radarServiceUUID]))
         harness.events.yield(.discovered(id: paired, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
@@ -1304,6 +1306,69 @@ struct VariaRadarIntegrationTests {
         await harness.client.endPairingScan()
         #expect(await currentState(harness) == .scanning)
         #expect(disconnects(harness).isEmpty)
+    }
+
+    // MARK: Nothing auto-connects with nothing wanting it (#585 review)
+
+    /// Events are handled one at a time on the client's own task, so once a stranger yielded after
+    /// the event under test is listed, that event's handler — transport calls included — is done.
+    private func settle(_ harness: Harness) async {
+        let marker = UUID()
+        harness.events.yield(.discovered(id: marker, name: nil, rssi: -90, services: [radarServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == marker } }
+    }
+
+    @Test("The paired radar discovered with nothing wanting a connection is listed, not connected")
+    func discoveryWithNothingWantingConnectionsIsListedNotConnected() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        await settle(harness)
+        let listed = await harness.devices { $0.contains { $0.id == id } }
+        #expect(listed.first { $0.id == id }?.isPaired == true)
+        #expect(harness.connectCount.value == 0)
+        #expect(await currentState(harness) == .disconnected)
+    }
+
+    @Test("The paired radar re-advertising after the last release is not reconnected")
+    func discoveryAfterTheLastReleaseDoesNotReconnect() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &states, connects: &connects)
+        await harness.client.endPairingScan()
+        try #require(await currentState(harness) == .disconnected)
+
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        await settle(harness)
+        #expect(harness.connectCount.value == 1)
+        #expect(await currentState(harness) == .disconnected)
+    }
+
+    @Test("Pairing a radar already seen, with nothing wanting a connection, connects nothing until the next scan")
+    func setPairedSensorWithNothingWantingConnectionsDoesNotConnect() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == id } }
+        await harness.client.endPairingScan()
+
+        await harness.pair(id)
+        #expect(harness.connectCount.value == 0)
+        #expect(await currentState(harness) == .disconnected)
+
+        var connects = harness.connectCalls.makeAsyncIterator()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        #expect(await connects.next() == id)
     }
 }
 

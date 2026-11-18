@@ -949,6 +949,7 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | Pairing scans stop in the background | At `.background` every client withdraws its pairing scan unless its own ambient scan (`isScanning`) holds the radio, and reissues it at `.active` without starting a new generation; `.inactive` alone moves nothing, and the refcount is never touched (§13.3, #418) |
 | A dropped strap creates no scan | HR's `.disconnected` rescans only if its ambient scan or an unsuspended pairing scan already wants the radio, and never sets `isScanning` (§13.3, #418) |
 | A pairing scan's connections end with it | When the last pairing scan ends with no ride, CSC and radar drop every connection and stop every reconnect ladder, keeping the pairings. `AppFeature` sets `setRideActive(true)` before it releases the Start sheet's scan, so Start Ride keeps the sheet's sensors (§13.3, #585) |
+| Nothing auto-connects with nothing wanting it | CSC and radar connect a paired sensor on discovery, or from `setPairedSensor(s)`, only while a pairing scan is open, their ambient scan runs, or a ride is active; otherwise it is listed and left alone. Explicit `setRoles` / `pair` / `connect` aren't gated (§13.3, #585) |
 | One pairing is interrogated at a time | A Pair tap while `pendingPairing` is set is refused, so a cancel cannot release the wrong peripheral |
 | A CSC answer does not displace a strap | Unambiguous roles fold into the role prompt's answer only where unoccupied; an occupied one is left alone rather than raising a prompt about a role the rider never chose |
 | Combo sensor assigned Both | SpeedFeature and CadenceFeature both connect to same peripheral UUID |
@@ -1154,6 +1155,19 @@ dropped strap stays dropped with no scan wanting it.
   and the 10 s sweep goes begin → end. Leaving the screen mid-interrogation drops it; on return, the replayed
   device list shows the row without a connection and `interrogationWasReleased` ends `pendingPairing`, so Pair
   works again.
+- **Nothing auto-connects with nothing wanting it.** The drop runs once, on the count reaching 0, so a
+  connection made after it would have nothing left to drop it. Examples: an advertisement already queued on
+  the client's event loop, the power-on rescan, a Sensors refresh effect that runs begin → end after the
+  screen closed, or `setPairedSensor(s)` re-adopting a sensor seen earlier. So the two auto-connect paths,
+  `.discovered` and `setPairedSensor(s)`, connect a paired sensor only while a pairing scan is open
+  (suspended or not), the client's ambient scan runs, or a ride is active. The sensor is still listed, and
+  the pairing still cached, so the next scan connects it. Explicit requests (`setRoles`, `pair`, the radar's
+  `connect`) are a caller's decision and aren't gated. The reconnect ladder only runs for an existing
+  connection, which the drop cancels.
+- **Onboarding ends its own scan.** S02's Next completes onboarding, and `AppFeature` nils `onboarding`
+  straight away, so the device list's `.onDisappear` arrives at an absent child and `ifLet` drops it.
+  `SensorPairingFeature` sends `.deviceManagement(.onDisappear)` before `.delegate(.next)`; before, every
+  client's count stayed at 1 for the first session and no release reached 0.
 - **Not at `.background`.** #577's review ruled out disconnecting there: it would take an interrogation slot
   from an open Sensors list, would have to be ordered against the suspension, and would race the launch-time
   resume. So a Sensors list left open as the phone is pocketed keeps its connections, and their ladders, until

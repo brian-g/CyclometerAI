@@ -295,6 +295,11 @@ private final class RadarClientState: @unchecked Sendable {
     private var rideActive = false
     /// Whether an open pairing scan currently wants the radio. Must hold the lock.
     private var pairingScanWantsRadioLocked: Bool { pairingScanCount > 0 && !pairingScansSuspended }
+    /// Whether anything wants a connection: an open pairing scan (suspended or not), the ambient
+    /// scan, or a ride. The paired radar is connected *on its own* — on discovery, or when
+    /// `setPairedSensor` finds it already seen — only while this holds (#585). Mirrors
+    /// `CSCClientState.wantsConnectionsLocked`. Must hold the lock.
+    private var wantsConnectionsLocked: Bool { pairingScanCount > 0 || isScanning || rideActive }
 
     /// Every radar seen this session. The inventory the pairing list is built from, and
     /// what lets `setPairedSensor` connect a device discovered before it was paired —
@@ -583,7 +588,9 @@ private final class RadarClientState: @unchecked Sendable {
             // The new radar is already in the session inventory: connect it now rather
             // than waiting for an advertisement that won't come.
             var toConnect: UUID?
-            if let id, targetPeripheralID == nil, discoveredIDs.contains(id) {
+            // Only while something wants a connection (#585); otherwise the pairing is cached and
+            // the next scan connects it.
+            if let id, targetPeripheralID == nil, discoveredIDs.contains(id), wantsConnectionsLocked {
                 targetPeripheralID = id
                 toConnect = id
             }
@@ -633,7 +640,7 @@ private final class RadarClientState: @unchecked Sendable {
             // sidebar. The shared central may be scanning several sensor types, so
             // filter on the service first.
             guard services.contains(radarServiceUUID) else { return }
-            let (shouldConnect, firstSighting): (Bool, Bool) = lock.withLock {
+            let (verdict, firstSighting): (DiscoveryVerdict, Bool) = lock.withLock {
                 // Record every radar seen, named or not — the pairing list is built from
                 // this inventory, and an unnamed unit still needs a row.
                 let firstSighting = discoveredIDs.insert(id).inserted
@@ -648,10 +655,12 @@ private final class RadarClientState: @unchecked Sendable {
                 // the check and the claim in one acquisition, so two redeliveries can't
                 // both pass it.
                 guard targetPeripheralID == nil, pairedPeripheralID == id else {
-                    return (false, firstSighting)
+                    return (.notPaired, firstSighting)
                 }
+                // Listed either way; connected only while something wants it (#585).
+                guard wantsConnectionsLocked else { return (.nothingWantsIt, firstSighting) }
                 targetPeripheralID = id
-                return (true, firstSighting)
+                return (.connect, firstSighting)
             }
             // Announce the gate's verdict, once per peripheral per scan session. Without
             // this an ignored radar is indistinguishable from one that never advertised:
@@ -660,10 +669,10 @@ private final class RadarClientState: @unchecked Sendable {
             if firstSighting {
                 logger.notice("""
                     discovered "\(name ?? "?", privacy: .public)" \(id, privacy: .public) — \
-                    \(shouldConnect ? "paired, connecting" : "not paired, ignoring", privacy: .public)
+                    \(verdict.logDescription, privacy: .public)
                     """)
             }
-            guard shouldConnect else { return }
+            guard verdict == .connect else { return }
             setConnectionState(.connecting)
             await bleClient.connect(id, radarOwnerID)
 
@@ -823,6 +832,19 @@ private final class RadarClientState: @unchecked Sendable {
             )
         }
         lock.withLock { reconnectTask = task }
+    }
+
+    /// What `.discovered` decided about a radar, for its once-per-session log line.
+    private enum DiscoveryVerdict {
+        case connect, notPaired, nothingWantsIt
+
+        var logDescription: String {
+            switch self {
+            case .connect: "paired, connecting"
+            case .notPaired: "not paired, ignoring"
+            case .nothingWantsIt: "paired, nothing wants a connection, ignoring"
+            }
+        }
     }
 
     /// A connection taken out of the client's state, still to be released on the transport.

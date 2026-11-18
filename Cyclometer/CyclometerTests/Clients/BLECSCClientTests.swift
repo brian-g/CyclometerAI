@@ -1394,6 +1394,7 @@ struct BLECSCIntegrationTests {
         let harness = Harness()
         let id = UUID()
         await harness.pair(id, roles: [.speed, .cadence])
+        await harness.client.beginPairingScan()   // the Sensors list, which wants connections (#585)
 
         harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -55, services: [cscServiceUUID]))
         var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
@@ -1828,6 +1829,71 @@ struct BLECSCIntegrationTests {
         #expect(harness.disconnected.value.map(\.0) == [id])
     }
 
+    // MARK: Nothing auto-connects with nothing wanting it (#585 review)
+
+    /// No pairing scan, no ride scan, no ride: a paired sensor advertising is listed for the
+    /// pairing UI but not connected — nothing would ever drop that connection.
+    @Test("A paired sensor discovered with nothing wanting connections is listed, not connected")
+    func discoveryWithNothingWantingConnectionsIsListedNotConnected() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        await settle(harness)
+        let listed = await harness.devices { $0.contains { $0.id == id } }
+        // A row's roles come from its connection slot, so an unconnected sensor lists with
+        // none. Sensors shows it as paired from the persisted records, not from this row.
+        let row = listed.first { $0.id == id }
+        #expect(row?.roles.isEmpty == true)
+        #expect(row?.connectionState == nil)
+        #expect(harness.connectCount.value == 0)
+        #expect(await harness.currentState(.speed) == .disconnected)
+    }
+
+    /// The review's case: an advertisement handled just after the last release's drop — queued
+    /// behind it, or from the Bluetooth power-on rescan — must not bring the sensor back.
+    @Test("A paired sensor re-advertising after the last release is not reconnected")
+    func discoveryAfterTheLastReleaseDoesNotReconnect() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &speedStates, connects: &connects)
+        await harness.client.endPairingScan()
+        try #require(await harness.currentState(.speed) == .disconnected)
+
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        await settle(harness)
+        #expect(harness.connectCount.value == 1)
+        #expect(await harness.currentState(.speed) == .disconnected)
+    }
+
+    /// `setPairedSensors` re-adopts a sensor already seen this session — a Sensors commit landing
+    /// after the screen closed. Gated the same way; the map is still cached for the next scan.
+    @Test("Pushing pairings with nothing wanting connections connects nothing, and the next scan does")
+    func setPairedSensorsWithNothingWantingConnectionsDoesNotConnect() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == id } }
+        await harness.client.endPairingScan()
+
+        await harness.pair(id, roles: [.speed, .cadence])
+        #expect(harness.connectCount.value == 0)
+        #expect(await harness.currentState(.speed) == .disconnected)
+
+        var connects = harness.connectCalls.makeAsyncIterator()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        #expect(await connects.next() == id)
+    }
+
     // MARK: - Capabilities (0x2A5C, #67)
 
     @Test("Discovering the CSC characteristics reads the feature characteristic")
@@ -1951,6 +2017,7 @@ struct BLECSCIntegrationTests {
         let harness = Harness()
         let id = UUID()
         await harness.pair(id, roles: [.speed, .cadence])
+        await harness.client.beginPairingScan()   // the Start sheet, which wants connections (#585)
 
         // CoreBluetooth won't redeliver `.discovered` for a peripheral already seen,
         // so the replay is what populates a sheet opened after discovery.
@@ -1973,6 +2040,7 @@ struct BLECSCIntegrationTests {
         let harness = Harness()
         let id = UUID()
         await harness.pair(id, roles: [.speed, .cadence])
+        await harness.client.beginPairingScan()   // the Sensors list, which wants connections (#585)
 
         var devices = harness.client.discoveredDevices().makeAsyncIterator()
         #expect(await devices.next()?.isEmpty == true)

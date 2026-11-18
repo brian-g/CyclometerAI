@@ -30,7 +30,15 @@ struct SensorPairingFeature {
         Reduce { state, action in
             switch action {
             case .nextButtonTapped:
-                return .send(.delegate(.next))
+                // End the device list's pairing scan here, while this state still exists. Next
+                // completes onboarding, and `AppFeature` nils `onboarding` straight away, so the
+                // list's own `.onDisappear` arrives at an absent child and `ifLet` drops it. That
+                // left every client's scan count at 1 for the first session, so no later release
+                // reached 0 and #585's drop never ran.
+                return .concatenate(
+                    .send(.deviceManagement(.onDisappear)),
+                    .send(.delegate(.next))
+                )
 
             case .deviceManagement, .delegate:
                 return .none
