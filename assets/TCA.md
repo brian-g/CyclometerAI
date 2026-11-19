@@ -134,8 +134,8 @@ struct PersistenceClient: Sendable {
     var flushTrackPoints: @Sendable ([TrackPointDTO]) async throws -> Void = { _ in }
     var appendRadarEvent: @Sendable (RadarEvent) async throws -> Void = { _ in }
     var appendVehiclePassEvent: @Sendable (VehiclePassEvent) async throws -> Void = { _ in }
-    var fetchUserProfile: @Sendable () async throws -> UserProfile = { UserProfile() }
-    var saveUserProfile: @Sendable (UserProfile) async throws -> Void = { _ in }
+    // No profile or preferences calls: RiderProfile and AppPreferences are JSON documents read
+    // through @Shared(.riderProfile) / @Shared(.appPreferences) (DataModel.md §3.5, §3.6).
     var fetchRides: @Sendable () async throws -> [Ride] = { [] }
 }
 ```
@@ -192,7 +192,7 @@ struct AppFeature {
         var onboarding: OnboardingFeature.State?   // non-nil during onboarding
         var tab: TabFeature.State = TabFeature.State()
         var activeRide: ActiveRideFeature.State?   // non-nil when ride is active
-        var userProfile: UserProfile = UserProfile()
+        @SharedReader(.appPreferences) var preferences   // DataModel.md §3.6; loads itself
     }
 
     enum Action {
@@ -201,7 +201,6 @@ struct AppFeature {
         case activeRide(ActiveRideFeature.Action)
         case appLaunched
         case onboardingCompleted
-        case userProfileLoaded(UserProfile)
     }
 }
 ```
@@ -275,7 +274,7 @@ struct ActiveRideFeature {
     @ObservableState
     struct State: Equatable {
         var rideId: UUID
-        var recordingState: RideRecordingState = .active
+        var recordingState: RideRecordingState = .idle
 
         // Sub-feature states
         var radar: RadarFeature.State
@@ -411,7 +410,7 @@ struct HeartRateFeature {
         var currentBPM: Int? = nil
         var activeSource: SensorSource = .none
         var currentZone: Int? = nil               // Computed from BPM at read time; never persisted. BRG: I don't understand why this would be true? Explain. 
-        var userProfile: UserProfile?             // Injected from parent for Karvonen calc
+        @SharedReader(.riderProfile) var riderProfile  // HR overrides for Karvonen (DataModel.md §3.5)
     }
 
     enum Action {
@@ -500,7 +499,7 @@ struct AlertOrchestratorFeature {
     struct State: Equatable {
         var currentAlertLevel: AlertLevel = .clear
         var previousAlertLevel: AlertLevel = .clear
-        var silentModeOverrideEnabled: Bool = false  // From UserProfile
+        var silentModeOverrideEnabled: Bool = false  // Not a setting in MVP (UX.md §S12); AudioClient holds the flag
     }
 
     enum Action {

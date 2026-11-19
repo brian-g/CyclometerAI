@@ -389,7 +389,7 @@ struct CSCCalculator: Sendable {  // shared base — specialised below
     var previousWheelEventTime: UInt16 = 0
     var previousCrankRevs: UInt16 = 0
     var previousCrankEventTime: UInt16 = 0
-    var wheelCircumferenceMM: Int                // From UserProfile
+    var wheelCircumferenceMM: Int                // From AppPreferences (DataModel.md §3.6)
 
     /// Returns speed in m/s. Returns nil if delta is invalid (sensor glitch, rollover edge case).
     mutating func updateSpeed(revs: UInt32, eventTime: UInt16) -> Double? {

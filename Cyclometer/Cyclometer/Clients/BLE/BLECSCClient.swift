@@ -1142,9 +1142,10 @@ private final class CSCClientState: @unchecked Sendable {
                 return
             case .release:
                 // Every path that removes a slot releases the "csc" owner, so `BLECentral`
-                // never lists this client against a peripheral it no longer holds, and a
-                // connect request it placed can't complete into a link nobody subscribes
-                // to (BLE.md §6.1).
+                // never lists this client against a peripheral it no longer holds (BLE.md
+                // §6.1). The release cancels a pending connect only when no other client owns
+                // the peripheral, and a connect placed after it can still complete; the
+                // `.connected` no-slot guard releases that link when it comes up (#558).
                 logger.notice("interrogating \(id, privacy: .public) dropped before a role was chosen — released")
                 await bleClient.disconnect(id, cscOwnerID)
             case .reconnect:
