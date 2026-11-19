@@ -390,6 +390,8 @@ private final class CSCClientState: @unchecked Sendable {
 
     private var slots: [UUID: Slot] = [:]   // ≤ 2 entries in practice
     private var isScanning = false
+    /// Every hardware scan call goes through this, enqueued under the lock that decided it (#586).
+    private var scanCalls: ScanCallSequence
     private var wheelCircumferenceMM = defaultWheelCircumferenceMM
     private var roleState: [SensorRole: BLECSCClient.ConnectionState] = [
         .speed: .disconnected, .cadence: .disconnected,
@@ -455,6 +457,7 @@ private final class CSCClientState: @unchecked Sendable {
     init(bleClient: BLEClient, clock: any Clock<Duration>) {
         self.bleClient = bleClient
         self.clock = clock
+        self.scanCalls = ScanCallSequence(bleClient: bleClient, serviceUUID: cscServiceUUID)
         startEventLoop()
     }
 
@@ -572,34 +575,34 @@ private final class CSCClientState: @unchecked Sendable {
         // the Start sheet's pairing scan may have connected only the one that was awake.
         // Skipping here let that scan's end stop the radio, and the other sensor was
         // never seen for the whole ride (#417).
-        let shouldScan = lock.withLock { () -> Bool in
+        let call = lock.withLock { () -> Task<Void, Never>? in
             let pairedRoles = pairedAssignments.values.reduce(into: Set<SensorRole>()) { $0.formUnion($1) }
             let heldRoles = slots.values.reduce(into: Set<SensorRole>()) { $0.formUnion($1.roles) }
-            guard !isScanning, slots.isEmpty || !pairedRoles.isSubset(of: heldRoles) else { return false }
+            guard !isScanning, slots.isEmpty || !pairedRoles.isSubset(of: heldRoles) else { return nil }
             isScanning = true
             recomputeRoleStatesLocked()
-            return true
+            return scanCalls.enqueue(.start)
         }
-        guard shouldScan else {
+        guard let call else {
             logger.notice("startScanning skipped — already scanning, or a slot exists and every paired role holds one")
             return
         }
-        await bleClient.startScanning([cscServiceUUID])
+        await call.value
     }
 
     func stopScanning() async {
-        let shouldStopHardware = lock.withLock { () -> Bool in
+        let call = lock.withLock { () -> Task<Void, Never>? in
             isScanning = false
             recomputeRoleStatesLocked()
-            return !pairingScanWantsRadioLocked
+            // `BLEClient.requestedServices` is a plain set with no per-caller refcount,
+            // so dropping the CSC UUID here would cancel a pairing scan too.
+            return pairingScanWantsRadioLocked ? nil : scanCalls.enqueue(.stop)
         }
-        // `BLEClient.requestedServices` is a plain set with no per-caller refcount,
-        // so dropping the CSC UUID here would cancel a pairing scan too.
-        guard shouldStopHardware else {
+        guard let call else {
             logger.notice("stopScanning kept alive — \(self.pairingScanCountSnapshot) pairing scan(s) open")
             return
         }
-        await bleClient.stopScanning([cscServiceUUID])
+        await call.value
     }
 
     // MARK: Pairing UI support (S11 subset)
@@ -609,30 +612,30 @@ private final class CSCClientState: @unchecked Sendable {
     /// is connected. Deliberately does not touch `isScanning`, so dashboard role
     /// tiles don't flip to `.scanning` behind a settings screen.
     func beginPairingScan() async {
-        let suspended = lock.withLock { () -> Bool in
+        let call = lock.withLock { () -> Task<Void, Never>? in
             pairingScanCount += 1
             // No scan runs while suspended, so a new generation would only sweep away
             // everything still listed. The current one carries on through the suspension.
-            guard !pairingScansSuspended else { return true }
+            guard !pairingScansSuspended else { return nil }
             rotateDiscoveryGenerationLocked()
-            return false
+            // Re-issuing the scan restarts the CoreBluetooth session, so peripherals
+            // already seen are re-advertised to us rather than being suppressed as
+            // duplicates. Subscribers also get the existing inventory replayed on
+            // subscribe, so the list is never empty just because discovery was earlier.
+            return scanCalls.enqueue(.start)
         }
         // Counted, and issued on return to the foreground. `.debug`: the Sensors screen's
         // sweep lands here every 10 s whenever the backgrounded app is awake.
-        guard !suspended else {
+        guard let call else {
             logger.debug("pairing scan deferred (\(self.pairingScanCountSnapshot) open) — app in background")
             return
         }
-        // Re-issuing the scan restarts the CoreBluetooth session, so peripherals
-        // already seen are re-advertised to us rather than being suppressed as
-        // duplicates. Subscribers also get the existing inventory replayed on
-        // subscribe, so the list is never empty just because discovery was earlier.
-        await bleClient.startScanning([cscServiceUUID])
+        await call.value
         logger.notice("pairing scan started (\(self.pairingScanCountSnapshot) open)")
     }
 
     func endPairingScan() async {
-        let (shouldStopHardware, dropped) = lock.withLock { () -> (Bool, [UUID]) in
+        let (call, dropped) = lock.withLock { () -> (Task<Void, Never>?, [UUID]) in
             pairingScanCount = max(0, pairingScanCount - 1)
             // The last holder is gone and no ride will use what it connected (#585): drop
             // it all, ladders included, or a sleeping sensor is redialled by UUID for the
@@ -640,14 +643,15 @@ private final class CSCClientState: @unchecked Sendable {
             let dropped = pairingScanCount == 0 && !rideActive && !slots.isEmpty ? dropAllSlotsLocked() : []
             // Suspended: the radio was already given back by `setPairingScansSuspended`,
             // or the ambient scan is holding it.
-            return (pairingScanCount == 0 && !isScanning && !pairingScansSuspended, dropped)
+            let shouldStop = pairingScanCount == 0 && !isScanning && !pairingScansSuspended
+            return (shouldStop ? scanCalls.enqueue(.stop) : nil, dropped)
         }
         for id in dropped { await bleClient.disconnect(id, cscOwnerID) }
         if !dropped.isEmpty {
             logger.notice("pairing scan ended — no ride, dropped \(dropped.count) connection(s)")
         }
-        guard shouldStopHardware else { return }
-        await bleClient.stopScanning([cscServiceUUID])
+        guard let call else { return }
+        await call.value
         logger.notice("pairing scan stopped")
     }
 
@@ -667,24 +671,24 @@ private final class CSCClientState: @unchecked Sendable {
             guard pairingScansSuspended != suspended else { return .none }
             pairingScansSuspended = suspended
             guard pairingScanCount > 0 else { return .none }
-            if suspended { return isScanning ? .keptByAmbientScan : .stop }
+            if suspended { return isScanning ? .keptByAmbientScan : .stop(scanCalls.enqueue(.stop)) }
             // No rotation: the generation open at backgrounding may be well under a second
             // old (a sweep can land just before), and judging staleness over that window
             // would drop every row not re-sighted in it, only for it to reappear a moment
             // after the restarted scan reports it. The generation carries on, and the next
             // sweep judges it over its full interval (#418).
-            return .start
+            return .start(scanCalls.enqueue(.start))
         }
         switch change {
         case .none:
             return
         case .keptByAmbientScan:
             logger.notice("pairing scan suspended — app in background, this client's ambient scan keeps the radio")
-        case .stop:
-            await bleClient.stopScanning([cscServiceUUID])
+        case .stop(let call):
+            await call.value
             logger.notice("pairing scan stopped — app in background, \(self.pairingScanCountSnapshot) held")
-        case .start:
-            await bleClient.startScanning([cscServiceUUID])
+        case .start(let call):
+            await call.value
             logger.notice("pairing scan started (\(self.pairingScanCountSnapshot) open) — app in foreground")
         }
     }
@@ -856,15 +860,14 @@ private final class CSCClientState: @unchecked Sendable {
     }
 
     func disconnect() async {
-        let (ids, shouldStopHardware): ([UUID], Bool) = lock.withLock {
+        let (ids, call): ([UUID], Task<Void, Never>?) = lock.withLock {
             isScanning = false
-            return (dropAllSlotsLocked(), !pairingScanWantsRadioLocked)
+            // Leave the radio scanning if the pairing UI still wants it — the shared
+            // requested-services set has no per-caller refcount.
+            return (dropAllSlotsLocked(), pairingScanWantsRadioLocked ? nil : scanCalls.enqueue(.stop))
         }
         for id in ids { await bleClient.disconnect(id, cscOwnerID) }
-        // Leave the radio scanning if the pairing UI still wants it — the shared
-        // requested-services set has no per-caller refcount.
-        guard shouldStopHardware else { return }
-        await bleClient.stopScanning([cscServiceUUID])
+        await call?.value
     }
 
     func setWheelCircumference(_ mm: Int) async {

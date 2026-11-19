@@ -7,8 +7,8 @@ enum PairingScanSuspension {
     /// Suspended, but the client's own ambient scan (`isScanning`, set by `startScanning`)
     /// still wants the radio, so it stays on.
     case keptByAmbientScan
-    /// Suspended: withdraw the scan.
-    case stop
-    /// Resumed with pairing scans open: reissue the scan.
-    case start
+    /// Suspended: the scan's withdrawal, enqueued under the lock (#586). Await it.
+    case stop(Task<Void, Never>)
+    /// Resumed with pairing scans open: the scan's reissue, enqueued under the lock. Await it.
+    case start(Task<Void, Never>)
 }

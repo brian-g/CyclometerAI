@@ -31,46 +31,6 @@ private func cscPayload(
     return Data([flags] + bytes)
 }
 
-/// Holds one `connect` call between the client's decision to connect and the transport
-/// receiving it, the window a ladder rung or `setRoles` has after checking its slot under
-/// the lock and before `connect` lands. Unarmed it passes every call straight through.
-private final class ConnectGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var armed = false
-    private var opened = false
-    private var held: CheckedContinuation<Void, Never>?
-    /// Yields once when a call reaches the armed gate.
-    let reached: AsyncStream<Void>
-    private let reachedContinuation: AsyncStream<Void>.Continuation
-
-    init() { (reached, reachedContinuation) = AsyncStream<Void>.makeStream() }
-
-    func arm() { lock.withLock { armed = true; opened = false } }
-
-    func pass() async {
-        guard lock.withLock({ armed }) else { return }
-        reachedContinuation.yield()
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let resumeNow = lock.withLock { () -> Bool in
-                if opened { return true }
-                held = continuation
-                return false
-            }
-            if resumeNow { continuation.resume() }
-        }
-    }
-
-    func open() {
-        let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
-            armed = false
-            opened = true
-            defer { held = nil }
-            return held
-        }
-        continuation?.resume()
-    }
-}
-
 // MARK: - Payload parsing
 
 @Suite("BLECSCClient — measurement parsing")
@@ -365,7 +325,12 @@ struct BLECSCIntegrationTests {
         let reads: LockIsolated<[(UUID, CBUUID, CBUUID)]>
         let clock: SteppedClock
         /// Arm to hold the next `connect` before the transport sees it.
-        let connectGate: ConnectGate
+        let connectGate: CallGate
+        /// Arm to hold the next `stopScanning` before the transport sees it (#586).
+        let scanStopGate: CallGate
+        /// The services the central would be scanning for, modelled as `BLECentral` keeps
+        /// them: a start adds, a stop removes, whichever lands last wins.
+        let requested: LockIsolated<Set<CBUUID>>
 
         init() {
             let (eventStream, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
@@ -379,11 +344,20 @@ struct BLECSCIntegrationTests {
             let characteristicsDiscovered = LockIsolated<[[CBUUID]?]>([])
             let reads = LockIsolated<[(UUID, CBUUID, CBUUID)]>([])
             let clock = SteppedClock()
-            let connectGate = ConnectGate()
+            let connectGate = CallGate()
+            let scanStopGate = CallGate()
+            let requested = LockIsolated<Set<CBUUID>>([])
 
             let bleClient = BLEClient(
-                startScanning: { uuids in scanned.withValue { $0.append(uuids) } },
-                stopScanning: { uuids in scanStopped.withValue { $0.append(uuids) } },
+                startScanning: { uuids in
+                    scanned.withValue { $0.append(uuids) }
+                    requested.withValue { $0.formUnion(uuids) }
+                },
+                stopScanning: { uuids in
+                    await scanStopGate.pass()
+                    scanStopped.withValue { $0.append(uuids) }
+                    requested.withValue { $0.subtract(uuids) }
+                },
                 connect: { id, _ in
                     await connectGate.pass()
                     connectCount.withValue { $0 += 1 }
@@ -420,6 +394,8 @@ struct BLECSCIntegrationTests {
             self.reads = reads
             self.clock = clock
             self.connectGate = connectGate
+            self.scanStopGate = scanStopGate
+            self.requested = requested
         }
 
         /// Drive a peripheral through the discovery handshake to `.active`. Reports
@@ -1740,6 +1716,34 @@ struct BLECSCIntegrationTests {
         await harness.client.endPairingScan()
         #expect(await harness.currentState(.speed) == .active)
         #expect(harness.disconnected.value.isEmpty)
+    }
+
+    /// Start sheet → Start, in the bad order (#586). The sheet's last `endPairingScan` decides to
+    /// stop, and the ride's `startScanning` decides to start before that stop has landed. Each
+    /// call used to go out as soon as its lock was released, so the start could land first and
+    /// the stop then drop the CSC service, blinding the ride to a sensor that woke late.
+    @Test("A pairing scan's stop still in flight can't drop the ride's scan")
+    func pairingScanStopInFlightKeepsRideScan() async {
+        let harness = Harness()
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+        await harness.client.beginPairingScan()
+
+        harness.scanStopGate.arm()
+        var reached = harness.scanStopGate.reached.makeAsyncIterator()
+        let sheetCloses = Task { await harness.client.endPairingScan() }
+        await reached.next()                                  // the stop is decided and in flight
+
+        let rideStarts = Task { await harness.client.startScanning() }
+        #expect(await speedStates.next() == .scanning)       // the ride's start is decided
+        // Give the start every chance to run ahead of the held stop. It waits behind it.
+        await allowStrayCallsToLand()
+        #expect(harness.scanned.value.count == 1)
+
+        harness.scanStopGate.open()
+        await sheetCloses.value
+        await rideStarts.value
+        #expect(harness.requested.value == [cscServiceUUID])
     }
 
     @Test("A pairing scan ending while another is open keeps the connections")
