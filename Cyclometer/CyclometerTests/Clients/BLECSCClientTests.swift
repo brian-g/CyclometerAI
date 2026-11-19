@@ -1799,7 +1799,10 @@ struct BLECSCIntegrationTests {
         _ = await harness.devices { $0.contains { $0.id == candidate } }
         await harness.client.pair(candidate)
         harness.bringToActive(candidate)
-        _ = await harness.devices { $0.first { $0.id == candidate }?.connectionState != nil }
+        // `.active`, not just any state: `pair` creates the slot as `.connecting`, so that
+        // would end the scan with `.connected` still queued. Handled after the drop, it hits
+        // the no-slot guard (#558) and disconnects a second time.
+        _ = await harness.devices { $0.first { $0.id == candidate }?.connectionState == .active }
 
         await harness.client.endPairingScan()
         try #require(harness.disconnected.value.map(\.0) == [candidate])
