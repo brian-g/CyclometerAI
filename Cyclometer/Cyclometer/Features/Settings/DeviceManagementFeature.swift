@@ -1,6 +1,7 @@
 import ComposableArchitecture
 import Foundation
 import OSLog
+import UIKit
 
 /// The rider's pairing decisions, logged at the moment they are made. The clients log
 /// what they were *told* (`paired strap → …`); without this, nothing recorded what told
@@ -33,6 +34,8 @@ struct DeviceManagementFeature {
     @Dependency(\.variaRadarClient) var variaRadarClient
     @Dependency(\.bleHRClient) var bleHRClient
     @Dependency(\.continuousClock) var clock
+    @Dependency(\.permissionsClient) var permissionsClient
+    @Dependency(\.openURL) var openURL
 
     /// How often the list re-checks what is still advertising while the screen is open.
     ///
@@ -74,6 +77,16 @@ struct DeviceManagementFeature {
         /// tap. Non-nil means a pairing is mid-flight, which is what makes a cancelled
         /// prompt release the sensor rather than leave it connected holding no role.
         var pendingPairing: UUID? = nil
+        /// The app's Bluetooth authorization, live. Bluetooth is optional at onboarding
+        /// (#596), so a rider can reach this list with it refused, and the scan then finds
+        /// nothing. Without this the list would just search forever with no reason given.
+        var bluetoothPermission: PermissionState = .notDetermined
+
+        /// Refused by the rider or by policy: only iOS Settings can change it, so the
+        /// list says so in place of "Searching for sensors…".
+        var isBluetoothBlocked: Bool {
+            bluetoothPermission == .denied || bluetoothPermission == .restricted
+        }
 
         /// Every peripheral seen this session, one row each.
         ///
@@ -163,6 +176,9 @@ struct DeviceManagementFeature {
         /// Pull to refresh. Restarts the scan on every client.
         case refreshRequested
         case devicesUpdated(SensorKind, [DiscoveredDevice])
+        case bluetoothPermissionChanged(PermissionState)
+        /// The blocked-Bluetooth message's Open Settings button.
+        case openSettingsTapped
         case pairButtonTapped(UUID)
         case unpairButtonTapped(UUID)
         case rowTapped(UUID)
@@ -213,6 +229,14 @@ struct DeviceManagementFeature {
                             await send(.devicesUpdated(.heartRate, devices))
                         }
                     },
+                    // Replays the current state on subscribe, then follows changes — a
+                    // rider who turns Bluetooth on in Settings comes back to a list that
+                    // is searching again.
+                    .run { send in
+                        for await change in permissionsClient.statuses() where change.domain == .bluetooth {
+                            await send(.bluetoothPermissionChanged(change.state))
+                        }
+                    },
                     // Sweeping stale rows is the same operation as a manual refresh, so
                     // it reuses that action rather than growing a second path that could
                     // drift from it.
@@ -255,6 +279,16 @@ struct DeviceManagementFeature {
                     await variaRadarClient.endPairingScan()
                     await bleHRClient.beginPairingScan()
                     await bleHRClient.endPairingScan()
+                }
+
+            case .bluetoothPermissionChanged(let permission):
+                state.bluetoothPermission = permission
+                return .none
+
+            case .openSettingsTapped:
+                return .run { [openURL] _ in
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    _ = await openURL(url)
                 }
 
             case .devicesUpdated(let kind, let devices):

@@ -988,7 +988,8 @@ project uses `PBXFileSystemSynchronizedRootGroup`, so new files need no `.xcodep
 ```
 Cyclometer/
 ├── App/                                   // AppFeature, AppView, CyclometerApp (@main),
-│                                          // Logger+Cyclometer, DocumentFolders, AutoDim bridge
+│                                          // Logger+Cyclometer, DocumentFolders, AutoDim bridge,
+│                                          // AppLinks (acmeapps.xyz URLs, #598)
 ├── Features/
 │   ├── ActiveRide/
 │   │   ├── ActiveRideFeature.swift        // parent reducer for the ride

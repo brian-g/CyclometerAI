@@ -2,6 +2,7 @@
 **Version:** 0.8.1  
 **Date:** 2026-09-17
 
+**Updated:** 2026-11-19 — Optional permissions (#596, #597): §S01's Next waits for Location only; Bluetooth and Motion and Fitness are Optional, and each row's Required/Optional label comes from the gate itself. §S11 (and so §S02) replaces "Searching for sensors…" with "Bluetooth Not Allowed" and an Open Settings button when Bluetooth is refused. §S12's Privacy Policy row opens the web policy instead of a bundled copy (#598).  
 **Updated:** 2026-11-17 — History unavailable (#206): when a store fails to open at launch, the app runs on a stand-in instead of crashing. S14 and S19 then say history is unavailable and offer Reset; the track store alone failing leads S14 with a notice. §S14 History Unavailable.  
 **Updated:** 2026-11-14 — Rain along the route (#152): with a route loaded, the dashboard's top banner says when rain is ahead ("Rain 70% · 18.4 km ahead", or "· here"). It is silent, lasts four seconds and shows on every check (about 10 minutes apart) while rain is ahead. It ranks below source switch and calibration and above off-route. §S05 and §W10.  
 **Updated:** 2026-11-13 — Wind map (#561): §W10's sheet opens on a map of the wind (an even field of arrows from W10's reading on a free ride; the forecast along the route ahead while following one), and §S20's map draws the forecast wind along the route. One sample per 10 km, 2 to 8, each the forecast for the hour the rider gets there. §S15's map-sheet wind layer is left for a follow-up.  
@@ -242,10 +243,10 @@ W9 Directions has none: its turn arrow already marks it. W2 Average Speed and W1
 > *Refer to `assets/design/Design.sketch` — S01.*
 
 ### Permissions Flow
-- Bluetooth (required for BLE sensors)
+- Bluetooth (optional — BLE sensors; without it speed and distance come from GPS)
 - Location **When In Use** (required for GPS track)
-- Motion and Fitness (required for activity detection, *where the hardware exists* — see the
-  availability note below)
+- Motion and Fitness (optional — the barometer, for elevation; without it elevation comes from GPS (#387).
+  *Where the hardware exists* — see the availability note below)
 - HealthKit (read: HR, resting HR, max HR, date of birth, body weight and biological sex — the last
   three for the workout's energy estimate — and workouts — only to avoid saving a ride twice; write: the `HKWorkout` recorded at ride end per §S10, with its cycling distance and active energy — both are requested together so the rider
   answers one sheet)
@@ -276,13 +277,18 @@ W9 Directions has none: its turn arrow already marks it. W2 Average Speed and W1
 ### Interactions
 For each permission item, when the user taps it, the system permission prompt will be displayed. When permission has been successfully granted for an item, the circle to the left of the item will become a filled circular checkmark. If they deny a permission, it will be a red X.
 
-If the user blocks Bluetooth, Location, or Motion and Fitness, they will not be able to proceed. Health is optional; HR zones are unavailable if denied. There is no skip affordance — users who have denied a required permission must go to iOS Settings to re-enable it.
+Location is the only required permission: if the user blocks it, they cannot proceed, and must go to iOS Settings to re-enable it. There is no skip affordance. Bluetooth, Motion and Fitness, and Health are optional. Without Bluetooth no sensor can be paired, and §S11 says so; without Motion and Fitness elevation comes from GPS; without Health, HR zones use defaults.
 
-The primary button reads **Next** and is enabled once the three required permissions are granted.
+The primary button reads **Next** and is enabled once Location is granted. Each row's sub-label reads **Required** or **Optional** from the same list Next checks, so the two cannot disagree.
+
+> **Revised 2026-11-19 (#596, #597).** Bluetooth and Motion and Fitness were required. Bluetooth was labelled
+> Optional while Next waited on it, so a rider who refused it could not finish onboarding. Neither is needed to
+> record a ride: GPS covers speed and distance, and elevation falls back to GPS altitude when the barometer is
+> denied (#387). Location stays required because a ride without a GPS track is not a recording.
 
 ### Open UX Questions
 - [x] Single permission-per-screen carousel, or batched permission request? Single permission request per item, all shown on the same screen.
-- [x] What happens if the user denies Bluetooth? Cannot proceed.
+- [x] What happens if the user denies Bluetooth? ~~Cannot proceed.~~ Proceeds; Bluetooth is optional, and the sensor list says it isn't allowed (#596).
 - [x] Skip / come back later affordance? No.
 - [x] Files permission? There isn't one — see the revision note above.
 - [x] Location Always or When In Use at onboarding? When In Use; escalate at first ride start.
@@ -1241,6 +1247,12 @@ foot of the list always shows a small progress indicator beside **"Searching for
 discovered and nothing paired, that row is the entire list, and the section footer adds **"Make sure your
 sensors are awake and within range."** — the footer appears only in that case.
 
+With Bluetooth refused (denied or restricted), the scan can find nothing, so that row instead reads
+**"Bluetooth Not Allowed"** over "Allow Bluetooth for Acme Ride in Settings to find and connect your sensors."
+and an **Open Settings** button, and the footer is dropped (#596). Paired sensors still list above it, so they
+can be unpaired. It follows the permission live: allowing Bluetooth in Settings brings the searching row back.
+A rider who hasn't been asked yet sees the system prompt when the scan starts.
+
 > **Revised 2026-08-14 (M10).** This section previously specified five sections keyed by role (Radar, HR,
 > Speed, Cadence, Power). The Sketch frame shows one flat list mixing device types, and the Sketch frame is
 > authoritative. A role-sectioned list would also have had to invent an answer for where an unpaired device
@@ -1361,7 +1373,7 @@ a confirmation:
 
 **About**
 - Version (read from bundle, shown as `CFBundleShortVersionString (CFBundleVersion)`)
-- Privacy Policy (navigates to inline policy view)
+- Privacy Policy — a link that opens the published policy, https://acmeapps.xyz/ride/privacy/, in Safari (#598). No policy text is bundled: the copy drifted from both the app and the site
 
 ### Deferred to Phase 2
 

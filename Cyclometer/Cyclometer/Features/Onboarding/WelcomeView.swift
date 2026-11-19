@@ -79,13 +79,9 @@ struct WelcomeView: View {
         case .health: "HealthKit"
         }
     }
+    /// From the gate itself, so a row can't say "Optional" while Next waits on it (#596).
     private static func subLabel(for domain: PermissionDomain) -> String {
-        switch domain {
-        case .locationWhenInUse: "Required"
-        case .motion: "Required"
-        case .bluetooth: "Optional"
-        case .health: "Optional"
-        }
+        WelcomeFeature.State.isRequired(domain) ? "Required" : "Optional"
     }
 
 }
@@ -131,6 +127,8 @@ private struct PermissionStatusOval: View {
     }
 }
 
+// MARK: - Previews
+
 #Preview("Welcome — needs permissions") {
     WelcomeView(
         store: Store(initialState: WelcomeFeature.State()) {
@@ -151,6 +149,20 @@ private struct PermissionStatusOval: View {
                 .locationWhenInUse: .granted,
                 .motion: .granted,
                 .health: .granted
+            ])
+        }
+    )
+}
+
+#Preview("Welcome — optional permissions denied") {
+    WelcomeView(
+        store: Store(initialState: WelcomeFeature.State()) {
+            WelcomeFeature()
+        } withDependencies: {
+            $0.permissionsClient = .mock(initial: [
+                .bluetooth: .denied,
+                .locationWhenInUse: .granted,
+                .motion: .denied
             ])
         }
     )

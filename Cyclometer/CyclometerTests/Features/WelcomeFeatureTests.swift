@@ -34,15 +34,21 @@ struct WelcomeFeatureTests {
     }
 
     // Pure — no TestStore needed, isNextEnabled is a computed property on State.
-    @Test("Next requires Bluetooth, Location, Motion each granted or unavailable; Health never gates",
+    @Test("Next requires only Location granted; Bluetooth, Motion and Health never gate (#596, #597)",
           arguments: [
         // (bluetooth, location, motion, health, expected)
         (PermissionState.granted, PermissionState.granted, PermissionState.granted, PermissionState.notDetermined, true),
         (.granted, .granted, .unavailable, .notDetermined, true),               // Simulator case
         (.granted, .grantedAlways, .granted, .notDetermined, true),
-        (.denied, .granted, .granted, .granted, false),
+        (.denied, .granted, .granted, .granted, true),                          // Bluetooth denied (#596)
+        (.restricted, .granted, .granted, .granted, true),
+        (.granted, .granted, .denied, .granted, true),                          // Motion denied: GPS altitude (#597)
+        (.granted, .granted, .notDetermined, .granted, true),
+        (.notDetermined, .granted, .notDetermined, .notDetermined, true),       // only Location answered
+        (.denied, .granted, .denied, .notDetermined, true),                     // every optional domain refused
         (.granted, .restricted, .granted, .granted, false),
-        (.granted, .granted, .notDetermined, .granted, false),
+        (.granted, .denied, .granted, .granted, false),
+        (.granted, .notDetermined, .granted, .granted, false),
         (.granted, .granted, .granted, .denied, true),                          // impossible in practice, still must not gate
     ])
     func nextGating(bluetooth: PermissionState, location: PermissionState, motion: PermissionState, health: PermissionState, expected: Bool) {
@@ -56,6 +62,23 @@ struct WelcomeFeatureTests {
     func nextButtonTappedGuardsWhenDisabled() async {
         let store = Self.makeStore(permissionsClient: .mock())
         await store.send(.nextButtonTapped)
+    }
+
+    @Test("nextButtonTapped sends delegate.next with Bluetooth and Motion denied (#596, #597)")
+    func nextButtonTappedWithOptionalDomainsDenied() async {
+        let store = Self.makeStore(permissionsClient: .mock(initial: [
+            .bluetooth: .denied, .locationWhenInUse: .granted, .motion: .denied,
+        ]))
+        store.exhaustivity = .off(showSkippedAssertions: false)
+        await store.send(.task)
+        await store.send(.nextButtonTapped)
+        await store.receive(\.delegate.next)
+    }
+
+    @Test("Only Location is labelled Required; the label reads the gate itself (#596)",
+          arguments: PermissionDomain.allCases)
+    func requiredMatchesGate(domain: PermissionDomain) {
+        #expect(WelcomeFeature.State.isRequired(domain) == (domain == .locationWhenInUse))
     }
 
     @Test("nextButtonTapped sends delegate.next once enabled")

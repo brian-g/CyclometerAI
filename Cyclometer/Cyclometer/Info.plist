@@ -51,7 +51,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Acme Ride uses your location to record your route. GPS is not active unless you are recording a ride.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>Acme Ride uses motion and fitness activity to tell riding from stopping, so it can pause and resume your ride automatically.</string>
+	<string>Acme Ride uses your iPhone's barometer to measure elevation and climbing accurately during a ride.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIAppFonts</key>

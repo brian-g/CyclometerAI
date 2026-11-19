@@ -124,14 +124,28 @@ final class WelcomeSnapshotTests: XCTestCase {
     /// Bluetooth denied — neither existing `#Preview` exercises
     /// `PermissionStatusOval`'s red-X branch, which only `.denied`/`.restricted`
     /// render. Next stays disabled and the guidance text stays visible.
+    /// Location is the only permission that blocks Next (#596, #597).
     func testDeniedBlocksNext() {
+        assertBothSchemes(
+            screen(permissionStates: [
+                .bluetooth: .granted,
+                .locationWhenInUse: .denied,
+                .motion: .granted
+            ]),
+            named: "deniedBlocksNext"
+        )
+    }
+
+    /// Bluetooth and Motion refused, Location allowed: both rows show a red X labelled
+    /// Optional, and Next is enabled (#596, #597).
+    func testOptionalDeniedAllowsNext() {
         assertBothSchemes(
             screen(permissionStates: [
                 .bluetooth: .denied,
                 .locationWhenInUse: .granted,
-                .motion: .granted
+                .motion: .denied
             ]),
-            named: "deniedBlocksNext"
+            named: "optionalDeniedAllowsNext"
         )
     }
 }

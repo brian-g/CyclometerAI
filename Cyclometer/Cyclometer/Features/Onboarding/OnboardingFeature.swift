@@ -46,17 +46,16 @@ struct OnboardingFeature {
             switch action {
             case .task:
                 // Only relevant when resuming past Welcome: a rider who already passed
-                // it may have revoked a required permission in Settings since — the
-                // Welcome-completion decision itself belongs to WelcomeFeature/#106, not
-                // here, so this is a coarse defensive re-check rather than a duplicate of
-                // that predicate.
+                // it may have revoked a required permission in Settings since. The
+                // predicate is Welcome's own, so the two can't disagree about what is
+                // required (#596).
                 guard state.step == .sensorPairing else { return .none }
                 return .run { send in
-                    async let bluetooth = permissionsClient.status(.bluetooth)
-                    async let location = permissionsClient.status(.locationWhenInUse)
-                    async let motion = permissionsClient.status(.motion)
-                    let (b, l, m) = await (bluetooth, location, motion)
-                    let satisfied = b.isGranted && l.isGranted && (m.isGranted || m == .unavailable)
+                    var satisfied = true
+                    for domain in WelcomeFeature.State.requiredDomains {
+                        let status = await permissionsClient.status(domain)
+                        if !WelcomeFeature.State.isSatisfied(status) { satisfied = false }
+                    }
                     await send(.requiredPermissionsChecked(satisfied: satisfied))
                 }
 

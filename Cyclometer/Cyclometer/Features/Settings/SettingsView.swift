@@ -189,20 +189,10 @@ private struct AboutSection: View {
     var body: some View {
         Section("About") {
             LabeledContent("Version", value: appVersion)
-            NavigationLink("Privacy Policy") { PrivacyPolicyView() }
+            // Opens the published policy in Safari (#598). A `Link`, so VoiceOver reads it
+            // as one; offline, Safari shows its own error page.
+            Link("Privacy Policy", destination: AppLinks.privacyPolicy)
         }
-    }
-}
-
-private struct PrivacyPolicyView: View {
-    var body: some View {
-        List {
-            Section("Privacy Policy") {
-                ForEach(SettingsData.privacyPolicyParagraphs, id: \.self) { Text($0) }
-            }
-        }
-        .navigationTitle("Privacy Policy")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

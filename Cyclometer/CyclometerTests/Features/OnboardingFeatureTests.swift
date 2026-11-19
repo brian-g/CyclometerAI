@@ -156,4 +156,36 @@ struct OnboardingFeatureTests {
 
         #expect(store.state.step == .sensorPairing)
     }
+
+    @Test(".task on Sensor Pairing with Bluetooth and Motion denied stays put — only Location is required (#596, #597)")
+    func taskOnSensorPairingWithOptionalDomainsDeniedStaysPut() async {
+        let store = Self.makeStore(
+            step: .sensorPairing,
+            permissionsClient: .mock(initial: [
+                .bluetooth: .denied,
+                .locationWhenInUse: .granted,
+                .motion: .denied,
+            ])
+        )
+
+        await store.send(.task)
+        await store.receive(\.requiredPermissionsChecked)
+
+        #expect(store.state.step == .sensorPairing)
+    }
+
+    @Test(".task on Sensor Pairing with Location revoked returns to Welcome")
+    func taskOnSensorPairingWithLocationRevokedReturnsToWelcome() async {
+        let store = Self.makeStore(
+            step: .sensorPairing,
+            permissionsClient: .mock(initial: [
+                .bluetooth: .granted,
+                .locationWhenInUse: .denied,
+                .motion: .granted,
+            ])
+        )
+
+        await store.send(.task)
+        await store.receive(\.requiredPermissionsChecked) { $0.step = .welcome }
+    }
 }

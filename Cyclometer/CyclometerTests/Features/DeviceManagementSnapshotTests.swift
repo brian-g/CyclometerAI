@@ -76,7 +76,8 @@ final class DeviceManagementSnapshotTests: XCTestCase {
     /// `DeviceManagementFeatureTests.makeStore`.
     private func screen(
         sources: [SensorKind: [DiscoveredDevice]] = [:],
-        pairedSensors: [PairedSensor] = []
+        pairedSensors: [PairedSensor] = [],
+        bluetoothPermission: PermissionState = .notDetermined
     ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
@@ -84,7 +85,11 @@ final class DeviceManagementSnapshotTests: XCTestCase {
         } operation: {
             @Shared(.appPreferences) var preferences
             $preferences.withLock { $0.pairedSensors = pairedSensors }
-            return Store(initialState: DeviceManagementFeature.State(sources: sources)) {
+            // Seeded, not fed through `.task`: a snapshot renders before the permission
+            // stream would deliver.
+            return Store(initialState: DeviceManagementFeature.State(
+                sources: sources, bluetoothPermission: bluetoothPermission
+            )) {
                 DeviceManagementFeature()
             } withDependencies: {
                 // Every testValue stream finishes without yielding, so the seeded
@@ -139,6 +144,15 @@ final class DeviceManagementSnapshotTests: XCTestCase {
     /// the only hint the rider gets — there is no state in which the scan has finished.
     func testEmptyAndScanning() {
         assertBothSchemes(screen(), named: "empty")
+    }
+
+    /// #596: Bluetooth refused, so the scan row says why and offers Settings, and the
+    /// footer hint is gone. A paired sensor still lists above it, to be unpaired.
+    func testBluetoothNotAllowed() {
+        assertBothSchemes(
+            screen(pairedSensors: Self.outOfRangeRecords, bluetoothPermission: .denied),
+            named: "bluetoothNotAllowed"
+        )
     }
 
     func testPairedButOutOfRange() {

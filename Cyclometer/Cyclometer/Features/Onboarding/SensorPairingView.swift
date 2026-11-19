@@ -44,6 +44,8 @@ struct SensorPairingView: View {
     }
 }
 
+// MARK: - Previews
+
 private func stubbedDevices<Client>(
     _ client: inout Client,
     _ keyPath: WritableKeyPath<Client, @Sendable () -> AsyncStream<[DiscoveredDevice]>>,
@@ -79,6 +81,7 @@ private func stubbedDevices<Client>(
             var hr = BLEHRClient.testValue
             stubbedDevices(&hr, \.discoveredDevices, DeviceDemoData.hrDevices)
             $0.bleHRClient = hr
+            $0.permissionsClient = .mock(initial: [.bluetooth: .granted])
         }
     )
 }
@@ -91,6 +94,24 @@ private func stubbedDevices<Client>(
             $0.bleCSCClient = .testValue
             $0.variaRadarClient = .testValue
             $0.bleHRClient = .testValue
+            $0.permissionsClient = .mock(initial: [.bluetooth: .granted])
+        }
+    )
+}
+
+#Preview("Add Sensors — Bluetooth not allowed") {
+    SensorPairingView(
+        store: Store(
+            initialState: SensorPairingFeature.State(
+                deviceManagement: DeviceManagementFeature.State(bluetoothPermission: .denied)
+            )
+        ) {
+            SensorPairingFeature()
+        } withDependencies: {
+            $0.bleCSCClient = .testValue
+            $0.variaRadarClient = .testValue
+            $0.bleHRClient = .testValue
+            $0.permissionsClient = .mock(initial: [.bluetooth: .denied])
         }
     )
 }
