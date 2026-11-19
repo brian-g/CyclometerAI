@@ -46,16 +46,35 @@ extension RideEndIntentClient: DependencyKey {
     static func file(at url: URL) -> RideEndIntentClient {
         .store(
             read: {
-                guard let data = try? Data(contentsOf: url) else { return [] }
+                let data: Data
+                do {
+                    data = try Data(contentsOf: url)
+                } catch CocoaError.fileReadNoSuchFile {
+                    return []
+                } catch {
+                    // Read as empty, so the next save or clear writes over every ride's marker.
+                    logger.error("failed to read ride-end markers: \(error.localizedDescription, privacy: .public)")
+                    return []
+                }
                 if let markers = try? JSONDecoder().decode([PendingRideEnd].self, from: data) {
                     return markers
                 }
                 // Written before #583, when the file held one marker.
-                return (try? JSONDecoder().decode(PendingRideEnd.self, from: data)).map { [$0] } ?? []
+                if let marker = try? JSONDecoder().decode(PendingRideEnd.self, from: data) {
+                    return [marker]
+                }
+                logger.error("ride-end markers file is undecodable; the next save or clear replaces it")
+                return []
             },
             write: { markers in
                 guard !markers.isEmpty else {
-                    try? FileManager.default.removeItem(at: url)
+                    do {
+                        try FileManager.default.removeItem(at: url)
+                    } catch CocoaError.fileNoSuchFile {
+                        // Nothing to drop.
+                    } catch {
+                        logger.error("failed to remove ride-end markers: \(error.localizedDescription, privacy: .public)")
+                    }
                     return
                 }
                 do {
@@ -63,7 +82,7 @@ extension RideEndIntentClient: DependencyKey {
                 } catch {
                     // Best effort. A lost marker only costs the recovery this exists for;
                     // it must never take the ride-end sequence down with it.
-                    logger.error("failed to record ride-end intent: \(error.localizedDescription, privacy: .public)")
+                    logger.error("failed to write ride-end markers: \(error.localizedDescription, privacy: .public)")
                 }
             }
         )

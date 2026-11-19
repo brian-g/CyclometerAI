@@ -491,7 +491,7 @@ struct AppFeatureTests {
         #expect(rideEndIntent.loadAll() == [marker])
     }
 
-    /// #357: the marker is cleared only while it is still the leftover ride's. The ride just started
+    /// #357, #583: the close-out clears only the leftover ride's marker. The ride just started
     /// can have ended — its Finish writes its own marker first — while this finalize was in flight,
     /// and that marker is the only record of its end if its own finalize fails.
     @Test("A close-out racing a start leaves a marker the new ride wrote while it was finalizing")
