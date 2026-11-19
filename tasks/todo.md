@@ -2595,3 +2595,18 @@ Bluetooth switched off (not refused) is not covered and still shows the searchin
 `testDeniedBlocksNext` denied Bluetooth, which no longer blocks Next, so it now denies Location. New
 snapshots: `testOptionalDeniedAllowsNext`, `testBluetoothNotAllowed`. Re-recorded with
 `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`, each image checked; the four snapshot suites then pass (19/19).
+
+---
+
+# #584 — Race-branch ride with a marker gets its Health workout
+
+Branch: `fix/584-race-branch-marker-workout`
+
+Decision (Brian, 2026-11-19): yes, a race-branch close-out with a ride-end marker gets a workout like the main path.
+
+- [x] `AppFeature` race branch: settle only the no-marker close-out; a marker ride stays Health-owed after finalize
+- [x] Test: marker ride's workout is written ending at the marker's time (`resumableRideFetchedDuringAStartUsesTheRideEndMarker`)
+- [x] Test: no-marker ride is still settled (`resumableRideFetchedDuringAStartWithoutItsMarker`)
+- [x] `UX.md` §HKWorkout orphan sentence + changelog line
+- [x] Builds for testing
+- [ ] Targeted `AppFeatureTests` run (when Brian asks)
