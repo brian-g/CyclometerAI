@@ -5,7 +5,7 @@ description: This skill should be used when the user asks to add a new TCA featu
 
 # TCA Feature Scaffold
 
-This skill encodes the real pattern already living in `Features/ActiveRide/Cadence/CadenceFeature.swift` and its companion files — the most complete, currently-accurate example in the repo (a BLE-backed sensor feature with a reconnect grace window, a widget view, its dashboard adapter, reducer tests, and snapshot tests). For where files go, `assets/TCA.md` §8 is the map of the source tree.
+This skill encodes the real pattern already living in `Features/ActiveRide/Cadence/CadenceFeature.swift` and its companion files — the most complete, currently-accurate example in the repo (a BLE-backed sensor feature with a stale-data watchdog, a widget view, its dashboard adapter, reducer tests, and snapshot tests). For where files go, `assets/TCA.md` §8 is the map of the source tree.
 
 ## File placement
 
@@ -18,8 +18,8 @@ Copy `assets/FeatureTemplate.swift.txt` and fill in the placeholders. Key shape,
 - `@Reducer struct <Name>Feature`, `@ObservableState struct State: Equatable`, `enum Action: Equatable`.
 - Dependencies via `@Dependency(\.xClient) var xClient` — never import `CoreBluetooth`/`CoreLocation`/etc. directly in a reducer; go through the `@DependencyClient` in `Clients/`.
 - A `.run { [xClient] send in ... }` effect subscribing to the client's `AsyncStream`, `.merge`d with a second `.run` for connection-state if the client exposes one separately (see `CadenceFeature.startListening`, which merges a cadence stream and a connection-state stream).
-- Reconnect/timeout patterns use a private `enum CancelID { case reconnectTimer }` and `.cancellable(id: CancelID.reconnectTimer, cancelInFlight: true)`; new data arriving cancels the pending timer (`return .cancel(id: CancelID.reconnectTimer)`), a terminal `.disconnected` clears the reading immediately with no grace delay.
-- `static let` constants for tunables (history window, grace delay) live on the reducer type itself, not scattered magic numbers.
+- Stale-data timeouts use a private `enum CancelID { case staleDataTimer }`. Each reading restarts the watchdog by merging an explicit `.cancel(id: CancelID.staleDataTimer)` with a `clock.sleep` `.run` marked `.cancellable(id: CancelID.staleDataTimer, cancelInFlight: true)`, because `cancelInFlight` alone leaves room for the old timeout to land. Non-terminal connection-state changes leave the watchdog alone; a terminal `.disconnected` clears the reading immediately and cancels the timer (see `CadenceFeature`'s `.cadenceReceived` and `.bleConnectionChanged`).
+- `static let` constants for tunables (history window, stale-data window) live on the reducer type itself, not scattered magic numbers.
 
 ## Composing into a parent
 
@@ -44,7 +44,7 @@ Rules that apply to every widget view in this codebase:
 
 - Design-system tokens only: `cy`-prefixed colors (`Color.cyBgSecondary`, `Color.cyTextPrimary`, …), `Spacing`/`Opacity` constants, shared components (`HeroNumber`, `WidgetLabel`) — never a hardcoded hex, point size, or opacity literal.
 - Layout branches on `size: WidgetSize` (`.oneByOne`/`.twoByOne`/`.twoByTwo`) with a dedicated `oneByOneContent`/`twoByOneContent` computed property per variant.
-- Include `#Preview` blocks for the realistic-data case and the "no signal" / empty-state case, at both grid sizes the widget actually supports — copy the four-preview pattern at the bottom of `CadenceWidgetView.swift`.
+- Include `#Preview` blocks for the realistic-data case and the "no signal" / empty-state case, at every grid size the widget supports (`.claude/rules/previews.md` has the full preview rules) — follow the `// MARK: - Previews` block at the bottom of `CadenceWidgetView.swift`.
 
 ## Tests
 
@@ -53,7 +53,7 @@ Two files, mirroring `CadenceFeatureTests.swift` and `CadenceWidgetSnapshotTests
 **`<Name>FeatureTests.swift`** — Swift Testing, not XCTest. Copy `assets/FeatureTests.swift.txt`:
 - `@MainActor @Suite("<Name>Feature") struct <Name>FeatureTests`, a private `makeStore(...)` helper that installs `withDependencies` (fake client, `TestClock`, pinned `date`).
 - `await store.send(.action) { $0.field = expected }` for direct state mutations; `await store.receive(\.action) { ... }` for effect-produced actions.
-- Cover the reconnect grace window explicitly if the feature has one: data-cancels-pending-timer, no-timer-armed-without-a-prior-reading, timeout-clears-after-the-delay, recovery-within-the-window-keeps-the-reading, terminal-disconnect-clears-immediately. These five cases are the actual regression surface for every BLE sensor feature in this app — see `CadenceFeatureTests`' "BLE reconnect grace window" section.
+- Cover the stale-data watchdog explicitly if the feature has one: readings stopping while the link stays `.active` clear the value; each reading restarts the window; a flapping link neither restarts nor cancels it; the first reading after a clear shows again and re-arms it; a terminal disconnect clears immediately and disarms it. These cases are the regression surface for every BLE sensor feature in this app — see `CadenceFeatureTests`' "Stale-data watchdog" section.
 
 **`<Name>WidgetSnapshotTests.swift`** — XCTest + `swift-snapshot-testing`. Copy `assets/WidgetSnapshotTests.swift.txt`:
 - Fixed-size canvas matching the widget's actual grid slot in points (e.g. 393×96 for a 2×1 row, 196×96 for a 1×1). Look up the real slot size from a sibling widget at the same `WidgetSize` rather than guessing.

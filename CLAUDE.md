@@ -21,7 +21,7 @@ All manual design assets live under `assets/design/`. When implementing UI, alwa
 | App icon | `assets/design/CyclometerIcon.sketch` | App icon artwork, all required sizes |
 | D-DIN fonts | `assets/design/d-din/` | Dashboard numeric typeface; must be bundled in the Xcode target. OTF files are licensed under SIL Open Font License. |
 
-> **Color token rule:** Always reference `assets/design/colors.md` for hex values and semantic token names before hardcoding any color in Swift. The Swift token file is `Cyclometer/Cyclometer/UI/DesignSystem/Color+Cyclometer.swift`, backed by asset-catalog color sets in `Cyclometer/Cyclometer/Assets.xcassets/colors/`. **In code the tokens are `cy`-prefixed** (e.g. `Color.cyPrimary`, `cyHRZone3`, `cyRatingBad`); the `br`-prefixed names used in the UX/design specs map 1:1 to these `cy` tokens (`brPrimary` → `cyPrimary`).
+> **Color token rule:** Use the semantic color tokens in Swift, never a hardcoded hex value. `assets/design/colors.md` is the canonical source for token names and hex values: check it before adding or changing a token. The Swift token file is `Cyclometer/Cyclometer/UI/DesignSystem/Color+Cyclometer.swift`, backed by asset-catalog color sets in `Cyclometer/Cyclometer/Assets.xcassets/colors/`. **In code the tokens are `cy`-prefixed** (e.g. `Color.cyPrimary`, `cyHRZone3`, `cyRatingBad`); the `br`-prefixed names used in the UX/design specs map 1:1 to these `cy` tokens (`brPrimary` → `cyPrimary`).
 
 ## Planned Architecture (from PRD.md)
 

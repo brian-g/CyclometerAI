@@ -1,6 +1,6 @@
 ---
 name: gh-batch
-description: This skill should be used when the user asks to batch-create GitHub issues from a milestone or spec section, file a set of issues for a wave of work, close out or relabel a group of issues, or move several issues between milestones. Triggers on phrases like "create issues for M10.7", "file issues for the weather section", "batch close these", or "move these to the next milestone". Encodes this repo's exact issue title/body/label conventions so batch-created issues match the existing ~150 issues rather than drifting from them.
+description: This skill should be used when the user asks to batch-create GitHub issues from a milestone or spec section, file a set of issues for a wave of work, close out or relabel a group of issues, or move several issues between milestones. Triggers on phrases like "create issues for M10.7", "file issues for the weather section", "batch close these", or "move these to the next milestone". Encodes this repo's exact issue title/body/label conventions so batch-created issues match the existing ones rather than drifting from them.
 ---
 
 # gh-batch

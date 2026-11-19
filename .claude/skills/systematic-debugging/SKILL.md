@@ -7,43 +7,15 @@ description: Use when encountering any bug, test failure, or unexpected behavior
 
 ## Overview
 
-**Core principle:** ALWAYS find root cause before attempting fixes. Symptom fixes are failure.
-
-**Violating the letter of this process is violating the spirit of debugging.**
-
-## The Iron Law
-
-```
-NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST
-```
-
-If you haven't completed Phase 1, you cannot propose fixes.
+**Core principle:** find the root cause before attempting a fix. Don't propose a fix until Phase 1 has found it; a fix aimed at the symptom doesn't hold.
 
 ## When to Use
 
-Use for ANY technical issue:
-- Test failures
-- Bugs in production
-- Unexpected behavior
-- Performance problems
-- Build failures
-- Integration issues
-
-**Use this ESPECIALLY when:**
-- Under time pressure (emergencies make guessing tempting)
-- "Just one quick fix" seems obvious
-- You've already tried multiple fixes
-- Previous fix didn't work
-- You don't fully understand the issue
-
-**Don't skip when:**
-- Issue seems simple (simple bugs have root causes too)
-- You're in a hurry (rushing guarantees rework)
-- Manager wants it fixed NOW (systematic is faster than thrashing)
+Use it for any technical issue: test failures, bugs in production, unexpected behavior, performance problems, build failures, integration issues. That includes issues that look simple (they have root causes too), and it matters most under time pressure or once a first fix hasn't worked.
 
 ## The Four Phases
 
-You MUST complete each phase before proceeding to the next.
+Work through the phases in order: each one's output is the next one's input.
 
 ### Phase 1: Root Cause Investigation
 
@@ -210,48 +182,9 @@ You MUST complete each phase before proceeding to the next.
 
    This is NOT a failed hypothesis - this is a wrong architecture.
 
-## Red Flags - STOP and Follow Process
+## Signs you've left the process
 
-If you catch yourself thinking:
-- "Quick fix for now, investigate later"
-- "Just try changing X and see if it works"
-- "Add multiple changes, run tests"
-- "Skip the test, I'll manually verify"
-- "It's probably X, let me fix that"
-- "I don't fully understand but this might work"
-- "Pattern says X but I'll adapt it differently"
-- "Here are the main problems: [lists fixes without investigation]"
-- Proposing solutions before tracing data flow
-- **"One more fix attempt" (when already tried 2+)**
-- **Each fix reveals new problem in different place**
-
-**ALL of these mean: STOP. Return to Phase 1.**
-
-**If 3+ fixes failed:** Question the architecture (see Phase 4.5)
-
-## your human partner's Signals You're Doing It Wrong
-
-**Watch for these redirections:**
-- "Is that not happening?" - You assumed without verifying
-- "Will it show us...?" - You should have added evidence gathering
-- "Stop guessing" - You're proposing fixes without understanding
-- "Ultra-think this" - Question fundamentals, not just symptoms
-- "We're stuck?" (frustrated) - Your approach isn't working
-
-**When you see these:** STOP. Return to Phase 1.
-
-## Common Rationalizations
-
-| Excuse | Reality |
-|--------|---------|
-| "Issue is simple, don't need process" | Simple issues have root causes too. Process is fast for simple bugs. |
-| "Emergency, no time for process" | Systematic debugging is FASTER than guess-and-check thrashing. |
-| "Just try this first, then investigate" | First fix sets the pattern. Do it right from the start. |
-| "I'll write test after confirming fix works" | Untested fixes don't stick. Test first proves it. |
-| "Multiple fixes at once saves time" | Can't isolate what worked. Causes new bugs. |
-| "Reference too long, I'll adapt the pattern" | Partial understanding guarantees bugs. Read it completely. |
-| "I see the problem, let me fix it" | Seeing symptoms ≠ understanding root cause. |
-| "One more fix attempt" (after 2+ failures) | 3+ failures = architectural problem. Question pattern, don't fix again. |
+Go back to Phase 1 when you catch yourself proposing a fix you can't explain, changing several things before re-testing, skipping the failing test, or adapting a reference pattern you haven't read in full. The same goes when the user asks whether something was actually verified or tells you to stop guessing. After three failed fixes, stop and question the architecture (Phase 4, step 5).
 
 ## Quick Reference
 

@@ -1,10 +1,10 @@
-// Template — adapted from Features/ActiveRide/CadenceFeature.swift, the most
-// complete current example of this codebase's reducer shape.
+// Template — adapted from Features/ActiveRide/Cadence/CadenceFeature.swift, the
+// most complete current example of this codebase's reducer shape.
 //
 // Fill in every <Name>/<name>/<Area> placeholder, then delete anything the
-// feature doesn't need (e.g. the reconnect-grace-window machinery only
-// applies to BLE-backed sensor features — drop CancelID/.cadenceReconnectTimedOut
-// analogues entirely if the feature has no reconnecting hardware source).
+// feature doesn't need (e.g. the stale-data watchdog only applies to BLE-backed
+// sensor features — drop CancelID/.staleDataTimedOut and `staleDataWindow`
+// entirely if the feature has no streaming hardware source).
 
 import ComposableArchitecture
 import Foundation
@@ -13,7 +13,13 @@ import Foundation
 struct <Name>Feature {
     // Tunables live here as `static let`, not as scattered magic numbers.
     // static let historyWindow: TimeInterval = 3600
-    // static let reconnectGraceDelay: Duration = .seconds(10)
+    //
+    // How long the value may go without a reading before it clears to "--".
+    // Readings, not connection state, drive the clear: a link that flaps between
+    // .reconnecting and .active says nothing about whether data is arriving.
+    // Size it to outlast the sensor's longest silence on an unbroken link
+    // (see CadenceFeature.staleDataWindow for how that was worked out).
+    static let staleDataWindow: Duration = .seconds(5)
 
     @Dependency(\.date.now) var now
     @Dependency(\.<name>Client) var <name>Client   // swap for this feature's real @DependencyClient
@@ -30,10 +36,10 @@ struct <Name>Feature {
         case startListening
         case valueReceived(Double)
         case bleConnectionChanged(BLECSCClient.ConnectionState)
-        case reconnectTimedOut
+        case staleDataTimedOut
     }
 
-    private enum CancelID { case reconnectTimer }
+    private enum CancelID { case staleDataTimer }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -59,30 +65,31 @@ struct <Name>Feature {
                     return .none
                 }
                 state.currentValue = Int(value.rounded())
-                // Real data flowing back cancels any pending clear-to-"--" timer.
-                return .cancel(id: CancelID.reconnectTimer)
+                // Each reading restarts the stale-data watchdog. Cancelled explicitly:
+                // `cancelInFlight` only cancels once the new task starts, which leaves room
+                // for the old timeout to land.
+                return .merge(
+                    .cancel(id: CancelID.staleDataTimer),
+                    .run { send in
+                        try await clock.sleep(for: Self.staleDataWindow)
+                        await send(.staleDataTimedOut)
+                    }
+                    .cancellable(id: CancelID.staleDataTimer, cancelInFlight: true)
+                )
 
             case .bleConnectionChanged(let connectionState):
                 state.connectionState = connectionState
                 switch connectionState {
-                case .active:
-                    return .cancel(id: CancelID.reconnectTimer)
-                case .reconnecting:
-                    // Only worth protecting if a reading is actually on screen.
-                    guard state.currentValue != nil else { return .none }
-                    return .run { send in
-                        try await clock.sleep(for: Self.reconnectGraceDelay)
-                        await send(.reconnectTimedOut)
-                    }
-                    .cancellable(id: CancelID.reconnectTimer, cancelInFlight: true)
                 case .disconnected:
                     state.currentValue = nil
-                    return .cancel(id: CancelID.reconnectTimer)
-                case .scanning, .connecting, .connected:
+                    return .cancel(id: CancelID.staleDataTimer)
+                case .scanning, .connecting, .connected, .reconnecting, .active:
+                    // The stale-data watchdog decides when to clear; a link that flaps
+                    // between these says nothing about whether data is arriving.
                     return .none
                 }
 
-            case .reconnectTimedOut:
+            case .staleDataTimedOut:
                 state.currentValue = nil
                 return .none
             }

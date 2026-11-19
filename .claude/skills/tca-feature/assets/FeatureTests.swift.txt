@@ -1,9 +1,9 @@
 // Template — adapted from CyclometerTests/Features/CadenceFeatureTests.swift.
 // Swift Testing (@Suite/@Test/#expect) + TCA TestStore, not XCTest.
 //
-// Fill in <Name>/<name> placeholders. Keep the reconnect-grace-window block
-// only if this feature has a reconnecting BLE/hardware source; delete it
-// otherwise.
+// Fill in <Name>/<name> placeholders. Keep the stale-data watchdog section and
+// `expireStaleData` only if this feature has a streaming BLE/hardware source;
+// delete them otherwise.
 
 import Testing
 import Foundation
@@ -14,7 +14,7 @@ import ComposableArchitecture
 @Suite("<Name>Feature")
 struct <Name>FeatureTests {
 
-    private static let testDate = Date(timeIntervalSince1970: 1_000_000)
+    nonisolated private static let testDate = Date(timeIntervalSince1970: 1_000_000)
 
     private func makeStore(
         initialState: <Name>Feature.State = <Name>Feature.State(),
@@ -31,6 +31,15 @@ struct <Name>FeatureTests {
         }
     }
 
+    /// Every reading arms the stale-data watchdog: an exhaustive test runs it out to end
+    /// with nothing in flight.
+    private func expireStaleData(_ store: TestStoreOf<<Name>Feature>, _ clock: TestClock<Duration>) async {
+        await clock.advance(by: <Name>Feature.staleDataWindow)
+        await store.receive(\.staleDataTimedOut) {
+            $0.currentValue = nil
+        }
+    }
+
     @Test("Start listening subscribes to the value and connection-state streams")
     func startListeningSubscribesToStreams() async {
         let (valueStream, valueContinuation) = AsyncStream<Double>.makeStream()
@@ -39,7 +48,8 @@ struct <Name>FeatureTests {
         client.<name> = { valueStream }
         client.connectionState = { _ in connStream }
 
-        let store = makeStore(<name>Client: client)
+        let clock = TestClock()
+        let store = makeStore(clock: clock, <name>Client: client)
         await store.send(.startListening)
 
         connContinuation.yield(.scanning)
@@ -54,6 +64,7 @@ struct <Name>FeatureTests {
 
         valueContinuation.finish()
         connContinuation.finish()
+        await expireStaleData(store, clock)
         await store.finish()
     }
 
@@ -67,88 +78,103 @@ struct <Name>FeatureTests {
     func negativeValueClearsState() async {
         let store = makeStore(initialState: <Name>Feature.State(currentValue: 80))
 
+        // Rejected before the watchdog is armed, so nothing is left in flight.
         await store.send(.valueReceived(-1)) {
             $0.currentValue = nil
         }
     }
 
-    // MARK: - BLE reconnect grace window
-    // Delete this section if the feature has no reconnecting hardware source.
+    // MARK: - Stale-data watchdog
+    // Delete this section if the feature has no streaming hardware source.
 
-    @Test("New data cancels a pending reconnect timer")
-    func dataCancelsPendingReconnectTimer() async {
+    /// A live link with a reading on screen.
+    private static var onSensor: <Name>Feature.State {
+        <Name>Feature.State(currentValue: 80, connectionState: .active)
+    }
+
+    @Test("Readings stopping while the link stays .active clear the value")
+    func silentSensorOnALiveLinkClears() async {
         let clock = TestClock()
-        let store = makeStore(
-            initialState: <Name>Feature.State(currentValue: 80),
-            clock: clock
-        )
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
 
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
-        }
-        // Data resumes before the grace window elapses — cancels the timer.
         await store.send(.valueReceived(82)) {
             $0.currentValue = 82
         }
-        // No .reconnectTimedOut should fire — an unasserted receive fails the test.
-        await clock.advance(by: .seconds(60))
+        // The link never leaves `.active`: the data's absence is the only signal.
+        await expireStaleData(store, clock)
     }
 
-    @Test(".reconnecting with no current reading arms no timer")
-    func reconnectingWithNoCurrentReadingIsNoop() async {
+    @Test("Each reading restarts the stale-data window")
+    func eachReadingRestartsTheWindow() async {
         let clock = TestClock()
-        let store = makeStore(clock: clock)
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
 
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
+        // Readings 3 s apart for 9 s: a window counted from the first would fire mid-loop,
+        // and its unasserted action would fail the next send. Keep the gap shorter than
+        // `staleDataWindow`.
+        for value in [82.0, 84, 86] {
+            await store.send(.valueReceived(value)) {
+                $0.currentValue = Int(value)
+            }
+            await clock.advance(by: .seconds(3))
         }
-        await clock.advance(by: .seconds(60))
-        // No .reconnectTimedOut fires — an unasserted receive fails the test.
-    }
-
-    @Test("Reconnect timeout clears the reading after the grace window")
-    func reconnectTimeoutClearsAfterGraceWindow() async {
-        let clock = TestClock()
-        let store = makeStore(
-            initialState: <Name>Feature.State(currentValue: 80),
-            clock: clock
-        )
-
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
-        }
-        await clock.advance(by: <Name>Feature.reconnectGraceDelay)
-        await store.receive(\.reconnectTimedOut) {
+        await clock.advance(by: <Name>Feature.staleDataWindow - .seconds(3))
+        await store.receive(\.staleDataTimedOut) {
             $0.currentValue = nil
         }
     }
 
-    @Test("Recovery within the grace window keeps the reading — no clear")
-    func recoveryWithinGraceWindowKeepsReading() async {
+    @Test("A flapping link neither restarts nor cancels the window")
+    func flappingLinkDoesNotDriveTheClear() async {
         let clock = TestClock()
-        let store = makeStore(
-            initialState: <Name>Feature.State(currentValue: 80),
-            clock: clock
-        )
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
 
-        await store.send(.bleConnectionChanged(.reconnecting)) {
-            $0.connectionState = .reconnecting
+        await store.send(.valueReceived(82)) {
+            $0.currentValue = 82
         }
-        await clock.advance(by: .seconds(4))
-        await store.send(.bleConnectionChanged(.active)) {
-            $0.connectionState = .active
+        // A drop and a recovery every second, with no data: neither may restart the
+        // window (it would never fire) or cancel it (the last reading would hold).
+        for connection: BLECSCClient.ConnectionState in [.reconnecting, .active, .reconnecting] {
+            await clock.advance(by: .seconds(1))
+            await store.send(.bleConnectionChanged(connection)) {
+                $0.connectionState = connection
+            }
         }
-        await clock.advance(by: .seconds(60))
-        // No .reconnectTimedOut fires — an unasserted receive fails the test.
+        await clock.advance(by: <Name>Feature.staleDataWindow - .seconds(3))
+        await store.receive(\.staleDataTimedOut) {
+            $0.currentValue = nil
+        }
     }
 
-    @Test("Terminal disconnect clears the reading immediately, no grace delay")
-    func terminalDisconnectClearsImmediately() async {
-        let store = makeStore(initialState: <Name>Feature.State(currentValue: 80))
+    @Test("The first reading after a clear shows again, and re-arms the watchdog")
+    func firstReadingAfterAClearShows() async {
+        let clock = TestClock()
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
 
+        await store.send(.valueReceived(82)) {
+            $0.currentValue = 82
+        }
+        await expireStaleData(store, clock)
+
+        await store.send(.valueReceived(88)) {
+            $0.currentValue = 88
+        }
+        await expireStaleData(store, clock)
+    }
+
+    @Test("Terminal disconnect clears the value immediately and disarms the watchdog")
+    func terminalDisconnectClearsImmediately() async {
+        let clock = TestClock()
+        let store = makeStore(initialState: Self.onSensor, clock: clock)
+
+        await store.send(.valueReceived(82)) {
+            $0.currentValue = 82
+        }
         await store.send(.bleConnectionChanged(.disconnected)) {
             $0.connectionState = .disconnected
             $0.currentValue = nil
         }
+        // No .staleDataTimedOut follows — an unasserted receive fails the test.
+        await clock.advance(by: <Name>Feature.staleDataWindow)
     }
 }
