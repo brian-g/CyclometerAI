@@ -172,7 +172,8 @@ final class Ride {
     // MARK: - Relationships
     // TrackPoints and VehiclePassEvents are linked by rideId only (TrackPoint's
     // CoreData FK pattern, #172) — no SwiftData `@Relationship` array here.
-    // radarEvents deferred until RadarEvent exists (a future issue).
+    // RadarEvent (DataModel.md §3.2, not built yet) follows the same pattern when it lands:
+    // it carries a rideId, and Ride gains no array.
 
     init(id: UUID = UUID(), startedAt: Date = .now) {
         self.id = id

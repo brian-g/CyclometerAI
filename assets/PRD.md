@@ -44,6 +44,7 @@
 | 0.6.17 | 2026-11-11 | Brian / Claude | Ride weather on S15 (#151). §12 Privacy: the current conditions of each forecast fetched during a ride are stored with the ride on the device for S15's Weather section. No new coordinate is sent: S15 asks WeatherKit only for its attribution, and only for a ride with weather to credit. |
 | 0.6.18 | 2026-11-13 | Brian / Claude | Start sheet weather follows the route (#559). §12 Privacy: with a route chosen, S05.1 sends the route's start to WeatherKit rather than the rider's location, and reads no location for it; a free ride still sends the rider's current location. The in-app privacy policy names a chosen route's start alongside the current location. |
 | 0.6.19 | 2026-11-14 | Brian / Claude | Rain along the route (#152). With a route loaded, each forecast W10 fetches during a ride also checks the stretch the rider reaches within two hours: a 50% or higher chance of precipitation at any point, in the hour the rider gets there, shows a silent four-second banner. It shows again on every check while it stays wet. It never goes through the radar alert path. It checks only while the dashboard is on screen and the rider is on the route. §12 Privacy: those checks send up to seven points ahead on the route, at least a kilometre past the rider, about every 10 minutes. W10's wind map (#561) is recorded there too. The in-app privacy policy names points along a route. |
+| 0.6.20 | 2026-11-19 | Brian / Claude | Spec reconciliation (#588). §10's `Ride`, `TrackPoint`, `RadarEvent`, `RadarVehicle` and `VehiclePassEvent` blocks, which predated `DataModel.md`, are replaced by pointers to it. §11's client list, feature tree, folder structure and test list, which named features, folders and tests that don't exist, are replaced by pointers to `TCA.md` §3 and §8. Appendix B's GPX example and §8.7's file naming use the exporter's `creator`, `cyc:` namespace URI and `AcmeRide_` filename prefix. No requirement changes. |
 
 ---
 
@@ -448,7 +449,7 @@ Wrist haptics are significantly more noticeable than pocket haptics. The same pa
 - [ ] A single 1 s speed spike well beyond the rider's speed, or a GPS reading with a valid `speedAccuracy` wider than 2.5 m/s, doesn't become the ride's max; a GPS reading with an invalid accuracy is treated as unknown and bounded by acceleration; a real sprint or descent still does (#540)
 - [ ] Source badge updates correctly on all transitions
 - [ ] Banner notification appears on source switch during active ride
-- [ ] GPX export correctly records the active source for each track point (see §10 and Appendix B)
+- [ ] GPX export correctly records the active source for each track point (see `DataModel.md` §4.3 and Appendix B)
 
 ---
 
@@ -615,7 +616,7 @@ The value remains **ride-level** — derived from every vehicle the radar can se
 
 **Recording Rate:** Track points recorded at 1Hz. Vehicle pass events recorded discretely on occurrence.
 
-**File Naming Convention:** `Cyclometer_YYYY-MM-DD_HH-mm.gpx`
+**File Naming Convention:** `AcmeRide_YYYY-MM-DD_HH-mm.gpx`
 
 **Storage:** Files app integration via `UIFileSharingEnabled` (`Info.plist`) and `LSSupportsOpeningDocumentsInPlace`. Ride GPX files stored in the app's `Documents/Rides/` directory.
 
@@ -1031,7 +1032,7 @@ In `CyclometerWidgets`, as `ControlWidget`s usable in Control Center, on the Loc
 **Alert Payload Structure (per BLE characteristic notification):**
 - Byte 0: Alert level (0 = clear, 1 = advisory, 2 = caution, 3 = danger)
 - Byte 1: Vehicle count (0–8)
-- Bytes 2–N: Vehicle records (see §10 RadarVehicle)
+- Bytes 2–N: Vehicle records (see `DataModel.md` §3.3 RadarVehicle)
 
 **Connection State Machine:**
 ```
@@ -1218,118 +1219,14 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 
 ---
 
-### Ride
+### Ride, TrackPoint and Vehicle Events
 
-```swift
-@Model class Ride {
-    var id: UUID
-    var startedAt: Date
-    var endedAt: Date?
-    var distance: Double               // meters; from active speed source
-    var duration: TimeInterval
-    var averageSpeed: Double           // m/s
-    var maxSpeed: Double               // m/s
-    var averageHeartRate: Int?         // bpm; nil if no HR source
-    var maxHeartRate: Int?             // bpm; nil if no HR source
-    var averageCadence: Int?           // rpm; nil if no cadence sensor
-    var hrZoneDurations: [Int: TimeInterval] // zone (1–5) → seconds in zone
-    var radarEventCount: Int
-    var vehiclePassCount: Int?         // total vehicle pass events recorded; nil if no radar paired
-    var gpxFileURL: URL?
-    var trackPoints: [TrackPoint]
-    var radarEvents: [RadarEvent]
-    var vehiclePassEvents: [VehiclePassEvent]  // discrete pass events for GPX export
-}
-```
+> Specified in `DataModel.md`, which is canonical for their shape; this section only names them. The entity blocks of earlier revisions predated it.
 
----
-
-### TrackPoint
-
-```swift
-@Model class TrackPoint {
-    var id: UUID
-    var rideId: UUID
-    var timestamp: Date
-    
-    var latitude: Double
-    var longitude: Double
-    var altitude: Double
-    var horizontalAccuracy: Double
-    
-    var speed: Double?                 // m/s; nil if no source active
-    var speedSource: SensorSource
-    
-    var heartRateBPM: Int?
-    var heartRateSource: SensorSource
-    
-    var cadenceRPM: Int?
-    
-    var powerWatts: Int?               // Phase 3
-}
-
-enum SensorSource: String, Codable {
-    case bleHR, bleWheel, bleCadence, blePower, appleWatch, gps, none
-}
-```
-
----
-
-### RadarEvent
-
-```swift
-@Model class RadarEvent {
-    var id: UUID
-    var rideId: UUID
-    var timestamp: Date
-    var vehicleCount: Int
-    var alertLevel: AlertLevel
-    var vehicles: [RadarVehicle]
-}
-
-enum AlertLevel: Int, Codable, Comparable {
-    case clear = 0, advisory = 1, caution = 2, danger = 3
-}
-```
-
----
-
-### RadarVehicle
-
-```swift
-struct RadarVehicle: Codable {
-    var vehicleIndex: Int
-    var distanceMeters: Double
-    var closingSpeedKph: Double        // positive = approaching; negative = receding
-    var alertLevel: AlertLevel
-    var estimatedSize: VehicleSize     // .unknown for MVP (see OQ11)
-}
-
-enum VehicleSize: String, Codable {
-    case unknown, small, medium, large
-}
-```
-
----
-
-### VehiclePassEvent
-
-> New in v0.3. Recorded as a GPX `<wpt>` element with `cyc:VehiclePassEvent` extension (see Appendix B). Stored separately from `RadarEvent` because a pass event is a discrete occurrence, not a state snapshot.
-
-```swift
-@Model class VehiclePassEvent {
-    var id: UUID
-    var rideId: UUID
-    var timestamp: Date
-    
-    var latitude: Double               // rider position at time of pass
-    var longitude: Double
-    
-    var alertLevelAtPass: AlertLevel   // ride-level alert at the vehicle's peak closing speed, not at the pass
-    var riderSpeedKph: Double          // rider speed at moment of pass
-    var estimatedPassSpeedKph: Double? // vehicle ground speed = riderSpeedKph + peak closing speed; nil if never observed approaching
-}
-```
+- **`Ride`** (`DataModel.md` §3.1) — the SwiftData summary row: timing, distance, speeds, heart-rate and cadence aggregates, route link, recording state and crash-resume fields, and the GPX export's URL. Track points and vehicle events link to it by `rideId` only; it holds no `@Relationship` arrays (#172).
+- **`TrackPoint`** (`DataModel.md` §4) — the 1 Hz time series, a CoreData entity (`TrackPointMO`) written by `NSBatchInsertRequest`, not a SwiftData `@Model`. `SensorSource` is §4.3.
+- **`VehiclePassEvent`** (`DataModel.md` §3.4) — one discrete pass, recorded as a GPX `<wpt>` with the `cyc:VehiclePassEvent` extension (Appendix B).
+- **`RadarEvent`** and **`RadarVehicle`** (`DataModel.md` §3.2, §3.3) — radar state snapshots. Specified, not built yet.
 
 **Pass detection logic:**
 ```swift
@@ -1360,42 +1257,9 @@ enum VehicleSize: String, Codable {
 
 **Rationale:** Cyclometer has multiple concurrent real-time data streams (BLE radar, BLE HR, BLE speed/cadence, HealthKit, CoreLocation), safety-critical alert logic that must be fully unit-testable without hardware, and planned multi-target expansion (Apple Watch, AR glasses). TCA's explicit state management, side-effect isolation via `Effect`, dependency injection via `@Dependency`, and `TestStore` make it the strongest architectural fit.
 
-**TCA Dependency Clients:**
-```swift
-@DependencyClient struct BluetoothClient
-@DependencyClient struct HealthKitClient
-@DependencyClient struct LocationClient
-@DependencyClient struct HapticClient
-@DependencyClient struct AudioAlertClient     // Three tones: allClear, warning, danger
-@DependencyClient struct PersistenceClient
-@DependencyClient struct NavigationClient     // GPX import, turn calc
-@DependencyClient struct WheelCalibrationClient  // GPS vs BLE distance comparison
-```
+**TCA Dependency Clients:** one `@Dependency` client per hardware or system service (BLE, HealthKit, location, altimeter, haptics, audio, persistence, weather and the rest). The list as built is the `Clients/` folder in `TCA.md` §8.
 
-**Feature Decomposition:**
-```
-AppFeature
-├── OnboardingFeature
-│   ├── WelcomeFeature
-│   ├── SensorPairingFeature
-│   └── ProfileSetupFeature
-├── ActiveRideFeature
-│   ├── RadarFeature                    ← BLE stream, alert level, vehicle pass detection
-│   ├── HeartRateFeature
-│   ├── SpeedFeature
-│   ├── CadenceFeature
-│   ├── NavigationFeature               ← route following, turn alerts, off-route
-│   ├── TrackPointRecorderFeature       ← 1Hz track points + vehicle pass event recording
-│   ├── WheelCalibrationFeature         ← GPS vs BLE auto-calibration
-│   └── AlertOrchestratorFeature        ← Combines all streams → haptic/audio/screen
-├── RideHistoryFeature                  ← Phase 2
-├── RideDetailFeature                   ← Phase 2
-├── RoutesFeature                       ← Routes tab: S19 list/map + S20 detail
-└── SettingsFeature
-    ├── DeviceSettingsFeature
-    ├── HRZoneSettingsFeature
-    └── AlertSettingsFeature
-```
+**Feature Decomposition:** the reducer tree as built is `TCA.md` §3, which is canonical for it. Heart rate, radar and location are slices of `ActiveRideFeature` state, not child features.
 
 **Navigation Structure:**
 The app uses a `TabView` with three tabs:
@@ -1408,62 +1272,7 @@ The app uses a `TabView` with three tabs:
 
 All three tabs are functional in MVP. The Routes tab (S19, S20) came into MVP with UX.md v0.8 and shipped in M8.
 
-**Project Folder Structure:**
-```
-Cyclometer/
-├── App/
-├── Features/
-│   ├── ActiveRide/
-│   │   ├── HeartRate/
-│   │   ├── Speed/
-│   │   ├── Cadence/
-│   │   └── Navigation/
-│   ├── Radar/
-│   ├── TrackPointRecorder/
-│   ├── WheelCalibration/
-│   ├── AlertOrchestrator/
-│   ├── Onboarding/
-│   ├── RideHistory/
-│   ├── Routes/
-│   └── Settings/
-├── Clients/
-│   ├── BluetoothClient.swift
-│   ├── HealthKitClient.swift
-│   ├── LocationClient.swift
-│   ├── HapticClient.swift
-│   ├── AudioAlertClient.swift
-│   ├── NavigationClient.swift
-│   ├── WheelCalibrationClient.swift
-│   └── PersistenceClient.swift
-├── Models/
-│   ├── Ride.swift
-│   ├── TrackPoint.swift
-│   ├── RadarEvent.swift
-│   ├── RadarVehicle.swift
-│   ├── VehiclePassEvent.swift
-│   ├── RiderProfile.swift
-│   ├── AppPreferences.swift
-│   ├── PairedSensor.swift
-│   └── SensorRole.swift
-├── Export/
-│   └── GPXExporter.swift
-├── DesignSystem/
-│   ├── Color+Cyclometer.swift
-│   ├── Typography.swift
-│   └── Components/
-└── Tests/
-    ├── RadarFeatureTests.swift
-    ├── VehiclePassDetectionTests.swift
-    ├── HeartRateFeatureTests.swift
-    ├── SpeedFeatureTests.swift
-    ├── CadenceFeatureTests.swift
-    ├── WheelCalibrationTests.swift
-    ├── AlertOrchestratorTests.swift
-    ├── AudioAlertTests.swift
-    ├── TrackPointRecorderTests.swift
-    ├── GPXExporterTests.swift
-    └── RideRecordingTests.swift
-```
+**Project Folder Structure:** `TCA.md` §8 maps the source tree, the widget extension's shared files and the test layout (`Cyclometer/CyclometerTests/`, mirroring the top-level source folders), and is canonical for them. Follow it when adding files.
 
 ---
 
@@ -1620,10 +1429,10 @@ Every ride exports a GPX 1.1 file with biometric track point extensions and vehi
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1"
-     creator="Cyclometer iOS"
+     creator="Acme Ride"
      xmlns="http://www.topografix.com/GPX/1/1"
      xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2"
-     xmlns:cyc="http://cyclometerapp.com/xmlschemas/VehicleEvent/v1"
+     xmlns:cyc="http://acmeapps.xyz/ride/xmlschemas/VehicleEvent/v1"
      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
      xsi:schemaLocation="
        http://www.topografix.com/GPX/1/1
@@ -1632,7 +1441,7 @@ Every ride exports a GPX 1.1 file with biometric track point extensions and vehi
        http://www.garmin.com/xmlschemas/TrackPointExtensionv2.xsd">
 
   <metadata>
-    <name>Cyclometer_2026-03-31_08-15</name>
+    <name>AcmeRide_2026-03-31_08-15</name>
     <time>2026-03-31T08:15:00.000Z</time>
   </metadata>
 
@@ -1681,7 +1490,7 @@ Every ride exports a GPX 1.1 file with biometric track point extensions and vehi
 - Elements are **omitted** (not zero-valued) when no sensor is active
 - Every `<time>` is UTC with a 3-digit fraction of a second (#416). Track points are stamped on a 1 s timer tick whose jitter can put two consecutive points in one whole second; whole-second times would give them the same `<time>`, and a reader deriving speed from time deltas would divide by zero. A reader of these files must also accept whole seconds: exports made before #416, and other tools' files, carry them
 - `cyc:VehiclePassEvent` is a Cyclometer-defined extension. No industry standard exists for vehicle pass events as of v0.4.
-- The `cyc:` namespace URI (`http://cyclometerapp.com/xmlschemas/VehicleEvent/v1`) does not need to resolve to a live schema document; it serves as a unique identifier
+- The `cyc:` namespace URI (`http://acmeapps.xyz/ride/xmlschemas/VehicleEvent/v1`) does not need to resolve to a live schema document; it serves as a unique identifier
 - Third-party apps that cannot parse `cyc:` elements will still read the `<wpt>` as a generic waypoint with name "Vehicle Pass", preserving basic compatibility
 
 ---

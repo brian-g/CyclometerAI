@@ -484,7 +484,7 @@ The accessory is enabled via:
 The accessory is a full-width horizontal strip. Internal layout (left to right):
 
 - **Leading progress ring** — `OpenRingProgressView`: a donut-style Swift Charts `SectorMark` showing route completion percentage. The visible arc spans 84% of the circle with a gap at the bottom; the completed segment uses `brPrimary` tint, the remaining segment uses `.secondary` at 22% opacity. The percentage integer is displayed in `.caption2.weight(.semibold)` at the center. When no route is being followed, a `figure.outdoor.cycle` SF Symbol in `brPrimary` replaces the ring. Frame: 42×42pt.
-- **Live stats** — two `HeroNumber` views at `.small` size (34pt D-DIN Condensed), `.horizontal` layout, showing current distance and current speed with units from `UserProfile.preferredUnit`. Stats update at 1Hz matching the dashboard.
+- **Live stats** — two `HeroNumber` views at `.small` size (34pt D-DIN Condensed), `.horizontal` layout, showing current distance and current speed with units from `AppPreferences.preferredUnit`. Stats update at 1Hz matching the dashboard.
 - **Spacer**
 
 There is no Open button: the whole strip is the tap target, as with Apple Music's mini player. A tap anywhere on it re-presents the full-screen `RideDashboardView`, zooming out of the strip (#333). VoiceOver reads the stats with the hint "Opens the ride dashboard".
@@ -640,7 +640,7 @@ Due to differences in phone sizes, some of the numbers will increase or decrease
 
 **Sizes:** 2x2, 2x1, 1x1
 
-- Primary value: `large-hero`; unit: km/h or mph (`UserProfile.preferredUnit`)
+- Primary value: `large-hero`; unit: km/h or mph (`AppPreferences.preferredUnit`)
 - Trend, at every size (#81): the shared trend indicator (#402), a ▲ (`brRatingGood`) or ▼ (`brRatingBad`) right of the primary value, level with the tops of its digits and a quarter of their height. It shows when current speed is above or below the ride average by more than 0.5 km/h. Hidden when even or with no reading. VoiceOver reads it as "above average" or "below average" after the speed (#401). The unit doesn't move
 - Watermark speed history graph (area line behind the numbers)
 - 2x1, 2x2: Max speed for ride (`small-hero`, labeled "MAX")
@@ -811,7 +811,7 @@ As built (#534): **Speed Gauge** in S08's Ride section, after Speed; W1 itself i
 
 **Sizes:** 2x2, 2x1, 1x1
 
-- Current pace in min/mi or min/km (`UserProfile.preferredUnit`)
+- Current pace in min/mi or min/km (`AppPreferences.preferredUnit`)
 - Pace should be shown as an average for the last 30s rather than a live pace. Updating it every second is  noisy.
 - Sheet: Ride metrics
 

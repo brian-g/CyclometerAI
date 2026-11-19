@@ -128,7 +128,7 @@ Each tone must be instantly distinguishable from the others and from iOS system 
 | Waveform | Square wave — maximum harmonic content, most penetrating through noise |
 | Volume | 100% of system volume; overrides AVAudioSession if user opt-in enabled |
 | Repeat | Continuous until alert level drops below L3 threshold |
-| Silent Mode | Rings through, like every tone. With `UserProfile.overrideSilentModeForL3 == true` it also ducks the rider's music and overrides the route to the speaker. |
+| Silent Mode | Rings through, like every tone. With `AudioClient.setOverridesSilentMode(true)` it would also duck the rider's music and override the route to the speaker. Nothing turns that on in MVP: UX.md §S12 resolved the override as not a setting. |
 
 **Design note:** The triple burst is a universally recognized urgency pattern (SOS-adjacent, rapid alarm cycles). 2,100 Hz is the frequency range where the square wave's harmonic content creates maximum auditory penetration. The square waveform is intentionally harsh — this is appropriate for a life-safety alert. The 800 ms pause between bursts prevents continuous tone fatigue and allows the rider to process the alert.
 
