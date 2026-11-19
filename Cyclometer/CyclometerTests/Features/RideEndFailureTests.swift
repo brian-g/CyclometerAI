@@ -96,7 +96,8 @@ struct RideEndFailureTests {
     }
 
     /// One second later on every read. With a constant clock a ride starts and ends at the same
-    /// instant, and a zero-length ride is settled without a workout (#277).
+    /// instant, and a zero-length ride is settled without a workout (#277). Its ticks also share
+    /// one timestamp, so only the first records a track point (#582), which leaves no line to draw.
     private static func movingClock() -> DateGenerator {
         let reads = LockIsolated(0.0)
         return DateGenerator { reads.withValue { $0 += 1; return testDate.addingTimeInterval($0) } }
@@ -308,7 +309,8 @@ struct RideEndFailureTests {
         let renders = LockIsolated(0)
 
         let store = Self.makeRideStore(
-            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory()
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory(),
+            date: Self.movingClock()
         )
         let rideId = await Self.runRideToEnd(store) {
             fetchRideIfPresent($0, from: swiftDataStack)?.endedAt != nil
@@ -334,7 +336,8 @@ struct RideEndFailureTests {
         let attempts = LockIsolated(0)
 
         let store = Self.makeRideStore(
-            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
+            date: Self.movingClock()
         )
         let rideId = await Self.runRideToEnd(store) {
             fetchRideIfPresent($0, from: swiftDataStack)?.endedAt != nil

@@ -80,6 +80,16 @@ struct ActiveRideFeature {
     /// moving, not one being nudged in a queue.
     static let movingSpeedMPS: Double = 1.0
 
+    /// The closest two recorded track points may be (#582): half the 1 s tick.
+    ///
+    /// The tick can fire twice in a row. When the 1 s timer wakes more than one interval late,
+    /// swift-clocks' `_AsyncTimerSequence.nextDeadline` (swift-async-algorithms' code) rounds
+    /// to a deadline that has already passed, so one extra tick lands at once. It happens after
+    /// a suspended process or a busy main actor. Both ticks stamp `date.now`, so they record two
+    /// points a few ms apart, right after a multi-second gap. A GPX consumer that takes speed
+    /// from time deltas reads a huge spike there.
+    static let minimumTrackPointSpacing: TimeInterval = 0.5
+
     /// How long after a manual pause Resume When Moving may undo it without the ride having read
     /// as stopped (#504). Long enough for a bike to roll to a stop after a Pause tapped while
     /// coasting (#267); short enough that a rider who paused while riding and rode on loses at
@@ -1084,7 +1094,7 @@ struct ActiveRideFeature {
 
                 // #170: one TrackPointDTO recorded per elapsed second, skipped
                 // silently if GPS hasn't locked yet (rare — ride start already
-                // requires a GPS lock, PRD §8.8).
+                // requires a GPS lock, PRD §8.8), or for the timer's catch-up tick (#582).
                 if let point = makeTrackPoint(from: state) {
                     // Claim the HealthKit sample this point just carried, so the next
                     // tick records absence rather than the same reading again (#221).
@@ -1719,11 +1729,27 @@ struct ActiveRideFeature {
     /// Also nil while the fix behind `coordinate` is too poor to record (#210): the track
     /// takes a gap rather than a position the app already knows is untrustworthy.
     /// `GPSFixFilter.maxSuppressedInterval` bounds how long such a gap can run.
+    ///
+    /// And nil for a tick under `minimumTrackPointSpacing` after the last recorded point
+    /// (#582). That is mostly the timer's catch-up tick, which isn't a second of its own. It can
+    /// also be an on-time tick right after one the main actor held up by over half a second:
+    /// dropping that one leaves a gap under 1.5 s, which a consumer reads better than two points
+    /// under half a second apart. The guard sits on the timestamp, not on the timer: when the
+    /// main actor is the thing running late, the two timer instants are seconds apart but both
+    /// reducer runs read the same `date.now`. A wall clock set back gives a negative gap, and
+    /// that tick still records: waiting for the clock to catch up would drop the track for as
+    /// long as it was set back.
     private func makeTrackPoint(from state: State) -> TrackPointDTO? {
         guard let coordinate = state.coordinate, state.isFixRecordable else { return nil }
+        let now = date.now
+        // `calorieTrack` is every point recorded this ride, in order, so its last is the previous one.
+        if let previous = state.calorieTrack.last?.timestamp,
+           (0..<Self.minimumTrackPointSpacing).contains(now.timeIntervalSince(previous)) {
+            return nil
+        }
         return TrackPointDTO(
             rideId: state.rideId,
-            timestamp: date.now,
+            timestamp: now,
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
             altitudeMeters: state.altitude,
