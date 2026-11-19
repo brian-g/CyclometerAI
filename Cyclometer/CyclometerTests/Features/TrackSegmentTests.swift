@@ -97,6 +97,7 @@ struct TrackSegmentTests {
         let beforePause = await Self.recordedPoint(from: store)
 
         await store.send(.pauseTapped)
+        store.dependencies.date.now = Self.segmentTestDate.addingTimeInterval(1)
         await store.send(.resumeTapped)
         await store.send(.locationUpdated(Self.update(latitude: 36.0939602, longitude: -79.5233471)))
         await store.send(.elapsedTick)

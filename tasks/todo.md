@@ -2502,3 +2502,33 @@ Brian: fix review findings 1 (onboarding scan leak) and 2 (late connections) in 
 - [x] Targeted suites → revert checks → full suite → commit + push (Brian's device run of the follow-up still to come)
 
 **Review (2026-11-18):** The first targeted run hung for ~90 minutes on one test. `discoveredDevicesTracksUnpair` looped on `devices.next()` until the row showed paired, and with the gate a row only holds roles once it's connected. The queued main-actor suites behind it never reported, so it looked like a mass hang. That test now opens the Sensors list's pairing scan. `discoveryWithNothingWantingConnectionsIsListedNotConnected` wrongly expected `isPaired`, but a CSC row's roles come from its slot. It now expects no roles and no connection state. Targeted suites: 253 passed. Revert check, with the gate set to `true` and the S02 send removed: exactly the 6 gate tests and the 2 S02 tests fail. Full suite: 3000 passed, 2 failed. Both failures were S02 tests outside the targeted set (`SensorPairingFeatureTests.nextDelegates`, `AppOnboardingTests.completingTheFlowPersistsAndDismisses`) that now receive `.deviceManagement(.onDisappear)`. Those suites pass on rerun (16/16). Lesson recorded in `tasks/lessons.md`.
+
+---
+
+## #582 — Catch-up ticks record track points milliseconds apart after a gap
+
+**Cause (confirmed).** swift-clocks 1.1.1 `_AsyncTimerSequence.nextDeadline` (copied from
+swift-async-algorithms): when the iterator is more than one interval late it returns
+`last + interval·⌈(now − (last+interval))/interval⌉`, which is always in `[now − interval, now)` — in the
+past — so `sleep(until:)` returns at once and one extra tick lands immediately. Reproduced with the pinned
+source: a 4 s SIGSTOP gives a 4.5 s gap then a tick 0.000 s later; a consumer blocked 3.3 s gives an
+immediate tick. In the app the reducer stamps `date.now` on both, so they land ms apart.
+
+**Fix.** Guard where the timestamp is taken: `makeTrackPoint` returns nil when the previous recorded
+point is under `minimumTrackPointSpacing` (0.5 s) old. A timer-level guard would miss the main-actor-busy
+case (timer instants 3.3 s apart, both reducer runs at the same wall time). The tick's other accounting
+(elapsed, distance) is unchanged.
+
+- [x] `minimumTrackPointSpacing` + guard in `makeTrackPoint`
+- [x] Test: back-to-back ticks after a gap record one point; normal 1 Hz records all
+- [x] Existing tests that ticked several times at one fixed date advance the clock per tick
+- [x] Affected suites green
+
+**Review (2026-11-19):** The first targeted run crashed the test host. `noReadingRecordsAbsentHR` indexed
+`recorded[1]` after its two fixed-date ticks recorded one point, and every later test showed 0.000 s. Five
+tests had ticked more than once at one fixed date and then read the track. That is the case the guard
+rejects, and no real timer produces it. They now advance the date a second per tick. Two
+`RideEndFailureTests` thumbnail tests needed a drawable track (`RideMapTrack` drops segments with fewer
+than 2 points), so they take the file's existing `movingClock()`. Targeted suites: 338 passed. Revert check
+(guard disabled, own derived data, no compile cache): `catchUpTickRecordsNoPoint` fails, the 1 Hz test
+passes. Full `CyclometerTests`: 3004 passed, 0 failed.

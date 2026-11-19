@@ -3647,6 +3647,7 @@ struct ActiveRideFeatureHRDropoutTests {
         await store.send(.locationUpdated(Self.goodFix))
         await store.send(.heartRateUpdated(150))
         await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow + 1)
         await store.send(.heartRateUpdated(0))
         await store.send(.elapsedTick)
         await store.skipInFlightEffects(strict: false)
@@ -3708,10 +3709,13 @@ struct ActiveRideFeatureHRDropoutTests {
         await store.send(.locationUpdated(Self.goodFix))
         await store.send(.heartRateUpdated(150))
         await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow + 1)
         await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow + 2)
         await store.send(.heartRateUpdated(0))   // a strap dropout counts for nothing
         await store.send(.elapsedTick)
         await store.send(.pauseTapped)
+        now.setValue(Self.fixedNow + 3)
         await store.send(.heartRateUpdated(160))
         await store.send(.elapsedTick)
         await store.skipInFlightEffects(strict: false)
@@ -3769,6 +3773,7 @@ struct ActiveRideFeatureHRDropoutTests {
         await store.send(.locationUpdated(Self.goodFix))
         await store.send(.heartRateUpdated(160))
         await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow + 1)
         await store.send(.elapsedTick)
         await store.skipInFlightEffects(strict: false)
 
@@ -3830,6 +3835,7 @@ struct ActiveRideFeatureHRDropoutTests {
         await store.send(.trackRecorder(.startRecording))
         await store.send(.locationUpdated(Self.goodFix))
         await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow + 1)
         await store.send(.locationUpdated(LocationUpdate(
             coordinate: Self.goodFix.coordinate, altitude: nil, speed: 8.5,
             horizontalAccuracy: 5.0, heading: 192.0, timestamp: Self.fixedNow + 1
@@ -3839,6 +3845,55 @@ struct ActiveRideFeatureHRDropoutTests {
 
         let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
         #expect(recorded.map(\.altitudeMeters) == [280.0, nil])
+    }
+
+    /// #582: a 1 s timer that wakes more than an interval late fires one extra tick at once
+    /// (swift-clocks' `nextDeadline` rounds to a deadline already past). The reducer sees a
+    /// multi-second gap, then a second tick a few ms later.
+    @Test("A catch-up tick right after a late one records no second track point")
+    func catchUpTickRecordsNoPoint() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow + 4.511)     // the late tick, after a suspension
+        await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow + 4.517)     // the catch-up tick, 6 ms later
+        await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow + 5.030)     // the timer's next scheduled tick
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.map(\.timestamp) == [Self.fixedNow, Self.fixedNow + 4.511, Self.fixedNow + 5.030])
+        #expect(zip(recorded, recorded.dropFirst()).allSatisfy {
+            $1.timestamp.timeIntervalSince($0.timestamp) >= ActiveRideFeature.minimumTrackPointSpacing
+        })
+        #expect(store.state.calorieTrack.map(\.timestamp) == recorded.map(\.timestamp))
+        // The tick itself still counts: elapsed time and distance are not this guard's business.
+        #expect(store.state.elapsedSeconds == 4)
+    }
+
+    @Test("Ticks a second apart, early or late by a fraction, each record a point")
+    func oneHertzRecordsEveryTick() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        let offsets: [TimeInterval] = [0, 1.031, 2.064, 3.054, 4.011, 5.040]
+        for offset in offsets {
+            now.setValue(Self.fixedNow + offset)
+            await store.send(.elapsedTick)
+        }
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.map(\.timestamp) == offsets.map { Self.fixedNow + $0 })
     }
 
     private static let goodFix = LocationUpdate(
