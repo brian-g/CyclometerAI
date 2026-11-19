@@ -363,6 +363,42 @@ struct AppFeatureTests {
         #expect(finalized.value?.3 == nil)
     }
 
+    /// #344: the fetch can read the row S05.1 just wrote and land after that start has, with the
+    /// sheet gone and the ride under way. It found the ride being recorded, not an orphan, so the
+    /// ride is neither resumed over itself nor closed out.
+    @Test("A resumable ride fetched after its own start landed leaves that ride alone")
+    func resumableRideFetchedAfterItsOwnStartLanded() async {
+        let newRideId = UUID()
+        let finalized = LockIsolated<[UUID]>([])
+        let settled = LockIsolated<[UUID]>([])
+        let store = TestStore(
+            initialState: AppFeature.State(
+                activeRide: ActiveRideFeature.State(rideId: newRideId, recordingState: .active),
+                isDashboardPresented: true
+            )
+        ) {
+            AppFeature()
+        } withDependencies: {
+            $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
+            $0.persistenceClient = .mock(
+                onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
+                onSettleRideHealthWorkout: { id in settled.withValue { $0.append(id) } }
+            )
+        }
+        store.exhaustivity = .off
+
+        await store.send(.resumableRideFetched(RideSummaryUpdate(
+            rideId: newRideId, recordingState: .active,
+            durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0
+        )))
+        await store.finish(timeout: effectDrainTimeout)
+
+        #expect(store.state.activeRide?.rideId == newRideId)
+        #expect(store.state.isDashboardPresented == true)
+        #expect(finalized.value.isEmpty)
+        #expect(settled.value.isEmpty)
+    }
+
     /// A launch whose fetch lands while a new ride is under way: started (`midWrite == false`), or
     /// its row still being written by S05.1 (`midWrite == true`, #344). Either sends the leftover
     /// ride down the close-out branch instead of resuming it.
@@ -746,9 +782,10 @@ struct AppFeatureTests {
 
     /// #175 review's orphan: a resumable ride found after the rider already started a new
     /// one is closed out rather than resumed. It never reached a Finish, so it gets its
-    /// thumbnail here. Not an Apple Health workout (#277): it ends at the relaunch, so one
-    /// would span every hour since the kill. Other rides still owed one are written.
-    @Test("an orphaned ride closed out at launch gets its map thumbnail, and is settled without a workout")
+    /// thumbnail here. Not an Apple Health workout (#277): with no ride-end marker it ends at the
+    /// relaunch, so one would span every hour since the kill (one with a marker gets its workout,
+    /// #584). Other rides still owed one are written.
+    @Test("an orphaned ride closed out at launch gets its map thumbnail, and with no marker is settled without a workout")
     func orphanedRideCloseOutCapturesThumbnail() async {
         let orphan = RideSummaryUpdate(
             rideId: UUID(), recordingState: .active,

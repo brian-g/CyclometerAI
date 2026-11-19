@@ -361,8 +361,12 @@ struct AppFeature {
                 // S05.1 writes a new ride's row before `activeRide` exists (#344), so a start
                 // can be mid-write when this lands. If the fetch found that very row, it is
                 // the ride being started, not one a kill left behind: leave it to the sheet.
+                // The start can also have landed first, the fetch having read the row once it
+                // was written: then it is the ride under way, and closing it out would end it.
                 let startingRideId = state.startSheet?.pendingRideId
-                if summary.rideId == startingRideId { return .none }
+                if summary.rideId == startingRideId || summary.rideId == state.activeRide?.rideId {
+                    return .none
+                }
                 // The rider already ended this ride and only its finalize write failed (#188).
                 // Read once for both close-outs below.
                 let pendingEnd = rideEndIntentClient.load(summary.rideId)

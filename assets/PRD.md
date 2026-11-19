@@ -46,6 +46,7 @@
 | 0.6.19 | 2026-11-14 | Brian / Claude | Rain along the route (#152). With a route loaded, each forecast W10 fetches during a ride also checks the stretch the rider reaches within two hours: a 50% or higher chance of precipitation at any point, in the hour the rider gets there, shows a silent four-second banner. It shows again on every check while it stays wet. It never goes through the radar alert path. It checks only while the dashboard is on screen and the rider is on the route. §12 Privacy: those checks send up to seven points ahead on the route, at least a kilometre past the rider, about every 10 minutes. W10's wind map (#561) is recorded there too. The in-app privacy policy names points along a route. |
 | 0.6.20 | 2026-11-19 | Brian / Claude | Spec reconciliation (#588). §10's `Ride`, `TrackPoint`, `RadarEvent`, `RadarVehicle` and `VehiclePassEvent` blocks, which predated `DataModel.md`, are replaced by pointers to it. §11's client list, feature tree, folder structure and test list, which named features, folders and tests that don't exist, are replaced by pointers to `TCA.md` §3 and §8. Appendix B's GPX example and §8.7's file naming use the exporter's `creator`, `cyc:` namespace URI and `AcmeRide_` filename prefix. No requirement changes. |
 | 0.6.21 | 2026-11-19 | Brian / Claude | Onboarding permissions and privacy policy (#596, #597, #598). Bluetooth and Motion and Fitness are optional at S01; Location is the only gate. The Motion purpose string names the barometer (elevation), its only use. S12's Privacy Policy opens https://acmeapps.xyz/ride/privacy/; the bundled copy is removed, so §12's mentions of the privacy policy now mean that page. |
+| 0.6.22 | 2026-11-19 | Brian / Claude | Orphan workouts (#584). §9.4's #318 decision note: an orphan closed out at relaunch that the rider had already ended keeps its real end time and gets its `HKWorkout` (UX.md §S10). One with no ride-end marker still gets none, since its end is the relaunch. |
 
 ---
 
@@ -1148,7 +1149,7 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 > - The owed flag retries the write at Finish and at launch (#277).
 > - The write is skipped when another source recorded an overlapping cycling workout.
 > - Crash recovery (#175, #188) runs from SwiftData alone, and an orphan closed out at relaunch gets no
->   workout.
+>   workout. Since #584, one the rider had already ended keeps its real end and gets its workout.
 >
 > A live builder's workout exists only inside its session, so `recoverActiveWorkoutSession` would
 > have to agree with the SwiftData recovery and the pending-ride-end marker. That is two recovery
