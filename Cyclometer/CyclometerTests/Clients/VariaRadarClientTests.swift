@@ -321,6 +321,7 @@ struct VariaRadarIntegrationTests {
         let peripheralID = UUID()
 
         await harness.client.setPairedSensor(peripheralID)
+        await harness.client.beginPairingScan()   // the Sensors list, which wants connections (#585)
         harness.events.yield(.discovered(
             id: peripheralID, name: "Varia RTL515", rssi: -50, services: [radarServiceUUID]
         ))
@@ -1112,6 +1113,7 @@ struct VariaRadarIntegrationTests {
         let paired = UUID()
         let stranger = UUID()
         await harness.pair(paired)
+        await harness.client.beginPairingScan()   // the Sensors list, which wants connections (#585)
 
         harness.events.yield(.discovered(id: stranger, name: "Someone else's Varia", rssi: -70, services: [radarServiceUUID]))
         harness.events.yield(.discovered(id: paired, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
@@ -1135,6 +1137,238 @@ struct VariaRadarIntegrationTests {
         // Nothing is tracked about a radar this client will not adopt, so it has no
         // lifecycle to report — not even `.disconnected`.
         #expect(theirs.connectionState == nil)
+    }
+
+    // MARK: - Pairing-scan connections (#585)
+
+    /// A pairing scan (the Start sheet, Sensors) connects the paired radar if it is awake.
+    /// Bring `id` up that way, to `.active`, with the scan still open.
+    private func connectUnderPairingScan(
+        _ harness: Harness,
+        _ id: UUID,
+        states: inout AsyncStream<VariaRadarClient.ConnectionState>.Iterator,
+        connects: inout AsyncStream<UUID>.Iterator
+    ) async {
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        #expect(await states.next() == .connecting)
+        #expect(await connects.next() == id)
+        harness.events.yield(.connected(id: id))
+        #expect(await states.next() == .connected)
+        harness.events.yield(.servicesDiscovered(peripheralID: id, serviceUUIDs: [radarServiceUUID]))
+        harness.events.yield(.characteristicsDiscovered(
+            peripheralID: id, serviceUUID: radarServiceUUID, characteristicUUIDs: [radarAlertUUID]
+        ))
+        #expect(await states.next() == .active)
+    }
+
+    /// The connection state right now, from a fresh subscription's replay. Never waits on a
+    /// transition, so a missing drop fails rather than hangs.
+    private func currentState(_ harness: Harness) async -> VariaRadarClient.ConnectionState? {
+        var states = harness.client.connectionState().makeAsyncIterator()
+        return await states.next()
+    }
+
+    private func disconnects(_ harness: Harness) -> [BLECall] {
+        harness.calls.value.filter { if case .disconnect = $0 { true } else { false } }
+    }
+
+    @Test("The last pairing scan to end with no ride drops the connection and keeps the pairing")
+    func lastReleaseWithNoRideDropsTheConnection() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &states, connects: &connects)
+
+        await harness.client.endPairingScan()
+        // `release` runs inside `endPairingScan`, so the replay shows the drop at once.
+        try #require(await currentState(harness) == .disconnected)
+        #expect(harness.calls.value.suffix(2) == [.disconnect(id, "radar"), .stopScanning([radarServiceUUID])])
+
+        // Still paired: the next pairing scan reconnects it.
+        #expect(await states.next() == .disconnected)
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        #expect(await states.next() == .connecting)
+        #expect(await connects.next() == id)
+    }
+
+    /// The issue's symptom: a radar the Start sheet connected goes to sleep after Cancel, and
+    /// its ladder keeps dialling it by UUID, in the background too.
+    @Test("The last pairing scan to end with no ride stops the reconnect ladder")
+    func lastReleaseStopsTheLadder() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &states, connects: &connects)
+        harness.events.yield(.disconnected(id: id, error: nil))
+        #expect(await states.next() == .reconnecting)
+        #expect(await harness.clock.advanceToNextSleep() == .seconds(1))
+        #expect(await connects.next() == id)            // first rung, still in flight
+
+        await harness.client.endPairingScan()
+        // `release` runs inside `endPairingScan`, so the replay shows the drop at once.
+        try #require(await currentState(harness) == .disconnected)
+        #expect(harness.clock.isIdle)
+        let connectsAfterRelease = harness.connectCount.value
+        await harness.clock.advance(by: .seconds(120))
+        #expect(harness.connectCount.value == connectsAfterRelease)
+
+        // The rung in flight completes after the drop: released again, not adopted.
+        harness.events.yield(.connected(id: id))
+        await expectEventually { disconnects(harness).count == 2 }
+        #expect(disconnects(harness) == [.disconnect(id, "radar"), .disconnect(id, "radar")])
+    }
+
+    /// Start sheet → Start. AppFeature flags the ride before the sheet's scan ends; the ride's
+    /// `startScanning` skips, because the radar is no longer `.disconnected`.
+    @Test("A running ride keeps the pairing scan's connection when it ends")
+    func rideActiveKeepsTheConnectionAcrossRelease() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &states, connects: &connects)
+
+        await harness.client.setRideActive(true)
+        await harness.client.startScanning()
+        await harness.client.endPairingScan()
+        #expect(await currentState(harness) == .active)
+        #expect(disconnects(harness).isEmpty)
+    }
+
+    @Test("A pairing scan ending while another is open keeps the connection")
+    func releaseWithAnotherHolderKeepsTheConnection() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &states, connects: &connects)
+
+        await harness.client.endPairingScan()
+        #expect(disconnects(harness).isEmpty)
+
+        await harness.client.endPairingScan()
+        // `release` runs inside `endPairingScan`, so the replay shows the drop at once.
+        try #require(await currentState(harness) == .disconnected)
+        #expect(disconnects(harness) == [.disconnect(id, "radar")])
+    }
+
+    /// A Sensors list opened mid-ride and closed after Finish.
+    @Test("Once the ride ends, the last pairing scan to end drops the connection")
+    func rideEndThenReleaseDrops() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.setRideActive(true)
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &states, connects: &connects)
+
+        await harness.client.setRideActive(false)
+        await harness.client.endPairingScan()
+        // `release` runs inside `endPairingScan`, so the replay shows the drop at once.
+        try #require(await currentState(harness) == .disconnected)
+        #expect(disconnects(harness) == [.disconnect(id, "radar")])
+    }
+
+    /// Nothing to drop: an ambient scan's `.scanning` must not be overwritten.
+    @Test("The last pairing scan to end with nothing connected leaves the state alone")
+    func releaseWithNothingConnectedLeavesTheState() async {
+        let harness = Harness()
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)   // replay
+        await harness.client.startScanning()
+        #expect(await states.next() == .scanning)
+
+        await harness.client.beginPairingScan()
+        await harness.client.endPairingScan()
+        #expect(await currentState(harness) == .scanning)
+        #expect(disconnects(harness).isEmpty)
+    }
+
+    // MARK: Nothing auto-connects with nothing wanting it (#585 review)
+
+    /// Events are handled one at a time on the client's own task, so once a stranger yielded after
+    /// the event under test is listed, that event's handler — transport calls included — is done.
+    private func settle(_ harness: Harness) async {
+        let marker = UUID()
+        harness.events.yield(.discovered(id: marker, name: nil, rssi: -90, services: [radarServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == marker } }
+    }
+
+    @Test("The paired radar discovered with nothing wanting a connection is listed, not connected")
+    func discoveryWithNothingWantingConnectionsIsListedNotConnected() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        await settle(harness)
+        let listed = await harness.devices { $0.contains { $0.id == id } }
+        #expect(listed.first { $0.id == id }?.isPaired == true)
+        #expect(harness.connectCount.value == 0)
+        #expect(await currentState(harness) == .disconnected)
+    }
+
+    @Test("The paired radar re-advertising after the last release is not reconnected")
+    func discoveryAfterTheLastReleaseDoesNotReconnect() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id)
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &states, connects: &connects)
+        await harness.client.endPairingScan()
+        try #require(await currentState(harness) == .disconnected)
+
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        await settle(harness)
+        #expect(harness.connectCount.value == 1)
+        #expect(await currentState(harness) == .disconnected)
+    }
+
+    @Test("Pairing a radar already seen, with nothing wanting a connection, connects nothing until the next scan")
+    func setPairedSensorWithNothingWantingConnectionsDoesNotConnect() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == id } }
+        await harness.client.endPairingScan()
+
+        await harness.pair(id)
+        #expect(harness.connectCount.value == 0)
+        #expect(await currentState(harness) == .disconnected)
+
+        var connects = harness.connectCalls.makeAsyncIterator()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        #expect(await connects.next() == id)
     }
 }
 

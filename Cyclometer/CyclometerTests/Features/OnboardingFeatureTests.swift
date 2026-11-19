@@ -64,8 +64,52 @@ struct OnboardingFeatureTests {
         await store.send(.sensorPairing(.nextButtonTapped)) {
             $0.$preferences.withLock { $0.hasCompletedOnboarding = true }
         }
+        await store.receive(\.sensorPairing.deviceManagement.onDisappear)
         await store.receive(\.sensorPairing.delegate.next)
         await store.receive(\.delegate.completed)
+    }
+
+    /// `AppFeature` nils `onboarding` on `.completed`, so the device list's own `.onDisappear`
+    /// lands on an absent child and is dropped. S02 has to end the list's pairing scan itself
+    /// before Next, or every client's count stays at 1 for the first session and #585's drop
+    /// never runs.
+    @Test("Next on Sensor Pairing ends the device list's pairing scan on every client")
+    func sensorPairingNextEndsThePairingScan() async {
+        let log = LockIsolated<[StartSheetPresentationTests.ScanCall]>([])
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            var csc = BLECSCClient.testValue
+            csc.beginPairingScan = { log.withValue { $0.append(.begin(.speedCadence)) } }
+            csc.endPairingScan = { log.withValue { $0.append(.end(.speedCadence)) } }
+            var radar = VariaRadarClient.testValue
+            radar.beginPairingScan = { log.withValue { $0.append(.begin(.radar)) } }
+            radar.endPairingScan = { log.withValue { $0.append(.end(.radar)) } }
+            var hr = BLEHRClient.testValue
+            hr.beginPairingScan = { log.withValue { $0.append(.begin(.heartRate)) } }
+            hr.endPairingScan = { log.withValue { $0.append(.end(.heartRate)) } }
+            return TestStore(initialState: OnboardingFeature.State(step: .sensorPairing)) {
+                OnboardingFeature()
+            } withDependencies: {
+                $0.defaultFileStorage = storage
+                $0.bleCSCClient = csc
+                $0.variaRadarClient = radar
+                $0.bleHRClient = hr
+                $0.continuousClock = TestClock()
+            }
+        }
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
+        await store.send(.sensorPairing(.deviceManagement(.task)))
+        await store.send(.sensorPairing(.nextButtonTapped))
+        await store.receive(\.delegate.completed)
+        await store.finish()
+
+        #expect(log.value == [
+            .begin(.speedCadence), .begin(.radar), .begin(.heartRate),
+            .end(.speedCadence), .end(.radar), .end(.heartRate),
+        ])
     }
 
     @Test(".task on Welcome does not check permissions — that decision belongs to Welcome itself")

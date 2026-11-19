@@ -923,7 +923,9 @@ struct BLECSCIntegrationTests {
         #expect(await speedStates.next() == .connected)
         #expect(await speedStates.next() == .active)
 
-        // Start: the ride takes its scan, then the sheet releases its own.
+        // Start: AppFeature flags the ride (#585), the ride takes its scan, and the sheet
+        // releases its own.
+        await harness.client.setRideActive(true)
         await harness.client.startScanning()
         #expect(harness.scanned.value.count == 2)            // the sheet's, then the ride's
         await harness.client.endPairingScan()
@@ -964,6 +966,7 @@ struct BLECSCIntegrationTests {
         #expect(await speedStates.next() == .connecting)
         #expect(await cadenceStates.next() == .connecting)
 
+        await harness.client.setRideActive(true)             // AppFeature, before the release (#585)
         await harness.client.startScanning()
         #expect(harness.scanned.value.count == 1)            // the sheet's only
         await harness.client.endPairingScan()
@@ -1391,6 +1394,7 @@ struct BLECSCIntegrationTests {
         let harness = Harness()
         let id = UUID()
         await harness.pair(id, roles: [.speed, .cadence])
+        await harness.client.beginPairingScan()   // the Sensors list, which wants connections (#585)
 
         harness.events.yield(.discovered(id: id, name: "GSC-10", rssi: -55, services: [cscServiceUUID]))
         var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
@@ -1638,6 +1642,258 @@ struct BLECSCIntegrationTests {
         #expect(harness.disconnected.value.isEmpty)
     }
 
+    // MARK: - Pairing-scan connections (#585)
+
+    /// A pairing scan (the Start sheet, Sensors) connects the paired sensors that are awake.
+    /// Bring `id` up that way, to `.active`, with the scan still open.
+    private func connectUnderPairingScan(
+        _ harness: Harness,
+        _ id: UUID,
+        states: inout AsyncStream<BLECSCClient.ConnectionState>.Iterator,
+        connects: inout AsyncStream<UUID>.Iterator
+    ) async {
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        #expect(await states.next() == .connecting)
+        #expect(await connects.next() == id)
+        harness.bringToActive(id)
+        #expect(await states.next() == .connected)
+        #expect(await states.next() == .active)
+    }
+
+    @Test("The last pairing scan to end with no ride drops its connections and keeps the pairing")
+    func lastReleaseWithNoRideDropsConnections() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &speedStates, connects: &connects)
+
+        await harness.client.endPairingScan()
+        // The drop happens inside `endPairingScan`, so the replay shows it at once; a
+        // `#require` so a missing drop fails here instead of hanging on a later stream wait.
+        try #require(await harness.currentState(.speed) == .disconnected)
+        #expect(harness.disconnected.value.map(\.0) == [id])
+        #expect(harness.disconnected.value.map(\.1) == ["csc"])
+        #expect(harness.scanStopped.value == [[cscServiceUUID]])
+
+        // Still paired: the next pairing scan reconnects it.
+        #expect(await speedStates.next() == .disconnected)
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        #expect(await speedStates.next() == .connecting)
+        #expect(await connects.next() == id)
+    }
+
+    /// The issue's symptom: a sensor the Start sheet connected goes to sleep after Cancel, and
+    /// its uncapped ladder keeps dialling it by UUID, in the background too.
+    @Test("The last pairing scan to end with no ride stops a reconnect ladder")
+    func lastReleaseStopsALadder() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &speedStates, connects: &connects)
+        harness.events.yield(.disconnected(id: id, error: nil))
+        #expect(await speedStates.next() == .reconnecting)
+        #expect(await harness.clock.advanceToNextSleep() == .seconds(1))
+        #expect(await connects.next() == id)                 // first rung, still in flight
+
+        await harness.client.endPairingScan()
+        // The drop happens inside `endPairingScan`, so the replay shows it at once; a
+        // `#require` so a missing drop fails here instead of hanging on a later stream wait.
+        try #require(await harness.currentState(.speed) == .disconnected)
+        #expect(harness.clock.isIdle)
+        let connectsAfterRelease = harness.connectCount.value
+        await harness.clock.advance(by: .seconds(120))
+        #expect(harness.connectCount.value == connectsAfterRelease)
+
+        // The rung in flight completes after the drop: released again, not adopted.
+        harness.events.yield(.connected(id: id))
+        await settle(harness)
+        #expect(harness.disconnected.value.map(\.0) == [id, id])
+        #expect(await harness.currentState(.speed) == .disconnected)
+    }
+
+    /// Start sheet → Start. AppFeature flags the ride before the sheet's scan ends, and the
+    /// ride's `startScanning` may skip entirely (every paired role already held).
+    @Test("A running ride keeps the pairing scan's connections when it ends")
+    func rideActiveKeepsConnectionsAcrossRelease() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &speedStates, connects: &connects)
+
+        await harness.client.setRideActive(true)
+        await harness.client.endPairingScan()
+        #expect(await harness.currentState(.speed) == .active)
+        #expect(harness.disconnected.value.isEmpty)
+    }
+
+    @Test("A pairing scan ending while another is open keeps the connections")
+    func releaseWithAnotherHolderKeepsConnections() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &speedStates, connects: &connects)
+
+        await harness.client.endPairingScan()
+        #expect(await harness.currentState(.speed) == .active)
+        #expect(harness.disconnected.value.isEmpty)
+
+        await harness.client.endPairingScan()
+        // The drop happens inside `endPairingScan`, so the replay shows it at once; a
+        // `#require` so a missing drop fails here instead of hanging on a later stream wait.
+        try #require(await harness.currentState(.speed) == .disconnected)
+        #expect(harness.disconnected.value.map(\.0) == [id])
+    }
+
+    /// Sensors is open (its own hold) and the rider tapped Pair. The 10 s sweep begins and
+    /// ends a scan of its own; it must not take the interrogation slot with it, or Pair is
+    /// refused until relaunch (#577 review).
+    @Test("A sweep during an interrogation keeps the slot and its capabilities arrive")
+    func sweepDuringInterrogationKeepsTheSlot() async {
+        let harness = Harness()
+        let candidate = UUID()
+        await harness.client.beginPairingScan()              // Sensors' .task
+        harness.events.yield(.discovered(id: candidate, name: "Wahoo RPM", rssi: -55, services: [cscServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == candidate } }
+
+        await harness.client.pair(candidate)
+        harness.bringToActive(candidate)
+        await harness.client.beginPairingScan()              // the sweep
+        await harness.client.endPairingScan()
+        harness.reportCapabilities(wheel: true, crank: true, from: candidate)
+
+        let listed = await harness.devices { $0.first { $0.id == candidate }?.capabilities != nil }
+        #expect(listed.first { $0.id == candidate }?.connectionState != nil)
+        #expect(harness.disconnected.value.isEmpty)
+    }
+
+    /// Leaving Sensors before choosing a role is the last release: the interrogation goes too.
+    /// `DeviceManagementFeature.interrogationWasReleased` clears `pendingPairing` from the row.
+    @Test("The last pairing scan to end with no ride drops an interrogation")
+    func lastReleaseDropsAnInterrogation() async throws {
+        let harness = Harness()
+        let candidate = UUID()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: candidate, name: "Wahoo RPM", rssi: -55, services: [cscServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == candidate } }
+        await harness.client.pair(candidate)
+        harness.bringToActive(candidate)
+        _ = await harness.devices { $0.first { $0.id == candidate }?.connectionState != nil }
+
+        await harness.client.endPairingScan()
+        try #require(harness.disconnected.value.map(\.0) == [candidate])
+        let listed = await harness.devices { $0.first { $0.id == candidate }?.connectionState == nil }
+        #expect(listed.first { $0.id == candidate }?.capabilities == nil)
+    }
+
+    /// A Sensors list opened mid-ride and closed after Finish.
+    @Test("Once the ride ends, the last pairing scan to end drops its connections")
+    func rideEndThenReleaseDrops() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.setRideActive(true)
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &speedStates, connects: &connects)
+
+        await harness.client.setRideActive(false)
+        await harness.client.endPairingScan()
+        // The drop happens inside `endPairingScan`, so the replay shows it at once; a
+        // `#require` so a missing drop fails here instead of hanging on a later stream wait.
+        try #require(await harness.currentState(.speed) == .disconnected)
+        #expect(harness.disconnected.value.map(\.0) == [id])
+    }
+
+    // MARK: Nothing auto-connects with nothing wanting it (#585 review)
+
+    /// No pairing scan, no ride scan, no ride: a paired sensor advertising is listed for the
+    /// pairing UI but not connected — nothing would ever drop that connection.
+    @Test("A paired sensor discovered with nothing wanting connections is listed, not connected")
+    func discoveryWithNothingWantingConnectionsIsListedNotConnected() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        await settle(harness)
+        let listed = await harness.devices { $0.contains { $0.id == id } }
+        // A row's roles come from its connection slot, so an unconnected sensor lists with
+        // none. Sensors shows it as paired from the persisted records, not from this row.
+        let row = listed.first { $0.id == id }
+        #expect(row?.roles.isEmpty == true)
+        #expect(row?.connectionState == nil)
+        #expect(harness.connectCount.value == 0)
+        #expect(await harness.currentState(.speed) == .disconnected)
+    }
+
+    /// The review's case: an advertisement handled just after the last release's drop — queued
+    /// behind it, or from the Bluetooth power-on rescan — must not bring the sensor back.
+    @Test("A paired sensor re-advertising after the last release is not reconnected")
+    func discoveryAfterTheLastReleaseDoesNotReconnect() async throws {
+        let harness = Harness()
+        let id = UUID()
+        await harness.pair(id, roles: [.speed, .cadence])
+        var speedStates = harness.client.connectionState(.speed).makeAsyncIterator()
+        #expect(await speedStates.next() == .disconnected)   // replay
+        var connects = harness.connectCalls.makeAsyncIterator()
+
+        await harness.client.beginPairingScan()
+        await connectUnderPairingScan(harness, id, states: &speedStates, connects: &connects)
+        await harness.client.endPairingScan()
+        try #require(await harness.currentState(.speed) == .disconnected)
+
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        await settle(harness)
+        #expect(harness.connectCount.value == 1)
+        #expect(await harness.currentState(.speed) == .disconnected)
+    }
+
+    /// `setPairedSensors` re-adopts a sensor already seen this session — a Sensors commit landing
+    /// after the screen closed. Gated the same way; the map is still cached for the next scan.
+    @Test("Pushing pairings with nothing wanting connections connects nothing, and the next scan does")
+    func setPairedSensorsWithNothingWantingConnectionsDoesNotConnect() async {
+        let harness = Harness()
+        let id = UUID()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == id } }
+        await harness.client.endPairingScan()
+
+        await harness.pair(id, roles: [.speed, .cadence])
+        #expect(harness.connectCount.value == 0)
+        #expect(await harness.currentState(.speed) == .disconnected)
+
+        var connects = harness.connectCalls.makeAsyncIterator()
+        await harness.client.beginPairingScan()
+        harness.events.yield(.discovered(id: id, name: "Wahoo SPEED", rssi: -55, services: [cscServiceUUID]))
+        #expect(await connects.next() == id)
+    }
+
     // MARK: - Capabilities (0x2A5C, #67)
 
     @Test("Discovering the CSC characteristics reads the feature characteristic")
@@ -1761,6 +2017,7 @@ struct BLECSCIntegrationTests {
         let harness = Harness()
         let id = UUID()
         await harness.pair(id, roles: [.speed, .cadence])
+        await harness.client.beginPairingScan()   // the Start sheet, which wants connections (#585)
 
         // CoreBluetooth won't redeliver `.discovered` for a peripheral already seen,
         // so the replay is what populates a sheet opened after discovery.
@@ -1783,6 +2040,7 @@ struct BLECSCIntegrationTests {
         let harness = Harness()
         let id = UUID()
         await harness.pair(id, roles: [.speed, .cadence])
+        await harness.client.beginPairingScan()   // the Sensors list, which wants connections (#585)
 
         var devices = harness.client.discoveredDevices().makeAsyncIterator()
         #expect(await devices.next()?.isEmpty == true)

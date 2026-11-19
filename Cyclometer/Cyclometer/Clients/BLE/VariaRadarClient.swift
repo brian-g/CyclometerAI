@@ -76,6 +76,11 @@ struct VariaRadarClient: Sendable {
     /// Take every open pairing scan off the radio while the app is in the background, and
     /// put them back on return (#418). Mirrors `BLECSCClient.setPairingScansSuspended`.
     var setPairingScansSuspended: @Sendable (Bool) async -> Void
+    /// Whether a ride is running (#585). With no ride, the last `endPairingScan` drops the
+    /// connection and stops the reconnect ladder, keeping the pairing. Mirrors
+    /// `BLECSCClient.setRideActive`; `isScanning` can't stand in, because `startScanning` skips
+    /// when the Start sheet already connected the radar.
+    var setRideActive: @Sendable (Bool) async -> Void
     var radarTargets:    @Sendable () -> AsyncStream<[RadarTarget]>
     var connectionState: @Sendable () -> AsyncStream<ConnectionState>
     /// Battery percentage of the connected radar, or `nil` when unknown — nothing
@@ -197,6 +202,7 @@ extension VariaRadarClient: DependencyKey {
             beginPairingScan:  { await state.beginPairingScan() },
             endPairingScan:    { await state.endPairingScan() },
             setPairingScansSuspended: { await state.setPairingScansSuspended($0) },
+            setRideActive:   { await state.setRideActive($0) },
             radarTargets:    { state.makeTargetsStream() },
             connectionState: { state.makeConnectionStateStream() },
             batteryLevel:    { state.makeBatteryStream() }
@@ -215,6 +221,7 @@ extension VariaRadarClient: DependencyKey {
         beginPairingScan:  { },
         endPairingScan:    { },
         setPairingScansSuspended: { _ in },
+        setRideActive:   { _ in },
         radarTargets:    { AsyncStream { $0.finish() } },
         connectionState: { AsyncStream { $0.finish() } },
         batteryLevel:    { AsyncStream { $0.finish() } }
@@ -283,8 +290,16 @@ private final class RadarClientState: @unchecked Sendable {
     /// The app is in the background, so the open pairing scans are off the radio (#418).
     /// They stay counted — only the hardware request is withdrawn. Mirrors `CSCClientState`.
     private var pairingScansSuspended = false
+    /// A ride is running, so a connection the Start sheet made must outlive its pairing scan
+    /// (#585). Set by the feature layer. Mirrors `CSCClientState`.
+    private var rideActive = false
     /// Whether an open pairing scan currently wants the radio. Must hold the lock.
     private var pairingScanWantsRadioLocked: Bool { pairingScanCount > 0 && !pairingScansSuspended }
+    /// Whether anything wants a connection: an open pairing scan (suspended or not), the ambient
+    /// scan, or a ride. The paired radar is connected *on its own* — on discovery, or when
+    /// `setPairedSensor` finds it already seen — only while this holds (#585). Mirrors
+    /// `CSCClientState.wantsConnectionsLocked`. Must hold the lock.
+    private var wantsConnectionsLocked: Bool { pairingScanCount > 0 || isScanning || rideActive }
 
     /// Every radar seen this session. The inventory the pairing list is built from, and
     /// what lets `setPairedSensor` connect a device discovered before it was paired —
@@ -443,10 +458,19 @@ private final class RadarClientState: @unchecked Sendable {
     }
 
     func endPairingScan() async {
-        let shouldStopHardware = lock.withLock { () -> Bool in
+        let (shouldStopHardware, dropped) = lock.withLock { () -> (Bool, DroppedConnection?) in
             pairingScanCount = max(0, pairingScanCount - 1)
+            // The last holder is gone and no ride will use what it connected (#585), the same
+            // rule as `CSCClientState.endPairingScan`. Only when there is something to drop:
+            // `release` publishes `.disconnected`, which must not overwrite an ambient `.scanning`.
+            let hasConnection = targetPeripheralID != nil || reconnectTask != nil
+            let dropped = pairingScanCount == 0 && !rideActive && hasConnection ? takeConnectionLocked() : nil
             // Suspended: the radio was already given back, or the ambient scan holds it.
-            return pairingScanCount == 0 && !isScanning && !pairingScansSuspended
+            return (pairingScanCount == 0 && !isScanning && !pairingScansSuspended, dropped)
+        }
+        if let dropped {
+            await release(dropped)
+            logger.notice("pairing scan ended — no ride, dropped the connection")
         }
         guard shouldStopHardware else { return }
         await bleClient.stopScanning([radarServiceUUID])
@@ -476,6 +500,14 @@ private final class RadarClientState: @unchecked Sendable {
             await bleClient.startScanning([radarServiceUUID])
             logger.notice("pairing scan started (\(self.pairingScanCountSnapshot) open) — app in foreground")
         }
+    }
+
+    func setRideActive(_ active: Bool) async {
+        let changed = lock.withLock { () -> Bool in
+            defer { rideActive = active }
+            return rideActive != active
+        }
+        if changed { logger.notice("ride \(active ? "active" : "ended", privacy: .public)") }
     }
 
     private var pairingScanCountSnapshot: Int { lock.withLock { pairingScanCount } }
@@ -513,23 +545,7 @@ private final class RadarClientState: @unchecked Sendable {
     /// User-initiated disconnect: clears the target first so the resulting
     /// `.disconnected` BLE event won't match and trigger reconnection.
     func disconnect() async {
-        cancelReconnect()
-        // Read and clear atomically — a .disconnected event processed between a
-        // separate read and clear would still match the target and start an
-        // unwanted reconnect.
-        let id = lock.withLock { () -> UUID? in
-            let current = targetPeripheralID
-            targetPeripheralID = nil
-            resetConnectionFrameStateLocked()
-            return current
-        }
-        setConnectionState(.disconnected)
-        // Same reason as the `.disconnected` branch: that branch can't run here,
-        // because the target has already been cleared above.
-        setBattery(nil)
-        if let id {
-            await bleClient.disconnect(id, radarOwnerID)
-        }
+        await release(lock.withLock { takeConnectionLocked() })
         // Ride finish must not silently kill a pairing scan the Sensors screen is
         // holding open — same shared-`requestedServices` hazard as `stopScanning`.
         let shouldStopHardware = lock.withLock { () -> Bool in
@@ -572,7 +588,9 @@ private final class RadarClientState: @unchecked Sendable {
             // The new radar is already in the session inventory: connect it now rather
             // than waiting for an advertisement that won't come.
             var toConnect: UUID?
-            if let id, targetPeripheralID == nil, discoveredIDs.contains(id) {
+            // Only while something wants a connection (#585); otherwise the pairing is cached and
+            // the next scan connects it.
+            if let id, targetPeripheralID == nil, discoveredIDs.contains(id), wantsConnectionsLocked {
                 targetPeripheralID = id
                 toConnect = id
             }
@@ -622,7 +640,7 @@ private final class RadarClientState: @unchecked Sendable {
             // sidebar. The shared central may be scanning several sensor types, so
             // filter on the service first.
             guard services.contains(radarServiceUUID) else { return }
-            let (shouldConnect, firstSighting): (Bool, Bool) = lock.withLock {
+            let (verdict, firstSighting): (DiscoveryVerdict, Bool) = lock.withLock {
                 // Record every radar seen, named or not — the pairing list is built from
                 // this inventory, and an unnamed unit still needs a row.
                 let firstSighting = discoveredIDs.insert(id).inserted
@@ -637,10 +655,12 @@ private final class RadarClientState: @unchecked Sendable {
                 // the check and the claim in one acquisition, so two redeliveries can't
                 // both pass it.
                 guard targetPeripheralID == nil, pairedPeripheralID == id else {
-                    return (false, firstSighting)
+                    return (.notPaired, firstSighting)
                 }
+                // Listed either way; connected only while something wants it (#585).
+                guard wantsConnectionsLocked else { return (.nothingWantsIt, firstSighting) }
                 targetPeripheralID = id
-                return (true, firstSighting)
+                return (.connect, firstSighting)
             }
             // Announce the gate's verdict, once per peripheral per scan session. Without
             // this an ignored radar is indistinguishable from one that never advertised:
@@ -649,10 +669,10 @@ private final class RadarClientState: @unchecked Sendable {
             if firstSighting {
                 logger.notice("""
                     discovered "\(name ?? "?", privacy: .public)" \(id, privacy: .public) — \
-                    \(shouldConnect ? "paired, connecting" : "not paired, ignoring", privacy: .public)
+                    \(verdict.logDescription, privacy: .public)
                     """)
             }
-            guard shouldConnect else { return }
+            guard verdict == .connect else { return }
             setConnectionState(.connecting)
             await bleClient.connect(id, radarOwnerID)
 
@@ -812,6 +832,51 @@ private final class RadarClientState: @unchecked Sendable {
             )
         }
         lock.withLock { reconnectTask = task }
+    }
+
+    /// What `.discovered` decided about a radar, for its once-per-session log line.
+    private enum DiscoveryVerdict {
+        case connect, notPaired, nothingWantsIt
+
+        var logDescription: String {
+            switch self {
+            case .connect: "paired, connecting"
+            case .notPaired: "not paired, ignoring"
+            case .nothingWantsIt: "paired, nothing wants a connection, ignoring"
+            }
+        }
+    }
+
+    /// A connection taken out of the client's state, still to be released on the transport.
+    private struct DroppedConnection {
+        var peripheralID: UUID?
+        var ladder: Task<Void, Never>?
+    }
+
+    /// Take the connection identity and the reconnect ladder in one acquisition. Read and clear
+    /// atomically: a `.disconnected` processed between a separate read and clear would still
+    /// match the target and start an unwanted reconnect. Shared by `disconnect()` and the last
+    /// `endPairingScan` with no ride (#585). Must hold the lock.
+    private func takeConnectionLocked() -> DroppedConnection {
+        let dropped = DroppedConnection(peripheralID: targetPeripheralID, ladder: reconnectTask)
+        reconnectTask = nil
+        targetPeripheralID = nil
+        resetConnectionFrameStateLocked()
+        return dropped
+    }
+
+    /// Finish what `takeConnectionLocked` started: stop the ladder, publish `.disconnected`, and
+    /// release the transport. A ladder rung already in flight is caught by `.connected`'s
+    /// non-target safety net.
+    private func release(_ dropped: DroppedConnection) async {
+        dropped.ladder?.cancel()
+        setConnectionState(.disconnected)
+        // The `.disconnected` branch would clear the battery, but it can't run for this
+        // connection: the target has already been cleared.
+        setBattery(nil)
+        if let id = dropped.peripheralID {
+            await bleClient.disconnect(id, radarOwnerID)
+        }
     }
 
     private func cancelReconnect() {

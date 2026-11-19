@@ -2469,3 +2469,36 @@ Plan: resolve at the point of use — keep `gpxFileURL` (no migration), exports 
 **Code review (2026-11-17):** PR CI was red because `RideDashboardSnapshotTests` was missing from `tests.yml`'s `-skip-testing` list. All 8 captures ran on CI's runner and failed there, so the "full suite → PR" tick above was premature. The suite is now in the skip list. Review fixes: the snapshot helper passes `file:`/`line:` through, the page indicator reads the page once, and stale comments are updated. `RideDashboardSnapshotTests` passes 4/4 locally. `banner(...)`, the S07 controls' file and the 1 s wait were kept as planned.
 
 **Trace (2026-11-17):** Brian recorded the Instruments SwiftUI trace on device, `main` vs branch. Good: `AppView`'s body no longer updates on each clock tick. All #352 acceptance criteria are met.
+
+---
+
+## #585 — Connections a pairing scan made outlive it (2026-11-18)
+
+Branch `fix/585-pairing-scan-connections`. Plan: CSC + radar get `setRideActive(Bool)`; `endPairingScan` reaching 0 with no ride drops every connection and ladder (pairings kept); AppFeature claims the ride before releasing the Start sheet's scan.
+
+- [x] CSC client: `rideActive`, `setRideActive`, shared drop helper, teardown in `endPairingScan`
+- [x] Radar client: same
+- [x] AppFeature: claim before release (start, resume); clear at `confirmFinish`; fix the wrong refcount comment
+- [x] Client integration tests (drop, ladder stops, ride keeps, other holder keeps, sweep during interrogation, ride end then release)
+- [x] `StartSheetPresentationTests` call-log ordering; `PairingScanBackgroundTests` end-to-end
+- [x] DeviceManagement: leave mid-interrogation then return → Pair works
+- [x] BLE.md §12 row + §13.3 decision 5
+- [x] Revert checks; targeted suites
+- [x] Full suite
+- [x] Brian runs on device; then commit + PR
+
+**Review (2026-11-18):** CSC and radar have `setRideActive(Bool)`. When the last pairing scan ends with no ride, `endPairingScan` drops every slot or target and cancels the ladders, keeping the pairings. The drop shares `dropAllSlotsLocked` / `takeConnectionLocked` + `release` with `disconnect()`. `AppFeature.handOffToRide` concatenates the ride flag before the Start sheet's release (Start Ride and resume), and `confirmFinish` clears it. The old "refcount never reaches zero" comment was wrong and is rewritten. DeviceManagement needed no change: leaving mid-interrogation drops the slot, and on return the replayed list ends `pendingPairing` (end-to-end test). Two existing CSC handoff tests now set the ride flag, as AppFeature does. Revert checks: with the drop neutralised, exactly 11 drop tests fail; with the claim removed, the end-to-end handoff test fails plus 5 call-log tests. Full suite: 2995 results, 0 failures. Not covered: a Sensors list left open while backgrounded keeps its connections (BLE.md §13.3 decision 5), and HR is untouched.
+
+**Device (2026-11-18):** Brian verified it by hand, and the collected log agrees. Cancel logged CSC `dropped 2 connection(s)` and radar `dropped the connection`, then three transport disconnects and the radio off, with no reconnects after. On Start, `ride active` preceded the sheet's releases and nothing was dropped. CSC and radar took no ride scan (only HR's `[180D]` ran), so the ride flag alone kept them up until Finish.
+
+### #585 follow-up from the code review (2026-11-18)
+
+Brian: fix review findings 1 (onboarding scan leak) and 2 (late connections) in #599; leave HR.
+
+- [x] S02 `nextButtonTapped` sends `.deviceManagement(.onDisappear)` before `.delegate(.next)`
+- [x] CSC + radar `wantsConnectionsLocked` gate on `.discovered` and `setPairedSensor(s)`
+- [x] Tests: onboarding balance; gate tests (CSC, radar); fix fallout
+- [x] BLE.md §12 row + decision 5 additions
+- [x] Targeted suites → revert checks → full suite → commit + push (Brian's device run of the follow-up still to come)
+
+**Review (2026-11-18):** The first targeted run hung for ~90 minutes on one test. `discoveredDevicesTracksUnpair` looped on `devices.next()` until the row showed paired, and with the gate a row only holds roles once it's connected. The queued main-actor suites behind it never reported, so it looked like a mass hang. That test now opens the Sensors list's pairing scan. `discoveryWithNothingWantingConnectionsIsListedNotConnected` wrongly expected `isPaired`, but a CSC row's roles come from its slot. It now expects no roles and no connection state. Targeted suites: 253 passed. Revert check, with the gate set to `true` and the S02 send removed: exactly the 6 gate tests and the 2 S02 tests fail. Full suite: 3000 passed, 2 failed. Both failures were S02 tests outside the targeted set (`SensorPairingFeatureTests.nextDelegates`, `AppOnboardingTests.completingTheFlowPersistsAndDismisses`) that now receive `.deviceManagement(.onDisappear)`. Those suites pass on rerun (16/16). Lesson recorded in `tasks/lessons.md`.

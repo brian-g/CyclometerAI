@@ -972,3 +972,19 @@ I dropped that idea along with the location case, rather than asking which cause
 **Rule.** When designing an empty or unavailable state, list the failure causes and give each one the rider can
 act on (offline, permission off) its own message; the rest share the generic one. WeatherKit's `WeatherError`
 has no offline case, so ask the network path (`NetworkStatusClient`) after the failure, never guess from the error.
+
+## A behaviour gate can turn an unbounded test loop into a hang (2026-11-18, #585)
+
+**What happened.** The #585 auto-connect gate stopped discovery connecting with nothing open. The CSC test
+`discoveredDevicesTracksUnpair` waited with `while list?.first?.isPaired != true { list = await devices.next() }`,
+which never ended. Its run sat for ~90 minutes, and the ~60 queued main-actor tests behind it never reported,
+so the run looked like a mass hang. Brian: "clearly the tests have hanged. figure out what the fuck is going on".
+
+**Why I was wrong.** I checked for tests that relied on auto-connect with a `connectCount`/state grep, but not for
+unbounded `while … await next()` loops. And I let a run that normally takes minutes go unwatched.
+
+**Rule.** Before running tests after a change to when something happens (a gate, a guard, an ordering), grep the
+affected suites for unbounded waits (`while … await …next()`, bare `for await` with no exit) and either bound them
+or confirm the change can't starve them. Run targeted suites with `-test-timeouts-enabled YES
+-default-test-execution-time-allowance 120` so a hang fails the test. When a run outlives its usual time,
+diagnose at once: compare the log's finished tests against the selected suites, and `sample` the host process.

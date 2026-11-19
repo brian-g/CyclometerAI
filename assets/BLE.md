@@ -580,7 +580,7 @@ static func reconnectDelay(attempt: Int) -> Duration {
 
 A drop before the 0x2A5C answer arrives means the answer never will. The Sensors screen, and onboarding S02, which runs the same `DeviceManagementFeature` reducer, watch for this. When the pending sensor's row in the CSC list goes from a connection state to none and has no capabilities, the screen ends the pairing in flight. The rider can then tap Pair again. Without that, the screen would wait forever, and with a pairing in flight every other Pair tap and reassignment is refused.
 
-**Removing a CSC slot always releases its connection (#558).** Every path that removes a slot also calls `bleClient.disconnect(id, "csc")`: `unpair`, `disconnect()` (which ride finish calls, #417), a role moved to another sensor, capabilities (read from 0x2A5C or inferred from a measurement) that leave a sensor no role, the no-role drop above, and standing down when Bluetooth is off, unauthorized or unsupported. In that last case CoreBluetooth has already dropped every link, and the call is there to keep `BLECentral`'s owner list true. `BLECentral` drops the "csc" owner and, if no other client still owns the peripheral, calls `cancelPeripheralConnection`. Apple's header says that call "cancels an active or pending connection". So on a powered-on central, a connect request this client placed *before* the release is cancelled along with it. On the stand-down path the central is not powered on, and the header doesn't say what a cancel does there. If a pending request survived the power-off and later completed, the no-slot `.connected` backstop in the next paragraph would let it go. A connect placed *after* the release is the exception, covered in the next paragraph. A `.connected` that was already queued when the slot went finds no slot and is let go (next paragraph), and the cancel queued behind it takes the link down. If another client (heart rate on a combo device) still owns the peripheral, the link stays up for that client, as it should.
+**Removing a CSC slot always releases its connection (#558).** Every path that removes a slot also calls `bleClient.disconnect(id, "csc")`: `unpair`, `disconnect()` (which ride finish calls, #417), the last pairing scan ending with no ride (#585), a role moved to another sensor, capabilities (read from 0x2A5C or inferred from a measurement) that leave a sensor no role, the no-role drop above, and standing down when Bluetooth is off, unauthorized or unsupported. In that last case CoreBluetooth has already dropped every link, and the call is there to keep `BLECentral`'s owner list true. `BLECentral` drops the "csc" owner and, if no other client still owns the peripheral, calls `cancelPeripheralConnection`. Apple's header says that call "cancels an active or pending connection". So on a powered-on central, a connect request this client placed *before* the release is cancelled along with it. On the stand-down path the central is not powered on, and the header doesn't say what a cancel does there. If a pending request survived the power-off and later completed, the no-slot `.connected` backstop in the next paragraph would let it go. A connect placed *after* the release is the exception, covered in the next paragraph. A `.connected` that was already queued when the slot went finds no slot and is let go (next paragraph), and the cancel queued behind it takes the link down. If another client (heart rate on a combo device) still owns the peripheral, the link stays up for that client, as it should.
 
 **A link that comes up for a peripheral the client no longer holds is let go (#558).** Disconnecting on release can't close one window by itself. A ladder rung, or `setRoles`, checks its slot under the client's lock and calls `connect` only after the lock is dropped, because the transport call is async. A release that lands in between queues its cancel first, and the connect lands after it. So `.connected` for a peripheral with no CSC slot calls `bleClient.disconnect(id, "csc")`, and `VariaRadarClient` does the same for a peripheral that isn't its target. For a peripheral only another client wants, the call is a no-op, because `BLECentral` cancels only when no owner is left.
 
@@ -948,6 +948,8 @@ App must **not crash** when Bluetooth permission is denied. The `RadarFeature` g
 | The ride scans for a paired role the sheet didn't connect | `BLECSCClient.startScanning` skips only when it is already scanning, or a slot exists and every paired role holds one; with no slots it always scans. With separate speed and cadence sensors the sheet may connect only the one that is awake; the ride's scan keeps the radio on for the other after the sheet's scan ends (#417) |
 | Pairing scans stop in the background | At `.background` every client withdraws its pairing scan unless its own ambient scan (`isScanning`) holds the radio, and reissues it at `.active` without starting a new generation; `.inactive` alone moves nothing, and the refcount is never touched (§13.3, #418) |
 | A dropped strap creates no scan | HR's `.disconnected` rescans only if its ambient scan or an unsuspended pairing scan already wants the radio, and never sets `isScanning` (§13.3, #418) |
+| A pairing scan's connections end with it | When the last pairing scan ends with no ride, CSC and radar drop every connection and stop every reconnect ladder, keeping the pairings. `AppFeature` sets `setRideActive(true)` before it releases the Start sheet's scan, so Start Ride keeps the sheet's sensors (§13.3, #585) |
+| Nothing auto-connects with nothing wanting it | CSC and radar connect a paired sensor on discovery, or from `setPairedSensor(s)`, only while a pairing scan is open, their ambient scan runs, or a ride is active; otherwise it is listed and left alone. Explicit `setRoles` / `pair` / `connect` aren't gated (§13.3, #585) |
 | One pairing is interrogated at a time | A Pair tap while `pendingPairing` is set is refused, so a cancel cannot release the wrong peripheral |
 | A CSC answer does not displace a strap | Unambiguous roles fold into the role prompt's answer only where unoccupied; an occupied one is left alone rather than raising a prompt about a role the rider never chose |
 | Combo sensor assigned Both | SpeedFeature and CadenceFeature both connect to same peripheral UUID |
@@ -1124,9 +1126,52 @@ finish's `disconnect()` — so it is a mid-ride edge only.
   under a second old, and judging staleness over it would drop every row not re-sighted in that window, to
   reappear a moment later. It carries on through the suspension and the next sweep judges it.
 - Connections are not touched. A sensor a pairing scan connected (the paired gate admits it on discovery)
-  stays connected through the suspension, exactly as it does when the screen closes in the foreground, and
-  if it drops the CSC and radar ladders keep reconnecting it by UUID, in the background too. That is a known
-  gap, not part of this rule.
+  stays connected through the suspension, and if it drops the CSC and radar ladders keep reconnecting it by
+  UUID, in the background too, until the screen holding the scan closes (decision 5).
+
+**5. A pairing scan's connections end with it. — Done, #585.**
+
+The paired gate connects whatever a pairing scan finds, and before this nothing outside a ride ever let go:
+a sensor the Start sheet connected stayed connected after Cancel, and when it slept its ladder (uncapped since
+#557) redialled it by UUID for the rest of the process, waking the app in the background.
+
+The rule: **when the last pairing scan ends and no ride is running, the CSC and radar clients drop every
+connection and stop every reconnect ladder; the pairings stay.** It lives in `endPairingScan`, on the count
+reaching 0, and shares its teardown with `disconnect()`. HR is left out: it has no ladder, and since #418 a
+dropped strap stays dropped with no scan wanting it.
+
+- **No connection records why it exists**, so "what the scan made" is "everything, when no ride needs it". A
+  slot from `setRoles`, `pair` or a ride scan looks the same as one from a pairing scan.
+- **An explicit ride flag, not `isScanning`.** `setRideActive(Bool)` on both clients, set by `AppFeature`,
+  which owns the ride. `isScanning` is false for a whole ride in exactly the case to protect: CSC's
+  `startScanning` skips when the sheet already holds every paired role, and the radar's skips unless
+  `.disconnected`.
+- **Claim before release.** On Start Ride and on a resumed ride, `AppFeature` concatenates `setRideActive(true)`
+  ahead of the sheet's three `endPairingScan`s. The ride's own `startScanning` runs in effects that
+  `activeRide(.task)` spawns, unordered with the release, so it can't be what keeps the connections. Finish
+  clears the flag. Ride finish's `disconnect()` has already dropped everything, so clearing it matters only
+  to a Sensors list opened mid-ride and closed afterwards.
+- **An interrogation in flight is safe while Sensors is open**, because its own hold keeps the count above 0
+  and the 10 s sweep goes begin → end. Leaving the screen mid-interrogation drops it; on return, the replayed
+  device list shows the row without a connection and `interrogationWasReleased` ends `pendingPairing`, so Pair
+  works again.
+- **Nothing auto-connects with nothing wanting it.** The drop runs once, on the count reaching 0, so a
+  connection made after it would have nothing left to drop it. Examples: an advertisement already queued on
+  the client's event loop, the power-on rescan, a Sensors refresh effect that runs begin → end after the
+  screen closed, or `setPairedSensor(s)` re-adopting a sensor seen earlier. So the two auto-connect paths,
+  `.discovered` and `setPairedSensor(s)`, connect a paired sensor only while a pairing scan is open
+  (suspended or not), the client's ambient scan runs, or a ride is active. The sensor is still listed, and
+  the pairing still cached, so the next scan connects it. Explicit requests (`setRoles`, `pair`, the radar's
+  `connect`) are a caller's decision and aren't gated. The reconnect ladder only runs for an existing
+  connection, which the drop cancels.
+- **Onboarding ends its own scan.** S02's Next completes onboarding, and `AppFeature` nils `onboarding`
+  straight away, so the device list's `.onDisappear` arrives at an absent child and `ifLet` drops it.
+  `SensorPairingFeature` sends `.deviceManagement(.onDisappear)` before `.delegate(.next)`; before, every
+  client's count stayed at 1 for the first session and no release reached 0.
+- **Not at `.background`.** #577's review ruled out disconnecting there: it would take an interrogation slot
+  from an open Sensors list, would have to be ordered against the suspension, and would race the launch-time
+  resume. So a Sensors list left open as the phone is pocketed keeps its connections, and their ladders, until
+  it closes.
 
 ### 13.4 What adopting restoration would require
 

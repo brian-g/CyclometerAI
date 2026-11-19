@@ -83,6 +83,12 @@ struct BLECSCClient: Sendable {
     /// started meanwhile needs no special case — and this client's own ambient scan
     /// (`startScanning`, which a ride makes) is never stopped by it (BLE.md §13.3).
     var setPairingScansSuspended: @Sendable (Bool) async -> Void
+    /// Whether a ride is running (#585). `AppFeature`, which owns the ride, sets it before it
+    /// releases the Start sheet's pairing scan and clears it when the ride finishes. With no
+    /// ride, the last `endPairingScan` drops every connection and stops every reconnect ladder,
+    /// keeping the pairings. `isScanning` can't tell a ride is running: `startScanning` skips
+    /// when the sheet already holds every paired role, which is exactly the handoff to keep.
+    var setRideActive:         @Sendable (Bool) async -> Void
     /// The rider tapped Pair. Connects the peripheral holding *no* roles, purely to
     /// read its capabilities — taking roles here would strip them off whichever
     /// sensor currently holds them, before the rider has decided anything. The
@@ -284,6 +290,7 @@ extension BLECSCClient: DependencyKey {
             beginPairingScan:      { await state.beginPairingScan() },
             endPairingScan:        { await state.endPairingScan() },
             setPairingScansSuspended: { await state.setPairingScansSuspended($0) },
+            setRideActive:         { await state.setRideActive($0) },
             pair:                  { id in await state.pair(peripheralID: id) },
             unpair:                { id in await state.unpair(peripheralID: id) },
             setWheelCircumference: { mm in await state.setWheelCircumference(mm) },
@@ -308,6 +315,7 @@ extension BLECSCClient: DependencyKey {
         beginPairingScan:      { },
         endPairingScan:        { },
         setPairingScansSuspended: { _ in },
+        setRideActive:         { _ in },
         pair:                  { _ in },
         unpair:                { _ in },
         setWheelCircumference: { _ in },
@@ -421,8 +429,18 @@ private final class CSCClientState: @unchecked Sendable {
     /// They stay counted — only the hardware request is withdrawn — so the holders'
     /// begin/end pairs balance whatever happens meanwhile.
     private var pairingScansSuspended = false
+    /// A ride is running, so the connections it inherited from the Start sheet must outlive
+    /// the sheet's pairing scan (#585). Set by the feature layer; nothing here infers it.
+    private var rideActive = false
     /// Whether an open pairing scan currently wants the radio. Must hold the lock.
     private var pairingScanWantsRadioLocked: Bool { pairingScanCount > 0 && !pairingScansSuspended }
+    /// Whether anything wants connections: an open pairing scan (suspended or not), this client's
+    /// ambient scan, or a ride. A paired sensor is connected *on its own* — on discovery, or when
+    /// `setPairedSensors` finds it already seen — only while this holds; otherwise a connection
+    /// made after the last pairing scan's drop would have nothing left to drop it (#585).
+    /// Explicit requests (`setRoles`, `pair`) are the caller's decision and aren't gated. Must hold
+    /// the lock.
+    private var wantsConnectionsLocked: Bool { pairingScanCount > 0 || isScanning || rideActive }
 
     private var speedContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
     private var cadenceContinuations: [Int: AsyncStream<Double>.Continuation] = [:]
@@ -614,15 +632,31 @@ private final class CSCClientState: @unchecked Sendable {
     }
 
     func endPairingScan() async {
-        let shouldStopHardware = lock.withLock { () -> Bool in
+        let (shouldStopHardware, dropped) = lock.withLock { () -> (Bool, [UUID]) in
             pairingScanCount = max(0, pairingScanCount - 1)
+            // The last holder is gone and no ride will use what it connected (#585): drop
+            // it all, ladders included, or a sleeping sensor is redialled by UUID for the
+            // rest of the process, in the background too.
+            let dropped = pairingScanCount == 0 && !rideActive && !slots.isEmpty ? dropAllSlotsLocked() : []
             // Suspended: the radio was already given back by `setPairingScansSuspended`,
             // or the ambient scan is holding it.
-            return pairingScanCount == 0 && !isScanning && !pairingScansSuspended
+            return (pairingScanCount == 0 && !isScanning && !pairingScansSuspended, dropped)
+        }
+        for id in dropped { await bleClient.disconnect(id, cscOwnerID) }
+        if !dropped.isEmpty {
+            logger.notice("pairing scan ended — no ride, dropped \(dropped.count) connection(s)")
         }
         guard shouldStopHardware else { return }
         await bleClient.stopScanning([cscServiceUUID])
         logger.notice("pairing scan stopped")
+    }
+
+    func setRideActive(_ active: Bool) async {
+        let changed = lock.withLock { () -> Bool in
+            defer { rideActive = active }
+            return rideActive != active
+        }
+        if changed { logger.notice("ride \(active ? "active" : "ended", privacy: .public)") }
     }
 
     /// Withdraw the open pairing scans from the radio, or reissue them (#418). Only the
@@ -706,6 +740,9 @@ private final class CSCClientState: @unchecked Sendable {
             pairedAssignments = assignments
             // Only peripherals already seen this session can be connected now; the
             // rest are picked up by `.discovered` when they next advertise.
+            // And only while something wants connections (#585); the map is cached either way,
+            // so the next scan connects them.
+            guard wantsConnectionsLocked else { return [] }
             return assignments
                 .filter { discoveredIDs.contains($0.key) && slots[$0.key] == nil }
                 .map { ($0.key, $0.value) }
@@ -820,12 +857,8 @@ private final class CSCClientState: @unchecked Sendable {
 
     func disconnect() async {
         let (ids, shouldStopHardware): ([UUID], Bool) = lock.withLock {
-            for slot in slots.values { slot.reconnectTask?.cancel() }
-            let ids = Array(slots.keys)
-            slots.removeAll()
             isScanning = false
-            recomputeRoleStatesLocked()
-            return (ids, !pairingScanWantsRadioLocked)
+            return (dropAllSlotsLocked(), !pairingScanWantsRadioLocked)
         }
         for id in ids { await bleClient.disconnect(id, cscOwnerID) }
         // Leave the radio scanning if the pairing UI still wants it — the shared
@@ -881,7 +914,10 @@ private final class CSCClientState: @unchecked Sendable {
                 sightedThisGeneration.insert(id)
                 if let name { discoveredNames[id] = name }
                 broadcastDiscoveredLocked()
-                guard slots[id] == nil, let roles = pairedAssignments[id] else { return nil }
+                // Listed either way; connected only while something wants it (#585).
+                guard slots[id] == nil, let roles = pairedAssignments[id], wantsConnectionsLocked else {
+                    return nil
+                }
                 return roles
             }
             guard let roles else { return }
@@ -1120,12 +1156,8 @@ private final class CSCClientState: @unchecked Sendable {
             case .poweredOff, .unauthorized, .unsupported:
                 // Permission denied / radio off: stand down cleanly, never crash.
                 let released: [UUID] = lock.withLock {
-                    for slot in slots.values { slot.reconnectTask?.cancel() }
-                    let ids = Array(slots.keys)
-                    slots.removeAll()
                     isScanning = false
-                    recomputeRoleStatesLocked()
-                    return ids
+                    return dropAllSlotsLocked()
                 }
                 // CoreBluetooth has already dropped the links, but `BLECentral` still lists
                 // "csc" as an owner of each. Releasing them keeps the rule every other slot
@@ -1211,6 +1243,20 @@ private final class CSCClientState: @unchecked Sendable {
         guard !discoveredContinuations.isEmpty else { return }
         let devices = discoveredDevicesLocked()
         for continuation in discoveredContinuations.values { continuation.yield(devices) }
+    }
+
+    /// Cancel every reconnect ladder and remove every slot, interrogating ones too, returning
+    /// the peripherals to release with `bleClient.disconnect` once the lock is dropped. Shared by
+    /// `disconnect()`, the last `endPairingScan` with no ride (#585), and standing down when
+    /// Bluetooth goes away, so the three can't drift.
+    /// A ladder rung already in flight is caught by `.connected`'s no-slot safety net. Pairings
+    /// are untouched. Must hold the lock.
+    private func dropAllSlotsLocked() -> [UUID] {
+        for slot in slots.values { slot.reconnectTask?.cancel() }
+        let ids = Array(slots.keys)
+        slots.removeAll()
+        recomputeRoleStatesLocked()
+        return ids
     }
 
     /// Recompute each role's published state from the slots and broadcast changes.
