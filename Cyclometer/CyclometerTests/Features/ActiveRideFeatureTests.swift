@@ -3896,6 +3896,27 @@ struct ActiveRideFeatureHRDropoutTests {
         #expect(recorded.map(\.timestamp) == offsets.map { Self.fixedNow + $0 })
     }
 
+    /// #582's guard reads the wall clock, which can be set back mid-ride: by hand, or by automatic
+    /// time correcting a clock that ran ahead. A negative gap isn't a catch-up tick.
+    @Test("A wall clock set back keeps recording rather than waiting for it to catch up")
+    func clockSetBackKeepsRecording() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow - 59)     // the clock goes back a minute
+        await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow - 58)
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.map(\.timestamp) == [Self.fixedNow, Self.fixedNow - 59, Self.fixedNow - 58])
+    }
+
     private static let goodFix = LocationUpdate(
         coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012),
         altitude: 280.0,

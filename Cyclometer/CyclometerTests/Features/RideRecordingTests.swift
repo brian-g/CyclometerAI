@@ -153,8 +153,10 @@ struct RideRecordingTests {
             // Crosses one 30-tick checkpoint (aggregates + track points flushed at
             // tick 30), then keeps going 5 more ticks whose track points sit
             // unflushed in this store's own RideDataBuffer when it "dies" below —
-            // the accepted one-checkpoint-window data loss.
-            for _ in 1...35 {
+            // the accepted one-checkpoint-window data loss. A second apart, as a real timer
+            // ticks: points stamped at one instant are dropped as catch-up ticks (#582).
+            for tick in 0..<35 {
+                firstStore.dependencies.date.now = Self.testDate.addingTimeInterval(TimeInterval(tick))
                 await firstStore.send(.elapsedTick)
             }
             // firstStore goes out of scope here — no `.finish()`, no explicit
@@ -201,7 +203,8 @@ struct RideRecordingTests {
         )))
         // The resume's own segment, so the map breaks at the kill rather than joining A to B.
         #expect(secondStore.state.trackSegments.last == [coordinateB])
-        for _ in 1...5 {
+        for tick in 1...5 {
+            secondStore.dependencies.date.now = Self.testDate.addingTimeInterval(TimeInterval(60 + tick))
             await secondStore.send(.elapsedTick)
         }
 

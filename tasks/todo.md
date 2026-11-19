@@ -2532,3 +2532,11 @@ rejects, and no real timer produces it. They now advance the date a second per t
 than 2 points), so they take the file's existing `movingClock()`. Targeted suites: 338 passed. Revert check
 (guard disabled, own derived data, no compile cache): `catchUpTickRecordsNoPoint` fails, the 1 Hz test
 passes. Full `CyclometerTests`: 3004 passed, 0 failed.
+
+**Code review --fix (2026-11-19):** The guard skipped any gap under 0.5 s, negative ones included, so a
+wall clock set back mid-ride would have dropped every track point until it caught up. It now skips only
+`0 ≤ gap < 0.5 s`. New test: `clockSetBackKeepsRecording`. The doc no longer claims every short gap is a
+catch-up tick: an on-time tick after one the main actor held up by more than 0.5 s is dropped too.
+`RideRecordingTests.killAndRelaunchResumesRide` ticked 35 times at one fixed date, so it recorded one
+point and its unflushed-at-kill case never happened. It now ticks a second apart. Build-for-testing is
+green. Tests not run yet.

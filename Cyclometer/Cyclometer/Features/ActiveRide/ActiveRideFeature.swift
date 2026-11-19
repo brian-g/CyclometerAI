@@ -1731,15 +1731,20 @@ struct ActiveRideFeature {
     /// `GPSFixFilter.maxSuppressedInterval` bounds how long such a gap can run.
     ///
     /// And nil for a tick under `minimumTrackPointSpacing` after the last recorded point
-    /// (#582). That is the timer's catch-up tick, and it isn't a second of its own. The guard
-    /// sits on the timestamp, not on the timer: when the main actor is the thing running late,
-    /// the two timer instants are seconds apart but both reducer runs read the same `date.now`.
+    /// (#582). That is mostly the timer's catch-up tick, which isn't a second of its own. It can
+    /// also be an on-time tick right after one the main actor held up by over half a second:
+    /// dropping that one leaves a gap under 1.5 s, which a consumer reads better than two points
+    /// under half a second apart. The guard sits on the timestamp, not on the timer: when the
+    /// main actor is the thing running late, the two timer instants are seconds apart but both
+    /// reducer runs read the same `date.now`. A wall clock set back gives a negative gap, and
+    /// that tick still records: waiting for the clock to catch up would drop the track for as
+    /// long as it was set back.
     private func makeTrackPoint(from state: State) -> TrackPointDTO? {
         guard let coordinate = state.coordinate, state.isFixRecordable else { return nil }
         let now = date.now
         // `calorieTrack` is every point recorded this ride, in order, so its last is the previous one.
         if let previous = state.calorieTrack.last?.timestamp,
-           now.timeIntervalSince(previous) < Self.minimumTrackPointSpacing {
+           (0..<Self.minimumTrackPointSpacing).contains(now.timeIntervalSince(previous)) {
             return nil
         }
         return TrackPointDTO(
