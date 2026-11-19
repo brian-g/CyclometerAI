@@ -2595,3 +2595,32 @@ Bluetooth switched off (not refused) is not covered and still shows the searchin
 `testDeniedBlocksNext` denied Bluetooth, which no longer blocks Next, so it now denies Location. New
 snapshots: `testOptionalDeniedAllowsNext`, `testBluetoothNotAllowed`. Re-recorded with
 `TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`, each image checked; the four snapshot suites then pass (19/19).
+
+---
+
+# #584 — Race-branch ride with a marker gets its Health workout
+
+Branch: `fix/584-race-branch-marker-workout`
+
+Decision (Brian, 2026-11-19): yes, a race-branch close-out with a ride-end marker gets a workout like the main path.
+
+- [x] `AppFeature` race branch: settle only the no-marker close-out; a marker ride stays Health-owed after finalize
+- [x] Test: marker ride's workout is written ending at the marker's time (`resumableRideFetchedDuringAStartUsesTheRideEndMarker`)
+- [x] Test: no-marker ride is still settled (`resumableRideFetchedDuringAStartWithoutItsMarker`)
+- [x] `UX.md` §HKWorkout orphan sentence + changelog line
+- [x] Builds for testing
+- [x] `AppFeatureTests` + `RideHealthWorkoutTests`: all pass, 0 failures. PR #605
+- [x] Review fixes: `resumableRideFetched` also ignores a fetch that found the ride already under way (new test
+      `resumableRideFetchedAfterItsOwnStartLanded`, caught by a mutation run); UX.md orphan sentence qualified;
+      PRD §9.4 #318 note annotated (0.6.22); `orphanedRideCloseOutCapturesThumbnail` title says "with no marker"
+- [x] `AppFeatureTests`, `RideEndFailureTests`, `RideHealthWorkoutTests`, `StartSheetPresentationTests`: 57/57 pass
+
+**Review.** A race-branch close-out with a ride-end marker is no longer settled, so the backfill that follows
+writes its workout from the row's start to the marker's end. The no-marker close-out is still settled. The review
+also found that the launch fetch can return the ride just started (`fetchResumableRide` picks the newest non-ended
+row) and land after the start, with the sheet gone. The guard caught only the mid-write order, so the race branch
+finalized the live ride. That is now ignored too. Found, not fixed: the no-marker close-out's finalize and settle
+are two writes, so a Finish backfill landing between them could write that orphan's relaunch-length workout. Making
+them one write needs a persistence change. A marker close-out writes the row's last checkpoint aggregates, since the
+marker carries no final summary, so its workout's distance can be up to one checkpoint short (the main path has
+this too).
