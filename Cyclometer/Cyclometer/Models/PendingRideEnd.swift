@@ -12,6 +12,9 @@ import Foundation
 /// the intent is written to file storage the moment Finish is confirmed and cleared only
 /// once `finalizeRide` actually succeeds. A marker still present at launch means the
 /// previous finalize never landed, and the ride is closed out instead of resumed.
+///
+/// Kept per ride (`RideEndIntentClient`, #583): a marker is cleared only by its own ride's
+/// finalize, never by another ride's Finish.
 struct PendingRideEnd: Codable, Equatable, Sendable {
     var rideId: UUID
     var endedAt: Date

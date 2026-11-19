@@ -365,9 +365,7 @@ struct AppFeature {
                 if summary.rideId == startingRideId { return .none }
                 // The rider already ended this ride and only its finalize write failed (#188).
                 // Read once for both close-outs below.
-                let pendingEnd = rideEndIntentClient.load().flatMap {
-                    $0.rideId == summary.rideId ? $0 : nil
-                }
+                let pendingEnd = rideEndIntentClient.load(summary.rideId)
                 // `.task`'s two effects race: the rider can start a brand-new ride
                 // through the normal start-sheet flow before this async fetch
                 // resolves. Don't clobber that ride — but the orphaned one still
@@ -744,8 +742,8 @@ struct AppFeature {
 
     /// Closes out a ride the rider had already ended (#188), with the end and the export its marker
     /// recorded, then drops the marker. Only once the write lands: a failed finalize keeps it, the
-    /// one record of that end, for the next launch. And only while it is still this ride's: one
-    /// started since can have ended and written its own in the meantime (#357).
+    /// one record of that end, for the next launch. And only this ride's: one started since can
+    /// have ended and written its own in the meantime (#357, #583).
     private static func finalizeEndedRide(
         _ pendingEnd: PendingRideEnd,
         _ summary: RideSummaryUpdate,
@@ -755,26 +753,24 @@ struct AppFeature {
         try await persistenceClient.finalizeRide(
             pendingEnd.rideId, pendingEnd.endedAt, summary, pendingEnd.gpxFileURL
         )
-        if rideEndIntentClient.load()?.rideId == pendingEnd.rideId {
-            rideEndIntentClient.clear()
-        }
+        rideEndIntentClient.clear(pendingEnd.rideId)
     }
 
     /// Clears exports no ride references (#346). At launch, and only once the fetch has found no
     /// resumable ride: no ride is ending then, so every export is either named by a row or
     /// orphaned.
     ///
-    /// The ride-end marker's file counts as referenced too. It names an export whose finalize
-    /// failed, which next launch's close-out writes into the row (#188). That ride is normally
-    /// resumable and so never reaches here; the marker is kept as a second guard.
+    /// Ride-end markers' files count as referenced too. Each names an export whose finalize
+    /// failed, which a launch's close-out writes into the row (#188). Those rides are normally
+    /// resumable and so never reach here; the markers are kept as a second guard.
     private static func sweepOrphanedRideExports() async {
         @Dependency(\.persistenceClient) var persistenceClient
         @Dependency(\.rideEndIntentClient) var rideEndIntentClient
         @Dependency(\.gpxDocumentsDirectory) var documentsDirectory
         await DocumentFolders.sweepOrphanedRideExports(documentsDirectory: documentsDirectory) {
             var names = try await persistenceClient.fetchRideGPXFileNames()
-            if let pending = rideEndIntentClient.load()?.gpxFileURL {
-                names.insert(pending.lastPathComponent)
+            for case let url? in rideEndIntentClient.loadAll().map(\.gpxFileURL) {
+                names.insert(url.lastPathComponent)
             }
             return names
         }
