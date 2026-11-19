@@ -56,16 +56,23 @@ struct DeviceListView: View {
                 // screen is open, so there is no state in which it has finished. With
                 // nothing found this row *is* the empty state, which is why the empty
                 // case needs no separate branch — only the footer's extra hint.
-                HStack(spacing: Spacing.sm) {
-                    Spacer()
-                    ProgressView().controlSize(.small)
-                    Text("Searching for sensors…")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.cyTextSecondary)
-                    Spacer()
+                //
+                // Except with Bluetooth refused (#596): the scan can never find anything,
+                // so "Searching" would be a lie. The row says why, and how to fix it.
+                if store.isBluetoothBlocked {
+                    BluetoothBlockedRow { store.send(.openSettingsTapped) }
+                } else {
+                    HStack(spacing: Spacing.sm) {
+                        Spacer()
+                        ProgressView().controlSize(.small)
+                        Text("Searching for sensors…")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.cyTextSecondary)
+                        Spacer()
+                    }
                 }
             } footer: {
-                if store.listedDevices.isEmpty {
+                if store.listedDevices.isEmpty && !store.isBluetoothBlocked {
                     Text("Make sure your sensors are awake and within range.")
                 }
             }
@@ -78,6 +85,28 @@ struct DeviceListView: View {
         .refreshable { await store.send(.refreshRequested).finish() }
         .task { await store.send(.task).finish() }
         .onDisappear { store.send(.onDisappear) }
+    }
+}
+
+/// The scan row's stand-in while Bluetooth is refused (#596): the cause, and the one place
+/// the rider can fix it. Settings, because iOS never re-prompts after a refusal.
+private struct BluetoothBlockedRow: View {
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        VStack(spacing: Spacing.sm) {
+            Text("Bluetooth Not Allowed")
+                .font(.headline)
+                .foregroundStyle(Color.cyTextPrimary)
+            Text("Allow Bluetooth for Acme Ride in Settings to find and connect your sensors.")
+                .font(.subheadline)
+                .foregroundStyle(Color.cyTextSecondary)
+                .multilineTextAlignment(.center)
+            Button("Open Settings", action: onOpenSettings)
+                .tint(.cyPrimary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Spacing.sm)
     }
 }
 
@@ -184,6 +213,8 @@ private func stubbedDevices<Client>(
                 var hr = BLEHRClient.testValue
                 stubbedDevices(&hr, \.discoveredDevices, DeviceDemoData.hrDevices)
                 $0.bleHRClient = hr
+
+                $0.permissionsClient = .mock(initial: [.bluetooth: .granted])
             }
         )
     }
@@ -199,6 +230,22 @@ private func stubbedDevices<Client>(
                 $0.bleCSCClient = .testValue
                 $0.variaRadarClient = .testValue
                 $0.bleHRClient = .testValue
+                $0.permissionsClient = .mock(initial: [.bluetooth: .granted])
+            }
+        )
+    }
+}
+
+#Preview("Manage Sensors — Bluetooth not allowed") {
+    NavigationStack {
+        DeviceManagementView(
+            store: Store(initialState: DeviceManagementFeature.State(bluetoothPermission: .denied)) {
+                DeviceManagementFeature()
+            } withDependencies: {
+                $0.bleCSCClient = .testValue
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+                $0.permissionsClient = .mock(initial: [.bluetooth: .denied])
             }
         )
     }

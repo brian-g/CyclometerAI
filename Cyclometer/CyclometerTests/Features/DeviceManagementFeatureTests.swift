@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import UIKit
 import ComposableArchitecture
 @testable import Cyclometer
 
@@ -295,6 +296,64 @@ struct DeviceManagementFeatureTests {
             #expect(log.value.filter { $0 == .begin(kind) }.count == 1)
             #expect(log.value.filter { $0 == .end(kind) }.count == 1)
         }
+    }
+
+    // MARK: Bluetooth permission (#596)
+
+    @Test("The list follows Bluetooth permission live, ignoring every other domain")
+    func bluetoothPermissionDrivesBlockedState() async {
+        let (permissions, continuation) = AsyncStream<PermissionChange>.makeStream()
+        let log = LockIsolated<[ScanCall]>([])
+        let (csc, radar, hr) = Self.recordingClients(into: log)
+
+        let store = makeStore(bleCSCClient: csc, variaRadarClient: radar, bleHRClient: hr)
+        store.dependencies.permissionsClient = PermissionsClient(
+            status: { _ in .notDetermined },
+            request: { _ in .notDetermined },
+            statuses: { permissions }
+        )
+        await store.send(.task)
+
+        continuation.yield(PermissionChange(domain: .bluetooth, state: .denied))
+        await store.receive(\.bluetoothPermissionChanged) { $0.bluetoothPermission = .denied }
+        #expect(store.state.isBluetoothBlocked)
+
+        // Another domain's change sends nothing — an exhaustive store would fail on it.
+        continuation.yield(PermissionChange(domain: .motion, state: .denied))
+
+        // Allowed in iOS Settings while the screen is open: back to searching.
+        continuation.yield(PermissionChange(domain: .bluetooth, state: .granted))
+        await store.receive(\.bluetoothPermissionChanged) { $0.bluetoothPermission = .granted }
+        #expect(!store.state.isBluetoothBlocked)
+
+        continuation.finish()
+        await store.send(.onDisappear)
+        await store.finish()
+    }
+
+    @Test("Only a refusal blocks the list; not-yet-asked still searches (the scan raises the prompt)",
+          arguments: [
+        (PermissionState.notDetermined, false),
+        (.granted, false),
+        (.unavailable, false),
+        (.denied, true),
+        (.restricted, true),
+    ])
+    func bluetoothBlockedOnlyOnRefusal(permission: PermissionState, blocked: Bool) {
+        let state = DeviceManagementFeature.State(bluetoothPermission: permission)
+        #expect(state.isBluetoothBlocked == blocked)
+    }
+
+    @Test("Open Settings opens the app's page in iOS Settings")
+    func openSettingsOpensAppSettings() async {
+        let opened = LockIsolated<[URL]>([])
+        let store = makeStore()
+        store.dependencies.openURL = OpenURLEffect { url in opened.withValue { $0.append(url) }; return true }
+
+        await store.send(.openSettingsTapped)
+        await store.finish()
+
+        #expect(opened.value == [URL(string: UIApplication.openSettingsURLString)!])
     }
 
     /// The sweep is what drops a sensor that has been switched off: each

@@ -2561,3 +2561,37 @@ Branch `fix/583-keyed-ride-end-markers`.
 **Review.** The single-slot marker is now keyed by ride. Trade-off: a kill between a successful finalize and its
 clear leaves that ride's marker indefinitely (the next Finish used to overwrite it). Harmless — it only protects an
 export the row already names — and it fails toward keeping exports.
+
+---
+
+## #596 / #597 / #598 — Onboarding permission gates, Motion string, Privacy Policy link
+
+Branch `fix/596-597-598-permissions-and-privacy`. Decisions (Brian, 2026-11-19): Bluetooth and Motion both
+become Optional, so Location is the only gate. Privacy Policy is a plain `Link`. The website copy changes in a
+separate acmeapps.xyz PR.
+
+- [x] `WelcomeFeature`: `requiredDomains = [.locationWhenInUse]`; one shared predicate
+- [x] `OnboardingFeature`'s resume re-check uses that predicate, not its own copy
+- [x] `WelcomeView`: sub-labels read the gate (`isRequired`), not a hand-written table
+- [x] `DeviceManagementFeature`: track Bluetooth permission; Open Settings action
+- [x] `DeviceListView`: denied/restricted → message + Open Settings in place of "Searching for sensors…"
+- [x] `Info.plist` `NSMotionUsageDescription` → barometric elevation
+- [x] Settings → About: Privacy Policy `Link` to the web policy; URL in one constants place
+- [x] Remove `PrivacyPolicyView` and `SettingsData.privacyPolicyParagraphs`
+- [x] UX.md §S01 (+ OQ answer), §S02/S11 denied state, §S12 About row
+- [x] Tests: `WelcomeFeatureTests` gating table (BT/Motion denied → Next on), `OnboardingFeatureTests`,
+      `DeviceManagementFeatureTests` (permission → state; Open Settings URL)
+- [x] Website: getting-started.md edited on branch `ride-optional-permissions` (uncommitted)
+- [x] Builds (`build-for-testing`)
+- [x] Brian runs it (verified on device)
+- [x] Full `CyclometerTests`; snapshots re-recorded and re-verified
+- [x] Commit + PR (app and website)
+
+**Review.** Location is the only onboarding gate. `WelcomeFeature.State.requiredDomains` drives Next, the row
+labels and `OnboardingFeature`'s resume check, which used to keep its own copy of the list. The sensor list
+follows Bluetooth permission live and shows Bluetooth Not Allowed with Open Settings when it's refused.
+Bluetooth switched off (not refused) is not covered and still shows the searching row. Full `CyclometerTests`:
+3024 passed, 4 snapshot failures, all expected (Welcome's labels, Settings' Privacy Policy row now a link).
+`testDeniedBlocksNext` denied Bluetooth, which no longer blocks Next, so it now denies Location. New
+snapshots: `testOptionalDeniedAllowsNext`, `testBluetoothNotAllowed`. Re-recorded with
+`TEST_RUNNER_SNAPSHOT_TESTING_RECORD=failed`, each image checked; the four snapshot suites then pass (19/19).
