@@ -928,8 +928,9 @@ struct ActiveRideFeature {
                         do {
                             try await persistenceClient.finalizeRide(rideId, endedAt, summary, gpxURL)
                             // Only now is the ride durably over. Clearing earlier would
-                            // discard the one record that survives this write failing.
-                            rideEndIntentClient.clear()
+                            // discard the one record that survives this write failing. Only
+                            // this ride's: a leftover's whose close-out failed stays (#583).
+                            rideEndIntentClient.clear(rideId)
                         } catch {
                             // Logged inside RidePersistenceActor. The marker deliberately
                             // stays: AppFeature closes the ride out at next launch rather

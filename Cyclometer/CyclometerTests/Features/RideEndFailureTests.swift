@@ -239,7 +239,7 @@ struct RideEndFailureTests {
         #expect(try await client.fetchTrackPoints(rideId).isEmpty)
 
         // finalizeRide succeeded, so the end intent is discharged.
-        #expect(rideEndIntent.load() == nil)
+        #expect(rideEndIntent.loadAll().isEmpty)
     }
 
     @Test("a ride-end flush that fails once is retried: every point is written once, and the rider isn't told of a loss (#345)")
@@ -296,7 +296,7 @@ struct RideEndFailureTests {
         #expect(ride.recordingState == .ended)
         #expect(ride.endedAt != nil)
         #expect(ride.gpxFileURL == nil)
-        #expect(rideEndIntent.load() == nil)
+        #expect(rideEndIntent.loadAll().isEmpty)
     }
 
     // MARK: - Map thumbnail (#177)
@@ -357,7 +357,7 @@ struct RideEndFailureTests {
         #expect(ride.gpxFileURL != nil)
         #expect(ride.mapThumbnailLight == nil)
         #expect(ride.mapThumbnailDark == nil)
-        #expect(rideEndIntent.load() == nil)
+        #expect(rideEndIntent.loadAll().isEmpty)
 
         // Next launch, back online: the thumbnail is late, not lost.
         let appStore = TestStore(initialState: AppFeature.State()) {
@@ -601,7 +601,7 @@ struct RideEndFailureTests {
         #expect(ride.endedAt != nil)
         #expect(ride.gpxFileURL != nil)
         #expect(ride.mapThumbnailDark == Data("dark".utf8))
-        #expect(rideEndIntent.load() == nil)
+        #expect(rideEndIntent.loadAll().isEmpty)
         // The workout is still owed (#277)...
         #expect(ride.isHealthWorkoutOwed)
 
@@ -678,7 +678,7 @@ struct RideEndFailureTests {
         // finalizeRide is the thing failing here, so the ride never reaches `.ended`.
         // The recorded intent, carrying the GPX written before the failure, is the
         // pipeline's observable end state instead.
-        let rideId = await Self.runRideToEnd(store) { _ in rideEndIntent.load()?.gpxFileURL != nil }
+        let rideId = await Self.runRideToEnd(store) { rideEndIntent.load($0)?.gpxFileURL != nil }
 
         // The write failed, so the row still looks like a ride in progress — this is the
         // state that used to be resumed.
@@ -691,7 +691,7 @@ struct RideEndFailureTests {
 
         // But the rider's intent to end it survived, in storage the failed write cannot
         // reach — including the URL of the GPX that was written before the failure.
-        let pending = try #require(rideEndIntent.load())
+        let pending = try #require(rideEndIntent.load(rideId))
         #expect(pending.rideId == rideId)
         // The Finish's own time: after the ride started, and before the relaunch below.
         #expect(pending.endedAt > strandedRide.startedAt)
@@ -746,8 +746,87 @@ struct RideEndFailureTests {
         #expect(recovered.isHealthWorkoutOwed == false)
 
         // Intent discharged, and no longer resumable.
-        #expect(rideEndIntent.load() == nil)
+        #expect(rideEndIntent.loadAll().isEmpty)
         #expect(try await liveClient.fetchResumableRide() == nil)
+    }
+
+    /// #583: markers are kept per ride. A launch close-out racing a start (#357) can fail its
+    /// finalize too, and keeps the leftover's marker for the next launch (#580). The ride that was
+    /// starting then finishes and writes its own. With one slot that write took the leftover's,
+    /// so the next launch found the leftover without it and resumed it (#188), and its export
+    /// was left for the sweep (#346).
+    @Test("a leftover's marker kept by a failed launch close-out survives the next ride's Finish")
+    func failedCloseOutsMarkerSurvivesTheNextRidesFinish() async throws {
+        let (liveClient, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        var failingClient = liveClient
+        failingClient.finalizeRide = { _, _, _, _ in throw WriteFailed() }
+
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let rideEndIntent = RideEndIntentClient.inMemory()
+
+        // The leftover: ended by the rider, but its finalize failed after the export was written.
+        let leftoverStore = Self.makeRideStore(
+            persistenceClient: failingClient, documentsDirectory: tempDir,
+            rideEndIntentClient: rideEndIntent, date: Self.movingClock()
+        )
+        let leftover = await Self.runRideToEnd(leftoverStore) { rideEndIntent.load($0)?.gpxFileURL != nil }
+        let marker = try #require(rideEndIntent.load(leftover))
+        let export = try #require(marker.gpxFileURL)
+        let summary = try #require(try await liveClient.fetchResumableRide())
+        #expect(summary.rideId == leftover)
+
+        // The next launch's fetch lands with a new ride under way, and its close-out fails too.
+        let raceStore = TestStore(initialState: AppFeature.State(
+            activeRide: ActiveRideFeature.State(rideId: UUID(), recordingState: .active),
+            isDashboardPresented: true
+        )) {
+            AppFeature()
+        } withDependencies: {
+            $0.calendar = Calendar(identifier: .gregorian)
+            $0.date = .constant(Self.testDate.addingTimeInterval(300))
+            $0.persistenceClient = failingClient
+            $0.gpxDocumentsDirectory = tempDir
+            $0.rideEndIntentClient = rideEndIntent
+            $0.healthKitClient = .testValue
+            $0.mapSnapshotClient = Self.countingSnapshots(LockIsolated(0))
+        }
+        raceStore.exhaustivity = .off
+        await raceStore.send(.resumableRideFetched(summary))
+        await raceStore.receive(\.rides.reloadRides)
+        await raceStore.finish(timeout: effectDrainTimeout)
+        #expect(try Self.fetchRide(leftover, from: swiftDataStack).endedAt == nil)
+        #expect(rideEndIntent.loadAll() == [marker])
+
+        // The new ride finishes normally: its own marker is written, then cleared by its finalize.
+        let nextStore = Self.makeRideStore(
+            persistenceClient: liveClient, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent
+        )
+        let next = await Self.runRideToEnd(nextStore) {
+            fetchRideIfPresent($0, from: swiftDataStack)?.recordingState == .ended
+        }
+        #expect(next != leftover)
+        #expect(rideEndIntent.loadAll() == [marker])
+
+        // Relaunch with a working finalize: the leftover is closed with its marker, not resumed.
+        await Self.relaunch(
+            persistenceClient: liveClient, documentsDirectory: tempDir,
+            rideEndIntentClient: rideEndIntent, healthKitClient: .testValue
+        )
+        let recovered = try Self.fetchRide(leftover, from: swiftDataStack)
+        #expect(recovered.recordingState == .ended)
+        #expect(recovered.endedAt == marker.endedAt)
+        #expect(recovered.gpxFileURL == export)
+        #expect(rideEndIntent.loadAll().isEmpty)
+        #expect(try await liveClient.fetchResumableRide() == nil)
+
+        // And one more: with nothing resumable the sweep runs (#346), and the export, now named
+        // by its row, is kept.
+        await Self.relaunch(
+            persistenceClient: liveClient, documentsDirectory: tempDir,
+            rideEndIntentClient: rideEndIntent, healthKitClient: .testValue
+        )
+        #expect(FileManager.default.fileExists(atPath: export.path(percentEncoded: false)))
     }
 
     @Test("a stale marker for a different ride does not stop a genuinely interrupted ride from resuming")

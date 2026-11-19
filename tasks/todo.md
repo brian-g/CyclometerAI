@@ -2540,3 +2540,24 @@ catch-up tick: an on-time tick after one the main actor held up by more than 0.5
 `RideRecordingTests.killAndRelaunchResumesRide` ticked 35 times at one fixed date, so it recorded one
 point and its unflushed-at-kill case never happened. It now ticks a second apart. Build-for-testing is
 green. Tests not run yet.
+
+---
+
+## #583 — A second ride's Finish overwrites an unconsumed ride-end marker
+
+Branch `fix/583-keyed-ride-end-markers`.
+
+- [x] `RideEndIntentClient` keyed by ride ID: `loadAll()`, `load(rideId)`, `save` (upsert), `clear(rideId)`; one lock around read-modify-write
+- [x] Live file holds `[PendingRideEnd]`; still reads the pre-#583 single-marker file
+- [x] `AppFeature`: close-out reads/clears only its ride's marker; sweep protects every marker's export
+- [x] `ActiveRideFeature`: Finish clears only its own ride's marker
+- [x] Existing tests: `load()` assertions moved to `loadAll()` / `load(rideId)` (behaviour unchanged)
+- [x] New: `RideEndFailureTests.failedCloseOutsMarkerSurvivesTheNextRidesFinish` (the AC scenario, live persistence)
+- [x] New: `RideEndIntentClientTests` (per-ride keep/clear, legacy file, missing file)
+- [x] Builds (`build-for-testing`)
+- [x] Full `CyclometerTests` run: 3009 passed, 0 failed
+- [x] Commit + PR
+
+**Review.** The single-slot marker is now keyed by ride. Trade-off: a kill between a successful finalize and its
+clear leaves that ride's marker indefinitely (the next Finish used to overwrite it). Harmless — it only protects an
+export the row already names — and it fails toward keeping exports.

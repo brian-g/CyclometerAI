@@ -420,7 +420,7 @@ struct AppFeatureTests {
         #expect(finalized.value.first?.0 == marker.rideId)
         #expect(finalized.value.first?.1 == marker.endedAt)
         #expect(finalized.value.first?.2 == marker.gpxFileURL)
-        #expect(rideEndIntent.load() == nil)
+        #expect(rideEndIntent.loadAll().isEmpty)
         // The rest of the branch is as before: still no Apple Health workout (#277).
         #expect(settled.value == [marker.rideId])
     }
@@ -455,7 +455,7 @@ struct AppFeatureTests {
         #expect(finalized.value.first?.0 == Self.leftoverRide.rideId)
         #expect(finalized.value.first?.1 == relaunch)
         #expect(finalized.value.first?.2 == nil)
-        #expect(rideEndIntent.load() == marker)
+        #expect(rideEndIntent.loadAll() == [marker].compactMap { $0 })
     }
 
     /// #357: the marker exists to survive a failed finalize (#188), so a close-out whose write fails
@@ -488,10 +488,10 @@ struct AppFeatureTests {
         await store.finish(timeout: effectDrainTimeout)
 
         #expect(attempts.value == 1)
-        #expect(rideEndIntent.load() == marker)
+        #expect(rideEndIntent.loadAll() == [marker])
     }
 
-    /// #357: the marker is cleared only while it is still the leftover ride's. The ride just started
+    /// #357, #583: the close-out clears only the leftover ride's marker. The ride just started
     /// can have ended — its Finish writes its own marker first — while this finalize was in flight,
     /// and that marker is the only record of its end if its own finalize fails.
     @Test("A close-out racing a start leaves a marker the new ride wrote while it was finalizing")
@@ -518,7 +518,7 @@ struct AppFeatureTests {
         await store.receive(\.rides.reloadRides)
         await store.finish(timeout: effectDrainTimeout)
 
-        #expect(rideEndIntent.load() == newRidesMarker)
+        #expect(rideEndIntent.loadAll() == [newRidesMarker])
     }
 
     /// #344: S05.1 writes a new ride's row before `activeRide` exists, so the launch-time fetch can

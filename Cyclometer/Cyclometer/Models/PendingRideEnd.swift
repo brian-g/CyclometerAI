@@ -10,8 +10,11 @@ import Foundation
 ///
 /// The fix has to live in a store that a SwiftData failure cannot take out with it, so
 /// the intent is written to file storage the moment Finish is confirmed and cleared only
-/// once `finalizeRide` actually succeeds. A marker still present at launch means the
-/// previous finalize never landed, and the ride is closed out instead of resumed.
+/// once `finalizeRide` actually succeeds. A resumable ride whose marker is still present at
+/// launch never had its finalize land, and is closed out instead of resumed.
+///
+/// Kept per ride (`RideEndIntentClient`, #583): a marker is cleared only by its own ride's
+/// finalize, never by another ride's Finish.
 struct PendingRideEnd: Codable, Equatable, Sendable {
     var rideId: UUID
     var endedAt: Date
