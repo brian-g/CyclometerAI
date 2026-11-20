@@ -2760,3 +2760,23 @@ noise; fixing only one would have made them a bias.
 revolutions in hand until then. GPS distance and revolutions now enter the window at the same fix, or neither does.
 Windows with no dropped intervals decide exactly as before: `twoWindowsCommit`, `probeDoesNotChangeDecisions` and
 the other commit tests are unchanged. Wheel quantity, thresholds and the §8.9.2 noise numbers stay with #419.
+
+---
+
+# #592 — HR keeps a link it connected after its target was cleared
+
+Branch: `fix/592`
+
+- [x] `.connected` for a peripheral that isn't the target releases the "hr" owner (`disconnect(id, "hr")`), the
+      backstop CSC and radar got in #578; logged only for HR straps (listed, or the paired one)
+- [x] Test `strayConnectIsLetGo`: paired strap discovered, `disconnect()` before `.connected` → a second
+      `disconnect(id, "hr")` and no service discovery
+- [x] BLE.md §6.1 names `BLEHRClient` in the backstop and narrow-race paragraphs
+- [x] `BLEHRClientTests` + `BLEHRIntegrationTests` pass (37/37 integration after the review's edit)
+- [x] Commit + PR #616
+
+**Review.** `BLECentral` cancels only when no owner is left, so the release does nothing to the CSC and radar
+links that also reach this branch. The normal path is unchanged: `unpairDisconnectsAndDoesNotReadopt` asserts the
+exact transport call list. One narrow race is accepted, as for CSC: a stray `.connected` handled just as
+`setPairedSensor` re-claims the same strap cancels its fresh connect; the rescan or the next ride's scan
+reconnects it. The full suite was not run; only the HR suites drive the live HR client.
