@@ -512,7 +512,12 @@ private final class HRClientState: @unchecked Sendable {
             await bleClient.connect(id, hrOwnerID)
 
         case .connected(let id):
-            let (isTarget, isHRStrap) = lock.withLock { (targetPeripheralID == id, discoveredIDs.contains(id)) }
+            // The paired strap counts even when unlisted: once `disconnect()` clears the
+            // target, a pairing scan's sweep can drop it from `discoveredIDs`, and a stray
+            // connect still pending then is exactly the #592 link worth seeing in the log.
+            let (isTarget, isHRStrap) = lock.withLock {
+                (targetPeripheralID == id, discoveredIDs.contains(id) || pairedPeripheralID == id)
+            }
             guard isTarget else {
                 // Not our target, but possibly our connect: `.discovered`, `connect(_:)` and
                 // `setPairedSensor` all claim the target under the lock and call `connect`
@@ -523,7 +528,9 @@ private final class HRClientState: @unchecked Sendable {
                 // client owns: `BLECentral` cancels only when no owner is left.
                 if isHRStrap {
                     // Only HR straps: every CSC and radar link reaches this branch too.
-                    logger.notice("connected \(id, privacy: .public) is no longer the target — releasing it")
+                    // "Not the target", not "no longer": on a combo device another client
+                    // connected, this strap was never HR's target.
+                    logger.notice("connected \(id, privacy: .public) is not the target — releasing it")
                 }
                 await bleClient.disconnect(id, hrOwnerID)
                 return
