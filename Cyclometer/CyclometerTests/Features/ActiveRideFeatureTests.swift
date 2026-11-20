@@ -3930,13 +3930,14 @@ struct ActiveRideFeatureHRDropoutTests {
 // MARK: - Calibration suspension
 
 /// PRD §8.9 suspends wheel auto-calibration during radar alerts. The parent derives
-/// that from `isCalibrationSuspended` and forwards it on the transition
-/// (`ActiveRideFeature.swift:294`).
+/// that from `isCalibrationSuspended` and forwards it on the transition (the
+/// `.onChange(of: \.isCalibrationSuspended)` forwarders in `ActiveRideFeature.body`).
 ///
 /// The pause/resume half of that `||` is already asserted incidentally by the state
 /// machine suite. The radar half was not reachable there: those stores start from
 /// `ActiveRideFeature.State()`, whose `recordingState` defaults to `.idle`, so
-/// suspension is already on before a target ever lands. These stores start recording.
+/// suspension is already on before a target ever lands. These stores start recording,
+/// except the #610 ones, which start from a ride resumed after a kill.
 @MainActor
 @Suite("ActiveRideFeature — calibration suspension")
 struct ActiveRideFeatureCalibrationSuspensionTests {
@@ -3969,8 +3970,14 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
         )
     }
 
-    private func makeStore() -> TestStoreOf<ActiveRideFeature> {
-        TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
+    /// The state is an autoclosure so `TestStore` builds it inside its own dependency
+    /// scope, as the other parameterized helpers in this file do: `@Shared` resolves when
+    /// the state is constructed.
+    private func makeStore(
+        state: @autoclosure () -> ActiveRideFeature.State
+            = ActiveRideFeature.State(recordingState: .active)
+    ) -> TestStoreOf<ActiveRideFeature> {
+        TestStore(initialState: state()) {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
@@ -4277,6 +4284,69 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
             $0.calibration.intervalRevolutions = 0
             $0.calibration.lastFixTimestamp = Self.fix(at: 4).timestamp
         }
+    }
+
+    private static func resumed(_ recordingState: Ride.RecordingState) -> ActiveRideFeature.State {
+        ActiveRideFeature.State(resuming: RideSummaryUpdate(
+            rideId: UUID(), recordingState: recordingState,
+            durationSeconds: 600, distanceMeters: 4_000, averageSpeedMPS: 6.5, maxSpeedMPS: 11
+        ))
+    }
+
+    /// #610: a paused resume starts with the parent already suspended, so neither
+    /// `.onChange` forwarder sees a transition — the child has to be seeded. And the
+    /// Resume tap has to reopen what the seed shut, or calibration stays off all ride.
+    @Test("A ride resumed while paused keeps calibration suspended until the rider resumes")
+    func pausedResumeSuspendsCalibration() async {
+        let store = makeStore(state: Self.resumed(.paused))
+        #expect(store.state.calibration.isSuspended)
+
+        // Every other gate opens: the sensor delivers and the fixes are clean.
+        await store.send(.calibration(.bleConnectionChanged(.active))) {
+            $0.calibration.isSensorActive = true
+        }
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 0)))) {
+            $0.calibration.isGPSUsable = true
+            $0.calibration.lastFixTimestamp = Self.fix(at: 0).timestamp
+        }
+
+        // Walking the bike while paused: neither the revolutions nor the fix's
+        // distance reach the window.
+        await store.send(.calibration(.wheelRevolutionsReceived(5)))
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 1)))) {
+            $0.calibration.lastFixTimestamp = Self.fix(at: 1).timestamp
+        }
+        #expect(store.state.calibration.gpsMeters == 0)
+        #expect(store.state.calibration.revolutions == 0)
+
+        // The rider taps Resume. Its segment, recorder and checkpoint changes are other
+        // suites' business; here only the gate matters. It reopens on the transition, and
+        // the interval in progress is forgotten so the next fix re-seeds (#587).
+        store.exhaustivity = .off
+        await store.send(.resumeTapped)
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = false
+            $0.calibration.lastFixTimestamp = nil
+        }
+        store.exhaustivity = .on
+
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 2)))) {
+            $0.calibration.lastFixTimestamp = Self.fix(at: 2).timestamp
+        }
+        await store.send(.calibration(.wheelRevolutionsReceived(5))) {
+            $0.calibration.intervalRevolutions = 5
+        }
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 3)))) {
+            $0.calibration.gpsMeters = 10
+            $0.calibration.revolutions = 5
+            $0.calibration.intervalRevolutions = 0
+            $0.calibration.lastFixTimestamp = Self.fix(at: 3).timestamp
+        }
+    }
+
+    @Test("A ride resumed while recording starts with calibration unsuspended")
+    func activeResumeLeavesCalibrationUnsuspended() {
+        #expect(!Self.resumed(.active).calibration.isSuspended)
     }
 }
 
