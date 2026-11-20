@@ -150,7 +150,8 @@ struct StartSheetPresentationTests {
         let resumedRideId = UUID()
         let store = Self.makeStore(into: log)
         store.dependencies.persistenceClient = .mock(
-            onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } }
+            onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
+            onFinalizeRideWithoutWorkout: { id, _, _ in finalized.withValue { $0.append(id) } }
         )
         store.exhaustivity = .off(showSkippedAssertions: false)
 
@@ -185,7 +186,8 @@ struct StartSheetPresentationTests {
         let orphanedRideId = UUID()
         let store = Self.makeStore(into: log)
         store.dependencies.persistenceClient = .mock(
-            onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } }
+            onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
+            onFinalizeRideWithoutWorkout: { id, _, _ in finalized.withValue { $0.append(id) } }
         )
         store.exhaustivity = .off(showSkippedAssertions: false)
 
