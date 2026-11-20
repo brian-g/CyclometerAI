@@ -2686,6 +2686,28 @@ Branch: `fix/589-build-for-testing-destination`
 The UDID is used only after `bootstatus -b`. Build time is inside the recent range, but one run can't show a small
 change given the ~1.7× variance between runners. The passing reruns' 5–7 min stall before package resolution
 didn't happen on this run. One run isn't enough to say the fix removes it.
+## #591 — Radar's Bluetooth-off branch leaves a stale BLECentral owner
+
+Branch `fix/591-radar-bt-off-disconnect`.
+
+- [x] Radar `.poweredOff/.unauthorized/.unsupported`: take the connection with `takeConnectionLocked()` and
+      `release` it (the path `disconnect()` and #585's last `endPairingScan` already share), so "radar" is
+      released on `BLECentral` like CSC's #578 branch
+- [x] Test `bluetoothOffReleasesTheOwner`: connected radar, Bluetooth off → one `disconnect(id, "radar")`;
+      Bluetooth back + re-advertisement → `.connecting` and a new `connect`
+- [x] Revert check (main's client, own derivedData, cache off): the new test fails; passes with the fix
+- [x] `VariaRadarIntegrationTests` + `VariaRadarTestValueTests`: 47 passed, 0 failed.
+      `PairingScanBackgroundTests` (the other live-radar suite): 10 passed, 0 failed
+- [x] Commit + PR
+
+**Review.** The branch previously cleared the target by hand and never called the transport. It now goes through
+the shared take-and-release pair, which also cancels the ladder and clears battery and frame state as before.
+Releasing while powered off drops `BLECentral`'s bookkeeping; CoreBluetooth ignores the
+`cancelPeripheralConnection` itself and logs an API MISUSE warning, since `BLECentral.disconnect` doesn't check the
+manager state. CSC has done the same since #578. No other suite drives `stateChanged` into the live radar client, so the full suite was not run.
+
+---
+
 # #587 — Calibration gates drop an interval from both sides
 
 Branch: `fix/587-calibration-gate-symmetry`
