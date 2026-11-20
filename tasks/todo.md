@@ -2682,5 +2682,6 @@ Branch `fix/591-radar-bt-off-disconnect`.
 
 **Review.** The branch previously cleared the target by hand and never called the transport. It now goes through
 the shared take-and-release pair, which also cancels the ladder and clears battery and frame state as before.
-Calling `cancelPeripheralConnection` while powered off only drops `BLECentral`'s bookkeeping; CSC has done the
-same since #578. No other suite drives `stateChanged` into the live radar client, so the full suite was not run.
+Releasing while powered off drops `BLECentral`'s bookkeeping; CoreBluetooth ignores the
+`cancelPeripheralConnection` itself and logs an API MISUSE warning, since `BLECentral.disconnect` doesn't check the
+manager state. CSC has done the same since #578. No other suite drives `stateChanged` into the live radar client, so the full suite was not run.

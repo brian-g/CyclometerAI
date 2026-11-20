@@ -900,6 +900,8 @@ struct VariaRadarIntegrationTests {
         // `release` publishes the state before it calls the transport.
         await settle(harness)
         #expect(disconnects(harness) == [.disconnect(id, "radar")])
+        // The ride's scan stays requested, so `BLECentral` has something to re-issue on power-on.
+        #expect(harness.requested.value.contains(radarServiceUUID))
 
         // The radio returns: `BLECentral` re-issues the ride's scan and the radar re-advertises.
         harness.events.yield(.stateChanged(.poweredOn))
