@@ -1003,3 +1003,22 @@ already said to point the handoff at the right review target.
 **Rule.** When a worktree is asked for, switch the session into it as soon as it exists (`EnterWorktree`, with
 `path:` for one made by `git worktree add`). Before handing off for review, check that the session's working
 directory is the branch under review. If it isn't, give the explicit target (`/code-review <PR#> --fix`).
+
+---
+
+## A test that blocks the main thread hung the whole suite (2026-11-20, #614)
+
+**What happened.** The #614 race test held the main queue with `DispatchSemaphore.wait()` so it could open a
+stream between the one-shot's off-main guard and its queued `requestLocation()`. It passed alone, but the full run
+stopped at 309 tests for 30 minutes. A `sample` of the host showed the main thread parked in that test's `wait()`.
+With `SWIFT_APPROACHABLE_CONCURRENCY`, a plain `async` test inherits its caller's isolation, so the test body (and
+the work that would release the hold) queued on the main thread behind the hold. I also left the run unwatched,
+which the #585 lesson already warned against. Brian: "has the build or tests hanged?"
+
+Making it `@concurrent` with a 10 s timed hold stopped the hang, but under full-suite load the test's task was
+starved for ~30 s, the hold expired, and the test failed. A neighbouring test also ran out its 2-minute allowance.
+
+**Rule.** Never block the main thread in a test: the host is shared, so it is either a hang or a flake. When a race
+can only be tested by holding a queue, remove the race instead: make the check and the action one step on the
+queue that serialises them (#614 moved the one-shot's whole decision onto the main queue). Never run a full suite
+in the background without a stall watch: a Monitor that reports when the log has had no new output for 3 minutes.
