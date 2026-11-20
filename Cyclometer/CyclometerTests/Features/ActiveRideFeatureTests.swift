@@ -4221,13 +4221,16 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
             $0.calibration.lastFixTimestamp = Self.fix(at: 0).timestamp
         }
 
-        // One second of riding: 10 m of GPS distance against 5 wheel revolutions.
+        // One second of riding: 5 wheel revolutions, then the fix closing the interval
+        // brings them into the window with its 10 m of GPS distance.
+        await store.send(.calibration(.wheelRevolutionsReceived(5))) {
+            $0.calibration.intervalRevolutions = 5
+        }
         await store.send(.calibration(.locationUpdated(Self.fix(at: 1)))) {
             $0.calibration.gpsMeters = 10
-            $0.calibration.lastFixTimestamp = Self.fix(at: 1).timestamp
-        }
-        await store.send(.calibration(.wheelRevolutionsReceived(5))) {
             $0.calibration.revolutions = 5
+            $0.calibration.intervalRevolutions = 0
+            $0.calibration.lastFixTimestamp = Self.fix(at: 1).timestamp
         }
 
         let targets = [Self.target(.danger)]
@@ -4241,31 +4244,38 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
 
         // Both accumulators freeze together — suppressing only one would manufacture
         // exactly the discrepancy this feature exists to detect. Only the fix
-        // timestamp advances, which is what stops the resumed window integrating
-        // across the alert.
+        // timestamp advances.
+        await store.send(.calibration(.wheelRevolutionsReceived(5)))
         await store.send(.calibration(.locationUpdated(Self.fix(at: 2)))) {
             $0.calibration.lastFixTimestamp = Self.fix(at: 2).timestamp
         }
-        await store.send(.calibration(.wheelRevolutionsReceived(5)))
 
         // Fixed clock — the disappearance grace period never elapses, so this
         // doesn't touch vehiclePassTracking; the record stays as tracked above.
         await store.send(.radarTargetsUpdated([])) {
             $0.radarTargets = []
         }
+        // The alert cleared partway through an interval, whose revolutions before that
+        // point were never counted, so the next fix re-seeds rather than closing it (#587).
         await store.receive(\.calibration.suspensionChanged) {
             $0.calibration.isSuspended = false
+            $0.calibration.lastFixTimestamp = nil
+        }
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 3)))) {
+            $0.calibration.lastFixTimestamp = Self.fix(at: 3).timestamp
         }
 
         // The road clears and the window carries on from where it stopped rather than
         // starting over: a rider in traffic would otherwise never complete one, and
         // that is exactly the rider who uses radar most (PRD §8.9).
-        await store.send(.calibration(.locationUpdated(Self.fix(at: 3)))) {
-            $0.calibration.gpsMeters = 20
-            $0.calibration.lastFixTimestamp = Self.fix(at: 3).timestamp
-        }
         await store.send(.calibration(.wheelRevolutionsReceived(5))) {
+            $0.calibration.intervalRevolutions = 5
+        }
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 4)))) {
+            $0.calibration.gpsMeters = 20
             $0.calibration.revolutions = 10
+            $0.calibration.intervalRevolutions = 0
+            $0.calibration.lastFixTimestamp = Self.fix(at: 4).timestamp
         }
     }
 }

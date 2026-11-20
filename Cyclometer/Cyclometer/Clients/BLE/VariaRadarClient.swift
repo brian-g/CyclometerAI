@@ -796,15 +796,13 @@ private final class RadarClientState: @unchecked Sendable {
             case .poweredOff, .unauthorized, .unsupported:
                 // Permission denied / radio off: stand down cleanly, never crash. The
                 // pairing survives — the rider didn't unpair, the radio went off — so
-                // only the connection identity is cleared.
-                cancelReconnect()
-                lock.withLock {
-                    targetPeripheralID = nil
-                    resetConnectionFrameStateLocked()
-                }
+                // only the connection identity is cleared. CoreBluetooth has already
+                // dropped the link, but `BLECentral` still lists "radar" as its owner;
+                // `release` lets that go too, as every other path clearing the target
+                // does (#591, CSC's equivalent in #578).
+                let dropped = lock.withLock { takeConnectionLocked() }
                 broadcastTargets([])
-                setBattery(nil)
-                setConnectionState(.disconnected)
+                await release(dropped)
             default:
                 break
             }
@@ -862,8 +860,8 @@ private final class RadarClientState: @unchecked Sendable {
 
     /// Take the connection identity and the reconnect ladder in one acquisition. Read and clear
     /// atomically: a `.disconnected` processed between a separate read and clear would still
-    /// match the target and start an unwanted reconnect. Shared by `disconnect()` and the last
-    /// `endPairingScan` with no ride (#585). Must hold the lock.
+    /// match the target and start an unwanted reconnect. Shared by `disconnect()`, the last
+    /// `endPairingScan` with no ride (#585), and Bluetooth going off (#591). Must hold the lock.
     private func takeConnectionLocked() -> DroppedConnection {
         let dropped = DroppedConnection(peripheralID: targetPeripheralID, ladder: reconnectTask)
         reconnectTask = nil

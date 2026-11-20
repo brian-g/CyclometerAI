@@ -2696,3 +2696,67 @@ come, so the open stream is checked by delivery rather than by a timeout. The tw
 - [x] Revert checks (own derivedData, cache off): a fire-and-forget `stopUpdates()` fails delivery + stop count; a
       direct `stopUpdatingLocation()` fails the stop count only
 - [x] Location suites: 14/14 pass, 3 iterations
+# #589 — CI "Build for testing" can't find the simulator it just resolved
+
+Branch: `fix/589-build-for-testing-destination`
+
+- [x] Cause, from the attempt-1 logs of 43868144206, 43868308534, 43918678778: all three resolved the same iOS 27.0
+      iPhone Air, started `xcodebuild` ~1 s after the background `simctl boot`, logged "Malformed bundle does not
+      contain an identifier" for the 27.0 runtime's cryptex mount (`SimulatorRuntime-v24.1.434`), then waited 60 s
+      and failed. The error listed every 27.1/27.2 iOS simulator and no 27.0 one. The issue's "no concrete
+      simulators" was wrong: the whole runtime was missing, not every device
+- [x] Passing reruns of the same runs, same device: no "Malformed" line. `xcodebuild` sat silent for 5–7 min
+      before "Resolve Package Graph" (normally ~3 s), then built. A boot in flight either stalls it or hides the runtime
+- [x] Fix: `build-for-testing` uses `generic/platform=iOS Simulator`; the UDID is used only by `test-without-building`,
+      after `simctl bootstatus -b`. `ARCHS=arm64` keeps the generic build single-arch
+- [x] CI green on the PR (run 44746910712): 2342 tests passed. "Build for testing" took 26.0 min, inside the
+      16.7–28.8 min range of the last 12 green runs. xcodebuild reached "Resolve Package Graph" 2.4 s after it started
+
+**Review.** `build-for-testing` no longer names the device, so a boot still in flight can't make the build fail.
+The UDID is used only after `bootstatus -b`. Build time is inside the recent range, but one run can't show a small
+change given the ~1.7× variance between runners. The passing reruns' 5–7 min stall before package resolution
+didn't happen on this run. One run isn't enough to say the fix removes it.
+## #591 — Radar's Bluetooth-off branch leaves a stale BLECentral owner
+
+Branch `fix/591-radar-bt-off-disconnect`.
+
+- [x] Radar `.poweredOff/.unauthorized/.unsupported`: take the connection with `takeConnectionLocked()` and
+      `release` it (the path `disconnect()` and #585's last `endPairingScan` already share), so "radar" is
+      released on `BLECentral` like CSC's #578 branch
+- [x] Test `bluetoothOffReleasesTheOwner`: connected radar, Bluetooth off → one `disconnect(id, "radar")`;
+      Bluetooth back + re-advertisement → `.connecting` and a new `connect`
+- [x] Revert check (main's client, own derivedData, cache off): the new test fails; passes with the fix
+- [x] `VariaRadarIntegrationTests` + `VariaRadarTestValueTests`: 47 passed, 0 failed.
+      `PairingScanBackgroundTests` (the other live-radar suite): 10 passed, 0 failed
+- [x] Commit + PR
+
+**Review.** The branch previously cleared the target by hand and never called the transport. It now goes through
+the shared take-and-release pair, which also cancels the ladder and clears battery and frame state as before.
+Releasing while powered off drops `BLECentral`'s bookkeeping; CoreBluetooth ignores the
+`cancelPeripheralConnection` itself and logs an API MISUSE warning, since `BLECentral.disconnect` doesn't check the
+manager state. CSC has done the same since #578. No other suite drives `stateChanged` into the live radar client, so the full suite was not run.
+
+---
+
+# #587 — Calibration gates drop an interval from both sides
+
+Branch: `fix/587-calibration-gate-symmetry`
+
+Decision (Brian, 2026-11-19): one rule for every gate, suspension included. Suspension's two edges were zero-mean
+noise; fixing only one would have made them a bias.
+
+- [x] Revolutions held per interval (`intervalRevolutions`), moved into the window only by a fix that adds that
+      interval's distance; every other fix discards them
+- [x] A sensor or suspension gate reopening partway through an interval forgets the last fix, so the next re-seeds
+- [x] Probe: counters renamed to dropped revolutions; the "doppler without gps-gate-unpaired rev" figure removed
+- [x] `probeRejectedIntervalDroppedFromBoth` expects the revolutions gone; new `reconnectReseedsInterval`;
+      `suspensionPauses` and `radarAlertPausesAndResumesTheWindow` pin both suspension edges
+- [x] Mutation checks: restoring the rejected interval's revolutions fails `poorAccuracyPauses` and
+      `probeRejectedIntervalDroppedFromBoth`; removing the re-seed fails `reconnectReseedsInterval`,
+      `suspensionPauses` and `radarAlertPausesAndResumesTheWindow`
+- [x] Full `CyclometerTests`: 3036 passed, 0 failed
+
+**Review.** The GPS gate decides on an interval only when its closing fix arrives, so the fix keeps the interval's
+revolutions in hand until then. GPS distance and revolutions now enter the window at the same fix, or neither does.
+Windows with no dropped intervals decide exactly as before: `twoWindowsCommit`, `probeDoesNotChangeDecisions` and
+the other commit tests are unchanged. Wheel quantity, thresholds and the §8.9.2 noise numbers stay with #419.

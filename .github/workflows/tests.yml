@@ -121,7 +121,8 @@ jobs:
       #
       # The script only starts the boot, in the background, and returns: `simctl boot`
       # blocks for ~2 min on the runner. Here, the boot overlaps the build, and "Wait for
-      # the simulator" collects it afterwards (#374).
+      # the simulator" collects it afterwards (#374). The build doesn't name the device, so
+      # a boot still in flight can't hide it from the build (#589).
       #
       # Not earlier: started before the cache restore, the boot competed with it for the
       # runner's disk and few cores. Run 37162293875's restore of the same ~800 MB cache
@@ -137,14 +138,24 @@ jobs:
       #
       # ARCHS=arm64: the runner and the simulator are both arm64, but the macro host tools
       # were built for x86_64 too. That was 464 compile units (462 of them swift-syntax) of
-      # a 1,926-unit clean build, with no use (#372).
+      # a 1,926-unit clean build, with no use (#372). It also keeps the generic destination
+      # below from building x86_64.
+      #
+      # A generic destination, not the resolved device (#589). The build needs only the SDK,
+      # and xcodebuild can't always see the device while its boot is still in flight. On
+      # 2026-11-16, three runs failed with "Unable to find a device matching … { id:<UDID> }"
+      # (43868144206, 43868308534, 43918678778). Each time, xcodebuild had logged "Malformed
+      # bundle does not contain an identifier" for the iOS 27.0 runtime's cryptex mount
+      # (SimulatorRuntime-v24.1.434 = 27.0, 24A434) a minute before. The error then listed
+      # every iOS 27.1 and 27.2 simulator and no 27.0 one, so the whole runtime holding the
+      # device had been dropped. The device is used once the boot is done, by "Run unit tests".
       - name: Build for testing
         working-directory: Cyclometer
         run: |
           xcodebuild build-for-testing \
             -project Cyclometer.xcodeproj \
             -scheme Cyclometer \
-            -destination "id=$SIM_UDID" \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipMacroValidation \
             ARCHS=arm64
