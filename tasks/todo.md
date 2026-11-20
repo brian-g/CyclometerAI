@@ -2760,3 +2760,24 @@ noise; fixing only one would have made them a bias.
 revolutions in hand until then. GPS distance and revolutions now enter the window at the same fix, or neither does.
 Windows with no dropped intervals decide exactly as before: `twoWindowsCommit`, `probeDoesNotChangeDecisions` and
 the other commit tests are unchanged. Wheel quantity, thresholds and the §8.9.2 noise numbers stay with #419.
+
+---
+
+# #593 — Pairing-release rule can clear a pairing that's about to restart
+
+Branch: `worktree-fix-593-pairing-release`
+
+- [x] `pendingPairingHasConnected`: set when a CSC broadcast after the Pair tap shows the pending row holding a slot;
+      the #578 release rule fires only after that, so a leftover slot's release landing around the tap is ignored
+- [x] `interrogationWasReleased` (previous-list comparison) removed; the rule reads only the incoming CSC list
+- [x] S02 Next releases an in-flight `pendingPairing` (unpair + clear), removing the orphaned slot at its source
+- [x] New tests: `staleReleaseAroundThePairTapKeepsThePairing` (the #593 ordering: prompt appears),
+      `eachPairTapWaitsForItsOwnSlot`, `nextReleasesAnInFlightPairing`; #578's
+      `releasedInterrogationEndsThePairing` and the S11 integration test still pass
+- [x] Mutation check: arming the flag from the pre-tap list (the old rule) fails
+      `staleReleaseAroundThePairTapKeepsThePairing`
+- [x] Full `CyclometerTests`: 3041 passed, 0 failed
+
+**Review.** The flag can't tell an old slot from the new one, only "seen since the tap". A leftover slot that
+broadcasts a state *after* the tap and is then released still ends the pairing. That needs two of its broadcasts
+still queued at the moment of the tap, and the S02 release removes the only known source of a leftover slot.

@@ -264,7 +264,8 @@ struct PairingScanBackgroundTests {
     /// The rider tapped Pair and left Sensors before the 0x2A5C answer: that is the last
     /// release, so the interrogation is dropped with everything else (#585). Coming back must
     /// end the pairing it left in flight, or every later Pair tap is refused until relaunch
-    /// (#577 review). `interrogationWasReleased` does it from the replayed device list.
+    /// (#577 review). The release rule does it from the replayed device list: the row was seen
+    /// holding a slot before the rider left, so its lost state now ends the pairing (#593).
     @Test("Leaving Sensors mid-interrogation drops it, and Pair works on return")
     func leavingSensorsMidInterrogationThenPairingAgain() async {
         let radio = Radio()

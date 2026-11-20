@@ -38,6 +38,39 @@ struct SensorPairingFeatureTests {
         await store.receive(\.delegate.next)
     }
 
+    /// Nothing outlives S02 to receive the capabilities of a pairing still in flight. Left
+    /// alone, the sensor sits connected holding no role, and that slot's later release can
+    /// end a Pair the rider starts in Settings (#593).
+    @Test("Next releases a pairing still waiting on its capabilities")
+    func nextReleasesAnInFlightPairing() async {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-0000000000A2")!
+        let unpaired = LockIsolated<[UUID]>([])
+        var ble = BLECSCClient.testValue
+        ble.unpair = { id in unpaired.withValue { $0.append(id) } }
+        let storage = FileStorage.inMemory
+        let store = withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            var state = SensorPairingFeature.State()
+            state.deviceManagement.pendingPairing = id
+            return TestStore(initialState: state) {
+                SensorPairingFeature()
+            } withDependencies: {
+                $0.defaultFileStorage = storage
+                $0.bleCSCClient = ble
+                $0.variaRadarClient = .testValue
+                $0.bleHRClient = .testValue
+            }
+        }
+
+        await store.send(.nextButtonTapped) {
+            $0.deviceManagement.pendingPairing = nil
+        }
+        await store.receive(\.deviceManagement.onDisappear)
+        await store.receive(\.delegate.next)
+        #expect(unpaired.value == [id])
+    }
+
     @Test("An unpair on the embedded device list writes through to shared preferences")
     func embeddedDeviceManagementActionReachesSharedState() async {
         let id = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!

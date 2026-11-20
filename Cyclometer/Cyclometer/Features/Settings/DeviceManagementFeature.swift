@@ -77,6 +77,12 @@ struct DeviceManagementFeature {
         /// tap. Non-nil means a pairing is mid-flight, which is what makes a cancelled
         /// prompt release the sensor rather than leave it connected holding no role.
         var pendingPairing: UUID? = nil
+        /// Whether a CSC broadcast since the Pair tap has shown `pendingPairing`'s row
+        /// holding a slot. Only then can the row losing its state mean *this* pairing was
+        /// released: before it, a lost state is an older slot's release still in flight
+        /// (#593). Reset by the Pair tap, the only place `pendingPairing` is set, so a
+        /// stale `true` left after a pairing ends is never read.
+        var pendingPairingHasConnected = false
         /// The app's Bluetooth authorization, live. Bluetooth is optional at onboarding
         /// (#596), so a rider can reach this list with it refused, and the scan then finds
         /// nothing. Without this the list would just search forever with no reason given.
@@ -296,12 +302,27 @@ struct DeviceManagementFeature {
                 // chasing it (#558), so its 0x2A5C answer is never coming. Without this the
                 // pairing stays in flight for the life of the app: every later Pair tap and
                 // row tap is refused, and no prompt is up for the rider to cancel. Read
-                // against the CSC source before it is overwritten, not the merged row: only
-                // the CSC client's own connection state says whether it still holds a slot.
-                if kind == .speedCadence, let id = state.pendingPairing,
-                   Self.interrogationWasReleased(id, from: state.sources[.speedCadence] ?? [], to: devices) {
-                    logger.notice("pairing \(id, privacy: .public) released before its capabilities were read")
-                    state.pendingPairing = nil
+                // from the CSC list, not the merged row: only the CSC client's own
+                // connection state says whether it still holds a slot.
+                //
+                // Only once this pairing's slot has been seen (#593). A slot left over
+                // from an earlier pairing can be released just as Pair is tapped again,
+                // and its stateless row then reaches here before `pair()` has made the
+                // new slot. Ending the pairing on that would send the new capabilities to
+                // nobody. The client broadcasts in order, so the new slot's state arrives
+                // after any such stale release.
+                //
+                // A slot that holds roles never loses its state while it is kept — it
+                // goes to `.reconnecting` — and the discovery sweep exempts slots, so
+                // this can't fire while the pairing is still going.
+                if kind == .speedCadence, let id = state.pendingPairing {
+                    let row = devices.first { $0.id == id }
+                    if row?.connectionState != nil {
+                        state.pendingPairingHasConnected = true
+                    } else if state.pendingPairingHasConnected, row?.capabilities == nil {
+                        logger.notice("pairing \(id, privacy: .public) released before its capabilities were read")
+                        state.pendingPairing = nil
+                    }
                 }
                 state.sources[kind] = devices
                 // Reconciliation reads the *merged* list, not just the kind that
@@ -383,6 +404,7 @@ struct DeviceManagementFeature {
                     return commit(Self.unambiguousRoles(of: device.kinds), to: id, in: &state)
                 }
                 state.pendingPairing = id
+                state.pendingPairingHasConnected = false
                 return .run { _ in await bleCSCClient.pair(id) }
 
             case .rowTapped(let id):
@@ -689,23 +711,6 @@ struct DeviceManagementFeature {
             await bleCSCClient.setPairedSensors(assignments)
             for id in orphaned { await bleCSCClient.unpair(id) }
         }
-    }
-
-    /// Whether the CSC client let go of the peripheral being paired before its
-    /// capabilities arrived: its row had a connection state in the previous CSC list and
-    /// has none, or is gone, in this one.
-    ///
-    /// A CSC row's connection state is its slot's, so non-nil → nil means the slot was
-    /// removed between the two broadcasts. A slot that holds roles never goes to nil while
-    /// it is kept — it goes to `.reconnecting` — and the discovery sweep exempts slots, so
-    /// this can't fire while the pairing is still going. It can't race the Pair tap
-    /// either: the row gains a state only once `pair()` has made the slot.
-    private static func interrogationWasReleased(
-        _ id: UUID, from previous: [DiscoveredDevice], to current: [DiscoveredDevice]
-    ) -> Bool {
-        guard previous.first(where: { $0.id == id })?.connectionState != nil else { return false }
-        let row = current.first { $0.id == id }
-        return row?.connectionState == nil && row?.capabilities == nil
     }
 
     private static func roleDialog(
