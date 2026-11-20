@@ -2666,6 +2666,26 @@ this too).
 
 ---
 
+# #589 — CI "Build for testing" can't find the simulator it just resolved
+
+Branch: `fix/589-build-for-testing-destination`
+
+- [x] Cause, from the attempt-1 logs of 43868144206, 43868308534, 43918678778: all three resolved the same iOS 27.0
+      iPhone Air, started `xcodebuild` ~1 s after the background `simctl boot`, logged "Malformed bundle does not
+      contain an identifier" for the 27.0 runtime's cryptex mount (`SimulatorRuntime-v24.1.434`), then waited 60 s
+      and failed. The error listed every 27.1/27.2 iOS simulator and no 27.0 one. The issue's "no concrete
+      simulators" was wrong: the whole runtime was missing, not every device
+- [x] Passing reruns of the same runs, same device: no "Malformed" line. `xcodebuild` sat silent for 5–7 min
+      before "Resolve Package Graph" (normally ~3 s), then built. A boot in flight either stalls it or hides the runtime
+- [x] Fix: `build-for-testing` uses `generic/platform=iOS Simulator`; the UDID is used only by `test-without-building`,
+      after `simctl bootstatus -b`. `ARCHS=arm64` keeps the generic build single-arch
+- [x] CI green on the PR (run 44746910712): 2342 tests passed. "Build for testing" took 26.0 min, inside the
+      16.7–28.8 min range of the last 12 green runs. xcodebuild reached "Resolve Package Graph" 2.4 s after it started
+
+**Review.** `build-for-testing` no longer names the device, so a boot still in flight can't make the build fail.
+The UDID is used only after `bootstatus -b`. Build time is inside the recent range, but one run can't show a small
+change given the ~1.7× variance between runners. The passing reruns' 5–7 min stall before package resolution
+didn't happen on this run. One run isn't enough to say the fix removes it.
 ## #591 — Radar's Bluetooth-off branch leaves a stale BLECentral owner
 
 Branch `fix/591-radar-bt-off-disconnect`.
