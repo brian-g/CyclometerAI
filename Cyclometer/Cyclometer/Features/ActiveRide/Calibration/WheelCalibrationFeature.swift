@@ -61,7 +61,8 @@ struct WheelCalibrationFeature {
         ///
         /// Defaults to `false` so it agrees with the parent's derived value for a
         /// state constructed mid-ride; nothing accumulates on this alone, since
-        /// `isSensorActive` and `isGPSUsable` both start closed.
+        /// `isSensorActive` and `isGPSUsable` both start closed. A resumed ride
+        /// seeds it from the parent instead (`State(resuming:)`, #610).
         var isSuspended = false
         /// The paired speed sensor is connected and delivering. Anything else voids
         /// the window outright — a reconnect gap loses revolutions that GPS kept

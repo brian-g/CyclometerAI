@@ -3969,8 +3969,10 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
         )
     }
 
-    private func makeStore() -> TestStoreOf<ActiveRideFeature> {
-        TestStore(initialState: ActiveRideFeature.State(recordingState: .active)) {
+    private func makeStore(
+        state: ActiveRideFeature.State = ActiveRideFeature.State(recordingState: .active)
+    ) -> TestStoreOf<ActiveRideFeature> {
+        TestStore(initialState: state) {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
@@ -4277,6 +4279,44 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
             $0.calibration.intervalRevolutions = 0
             $0.calibration.lastFixTimestamp = Self.fix(at: 4).timestamp
         }
+    }
+
+    private static func resumed(_ recordingState: Ride.RecordingState) -> ActiveRideFeature.State {
+        ActiveRideFeature.State(resuming: RideSummaryUpdate(
+            rideId: UUID(), recordingState: recordingState,
+            durationSeconds: 600, distanceMeters: 4_000, averageSpeedMPS: 6.5, maxSpeedMPS: 11
+        ))
+    }
+
+    /// #610: a paused resume starts with the parent already suspended, so neither
+    /// `.onChange` forwarder sees a transition — the child has to be seeded.
+    @Test("A ride resumed while paused keeps calibration suspended, so moving adds nothing")
+    func pausedResumeSuspendsCalibration() async {
+        let store = makeStore(state: Self.resumed(.paused))
+        #expect(store.state.calibration.isSuspended)
+
+        // Every other gate opens: the sensor delivers and the fixes are clean.
+        await store.send(.calibration(.bleConnectionChanged(.active))) {
+            $0.calibration.isSensorActive = true
+        }
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 0)))) {
+            $0.calibration.isGPSUsable = true
+            $0.calibration.lastFixTimestamp = Self.fix(at: 0).timestamp
+        }
+
+        // Walking the bike while paused: neither the revolutions nor the fix's
+        // distance reach the window.
+        await store.send(.calibration(.wheelRevolutionsReceived(5)))
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 1)))) {
+            $0.calibration.lastFixTimestamp = Self.fix(at: 1).timestamp
+        }
+        #expect(store.state.calibration.gpsMeters == 0)
+        #expect(store.state.calibration.revolutions == 0)
+    }
+
+    @Test("A ride resumed while recording starts with calibration unsuspended")
+    func activeResumeLeavesCalibrationUnsuspended() {
+        #expect(!Self.resumed(.active).calibration.isSuspended)
     }
 }
 
