@@ -2679,4 +2679,10 @@ Branch: `fix/589-build-for-testing-destination`
       before "Resolve Package Graph" (normally ~3 s), then built. A boot in flight either stalls it or hides the runtime
 - [x] Fix: `build-for-testing` uses `generic/platform=iOS Simulator`; the UDID is used only by `test-without-building`,
       after `simctl bootstatus -b`. `ARCHS=arm64` keeps the generic build single-arch
-- [ ] CI green on the PR; "Build for testing" step time compared with recent green runs (16.7–28.8 min, 12 runs)
+- [x] CI green on the PR (run 44746910712): 2342 tests passed. "Build for testing" took 26.0 min, inside the
+      16.7–28.8 min range of the last 12 green runs. xcodebuild reached "Resolve Package Graph" 2.4 s after it started
+
+**Review.** `build-for-testing` no longer names the device, so a boot still in flight can't make the build fail.
+The UDID is used only after `bootstatus -b`. Build time is inside the recent range, but one run can't show a small
+change given the ~1.7× variance between runners. The passing reruns' 5–7 min stall before package resolution
+didn't happen on this run. One run isn't enough to say the fix removes it.
