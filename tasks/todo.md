@@ -2663,3 +2663,22 @@ are two writes, so a Finish backfill landing between them could write that orpha
 them one write needs a persistence change. A marker close-out writes the row's last checkpoint aggregates, since the
 marker carries no final summary, so its workout's distance can be up to one checkpoint short (the main path has
 this too).
+
+---
+
+# #590 — One-shot stream test races a 300 ms sleep
+
+Branch: `fix/590-location-oneshot-race`
+
+- [x] `LocationManagerState.init(makeManager:)`: the manager factory can be injected; `shared` behaves as before
+- [x] `oneShotDoesNotDisturbAnActiveStream` uses its own instance over a stub manager that never reaches
+      CoreLocation, pushes a fix through the delegate, and expects the stream to deliver it. No sleep race
+- [x] Also expects no `requestLocation()` while streaming (CoreLocation cancels the live updates on it)
+- [x] Location suites: 14/14 pass, 3/3 runs
+- [x] Revert checks (own derivedData): one-shot calling `stopUpdates()` fails; streaming guard removed fails
+- [x] Full `CyclometerTests`: 2,651 pass, 0 failures
+
+**Review.** The race was not in the guard but in the real manager: any request draws a `kCLErrorDenied` ~2 s
+later on an unauthorized simulator, and a denial finishes every stream. The test now runs where no denial can
+come, so the open stream is checked by delivery rather than by a timeout. The two timeout tests still drive
+`shared`; they wait only for their own 200 ms timers, which a denial would also resolve with nil.

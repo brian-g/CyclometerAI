@@ -144,8 +144,7 @@ struct LocationClientTests {
 
 // MARK: - One-shot fix (#193)
 
-/// `LocationManagerState` is a singleton with a private `init`, so these drive the shared
-/// instance. That is enough to cover what the one-shot actually risks: the continuation table
+/// The timeout tests drive the shared `LocationManagerState`. That is enough to cover what the one-shot actually risks: the continuation table
 /// is what a double resume would crash on, and a waiter that is never resumed hangs forever.
 ///
 /// On a simulator never asked for authorization, as CI's fresh one is, no fix ever comes, and
@@ -180,31 +179,42 @@ struct LocationOneShotTests {
     }
 
     /// The whole point of the one-shot is that it never touches `stopUpdates()`, which would
-    /// end a recording ride's stream. This pins the pairing: a live subscriber survives it.
+    /// end a recording ride's stream. Nor `requestLocation()`, which CoreLocation documents as
+    /// cancelling `startUpdatingLocation()`. This pins the pairing: a live subscriber survives it.
+    ///
+    /// Its own instance over a stub manager, not `shared`: the real manager answers with a
+    /// denial ~2 s after any request — this stream's own start, or another test's one-shot —
+    /// and a denial finishes every stream, so under load it could land mid-test (#590).
     @Test("Asking for a one-shot leaves an active update stream running")
     func oneShotDoesNotDisturbAnActiveStream() async {
-        // A denial finishes every stream, and the other tests leave their requests outstanding.
-        // Given 2 s, one is denied — on CI a main-queue stall let that land after the stream
-        // below opened. Stopping first cancels them; one already due is delivered before it.
-        await LocationManagerState.shared.stopUpdates()
+        let manager = await StubLocationManager()
+        let state = LocationManagerState(makeManager: { manager })
 
-        let stream = LocationManagerState.shared.makeUpdateStream()
+        let stream = state.makeUpdateStream()
         var iterator = stream.makeAsyncIterator()
 
-        _ = await LocationManagerState.shared.currentCoordinate(timeout: .milliseconds(200))
+        _ = await state.currentCoordinate(timeout: .milliseconds(200))
 
-        // Finishing the stream would make the next element nil immediately; instead this
-        // races the (never-arriving) first fix, so a timeout means the stream is still open.
-        // Keep the race well under 2 s: past that, this stream's own start is denied.
-        let finished = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
-            group.addTask { _ = await iterator.next(); return true }
-            group.addTask { try? await Task.sleep(for: .milliseconds(300)); return false }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
-        }
-        #expect(finished == false, "the one-shot finished a live update stream")
+        // Delivered only if the stream is still open: a finished one yields nil instead.
+        let fix = CLLocation(latitude: 43.0731, longitude: -89.4012)
+        state.locationManager(manager, didUpdateLocations: [fix])
+        let next = await iterator.next()
 
-        await LocationManagerState.shared.stopUpdates()
+        #expect(next?.coordinate == Coordinate(latitude: 43.0731, longitude: -89.4012),
+                "the one-shot finished a live update stream")
+        #expect(await manager.requestLocationCalls == 0,
+                "the one-shot requested a fix, which cancels the live updates")
     }
+}
+
+/// A `CLLocationManager` that never reaches CoreLocation: no request goes out, so no fix
+/// and no denial ever come back. Callbacks are driven by calling the delegate directly.
+@MainActor
+private final class StubLocationManager: CLLocationManager {
+    private(set) var requestLocationCalls = 0
+
+    override var location: CLLocation? { nil }
+    override func startUpdatingLocation() {}
+    override func stopUpdatingLocation() {}
+    override func requestLocation() { requestLocationCalls += 1 }
 }
