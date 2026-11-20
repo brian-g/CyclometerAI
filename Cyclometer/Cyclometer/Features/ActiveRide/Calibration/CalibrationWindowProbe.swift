@@ -30,8 +30,9 @@ struct CalibrationWindowProbe: Equatable {
     private(set) var rejectedFixes = 0
     private(set) var gpsGateShuts = 0
     /// Usable fixes that added nothing, by reason: a re-seed (the first fix after a GPS-gate
-    /// shut or after the window reset, which only starts the next interval), or a fix that
-    /// landed while the sensor or suspension gate was shut.
+    /// shut, after the window reset, or after the sensor or suspension gate reopened, which
+    /// only starts the next interval), or a fix that landed while the sensor or suspension
+    /// gate was shut.
     private(set) var reseedFixes = 0
     private(set) var fixesSkippedWhileGated = 0
     /// Revolutions counted for an interval the window then left out, split by why it was
@@ -44,8 +45,10 @@ struct CalibrationWindowProbe: Equatable {
     private(set) var startedAt: Date?
     private(set) var endedAt: Date?
 
-    /// The coordinate of the fix whose timestamp is `State.lastFixTimestamp`. Updated
-    /// together with it, so the pair always describes the same fix.
+    /// The coordinate of the last fix that landed. Set together with `State.lastFixTimestamp`
+    /// and read only while that is non-nil, so the pair it is read with always describes the
+    /// same fix. Forgetting the last fix (a GPS-gate shut, a gate reopening) clears only the
+    /// timestamp.
     var lastFixCoordinate: Coordinate?
 
     static func == (lhs: Self, rhs: Self) -> Bool { true }
@@ -81,6 +84,14 @@ struct CalibrationWindowProbe: Equatable {
             fixesSkippedWhileGated += 1
             droppedRevolutionsWhileGated += droppedRevolutions
         }
+    }
+
+    /// The revolutions of an interval the suspension gate shut partway through, whose
+    /// closing fix the GPS gate then rejected. The suspension lost the interval, so they
+    /// count as dropped while gated. The fix itself is not tallied: rejected fixes count
+    /// only while the suspension gate is open.
+    mutating func revolutionsDroppedWhileGated(_ droppedRevolutions: Double) {
+        droppedRevolutionsWhileGated += droppedRevolutions
     }
 
     /// The window's log line, after its existing `calibration window:` line. Numbers only:

@@ -150,6 +150,7 @@ extension WheelCalibrationFeatureTests {
         var pendingOverReading: Bool?
         var gpsMeters: Double
         var revolutions: Double
+        var intervalRevolutions: Double
         var lastFixTimestamp: Date?
         var lastCalibrationAt: Date?
     }
@@ -183,7 +184,7 @@ extension WheelCalibrationFeatureTests {
         return (Decisions(
             commitCount: s.commitCount, storedMM: s.preferences.wheelCircumferenceMM, pushedMM: pushed.value,
             pendingMeasurements: s.pendingMeasurements, pendingOverReading: s.pendingOverReading,
-            gpsMeters: s.gpsMeters, revolutions: s.revolutions,
+            gpsMeters: s.gpsMeters, revolutions: s.revolutions, intervalRevolutions: s.intervalRevolutions,
             lastFixTimestamp: s.lastFixTimestamp, lastCalibrationAt: s.lastCalibrationAt
         ), positionalBeforeClose)
     }
@@ -228,6 +229,29 @@ extension WheelCalibrationFeatureTests {
         #expect(probe.droppedRevolutionsAtGPSGate == 0)
         // Dropped from the window, not just labelled: only the three used intervals' remain.
         #expect(store.state.revolutions == 2.5 * 3)
+    }
+
+    @Test("A fix rejected during suspension still accounts for the interval's dropped revolutions")
+    func probeSuspensionRejectionCountsDroppedRevolutions() async {
+        let store = makeProbeStore()
+        store.exhaustivity = .off
+        await store.send(.bleConnectionChanged(.active))
+        let path = curve(points: 6)
+        await ride(store, Array(path.prefix(4)))
+
+        // Revolutions land, suspension shuts, and the next fix is too inaccurate to use.
+        await store.send(.wheelRevolutionsReceived(2.5))
+        await store.send(.suspensionChanged(true))
+        await store.send(.locationUpdated(probeFix(
+            path[4], at: 4, speed: meters(path[3], path[4]), accuracy: 12
+        )))
+
+        let probe = store.state.probe
+        #expect(probe.droppedRevolutionsWhileGated == 2.5)
+        #expect(probe.rejectedFixes == 0)   // rejections tally only while suspension is open
+        #expect(probe.droppedRevolutionsAtGPSGate == 0)
+        #expect(store.state.revolutions == 2.5 * 3)
+        #expect(store.state.intervalRevolutions == 0)
     }
 
     @Test("The probe resets with the window")

@@ -167,10 +167,14 @@ struct WheelCalibrationFeature {
                     // consistent stretch, and clearing the timestamp means the first
                     // fix after recovery re-seeds the interval instead of integrating
                     // across the gap.
-                    if state.isSensorActive, !state.isSuspended {
-                        state.probe.fixRejected(
-                            gateWasOpen: state.isGPSUsable, droppedRevolutions: state.intervalRevolutions
-                        )
+                    if state.isSensorActive {
+                        if state.isSuspended {
+                            state.probe.revolutionsDroppedWhileGated(state.intervalRevolutions)
+                        } else {
+                            state.probe.fixRejected(
+                                gateWasOpen: state.isGPSUsable, droppedRevolutions: state.intervalRevolutions
+                            )
+                        }
                     }
                     state.intervalRevolutions = 0
                     if state.isGPSUsable {
