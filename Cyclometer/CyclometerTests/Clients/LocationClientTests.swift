@@ -214,6 +214,33 @@ struct LocationOneShotTests {
         #expect(await manager.stopUpdatingLocationCalls == 0,
                 "the one-shot stopped the manager's updates under a live stream")
     }
+
+    /// The one ordering the one-shot still allows (#614): its request is out, then a ride's
+    /// stream starts. That `startUpdatingLocation()` cancels the request with no callback, so
+    /// the waiter must be answered by the stream's first fix rather than its own timeout.
+    @Test("A stream that starts after a one-shot's request answers the waiter with its first fix")
+    func streamStartingAfterTheRequestAnswersTheWaiter() async throws {
+        let manager = await StubLocationManager()
+        let state = LocationManagerState(makeManager: { manager })
+
+        // Long enough that only the stream's fix can answer it inside the test.
+        let waiter = Task { await state.currentCoordinate(timeout: .seconds(30)) }
+
+        let deadline = ContinuousClock.now + .seconds(5)
+        while await manager.requestLocationCalls == 0 {
+            try #require(ContinuousClock.now < deadline, "the one-shot never requested a fix")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let stream = state.makeUpdateStream()
+        var iterator = stream.makeAsyncIterator()
+        let fix = CLLocation(latitude: 43.0731, longitude: -89.4012)
+        state.locationManager(manager, didUpdateLocations: [fix])
+
+        let expected = Coordinate(latitude: 43.0731, longitude: -89.4012)
+        #expect(await waiter.value == expected, "the stream's fix did not answer the waiter")
+        #expect(await iterator.next()?.coordinate == expected)
+    }
 }
 
 /// A `CLLocationManager` that never starts location services: no update or fix is requested,

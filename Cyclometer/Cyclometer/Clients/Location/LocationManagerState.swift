@@ -145,54 +145,60 @@ final class LocationManagerState: NSObject, @unchecked Sendable, CLLocationManag
     /// Deliberately *not* built on `startUpdates()` + `stopUpdates()`: `stopUpdates()`
     /// finishes every subscriber's continuation and stops the manager outright, so a
     /// browse screen using that pair would end a recording ride's position stream.
+    ///
+    /// The whole decision is one step on the main queue, the queue every CoreLocation call
+    /// runs on. Checking for a stream anywhere else leaves a gap in which a ride's stream
+    /// can open before the request goes out (#614).
     func currentCoordinate(timeout: Duration = LocationManagerState.oneShotTimeout) async -> Coordinate? {
-        // CoreLocation usually already holds a recent fix — from a ride, or from another
-        // app. Reusing it answers instantly and starts no hardware at all.
-        if let cached = await cachedCoordinate(maximumAge: Self.maximumCachedFixAge) {
-            return cached
-        }
-
-        // `requestLocation()` and `startUpdatingLocation()` are mutually exclusive on one
-        // manager: CoreLocation documents that starting either immediately cancels the
-        // other. So while a ride is streaming, requesting here would cancel the ride's
-        // updates — and a ride ending would cancel this request with no callback at all,
-        // stranding the waiter until its timeout. Whatever the stream has already
-        // delivered is the only safe answer, at any age: it is being refreshed live.
-        guard lock.withLock({ updateContinuations.isEmpty }) else {
-            return await cachedCoordinate(maximumAge: .infinity)
-        }
-
-        let id = lock.withLock { () -> Int in
-            let current = nextID; nextID += 1; return current
-        }
-
-        return await withCheckedContinuation { (continuation: CheckedContinuation<Coordinate?, Never>) in
-            lock.withLock { oneShotContinuations[id] = continuation }
-
-            // Started *after* registration, so it cannot try to resolve an id the table
-            // does not hold yet and strand the continuation forever. Not cancelled on a
-            // successful fix: a stale timer finds nothing to remove and dies quietly.
-            // It is also what covers a transient CoreLocation error, which the delegate
-            // deliberately does not treat as an answer.
-            Task { [weak self] in
-                try? await Task.sleep(for: timeout)
-                self?.resumeOneShot(id: id, with: nil)
-            }
-
+        await withCheckedContinuation { (continuation: CheckedContinuation<Coordinate?, Never>) in
             DispatchQueue.main.async { [self] in
-                ensureManager().requestLocation()
+                let mgr = ensureManager()
+                let cached = mgr.location.map {
+                    (coordinate: Coordinate(latitude: $0.coordinate.latitude,
+                                            longitude: $0.coordinate.longitude),
+                     age: Date().timeIntervalSince($0.timestamp))
+                }
+
+                // CoreLocation usually already holds a recent fix — from a ride, or from
+                // another app. Reusing it answers instantly and starts no hardware at all.
+                if let cached, cached.age <= Self.maximumCachedFixAge {
+                    continuation.resume(returning: cached.coordinate)
+                    return
+                }
+
+                // `requestLocation()` and `startUpdatingLocation()` are mutually exclusive on
+                // one manager: CoreLocation documents that starting either immediately cancels
+                // the other. So while a ride is streaming, requesting here would cancel the
+                // ride's updates — and a ride ending would cancel this request with no callback
+                // at all, stranding the waiter until its timeout. Whatever the stream has
+                // already delivered is the only safe answer, at any age: it is being refreshed
+                // live. A stream that registers after this check is harmless: its
+                // `startUpdatingLocation()` is queued behind this block, so it cancels the
+                // request, and its first fix answers the waiter through `didUpdateLocations`.
+                guard lock.withLock({ updateContinuations.isEmpty }) else {
+                    continuation.resume(returning: cached?.coordinate)
+                    return
+                }
+
+                let id = lock.withLock { () -> Int in
+                    let current = nextID; nextID += 1
+                    oneShotContinuations[current] = continuation
+                    return current
+                }
+
+                // Started *after* registration, so it cannot try to resolve an id the table
+                // does not hold yet and strand the continuation forever. Not cancelled on a
+                // successful fix: a stale timer finds nothing to remove and dies quietly.
+                // It is also what covers a transient CoreLocation error, which the delegate
+                // deliberately does not treat as an answer.
+                Task { [weak self] in
+                    try? await Task.sleep(for: timeout)
+                    self?.resumeOneShot(id: id, with: nil)
+                }
+
+                mgr.requestLocation()
                 logger.notice("one-shot location requested")
             }
-        }
-    }
-
-    private func cachedCoordinate(maximumAge: TimeInterval) async -> Coordinate? {
-        await MainActor.run(resultType: Coordinate?.self) { [self] in
-            guard let location = ensureManager().location,
-                  Date().timeIntervalSince(location.timestamp) <= maximumAge
-            else { return nil }
-            return Coordinate(latitude: location.coordinate.latitude,
-                              longitude: location.coordinate.longitude)
         }
     }
 
