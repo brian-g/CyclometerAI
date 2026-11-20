@@ -988,3 +988,18 @@ affected suites for unbounded waits (`while … await …next()`, bare `for awai
 or confirm the change can't starve them. Run targeted suites with `-test-timeouts-enabled YES
 -default-test-execution-time-allowance 120` so a hang fails the test. When a run outlives its usual time,
 diagnose at once: compare the log's finished tests against the selected suites, and `sample` the host process.
+
+---
+
+## A worktree the session never entered sends `/code-review` to the wrong code (2026-11-20, #589)
+
+**What happened.** Brian asked for a new worktree for #589. I created `../CyclometerAI-589` with `git worktree add`,
+did all the work there by absolute path, and opened PR #611. Then I said it was "ready for `/code-review --fix`".
+But the session's working directory was still the main checkout, because Bash resets cwd after every call. So the
+review ran on `fix/587` there, plus uncommitted work from another session, and wrote fixes into it. Brian: "What
+the fuck is going on? Why was it on the wrong worktree?" The same thing happened on #286, and the memory about it
+already said to point the handoff at the right review target.
+
+**Rule.** When a worktree is asked for, switch the session into it as soon as it exists (`EnterWorktree`, with
+`path:` for one made by `git worktree add`). Before handing off for review, check that the session's working
+directory is the branch under review. If it isn't, give the explicit target (`/code-review <PR#> --fix`).
