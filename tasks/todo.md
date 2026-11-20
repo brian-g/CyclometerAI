@@ -2686,3 +2686,25 @@ Branch: `fix/589-build-for-testing-destination`
 The UDID is used only after `bootstatus -b`. Build time is inside the recent range, but one run can't show a small
 change given the ~1.7× variance between runners. The passing reruns' 5–7 min stall before package resolution
 didn't happen on this run. One run isn't enough to say the fix removes it.
+# #587 — Calibration gates drop an interval from both sides
+
+Branch: `fix/587-calibration-gate-symmetry`
+
+Decision (Brian, 2026-11-19): one rule for every gate, suspension included. Suspension's two edges were zero-mean
+noise; fixing only one would have made them a bias.
+
+- [x] Revolutions held per interval (`intervalRevolutions`), moved into the window only by a fix that adds that
+      interval's distance; every other fix discards them
+- [x] A sensor or suspension gate reopening partway through an interval forgets the last fix, so the next re-seeds
+- [x] Probe: counters renamed to dropped revolutions; the "doppler without gps-gate-unpaired rev" figure removed
+- [x] `probeRejectedIntervalDroppedFromBoth` expects the revolutions gone; new `reconnectReseedsInterval`;
+      `suspensionPauses` and `radarAlertPausesAndResumesTheWindow` pin both suspension edges
+- [x] Mutation checks: restoring the rejected interval's revolutions fails `poorAccuracyPauses` and
+      `probeRejectedIntervalDroppedFromBoth`; removing the re-seed fails `reconnectReseedsInterval`,
+      `suspensionPauses` and `radarAlertPausesAndResumesTheWindow`
+- [x] Full `CyclometerTests`: 3036 passed, 0 failed
+
+**Review.** The GPS gate decides on an interval only when its closing fix arrives, so the fix keeps the interval's
+revolutions in hand until then. GPS distance and revolutions now enter the window at the same fix, or neither does.
+Windows with no dropped intervals decide exactly as before: `twoWindowsCommit`, `probeDoesNotChangeDecisions` and
+the other commit tests are unchanged. Wheel quantity, thresholds and the §8.9.2 noise numbers stay with #419.
