@@ -751,15 +751,23 @@ struct AppFeature {
     /// have ended and written its own in the meantime (#357, #583).
     ///
     /// With the totals Finish worked out, when the marker has them (#607). `checkpoint` is the
-    /// row's own summary, used only for a marker written before #607.
+    /// row's own summary, as `fetchResumableRide` read it: the totals for a marker without any
+    /// (written before #607, or with a summary that no longer reads), and the pass count either way.
     private static func finalizeEndedRide(
         _ pendingEnd: PendingRideEnd,
         _ checkpoint: RideSummaryUpdate,
         _ persistenceClient: PersistenceClient,
         _ rideEndIntentClient: RideEndIntentClient
     ) async throws {
+        var summary = pendingEnd.summary ?? checkpoint
+        // The checkpoint's count has the ride's saved passes counted in (#298). Finish's can trail
+        // them: the dashboard counts a pass only once its write returns, and one still out at the
+        // Finish lands after the ride is gone.
+        if let savedPasses = checkpoint.vehiclePassCount {
+            summary.vehiclePassCount = max(summary.vehiclePassCount ?? 0, savedPasses)
+        }
         try await persistenceClient.finalizeRide(
-            pendingEnd.rideId, pendingEnd.endedAt, pendingEnd.summary ?? checkpoint, pendingEnd.gpxFileURL
+            pendingEnd.rideId, pendingEnd.endedAt, summary, pendingEnd.gpxFileURL
         )
         rideEndIntentClient.clear(pendingEnd.rideId)
     }

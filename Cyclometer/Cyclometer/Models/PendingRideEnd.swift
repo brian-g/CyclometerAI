@@ -1,4 +1,8 @@
 import Foundation
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
+private let logger = Logger.cyclometer(.persistence)
 
 /// A rider's intent to end a ride, recorded outside SwiftData.
 ///
@@ -37,9 +41,16 @@ extension PendingRideEnd {
     /// checkpoint summary.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        rideId = try container.decode(UUID.self, forKey: .rideId)
+        let rideId = try container.decode(UUID.self, forKey: .rideId)
+        self.rideId = rideId
         endedAt = try container.decode(Date.self, forKey: .endedAt)
         gpxFileURL = try container.decodeIfPresent(URL.self, forKey: .gpxFileURL)
-        summary = try? container.decodeIfPresent(RideSummaryUpdate.self, forKey: .summary)
+        do {
+            summary = try container.decodeIfPresent(RideSummaryUpdate.self, forKey: .summary)
+        } catch {
+            // Logged, so a close-out with the checkpoint's totals isn't mistaken for a missing one.
+            logger.error("ride-end marker for \(rideId, privacy: .public) has an unreadable summary; its close-out falls back to the checkpoint's: \(error.localizedDescription, privacy: .public)")
+            summary = nil
+        }
     }
 }

@@ -83,6 +83,28 @@ struct RideEndIntentClientTests {
         #expect(RideEndIntentClient.file(at: url).loadAll() == [marker])
     }
 
+    /// #607 review: JSON has no non-finite number, and the default encoder throws on one. A NaN or
+    /// infinite total must not fail the write and cost the ride its marker (#188).
+    @Test("A marker whose summary holds a non-finite number is still written, and reads back")
+    func nonFiniteSummaryIsWritten() throws {
+        let url = Self.makeFileURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        var marker = Self.marker(1_000, export: "leftover")
+        marker.summary = RideSummaryUpdate(
+            rideId: marker.rideId, recordingState: .ended,
+            durationSeconds: 60, distanceMeters: .infinity, averageSpeedMPS: .nan, maxSpeedMPS: -.infinity
+        )
+        RideEndIntentClient.file(at: url).save(marker)
+
+        let loaded = try #require(RideEndIntentClient.file(at: url).loadAll().first)
+        #expect(loaded.rideId == marker.rideId)
+        #expect(loaded.gpxFileURL == marker.gpxFileURL)
+        let summary = try #require(loaded.summary)
+        #expect(summary.distanceMeters == .infinity)
+        #expect(summary.averageSpeedMPS.isNaN)
+        #expect(summary.maxSpeedMPS == -.infinity)
+    }
+
     /// #607: a marker written before it has no summary, and one whose summary can't be read (a
     /// field added since) still reads, with none. Either throwing would lose every ride's marker,
     /// since the file decodes as one array.

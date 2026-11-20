@@ -2842,3 +2842,16 @@ it's written twice per Finish, as before. The tolerant decode has a cost. If a f
 `RideSummaryUpdate`, a marker written before that update decodes with no summary and falls back to the checkpoint
 totals. It doesn't lose the marker. That fallback only matters for a ride whose finalize failed and that is still
 pending across an app update.
+
+**Code review (xhigh, --fix).**
+- [x] The marker file's encoder and decoder now spell non-finite numbers as strings. The default encoder throws on
+      NaN or infinity, which would have failed the whole write and cost the ride its marker. Test:
+      `nonFiniteSummaryIsWritten`
+- [x] The close-out keeps the higher of Finish's and the checkpoint's `vehiclePassCount`. The marker path skipped
+      the #298 reconciliation, and a pass whose write returns after Finish is saved but missing from Finish's count.
+      Test: `closeOutKeepsTheHigherPassCount`
+- [x] An unreadable marker summary is now logged instead of dropped silently, and `finalizeEndedRide`'s doc says
+      when the checkpoint is used
+- Skipped: the marker's summary still has no `finish`, so a closed-out ride is backfilled from its track and doesn't
+  get the live ascent, descent and energy. That's the documented design, not a regression
+- `RideEndIntentClientTests`, `AppFeatureTests`, `RideEndFailureTests`: 52 passed, 0 failed. Full suite not re-run
