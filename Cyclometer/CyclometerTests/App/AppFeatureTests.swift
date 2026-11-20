@@ -363,6 +363,42 @@ struct AppFeatureTests {
         #expect(finalized.value?.3 == nil)
     }
 
+    /// #344: the fetch can read the row S05.1 just wrote and land after that start has, with the
+    /// sheet gone and the ride under way. It found the ride being recorded, not an orphan, so the
+    /// ride is neither resumed over itself nor closed out.
+    @Test("A resumable ride fetched after its own start landed leaves that ride alone")
+    func resumableRideFetchedAfterItsOwnStartLanded() async {
+        let newRideId = UUID()
+        let finalized = LockIsolated<[UUID]>([])
+        let settled = LockIsolated<[UUID]>([])
+        let store = TestStore(
+            initialState: AppFeature.State(
+                activeRide: ActiveRideFeature.State(rideId: newRideId, recordingState: .active),
+                isDashboardPresented: true
+            )
+        ) {
+            AppFeature()
+        } withDependencies: {
+            $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
+            $0.persistenceClient = .mock(
+                onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
+                onSettleRideHealthWorkout: { id in settled.withValue { $0.append(id) } }
+            )
+        }
+        store.exhaustivity = .off
+
+        await store.send(.resumableRideFetched(RideSummaryUpdate(
+            rideId: newRideId, recordingState: .active,
+            durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0
+        )))
+        await store.finish(timeout: effectDrainTimeout)
+
+        #expect(store.state.activeRide?.rideId == newRideId)
+        #expect(store.state.isDashboardPresented == true)
+        #expect(finalized.value.isEmpty)
+        #expect(settled.value.isEmpty)
+    }
+
     /// A launch whose fetch lands while a new ride is under way: started (`midWrite == false`), or
     /// its row still being written by S05.1 (`midWrite == true`, #344). Either sends the leftover
     /// ride down the close-out branch instead of resuming it.
@@ -388,7 +424,9 @@ struct AppFeatureTests {
     /// #357: the leftover ride was one the rider had ended, and only its finalize failed — after the
     /// export was written (#188). Its close-out keeps the marker's end and export rather than the
     /// relaunch's time and nil, which left the export for #346's sweep, and discharges the marker.
-    @Test("A close-out racing a start keeps a ride-end marker's end and export, then clears it", arguments: [false, true])
+    /// #584: with its real end, it is owed its Apple Health workout like any finished ride, and the
+    /// backfill writes it ending at the marker's time.
+    @Test("A close-out racing a start keeps a ride-end marker's end and export, clears it, and writes its workout", arguments: [false, true])
     func resumableRideFetchedDuringAStartUsesTheRideEndMarker(midWrite: Bool) async {
         let marker = PendingRideEnd(
             rideId: Self.leftoverRide.rideId,
@@ -397,16 +435,32 @@ struct AppFeatureTests {
         )
         let rideEndIntent = RideEndIntentClient.inMemory(initial: marker)
         let finalized = LockIsolated<[(UUID, Date, URL?)]>([])
-        let settled = LockIsolated<[UUID]>([])
+        let workouts = LockIsolated<[RideWorkout]>([])
+        // What the live actor does: finalize makes the ride owed, and settling removes it.
+        let owed = LockIsolated<[OwedHealthWorkout]>([])
         let store = TestStore(initialState: Self.stateWithStartInFlight(midWrite: midWrite)) {
             AppFeature()
         } withDependencies: {
             $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
             $0.rideEndIntentClient = rideEndIntent
-            $0.persistenceClient = .mock(
-                onFinalizeRide: { id, endedAt, _, url in finalized.withValue { $0.append((id, endedAt, url)) } },
-                onSettleRideHealthWorkout: { id in settled.withValue { $0.append(id) } }
+            var client = PersistenceClient.mock(
+                onFinalizeRide: { id, endedAt, summary, url in
+                    finalized.withValue { $0.append((id, endedAt, url)) }
+                    owed.withValue {
+                        $0.append(OwedHealthWorkout(
+                            rideId: id,
+                            startedAt: Date(timeIntervalSince1970: 1_496_400),
+                            endedAt: endedAt,
+                            distanceMeters: summary.distanceMeters,
+                            movingSeconds: summary.durationSeconds
+                        ))
+                    }
+                }
             )
+            client.fetchRidesOwedHealthWorkout = { owed.value }
+            client.settleRideHealthWorkout = { id in owed.withValue { $0.removeAll { $0.rideId == id } } }
+            $0.persistenceClient = client
+            $0.healthKitClient = .mock(onSaveWorkout: { workout in workouts.withValue { $0.append(workout) } })
         }
         store.exhaustivity = .off
 
@@ -421,13 +475,15 @@ struct AppFeatureTests {
         #expect(finalized.value.first?.1 == marker.endedAt)
         #expect(finalized.value.first?.2 == marker.gpxFileURL)
         #expect(rideEndIntent.loadAll().isEmpty)
-        // The rest of the branch is as before: still no Apple Health workout (#277).
-        #expect(settled.value == [marker.rideId])
+        #expect(workouts.value.map(\.rideId) == [marker.rideId])
+        #expect(workouts.value.first?.endedAt == marker.endedAt)
+        #expect(owed.value.isEmpty)
     }
 
     /// #357: with no marker, or one some other ride left, the close-out is what it always was —
-    /// closed at the relaunch with no export — and the marker is left alone.
-    @Test("A close-out racing a start without this ride's marker closes it with nil and leaves the marker", arguments: [false, true])
+    /// closed at the relaunch with no export, and settled with no Apple Health workout (#277) —
+    /// and the marker is left alone.
+    @Test("A close-out racing a start without this ride's marker closes it with nil, settles it, and leaves the marker", arguments: [false, true])
     func resumableRideFetchedDuringAStartWithoutItsMarker(otherRideMarker: Bool) async {
         let marker = otherRideMarker
             ? PendingRideEnd(rideId: UUID(), endedAt: Date(timeIntervalSince1970: 1_500_000),
@@ -435,6 +491,7 @@ struct AppFeatureTests {
             : nil
         let rideEndIntent = RideEndIntentClient.inMemory(initial: marker)
         let finalized = LockIsolated<[(UUID, Date, URL?)]>([])
+        let settled = LockIsolated<[UUID]>([])
         let relaunch = Date(timeIntervalSince1970: 2_000_000)
         let store = TestStore(initialState: Self.stateWithStartInFlight(midWrite: false)) {
             AppFeature()
@@ -442,7 +499,8 @@ struct AppFeatureTests {
             $0.date = .constant(relaunch)
             $0.rideEndIntentClient = rideEndIntent
             $0.persistenceClient = .mock(
-                onFinalizeRide: { id, endedAt, _, url in finalized.withValue { $0.append((id, endedAt, url)) } }
+                onFinalizeRide: { id, endedAt, _, url in finalized.withValue { $0.append((id, endedAt, url)) } },
+                onSettleRideHealthWorkout: { id in settled.withValue { $0.append(id) } }
             )
         }
         store.exhaustivity = .off
@@ -455,6 +513,7 @@ struct AppFeatureTests {
         #expect(finalized.value.first?.0 == Self.leftoverRide.rideId)
         #expect(finalized.value.first?.1 == relaunch)
         #expect(finalized.value.first?.2 == nil)
+        #expect(settled.value == [Self.leftoverRide.rideId])
         #expect(rideEndIntent.loadAll() == [marker].compactMap { $0 })
     }
 
@@ -723,9 +782,10 @@ struct AppFeatureTests {
 
     /// #175 review's orphan: a resumable ride found after the rider already started a new
     /// one is closed out rather than resumed. It never reached a Finish, so it gets its
-    /// thumbnail here. Not an Apple Health workout (#277): it ends at the relaunch, so one
-    /// would span every hour since the kill. Other rides still owed one are written.
-    @Test("an orphaned ride closed out at launch gets its map thumbnail, and is settled without a workout")
+    /// thumbnail here. Not an Apple Health workout (#277): with no ride-end marker it ends at the
+    /// relaunch, so one would span every hour since the kill (one with a marker gets its workout,
+    /// #584). Other rides still owed one are written.
+    @Test("an orphaned ride closed out at launch gets its map thumbnail, and with no marker is settled without a workout")
     func orphanedRideCloseOutCapturesThumbnail() async {
         let orphan = RideSummaryUpdate(
             rideId: UUID(), recordingState: .active,

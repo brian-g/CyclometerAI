@@ -361,8 +361,12 @@ struct AppFeature {
                 // S05.1 writes a new ride's row before `activeRide` exists (#344), so a start
                 // can be mid-write when this lands. If the fetch found that very row, it is
                 // the ride being started, not one a kill left behind: leave it to the sheet.
+                // The start can also have landed first, the fetch having read the row once it
+                // was written: then it is the ride under way, and closing it out would end it.
                 let startingRideId = state.startSheet?.pendingRideId
-                if summary.rideId == startingRideId { return .none }
+                if summary.rideId == startingRideId || summary.rideId == state.activeRide?.rideId {
+                    return .none
+                }
                 // The rider already ended this ride and only its finalize write failed (#188).
                 // Read once for both close-outs below.
                 let pendingEnd = rideEndIntentClient.load(summary.rideId)
@@ -377,18 +381,19 @@ struct AppFeature {
                     return .run { [persistenceClient, rideEndIntentClient, date] send in
                         // One the rider had ended keeps its end and its export (#357): closed with
                         // nil, the export is unreferenced and the launch sweep deletes it (#346).
+                        // Its end is when the rider stopped, so it stays owed its Apple Health
+                        // workout, as on the main close-out path (#584).
                         if let pendingEnd {
                             try? await Self.finalizeEndedRide(
                                 pendingEnd, summary, persistenceClient, rideEndIntentClient
                             )
                         } else {
                             try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
+                            // No workout (#277): without a marker its end is the relaunch, not when
+                            // the rider stopped, so a workout would span every hour between the two.
+                            // Settled before the backfill below, the only one that could see it.
+                            try? await persistenceClient.settleRideHealthWorkout(summary.rideId)
                         }
-                        // No Apple Health workout (#277): without a marker its end is the relaunch,
-                        // not when the rider stopped, so a workout would span every hour between
-                        // the two. One with a marker is settled too, as before #357.
-                        // Settled before the backfill below, the only one that could see it.
-                        try? await persistenceClient.settleRideHealthWorkout(summary.rideId)
                         await send(.rides(.reloadRides))
                         await Self.backfillFinishedRides(send: send)
                     }
