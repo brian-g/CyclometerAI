@@ -3,7 +3,10 @@ import Foundation
 /// Snapshot of a ride's running aggregates, written to the persisted `Ride` both at
 /// the 30s checkpoint and (with final values) at ride end. Mirrors TrackPointDTO's
 /// role as a boundary DTO — no persistence-layer types leak through it.
-struct RideSummaryUpdate: Sendable, Equatable {
+///
+/// `Codable` so a ride-end marker can carry Finish's summary (`PendingRideEnd.summary`, #607).
+/// Synthesized on purpose: a field added later is carried without anyone remembering to.
+struct RideSummaryUpdate: Codable, Sendable, Equatable {
     var rideId: UUID
     var recordingState: Ride.RecordingState = .active
     var durationSeconds: TimeInterval

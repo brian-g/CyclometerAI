@@ -42,6 +42,11 @@ extension RideEndIntentClient: DependencyKey {
         .file(at: URL.documentsDirectory.appending(component: "pending-ride-end.json"))
     }
 
+    /// How the file spells a non-finite number. JSON has none, and by default the encoder throws
+    /// on one: a single NaN in a marker's summary (#607) would fail the whole write, and the ride
+    /// would lose its marker, the one record of its end (#188).
+    private static let nonFinite = (positiveInfinity: "+Infinity", negativeInfinity: "-Infinity", nan: "NaN")
+
     /// The live store, at a location a test can choose.
     static func file(at url: URL) -> RideEndIntentClient {
         .store(
@@ -56,11 +61,16 @@ extension RideEndIntentClient: DependencyKey {
                     logger.error("failed to read ride-end markers: \(error.localizedDescription, privacy: .public)")
                     return []
                 }
-                if let markers = try? JSONDecoder().decode([PendingRideEnd].self, from: data) {
+                let decoder = JSONDecoder()
+                decoder.nonConformingFloatDecodingStrategy = .convertFromString(
+                    positiveInfinity: nonFinite.positiveInfinity, negativeInfinity: nonFinite.negativeInfinity,
+                    nan: nonFinite.nan
+                )
+                if let markers = try? decoder.decode([PendingRideEnd].self, from: data) {
                     return markers
                 }
                 // Written before #583, when the file held one marker.
-                if let marker = try? JSONDecoder().decode(PendingRideEnd.self, from: data) {
+                if let marker = try? decoder.decode(PendingRideEnd.self, from: data) {
                     return [marker]
                 }
                 logger.error("ride-end markers file is undecodable; the next save or clear replaces it")
@@ -77,8 +87,13 @@ extension RideEndIntentClient: DependencyKey {
                     }
                     return
                 }
+                let encoder = JSONEncoder()
+                encoder.nonConformingFloatEncodingStrategy = .convertToString(
+                    positiveInfinity: nonFinite.positiveInfinity, negativeInfinity: nonFinite.negativeInfinity,
+                    nan: nonFinite.nan
+                )
                 do {
-                    try JSONEncoder().encode(markers).write(to: url, options: .atomic)
+                    try encoder.encode(markers).write(to: url, options: .atomic)
                 } catch {
                     // Best effort. A lost marker only costs the recovery this exists for;
                     // it must never take the ride-end sequence down with it.

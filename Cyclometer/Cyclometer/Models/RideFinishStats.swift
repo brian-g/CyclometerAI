@@ -11,7 +11,7 @@ private let logger = Logger.cyclometer(.recording)
 /// A ride whose live state covered all of it stores the dashboard's own totals through
 /// `RideSummaryUpdate.finish`. Every other ride is owed them, and `backfill` works them out from
 /// its saved track.
-struct RideFinishStats: Sendable, Equatable {
+struct RideFinishStats: Codable, Sendable, Equatable {
     /// Nil for a ride with no altitude, as both are.
     var ascentMeters: Double?
     var descentMeters: Double?

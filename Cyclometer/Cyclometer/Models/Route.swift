@@ -274,7 +274,7 @@ struct RouteDetail: Sendable, Equatable {
 
 /// The (id, name) pair a `Ride` denormalizes when it starts. One value rather than two
 /// parameters, so a ride can't be written with an id and a mismatched name.
-struct RouteReference: Sendable, Equatable {
+struct RouteReference: Codable, Sendable, Equatable {
     var id: UUID
     var name: String
 }

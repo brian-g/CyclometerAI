@@ -750,6 +750,50 @@ struct RideEndFailureTests {
         #expect(try await liveClient.fetchResumableRide() == nil)
     }
 
+    /// #607: the close-out writes the totals the Finish worked out, carried in the marker. It used to
+    /// write the row's, which are only as current as the last checkpoint that saved. A failed
+    /// finalize means SwiftData writes are failing, so here the pause's checkpoint fails too, and
+    /// the row keeps the totals it was created with.
+    @Test("a ride closed out at launch keeps its Finish's totals, and its workout carries that distance")
+    func closedOutRideKeepsItsFinishTotals() async throws {
+        let (liveClient, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        var failingClient = liveClient
+        failingClient.updateRideSummary = { _ in throw WriteFailed() }
+        failingClient.finalizeRide = { _, _, _, _ in throw WriteFailed() }
+
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let rideEndIntent = RideEndIntentClient.inMemory()
+        let store = Self.makeRideStore(
+            persistenceClient: failingClient, documentsDirectory: tempDir,
+            rideEndIntentClient: rideEndIntent, date: Self.movingClock()
+        )
+        let rideId = await Self.runRideToEnd(store, speedMPS: 5) { rideEndIntent.load($0)?.gpxFileURL != nil }
+
+        let finish = try #require(rideEndIntent.load(rideId)?.summary)
+        #expect(finish.recordingState == .ended)
+        #expect(finish.distanceMeters > 0)
+        let stranded = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(stranded.distanceMeters < finish.distanceMeters)
+        #expect(stranded.durationSeconds < finish.durationSeconds)
+
+        let workouts = LockIsolated<[RideWorkout]>([])
+        await Self.relaunch(
+            persistenceClient: liveClient, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
+            healthKitClient: .mock(onSaveWorkout: { workout in workouts.withValue { $0.append(workout) } })
+        )
+
+        let recovered = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(recovered.recordingState == .ended)
+        #expect(recovered.distanceMeters == finish.distanceMeters)
+        #expect(recovered.durationSeconds == finish.durationSeconds)
+        #expect(recovered.averageSpeedMPS == finish.averageSpeedMPS)
+        #expect(recovered.speedSampleCount == finish.speedSampleCount)
+        #expect(recovered.pauses == finish.pauses)
+        #expect(workouts.value.map(\.distanceMeters) == [finish.distanceMeters])
+        #expect(rideEndIntent.loadAll().isEmpty)
+    }
+
     /// #583: markers are kept per ride. A launch close-out racing a start (#357) can fail its
     /// finalize too, and keeps the leftover's marker for the next launch (#580). The ride that was
     /// starting then finishes and writes its own. With one slot that write took the leftover's,
