@@ -122,6 +122,15 @@ struct WheelCalibrationFeature {
                 // which cancels every child effect when the ride state goes nil at
                 // ride end. An explicit stop action would race that — it arrives as
                 // an effect, after the state it belongs to is already gone.
+                //
+                // A ride resumed while paused arrives already suspended, seeded rather than
+                // sent through `.suspensionChanged` (#610), so name the gate here or the log
+                // shows fixes skipped with no gate shut.
+                if state.isSuspended {
+                    logger.notice(
+                        "calibration suspension gate shut at start — radar alert, turn alert, or ride not recording"
+                    )
+                }
                 return .merge(
                     .run { [bleCSCClient] send in
                         for await revolutions in bleCSCClient.wheelRevolutions() {
