@@ -358,6 +358,8 @@ struct AppFeatureTests {
         #expect(store.state.activeRide?.rideId == newRideId)
         #expect(store.state.isDashboardPresented == true)
 
+        // Sent after the close-out's write, so it has run by now.
+        await store.receive(\.rides.reloadRides)
         #expect(finalized.value?.0 == orphanedRideId)
         #expect(finalized.value?.1 == fixedDate)
         #expect(finalized.value?.2 == orphanedSummary)

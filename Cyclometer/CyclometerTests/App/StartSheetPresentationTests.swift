@@ -185,8 +185,8 @@ struct StartSheetPresentationTests {
         let finalized = LockIsolated<[UUID]>([])
         let orphanedRideId = UUID()
         let store = Self.makeStore(into: log)
+        // No marker, so the orphan is closed out never owed a workout (#606).
         store.dependencies.persistenceClient = .mock(
-            onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
             onFinalizeRideWithoutWorkout: { id, _, _ in finalized.withValue { $0.append(id) } }
         )
         store.exhaustivity = .off(showSkippedAssertions: false)
@@ -198,6 +198,8 @@ struct StartSheetPresentationTests {
         #expect(log.value == Self.begun + Self.rideStarted + Self.ended)
 
         await store.send(.resumableRideFetched(Self.resumable(orphanedRideId)))
+        // Sent after the close-out's write, so it has run by now.
+        await store.receive(\.rides.reloadRides)
 
         // The rider's ride is untouched, and the stale one is closed out rather than left a
         // phantom row.
