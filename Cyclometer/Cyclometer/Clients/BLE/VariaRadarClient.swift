@@ -283,6 +283,8 @@ private final class RadarClientState: @unchecked Sendable {
     /// `connectionState` because a pairing scan must not move that state — see
     /// `beginPairingScan`.
     private var isScanning = false
+    /// Every hardware scan call goes through this, enqueued under the lock that decided it (#586).
+    private var scanCalls: ScanCallSequence
     /// How many pairing scans are open. Deliberately not folded into `isScanning`:
     /// the two answer different questions, and only their sum decides whether the
     /// radio may be released. Mirrors `BLECSCClient.pairingScanCount`.
@@ -326,6 +328,7 @@ private final class RadarClientState: @unchecked Sendable {
     init(bleClient: BLEClient, clock: any Clock<Duration>) {
         self.bleClient = bleClient
         self.clock = clock
+        self.scanCalls = ScanCallSequence(bleClient: bleClient, serviceUUID: radarServiceUUID)
         startEventLoop()
     }
 
@@ -405,31 +408,35 @@ private final class RadarClientState: @unchecked Sendable {
         // Only start a fresh scan from a cold state. Re-entering (the dashboard's
         // .task re-runs when the view re-appears, while this state object is
         // process-global) must not stomp a live connection back to .scanning.
-        let shouldScan = lock.withLock { () -> Bool in
-            guard connectionState == .disconnected else { return false }
+        let call = lock.withLock { () -> Task<Void, Never>? in
+            guard connectionState == .disconnected else { return nil }
             isScanning = true
-            return true
+            // In the acquisition that issues the start, which can land as soon as it is
+            // enqueued (#586). Published after the lock, `.scanning` could overwrite the
+            // `.connecting` or `.connected` of a radar that start had already found.
+            _ = setConnectionStateLocked(.scanning)
+            return scanCalls.enqueue(.start)
         }
-        guard shouldScan else {
+        guard let call else {
             logger.notice("startScanning skipped — not in disconnected state")
             return
         }
-        setConnectionState(.scanning)
-        await bleClient.startScanning([radarServiceUUID])
+        logConnectionState(.scanning)
+        await call.value
     }
 
     func stopScanning() async {
-        let shouldStopHardware = lock.withLock { () -> Bool in
+        let call = lock.withLock { () -> Task<Void, Never>? in
             isScanning = false
-            return !pairingScanWantsRadioLocked
+            // `BLEClient.requestedServices` is a plain set with no per-caller refcount, so
+            // dropping the radar UUID here would cancel the Sensors screen's scan too.
+            return pairingScanWantsRadioLocked ? nil : scanCalls.enqueue(.stop)
         }
-        // `BLEClient.requestedServices` is a plain set with no per-caller refcount, so
-        // dropping the radar UUID here would cancel the Sensors screen's scan too.
-        guard shouldStopHardware else {
+        guard let call else {
             logger.notice("stopScanning kept alive — \(self.pairingScanCountSnapshot) pairing scan(s) open")
             return
         }
-        await bleClient.stopScanning([radarServiceUUID])
+        await call.value
     }
 
     // MARK: Pairing UI support (S11)
@@ -439,26 +446,26 @@ private final class RadarClientState: @unchecked Sendable {
     /// Deliberately does not touch `connectionState`, so the ride sidebar doesn't flip
     /// to "Searching" behind a settings screen.
     func beginPairingScan() async {
-        let suspended = lock.withLock { () -> Bool in
+        let call = lock.withLock { () -> Task<Void, Never>? in
             pairingScanCount += 1
             // No scan runs while suspended — see `CSCClientState.beginPairingScan`.
-            guard !pairingScansSuspended else { return true }
+            guard !pairingScansSuspended else { return nil }
             rotateDiscoveryGenerationLocked()
-            return false
+            // Re-issuing the scan restarts the CoreBluetooth session, so peripherals
+            // already seen are re-advertised to us rather than suppressed as duplicates.
+            // That is also what makes pull-to-refresh work (#98).
+            return scanCalls.enqueue(.start)
         }
-        guard !suspended else {
+        guard let call else {
             logger.debug("pairing scan deferred (\(self.pairingScanCountSnapshot) open) — app in background")
             return
         }
-        // Re-issuing the scan restarts the CoreBluetooth session, so peripherals
-        // already seen are re-advertised to us rather than suppressed as duplicates.
-        // That is also what makes pull-to-refresh work (#98).
-        await bleClient.startScanning([radarServiceUUID])
+        await call.value
         logger.notice("pairing scan started (\(self.pairingScanCountSnapshot) open)")
     }
 
     func endPairingScan() async {
-        let (shouldStopHardware, dropped) = lock.withLock { () -> (Bool, DroppedConnection?) in
+        let (call, dropped) = lock.withLock { () -> (Task<Void, Never>?, DroppedConnection?) in
             pairingScanCount = max(0, pairingScanCount - 1)
             // The last holder is gone and no ride will use what it connected (#585), the same
             // rule as `CSCClientState.endPairingScan`. Only when there is something to drop:
@@ -466,14 +473,15 @@ private final class RadarClientState: @unchecked Sendable {
             let hasConnection = targetPeripheralID != nil || reconnectTask != nil
             let dropped = pairingScanCount == 0 && !rideActive && hasConnection ? takeConnectionLocked() : nil
             // Suspended: the radio was already given back, or the ambient scan holds it.
-            return (pairingScanCount == 0 && !isScanning && !pairingScansSuspended, dropped)
+            let shouldStop = pairingScanCount == 0 && !isScanning && !pairingScansSuspended
+            return (shouldStop ? scanCalls.enqueue(.stop) : nil, dropped)
         }
         if let dropped {
             await release(dropped)
             logger.notice("pairing scan ended — no ride, dropped the connection")
         }
-        guard shouldStopHardware else { return }
-        await bleClient.stopScanning([radarServiceUUID])
+        guard let call else { return }
+        await call.value
         logger.notice("pairing scan stopped")
     }
 
@@ -484,20 +492,20 @@ private final class RadarClientState: @unchecked Sendable {
             guard pairingScansSuspended != suspended else { return .none }
             pairingScansSuspended = suspended
             guard pairingScanCount > 0 else { return .none }
-            if suspended { return isScanning ? .keptByAmbientScan : .stop }
+            if suspended { return isScanning ? .keptByAmbientScan : .stop(scanCalls.enqueue(.stop)) }
             // No rotation — see `CSCClientState.setPairingScansSuspended`.
-            return .start
+            return .start(scanCalls.enqueue(.start))
         }
         switch change {
         case .none:
             return
         case .keptByAmbientScan:
             logger.notice("pairing scan suspended — app in background, this client's ambient scan keeps the radio")
-        case .stop:
-            await bleClient.stopScanning([radarServiceUUID])
+        case .stop(let call):
+            await call.value
             logger.notice("pairing scan stopped — app in background, \(self.pairingScanCountSnapshot) held")
-        case .start:
-            await bleClient.startScanning([radarServiceUUID])
+        case .start(let call):
+            await call.value
             logger.notice("pairing scan started (\(self.pairingScanCountSnapshot) open) — app in foreground")
         }
     }
@@ -548,12 +556,11 @@ private final class RadarClientState: @unchecked Sendable {
         await release(lock.withLock { takeConnectionLocked() })
         // Ride finish must not silently kill a pairing scan the Sensors screen is
         // holding open — same shared-`requestedServices` hazard as `stopScanning`.
-        let shouldStopHardware = lock.withLock { () -> Bool in
+        let call = lock.withLock { () -> Task<Void, Never>? in
             isScanning = false
-            return !pairingScanWantsRadioLocked
+            return pairingScanWantsRadioLocked ? nil : scanCalls.enqueue(.stop)
         }
-        guard shouldStopHardware else { return }
-        await bleClient.stopScanning([radarServiceUUID])
+        await call?.value
     }
 
     /// Cache the rider's durable pairing, tearing down whatever no longer matches it and
@@ -894,18 +901,25 @@ private final class RadarClientState: @unchecked Sendable {
         // Mutate and broadcast in one critical section so subscribers observe
         // transitions in order and replay-on-subscribe can't miss one. Yielding
         // to an AsyncStream never blocks, so holding the lock here is safe.
-        let changed = lock.withLock { () -> Bool in
-            guard connectionState != newState else { return false }
-            connectionState = newState
-            for continuation in stateContinuations.values { continuation.yield(newState) }
-            // `DiscoveredDevice.isConnected` is derived from this, and every transition
-            // in and out of a connection runs through here.
-            broadcastDiscoveredLocked()
-            return true
+        if lock.withLock({ setConnectionStateLocked(newState) }) {
+            logConnectionState(newState)
         }
-        if changed {
-            logger.notice("connection state → \(String(describing: newState), privacy: .public)")
-        }
+    }
+
+    /// Store and broadcast a state change, returning whether it changed. The caller logs it
+    /// with `logConnectionState` once the lock is dropped. Must hold the lock.
+    private func setConnectionStateLocked(_ newState: VariaRadarClient.ConnectionState) -> Bool {
+        guard connectionState != newState else { return false }
+        connectionState = newState
+        for continuation in stateContinuations.values { continuation.yield(newState) }
+        // `DiscoveredDevice.isConnected` is derived from this, and every transition
+        // in and out of a connection runs through here.
+        broadcastDiscoveredLocked()
+        return true
+    }
+
+    private func logConnectionState(_ newState: VariaRadarClient.ConnectionState) {
+        logger.notice("connection state → \(String(describing: newState), privacy: .public)")
     }
 
     /// Store and publish the battery level. Same single-critical-section discipline as

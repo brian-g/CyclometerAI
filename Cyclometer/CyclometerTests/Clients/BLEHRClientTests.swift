@@ -165,17 +165,31 @@ struct BLEHRIntegrationTests {
         let notified: LockIsolated<[(Bool, CBUUID)]>
         let reads: LockIsolated<[CBUUID]>
         let calls: LockIsolated<[BLECall]>
+        /// Arm to hold the next `stopScanning` before the transport sees it (#586).
+        let scanStopGate: CallGate
+        /// The services the central would be scanning for, modelled as `BLECentral` keeps
+        /// them: a start adds, a stop removes, whichever lands last wins.
+        let requested: LockIsolated<Set<CBUUID>>
 
         init() {
             let (eventStream, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
+            let scanStopGate = CallGate()
+            let requested = LockIsolated<Set<CBUUID>>([])
             let servicesDiscovered = LockIsolated<[[CBUUID]?]>([])
             let notified = LockIsolated<[(Bool, CBUUID)]>([])
             let reads = LockIsolated<[CBUUID]>([])
             let calls = LockIsolated<[BLECall]>([])
 
             let bleClient = BLEClient(
-                startScanning: { uuids in calls.withValue { $0.append(.startScanning(uuids)) } },
-                stopScanning: { uuids in calls.withValue { $0.append(.stopScanning(uuids)) } },
+                startScanning: { uuids in
+                    calls.withValue { $0.append(.startScanning(uuids)) }
+                    requested.withValue { $0.formUnion(uuids) }
+                },
+                stopScanning: { uuids in
+                    await scanStopGate.pass()
+                    calls.withValue { $0.append(.stopScanning(uuids)) }
+                    requested.withValue { $0.subtract(uuids) }
+                },
                 connect: { id, _ in calls.withValue { $0.append(.connect(id)) } },
                 disconnect: { id, owner in calls.withValue { $0.append(.disconnect(id, owner)) } },
                 discoverServices: { _, uuids in
@@ -197,6 +211,8 @@ struct BLEHRIntegrationTests {
             self.notified = notified
             self.reads = reads
             self.calls = calls
+            self.scanStopGate = scanStopGate
+            self.requested = requested
         }
 
         /// Tell the client this strap is paired, the way `AppFeature` does at launch.
@@ -942,6 +958,31 @@ struct BLEHRIntegrationTests {
 
         await harness.client.endPairingScan()
         #expect(!harness.calls.value.contains(.stopScanning([hrServiceUUID])))
+    }
+
+    /// Start sheet → Start, in the bad order (#586) — `BLECSCClientTests` has the full story. The
+    /// sheet's last `endPairingScan` decides to stop; the ride's `startScanning` decides to start
+    /// before that stop has landed. The start must not land first.
+    @Test("A pairing scan's stop still in flight can't drop the ride's scan")
+    func pairingScanStopInFlightKeepsRideScan() async {
+        let harness = Harness()
+        await harness.client.beginPairingScan()
+
+        harness.scanStopGate.arm()
+        var reached = harness.scanStopGate.reached.makeAsyncIterator()
+        let sheetCloses = Task { await harness.client.endPairingScan() }
+        await reached.next()                                  // the stop is decided and in flight
+
+        // This client publishes nothing when its ambient scan starts, so there's no stream to
+        // sync on: the window lets the ride's start decide, and run ahead if it could.
+        let rideStarts = Task { await harness.client.startScanning() }
+        await allowStrayCallsToLand()
+        #expect(harness.calls.value == [.startScanning([hrServiceUUID])])
+
+        harness.scanStopGate.open()
+        await sheetCloses.value
+        await rideStarts.value
+        #expect(harness.requested.value == [hrServiceUUID])
     }
 
     @Test("A pairing scan re-issues the hardware scan, which is what refresh restarts")

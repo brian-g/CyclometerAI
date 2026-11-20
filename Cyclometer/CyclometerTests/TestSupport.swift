@@ -242,3 +242,62 @@ extension Array where Element == Double {
         enumerated().map { WatermarkPoint(time: Date(timeIntervalSinceReferenceDate: Double($0.offset)), value: $0.element, run: 0) }
     }
 }
+
+/// Gives a call that must *not* happen yet a window to happen in, before asserting that it hasn't.
+///
+/// The work under test runs on other threads, so cooperative yields on the test's own task don't
+/// give it a turn. Only a real-time wait does. The window only decides how reliably the
+/// regression is caught; the passing path never depends on its length, so contention can make it
+/// miss, never fail.
+func allowStrayCallsToLand() async {
+    try? await Task.sleep(for: .milliseconds(100))
+}
+
+// MARK: - Transport call gate
+
+/// Holds one transport call between a client's decision and the transport receiving it: the
+/// window a BLE client has after deciding under its lock and before the call lands. The CSC
+/// suite holds a `connect` there (a ladder rung or `setRoles` racing a slot change); the scan
+/// ordering tests hold a `stopScanning` (#586). Unarmed it passes every call straight through.
+final class CallGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var armed = false
+    private var opened = false
+    private var held: CheckedContinuation<Void, Never>?
+    /// Yields once when a call reaches the armed gate.
+    let reached: AsyncStream<Void>
+    private let reachedContinuation: AsyncStream<Void>.Continuation
+
+    init() { (reached, reachedContinuation) = AsyncStream<Void>.makeStream() }
+
+    func arm() { lock.withLock { armed = true; opened = false } }
+
+    func pass() async {
+        // Catch one call and disarm: there is one `held` slot, so a second call caught while
+        // armed would overwrite it and leak the first one's continuation, hanging its caller.
+        let caught = lock.withLock { () -> Bool in
+            defer { armed = false }
+            return armed
+        }
+        guard caught else { return }
+        reachedContinuation.yield()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow = lock.withLock { () -> Bool in
+                if opened { return true }
+                held = continuation
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            armed = false
+            opened = true
+            defer { held = nil }
+            return held
+        }
+        continuation?.resume()
+    }
+}

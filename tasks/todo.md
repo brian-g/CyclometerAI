@@ -2598,6 +2598,45 @@ snapshots: `testOptionalDeniedAllowsNext`, `testBluetoothNotAllowed`. Re-recorde
 
 ---
 
+## #586 — Pairing-scan stop can land after the ride's scan start
+
+Branch `fix/586-scan-call-order`.
+
+**Diagnosis.** All three clients (CSC, HR, radar) decide a scan start/stop under their lock, drop the lock,
+then await `bleClient.startScanning/stopScanning`. Two decisions made A-then-B can reach `BLECentral` B-then-A.
+22 call sites across the three clients have this shape.
+
+**Approach (recommended): serialise each client's scan calls in decision order.** A small shared
+`ScanCallSequence` (one per client, mutated under the client's lock) chains each call onto the previous one's
+`Task`. The call is enqueued inside the same lock acquisition that made the decision, and the caller awaits it
+after the lock, so `await client.x()` still returns once the call has landed. `BLEClient` is unchanged.
+
+Why not a refcount/owner set in `BLEClient` (the issue's first option):
+- An owner set (`csc.ambient` / `csc.pairing`) fixes this race, but not a reorder *within* an owner. Example: the
+  Start sheet's last `endPairingScan` racing the Sensors screen's `beginPairingScan`, or a suspension racing
+  either one. Same bug class, same window size.
+- A plain refcount commutes, but `beginPairingScan` and HR's rescan-on-drop re-issue `startScanning` to restart
+  the CoreBluetooth session (#98, HR reconnect). With a refcount those calls leak counts. They'd need a separate
+  restart API, and every existing test that asserts "no stop while a pairing scan is open" would be rewritten.
+
+- [x] `ScanCallSequence` (Clients/BLE/) + unit test: calls land in enqueue order even when the first blocks
+- [x] CSC: route the 7 scan calls through it, enqueued inside the deciding lock
+- [x] HR: same, 8 calls (incl. rescan-on-drop)
+- [x] Radar: same, 7 calls
+- [x] "No per-caller refcount" comments: still accurate (the guards stay), kept. BLE.md behaviour table row added
+- [x] Tests: per client, gate the pairing-scan stop, run the ride start into the gap, open the gate → the
+      last call is start (service still requested). Fails on `main`, passes here.
+- [x] Existing CSC/HR/radar/PairingScanBackground suites pass (bounded test timeouts, per #585 lesson)
+- [x] Full `CyclometerTests` (BLE clients are a shared path): 3034 passed, 0 failed
+- [x] Commit + PR
+
+**Review.** The three clients now enqueue each hardware scan call on a `ScanCallSequence` inside the lock
+that decided it. Each call waits for the previous one, so calls reach `BLECentral` in decision order and
+`await client.x()` still returns once its own call has landed. `BLEClient` is unchanged. New interleave test
+per client: a gated `stopScanning`, the ride's start decided in the gap, the gate opened, then the modelled
+requested set is checked. Revert check (main's clients, own derivedData): all three fail in 3/3 runs with
+`requested → []`. The first version waited with 100 `Task.yield()`s, and the CSC and radar tests passed on main
+because the start runs on another thread. A 100 ms real-time window (`allowStrayCallsToLand`) fixed that.
 # #584 — Race-branch ride with a marker gets its Health workout
 
 Branch: `fix/584-race-branch-marker-workout`

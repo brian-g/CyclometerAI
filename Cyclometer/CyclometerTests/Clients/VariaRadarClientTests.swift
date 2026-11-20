@@ -148,9 +148,16 @@ struct VariaRadarIntegrationTests {
         let reads: LockIsolated<[CBUUID]>
         let calls: LockIsolated<[BLECall]>
         let clock: SteppedClock
+        /// Arm to hold the next `stopScanning` before the transport sees it (#586).
+        let scanStopGate: CallGate
+        /// The services the central would be scanning for, modelled as `BLECentral` keeps
+        /// them: a start adds, a stop removes, whichever lands last wins.
+        let requested: LockIsolated<Set<CBUUID>>
 
         init() {
             let (eventStream, eventContinuation) = AsyncStream<BLEEvent>.makeStream()
+            let scanStopGate = CallGate()
+            let requested = LockIsolated<Set<CBUUID>>([])
             let (connectStream, connectContinuation) = AsyncStream<UUID>.makeStream()
             let connectCount = LockIsolated(0)
             let scanned = LockIsolated<[[CBUUID]]>([])
@@ -164,8 +171,13 @@ struct VariaRadarIntegrationTests {
                 startScanning: { uuids in
                     scanned.withValue { $0.append(uuids) }
                     calls.withValue { $0.append(.startScanning(uuids)) }
+                    requested.withValue { $0.formUnion(uuids) }
                 },
-                stopScanning: { uuids in calls.withValue { $0.append(.stopScanning(uuids)) } },
+                stopScanning: { uuids in
+                    await scanStopGate.pass()
+                    calls.withValue { $0.append(.stopScanning(uuids)) }
+                    requested.withValue { $0.subtract(uuids) }
+                },
                 connect: { id, _ in
                     connectCount.withValue { $0 += 1 }
                     calls.withValue { $0.append(.connect(id)) }
@@ -199,6 +211,8 @@ struct VariaRadarIntegrationTests {
             self.reads = reads
             self.calls = calls
             self.clock = clock
+            self.scanStopGate = scanStopGate
+            self.requested = requested
         }
 
         /// Tell the client this radar is paired, the way `AppFeature` does at launch.
@@ -974,6 +988,33 @@ struct VariaRadarIntegrationTests {
         #expect(harness.calls.value.contains(.stopScanning([radarServiceUUID])))
     }
 
+    /// Start sheet → Start, in the bad order (#586) — `BLECSCClientTests` has the full story. The
+    /// sheet's last `endPairingScan` decides to stop; the ride's `startScanning` decides to start
+    /// before that stop has landed. The start must not land first.
+    @Test("A pairing scan's stop still in flight can't drop the ride's scan")
+    func pairingScanStopInFlightKeepsRideScan() async {
+        let harness = Harness()
+        var states = harness.client.connectionState().makeAsyncIterator()
+        #expect(await states.next() == .disconnected)        // replay
+        await harness.client.beginPairingScan()
+
+        harness.scanStopGate.arm()
+        var reached = harness.scanStopGate.reached.makeAsyncIterator()
+        let sheetCloses = Task { await harness.client.endPairingScan() }
+        await reached.next()                                  // the stop is decided and in flight
+
+        let rideStarts = Task { await harness.client.startScanning() }
+        #expect(await states.next() == .scanning)            // the ride's start is decided
+        // Give the start every chance to run ahead of the held stop. It waits behind it.
+        await allowStrayCallsToLand()
+        #expect(harness.scanned.value.count == 1)
+
+        harness.scanStopGate.open()
+        await sheetCloses.value
+        await rideStarts.value
+        #expect(harness.requested.value == [radarServiceUUID])
+    }
+
     @Test("A pairing scan re-issues the hardware scan, which is what refresh restarts")
     func pairingScanReissuesTheScan() async {
         let harness = Harness()
@@ -1187,7 +1228,11 @@ struct VariaRadarIntegrationTests {
         await harness.client.endPairingScan()
         // `release` runs inside `endPairingScan`, so the replay shows the drop at once.
         try #require(await currentState(harness) == .disconnected)
-        #expect(harness.calls.value.suffix(2) == [.disconnect(id, "radar"), .stopScanning([radarServiceUUID])])
+        // Either order: the stop is enqueued under the lock that decided it and can land
+        // before `release` sends the disconnect (#586).
+        let tail = Array(harness.calls.value.suffix(2))
+        #expect(tail.contains(.disconnect(id, "radar")))
+        #expect(tail.contains(.stopScanning([radarServiceUUID])))
 
         // Still paired: the next pairing scan reconnects it.
         #expect(await states.next() == .disconnected)
