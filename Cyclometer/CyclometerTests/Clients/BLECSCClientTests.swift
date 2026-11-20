@@ -1793,7 +1793,7 @@ struct BLECSCIntegrationTests {
     }
 
     /// Leaving Sensors before choosing a role is the last release: the interrogation goes too.
-    /// `DeviceManagementFeature.interrogationWasReleased` clears `pendingPairing` from the row.
+    /// `DeviceManagementFeature`'s release rule clears `pendingPairing` from the row.
     @Test("The last pairing scan to end with no ride drops an interrogation")
     func lastReleaseDropsAnInterrogation() async throws {
         let harness = Harness()

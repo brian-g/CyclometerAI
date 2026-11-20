@@ -2763,6 +2763,31 @@ the other commit tests are unchanged. Wheel quantity, thresholds and the §8.9.2
 
 ---
 
+# #593 — Pairing-release rule can clear a pairing that's about to restart
+
+Branch: `worktree-fix-593-pairing-release`
+
+- [x] `pendingPairingHasConnected`: set when a CSC broadcast after the Pair tap shows the pending row holding a slot;
+      the #578 release rule fires only after that, so a leftover slot's release landing around the tap is ignored
+- [x] `interrogationWasReleased` (previous-list comparison) removed; the rule reads only the incoming CSC list
+- [x] S02 Next releases an in-flight `pendingPairing` (unpair + clear). A backstop: Next's `.onDisappear` is normally
+      the last pairing scan with no ride, and #585's drop already removes the slot; the unpair covers a scan held
+      elsewhere
+- [x] New tests: `staleReleaseAroundThePairTapKeepsThePairing` (the #593 ordering: prompt appears),
+      `eachPairTapWaitsForItsOwnSlot`, `nextReleasesAnInFlightPairing`; #578's
+      `releasedInterrogationEndsThePairing` and the S11 integration test still pass
+- [x] Mutation check: arming the flag from the pre-tap list (the old rule) fails
+      `staleReleaseAroundThePairTapKeepsThePairing`
+- [x] Full `CyclometerTests`: 3041 passed, 0 failed
+
+**Review.** The flag can't tell an old slot from the new one, only "seen since the tap". A leftover slot that
+broadcasts a state *after* the tap and is then released still ends the pairing. That needs two of its broadcasts
+still queued at the moment of the tap, and since #585 a leftover slot from S02 survives only while another
+pairing scan is held. The flag's limit is now stated next to the rule.
+
+**Code review (xhigh).** No correctness findings. Two comment fixes applied (the S02 release is a backstop behind
+#585; the flag means "seen since the tap"). Not taken: Pair with Bluetooth powered off leaves `pendingPairing` stuck
+until the rider leaves Sensors. That bug predates this change, and fixing it belongs in the CSC client.
 # #592 — HR keeps a link it connected after its target was cleared
 
 Branch: `fix/592`

@@ -1273,6 +1273,7 @@ struct DeviceManagementFeatureTests {
         let connected = [Self.sensor(id: Self.availableID, name: "GSC-10", state: .connected)]
         await store.send(.devicesUpdated(.speedCadence, connected)) {
             $0.sources[.speedCadence] = connected
+            $0.pendingPairingHasConnected = true
         }
 
         // The link drops before 0x2A5C answers: the client drops the slot, so the row
@@ -1286,6 +1287,7 @@ struct DeviceManagementFeatureTests {
         // The rider can try again.
         await store.send(.pairButtonTapped(Self.availableID)) {
             $0.pendingPairing = Self.availableID
+            $0.pendingPairingHasConnected = false
         }
         await store.finish()
         #expect(paired.value == [Self.availableID, Self.availableID])
@@ -1301,6 +1303,7 @@ struct DeviceManagementFeatureTests {
         let connected = [Self.sensor(id: Self.availableID, name: "Wahoo RPM", state: .connected)]
         await store.send(.devicesUpdated(.speedCadence, connected)) {
             $0.sources[.speedCadence] = connected
+            $0.pendingPairingHasConnected = true
         }
 
         // The read answered before the release: the answer is what the prompt needs, so
@@ -1334,6 +1337,7 @@ struct DeviceManagementFeatureTests {
             let update = [Self.sensor(id: Self.availableID, name: "GSC-10", roles: [.speed], state: state)]
             await store.send(.devicesUpdated(.speedCadence, update)) {
                 $0.sources[.speedCadence] = update
+                $0.pendingPairingHasConnected = true
             }
         }
         #expect(store.state.pendingPairing == Self.availableID)
@@ -1356,6 +1360,7 @@ struct DeviceManagementFeatureTests {
         ]
         await store.send(.devicesUpdated(.speedCadence, connected)) {
             $0.sources[.speedCadence] = connected
+            $0.pendingPairingHasConnected = true
         }
 
         let otherGone = [
@@ -1365,6 +1370,79 @@ struct DeviceManagementFeatureTests {
         await store.send(.devicesUpdated(.speedCadence, otherGone)) {
             $0.sources[.speedCadence] = otherGone
         }
+        #expect(store.state.pendingPairing == Self.availableID)
+        await store.finish()
+    }
+
+    /// S02's Next used to leave an interrogating slot that no screen owned (#593). When
+    /// that slot is released just as the rider taps Pair on the same sensor in Settings,
+    /// the release reaches the reducer before `pair()` has made the new slot. Only this
+    /// pairing's own slot losing its state can end it.
+    @Test("A leftover slot released around the Pair tap does not end the new pairing")
+    func staleReleaseAroundThePairTapKeepsThePairing() async {
+        let paired = LockIsolated<[UUID]>([])
+        var ble = BLECSCClient.testValue
+        ble.pair = { id in paired.withValue { $0.append(id) } }
+
+        // Settings' list already shows the leftover slot interrogating the sensor.
+        let store = makeStore(
+            devices: [Self.sensor(id: Self.availableID, name: "Wahoo RPM", state: .connecting)],
+            bleCSCClient: ble
+        )
+        await store.send(.pairButtonTapped(Self.availableID)) {
+            $0.pendingPairing = Self.availableID
+        }
+
+        // The leftover slot's release, emitted before `pair()` ran.
+        let staleRelease = [Self.sensor(id: Self.availableID, name: "Wahoo RPM")]
+        await store.send(.devicesUpdated(.speedCadence, staleRelease)) {
+            $0.sources[.speedCadence] = staleRelease
+        }
+        #expect(store.state.pendingPairing == Self.availableID)
+
+        // `pair()` makes the new slot, and its read answers.
+        let connecting = [Self.sensor(id: Self.availableID, name: "Wahoo RPM", state: .connecting)]
+        await store.send(.devicesUpdated(.speedCadence, connecting)) {
+            $0.sources[.speedCadence] = connecting
+            $0.pendingPairingHasConnected = true
+        }
+        let answered = [Self.sensor(
+            id: Self.availableID, name: "Wahoo RPM", state: .connected, capabilities: Self.combo
+        )]
+        await store.send(.devicesUpdated(.speedCadence, answered)) {
+            $0.sources[.speedCadence] = answered
+            $0.roleDialog = Self.expectedDialog(for: Self.availableID, name: "Wahoo RPM")
+        }
+        #expect(store.state.pendingPairing == Self.availableID)
+        await store.finish()
+        #expect(paired.value == [Self.availableID])
+    }
+
+    /// The flag that keeps a stale release out is cleared by every Pair tap: the next
+    /// pairing has to see its own slot before a lost state can end it.
+    @Test("A new Pair tap ignores a release until its own slot is seen")
+    func eachPairTapWaitsForItsOwnSlot() async {
+        let store = makeStore(devices: Self.rowToPair(name: "GSC-10"))
+        await store.send(.pairButtonTapped(Self.availableID)) {
+            $0.pendingPairing = Self.availableID
+        }
+        let connected = [Self.sensor(id: Self.availableID, name: "GSC-10", state: .connected)]
+        await store.send(.devicesUpdated(.speedCadence, connected)) {
+            $0.sources[.speedCadence] = connected
+            $0.pendingPairingHasConnected = true
+        }
+        let released = [Self.sensor(id: Self.availableID, name: "GSC-10")]
+        await store.send(.devicesUpdated(.speedCadence, released)) {
+            $0.sources[.speedCadence] = released
+            $0.pendingPairing = nil
+        }
+
+        await store.send(.pairButtonTapped(Self.availableID)) {
+            $0.pendingPairing = Self.availableID
+            $0.pendingPairingHasConnected = false
+        }
+        // A sweep re-broadcast of the released row, before the new slot exists.
+        await store.send(.devicesUpdated(.speedCadence, released))
         #expect(store.state.pendingPairing == Self.availableID)
         await store.finish()
     }
