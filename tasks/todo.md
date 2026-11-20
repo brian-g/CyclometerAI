@@ -2663,3 +2663,24 @@ are two writes, so a Finish backfill landing between them could write that orpha
 them one write needs a persistence change. A marker close-out writes the row's last checkpoint aggregates, since the
 marker carries no final summary, so its workout's distance can be up to one checkpoint short (the main path has
 this too).
+
+---
+
+## #591 — Radar's Bluetooth-off branch leaves a stale BLECentral owner
+
+Branch `fix/591-radar-bt-off-disconnect`.
+
+- [x] Radar `.poweredOff/.unauthorized/.unsupported`: take the connection with `takeConnectionLocked()` and
+      `release` it (the path `disconnect()` and #585's last `endPairingScan` already share), so "radar" is
+      released on `BLECentral` like CSC's #578 branch
+- [x] Test `bluetoothOffReleasesTheOwner`: connected radar, Bluetooth off → one `disconnect(id, "radar")`;
+      Bluetooth back + re-advertisement → `.connecting` and a new `connect`
+- [x] Revert check (main's client, own derivedData, cache off): the new test fails; passes with the fix
+- [x] `VariaRadarIntegrationTests` + `VariaRadarTestValueTests`: 47 passed, 0 failed.
+      `PairingScanBackgroundTests` (the other live-radar suite): 10 passed, 0 failed
+- [x] Commit + PR
+
+**Review.** The branch previously cleared the target by hand and never called the transport. It now goes through
+the shared take-and-release pair, which also cancels the ladder and clears battery and frame state as before.
+Calling `cancelPeripheralConnection` while powered off only drops `BLECentral`'s bookkeeping; CSC has done the
+same since #578. No other suite drives `stateChanged` into the live radar client, so the full suite was not run.

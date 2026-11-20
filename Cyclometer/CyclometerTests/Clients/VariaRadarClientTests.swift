@@ -876,6 +876,38 @@ struct VariaRadarIntegrationTests {
         #expect(await states.next() == .connecting)
     }
 
+    /// CoreBluetooth drops the link itself when the radio goes off, but `BLECentral` keeps
+    /// "radar" listed as the peripheral's owner until the client releases it (#591).
+    @Test("Bluetooth turning off releases the radar's owner, and the radar reconnects when it returns")
+    func bluetoothOffReleasesTheOwner() async {
+        let harness = Harness()
+        let id = UUID()
+
+        var states = harness.client.connectionState().makeAsyncIterator()
+        _ = await states.next()  // .disconnected
+        var connects = harness.connectCalls.makeAsyncIterator()
+        await harness.pair(id)
+        await harness.client.startScanning()
+        _ = await states.next()  // .scanning
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        _ = await states.next()  // .connecting
+        #expect(await connects.next() == id)
+        harness.events.yield(.connected(id: id))
+        _ = await states.next()  // .connected
+
+        harness.events.yield(.stateChanged(.poweredOff))
+        #expect(await states.next() == .disconnected)
+        // `release` publishes the state before it calls the transport.
+        await settle(harness)
+        #expect(disconnects(harness) == [.disconnect(id, "radar")])
+
+        // The radio returns: `BLECentral` re-issues the ride's scan and the radar re-advertises.
+        harness.events.yield(.stateChanged(.poweredOn))
+        harness.events.yield(.discovered(id: id, name: "Varia RTL515", rssi: -60, services: [radarServiceUUID]))
+        #expect(await states.next() == .connecting)
+        #expect(await connects.next() == id)
+    }
+
     @Test("A late discovery subscriber gets the current device list replayed")
     func discoveredDevicesReplaysForALateSubscriber() async {
         let harness = Harness()
