@@ -4,8 +4,8 @@ import ComposableArchitecture
 @testable import Cyclometer
 
 /// #419's instrumentation: the window's positional distance, measured over exactly the
-/// intervals whose Doppler distance the window counts, and the revolutions that entered
-/// the window with no GPS interval to pair with.
+/// intervals whose Doppler distance the window counts, and the revolutions dropped with
+/// the intervals it left out.
 ///
 /// An extension of `WheelCalibrationFeatureTests` rather than a suite of its own, so these
 /// run inside that suite's `.serialized` trait: they write `@Shared(.appPreferences)` too.
@@ -103,12 +103,12 @@ extension WheelCalibrationFeatureTests {
         #expect(probe.usedIntervals == path.count - 1)
         #expect(probe.integratedSeconds == TimeInterval(path.count - 1))
         #expect(probe.rejectedFixes == 0)
-        #expect(probe.unpairedRevolutionsAtGPSGate == 0)
+        #expect(probe.droppedRevolutionsAtGPSGate == 0)
         // The curve is real: the chord across it is well short of the distance along it.
         #expect(meters(path[0], path[path.count - 1]) < expected * 0.8)
     }
 
-    @Test("A rejected fix drops the same intervals from the Doppler and positional sides")
+    @Test("A rejected fix drops the same intervals from the Doppler, positional and revolution sides")
     func probeRejectedIntervalDroppedFromBoth() async {
         let store = makeProbeStore()
         store.exhaustivity = .off
@@ -132,11 +132,13 @@ extension WheelCalibrationFeatureTests {
         #expect(probe.reseedFixes == 2)   // the first fix's seed, and the re-seed after the rejection
         #expect(probe.fixesSkippedWhileGated == 0)
 
-        // The asymmetry #419 names, pinned as the code behaves today: the revolutions of
-        // the interval the GPS gate rejected stay in the window. The gate decides only
-        // when the next fix lands, after those revolutions have been counted.
-        #expect(probe.unpairedRevolutionsAtGPSGate == 2.5)
-        #expect(store.state.revolutions == 2.5 * Double(path.count - 1 - 1))
+        // And the same two intervals' revolutions (#587). The gate decides only when the
+        // rejected fix lands, after its interval's revolutions have been counted, so
+        // they're held until then and dropped with it. The interval after it accrues
+        // none, its gate already shut.
+        #expect(probe.droppedRevolutionsAtGPSGate == 2.5)
+        #expect(store.state.revolutions == 2.5 * Double(probe.usedIntervals))
+        #expect(store.state.intervalRevolutions == 0)
     }
 
     /// What a window decided, field by field — everything but the probe.
@@ -221,9 +223,11 @@ extension WheelCalibrationFeatureTests {
 
         let probe = store.state.probe
         #expect(probe.fixesSkippedWhileGated == 1)
-        #expect(probe.unpairedRevolutionsWhileGated == 2.5)
+        #expect(probe.droppedRevolutionsWhileGated == 2.5)
         #expect(probe.reseedFixes == 1)   // only the first fix's seed
-        #expect(probe.unpairedRevolutionsAtGPSGate == 0)
+        #expect(probe.droppedRevolutionsAtGPSGate == 0)
+        // Dropped from the window, not just labelled: only the three used intervals' remain.
+        #expect(store.state.revolutions == 2.5 * 3)
     }
 
     @Test("The probe resets with the window")
@@ -246,22 +250,18 @@ extension WheelCalibrationFeatureTests {
         var probe = CalibrationWindowProbe()
         let a = Coordinate(latitude: 45.123456, longitude: 7.654321)
         let b = Coordinate(latitude: 45.123546, longitude: 7.654321)   // ~10 m north
-        probe.revolutionsCounted(5)
         probe.intervalUsed(from: a, at: Self.probeStart, to: b, at: Self.probeStart.addingTimeInterval(1))
-        probe.revolutionsCounted(1)
-        probe.fixRejected(gateWasOpen: true)
-        probe.fixSkipped(isReseed: true)
-        probe.revolutionsCounted(0.5)
-        probe.fixSkipped(isReseed: false)
+        probe.fixRejected(gateWasOpen: true, droppedRevolutions: 1)
+        probe.fixSkipped(isReseed: true, droppedRevolutions: 0)
+        probe.fixSkipped(isReseed: false, droppedRevolutions: 0.5)
 
         let line = probe.summary(dopplerMeters: 9.8, revolutions: 6, storedMM: 2096)
         #expect(line.contains("doppler 9.8 m"))
         #expect(line.contains("positional 10.0 m"))
         #expect(line.contains("doppler/positional \(String(format: "%.4f", 9.8 / meters(a, b)))"))
-        #expect(line.contains("unpaired rev 1.0 at gps gate (1 shuts, 1 fixes rejected)"))
+        #expect(line.contains("dropped rev 1.0 at gps gate (1 shuts, 1 fixes rejected)"))
         #expect(line.contains("0.5 while the sensor or suspension gate was shut (1 fixes skipped)"))
         #expect(line.contains("0.0 at re-seeds (1 re-seed fixes)"))
-        #expect(line.contains("doppler without gps-gate-unpaired rev 1960 mm"))
         #expect(!line.contains("45.1"))
         #expect(!line.contains("7.65"))
     }

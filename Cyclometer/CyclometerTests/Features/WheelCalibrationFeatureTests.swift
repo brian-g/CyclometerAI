@@ -115,11 +115,14 @@ struct WheelCalibrationFeatureTests {
         }
         for _ in 0..<seconds {
             await store.send(.wheelRevolutionsReceived(revolutionsPerSecond)) {
-                $0.revolutions += revolutionsPerSecond
+                $0.intervalRevolutions = revolutionsPerSecond
             }
             offset += 1
+            // The interval's revolutions enter the window with its distance, not before.
             await store.send(.locationUpdated(fix(at: offset))) {
                 $0.gpsMeters += 10
+                $0.revolutions += revolutionsPerSecond
+                $0.intervalRevolutions = 0
                 $0.lastFixTimestamp = Self.start.addingTimeInterval(offset)
             }
         }
@@ -182,12 +185,16 @@ struct WheelCalibrationFeatureTests {
         let revsBefore = store.state.revolutions
         #expect(metresBefore == 50)
 
+        // The rejected fix closes an interval whose revolutions have already landed.
+        // They go with its distance (#587) — suppressing one accumulator alone would
+        // manufacture the very discrepancy the feature looks for.
+        await store.send(.wheelRevolutionsReceived(4.77)) { $0.intervalRevolutions = 4.77 }
         await store.send(.locationUpdated(fix(at: 6, accuracy: 12))) {
             $0.isGPSUsable = false
+            $0.intervalRevolutions = 0
             $0.lastFixTimestamp = nil
         }
-        // Revolutions are dropped too — suppressing one accumulator alone would
-        // manufacture the very discrepancy the feature looks for.
+        // And while the gate is shut, revolutions don't accrue at all.
         await store.send(.wheelRevolutionsReceived(4.77))
         #expect(store.state.gpsMeters == metresBefore)
         #expect(store.state.revolutions == revsBefore)
@@ -208,21 +215,40 @@ struct WheelCalibrationFeatureTests {
         let metresBefore = store.state.gpsMeters
         let revsBefore = store.state.revolutions
 
+        // Suspension shuts partway through the interval: what landed before it is
+        // dropped by the next fix, which adds no distance.
+        await store.send(.wheelRevolutionsReceived(2)) { $0.intervalRevolutions = 2 }
         await store.send(.suspensionChanged(true)) { $0.isSuspended = true }
         await store.send(.wheelRevolutionsReceived(4.77))
         await store.send(.locationUpdated(fix(at: 6))) {
+            $0.intervalRevolutions = 0
             $0.lastFixTimestamp = Self.start.addingTimeInterval(6)
         }
         #expect(store.state.gpsMeters == metresBefore)
         #expect(store.state.revolutions == revsBefore)
 
-        await store.send(.suspensionChanged(false)) { $0.isSuspended = false }
+        // It reopens partway through the next: that interval has only part of its
+        // revolutions, so its closing fix re-seeds rather than adding a full 10 m.
+        await store.send(.suspensionChanged(false)) {
+            $0.isSuspended = false
+            $0.lastFixTimestamp = nil
+        }
+        await store.send(.wheelRevolutionsReceived(2)) { $0.intervalRevolutions = 2 }
         await store.send(.locationUpdated(fix(at: 7))) {
-            $0.gpsMeters += 10
+            $0.intervalRevolutions = 0
             $0.lastFixTimestamp = Self.start.addingTimeInterval(7)
         }
-        #expect(store.state.gpsMeters == metresBefore + 10)
+        #expect(store.state.gpsMeters == metresBefore)
+        #expect(store.state.revolutions == revsBefore)
 
+        // The first whole interval after it counts on both sides.
+        await store.send(.wheelRevolutionsReceived(4.77)) { $0.intervalRevolutions = 4.77 }
+        await store.send(.locationUpdated(fix(at: 8))) {
+            $0.gpsMeters += 10
+            $0.revolutions += 4.77
+            $0.intervalRevolutions = 0
+            $0.lastFixTimestamp = Self.start.addingTimeInterval(8)
+        }
     }
 
     @Test("A GPS gap over 3 seconds pauses the window")
@@ -269,6 +295,47 @@ struct WheelCalibrationFeatureTests {
             $0.gpsMeters = 0
             $0.revolutions = 0
             $0.lastFixTimestamp = nil
+        }
+    }
+
+    @Test("After a reconnect, the interval it lands in is dropped from both sides (#587)")
+    func reconnectReseedsInterval() async {
+        let store = makeStore()
+        await startRiding(store)
+        _ = await rideWindow(store, from: 0, seconds: 5, revolutionsPerSecond: 4.77)
+        await store.send(.bleConnectionChanged(.reconnecting)) {
+            $0.isSensorActive = false
+            $0.gpsMeters = 0
+            $0.revolutions = 0
+            $0.lastFixTimestamp = nil
+        }
+
+        // GPS keeps reporting through the gap, so it holds a fix from before the
+        // sensor comes back.
+        await store.send(.locationUpdated(fix(at: 6))) {
+            $0.lastFixTimestamp = Self.start.addingTimeInterval(6)
+        }
+
+        // The sensor returns partway through the next interval. That interval has GPS
+        // distance for all of it and revolutions for only the part after the
+        // reconnect, so its closing fix re-seeds instead of adding 10 m.
+        await store.send(.bleConnectionChanged(.active)) {
+            $0.isSensorActive = true
+            $0.lastFixTimestamp = nil
+        }
+        await store.send(.wheelRevolutionsReceived(1.5)) { $0.intervalRevolutions = 1.5 }
+        await store.send(.locationUpdated(fix(at: 7))) {
+            $0.intervalRevolutions = 0
+            $0.lastFixTimestamp = Self.start.addingTimeInterval(7)
+        }
+
+        // The first whole interval after the reconnect counts on both sides.
+        await store.send(.wheelRevolutionsReceived(4.77)) { $0.intervalRevolutions = 4.77 }
+        await store.send(.locationUpdated(fix(at: 8))) {
+            $0.gpsMeters = 10
+            $0.revolutions = 4.77
+            $0.intervalRevolutions = 0
+            $0.lastFixTimestamp = Self.start.addingTimeInterval(8)
         }
     }
 
@@ -330,7 +397,7 @@ struct WheelCalibrationFeatureTests {
         #expect(expected != Int(drivenMeasurement.rounded()))   // averaging is observable
         let closingFix = TimeInterval(Self.windowSeconds)
         store.exhaustivity = .on
-        await store.send(.wheelRevolutionsReceived(rate)) { $0.revolutions += rate }
+        await store.send(.wheelRevolutionsReceived(rate)) { $0.intervalRevolutions = rate }
         await store.send(.locationUpdated(fix(at: closingFix))) {
             $0.$preferences.withLock { $0.wheelCircumferenceMM = expected }
             $0.commitCount = 1
@@ -340,6 +407,7 @@ struct WheelCalibrationFeatureTests {
             // still seeds the next interval, so no riding is lost between windows.
             $0.gpsMeters = 0
             $0.revolutions = 0
+            $0.intervalRevolutions = 0
             $0.pendingMeasurements = []
             $0.pendingOverReading = nil
             $0.lastFixTimestamp = Self.start.addingTimeInterval(closingFix)

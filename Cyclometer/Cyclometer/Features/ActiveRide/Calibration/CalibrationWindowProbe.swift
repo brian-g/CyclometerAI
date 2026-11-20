@@ -7,7 +7,7 @@ import Foundation
 /// #419 found windows measuring ~2% below an independent length. The window's GPS
 /// distance is the Doppler integral; this records, over exactly the same accepted
 /// intervals, the distance between the fixes' coordinates (positional distance), and it
-/// counts the revolutions that entered the window without a GPS interval to pair with.
+/// counts the revolutions dropped with the intervals the window left out.
 ///
 /// **Equality-transparent.** `==` is always true, so the probe never shows up in a
 /// `TestStore` diff. Every state change the calibration *decides* is still compared
@@ -34,12 +34,12 @@ struct CalibrationWindowProbe: Equatable {
     /// landed while the sensor or suspension gate was shut.
     private(set) var reseedFixes = 0
     private(set) var fixesSkippedWhileGated = 0
-    /// Revolutions the window counted for a fix interval whose GPS distance it did not
-    /// count, split by why the interval was dropped. The GPS gate decides only when the
-    /// *next* fix lands, so the revolutions of the interval it rejects are already in.
-    private(set) var unpairedRevolutionsAtGPSGate = 0.0
-    private(set) var unpairedRevolutionsWhileGated = 0.0
-    private(set) var unpairedRevolutionsAtReseeds = 0.0
+    /// Revolutions counted for an interval the window then left out, split by why it was
+    /// left out. They never reach the window (#587): the reducer holds an interval's
+    /// revolutions until its closing fix decides whether the interval counts.
+    private(set) var droppedRevolutionsAtGPSGate = 0.0
+    private(set) var droppedRevolutionsWhileGated = 0.0
+    private(set) var droppedRevolutionsAtReseeds = 0.0
     /// Fix times bounding the accepted intervals: the start of the first, the end of the last.
     private(set) var startedAt: Date?
     private(set) var endedAt: Date?
@@ -48,14 +48,7 @@ struct CalibrationWindowProbe: Equatable {
     /// together with it, so the pair always describes the same fix.
     var lastFixCoordinate: Coordinate?
 
-    private var revolutionsSinceLastFix = 0.0
-
     static func == (lhs: Self, rhs: Self) -> Bool { true }
-
-    /// Revolutions the window just accumulated.
-    mutating func revolutionsCounted(_ revolutions: Double) {
-        revolutionsSinceLastFix += revolutions
-    }
 
     /// An interval whose Doppler distance the window just added, from the previous fix
     /// at `previousCoordinate` to `coordinate`.
@@ -68,37 +61,33 @@ struct CalibrationWindowProbe: Equatable {
         integratedSeconds += timestamp.timeIntervalSince(previousTimestamp)
         if startedAt == nil { startedAt = previousTimestamp }
         endedAt = timestamp
-        revolutionsSinceLastFix = 0
     }
 
-    /// A fix the GPS gate rejected. `gateWasOpen` marks the shut.
-    mutating func fixRejected(gateWasOpen: Bool) {
+    /// A fix the GPS gate rejected, and the revolutions of the interval it closed.
+    /// `gateWasOpen` marks the shut.
+    mutating func fixRejected(gateWasOpen: Bool, droppedRevolutions: Double) {
         rejectedFixes += 1
         if gateWasOpen { gpsGateShuts += 1 }
-        unpairedRevolutionsAtGPSGate += revolutionsSinceLastFix
-        revolutionsSinceLastFix = 0
+        droppedRevolutionsAtGPSGate += droppedRevolutions
     }
 
-    /// A usable fix that added no distance: a re-seed, or one that landed while the sensor
-    /// or suspension gate was shut.
-    mutating func fixSkipped(isReseed: Bool) {
+    /// A usable fix that added no distance, and the revolutions of the interval it closed:
+    /// a re-seed, or one that landed while the sensor or suspension gate was shut.
+    mutating func fixSkipped(isReseed: Bool, droppedRevolutions: Double) {
         if isReseed {
             reseedFixes += 1
-            unpairedRevolutionsAtReseeds += revolutionsSinceLastFix
+            droppedRevolutionsAtReseeds += droppedRevolutions
         } else {
             fixesSkippedWhileGated += 1
-            unpairedRevolutionsWhileGated += revolutionsSinceLastFix
+            droppedRevolutionsWhileGated += droppedRevolutions
         }
-        revolutionsSinceLastFix = 0
     }
 
     /// The window's log line, after its existing `calibration window:` line. Numbers only:
     /// no coordinates, so a collected log carries nothing that places the ride.
     ///
     /// Each distance is turned into the circumference it implies with the same arithmetic
-    /// as the real measurement, `WheelCalibration.measuredCircumferenceMM`. The third
-    /// figure leaves out the revolutions counted for intervals the GPS gate rejected, which
-    /// is what the window would measure if both sides dropped those intervals.
+    /// as the real measurement, `WheelCalibration.measuredCircumferenceMM`.
     func summary(dopplerMeters: Double, revolutions: Double, storedMM: Int) -> String {
         func f(_ value: Double, _ digits: Int) -> String { String(format: "%.\(digits)f", value) }
         func mm(_ meters: Double, _ revs: Double) -> String {
@@ -111,13 +100,12 @@ struct CalibrationWindowProbe: Equatable {
         return "doppler \(f(dopplerMeters, 1)) m, positional \(f(positionalMeters, 1)) m "
             + "(doppler/positional \(ratio)), \(f(revolutions, 1)) rev → "
             + "doppler \(mm(dopplerMeters, revolutions)), positional \(mm(positionalMeters, revolutions)), "
-            + "doppler without gps-gate-unpaired rev \(mm(dopplerMeters, revolutions - unpairedRevolutionsAtGPSGate)), "
             + "stored \(storedMM) mm; "
-            + "unpaired rev \(f(unpairedRevolutionsAtGPSGate, 1)) at gps gate "
+            + "dropped rev \(f(droppedRevolutionsAtGPSGate, 1)) at gps gate "
             + "(\(gpsGateShuts) shuts, \(rejectedFixes) fixes rejected), "
-            + "\(f(unpairedRevolutionsWhileGated, 1)) while the sensor or suspension gate was shut "
+            + "\(f(droppedRevolutionsWhileGated, 1)) while the sensor or suspension gate was shut "
             + "(\(fixesSkippedWhileGated) fixes skipped), "
-            + "\(f(unpairedRevolutionsAtReseeds, 1)) at re-seeds (\(reseedFixes) re-seed fixes); "
+            + "\(f(droppedRevolutionsAtReseeds, 1)) at re-seeds (\(reseedFixes) re-seed fixes); "
             + "\(usedIntervals) intervals, \(f(integratedSeconds, 1)) s integrated of a \(span) span"
     }
 

@@ -20,6 +20,14 @@ private let logger = Logger.cyclometer(.ble)
 /// discrepancy this feature exists to detect. Gates are sticky flags read when a
 /// sample lands, never per-sample filters.
 ///
+/// The unit both sides share is the interval between two fixes. Revolutions are held
+/// in `intervalRevolutions` until the fix closing their interval lands, and enter the
+/// window only together with that interval's GPS distance. Every fix that adds no
+/// distance discards them: the GPS gate rejects an interval only when its closing fix
+/// arrives, after its revolutions are in (#587). A sensor or suspension gate that
+/// reopens partway through an interval leaves GPS distance for all of it and
+/// revolutions for only part, so the next fix re-seeds instead of closing it.
+///
 /// Accepted residual: BLE notifications and GPS fixes arrive on independent ~1 Hz
 /// phases, so where a window's boundaries fall relative to each stream shifts what it
 /// counts. The error is zero-mean (see `wheelRevolutionsReceived`) with a spread of
@@ -64,6 +72,9 @@ struct WheelCalibrationFeature {
 
         var gpsMeters = 0.0
         var revolutions = 0.0
+        /// Revolutions since the last fix, not yet in the window. The next fix moves them
+        /// into `revolutions` if it adds its interval's distance, and discards them if not.
+        var intervalRevolutions = 0.0
         var lastFixTimestamp: Date?
         /// Diagnostics for the window's log line (#419). In memory only, reset with the
         /// accumulators, and read by nothing that decides.
@@ -135,7 +146,7 @@ struct WheelCalibrationFeature {
                 if state.isSensorActive != isActive {
                     logger.notice("calibration sensor gate \(isActive ? "open" : "shut", privacy: .public)")
                 }
-                state.isSensorActive = isActive
+                updateGate(&state) { $0.isSensorActive = isActive }
                 return .none
 
             case .wheelRevolutionsReceived(let revolutions):
@@ -147,8 +158,7 @@ struct WheelCalibrationFeature {
                 // straddling delta would leave only the second truncation and turn a
                 // zero-mean error into a systematic one-notification undercount.
                 guard state.isAccumulating else { return .none }
-                state.revolutions += revolutions
-                state.probe.revolutionsCounted(revolutions)
+                state.intervalRevolutions += revolutions
                 return .none
 
             case .locationUpdated(let update):
@@ -158,8 +168,11 @@ struct WheelCalibrationFeature {
                     // fix after recovery re-seeds the interval instead of integrating
                     // across the gap.
                     if state.isSensorActive, !state.isSuspended {
-                        state.probe.fixRejected(gateWasOpen: state.isGPSUsable)
+                        state.probe.fixRejected(
+                            gateWasOpen: state.isGPSUsable, droppedRevolutions: state.intervalRevolutions
+                        )
                     }
+                    state.intervalRevolutions = 0
                     if state.isGPSUsable {
                         logger.notice(
                             """
@@ -187,8 +200,12 @@ struct WheelCalibrationFeature {
                 guard wasUsable, let previous = state.lastFixTimestamp, state.isAccumulating
                 else {
                     if state.isSensorActive {
-                        state.probe.fixSkipped(isReseed: !wasUsable || state.lastFixTimestamp == nil)
+                        state.probe.fixSkipped(
+                            isReseed: !wasUsable || state.lastFixTimestamp == nil,
+                            droppedRevolutions: state.intervalRevolutions
+                        )
                     }
+                    state.intervalRevolutions = 0
                     return .none
                 }
 
@@ -198,6 +215,8 @@ struct WheelCalibrationFeature {
                 // threshold itself at realistic fix noise. Speed error is zero-mean and
                 // averages out across the window.
                 state.gpsMeters += update.speed * update.timestamp.timeIntervalSince(previous)
+                state.revolutions += state.intervalRevolutions
+                state.intervalRevolutions = 0
                 // Instrumentation only (#419): the same interval measured between the two
                 // fixes' coordinates. Nothing reads it back.
                 if let previousCoordinate = state.probe.lastFixCoordinate {
@@ -219,7 +238,7 @@ struct WheelCalibrationFeature {
                         "calibration suspension gate \(isSuspended ? "shut — radar alert, turn alert, or ride not recording" : "open", privacy: .public)"
                     )
                 }
-                state.isSuspended = isSuspended
+                updateGate(&state) { $0.isSuspended = isSuspended }
                 return .none
 
             case .bannerDismissed:
@@ -241,12 +260,22 @@ struct WheelCalibrationFeature {
         return gap > 0 && gap <= WheelCalibration.maxGPSGap
     }
 
+    /// Applies a sensor or suspension gate change. If it reopens accumulation, the
+    /// interval since the last fix had revolutions counted for only the part after the
+    /// reopen, so forgetting the last fix makes the next one re-seed (#587).
+    private func updateGate(_ state: inout State, _ change: (inout State) -> Void) {
+        let wasAccumulating = state.isAccumulating
+        change(&state)
+        if !wasAccumulating, state.isAccumulating { state.lastFixTimestamp = nil }
+    }
+
     /// Single funnel for clearing the accumulators, so no path can zero one and leave
     /// the other standing. Leaves the confirmation streak alone — a window that ends
     /// normally hands its verdict to the next one.
     private func resetMeasurements(_ state: inout State) {
         state.gpsMeters = 0
         state.revolutions = 0
+        state.intervalRevolutions = 0
         state.lastFixTimestamp = nil
         state.probe = CalibrationWindowProbe()
     }
