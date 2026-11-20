@@ -144,8 +144,9 @@ struct LocationClientTests {
 
 // MARK: - One-shot fix (#193)
 
-/// The timeout tests drive the shared `LocationManagerState`. That is enough to cover what the one-shot actually risks: the continuation table
-/// is what a double resume would crash on, and a waiter that is never resumed hangs forever.
+/// The timeout tests drive the shared `LocationManagerState`. That is enough to cover what the
+/// one-shot actually risks: the continuation table is what a double resume would crash on, and a
+/// waiter that is never resumed hangs forever.
 ///
 /// On a simulator never asked for authorization, as CI's fresh one is, no fix ever comes, and
 /// CoreLocation answers every `requestLocation()` and `startUpdatingLocation()` with
@@ -180,7 +181,9 @@ struct LocationOneShotTests {
 
     /// The whole point of the one-shot is that it never touches `stopUpdates()`, which would
     /// end a recording ride's stream. Nor `requestLocation()`, which CoreLocation documents as
-    /// cancelling `startUpdatingLocation()`. This pins the pairing: a live subscriber survives it.
+    /// not usable concurrently with `startUpdatingLocation()`. Nor the manager's own
+    /// `stopUpdatingLocation()`, which would leave the stream open but starved of fixes. This
+    /// pins the pairing: a live subscriber survives it.
     ///
     /// Its own instance over a stub manager, not `shared`: the real manager answers with a
     /// denial ~2 s after any request — this stream's own start, or another test's one-shot —
@@ -195,6 +198,10 @@ struct LocationOneShotTests {
 
         _ = await state.currentCoordinate(timeout: .milliseconds(200))
 
+        // A stop or request the one-shot set off asynchronously gets a window to land in first:
+        // checked straight after the return, it would land after the checks and pass unseen.
+        await allowStrayCallsToLand()
+
         // Delivered only if the stream is still open: a finished one yields nil instead.
         let fix = CLLocation(latitude: 43.0731, longitude: -89.4012)
         state.locationManager(manager, didUpdateLocations: [fix])
@@ -203,18 +210,23 @@ struct LocationOneShotTests {
         #expect(next?.coordinate == Coordinate(latitude: 43.0731, longitude: -89.4012),
                 "the one-shot finished a live update stream")
         #expect(await manager.requestLocationCalls == 0,
-                "the one-shot requested a fix, which cancels the live updates")
+                "the one-shot requested a fix while streaming, which CoreLocation does not allow")
+        #expect(await manager.stopUpdatingLocationCalls == 0,
+                "the one-shot stopped the manager's updates under a live stream")
     }
 }
 
-/// A `CLLocationManager` that never reaches CoreLocation: no request goes out, so no fix
-/// and no denial ever come back. Callbacks are driven by calling the delegate directly.
+/// A `CLLocationManager` that never starts location services: no update or fix is requested,
+/// so no fix and no denial ever come back. Callbacks are driven by calling the delegate
+/// directly. Authorization (`authorizationStatus`, `requestWhenInUseAuthorization()`) is not
+/// stubbed and still reaches CoreLocation.
 @MainActor
 private final class StubLocationManager: CLLocationManager {
     private(set) var requestLocationCalls = 0
+    private(set) var stopUpdatingLocationCalls = 0
 
     override var location: CLLocation? { nil }
     override func startUpdatingLocation() {}
-    override func stopUpdatingLocation() {}
+    override func stopUpdatingLocation() { stopUpdatingLocationCalls += 1 }
     override func requestLocation() { requestLocationCalls += 1 }
 }
