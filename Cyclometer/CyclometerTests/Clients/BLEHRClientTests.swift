@@ -474,6 +474,36 @@ struct BLEHRIntegrationTests {
         #expect(harness.calls.value.filter { $0 == .startScanning([hrServiceUUID]) }.count == 1)
     }
 
+    /// `.discovered` claims the target under the lock and calls `connect` once it is
+    /// dropped, so a `disconnect()` in between leaves that connect landing after the
+    /// cancel (#592). A link that completes for a strap this client no longer targets
+    /// must have its "hr" owner released, or it stays up with nothing reading it.
+    @Test("A connect that completes for a strap no longer targeted is let go")
+    func strayConnectIsLetGo() async {
+        let harness = Harness()
+        let id = UUID()
+
+        await harness.pair(id)
+        await harness.client.startScanning()
+        harness.events.yield(.discovered(id: id, name: "HRM-Dual", rssi: -55, services: [hrServiceUUID]))
+        // The target is claimed in the same lock acquisition that lists the strap.
+        _ = await harness.devices { $0.contains { $0.id == id } }
+
+        await harness.client.disconnect()
+        harness.events.yield(.connected(id: id))
+        // Events are handled in order: once a later discovery is listed, the `.connected`
+        // handler has finished, transport calls included.
+        let marker = UUID()
+        harness.events.yield(.discovered(id: marker, name: nil, rssi: -90, services: [hrServiceUUID]))
+        _ = await harness.devices { $0.contains { $0.id == marker } }
+
+        let disconnects = harness.calls.value.filter {
+            if case .disconnect = $0 { return true } else { return false }
+        }
+        #expect(disconnects == [.disconnect(id, "hr"), .disconnect(id, "hr")])
+        #expect(harness.servicesDiscovered.value.isEmpty)
+    }
+
     /// CoreBluetooth won't redeliver `.discovered` for a peripheral already seen this
     /// session, so without this path S11's Pair button does nothing until the strap
     /// next advertises.

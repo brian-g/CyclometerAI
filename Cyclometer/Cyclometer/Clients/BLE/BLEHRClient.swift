@@ -512,7 +512,22 @@ private final class HRClientState: @unchecked Sendable {
             await bleClient.connect(id, hrOwnerID)
 
         case .connected(let id):
-            guard lock.withLock({ targetPeripheralID }) == id else { return }
+            let (isTarget, isHRStrap) = lock.withLock { (targetPeripheralID == id, discoveredIDs.contains(id)) }
+            guard isTarget else {
+                // Not our target, but possibly our connect: `.discovered`, `connect(_:)` and
+                // `setPairedSensor` all claim the target under the lock and call `connect`
+                // once it is dropped, so an unpair, `disconnect()` or ride finish can clear
+                // the target in between and the connect lands after the cancel. Releasing
+                // the "hr" owner here closes that gap whatever the ordering, as the CSC and
+                // radar clients do (#558, #592). It is a no-op for a peripheral another
+                // client owns: `BLECentral` cancels only when no owner is left.
+                if isHRStrap {
+                    // Only HR straps: every CSC and radar link reaches this branch too.
+                    logger.notice("connected \(id, privacy: .public) is no longer the target — releasing it")
+                }
+                await bleClient.disconnect(id, hrOwnerID)
+                return
+            }
             // One call for both services: didDiscoverServices reports the peripheral's
             // full service list, so a second call for 0x180F would re-fire the
             // measurement characteristic's discover → notify chain.
