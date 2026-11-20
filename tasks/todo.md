@@ -2663,3 +2663,20 @@ are two writes, so a Finish backfill landing between them could write that orpha
 them one write needs a persistence change. A marker close-out writes the row's last checkpoint aggregates, since the
 marker carries no final summary, so its workout's distance can be up to one checkpoint short (the main path has
 this too).
+
+---
+
+# #589 — CI "Build for testing" can't find the simulator it just resolved
+
+Branch: `fix/589-build-for-testing-destination`
+
+- [x] Cause, from the attempt-1 logs of 43868144206, 43868308534, 43918678778: all three resolved the same iOS 27.0
+      iPhone Air, started `xcodebuild` ~1 s after the background `simctl boot`, logged "Malformed bundle does not
+      contain an identifier" for the 27.0 runtime's cryptex mount (`SimulatorRuntime-v24.1.434`), then waited 60 s
+      and failed. The error listed every 27.1/27.2 iOS simulator and no 27.0 one. The issue's "no concrete
+      simulators" was wrong: the whole runtime was missing, not every device
+- [x] Passing reruns of the same runs, same device: no "Malformed" line. `xcodebuild` sat silent for 5–7 min
+      before "Resolve Package Graph" (normally ~3 s), then built. A boot in flight either stalls it or hides the runtime
+- [x] Fix: `build-for-testing` uses `generic/platform=iOS Simulator`; the UDID is used only by `test-without-building`,
+      after `simctl bootstatus -b`. `ARCHS=arm64` keeps the generic build single-arch
+- [ ] CI green on the PR; "Build for testing" step time compared with recent green runs (16.7–28.8 min, 12 runs)
