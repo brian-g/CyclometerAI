@@ -388,11 +388,13 @@ struct AppFeature {
                                 pendingEnd, summary, persistenceClient, rideEndIntentClient
                             )
                         } else {
-                            try? await persistenceClient.finalizeRide(summary.rideId, date.now, summary, nil)
                             // No workout (#277): without a marker its end is the relaunch, not when
                             // the rider stopped, so a workout would span every hour between the two.
-                            // Settled before the backfill below, the only one that could see it.
-                            try? await persistenceClient.settleRideHealthWorkout(summary.rideId)
+                            // Never owed in the same write: the new ride's Finish backfill can read
+                            // the owed list at any moment (#606).
+                            try? await persistenceClient.finalizeRideWithoutWorkout(
+                                summary.rideId, date.now, summary
+                            )
                         }
                         await send(.rides(.reloadRides))
                         await Self.backfillFinishedRides(send: send)

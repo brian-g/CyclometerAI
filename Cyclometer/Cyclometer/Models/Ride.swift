@@ -110,7 +110,8 @@ final class Ride {
 
     // MARK: - Apple Health (#277)
     // Set by `finalizeRide`, cleared once the ride's `HKWorkout` is written or skipped as a
-    // duplicate; `RideHealthWorkout.backfill` writes every ride still owed one. The declaration
+    // duplicate; `RideHealthWorkout.backfill` writes every ride still owed one. A launch close-out
+    // with no ride-end marker is finalized never owed one (#606). The declaration
     // default is what migration gives rides that ended before this existed, so they are not
     // owed: the ones since #250 already have their workout.
     var isHealthWorkoutOwed: Bool = false

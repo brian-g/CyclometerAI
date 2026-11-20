@@ -336,7 +336,7 @@ struct AppFeatureTests {
             rideId: orphanedRideId, recordingState: .active,
             durationSeconds: 300, distanceMeters: 2_000, averageSpeedMPS: 5, maxSpeedMPS: 9
         )
-        let finalized = LockIsolated<(UUID, Date, RideSummaryUpdate, URL?)?>(nil)
+        let finalized = LockIsolated<(UUID, Date, RideSummaryUpdate)?>(nil)
         let fixedDate = Date(timeIntervalSince1970: 2_000_000)
         let store = TestStore(
             initialState: AppFeature.State(
@@ -347,7 +347,8 @@ struct AppFeatureTests {
             AppFeature()
         } withDependencies: {
             $0.date = .constant(fixedDate)
-            $0.persistenceClient = .mock(onFinalizeRide: { finalized.setValue(($0, $1, $2, $3)) })
+            // No marker, so closed out with no export and no workout owed (#606).
+            $0.persistenceClient = .mock(onFinalizeRideWithoutWorkout: { finalized.setValue(($0, $1, $2)) })
         }
         store.exhaustivity = .off
 
@@ -357,10 +358,11 @@ struct AppFeatureTests {
         #expect(store.state.activeRide?.rideId == newRideId)
         #expect(store.state.isDashboardPresented == true)
 
+        // Sent after the close-out's write, so it has run by now.
+        await store.receive(\.rides.reloadRides)
         #expect(finalized.value?.0 == orphanedRideId)
         #expect(finalized.value?.1 == fixedDate)
         #expect(finalized.value?.2 == orphanedSummary)
-        #expect(finalized.value?.3 == nil)
     }
 
     /// #344: the fetch can read the row S05.1 just wrote and land after that start has, with the
@@ -370,7 +372,6 @@ struct AppFeatureTests {
     func resumableRideFetchedAfterItsOwnStartLanded() async {
         let newRideId = UUID()
         let finalized = LockIsolated<[UUID]>([])
-        let settled = LockIsolated<[UUID]>([])
         let store = TestStore(
             initialState: AppFeature.State(
                 activeRide: ActiveRideFeature.State(rideId: newRideId, recordingState: .active),
@@ -382,7 +383,7 @@ struct AppFeatureTests {
             $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
             $0.persistenceClient = .mock(
                 onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
-                onSettleRideHealthWorkout: { id in settled.withValue { $0.append(id) } }
+                onFinalizeRideWithoutWorkout: { id, _, _ in finalized.withValue { $0.append(id) } }
             )
         }
         store.exhaustivity = .off
@@ -396,7 +397,6 @@ struct AppFeatureTests {
         #expect(store.state.activeRide?.rideId == newRideId)
         #expect(store.state.isDashboardPresented == true)
         #expect(finalized.value.isEmpty)
-        #expect(settled.value.isEmpty)
     }
 
     /// A launch whose fetch lands while a new ride is under way: started (`midWrite == false`), or
@@ -527,9 +527,11 @@ struct AppFeatureTests {
     }
 
     /// #357: with no marker, or one some other ride left, the close-out is what it always was —
-    /// closed at the relaunch with no export, and settled with no Apple Health workout (#277) —
-    /// and the marker is left alone.
-    @Test("A close-out racing a start without this ride's marker closes it with nil, settles it, and leaves the marker", arguments: [false, true])
+    /// closed at the relaunch with no export and no Apple Health workout (#277) — and the marker is
+    /// left alone. #606: never owed one, even for a moment. A Finish backfill lands right after the
+    /// write here, before anything else can run: a finalize then a settle left the ride owed in
+    /// between, and that backfill wrote a workout spanning the orphan's start to the relaunch.
+    @Test("A close-out racing a start without this ride's marker closes it with nil, never owed a workout, and leaves the marker", arguments: [false, true])
     func resumableRideFetchedDuringAStartWithoutItsMarker(otherRideMarker: Bool) async {
         let marker = otherRideMarker
             ? PendingRideEnd(rideId: UUID(), endedAt: Date(timeIntervalSince1970: 1_500_000),
@@ -537,17 +539,35 @@ struct AppFeatureTests {
             : nil
         let rideEndIntent = RideEndIntentClient.inMemory(initial: marker)
         let finalized = LockIsolated<[(UUID, Date, URL?)]>([])
-        let settled = LockIsolated<[UUID]>([])
+        let workouts = LockIsolated<[UUID]>([])
         let relaunch = Date(timeIntervalSince1970: 2_000_000)
+        // What the live actor does: `finalizeRide` makes the ride owed, settling removes it, and
+        // `finalizeRideWithoutWorkout` never makes it owed.
+        let owed = LockIsolated<[OwedHealthWorkout]>([])
         let store = TestStore(initialState: Self.stateWithStartInFlight(midWrite: false)) {
             AppFeature()
         } withDependencies: {
             $0.date = .constant(relaunch)
             $0.rideEndIntentClient = rideEndIntent
-            $0.persistenceClient = .mock(
-                onFinalizeRide: { id, endedAt, _, url in finalized.withValue { $0.append((id, endedAt, url)) } },
-                onSettleRideHealthWorkout: { id in settled.withValue { $0.append(id) } }
-            )
+            var client = PersistenceClient.mock()
+            client.finalizeRide = { id, endedAt, summary, url in
+                finalized.withValue { $0.append((id, endedAt, url)) }
+                owed.withValue {
+                    $0.append(OwedHealthWorkout(
+                        rideId: id, startedAt: Date(timeIntervalSince1970: 1_496_400), endedAt: endedAt,
+                        distanceMeters: summary.distanceMeters, movingSeconds: summary.durationSeconds
+                    ))
+                }
+                await RideHealthWorkout.backfill()
+            }
+            client.finalizeRideWithoutWorkout = { id, endedAt, _ in
+                finalized.withValue { $0.append((id, endedAt, nil)) }
+                await RideHealthWorkout.backfill()
+            }
+            client.fetchRidesOwedHealthWorkout = { owed.value }
+            client.settleRideHealthWorkout = { id in owed.withValue { $0.removeAll { $0.rideId == id } } }
+            $0.persistenceClient = client
+            $0.healthKitClient = .mock(onSaveWorkout: { workout in workouts.withValue { $0.append(workout.rideId) } })
         }
         store.exhaustivity = .off
 
@@ -559,7 +579,8 @@ struct AppFeatureTests {
         #expect(finalized.value.first?.0 == Self.leftoverRide.rideId)
         #expect(finalized.value.first?.1 == relaunch)
         #expect(finalized.value.first?.2 == nil)
-        #expect(settled.value == [Self.leftoverRide.rideId])
+        #expect(workouts.value.isEmpty, "a workout was written for the orphan")
+        #expect(owed.value.isEmpty)
         #expect(rideEndIntent.loadAll() == [marker].compactMap { $0 })
     }
 
@@ -647,7 +668,7 @@ struct AppFeatureTests {
             $0.locationClient = .testValue
             $0.hapticsClient = .testValue
             $0.permissionsClient = .testValue
-            var client = PersistenceClient.mock(onFinalizeRide: { id, _, _, _ in
+            var client = PersistenceClient.mock(onFinalizeRideWithoutWorkout: { id, _, _ in
                 finalized.withValue { $0.append(id) }
             })
             client.createRide = { id, _, _ in
@@ -830,8 +851,8 @@ struct AppFeatureTests {
     /// one is closed out rather than resumed. It never reached a Finish, so it gets its
     /// thumbnail here. Not an Apple Health workout (#277): with no ride-end marker it ends at the
     /// relaunch, so one would span every hour since the kill (one with a marker gets its workout,
-    /// #584). Other rides still owed one are written.
-    @Test("an orphaned ride closed out at launch gets its map thumbnail, and with no marker is settled without a workout")
+    /// #584), and it is never owed one (#606). Other rides still owed one are written.
+    @Test("an orphaned ride closed out at launch gets its map thumbnail, and with no marker no workout")
     func orphanedRideCloseOutCapturesThumbnail() async {
         let orphan = RideSummaryUpdate(
             rideId: UUID(), recordingState: .active,
@@ -855,7 +876,8 @@ struct AppFeatureTests {
             distanceMeters: 20_000,
             movingSeconds: 3_400
         )
-        // What the live actor does: finalize makes the orphan owed, and settling removes it.
+        // What the live actor does: the orphan's finalize never makes it owed, and settling
+        // removes the earlier ride.
         let owed = LockIsolated([earlier])
         let store = TestStore(
             initialState: AppFeature.State(activeRide: ActiveRideFeature.State(recordingState: .active))
@@ -866,18 +888,7 @@ struct AppFeatureTests {
             var client = PersistenceClient.mock(
                 trackPoints: [orphan.rideId: track],
                 rideIdsMissingMapThumbnail: [orphan.rideId],
-                onFinalizeRide: { id, endedAt, summary, _ in
-                    finalized.withValue { $0.append(id) }
-                    owed.withValue {
-                        $0.insert(OwedHealthWorkout(
-                            rideId: id,
-                            startedAt: Date(timeIntervalSince1970: 1_000_000 - 36_000),
-                            endedAt: endedAt,
-                            distanceMeters: summary.distanceMeters,
-                            movingSeconds: summary.durationSeconds
-                        ), at: 0)
-                    }
-                },
+                onFinalizeRideWithoutWorkout: { id, _, _ in finalized.withValue { $0.append(id) } },
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
             client.fetchRidesOwedHealthWorkout = { owed.value }

@@ -29,6 +29,11 @@ struct PersistenceClient: Sendable {
     /// Writes final aggregates, endedAt, recordingState .ended, and the exported
     /// GPX file's URL (nil if export failed) in one call.
     var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate, URL?) async throws -> Void
+    /// `finalizeRide` for a ride closed out at launch with no ride-end marker: ended at the
+    /// relaunch, no export, and never owed an Apple Health workout (#277), in the same one write.
+    /// A finalize and then a settle would leave it owed in between, where a Finish's backfill
+    /// could write a workout spanning every hour since the kill (#606).
+    var finalizeRideWithoutWorkout: @Sendable (UUID, Date, RideSummaryUpdate) async throws -> Void
     /// Sets a finished ride's title — S10's rename field (#249).
     var renameRide: @Sendable (UUID, String) async throws -> Void
     /// Sets a finished ride's notes — S15's Edit sheet (#538).
@@ -141,6 +146,11 @@ extension PersistenceClient: DependencyKey {
                 try stores.retainExportIfHistoryUnavailable(gpxFileURL)
                 try await stores.rideActor.finalizeRide(id: id, endedAt: endedAt, summary: summary, gpxFileURL: gpxFileURL)
             },
+            finalizeRideWithoutWorkout: { id, endedAt, summary in
+                try await stores.rideActor.finalizeRide(
+                    id: id, endedAt: endedAt, summary: summary, gpxFileURL: nil, owesHealthWorkout: false
+                )
+            },
             renameRide: { try await stores.rideActor.renameRide(id: $0, title: $1) },
             updateRideNotes: { try await stores.rideActor.updateRideNotes(id: $0, notes: $1) },
             replaceRideGPX: { try await stores.rideActor.replaceGPXFile(id: $0, contents: $1) },
@@ -209,6 +219,7 @@ extension PersistenceClient: DependencyKey {
         createRide: { _, _, _ in },
         updateRideSummary: { _ in },
         finalizeRide: { _, _, _, _ in },
+        finalizeRideWithoutWorkout: { _, _, _ in },
         renameRide: { _, _ in },
         updateRideNotes: { _, _ in },
         replaceRideGPX: { _, _ in },
