@@ -749,14 +749,17 @@ struct AppFeature {
     /// recorded, then drops the marker. Only once the write lands: a failed finalize keeps it, the
     /// one record of that end, for the next launch. And only this ride's: one started since can
     /// have ended and written its own in the meantime (#357, #583).
+    ///
+    /// With the totals Finish worked out, when the marker has them (#607). `checkpoint` is the
+    /// row's own summary, used only for a marker written before #607.
     private static func finalizeEndedRide(
         _ pendingEnd: PendingRideEnd,
-        _ summary: RideSummaryUpdate,
+        _ checkpoint: RideSummaryUpdate,
         _ persistenceClient: PersistenceClient,
         _ rideEndIntentClient: RideEndIntentClient
     ) async throws {
         try await persistenceClient.finalizeRide(
-            pendingEnd.rideId, pendingEnd.endedAt, summary, pendingEnd.gpxFileURL
+            pendingEnd.rideId, pendingEnd.endedAt, pendingEnd.summary ?? checkpoint, pendingEnd.gpxFileURL
         )
         rideEndIntentClient.clear(pendingEnd.rideId)
     }

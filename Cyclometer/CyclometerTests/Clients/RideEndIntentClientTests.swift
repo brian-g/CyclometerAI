@@ -3,7 +3,7 @@ import Testing
 @testable import Cyclometer
 
 /// #583: the ride-end marker file holds one marker per ride, and still reads the single
-/// marker it held before.
+/// marker it held before. #607: and each marker's summary, when it can.
 @Suite("Ride-end intent store")
 struct RideEndIntentClientTests {
 
@@ -63,6 +63,49 @@ struct RideEndIntentClientTests {
         let next = Self.marker(2_000)
         client.save(next)
         #expect(client.loadAll() == [legacy, next])
+    }
+
+    /// #607: a marker carries Finish's summary through the file and back.
+    @Test("A marker's summary survives the file")
+    func summaryRoundTrips() {
+        let url = Self.makeFileURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        var marker = Self.marker(1_000, export: "leftover")
+        marker.summary = RideSummaryUpdate(
+            rideId: marker.rideId, recordingState: .ended,
+            durationSeconds: 3_600, distanceMeters: 30_000, averageSpeedMPS: 8.3, maxSpeedMPS: 14,
+            averageHeartRateBPM: 142, cadenceSecondsByRPM: [88: 1_200],
+            pauses: [RidePause(startedAt: Date(timeIntervalSince1970: 900), endedAt: nil, isAuto: false)],
+            route: RouteReference(id: UUID(), name: "Lakeshore")
+        )
+        RideEndIntentClient.file(at: url).save(marker)
+
+        #expect(RideEndIntentClient.file(at: url).loadAll() == [marker])
+    }
+
+    /// #607: a marker written before it has no summary, and one whose summary can't be read (a
+    /// field added since) still reads, with none. Either throwing would lose every ride's marker,
+    /// since the file decodes as one array.
+    @Test("A marker without a readable summary still reads, with none", arguments: [nil, #"{"rideId":"x"}"#])
+    func markerWithoutReadableSummaryReads(summaryJSON: String?) throws {
+        let url = Self.makeFileURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let leftover = Self.marker(1_000, export: "leftover")
+        let next = Self.marker(2_000)
+        // The pre-#607 shape, written by hand so it doesn't depend on today's encoder.
+        let markers = try [leftover, next].map { marker in
+            var json = try #require(
+                try JSONSerialization.jsonObject(with: JSONEncoder().encode(marker)) as? [String: Any]
+            )
+            #expect(json["summary"] == nil)
+            if let summaryJSON {
+                json["summary"] = try JSONSerialization.jsonObject(with: Data(summaryJSON.utf8))
+            }
+            return json
+        }
+        try JSONSerialization.data(withJSONObject: markers).write(to: url)
+
+        #expect(RideEndIntentClient.file(at: url).loadAll() == [leftover, next])
     }
 
     @Test("No file reads as no markers")

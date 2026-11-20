@@ -425,16 +425,25 @@ struct AppFeatureTests {
     /// export was written (#188). Its close-out keeps the marker's end and export rather than the
     /// relaunch's time and nil, which left the export for #346's sweep, and discharges the marker.
     /// #584: with its real end, it is owed its Apple Health workout like any finished ride, and the
-    /// backfill writes it ending at the marker's time.
-    @Test("A close-out racing a start keeps a ride-end marker's end and export, clears it, and writes its workout", arguments: [false, true])
-    func resumableRideFetchedDuringAStartUsesTheRideEndMarker(midWrite: Bool) async {
+    /// backfill writes it ending at the marker's time. #607: with the totals the marker carries from
+    /// the Finish, which the row's last checkpoint trails. A marker written before #607 has none,
+    /// and the close-out keeps the checkpoint's.
+    @Test("A close-out racing a start keeps a ride-end marker's end, export and totals, clears it, and writes its workout", arguments: [false, true], [false, true])
+    func resumableRideFetchedDuringAStartUsesTheRideEndMarker(midWrite: Bool, markerHasSummary: Bool) async {
+        var finish = Self.leftoverRide
+        finish.recordingState = .ended
+        finish.durationSeconds = 320
+        finish.distanceMeters = 2_150
         let marker = PendingRideEnd(
             rideId: Self.leftoverRide.rideId,
             endedAt: Date(timeIntervalSince1970: 1_500_000),
-            gpxFileURL: URL(filePath: "/Documents/Rides/leftover.gpx")
+            gpxFileURL: URL(filePath: "/Documents/Rides/leftover.gpx"),
+            summary: markerHasSummary ? finish : nil
         )
+        let expectedSummary = markerHasSummary ? finish : Self.leftoverRide
         let rideEndIntent = RideEndIntentClient.inMemory(initial: marker)
         let finalized = LockIsolated<[(UUID, Date, URL?)]>([])
+        let finalizedSummaries = LockIsolated<[RideSummaryUpdate]>([])
         let workouts = LockIsolated<[RideWorkout]>([])
         // What the live actor does: finalize makes the ride owed, and settling removes it.
         let owed = LockIsolated<[OwedHealthWorkout]>([])
@@ -446,6 +455,7 @@ struct AppFeatureTests {
             var client = PersistenceClient.mock(
                 onFinalizeRide: { id, endedAt, summary, url in
                     finalized.withValue { $0.append((id, endedAt, url)) }
+                    finalizedSummaries.withValue { $0.append(summary) }
                     owed.withValue {
                         $0.append(OwedHealthWorkout(
                             rideId: id,
@@ -474,9 +484,11 @@ struct AppFeatureTests {
         #expect(finalized.value.first?.0 == marker.rideId)
         #expect(finalized.value.first?.1 == marker.endedAt)
         #expect(finalized.value.first?.2 == marker.gpxFileURL)
+        #expect(finalizedSummaries.value == [expectedSummary])
         #expect(rideEndIntent.loadAll().isEmpty)
         #expect(workouts.value.map(\.rideId) == [marker.rideId])
         #expect(workouts.value.first?.endedAt == marker.endedAt)
+        #expect(workouts.value.first?.distanceMeters == expectedSummary.distanceMeters)
         #expect(owed.value.isEmpty)
     }
 

@@ -878,9 +878,10 @@ struct ActiveRideFeature {
                     .run { [rideDataBuffer, persistenceClient, rideEndIntentClient] _ in
                         // Recorded before any of the writes below, in storage a SwiftData
                         // failure cannot reach: if `finalizeRide` fails, this is the only
-                        // durable trace that the rider ended this ride (#188).
+                        // durable trace that the rider ended this ride (#188). With its totals,
+                        // which the row's last checkpoint can trail (#607).
                         rideEndIntentClient.save(
-                            PendingRideEnd(rideId: rideId, endedAt: endedAt, gpxFileURL: nil)
+                            PendingRideEnd(rideId: rideId, endedAt: endedAt, gpxFileURL: nil, summary: finalSummary)
                         )
 
                         // Retried once. The flush waits for a checkpoint's still in flight, so a
@@ -914,7 +915,7 @@ struct ActiveRideFeature {
                             // written successfully isn't orphaned on disk if only the
                             // row pointing at it fails to save.
                             rideEndIntentClient.save(
-                                PendingRideEnd(rideId: rideId, endedAt: endedAt, gpxFileURL: gpxURL)
+                                PendingRideEnd(rideId: rideId, endedAt: endedAt, gpxFileURL: gpxURL, summary: finalSummary)
                             )
                         } catch {
                             // Degrades to a nil gpxFileURL rather than leaving the ride

@@ -2805,3 +2805,40 @@ links that also reach this branch. The normal path is unchanged: `unpairDisconne
 exact transport call list. One narrow race is accepted, as for CSC: a stray `.connected` handled just as
 `setPairedSensor` re-claims the same strap cancels its fresh connect; the rescan or the next ride's scan
 reconnects it. The full suite was not run; only the HR suites drive the live HR client.
+
+---
+
+# #607 — A ride closed out from its ride-end marker keeps its last checkpoint totals
+
+Branch: `worktree-fix-607`
+
+**Finding.** `finalizeRide` → `apply` overwrites every running aggregate (distance, duration, speeds, HR, cadence
+tallies, sample counts, pauses, weather, route progress). The close-out passes the summary `fetchResumableRide` read
+back, so *all* of those are as of the last checkpoint that landed, not just distance and moving time. `pause()` does
+write a checkpoint, and Finish is only reachable from paused. But a failed finalize means SwiftData writes are failing,
+so that pause checkpoint has most likely failed too.
+
+**Plan (store Finish's summary in the marker, not rebuild from the track).** A rebuild can't give "the totals from
+its Finish": live distance can come from the wheel sensor, not the GPS track.
+
+- [x] `PendingRideEnd.summary: RideSummaryUpdate?`, set from Finish's `finalSummary` on both marker saves
+- [x] `RideSummaryUpdate`, `RouteReference`, `RideFinishStats`: `Codable` (synthesized, no CodingKeys, so a new field
+      can't be silently left out). `finish` is nil when the marker is written; the close-out leaves the ride owed it,
+      as it does today
+- [x] Tolerant decode: `PendingRideEnd.init(from:)` reads `summary` with `try?`. A marker written before #607, or a
+      summary a later field addition can't decode, falls back to the checkpoint summary and never drops the marker.
+      (The markers file decodes as one array, so one marker that fails to decode would lose every ride's marker.)
+- [x] `finalizeEndedRide` writes `pendingEnd.summary ?? checkpoint`, on both close-out paths
+- [x] Tests: `closedOutRideKeepsItsFinishTotals` (main path, end to end: checkpoint and finalize both fail, relaunch
+      writes Finish's totals and the workout's distance); `resumableRideFetchedDuringAStartUsesTheRideEndMarker` now
+      `× markerHasSummary` (race branch, new and old markers); `summaryRoundTrips`,
+      `markerWithoutReadableSummaryReads` (no summary key / an unreadable summary, two markers kept)
+- [x] Mutation check: with the close-out back on the checkpoint summary, the end-to-end test and both
+      `markerHasSummary: true` cases fail, and the old-marker cases still pass
+- [x] Full `CyclometerTests`: 3048 passed, 0 failed
+
+**Review.** The marker now holds the whole summary (a few KB with weather samples and the cadence histogram), and
+it's written twice per Finish, as before. The tolerant decode has a cost. If a future field is added to
+`RideSummaryUpdate`, a marker written before that update decodes with no summary and falls back to the checkpoint
+totals. It doesn't lose the marker. That fallback only matters for a ride whose finalize failed and that is still
+pending across an app update.
