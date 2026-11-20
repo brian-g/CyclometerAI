@@ -38,9 +38,11 @@ struct SensorPairingFeature {
                 // reached 0 and #585's drop never ran.
                 //
                 // A pairing still in flight is released the way the prompt's Cancel would
-                // release it. Nothing outlives this screen to receive its capabilities, so
-                // it would sit connected holding no role, and that slot's later release
-                // could end a Pair the rider starts in Settings (#593).
+                // release it: nothing outlives this screen to receive its capabilities. The
+                // `.onDisappear` above normally drops the slot too, as the last pairing scan
+                // with no ride (#585); this covers a scan still held elsewhere, where the slot
+                // would sit connected holding no role and its later release could end a Pair
+                // the rider starts in Settings (#593).
                 let abandoned = state.deviceManagement.pendingPairing
                 state.deviceManagement.pendingPairing = nil
                 let release: Effect<Action> = abandoned.map { id in

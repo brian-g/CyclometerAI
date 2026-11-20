@@ -78,8 +78,8 @@ struct DeviceManagementFeature {
         /// prompt release the sensor rather than leave it connected holding no role.
         var pendingPairing: UUID? = nil
         /// Whether a CSC broadcast since the Pair tap has shown `pendingPairing`'s row
-        /// holding a slot. Only then can the row losing its state mean *this* pairing was
-        /// released: before it, a lost state is an older slot's release still in flight
+        /// holding a slot. Only then is the row losing its state taken to mean *this* pairing
+        /// was released: before it, a lost state is an older slot's release still in flight
         /// (#593). Reset by the Pair tap, the only place `pendingPairing` is set, so a
         /// stale `true` left after a pairing ends is never read.
         var pendingPairingHasConnected = false
@@ -305,12 +305,14 @@ struct DeviceManagementFeature {
                 // from the CSC list, not the merged row: only the CSC client's own
                 // connection state says whether it still holds a slot.
                 //
-                // Only once this pairing's slot has been seen (#593). A slot left over
+                // Only once the row has been seen holding a slot since the tap (#593). A slot left over
                 // from an earlier pairing can be released just as Pair is tapped again,
                 // and its stateless row then reaches here before `pair()` has made the
                 // new slot. Ending the pairing on that would send the new capabilities to
                 // nobody. The client broadcasts in order, so the new slot's state arrives
-                // after any such stale release.
+                // after any such stale release. The flag means "seen since the tap", not
+                // "this pairing's slot": a leftover whose own state broadcast was still
+                // queued at the tap arms it, and its release then still ends the pairing.
                 //
                 // A slot that holds roles never loses its state while it is kept — it
                 // goes to `.reconnecting` — and the discovery sweep exempts slots, so
