@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-11-19 (#588) — §11: OQDM6 and OQDM7 record what superseded their original answers (§3.7, §3.8), instead of contradicting them. §9 gains rows for #175's five crash-resume fields, #263's `trackSegmentIndex`, #277's `isHealthWorkoutOwed` and #406's `isRouteComplete`, and the MVP rows are renumbered into the order they shipped. Documentation only; no schema change.
+**Updated:** 2026-11-20 (#606) — §3.1: `isHealthWorkoutOwed` is not set for a launch close-out with no ride-end marker. Its end is the relaunch, so it is finalized never owed a workout, in the same write. Documentation only; no schema change.
+**Previously:** 2026-11-19 (#588) — §11: OQDM6 and OQDM7 record what superseded their original answers (§3.7, §3.8), instead of contradicting them. §9 gains rows for #175's five crash-resume fields, #263's `trackSegmentIndex`, #277's `isHealthWorkoutOwed` and #406's `isRouteComplete`, and the MVP rows are renumbered into the order they shipped. Documentation only; no schema change.
 **Previously:** 2026-11-15 (#245) — §3.1 reconciled with `Ride.swift`, the source of truth: it gains the ten stored properties it was missing (#175's crash-resume fields, W5's cadence columns, `trackSegmentIndex`, `isRouteComplete`, `isHealthWorkoutOwed`) and drops the `radarEvents` and `vehiclePassEvents` `@Relationship` arrays, which #172 replaced with `rideId` foreign keys. `recordingState` is typed `Ride.RecordingState`, distinct from `ActiveRideFeature`'s unpersisted `RideRecordingState`. §2's ERD marks the `rideId` links as foreign keys. §9 states the declaration-site-default rule that §3.1 and §3.10 already cited. Documentation only; no schema change.
 **Previously:** 2026-11-11 (#151) — §3.1: `Ride.weather` is now a list of `RideWeatherSample`s, one per forecast fetched during the ride, in place of the single `RideWeather` captured at the start. Same `weatherData` column, so no migration: nothing wrote it before.
 **Previously:** 2026-11-05 (#536) — §3.1: `Ride` gains `calorieSeriesData`, W23's calorie series stored with #460's total so S15's Active Calories chart doesn't move when the rider's Health body weight changes. Its last point is the stored total. §9 records the migration.
@@ -207,7 +208,9 @@ final class Ride {
 
     // MARK: - Apple Health (#277)
     // Set by finalizeRide, cleared once the ride's HKWorkout is written or skipped as a duplicate;
-    // RideHealthWorkout.backfill writes every ride still owed one. The declaration default is what
+    // RideHealthWorkout.backfill writes every ride still owed one. A launch close-out with no
+    // ride-end marker is finalized never owed one, in the same write (#606): it ends at the
+    // relaunch, so a workout would span every hour since the kill. The declaration default is what
     // migration gives rides that ended before this existed, so they are not owed: the ones since
     // #250 already have their workout.
     var isHealthWorkoutOwed: Bool = false

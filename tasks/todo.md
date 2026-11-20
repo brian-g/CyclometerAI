@@ -2805,3 +2805,27 @@ links that also reach this branch. The normal path is unchanged: `unpairDisconne
 exact transport call list. One narrow race is accepted, as for CSC: a stray `.connected` handled just as
 `setPairedSensor` re-claims the same strap cancels its fresh connect; the rescan or the next ride's scan
 reconnects it. The full suite was not run; only the HR suites drive the live HR client.
+
+---
+
+# #606 — A no-marker orphan can get a relaunch-length Health workout between its finalize and settle
+
+Branch: `fix/606`
+
+- [x] `PersistenceClient.finalizeRideWithoutWorkout`: the launch close-out with no ride-end marker ends the ride
+      (relaunch time, no export) and leaves it never owed a workout in one write, through
+      `RidePersistenceActor.finalizeRide(owesHealthWorkout: false)`; the separate settle after it is gone
+- [x] AppFeature's close-out racing a start (#175, #357) calls it in place of `finalizeRide` + `settleRideHealthWorkout`
+- [x] `resumableRideFetchedDuringAStartWithoutItsMarker` runs a workout backfill inside the write, as a Finish
+      landing there would, and expects no workout; new `finalizeWithoutWorkoutIsNeverOwed` against the live store
+- [x] Affected suites (AppFeature, PersistenceClient, RideEndFailure, RideHealthWorkout, PairingScanBackground,
+      StartSheetPresentation, NavigationPipeline) pass. Full `CyclometerTests`: one failure,
+      `ActiveRideFeatureTimerTests.noCheckpointWhilePaused()` hitting the 120 s allowance; it passes on its own
+
+**Review.** The orphan's row never reads as owed, so no backfill can see it, whatever order the writes land in.
+A ride closed out with its marker still goes through `finalizeRide` and keeps its workout (#584).
+
+**Code review (xhigh).** No correctness findings. Fixed: the StartSheet orphan test now records only
+`finalizeRideWithoutWorkout`, so a regression to `finalizeRide` fails it; two close-out tests wait for the
+`reloadRides` the effect sends after its write instead of asserting straight after `send`; the
+`Ride.isHealthWorkoutOwed` comment names the exception.

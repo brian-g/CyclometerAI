@@ -49,7 +49,12 @@ actor RidePersistenceActor {
     /// Ride-end: aggregates + endedAt + .ended in one fetch/save. Closing out a ride
     /// is logically one atomic write, not the two independent round trips an earlier
     /// version of this actor required to avoid two contexts racing on the same row.
-    func finalizeRide(id: UUID, endedAt: Date, summary: RideSummaryUpdate, gpxFileURL: URL?) throws {
+    ///
+    /// `owesHealthWorkout` is false only for a launch close-out with no ride-end marker (#606):
+    /// its end is the relaunch, so it is never owed a workout, not even between two writes.
+    func finalizeRide(
+        id: UUID, endedAt: Date, summary: RideSummaryUpdate, gpxFileURL: URL?, owesHealthWorkout: Bool = true
+    ) throws {
         try savingChanges("finalizeRide", id: id, context: modelContext) {
             let ride = try fetchRide(id: id)
             apply(summary, to: ride)
@@ -57,8 +62,8 @@ actor RidePersistenceActor {
             ride.recordingState = .ended
             ride.gpxFileURL = gpxFileURL
             // Durably over, so now owed its Apple Health workout (#277) — on every path that
-            // ends a ride, since all of them come through here.
-            ride.isHealthWorkoutOwed = true
+            // ends a ride, since all of them come through here, bar the one whose end is unknown.
+            ride.isHealthWorkoutOwed = owesHealthWorkout
             // The live finish's ascent, descent and energy (#460). Without them — a close-out,
             // or a resume whose saved track hadn't come back — the ride is owed them from its
             // saved track instead (`RideFinishStats.backfill`).

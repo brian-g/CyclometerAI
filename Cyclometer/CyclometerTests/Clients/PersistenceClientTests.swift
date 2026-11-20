@@ -485,6 +485,33 @@ struct PersistenceClientTests {
         )])
     }
 
+    /// #606: a launch close-out with no ride-end marker is ended and never owed its workout in
+    /// one write, so no read can find it owed in between. Still owed what the other backfills
+    /// give it: its finish stats and its thumbnail.
+    @Test("finalizeRideWithoutWorkout ends the ride with no export and never makes it owed a workout")
+    func finalizeWithoutWorkoutIsNeverOwed() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let startedAt = Date(timeIntervalSince1970: 1_000_000)
+        let relaunch = startedAt.addingTimeInterval(36_000)
+        let rideId = UUID()
+        try await client.createRide(rideId, startedAt, nil)
+
+        try await client.finalizeRideWithoutWorkout(rideId, relaunch, RideSummaryUpdate(
+            rideId: rideId, recordingState: .active,
+            durationSeconds: 1_200, distanceMeters: 8_000, averageSpeedMPS: 6.6, maxSpeedMPS: 11
+        ))
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(ride.recordingState == .ended)
+        #expect(ride.endedAt == relaunch)
+        #expect(ride.gpxFileURL == nil)
+        #expect(ride.distanceMeters == 8_000)
+        #expect(ride.isHealthWorkoutOwed == false)
+        #expect(ride.isFinishStatsOwed)
+        #expect(try await client.fetchRidesOwedHealthWorkout().isEmpty)
+        #expect(try await client.fetchRideIdsMissingMapThumbnail() == [rideId])
+    }
+
     @Test("fetchRidesOwedHealthWorkout is newest first, and a settled ride leaves it")
     func settledRideLeavesOwedList() async throws {
         let (client, swiftDataStack) = Self.makeLiveClient()
