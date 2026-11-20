@@ -1902,10 +1902,6 @@ extension ActiveRideFeature.State {
         recordingState = summary.recordingState == .paused ? .paused : .active
         cadence.isRecording = recordingState == .active
         sensorHealth.isRecording = recordingState == .active
-        // The `.onChange` forwarders only see transitions, and a paused resume starts with
-        // the parent already suspended — so seed the child here, or a paused ride feeds the
-        // window until something flips suspension (#610).
-        calibration.isSuspended = isCalibrationSuspended
         // Only meaningful alongside `.paused` (`.pauseTapped`/`.resumeTapped`
         // always clear it) — restoring it lets the `case .speed` auto-resume
         // guard keep working after a resume exactly as it did before the kill,
@@ -1973,5 +1969,10 @@ extension ActiveRideFeature.State {
         // And whether it had finished (#406): otherwise the ring would read short of full, and
         // riding on past the end would match nothing and go off route.
         navigation.isRouteComplete = summary.isRouteComplete
+        // The `.onChange` forwarders only see transitions, and a paused resume starts with
+        // the parent already suspended — so seed the child here, or a paused ride feeds the
+        // window until something flips suspension (#610). Last, because it derives from
+        // recording, radar and navigation state, and must see whatever this init restores.
+        calibration.isSuspended = isCalibrationSuspended
     }
 }

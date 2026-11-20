@@ -3930,13 +3930,14 @@ struct ActiveRideFeatureHRDropoutTests {
 // MARK: - Calibration suspension
 
 /// PRD §8.9 suspends wheel auto-calibration during radar alerts. The parent derives
-/// that from `isCalibrationSuspended` and forwards it on the transition
-/// (`ActiveRideFeature.swift:294`).
+/// that from `isCalibrationSuspended` and forwards it on the transition (the
+/// `.onChange(of: \.isCalibrationSuspended)` forwarders in `ActiveRideFeature.body`).
 ///
 /// The pause/resume half of that `||` is already asserted incidentally by the state
 /// machine suite. The radar half was not reachable there: those stores start from
 /// `ActiveRideFeature.State()`, whose `recordingState` defaults to `.idle`, so
-/// suspension is already on before a target ever lands. These stores start recording.
+/// suspension is already on before a target ever lands. These stores start recording,
+/// except the #610 ones, which start from a ride resumed after a kill.
 @MainActor
 @Suite("ActiveRideFeature — calibration suspension")
 struct ActiveRideFeatureCalibrationSuspensionTests {
@@ -3969,10 +3970,14 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
         )
     }
 
+    /// The state is an autoclosure so `TestStore` builds it inside its own dependency
+    /// scope, as the other parameterized helpers in this file do: `@Shared` resolves when
+    /// the state is constructed.
     private func makeStore(
-        state: ActiveRideFeature.State = ActiveRideFeature.State(recordingState: .active)
+        state: @autoclosure () -> ActiveRideFeature.State
+            = ActiveRideFeature.State(recordingState: .active)
     ) -> TestStoreOf<ActiveRideFeature> {
-        TestStore(initialState: state) {
+        TestStore(initialState: state()) {
             ActiveRideFeature()
         } withDependencies: {
             $0.continuousClock = TestClock()
@@ -4289,8 +4294,9 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
     }
 
     /// #610: a paused resume starts with the parent already suspended, so neither
-    /// `.onChange` forwarder sees a transition — the child has to be seeded.
-    @Test("A ride resumed while paused keeps calibration suspended, so moving adds nothing")
+    /// `.onChange` forwarder sees a transition — the child has to be seeded. And the
+    /// Resume tap has to reopen what the seed shut, or calibration stays off all ride.
+    @Test("A ride resumed while paused keeps calibration suspended until the rider resumes")
     func pausedResumeSuspendsCalibration() async {
         let store = makeStore(state: Self.resumed(.paused))
         #expect(store.state.calibration.isSuspended)
@@ -4312,6 +4318,30 @@ struct ActiveRideFeatureCalibrationSuspensionTests {
         }
         #expect(store.state.calibration.gpsMeters == 0)
         #expect(store.state.calibration.revolutions == 0)
+
+        // The rider taps Resume. Its segment, recorder and checkpoint changes are other
+        // suites' business; here only the gate matters. It reopens on the transition, and
+        // the interval in progress is forgotten so the next fix re-seeds (#587).
+        store.exhaustivity = .off
+        await store.send(.resumeTapped)
+        await store.receive(\.calibration.suspensionChanged) {
+            $0.calibration.isSuspended = false
+            $0.calibration.lastFixTimestamp = nil
+        }
+        store.exhaustivity = .on
+
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 2)))) {
+            $0.calibration.lastFixTimestamp = Self.fix(at: 2).timestamp
+        }
+        await store.send(.calibration(.wheelRevolutionsReceived(5))) {
+            $0.calibration.intervalRevolutions = 5
+        }
+        await store.send(.calibration(.locationUpdated(Self.fix(at: 3)))) {
+            $0.calibration.gpsMeters = 10
+            $0.calibration.revolutions = 5
+            $0.calibration.intervalRevolutions = 0
+            $0.calibration.lastFixTimestamp = Self.fix(at: 3).timestamp
+        }
     }
 
     @Test("A ride resumed while recording starts with calibration unsuspended")
