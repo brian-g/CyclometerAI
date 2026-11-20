@@ -2666,6 +2666,36 @@ this too).
 
 ---
 
+# #590 — One-shot stream test races a 300 ms sleep
+
+Branch: `fix/590-location-oneshot-race`
+
+- [x] `LocationManagerState.init(makeManager:)`: the manager factory can be injected; `shared` behaves as before
+- [x] `oneShotDoesNotDisturbAnActiveStream` uses its own instance over a stub manager that never reaches
+      CoreLocation, pushes a fix through the delegate, and expects the stream to deliver it. No sleep race
+- [x] Also expects no `requestLocation()` while streaming (CoreLocation says it can't run alongside
+      `startUpdatingLocation()`)
+- [x] Location suites: 14/14 pass, 3/3 runs
+- [x] Revert checks (own derivedData): one-shot calling `stopUpdates()` fails; streaming guard removed fails
+- [x] Full `CyclometerTests`: 2,651 pass, 0 failures
+
+**Review.** The race was not in the guard but in the real manager: any request draws a `kCLErrorDenied` ~2 s
+later on an unauthorized simulator, and a denial finishes every stream. The test now runs where no denial can
+come, so the open stream is checked by delivery rather than by a timeout. The two timeout tests still drive
+`shared`; they wait only for their own 200 ms timers, which a denial would also resolve with nil.
+
+**Code review follow-up.**
+- [x] `init(makeManager:)` has no default factory: `LocationManagerState()` no longer compiles, which keeps the
+      singleton deliberate as the removed `private init()` did; `shared` passes `{ CLLocationManager() }`
+- [x] Stream test waits `allowStrayCallsToLand()` after the one-shot, so a stop or request set off asynchronously
+      lands before the checks instead of after them
+- [x] Stub counts `stopUpdatingLocation()` and the test expects none: a direct hardware stop left the stream open
+      and passed before
+- [x] Comments: CoreLocation documents `startUpdatingLocation()` cancelling a pending `requestLocation()`, and the
+      two as not usable together, not the reverse. The stub's doc no longer claims authorization is stubbed
+- [x] Revert checks (own derivedData, cache off): a fire-and-forget `stopUpdates()` fails delivery + stop count; a
+      direct `stopUpdatingLocation()` fails the stop count only
+- [x] Location suites: 14/14 pass, 3 iterations
 # #589 — CI "Build for testing" can't find the simulator it just resolved
 
 Branch: `fix/589-build-for-testing-destination`

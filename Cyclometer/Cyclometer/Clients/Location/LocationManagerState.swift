@@ -15,7 +15,7 @@ private let logger = Logger.cyclometer(.location)
 /// CoreLocation calls, `lock` for continuation storage.
 final class LocationManagerState: NSObject, @unchecked Sendable, CLLocationManagerDelegate {
 
-    static let shared = LocationManagerState()
+    static let shared = LocationManagerState(makeManager: { CLLocationManager() })
 
     private var manager: CLLocationManager?
     private var updateContinuations: [Int: AsyncStream<LocationUpdate>.Continuation] = [:]
@@ -25,8 +25,16 @@ final class LocationManagerState: NSObject, @unchecked Sendable, CLLocationManag
     private var isRequestingAuth = false
     private var nextID = 0
     private let lock = NSLock()
+    private let makeManager: @MainActor () -> CLLocationManager
 
-    override private init() { super.init() }
+    /// Production uses `shared` only, for the reason above, so the factory has no default:
+    /// `LocationManagerState()` does not compile, and a second instance takes a deliberate one.
+    /// Tests pass a stub manager that never starts location services, so no `kCLErrorDenied`
+    /// can arrive and finish a stream mid-assertion (#590).
+    init(makeManager: @escaping @MainActor () -> CLLocationManager) {
+        self.makeManager = makeManager
+        super.init()
+    }
 
     // MARK: Authorization
 
@@ -210,7 +218,7 @@ final class LocationManagerState: NSObject, @unchecked Sendable, CLLocationManag
     @MainActor
     private func ensureManager() -> CLLocationManager {
         if let manager { return manager }
-        let mgr = CLLocationManager()
+        let mgr = makeManager()
         mgr.delegate = self
         mgr.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         mgr.allowsBackgroundLocationUpdates = true
