@@ -1228,7 +1228,11 @@ struct VariaRadarIntegrationTests {
         await harness.client.endPairingScan()
         // `release` runs inside `endPairingScan`, so the replay shows the drop at once.
         try #require(await currentState(harness) == .disconnected)
-        #expect(harness.calls.value.suffix(2) == [.disconnect(id, "radar"), .stopScanning([radarServiceUUID])])
+        // Either order: the stop is enqueued under the lock that decided it and can land
+        // before `release` sends the disconnect (#586).
+        let tail = Array(harness.calls.value.suffix(2))
+        #expect(tail.contains(.disconnect(id, "radar")))
+        #expect(tail.contains(.stopScanning([radarServiceUUID])))
 
         // Still paired: the next pairing scan reconnects it.
         #expect(await states.next() == .disconnected)

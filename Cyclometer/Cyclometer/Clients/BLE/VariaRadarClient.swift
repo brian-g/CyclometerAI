@@ -411,13 +411,17 @@ private final class RadarClientState: @unchecked Sendable {
         let call = lock.withLock { () -> Task<Void, Never>? in
             guard connectionState == .disconnected else { return nil }
             isScanning = true
+            // In the acquisition that issues the start, which can land as soon as it is
+            // enqueued (#586). Published after the lock, `.scanning` could overwrite the
+            // `.connecting` or `.connected` of a radar that start had already found.
+            _ = setConnectionStateLocked(.scanning)
             return scanCalls.enqueue(.start)
         }
         guard let call else {
             logger.notice("startScanning skipped — not in disconnected state")
             return
         }
-        setConnectionState(.scanning)
+        logConnectionState(.scanning)
         await call.value
     }
 
@@ -897,18 +901,25 @@ private final class RadarClientState: @unchecked Sendable {
         // Mutate and broadcast in one critical section so subscribers observe
         // transitions in order and replay-on-subscribe can't miss one. Yielding
         // to an AsyncStream never blocks, so holding the lock here is safe.
-        let changed = lock.withLock { () -> Bool in
-            guard connectionState != newState else { return false }
-            connectionState = newState
-            for continuation in stateContinuations.values { continuation.yield(newState) }
-            // `DiscoveredDevice.isConnected` is derived from this, and every transition
-            // in and out of a connection runs through here.
-            broadcastDiscoveredLocked()
-            return true
+        if lock.withLock({ setConnectionStateLocked(newState) }) {
+            logConnectionState(newState)
         }
-        if changed {
-            logger.notice("connection state → \(String(describing: newState), privacy: .public)")
-        }
+    }
+
+    /// Store and broadcast a state change, returning whether it changed. The caller logs it
+    /// with `logConnectionState` once the lock is dropped. Must hold the lock.
+    private func setConnectionStateLocked(_ newState: VariaRadarClient.ConnectionState) -> Bool {
+        guard connectionState != newState else { return false }
+        connectionState = newState
+        for continuation in stateContinuations.values { continuation.yield(newState) }
+        // `DiscoveredDevice.isConnected` is derived from this, and every transition
+        // in and out of a connection runs through here.
+        broadcastDiscoveredLocked()
+        return true
+    }
+
+    private func logConnectionState(_ newState: VariaRadarClient.ConnectionState) {
+        logger.notice("connection state → \(String(describing: newState), privacy: .public)")
     }
 
     /// Store and publish the battery level. Same single-critical-section discipline as

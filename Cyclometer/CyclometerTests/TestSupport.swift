@@ -273,7 +273,13 @@ final class CallGate: @unchecked Sendable {
     func arm() { lock.withLock { armed = true; opened = false } }
 
     func pass() async {
-        guard lock.withLock({ armed }) else { return }
+        // Catch one call and disarm: there is one `held` slot, so a second call caught while
+        // armed would overwrite it and leak the first one's continuation, hanging its caller.
+        let caught = lock.withLock { () -> Bool in
+            defer { armed = false }
+            return armed
+        }
+        guard caught else { return }
         reachedContinuation.yield()
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let resumeNow = lock.withLock { () -> Bool in
