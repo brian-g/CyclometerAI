@@ -22,14 +22,30 @@ enum GPSFixFilter {
     /// window on, defined here so the two gates cannot drift apart.
     static let maxHorizontalAccuracy = 10.0
 
-    /// Longest the gate may suppress recording before a fix is taken regardless of how
-    /// poor it is.
+    /// Longest the gate may suppress recording before it takes a fix worse than
+    /// `maxHorizontalAccuracy`, as long as that fix is within `maxBackstopAccuracy`.
     ///
     /// Without it a ride spent under heavy tree cover — where accuracy can sit above the
     /// threshold for minutes — would record no track at all, which is a far worse outcome
     /// for the rider than a coarse one. Ten seconds keeps the degraded track recognisable
     /// while still discarding ~90% of the points in such a stretch.
     static let maxSuppressedInterval: TimeInterval = 10
+
+    /// The worst fix the backstop takes. Anything worse waits for `lastResortInterval`.
+    ///
+    /// A fix's error is about its reported accuracy, and under cover the errors lean one way, so
+    /// a run of 20–45 m fixes draws a plausible line beside the road rather than scatter. On
+    /// 2026-11-21 the first 300 m of the ride came out 27–40 m off the rider's return over the
+    /// same ground; the straight line from the last good point to the next was within 7 m.
+    /// Replaying 12 rides, every backstop fix worse than 20 m sat off the line its neighbours
+    /// drew, none on a bend the rider took, and the longest stretch it leaves straight-lined
+    /// is 52 s / 263 m.
+    static let maxBackstopAccuracy = 20.0
+
+    /// Longest the gate may go without recording before it takes any valid fix, however poor.
+    /// Keeps a ride whose every fix is worse than `maxBackstopAccuracy` from recording no track
+    /// at all. Above the longest such stretch seen (52 s), so no recorded ride reaches it.
+    static let lastResortInterval: TimeInterval = 60
 
     /// Whether a fix of this accuracy may be recorded.
     ///
@@ -42,18 +58,22 @@ enum GPSFixFilter {
     /// Whether this fix may be recorded, given how long it has been since one was.
     ///
     /// `sinceLastRecorded` is measured from the last recorded point, or from ride start
-    /// while there is none — so a ride whose every fix is poor still records a track at the
-    /// backstop's cadence rather than an empty one.
+    /// while there is none — so a ride whose every fix is poor still records a track, at the
+    /// backstop's cadence or, worse than `maxBackstopAccuracy`, the last resort's, rather than
+    /// an empty one.
     ///
-    /// The backstop only ever rescues a *valid* fix: a negative accuracy means CoreLocation
-    /// is telling us the position itself is meaningless, and no amount of waiting makes it
-    /// worth writing down.
+    /// Neither rescues an *invalid* fix: a negative accuracy means CoreLocation is telling us
+    /// the position itself is meaningless, and no amount of waiting makes it worth writing
+    /// down.
     static func isRecordable(
         horizontalAccuracyMeters: Double,
         sinceLastRecorded: TimeInterval
     ) -> Bool {
         guard horizontalAccuracyMeters > 0 else { return false }
-        return isTrustworthy(horizontalAccuracyMeters)
-            || sinceLastRecorded >= maxSuppressedInterval
+        if isTrustworthy(horizontalAccuracyMeters) { return true }
+        if horizontalAccuracyMeters <= maxBackstopAccuracy {
+            return sinceLastRecorded >= maxSuppressedInterval
+        }
+        return sinceLastRecorded >= lastResortInterval
     }
 }

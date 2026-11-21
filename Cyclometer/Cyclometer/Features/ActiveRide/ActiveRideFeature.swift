@@ -432,7 +432,7 @@ struct ActiveRideFeature {
         /// it is actually made of. False until the first fix arrives.
         var isFixRecordable: Bool = false
         /// When a track point was last recorded, or ride start while none has been —
-        /// what `GPSFixFilter.maxSuppressedInterval` is measured against.
+        /// what `GPSFixFilter.isRecordable`'s backstops are measured against.
         var lastRecordablePositionAt: Date? = nil
         var isLocationAvailable: Bool = false
         /// Consecutive seconds at or below `stationarySpeedMPS` — not literally zero,
@@ -646,9 +646,9 @@ struct ActiveRideFeature {
                     state.recordingState = .active
                 }
                 let startedAt = date.now
-                // Seeds the backstop `GPSFixFilter.maxSuppressedInterval` is measured
-                // against, so a ride that never sees a good fix still starts recording one
-                // 10 s in rather than never (#210).
+                // Seeds the backstops `GPSFixFilter.isRecordable` measures against, so a ride
+                // that never sees a good fix still starts recording one 10 s in (60 s if every
+                // fix is worse than 20 m) rather than never (#210).
                 state.lastRecordablePositionAt = startedAt
                 return .merge(
                     .send(.speed(.startListening)),
@@ -1730,7 +1730,7 @@ struct ActiveRideFeature {
     ///
     /// Also nil while the fix behind `coordinate` is too poor to record (#210): the track
     /// takes a gap rather than a position the app already knows is untrustworthy.
-    /// `GPSFixFilter.maxSuppressedInterval` bounds how long such a gap can run.
+    /// `GPSFixFilter.lastResortInterval` bounds how long such a gap can run.
     ///
     /// And nil for a tick under `minimumTrackPointSpacing` after the last recorded point
     /// (#582). That is mostly the timer's catch-up tick, which isn't a second of its own. It can

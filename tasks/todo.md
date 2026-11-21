@@ -2876,3 +2876,15 @@ A ride closed out with its marker still goes through `finalizeRide` and keeps it
 `finalizeRideWithoutWorkout`, so a regression to `finalizeRide` fails it; two close-out tests wait for the
 `reloadRides` the effect sends after its write instead of asserting straight after `send`; the
 `Ride.isHealthWorkoutOwed` comment names the exception.
+
+---
+
+## GPS backstop accuracy ceiling (branch `gps-backstop-accuracy-ceiling`, 2026-11-21)
+
+The 2026-11-21 ride's first ~300 m was drawn 27–40 m off the road: #210's 10 s backstop took fixes of any accuracy (14–47 m), whose errors all leaned east. A straight line between the good fixes would have been within 7 m. Option 1 chosen: the backstop takes only fixes ≤ 20 m.
+
+- [x] `GPSFixFilter.maxBackstopAccuracy = 20`; fixes worse than that wait for `lastResortInterval = 60` s, so an all-poor ride still records a track (#210's guarantee)
+- [x] Replayed 12 rides: 21 backstop fixes > 20 m, all off the line their neighbours draw; longest new straight-line stretch 52 s / 263 m
+- [x] `GPSFixFilterTests`: 10 pass, including the 11-21 start replay; revert check fails 3 of them
+- [ ] Brian rides it
+- [x] Full `CyclometerTests`: 3058 passed, 0 failures
