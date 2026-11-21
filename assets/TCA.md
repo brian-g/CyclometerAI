@@ -2,6 +2,7 @@
 **Version:** 1.2  
 **Date:** 2026-05-21  
 **Updated:** 2026-05-22 - HKWorkout write at ride end; SyncClient + RideSummaryFeature spec; service sync from S10  
+**Updated:** 2026-11-21 - Strava (Phase 2, PRD §8.12): new §4.15 `KeychainClient`, `StravaAuthClient`, `StravaClient`, `AccountsFeature`, `SyncQueueFeature`, `StravaRoutesFeature`; S10's Sync To replaces `RideSyncSheetFeature`  
 **Updated:** 2026-09-30 - §3 and §8 rewritten to match the implemented tree (#339, #342)  
 **Updated:** 2026-10-09 - `AltimeterClient` and `LocationUpdate.verticalAccuracy` (#387)  
 **Status:** Draft — Ready for Engineering Review  
@@ -43,7 +44,10 @@ All side effects are injected as `@Dependency` values. No feature directly impor
 @Dependency(\.persistence)        var persistence: PersistenceClient
 @Dependency(\.navigation)         var navigation: NavigationClient
 @Dependency(\.wheelCalibration)   var wheelCalibration: WheelCalibrationClient
-@Dependency(\.sync)              var sync: SyncClient
+@Dependency(\.sync)              var sync: SyncClient            // Phase 2: superseded by SyncQueueFeature + StravaClient (§4.15)
+@Dependency(\.keychain)          var keychain: KeychainClient    // Phase 2 (§4.15)
+@Dependency(\.stravaAuth)        var stravaAuth: StravaAuthClient
+@Dependency(\.strava)            var strava: StravaClient
 @Dependency(\.continuousClock)    var clock: any Clock<Duration>  // TCA built-in
 ```
 
@@ -881,6 +885,60 @@ used to cost them 20 m of riding still being told they were off a route they wer
 `arrivalMeters` (30) of the end the route is done: no more turns, and riding on past the finish is
 not being off-route. A turn already within `minimumAnnounceDistanceMeters` (10) is not announced at
 all — reachable by rejoining right at a junction, where the tone would land after the decision.
+
+---
+
+### 4.15 Strava (Phase 2)
+
+PRD §8.12. Three clients and four features; every network call goes through `StravaClient`, so reducers test
+against its mock and the transport tests against recorded responses.
+
+```swift
+@DependencyClient
+struct KeychainClient {
+    var read:   @Sendable (_ account: String) throws -> Data?
+    var write:  @Sendable (_ account: String, _ data: Data) throws -> Void
+    var delete: @Sendable (_ account: String) throws -> Void
+}
+
+/// ASWebAuthenticationSession or the Strava app, then the token service. Owns refresh: an actor inside the live
+/// value serializes it, so concurrent requests refresh once and the rotated refresh token is written first.
+@DependencyClient
+struct StravaAuthClient {
+    var connect:     @Sendable () async throws -> ConnectedService       // OAuth + exchange + Keychain write
+    var accessToken: @Sendable () async throws -> String                 // refreshes under 5 min left
+    var disconnect:  @Sendable () async throws -> Void                   // revoke + Keychain delete
+}
+
+@DependencyClient
+struct StravaClient {
+    var upload:          @Sendable (StravaUpload) async throws -> StravaUploadID
+    var uploadStatus:    @Sendable (StravaUploadID) async throws -> StravaUploadStatus   // .processing / .ready(activityID) / .duplicate(activityID) / .failed
+    var segmentEfforts:  @Sendable (_ activityID: String) async throws -> [StravaSegmentEffort]
+    var routes:          @Sendable (_ page: Int) async throws -> [StravaRouteSummary]
+    var route:           @Sendable (_ routeID: String) async throws -> StravaRouteDetail  // segments
+    var routeGPX:        @Sendable (_ routeID: String) async throws -> Data
+    var bikes:           @Sendable () async throws -> [StravaGear]                       // later, Multi-bike
+    var setGear:         @Sendable (_ activityID: String, _ gearID: String) async throws -> Void
+}
+```
+
+`StravaClient`'s live value adds the bearer token from `StravaAuthClient`, retries once after a 401 with a refreshed
+token, reads the rate-limit headers, and throws `StravaError.rateLimited(until:)` on a 429.
+
+| Feature | Scope | Does |
+|---|---|---|
+| `AccountsFeature` | `SettingsFeature` | S12 Accounts rows and S12.1: connect, disconnect, Reconnect, granted scopes |
+| `SyncQueueFeature` | `AppFeature` (app-lifetime) | Runs uploads after S10 closes: upload, poll `uploadStatus` (1, 2, 4, then 8 s, for 2 min), write `RideSyncRecord`. On launch resumes records left `pending` or `processing`. Replaces `SyncClient.uploadRide`'s single call |
+| `RideSummaryFeature` | — | Gains `syncDestinations: [SyncDestination: Bool]` for S10's Sync To; `.task` loads the defaults; `.finishTapped` and dismissal save them and send the chosen services to `SyncQueueFeature`. Health off sends `healthKit.deleteWorkout`. `RideSyncSheetFeature` is retired |
+| `StravaRoutesFeature` | S19 and S05.2 | Paged browser; choosing fetches `routeGPX`, imports through `GPXRouteImporter`, upserts by `stravaRouteID` |
+
+S15's `RideDetailFeature` and S20's `RouteDetailFeature` each gain a `segments` child: load the cache, fetch when it
+is missing (S15: also when empty and the upload is under ten minutes old; S20: also after seven days), save it.
+S20's also reads the efforts of the route's synced previous rides, fetching up to five uncached, and merges them
+with the route's own segments through `RouteSegmentMatcher` — a pure function (segment endpoints within 30 m of the
+polyline, ordered by distance along it, best time per segment) with its own unit tests. No Explore Segments call
+(PRD §8.12).
 
 ---
 
