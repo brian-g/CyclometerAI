@@ -240,9 +240,10 @@ final class LocationManagerState: NSObject, @unchecked Sendable, CLLocationManag
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         // Ahead of the stream-subscriber check below: a one-shot caller is typically the
         // only thing listening, and that guard would return before it was ever answered.
-        if let first = locations.first {
-            drainOneShots(with: Coordinate(latitude: first.coordinate.latitude,
-                                           longitude: first.coordinate.longitude))
+        // The newest fix: CoreLocation orders a batch oldest first.
+        if let latest = locations.last {
+            drainOneShots(with: Coordinate(latitude: latest.coordinate.latitude,
+                                           longitude: latest.coordinate.longitude))
         }
 
         let continuations = lock.withLock { Array(updateContinuations.values) }
