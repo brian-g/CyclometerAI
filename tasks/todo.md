@@ -2903,3 +2903,14 @@ backstop's cadence. Left open, because each needs a decision or reaches past thi
 - [x] Saved-track readers get untrusted points on the line between trusted neighbours (`interpolatingUntrustedPositions`, applied in the live `fetchTrackPoints`)
 - [x] Tests: interpolation (5), live-store round trip, v3→v4 migration, three recording tests; each fails with its piece reverted
 - [x] Full `CyclometerTests`: 3070 passed, 0 failures
+
+**Code review (xhigh), second pass.** Fixed: a run of untrusted points opening a segment took the position held
+from before the pause, which drew #263's chord again; it now takes the segment's first trusted position, where the
+live map starts it. `resume()` changes the gate without logging it; both sites now share `logRecordingGate`. Two
+stale comments. Full `CyclometerTests`: 3070 passed, 0 failures. Left open for a decision:
+- During a fix freeze each tick re-writes the frozen fix as trusted, restarting the backstop clock every second and
+  recording a stop that never happened (pre-existing; the clock change makes the wait after it longer).
+- An untrusted point stores the rejected fix's accuracy (possibly −1) beside a position that fix never gave; GPX
+  and the Health route both carry it.
+- A back-to-back batch past the backstop adds every fix to the live map, but only one is saved.
+- Antimeridian interpolation: not reachable for this app's riders; dropped.

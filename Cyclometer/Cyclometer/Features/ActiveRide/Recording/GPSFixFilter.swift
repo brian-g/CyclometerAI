@@ -11,9 +11,10 @@ import Foundation
 /// ("calibration gps gate shut — accuracy 10.3 m"). The app knew the fix was untrustworthy
 /// and wrote it to the track anyway.
 ///
-/// The remedy is to record *nothing* across such a window rather than to substitute a
-/// guess: a consumer straight-lines the gap, which is close to the truth for a rider who
-/// was on the road the whole time. What is not the remedy is filtering on how far the
+/// The remedy is to record no *position* from such a window rather than one the app knows is
+/// wrong: its seconds keep their sensor readings at the last trusted position, marked untrusted,
+/// and a reader of the saved track straight-lines them (`TrackPointDTO.isPositionTrusted`),
+/// which is close to the truth for a rider who was on the road the whole time. What is not the remedy is filtering on how far the
 /// position jumped — the jump at the end of one of these windows is the fix catching up
 /// with ground the rider genuinely covered, and every one of them on that ride is
 /// consistent in both bearing and distance with the speed channel.

@@ -62,9 +62,11 @@ extension TrackPointDTO {
     /// rider across a stretch of poor GPS, so every reader of a saved track — map, GPX, Health
     /// route, energy — agrees with it.
     ///
-    /// A run without a trusted point on both sides in its segment keeps the position it was
-    /// recorded with, the last trusted one. Never across a segment boundary: the rider was paused there,
-    /// and a line across it is the chord #263 removed.
+    /// A run at the end of its segment keeps the position it was recorded with, the last trusted
+    /// one, where the live map's segment ends. A run at the start of one, after a resume, takes the
+    /// segment's first trusted position instead, where the live map's segment starts: the position
+    /// it holds is from before the pause, and a line from there is the chord #263 removed for a
+    /// rider who moved while paused. Never across a segment boundary, for the same reason.
     static func interpolatingUntrustedPositions(_ trackPoints: [TrackPointDTO]) -> [TrackPointDTO] {
         guard trackPoints.contains(where: { !$0.isPositionTrusted }) else { return trackPoints }
         return segments(of: trackPoints).flatMap { segment -> [TrackPointDTO] in
@@ -78,13 +80,14 @@ extension TrackPointDTO {
                     continue
                 }
                 let runEnd = segment[index...].firstIndex(where: \.isPositionTrusted) ?? segment.endIndex
-                if let before, runEnd < segment.endIndex {
+                if runEnd < segment.endIndex {
                     let after = segment[runEnd]
-                    let span = after.timestamp.timeIntervalSince(before.timestamp)
-                    for inRun in index..<runEnd where span > 0 {
-                        let fraction = segment[inRun].timestamp.timeIntervalSince(before.timestamp) / span
-                        segment[inRun].latitude = before.latitude + (after.latitude - before.latitude) * fraction
-                        segment[inRun].longitude = before.longitude + (after.longitude - before.longitude) * fraction
+                    let start = before ?? after
+                    let span = after.timestamp.timeIntervalSince(start.timestamp)
+                    for inRun in index..<runEnd {
+                        let fraction = span > 0 ? segment[inRun].timestamp.timeIntervalSince(start.timestamp) / span : 0
+                        segment[inRun].latitude = start.latitude + (after.latitude - start.latitude) * fraction
+                        segment[inRun].longitude = start.longitude + (after.longitude - start.longitude) * fraction
                     }
                 }
                 index = runEnd

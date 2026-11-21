@@ -1261,8 +1261,8 @@ struct ActiveRideFeature {
             case .locationUpdated(let update):
                 // `coordinate` always takes the freshest fix — the live map marker is
                 // best-effort, and there is nothing better to show. What a poor fix does
-                // not do is enter the recorded track: no polyline vertex here, and no
-                // track point at the next tick (#210).
+                // not do is enter the recorded track: no polyline vertex here, and the next
+                // tick's point holds the last trusted position instead of this one (#210).
                 state.coordinate = update.coordinate
                 if state.sunsetFix?.isFresh(at: date.now) != true {
                     state.sunsetFix = SunsetFix(coordinate: update.coordinate, takenAt: date.now)
@@ -1286,14 +1286,7 @@ struct ActiveRideFeature {
                     }
                 }
                 if wasRecordable != state.isFixRecordable {
-                    let gate = state.isFixRecordable ? "open" : "shut"
-                    logger.notice(
-                        """
-                        recording gps gate \
-                        \(gate, privacy: .public) — accuracy \
-                        \(update.horizontalAccuracy, format: .fixed(precision: 1), privacy: .public) m
-                        """
-                    )
+                    logRecordingGate(isOpen: state.isFixRecordable, accuracyMeters: update.horizontalAccuracy)
                 }
                 state.altitudeResolver.gpsFix(altitude: update.altitude, verticalAccuracy: update.verticalAccuracy)
                 state.heading = update.heading
@@ -1825,7 +1818,11 @@ struct ActiveRideFeature {
         // the pause. And the held fix is judged again on that clock: one the pause let through
         // on its long wait would otherwise be the new stretch's first trusted point (#624 review).
         state.lastRecordablePositionAt = date.now
+        let wasRecordable = state.isFixRecordable
         state.isFixRecordable = GPSFixFilter.isTrustworthy(state.horizontalAccuracy)
+        if wasRecordable != state.isFixRecordable {
+            logRecordingGate(isOpen: state.isFixRecordable, accuracyMeters: state.horizontalAccuracy)
+        }
         beginTrackSegment(&state)
         // After `beginTrackSegment`, so the checkpoint this resume writes already
         // carries the new segment index — a kill before the next one would
@@ -1836,6 +1833,19 @@ struct ActiveRideFeature {
             .run { [persistenceClient] _ in
                 try? await persistenceClient.updateRideSummary(update)
             }
+        )
+    }
+
+    /// The recording log's gate line (#210), which a ride's forensics replay the filter from, so
+    /// every change of `isFixRecordable` writes one.
+    private func logRecordingGate(isOpen: Bool, accuracyMeters: Double) {
+        let gate = isOpen ? "open" : "shut"
+        logger.notice(
+            """
+            recording gps gate \
+            \(gate, privacy: .public) — accuracy \
+            \(accuracyMeters, format: .fixed(precision: 1), privacy: .public) m
+            """
         )
     }
 

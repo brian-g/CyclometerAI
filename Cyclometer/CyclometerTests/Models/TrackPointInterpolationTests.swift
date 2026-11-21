@@ -58,10 +58,20 @@ struct TrackPointInterpolationTests {
         #expect(result.map(\.segmentIndex) == [0, 0, 1, 1, 1])
     }
 
-    @Test("A run at the start of a segment, with no trusted point before it, keeps its position")
-    func leadingRunKeepsHeldPosition() {
-        let track = [point(0, 10, 20, trusted: false), point(1, 12, 22)]
-        #expect(TrackPointDTO.interpolatingUntrustedPositions(track) == track)
+    @Test("A run opening a segment takes its first trusted position, not the one held from before the pause")
+    func leadingRunTakesFirstTrustedPosition() {
+        // Paused at (10, 20), moved while paused, resumed under a poor fix: the run holds the
+        // position from before the pause until the first trusted fix at (50, 60).
+        let track = [
+            point(0, 10, 20),
+            point(60, 10, 20, trusted: false, segment: 1),
+            point(61, 10, 20, trusted: false, segment: 1, bpm: 120),
+            point(62, 50, 60, segment: 1)
+        ]
+        let result = TrackPointDTO.interpolatingUntrustedPositions(track)
+        #expect(result.map(\.latitude) == [10, 50, 50, 50])
+        #expect(result.map(\.longitude) == [20, 60, 60, 60])
+        #expect(result.map(\.heartRateBPM) == [nil, nil, 120, nil])
     }
 
     @Test("A track of trusted points comes back unchanged")
