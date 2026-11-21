@@ -1020,12 +1020,14 @@ Strava is the first connected service. It ships with the Settings → Accounts s
 
 **Priorities, in build order:**
 
-1. Connect a Strava account and keep the connection (S12 Accounts, S12.1)
-2. Upload a ride to Strava, chosen per ride in S10's Sync To section
-3. The ride's segment results on Ride Detail (S15)
-4. A route's segments on Route Detail (S20)
-5. Strava routes at ride start: imported on S19, and chosen on S05.2
-6. Later, with Multi-bike (§6, DataModel.md §3.9): the ride's Strava gear
+1. Connect a Strava account and keep the connection (S12 Accounts, S12.1): #625 token service, #626 sign-in, #627 client, #628 schema, #629 screens
+2. Upload a ride to Strava, chosen per ride in S10's Sync To section: #630 queue, #631 Sync To, #632 S15 Sync and S14 retry
+3. The ride's segment results on Ride Detail (S15): #633
+4. A route's segments on Route Detail (S20): #635
+5. Strava routes at ride start: imported on S19 (#634), and chosen on S05.2 (#636)
+6. Later, with Multi-bike (§6, DataModel.md §3.9): the ride's Strava gear (#638)
+
+Design.sketch frames for all of it: #637.
 
 Not in scope: Strava Live Segments (a licensed partner API that needs a Strava subscription), reading the rider's
 Strava activity history into Cyclometer, and on-device segment detection (Phase 3).
