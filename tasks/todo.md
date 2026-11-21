@@ -2888,3 +2888,11 @@ The 2026-11-21 ride's first ~300 m was drawn 27–40 m off the road: #210's 10 s
 - [x] `GPSFixFilterTests`: 10 pass, including the 11-21 start replay; revert check fails 3 of them
 - [ ] Brian rides it
 - [x] Full `CyclometerTests`: 3058 passed, 0 failures
+
+**Code review (xhigh).** No defect in `isRecordable` itself. Fixed: the parameterized test's title named only the
+backstop's cadence. Left open, because each needs a decision or reaches past this branch:
+- The backstop clock resets on any recordable fix, including one no tick writes. That happens with a batch delivered
+  back to back, or with any fix while paused. A last resort lost this way leaves a gap of 120 s or more.
+- HR, cadence and speed ride on the track point. A 20–60 m stretch now keeps about 1/60 of their seconds, down from 1/10.
+- A 60 s chord cuts across bends on a twisty road under cover.
+- The last resort has no ceiling, so it records km-scale or reduced-accuracy fixes.

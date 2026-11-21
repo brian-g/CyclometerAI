@@ -71,7 +71,7 @@ struct GPSFixFilterTests {
         ))
     }
 
-    @Test("A ride whose every fix is poor still records a track, at the backstop's cadence",
+    @Test("A ride whose every fix is poor still records a track, at the backstop's or the last resort's cadence",
           arguments: [
             (accuracy: 15.0, interval: GPSFixFilter.maxSuppressedInterval),
             (accuracy: 30.0, interval: GPSFixFilter.lastResortInterval)
