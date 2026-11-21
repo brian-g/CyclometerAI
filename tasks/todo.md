@@ -2896,3 +2896,10 @@ backstop's cadence. Left open, because each needs a decision or reaches past thi
 - HR, cadence and speed ride on the track point. A 20–60 m stretch now keeps about 1/60 of their seconds, down from 1/10.
 - A 60 s chord cuts across bends on a twisty road under cover.
 - The last resort has no ceiling, so it records km-scale or reduced-accuracy fixes.
+
+**Review follow-ups (items 1 and 2, on #624).**
+- [x] Backstop clock moves on a written trusted point, not on a fix; seeded at resume, where the held fix is judged again. A batch delivered back to back records the newer fix instead of neither
+- [x] Every tick writes a point: an untrusted one holds the last trusted position and keeps its HR, cadence and speed (`TrackPointDTO.isPositionTrusted`, model v4)
+- [x] Saved-track readers get untrusted points on the line between trusted neighbours (`interpolatingUntrustedPositions`, applied in the live `fetchTrackPoints`)
+- [x] Tests: interpolation (5), live-store round trip, v3→v4 migration, three recording tests; each fails with its piece reverted
+- [x] Full `CyclometerTests`: 3070 passed, 0 failures

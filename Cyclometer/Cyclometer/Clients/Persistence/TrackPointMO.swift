@@ -23,4 +23,7 @@ final class TrackPointMO: NSManagedObject {
     /// `TrackPointDTO.segmentIndex` (#263). Int16 rather than Int32: a resume per minute
     /// for a day of riding is still under 1500.
     @NSManaged var segmentIndex: Int16
+    /// `TrackPointDTO.isPositionTrusted`. Defaults to YES in the model, so every row written
+    /// before it existed reads back as the trusted point it was.
+    @NSManaged var isPositionTrusted: Bool
 }

@@ -439,7 +439,6 @@ struct ActiveRideFeatureLocationTests {
             $0.horizontalAccuracy = 5.0
             $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
-            $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
@@ -498,7 +497,6 @@ struct ActiveRideFeatureLocationTests {
             $0.horizontalAccuracy = 5.0
             $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
-            $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
@@ -530,7 +528,8 @@ struct ActiveRideFeatureLocationTests {
         )
         await store.send(.locationUpdated(poor)) {
             // Live position still follows the freshest fix — but no polyline vertex, and
-            // `isFixRecordable` false means `.elapsedTick` writes no track point either.
+            // `isFixRecordable` false means `.elapsedTick`'s point holds the last trusted
+            // position rather than this one (`poorFixSecondRecordsUntrustedPoint`).
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.horizontalAccuracy = 13.2
@@ -639,7 +638,6 @@ struct ActiveRideFeatureLocationTests {
             $0.horizontalAccuracy = 5.0
             $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
-            $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
         }
         await store.receive(.speed(.gpsSpeedReceived(8.5))) {
@@ -726,7 +724,6 @@ struct ActiveRideFeatureLocationTests {
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
             $0.isFixRecordable = true
-            $0.lastRecordablePositionAt = testDate
             $0.heading = 192.0
         }
         await store.receive(.speed(.gpsSpeedReceived(-1))) {
@@ -997,6 +994,8 @@ struct ActiveRideFeatureTimerTests {
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
+            // The backstops wait from the resume (#624 review).
+            $0.lastRecordablePositionAt = testDate
             $0.trackSegments.append([])
         }
         await store.receive(\.trackRecorder.resumeRecording) {
@@ -2045,6 +2044,8 @@ struct ActiveRideFeatureStateMachineTests {
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
+            // The backstops wait from the resume (#624 review).
+            $0.lastRecordablePositionAt = testDate
             $0.trackSegments.append([])
         }
         await store.receive(\.trackRecorder.resumeRecording) {
@@ -2080,6 +2081,8 @@ struct ActiveRideFeatureStateMachineTests {
             // A resume opens a new track segment, so the map and the export break the
             // line where the rider stopped instead of drawing across it (#263).
             $0.trackSegmentIndex = 1
+            // The backstops wait from the resume (#624 review).
+            $0.lastRecordablePositionAt = testDate
             $0.trackSegments.append([])
         }
         await store.receive(\.trackRecorder.resumeRecording) {
@@ -2462,7 +2465,6 @@ struct ActiveRideFeatureStateMachineTests {
             $0.horizontalAccuracy = 5.0
             $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
-            $0.lastRecordablePositionAt = testDate
             $0.heading = 0
         }
         await store.receive(.speed(.gpsSpeedReceived(8.0))) {
@@ -3915,6 +3917,87 @@ struct ActiveRideFeatureHRDropoutTests {
 
         let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
         #expect(recorded.map(\.timestamp) == [Self.fixedNow, Self.fixedNow - 59, Self.fixedNow - 58])
+    }
+
+    /// A fix past `GPSFixFilter.maxBackstopAccuracy`, as under the 2026-11-21 canopy.
+    private static func poorFix(latitude: Double, at offset: TimeInterval) -> LocationUpdate {
+        LocationUpdate(
+            coordinate: Coordinate(latitude: latitude, longitude: -89.4012), altitude: 281.0, speed: 6.0,
+            horizontalAccuracy: 35.0, heading: 192.0, timestamp: fixedNow + offset
+        )
+    }
+
+    @Test("A second under a poor fix keeps its readings, at the last trusted position, marked untrusted")
+    func poorFixSecondRecordsUntrustedPoint() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.elapsedTick)
+        now.setValue(Self.fixedNow + 1)
+        await store.send(.heartRateUpdated(140))
+        await store.send(.locationUpdated(Self.poorFix(latitude: 43.0740, at: 1)))
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.map(\.isPositionTrusted) == [true, false])
+        // The position the filter rejected is nowhere in the record; the trusted one is held.
+        #expect(recorded.map(\.latitude) == [43.0731, 43.0731])
+        #expect(recorded.last?.horizontalAccuracyMeters == 35.0)
+        #expect(recorded.last?.heartRateBPM == 140)
+        // HR time in zone and calories count the second too.
+        #expect(store.state.calorieTrack.count == 2)
+        // The live map still draws only what the filter let through.
+        #expect(store.state.trackSegments.flatMap { $0 } == [Self.goodFix.coordinate])
+    }
+
+    @Test("Two poor fixes delivered back to back at the last resort record the newer, not neither")
+    func backToBackFixesAtLastResortRecordOne() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.elapsedTick)
+        let lastResort = GPSFixFilter.lastResortInterval
+        now.setValue(Self.fixedNow + lastResort)
+        // One batch from CoreLocation: both fixes land before the next tick.
+        await store.send(.locationUpdated(Self.poorFix(latitude: 43.0790, at: lastResort - 0.5)))
+        await store.send(.locationUpdated(Self.poorFix(latitude: 43.0795, at: lastResort)))
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.last?.isPositionTrusted == true)
+        #expect(recorded.last?.latitude == 43.0795)
+        #expect(store.state.lastRecordablePositionAt == Self.fixedNow + lastResort)
+    }
+
+    @Test("A poor fix let through during a long pause isn't the resumed stretch's first trusted point")
+    func poorFixFromPauseIsJudgedAgainAtResume() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.elapsedTick)
+        await store.send(.pauseTapped)
+        // Long enough into the pause that the last resort takes even a 35 m fix.
+        now.setValue(Self.fixedNow + 2 * GPSFixFilter.lastResortInterval)
+        await store.send(.locationUpdated(Self.poorFix(latitude: 43.0800, at: 2 * GPSFixFilter.lastResortInterval)))
+        await store.send(.resumeTapped)
+        now.setValue(Self.fixedNow + 2 * GPSFixFilter.lastResortInterval + 1)
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.last?.isPositionTrusted == false)
+        #expect(recorded.last?.latitude == 43.0731)
     }
 
     private static let goodFix = LocationUpdate(

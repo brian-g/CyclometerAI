@@ -135,6 +135,29 @@ struct PersistenceClientTests {
         #expect(fetched.map(\.altitudeMeters) == [nil, -28.0, 0])
     }
 
+    @Test("an untrusted point round-trips its flag and comes back on the line between its trusted neighbours")
+    func untrustedPointIsInterpolatedOnFetch() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        // Whole seconds, so the fraction along the line is exactly a half.
+        let base = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        // The middle second was recorded under a poor fix, at the last trusted position, held.
+        let points = [(0.0, 10.0, true), (1, 10, false), (2, 12, true)].map { second, latitude, trusted in
+            TrackPointDTO(
+                rideId: rideId, timestamp: base.addingTimeInterval(second),
+                latitude: latitude, longitude: 20, horizontalAccuracyMeters: trusted ? 2 : 35,
+                speedSource: .none, heartRateBPM: 130, heartRateSource: .bleHR, isPositionTrusted: trusted
+            )
+        }
+
+        try await client.flushTrackPoints(points)
+
+        let fetched = try await client.fetchTrackPoints(rideId)
+        #expect(fetched.map(\.isPositionTrusted) == [true, false, true])
+        #expect(fetched.map(\.latitude) == [10, 11, 12])
+        #expect(fetched.map(\.heartRateBPM) == [130, 130, 130])
+    }
+
     @Test("a zero sensor reading round-trips as 0, not as nil")
     func zeroSensorReadingsRoundTripAsZero() async throws {
         let (client, _) = Self.makeLiveClient()

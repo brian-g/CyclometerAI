@@ -26,6 +26,15 @@ struct TrackPointDTO: Sendable, Equatable {
     /// Last, with a default, so every existing `TrackPointDTO(...)` literal still compiles
     /// and still means what it did: one segment, index 0.
     var segmentIndex: Int = 0
+    /// False for a second recorded while `GPSFixFilter` held the fix back: the point is
+    /// there for its sensor readings, and its position is the last trusted one, held. A
+    /// saved track's reader gets it on the line between its trusted neighbours instead
+    /// (`interpolatingUntrustedPositions`).
+    ///
+    /// Before this, a second with a poor fix recorded nothing, so heart rate, cadence and
+    /// speed under tree cover kept one second in every 10 — one in 60 once the backstop
+    /// stopped taking fixes worse than 20 m (#624 review).
+    var isPositionTrusted: Bool = true
 }
 
 extension TrackPointDTO {
@@ -46,5 +55,41 @@ extension TrackPointDTO {
             segments[segments.count - 1].append(point)
         }
         return segments
+    }
+
+    /// The track with every untrusted point placed on the straight line between the trusted
+    /// points either side of it in its segment, in proportion to time: where the map draws the
+    /// rider across a stretch of poor GPS, so every reader of a saved track — map, GPX, Health
+    /// route, energy — agrees with it.
+    ///
+    /// A run without a trusted point on both sides in its segment keeps the position it was
+    /// recorded with, the last trusted one. Never across a segment boundary: the rider was paused there,
+    /// and a line across it is the chord #263 removed.
+    static func interpolatingUntrustedPositions(_ trackPoints: [TrackPointDTO]) -> [TrackPointDTO] {
+        guard trackPoints.contains(where: { !$0.isPositionTrusted }) else { return trackPoints }
+        return segments(of: trackPoints).flatMap { segment -> [TrackPointDTO] in
+            var segment = segment
+            var before: TrackPointDTO?
+            var index = segment.startIndex
+            while index < segment.endIndex {
+                guard !segment[index].isPositionTrusted else {
+                    before = segment[index]
+                    index += 1
+                    continue
+                }
+                let runEnd = segment[index...].firstIndex(where: \.isPositionTrusted) ?? segment.endIndex
+                if let before, runEnd < segment.endIndex {
+                    let after = segment[runEnd]
+                    let span = after.timestamp.timeIntervalSince(before.timestamp)
+                    for inRun in index..<runEnd where span > 0 {
+                        let fraction = segment[inRun].timestamp.timeIntervalSince(before.timestamp) / span
+                        segment[inRun].latitude = before.latitude + (after.latitude - before.latitude) * fraction
+                        segment[inRun].longitude = before.longitude + (after.longitude - before.longitude) * fraction
+                    }
+                }
+                index = runEnd
+            }
+            return segment
+        }
     }
 }
