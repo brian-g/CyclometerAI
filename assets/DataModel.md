@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-11-20 (#606) — §3.1: `isHealthWorkoutOwed` is not set for a launch close-out with no ride-end marker. Its end is the relaunch, so it is finalized never owed a workout, in the same write. Documentation only; no schema change.
+**Updated:** 2026-11-21 (Strava, PRD §8.12) — §3.8 ConnectedService becomes a `Codable` value in the AppPreferences document, with Keychain `OAuthTokens`, granted scopes and S10's remembered sync defaults. New §3.8.1: segment efforts cached on `Ride`, Strava route id and segments on `Route`. §9 adds schema 1.3.  
+**Previously:** 2026-11-20 (#606) — §3.1: `isHealthWorkoutOwed` is not set for a launch close-out with no ride-end marker. Its end is the relaunch, so it is finalized never owed a workout, in the same write. Documentation only; no schema change.
 **Previously:** 2026-11-19 (#588) — §11: OQDM6 and OQDM7 record what superseded their original answers (§3.7, §3.8), instead of contradicting them. §9 gains rows for #175's five crash-resume fields, #263's `trackSegmentIndex`, #277's `isHealthWorkoutOwed` and #406's `isRouteComplete`, and the MVP rows are renumbered into the order they shipped. Documentation only; no schema change.
 **Previously:** 2026-11-15 (#245) — §3.1 reconciled with `Ride.swift`, the source of truth: it gains the ten stored properties it was missing (#175's crash-resume fields, W5's cadence columns, `trackSegmentIndex`, `isRouteComplete`, `isHealthWorkoutOwed`) and drops the `radarEvents` and `vehiclePassEvents` `@Relationship` arrays, which #172 replaced with `rideId` foreign keys. `recordingState` is typed `Ride.RecordingState`, distinct from `ActiveRideFeature`'s unpersisted `RideRecordingState`. §2's ERD marks the `rideId` links as foreign keys. §9 states the declaration-site-default rule that §3.1 and §3.10 already cited. Documentation only; no schema change.
 **Previously:** 2026-11-11 (#151) — §3.1: `Ride.weather` is now a list of `RideWeatherSample`s, one per forecast fetched during the ride, in place of the single `RideWeather` captured at the start. Same `weatherData` column, so no migration: nothing wrote it before.
@@ -55,7 +56,7 @@
 | Active-ride telemetry buffering | In-memory ring buffer; never written until checkpoint/end |
 | RadarEvent, VehiclePassEvent — discrete | SwiftData — low frequency; UI-queryable |
 | PairedSensor — a handful of records, never queried, read whole | Nested `Codable` array in the AppPreferences JSON document (#67, see §3.6) — synchronous reads, no ModelContainer |
-| ConnectedService — low-frequency writes | Open. The Keychain-identifier pattern is a separate problem and nothing consumes it yet |
+| ConnectedService — low-frequency writes | AppPreferences JSON document, tokens in the Keychain (§3.8, revised 2026-11-21 for Strava) |
 | iOS minimum | iOS 27 — SwiftData and Swift concurrency fully supported |
 
 ### Checkpoint Policy
@@ -95,7 +96,7 @@ TrackPoint    RadarEvent   VehiclePassEvent
 ```
 
 **Key relationships:**
-- AppPreferences is no longer a SwiftData entity, so it cannot own a SwiftData `@Relationship`. #67 settled PairedSensor by folding it into the AppPreferences JSON document as a nested `Codable` array; ConnectedService is still open — see §3.6
+- AppPreferences is no longer a SwiftData entity, so it cannot own a SwiftData `@Relationship`. #67 settled PairedSensor by folding it into the AppPreferences JSON document as a nested `Codable` array; ConnectedService followed it into the document for Strava — see §3.8
 - **PairedSensor is app-wide only for MVP.** In Phase 2 sensors belong to a bike: each bike has its own speed, cadence, radar and power sensors, and the speed sensor also carries that wheel's circumference. Heart rate is the exception and stays rider-scoped, since the strap follows the rider across bikes. The MVP ownership #67 picked has to survive gaining that bike dimension — as a nested value it does: the array grows a `bikeID` field and the lookup key becomes (bike, role), which is a decode shim rather than a schema stage — see §3.9
 - Ride and RiderProfile have no relationship — single rider; rides queried by date range. Since #96 RiderProfile is its own JSON document (§3.5), so a relationship is not expressible in any case
 - **TrackPoint, VehiclePassEvent and RadarEvent link to Ride by `rideId` only** — no SwiftData `@Relationship` array on Ride (#172), following TrackPoint's CoreData FK pattern. RadarEvent is not built yet (the live schema is `[Ride, VehiclePassEvent, Route]`); it follows the same pattern when it lands
@@ -828,43 +829,94 @@ already claimed it (#93).
 
 ### 3.8 ConnectedService
 
-A connected third-party service. OAuth tokens live in the iOS Keychain; this entity holds only the lookup key and display metadata.
+A connected third-party service. OAuth tokens live in the iOS Keychain; this record holds only the lookup key and
+display metadata.
 
-> **Deferred to Phase 2 (M13), 2026-08-14.** The S12 Accounts section that would create these records has
-> moved out of MVP (UX.md §S12), and its only other consumer — the Ride Summary sync sheet — was already
-> Phase 2. Nothing in MVP reads or writes this entity, so it stays specified and unimplemented. The ownership
-> question below is deferred with it.
-
-> Same open ownership question as §3.7 — no `@Relationship` owner since #69.
+> **Revised 2026-11-21 (Strava, PRD §8.12).** No longer a SwiftData `@Model`. Following #67's PairedSensor, it is a
+> `Codable` value in the AppPreferences JSON document (§3.6), which settles the ownership question §3.7 left open: the
+> document owns it. A record exists from connect until disconnect; the tokens it names never touch the document.
 
 ```swift
-/// OQDM7 resolved: replaces fixed stravaAccessToken / rideWithGPSAccessToken fields.
-@Model
-final class ConnectedService {
-    var id: UUID
+struct ConnectedService: Codable, Equatable, Sendable, Identifiable {
+    var id: ExternalService { serviceType }      // one record per service (OQDM7)
     var serviceType: ExternalService
-    var keychainIdentifier: String             // kSecAttrAccount key for Keychain lookup
-    var accountDisplayName: String?            // e.g. "brian@strava.com" — shown in S12
-    var isEnabled: Bool
-
-    init(serviceType: ExternalService, keychainIdentifier: String) {
-        self.id = UUID()
-        self.serviceType = serviceType
-        self.keychainIdentifier = keychainIdentifier
-        self.isEnabled = true
-    }
+    var keychainIdentifier: String               // kSecAttrAccount of the token item
+    var athleteID: String                        // Strava athlete id; the routes endpoint needs it
+    var accountDisplayName: String?              // athlete's name, shown in S12 / S12.1 / S10
+    var grantedScopes: Set<String>               // from the OAuth callback; gates features (PRD §8.12)
+    var connectedAt: Date
+    var isDisconnected: Bool = false             // the service refused a refresh; S12.1 offers Reconnect
 }
 
 /// Extensible without schema migration — new cases store cleanly as new string values.
-enum ExternalService: String, Codable, Sendable {
+enum ExternalService: String, Codable, Sendable, CaseIterable {
     case strava
     case rideWithGPS
     case tribosDotStudio
     case komoot
 }
+
+// AppPreferences (§3.6) gains:
+//     var connectedServices: [ConnectedService] = []
+//     var syncDestinationDefaults: [SyncDestination: Bool] = [:]   // S10 Sync To's remembered toggles
+enum SyncDestination: Codable, Hashable, Sendable {
+    case appleHealth
+    case service(ExternalService)
+}
+
+/// Keychain item (kSecClassGenericPassword, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly), JSON-encoded.
+struct OAuthTokens: Codable, Sendable {
+    var accessToken: String
+    var refreshToken: String
+    var expiresAt: Date
+}
 ```
 
-> **Security note:** Raw OAuth tokens are stored in the iOS Keychain under kSecClassGenericPassword. keychainIdentifier is the kSecAttrAccount key. Tokens never touch SwiftData.
+> **Security note:** Raw OAuth tokens are stored in the iOS Keychain under kSecClassGenericPassword. keychainIdentifier
+> is the kSecAttrAccount key. Tokens never touch SwiftData or the AppPreferences document, and are not backed up.
+
+### 3.8.1 Cached Strava data
+
+Read from Strava, kept for display, and deleted when Strava is disconnected (PRD §8.12). Both are optional JSON
+columns, so the migration is lightweight.
+
+```swift
+// Ride (§3.1) gains:
+//     var stravaSegmentEffortsData: Data?     // [StravaSegmentEffort]; nil = never fetched, [] = none
+//     var stravaSegmentsFetchedAt: Date?
+
+// Route (§3.10) gains:
+//     var stravaRouteID: String?              // set by a Strava import; re-import updates in place by it
+//     var stravaSegmentsData: Data?           // [StravaRouteSegment]
+//     var stravaSegmentsFetchedAt: Date?      // refetched after seven days
+
+struct StravaSegmentEffort: Codable, Equatable, Sendable {
+    var effortID: String
+    var segmentID: String
+    var name: String
+    var distanceMeters: Double
+    var averageGradePercent: Double
+    var elapsedSeconds: Int
+    var startIndex: Int                         // orders the list by the ride
+    var prRank: Int?                            // 1–3
+    var komRank: Int?                           // 1–10
+    var bestElapsedSeconds: Int?                // subscriber-only on Strava's side
+    var bestDate: Date?
+}
+
+struct StravaRouteSegment: Codable, Equatable, Sendable {
+    var segmentID: String
+    var name: String
+    var distanceMeters: Double
+    var averageGradePercent: Double
+    var climbCategory: Int                      // 0 = uncategorized … 5 = HC
+    var bestElapsedSeconds: Int?                // subscriber-only on Strava's side
+    var bestDate: Date?
+}
+```
+
+`RideSyncRecord` (§3.1) is unchanged; `SyncStatus` gains `processing` (uploaded, awaiting Strava's `activity_id`) so
+a ride quit mid-poll resumes polling rather than uploading again.
 
 ---
 
@@ -1295,6 +1347,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 | 1.1.8 (MVP — #536) | Add `Ride.calorieSeriesData: Data?`, optional, so inferred lightweight migration adds it as nil (#186 doesn't apply). The rides #460's backfill still owes get a series when it stores their stats; a ride that already has its stats stored keeps no series, and S15 hides its Active Calories section. `RideSchemaMigrationTests` covers an older store |
 | 1.1.9 (MVP — #537) | Add `Ride.pausesData: Data?`, optional, so inferred lightweight migration adds it as nil and a ride recorded before it reads as having no pauses (#186 doesn't apply). `RideSchemaMigrationTests` covers it |
 | 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
+| 1.3 (Phase 2 — Strava) | Add `Ride.stravaSegmentEffortsData`, `Ride.stravaSegmentsFetchedAt`, `Route.stravaRouteID`, `Route.stravaSegmentsData` and `Route.stravaSegmentsFetchedAt`, all optional, so inferred lightweight migration applies; `SyncStatus` gains `processing`. ConnectedService and the sync defaults are AppPreferences document fields (§3.8), not a schema stage |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 
 Key rules:
