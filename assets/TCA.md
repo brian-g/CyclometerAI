@@ -935,6 +935,10 @@ token, reads the rate-limit headers, and throws `StravaError.rateLimited(until:)
 
 S15's `RideDetailFeature` and S20's `RouteDetailFeature` each gain a `segments` child: load the cache, fetch when it
 is missing (S15: also when empty and the upload is under ten minutes old; S20: also after seven days), save it.
+S20's also reads the efforts of the route's synced previous rides, fetching up to five uncached, and merges them
+with the route's own segments through `RouteSegmentMatcher` — a pure function (segment endpoints within 30 m of the
+polyline, ordered by distance along it, best time per segment) with its own unit tests. No Explore Segments call
+(PRD §8.12).
 
 ---
 

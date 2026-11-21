@@ -898,6 +898,11 @@ struct StravaSegmentEffort: Codable, Equatable, Sendable {
     var averageGradePercent: Double
     var elapsedSeconds: Int
     var startIndex: Int                         // orders the list by the ride
+    var climbCategory: Int                      // S20 lists ride-derived segments too
+    var startLatitude: Double                   // segment's start and end: S20 keeps a segment
+    var startLongitude: Double                  // only when both lie within 30 m of the route
+    var endLatitude: Double
+    var endLongitude: Double
     var prRank: Int?                            // 1–3
     var komRank: Int?                           // 1–10
     var bestElapsedSeconds: Int?                // subscriber-only on Strava's side

@@ -46,7 +46,7 @@
 | 0.6.19 | 2026-11-14 | Brian / Claude | Rain along the route (#152). With a route loaded, each forecast W10 fetches during a ride also checks the stretch the rider reaches within two hours: a 50% or higher chance of precipitation at any point, in the hour the rider gets there, shows a silent four-second banner. It shows again on every check while it stays wet. It never goes through the radar alert path. It checks only while the dashboard is on screen and the rider is on the route. §12 Privacy: those checks send up to seven points ahead on the route, at least a kilometre past the rider, about every 10 minutes. W10's wind map (#561) is recorded there too. The in-app privacy policy names points along a route. |
 | 0.6.20 | 2026-11-19 | Brian / Claude | Spec reconciliation (#588). §10's `Ride`, `TrackPoint`, `RadarEvent`, `RadarVehicle` and `VehiclePassEvent` blocks, which predated `DataModel.md`, are replaced by pointers to it. §11's client list, feature tree, folder structure and test list, which named features, folders and tests that don't exist, are replaced by pointers to `TCA.md` §3 and §8. Appendix B's GPX example and §8.7's file naming use the exporter's `creator`, `cyc:` namespace URI and `AcmeRide_` filename prefix. No requirement changes. |
 | 0.6.21 | 2026-11-19 | Brian / Claude | Onboarding permissions and privacy policy (#596, #597, #598). Bluetooth and Motion and Fitness are optional at S01; Location is the only gate. The Motion purpose string names the barometer (elevation), its only use. S12's Privacy Policy opens https://acmeapps.xyz/ride/privacy/; the bundled copy is removed, so §12's mentions of the privacy policy now mean that page. |
-| 0.6.23 | 2026-11-21 | Brian / Claude | Strava (Phase 2). New §8.12: connecting through a stateless token service that holds the client secret, Keychain tokens, uploads chosen per ride in S10's Sync To section, segment efforts on S15 and a Strava route's segments on S20 (best time and date only where Strava returns them, which is to subscribers), Strava route import on S19 and S05.2, and gear with Multi-bike later. §6 and §8.6 point to it. |
+| 0.6.23 | 2026-11-21 | Brian / Claude | Strava (Phase 2). New §8.12: connecting through a stateless token service that holds the client secret, Keychain tokens, uploads chosen per ride in S10's Sync To section, segment efforts on S15, and segments on S20 from a Strava route itself or, for any route, from its previous rides synced to Strava (Explore Segments is closed to Standard-tier apps since 2026-09-01), Strava route import on S19 and S05.2, and gear with Multi-bike later. §6 and §8.6 point to it. |
 | 0.6.22 | 2026-11-19 | Brian / Claude | Orphan workouts (#584). §9.4's #318 decision note: an orphan closed out at relaunch that the rider had already ended keeps its real end time and gets its `HKWorkout` (UX.md §S10). One with no ride-end marker still gets none, since its end is the relaunch. |
 
 ---
@@ -1082,10 +1082,23 @@ pull to refresh. Each effort shows the segment's name, distance and average grad
 medal for `pr_rank` 1–3 and a KOM/QOM rank in the top 10 — all free to every Strava account. The rider's best time
 and its date are subscriber-only on Strava's API (since June 2020): shown when Strava returns them, never asked for.
 
-**Segments on Route Detail (S20).** Only a route imported from Strava has segments, from `GET /api/v3/routes/:id`,
-cached on the route for seven days. The API has no way to match segments to an arbitrary GPX polyline, so a route
-imported from Files has no segments section (Phase 3 segment detection). Each row: name, distance, average grade and
-climb category; the rider's best time and date when Strava returns them (subscribers).
+**Segments on Route Detail (S20).** Two sources, both open to a Standard-tier app:
+
+- **A route imported from Strava:** the segments in `GET /api/v3/routes/:id`, cached on the route for seven days
+- **Any route, from its previous rides:** the segment efforts of rides that followed the route (`Ride.routeId`) and
+  were synced to Strava — the same efforts S15 caches. A segment belongs to the route when its start and its end each
+  lie within 30 m of the route's polyline, so a detour's segments are left out. Rides whose efforts aren't cached are
+  fetched when S20 appears, the five most recent at most, into the cache S15 reads
+- Merged by segment id and listed once each, in order of distance along the route. Each row: name, distance, average
+  grade and climb category. The best time and its date are Strava's PR when Strava returns it (subscribers; it covers
+  all the rider's Strava activities), otherwise the rider's fastest effort among the route's rides. That is the
+  rider's own data, so free accounts get it too
+- A route from Files that has never been ridden, or whose rides were never synced, has no segments section
+
+> **Not used: Explore Segments.** Matching segments to an unridden GPX route needs `GET /api/v3/segments/explore`,
+> which Strava restricted to approved Extended Access Tier apps (generally 10,000+ athletes) on 2026-09-01; it also
+> returns only the top 10 segments per box. If Cyclometer reaches Extended Access, the route's bounding box can be
+> tiled, each tile explored, and the returned polylines matched with the same 30 m rule, within the rate limit.
 
 **Routes.** S19's import action gains **From Strava**, a browser over `GET /api/v3/athletes/:id/routes` (rides only).
 A chosen route is fetched with `GET /api/v3/routes/:id/export_gpx` and goes through the GPX importer and analysis
@@ -1123,7 +1136,7 @@ one (`Bike.stravaGearID`). Uploads can't name gear, so once the upload has an `a
 - [ ] Unticked scopes hide their features and are named on S12.1
 - [ ] A ride uploads from S10 and links to its Strava activity; a duplicate records the existing activity
 - [ ] A ride pending at quit uploads after relaunch
-- [ ] S15 shows the ride's efforts with PR medals; S20 shows a Strava route's segments
+- [ ] S15 shows the ride's efforts with PR medals; S20 shows a Strava route's segments, and a GPX route's segments from its synced rides, without a detour's
 - [ ] A Strava route imports, re-imports in place, and starts a ride from S05.2
 - [ ] Disconnect revokes, clears the Keychain and the cached Strava data
 - [ ] `StravaClient` and the token flow covered by tests against a mock transport; reducers by `TestStore`
