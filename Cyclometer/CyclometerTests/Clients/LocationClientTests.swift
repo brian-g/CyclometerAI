@@ -223,10 +223,13 @@ struct LocationOneShotTests {
         let manager = await StubLocationManager()
         let state = LocationManagerState(makeManager: { manager })
 
-        // Long enough that only the stream's fix can answer it inside the test.
-        let waiter = Task { await state.currentCoordinate(timeout: .seconds(30)) }
+        // Long enough that only the stream's fix can answer it inside the test, and longer
+        // than the deadline below, so a contended run can't time the waiter out first.
+        let waiter = Task { await state.currentCoordinate(timeout: .seconds(60)) }
 
-        let deadline = ContinuousClock.now + .seconds(5)
+        // Generous on purpose, like `effectDrainTimeout`: the request is one main-queue hop
+        // away, but a contended full-suite run can starve this task for tens of seconds.
+        let deadline = ContinuousClock.now + .seconds(30)
         while await manager.requestLocationCalls == 0 {
             try #require(ContinuousClock.now < deadline, "the one-shot never requested a fix")
             try await Task.sleep(for: .milliseconds(10))
