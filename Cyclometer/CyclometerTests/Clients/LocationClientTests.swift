@@ -160,14 +160,20 @@ struct LocationOneShotTests {
     private static let fixCoordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
 
     /// Waits until the stub has received `count` `requestLocation()` calls. Each call is made in
-    /// the same main-queue step that registers its waiter, so by then every waiter is in the table.
+    /// the same main-queue step that registers its waiter, so by then every waiter has been
+    /// registered (an expired one may already have been answered and removed).
     ///
     /// Generous on purpose, like `effectDrainTimeout`: each request is one main-queue hop away,
     /// but a contended full-suite run can starve this task for tens of seconds.
-    private static func waitForRequests(_ count: Int, on manager: StubLocationManager) async throws {
+    private static func waitForRequests(
+        _ count: Int, on manager: StubLocationManager,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async throws {
         let deadline = ContinuousClock.now + .seconds(30)
         while await manager.requestLocationCalls < count {
-            try #require(ContinuousClock.now < deadline, "the one-shots never requested a fix")
+            try #require(ContinuousClock.now < deadline,
+                         "the stub never received \(count) requestLocation() calls",
+                         sourceLocation: sourceLocation)
             try await Task.sleep(for: .milliseconds(10))
         }
     }
@@ -213,20 +219,24 @@ struct LocationOneShotTests {
     /// second callback (`requestLocation()` can report a fix and then fail). Only removal from
     /// the table under the lock makes the first answer the only one.
     ///
-    /// Both orders are set up for certain, without relying on timing:
+    /// Both orders are set up for certain, without racing the timers:
     /// - **Timer first.** The expired waiters have all been answered by their timers before the
     ///   callback arrives. If `resumeOneShot` resumed without removing, the drain would resume
     ///   them again and trap.
-    /// - **Callback first.** The pending waiters' timers are a minute away, so only the callback
-    ///   can answer them. It is then delivered again; if `drainOneShots` didn't empty the table,
-    ///   the repeat would resume them again and trap.
+    /// - **Callback first.** The pending waiters' timers are a minute away, longer than the test
+    ///   takes, so only the callback can answer them. It is then delivered again; if
+    ///   `drainOneShots` didn't empty the table, the repeat would resume them again and trap.
+    ///
+    /// The ordering is what's pinned, not the lock: no timer runs concurrently with a drain here.
     @Test("Concurrent requests each get exactly one answer", arguments: DrainingCallback.allCases)
     func concurrentRequestsAllResolve(callback: DrainingCallback) async throws {
         let manager = await StubLocationManager()
         let state = LocationManagerState(makeManager: { manager })
+        let pendingTimeout: Duration = .seconds(60)
+        let start = ContinuousClock.now
 
         let expired = (0..<4).map { _ in Task { await state.currentCoordinate(timeout: .zero) } }
-        let pending = (0..<4).map { _ in Task { await state.currentCoordinate(timeout: .seconds(60)) } }
+        let pending = (0..<4).map { _ in Task { await state.currentCoordinate(timeout: pendingTimeout) } }
         try await Self.waitForRequests(8, on: manager)
 
         for waiter in expired {
@@ -239,6 +249,10 @@ struct LocationOneShotTests {
         for waiter in pending {
             #expect(await waiter.value == callback.answer, "a pending waiter was not answered by the callback")
         }
+        // A denial answers nil, as a timer does, so the value alone can't show who answered.
+        // The timers started after `start`, so none can have fired inside `pendingTimeout`.
+        #expect(ContinuousClock.now - start < pendingTimeout,
+                "the pending waiters were answered by their timers, not the callback")
     }
 
     /// The whole point of the one-shot is that it never touches `stopUpdates()`, which would
