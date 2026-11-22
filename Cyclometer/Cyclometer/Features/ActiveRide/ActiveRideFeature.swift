@@ -441,6 +441,12 @@ struct ActiveRideFeature {
         /// the gate shut holds, so its sensor readings are kept without a position the filter
         /// rejected (`TrackPointDTO.isPositionTrusted`).
         var lastTrustedCoordinate: Coordinate? = nil
+        /// Whether a fix has arrived since the last trusted track point was written: one fix, one
+        /// trusted point. When iOS stops sending fixes, as under cover while moving (19 s on
+        /// 2026-10-16), the seconds until the next one hold the last position untrusted, and a
+        /// reader puts them on the line to that fix. Re-writing the frozen fix as trusted drew a
+        /// stop that never happened, then a jump, and restarted the backstop's wait every second.
+        var hasUnwrittenFix: Bool = false
         var isLocationAvailable: Bool = false
         /// Consecutive seconds at or below `stationarySpeedMPS` — not literally zero,
         /// which GPS never reports (#262). Name kept for the persisted `Ride` field.
@@ -1106,6 +1112,7 @@ struct ActiveRideFeature {
                 // requires a GPS lock, PRD §8.8), or for the timer's catch-up tick (#582).
                 if let point = makeTrackPoint(from: state) {
                     if point.isPositionTrusted {
+                        state.hasUnwrittenFix = false
                         state.lastRecordablePositionAt = date.now
                         state.lastTrustedCoordinate = Coordinate(latitude: point.latitude, longitude: point.longitude)
                     }
@@ -1264,6 +1271,7 @@ struct ActiveRideFeature {
                 // not do is enter the recorded track: no polyline vertex here, and the next
                 // tick's point holds the last trusted position instead of this one (#210).
                 state.coordinate = update.coordinate
+                state.hasUnwrittenFix = true
                 if state.sunsetFix?.isFresh(at: date.now) != true {
                     state.sunsetFix = SunsetFix(coordinate: update.coordinate, takenAt: date.now)
                 }
@@ -1731,11 +1739,12 @@ struct ActiveRideFeature {
     /// while there's no GPS fix yet, since `TrackPointDTO.latitude`/`longitude` are
     /// non-optional — ride start already requires a GPS lock (PRD §8.8), so this is rare.
     ///
-    /// While the fix behind `coordinate` is too poor to record (#210), the point keeps the
-    /// second's sensor readings but not that position: it holds `lastTrustedCoordinate` and is
-    /// marked untrusted, and a reader of the saved track puts it on the line between its trusted
-    /// neighbours (`TrackPointDTO.interpolatingUntrustedPositions`). Nil only before the ride's
-    /// first trusted point, when there is no position to hold.
+    /// While the fix behind `coordinate` is too poor to record (#210), or is one a trusted point
+    /// has already been written from (`hasUnwrittenFix`), the point keeps the second's sensor
+    /// readings but not that position: it holds `lastTrustedCoordinate` and is marked untrusted,
+    /// and a reader of the saved track puts it on the line between its trusted neighbours
+    /// (`TrackPointDTO.interpolatingUntrustedPositions`). Nil only before the ride's first trusted
+    /// point, when there is no position to hold. While fixes keep arriving,
     /// `GPSFixFilter.lastResortInterval` bounds how long the position can go untrusted.
     ///
     /// And nil for a tick under `minimumTrackPointSpacing` after the last recorded point
@@ -1748,7 +1757,8 @@ struct ActiveRideFeature {
     /// that tick still records: waiting for the clock to catch up would drop the track for as
     /// long as it was set back.
     private func makeTrackPoint(from state: State) -> TrackPointDTO? {
-        guard let coordinate = state.isFixRecordable ? state.coordinate : state.lastTrustedCoordinate
+        let isTrusted = state.isFixRecordable && state.hasUnwrittenFix
+        guard let coordinate = isTrusted ? state.coordinate : state.lastTrustedCoordinate
         else { return nil }
         let now = date.now
         // `calorieTrack` is every point recorded this ride, in order, so its last is the previous one.
@@ -1780,7 +1790,7 @@ struct ActiveRideFeature {
             cadenceRPM: state.cadence.cadenceRPM,
             powerWatts: nil,
             segmentIndex: state.trackSegmentIndex,
-            isPositionTrusted: state.isFixRecordable
+            isPositionTrusted: isTrusted
         )
     }
 

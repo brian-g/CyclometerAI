@@ -436,12 +436,13 @@ extension HealthKitClient {
     /// and leave Workout Routes off, and a route that fails is logged and dropped rather than
     /// taking the workout down with it.
     private static func saveRoute(_ workout: RideWorkout, to saved: HKWorkout, _ store: HKHealthStore) async {
-        guard !workout.trackPoints.isEmpty,
+        let locations = routeLocations(workout.trackPoints)
+        guard !locations.isEmpty,
               store.authorizationStatus(for: PermissionsClient.workoutRouteType) == .sharingAuthorized
         else { return }
         let routeBuilder = HKWorkoutRouteBuilder(healthStore: store, device: .local())
         do {
-            try await routeBuilder.insertRouteData(routeLocations(workout.trackPoints))
+            try await routeBuilder.insertRouteData(locations)
             // Its own sync identifier, like the distance sample's.
             try await routeBuilder.finishRoute(with: saved, metadata: syncMetadata("\(workout.rideId.uuidString)-route"))
         } catch {
@@ -455,8 +456,12 @@ extension HealthKitClient {
     /// Only what a track point records: course and vertical accuracy never were, so both go
     /// in as CoreLocation's "invalid" −1 — which also marks the altitude unusable, so a point
     /// with none (#303) goes in as 0 — and a second with no speed reading gets the same.
+    ///
+    /// Trusted points only. A second recorded under a poor fix has a position no fix gave and the
+    /// rejected fix's accuracy, −1 for an invalid one, which makes the `CLLocation` invalid; Fitness
+    /// draws the same line between the trusted points either side of it (#624).
     static func routeLocations(_ points: [TrackPointDTO]) -> [CLLocation] {
-        points.map { point in
+        points.filter(\.isPositionTrusted).map { point in
             CLLocation(
                 coordinate: CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude),
                 altitude: point.altitudeMeters ?? 0,

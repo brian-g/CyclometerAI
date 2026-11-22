@@ -2914,3 +2914,13 @@ stale comments. Full `CyclometerTests`: 3070 passed, 0 failures. Left open for a
   and the Health route both carry it.
 - A back-to-back batch past the backstop adds every fix to the live map, but only one is saved.
 - Antimeridian interpolation: not reachable for this app's riders; dropped.
+
+---
+
+## #624 review leftovers: frozen fix, Health route
+
+- [x] One fix, one trusted point: `State.hasUnwrittenFix`, set by each fix and cleared by the trusted write. Seconds with no new fix (iOS stops sending under cover, 19 s on 10-16) are untrusted, read back on the line to the next fix, and no longer restart the backstop's wait
+- [x] Health route built from trusted points only: an untrusted point's −1 accuracy made its `CLLocation` invalid. The "store a negative accuracy as 0" half was dropped: the route was the only reader that took it as-is (GPX already omits ≤ 0)
+- [x] Tests: `frozenFixIsNotRewrittenAsTrusted`, `routeLocationsSkipUntrustedPoints`; `vehiclePassesAgreeAcrossPersistenceAndGPX` now asserts the two fixless ticks are untrusted and compares positions at the GPX's 7 places; 7 exhaustive location sends assert the flag
+- [x] Revert checks: each fix reverted fails its test
+- [x] Full `CyclometerTests`: 3072 passed, 0 failures

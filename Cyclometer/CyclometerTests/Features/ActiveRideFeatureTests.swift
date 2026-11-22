@@ -432,6 +432,7 @@ struct ActiveRideFeatureLocationTests {
     func locationUpdatePopulatesState() async {
         let store = makeStore()
         await store.send(.locationUpdated(Self.sampleUpdate)) {
+            $0.hasUnwrittenFix = true
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
@@ -490,6 +491,7 @@ struct ActiveRideFeatureLocationTests {
         }
 
         await store.send(.locationUpdated(Self.sampleUpdate)) {
+            $0.hasUnwrittenFix = true
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
@@ -527,6 +529,7 @@ struct ActiveRideFeatureLocationTests {
             timestamp: testDate
         )
         await store.send(.locationUpdated(poor)) {
+            $0.hasUnwrittenFix = true
             // Live position still follows the freshest fix — but no polyline vertex, and
             // `isFixRecordable` false means `.elapsedTick`'s point holds the last trusted
             // position rather than this one (`poorFixSecondRecordsUntrustedPoint`).
@@ -631,6 +634,7 @@ struct ActiveRideFeatureLocationTests {
     func locationContinuesWhilePaused() async {
         let store = makeStore()
         await store.send(.locationUpdated(Self.sampleUpdate)) {
+            $0.hasUnwrittenFix = true
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
@@ -671,6 +675,7 @@ struct ActiveRideFeatureLocationTests {
             timestamp: Date(timeIntervalSince1970: 1_000_001)
         )
         await store.send(.locationUpdated(pausedUpdate)) {
+            $0.hasUnwrittenFix = true
             $0.coordinate = Coordinate(latitude: 44.0, longitude: -90.0)
             // The track does NOT grow while paused — it stays at the single point
             // recorded during the active update above.
@@ -718,6 +723,7 @@ struct ActiveRideFeatureLocationTests {
         )
 
         await store.send(.locationUpdated(invalidUpdate)) {
+            $0.hasUnwrittenFix = true
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
@@ -2458,6 +2464,7 @@ struct ActiveRideFeatureStateMachineTests {
             timestamp: testDate
         )
         await store.send(.locationUpdated(update)) {
+            $0.hasUnwrittenFix = true
             $0.coordinate = Coordinate(latitude: 43.0, longitude: -89.0)
             $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0, longitude: -89.0), takenAt: testDate)
             $0.trackSegments = [[Coordinate(latitude: 43.0, longitude: -89.0)]]
@@ -3975,6 +3982,42 @@ struct ActiveRideFeatureHRDropoutTests {
         #expect(recorded.last?.isPositionTrusted == true)
         #expect(recorded.last?.latitude == 43.0795)
         #expect(store.state.lastRecordablePositionAt == Self.fixedNow + lastResort)
+    }
+
+    /// The 2026-10-16 freeze: iOS sent no fix for 19 s while the rider kept moving. Re-writing the
+    /// frozen fix as trusted each second drew a stop that never happened, then a jump, and kept
+    /// restarting the backstop's wait.
+    @Test("Seconds with no new fix are untrusted and don't restart the backstop's wait")
+    func frozenFixIsNotRewrittenAsTrusted() async {
+        let now = LockIsolated(Self.fixedNow)
+        let store = makeStore(now: now)
+        store.exhaustivity = .off
+
+        await store.send(.trackRecorder(.startRecording))
+        await store.send(.locationUpdated(Self.goodFix))
+        await store.send(.elapsedTick)
+        for second in 1...4 {
+            now.setValue(Self.fixedNow + TimeInterval(second))
+            await store.send(.elapsedTick)
+        }
+        #expect(store.state.lastRecordablePositionAt == Self.fixedNow)
+        now.setValue(Self.fixedNow + 5)
+        let resumed = LocationUpdate(
+            coordinate: Coordinate(latitude: 43.0741, longitude: -89.4012), altitude: 280.0, speed: 8.5,
+            horizontalAccuracy: 5.0, heading: 192.0, timestamp: Self.fixedNow + 5
+        )
+        await store.send(.locationUpdated(resumed))
+        await store.send(.elapsedTick)
+        await store.skipInFlightEffects(strict: false)
+
+        let recorded = await store.dependencies.rideDataBuffer.drainForFlush()
+        #expect(recorded.map(\.isPositionTrusted) == [true, false, false, false, false, true])
+        // Read back, the frozen seconds land on the line to the next fix, not stacked on the frozen one.
+        let read = TrackPointDTO.interpolatingUntrustedPositions(recorded).map(\.latitude)
+        for (latitude, expected) in zip(read, stride(from: 43.0731, through: 43.0741, by: 0.0002)) {
+            #expect(abs(latitude - expected) < 1e-9)
+        }
+        #expect(store.state.lastRecordablePositionAt == Self.fixedNow + 5)
     }
 
     @Test("A poor fix let through during a long pause isn't the resumed stretch's first trusted point")
