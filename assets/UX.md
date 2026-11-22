@@ -1223,8 +1223,8 @@ An outdoor cycling `HKWorkout` is written to Apple Health when S10 closes with i
 - [x] Zone breakdown chart type? Pie chart
 - [x] Ride summary highlights? Enhanced after user feedback
 - [x] Rider can rename ride from this screen? Yes — tapping the title field opens the keyboard
-- [ ] Should the sync sheet show estimated upload size or time? TBD
-- [ ] If HKWorkout write fails (HealthKit permission revoked), should the rider be notified? TBD
+- [x] Should the sync sheet show estimated upload size or time? No
+- [x] If HKWorkout write fails (HealthKit permission revoked), should the rider be notified? Yes, and options to try again should be presented
 
 ---
 
