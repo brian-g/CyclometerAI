@@ -64,8 +64,16 @@ Nothing the rider set up during the trial is deleted. Everything returns the mom
 | Radar | Stays paired. The radar column (W7) shows a lock state with an unlock prompt. No radar alerts. |
 | AR glasses | Stay paired, no output. Lock shown in Settings → Sensors. |
 | Weather | The weather widget shows a lock state. No WeatherKit calls. |
-| Apple Health | No workout is written at ride end. The Apple Health row in Sync To (S10) shows a lock. Workouts written during the trial stay in Health. |
+| Apple Health | No workout is written at ride end. The Apple Health row in Sync To (S10) shows a lock. Workouts written during the trial stay in Health. Each ride finished while Free is marked `isHealthWorkoutDeferred`, so it can be added later (§4.1). |
 | Services | Accounts stay connected (tokens kept). Sync To in Ride Summary (S10) shows the services locked. No uploads. |
+
+### 4.1 Apple Health backfill on unlock
+
+- When the unlock lands (purchase or restore) and any ride is `isHealthWorkoutDeferred`, the app asks once: **"Add N rides to Apple Health?"**, with **Add Rides** and **Not Now** of equal weight
+- **Add Rides** moves those rides to `isHealthWorkoutOwed` and clears the deferred flag; #277's `RideHealthWorkout.backfill` writes them, skipping any that overlap another source's workout, as it does today
+- **Not Now** leaves them deferred. Settings keeps an **Add N Rides to Apple Health** row until they are added or deleted; it disappears at zero
+- A deferred ride deleted before backfill is simply gone; nothing is written for it
+- `isHealthWorkoutDeferred` is never set while trial or unlocked, so #277's launch backfill never touches a Free ride on its own
 
 ---
 
@@ -163,6 +171,8 @@ enum GatedFeature: CaseIterable {
 - Free: with more than 3 sensors paired, the ride start prompts the rider to choose 3
 - Free: pages 2+ are obscured, not deleted; restored on unlock
 - Free: no WeatherKit calls; no HKWorkout write; no service uploads; tokens kept
+- Free: a finished ride is `isHealthWorkoutDeferred`, not `isHealthWorkoutOwed`; launch backfill skips it
+- Unlock with deferred rides → the prompt; Add Rides writes them; Not Now leaves the Settings row; no prompt with none deferred
 - Free: an Apple Watch HR source doesn't count toward 3
 - Routes: no limit in any state
 
@@ -175,3 +185,5 @@ enum GatedFeature: CaseIterable {
 3. Milestone: **M12 — App Store Submission** (2026-11-22)
 4. Launch discount: **none** (2026-11-22)
 5. Trial length: **28 days**, up from 14; Apple Health workouts move into the unlock (2026-11-22)
+6. Rides recorded while Free: **prompt to backfill** their Health workouts on unlock (§4.1) (2026-11-22)
+7. Bundle ID is `xyz.acmeapps.ride`; the product ID follows it (2026-11-22)

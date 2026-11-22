@@ -215,6 +215,8 @@ final class Ride {
     // migration gives rides that ended before this existed, so they are not owed: the ones since
     // #250 already have their workout.
     var isHealthWorkoutOwed: Bool = false
+    // M12 Monetization: finished while Free, so no workout was written; offered for backfill on unlock
+    var isHealthWorkoutDeferred: Bool = false
 
     // MARK: - Sync Status
     // Per-service sync tracking. Written by RideSyncSheetFeature after upload.
@@ -1351,6 +1353,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 | 1.1.7 (MVP — #460) | Add `Ride.ascentMeters`, `descentMeters` and `activeKilocalories`, all optional, and `isFinishStatsOwed: Bool = true` at the declaration, so inferred lightweight migration gives every older ride `true` (#186). `RideFinishStats.backfill` then works each one out once at launch: ascent and descent from the saved track through `ElevationTracker.Seed`, calories from the saved track and Health's body mass at that moment. `RideSchemaMigrationTests` covers an older store |
 | 1.1.8 (MVP — #536) | Add `Ride.calorieSeriesData: Data?`, optional, so inferred lightweight migration adds it as nil (#186 doesn't apply). The rides #460's backfill still owes get a series when it stores their stats; a ride that already has its stats stored keeps no series, and S15 hides its Active Calories section. `RideSchemaMigrationTests` covers an older store |
 | 1.1.9 (MVP — #537) | Add `Ride.pausesData: Data?`, optional, so inferred lightweight migration adds it as nil and a ride recorded before it reads as having no pauses (#186 doesn't apply). `RideSchemaMigrationTests` covers it |
+| 1.1.10 (M12 — Monetization) | Add `Ride.isHealthWorkoutDeferred: Bool = false`, set by `finalizeRide` instead of `isHealthWorkoutOwed` while the app is Free, and moved to owed when the rider accepts the unlock's backfill prompt (Monetization.md §4.1). Inferred lightweight migration gives older rides false |
 | 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
 | 1.3 (Phase 2 — Strava) | Add `Ride.stravaSegmentEffortsData`, `Ride.stravaSegmentsFetchedAt`, `Route.stravaRouteID`, `Route.stravaSegmentsData` and `Route.stravaSegmentsFetchedAt`, all optional, so inferred lightweight migration applies; `SyncStatus` gains `processing`. ConnectedService and the sync defaults are AppPreferences document fields (§3.8), not a schema stage |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
