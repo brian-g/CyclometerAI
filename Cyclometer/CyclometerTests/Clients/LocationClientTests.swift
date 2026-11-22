@@ -144,39 +144,115 @@ struct LocationClientTests {
 
 // MARK: - One-shot fix (#193)
 
-/// The timeout tests drive the shared `LocationManagerState`. That is enough to cover what the
-/// one-shot actually risks: the continuation table is what a double resume would crash on, and a
-/// waiter that is never resumed hangs forever.
+/// Every test here runs its own `LocationManagerState` over `StubLocationManager`, never
+/// `shared` (#615). What the real manager answers depends on the simulator, not the test: a
+/// simulator with location granted and a simulated location set has a cached fix, which skips
+/// the request entirely. CI's simulator, which has never been asked for authorization, answers
+/// every request with `kCLErrorDenied` about 2 s later. With the stub, no fix or denial arrives
+/// unless the test delivers one by calling the delegate itself.
 ///
-/// On a simulator never asked for authorization, as CI's fresh one is, no fix ever comes, and
-/// CoreLocation answers every `requestLocation()` and `startUpdatingLocation()` with
-/// `kCLErrorDenied` about 2 s later. The 200 ms timeouts here expire well before that, which
-/// is precisely the timeout path.
+/// What the one-shot actually risks is its continuation table: a waiter resumed twice traps, and
+/// one never resumed hangs forever.
 @Suite("LocationManagerState — one-shot fix")
 struct LocationOneShotTests {
 
-    @Test("A request with no fix available resolves nil rather than hanging")
-    func timeoutResolvesNil() async {
-        let coordinate = await LocationManagerState.shared.currentCoordinate(timeout: .milliseconds(200))
-        #expect(coordinate == nil)
+    private static let fix = CLLocation(latitude: 43.0731, longitude: -89.4012)
+    private static let fixCoordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
+
+    /// Waits until the stub has received `count` `requestLocation()` calls. Each call is made in
+    /// the same main-queue step that registers its waiter, so by then every waiter has been
+    /// registered (an expired one may already have been answered and removed).
+    ///
+    /// Generous on purpose, like `effectDrainTimeout`: each request is one main-queue hop away,
+    /// but a contended full-suite run can starve this task for tens of seconds.
+    private static func waitForRequests(
+        _ count: Int, on manager: StubLocationManager,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async throws {
+        let deadline = ContinuousClock.now + .seconds(30)
+        while await manager.requestLocationCalls < count {
+            try #require(ContinuousClock.now < deadline,
+                         "the stub never received \(count) requestLocation() calls",
+                         sourceLocation: sourceLocation)
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
-    /// Every waiter has its own id in the table, and `drainOneShots` resumes all of them at
-    /// once while the per-waiter timers race it. If removal-under-lock were not what gates a
-    /// resume, this is where a double resume would trap.
-    @Test("Concurrent requests each get exactly one answer")
-    func concurrentRequestsAllResolve() async {
-        let answers = await withTaskGroup(of: Coordinate?.self, returning: [Coordinate?].self) { group in
-            for _ in 0..<8 {
-                group.addTask {
-                    await LocationManagerState.shared.currentCoordinate(timeout: .milliseconds(200))
-                }
+    @Test("A request with no fix available resolves nil rather than hanging")
+    func timeoutResolvesNil() async {
+        let manager = await StubLocationManager()
+        let state = LocationManagerState(makeManager: { manager })
+
+        #expect(await state.currentCoordinate(timeout: .milliseconds(200)) == nil)
+        // Answered by its timer, not by a cached fix: the request really went out.
+        #expect(await manager.requestLocationCalls == 1)
+    }
+
+    /// The two callbacks that answer every waiter at once through `drainOneShots`.
+    enum DrainingCallback: CaseIterable, CustomTestStringConvertible {
+        case fix, denial
+
+        var testDescription: String {
+            switch self {
+            case .fix: "didUpdateLocations"
+            case .denial: "didFailWithError(kCLErrorDenied)"
             }
-            var collected: [Coordinate?] = []
-            for await answer in group { collected.append(answer) }
-            return collected
         }
-        #expect(answers.count == 8)
+
+        /// What a waiter still in the table gets from this callback.
+        var answer: Coordinate? {
+            switch self {
+            case .fix: LocationOneShotTests.fixCoordinate
+            case .denial: nil
+            }
+        }
+
+        fileprivate func deliver(to state: LocationManagerState, from manager: StubLocationManager) {
+            switch self {
+            case .fix: state.locationManager(manager, didUpdateLocations: [LocationOneShotTests.fix])
+            case .denial: state.locationManager(manager, didFailWithError: CLError(.denied))
+            }
+        }
+    }
+
+    /// Each waiter can be answered three times: by its timer, by `drainOneShots`, and by a
+    /// second callback (`requestLocation()` can report a fix and then fail). Only removal from
+    /// the table under the lock makes the first answer the only one.
+    ///
+    /// Both orders are set up for certain, without racing the timers:
+    /// - **Timer first.** The expired waiters have all been answered by their timers before the
+    ///   callback arrives. If `resumeOneShot` resumed without removing, the drain would resume
+    ///   them again and trap.
+    /// - **Callback first.** The pending waiters' timers are a minute away, longer than the test
+    ///   takes, so only the callback can answer them. It is then delivered again; if
+    ///   `drainOneShots` didn't empty the table, the repeat would resume them again and trap.
+    ///
+    /// The ordering is what's pinned, not the lock: no timer runs concurrently with a drain here.
+    @Test("Concurrent requests each get exactly one answer", arguments: DrainingCallback.allCases)
+    func concurrentRequestsAllResolve(callback: DrainingCallback) async throws {
+        let manager = await StubLocationManager()
+        let state = LocationManagerState(makeManager: { manager })
+        let pendingTimeout: Duration = .seconds(60)
+        let start = ContinuousClock.now
+
+        let expired = (0..<4).map { _ in Task { await state.currentCoordinate(timeout: .zero) } }
+        let pending = (0..<4).map { _ in Task { await state.currentCoordinate(timeout: pendingTimeout) } }
+        try await Self.waitForRequests(8, on: manager)
+
+        for waiter in expired {
+            #expect(await waiter.value == nil, "an expired waiter was not answered by its timer")
+        }
+
+        callback.deliver(to: state, from: manager)
+        callback.deliver(to: state, from: manager)
+
+        for waiter in pending {
+            #expect(await waiter.value == callback.answer, "a pending waiter was not answered by the callback")
+        }
+        // A denial answers nil, as a timer does, so the value alone can't show who answered.
+        // The timers started after `start`, so none can have fired inside `pendingTimeout`.
+        #expect(ContinuousClock.now - start < pendingTimeout,
+                "the pending waiters were answered by their timers, not the callback")
     }
 
     /// The whole point of the one-shot is that it never touches `stopUpdates()`, which would
@@ -185,9 +261,8 @@ struct LocationOneShotTests {
     /// `stopUpdatingLocation()`, which would leave the stream open but starved of fixes. This
     /// pins the pairing: a live subscriber survives it.
     ///
-    /// Its own instance over a stub manager, not `shared`: the real manager answers with a
-    /// denial ~2 s after any request — this stream's own start, or another test's one-shot —
-    /// and a denial finishes every stream, so under load it could land mid-test (#590).
+    /// On the real manager a denial ~2 s after any request would finish this stream, so under
+    /// load it could land mid-test (#590): the reason the suite runs on the stub.
     @Test("Asking for a one-shot leaves an active update stream running")
     func oneShotDoesNotDisturbAnActiveStream() async {
         let manager = await StubLocationManager()
@@ -227,13 +302,7 @@ struct LocationOneShotTests {
         // than the deadline below, so a contended run can't time the waiter out first.
         let waiter = Task { await state.currentCoordinate(timeout: .seconds(60)) }
 
-        // Generous on purpose, like `effectDrainTimeout`: the request is one main-queue hop
-        // away, but a contended full-suite run can starve this task for tens of seconds.
-        let deadline = ContinuousClock.now + .seconds(30)
-        while await manager.requestLocationCalls == 0 {
-            try #require(ContinuousClock.now < deadline, "the one-shot never requested a fix")
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await Self.waitForRequests(1, on: manager)
 
         let stream = state.makeUpdateStream()
         var iterator = stream.makeAsyncIterator()
