@@ -44,7 +44,7 @@ struct FrozenWheelAutoPauseTests {
     /// - Parameter pause: nil for a ride riding at 3 m/s; otherwise the ride is paused that way,
     ///   the wheel the source and reading 0.
     private func makeStore(
-        pause: Pause? = nil, isResumeWhenMovingEnabled: Bool = false
+        pause: Pause? = nil, isResumeWhenMovingEnabled: Bool = false, isAutoPauseEnabled: Bool = true
     ) -> TestStoreOf<ActiveRideFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
@@ -52,7 +52,7 @@ struct FrozenWheelAutoPauseTests {
         } operation: {
             @Shared(.appPreferences) var preferences
             $preferences.withLock {
-                $0.isAutoPauseEnabled = true
+                $0.isAutoPauseEnabled = isAutoPauseEnabled
                 $0.isResumeWhenMovingEnabled = isResumeWhenMovingEnabled
             }
             var state = ActiveRideFeature.State(recordingState: pause == nil ? .active : .paused)
@@ -308,9 +308,48 @@ struct FrozenWheelAutoPauseTests {
         #expect(store.state.distanceMeters == 0)
     }
 
+    @Test("A Pause tapped while riding on stays paused once the bike stops, GPS a fix behind (#267)")
+    func pauseTappedWhileRidingStaysPausedAtTheStop() async {
+        let store = makePausedStore(.manual, isResumeWhenMovingEnabled: true)
+        // Riding on after the tap, GPS agreeing, inside the grace; then the stop that arms the pause.
+        let seconds = [Second](repeating: (3.0, (3.0, 2.0)), count: 5)
+            + [(0, (1.5, 2.0))]
+            + [Second](repeating: (0, (0.04, 2.0)), count: 5)
+        let paused = await replay(seconds, on: store)
+        #expect(paused.count == seconds.count)
+    }
+
+    @Test("Without auto-pause nothing would pause a GPS resume again, so GPS doesn't resume")
+    func gpsResumeNeedsAutoPause() async {
+        let store = makePausedStore(.manual, isResumeWhenMovingEnabled: true, isAutoPauseEnabled: false)
+        let moving = [Second](repeating: (0, (3.0, 2.0)), count: 5)
+        let paused = await replay(moving, on: store)
+        #expect(paused.count == moving.count)
+    }
+
+    @Test("An auto-paused ride with the Finish alert up doesn't resume on GPS")
+    func finishAlertBlocksGPSResume() async {
+        let store = makePausedStore()
+        await store.send(.finishTapped)
+        let moving = [Second](repeating: (0, (3.0, 2.0)), count: 5)
+        let paused = await replay(moving, on: store)
+        #expect(paused.count == moving.count)
+    }
+
+    @Test("Two moving fixes with a gap between them aren't two in a row")
+    func movingFixesAcrossAGapStayPaused() async {
+        let store = makePausedStore()
+        let gap = [Second](repeating: (0, nil), count: Int(ActiveRideFeature.movingGPSFixMaxAge))
+        let seconds: [Second] = [(0, (3.0, 2.0))] + gap + [(0, (3.0, 2.0)), (0, (0.04, 2.0))]
+        let paused = await replay(seconds, on: store)
+        #expect(paused.count == seconds.count)
+    }
+
     private func makePausedStore(
-        _ pause: Pause = .auto, isResumeWhenMovingEnabled: Bool = false
+        _ pause: Pause = .auto, isResumeWhenMovingEnabled: Bool = false, isAutoPauseEnabled: Bool = true
     ) -> TestStoreOf<ActiveRideFeature> {
-        makeStore(pause: pause, isResumeWhenMovingEnabled: isResumeWhenMovingEnabled)
+        makeStore(
+            pause: pause, isResumeWhenMovingEnabled: isResumeWhenMovingEnabled, isAutoPauseEnabled: isAutoPauseEnabled
+        )
     }
 }

@@ -458,7 +458,9 @@ struct ActiveRideFeature {
         /// capped by `maxGPSMovingVetoSeconds` (#623). A resume GPS made spends it all (#643).
         var gpsMovingVetoSeconds: Int = 0
         /// Fixes in a row, this pause, for which `isGPSMoving` held: what lets GPS resume a pause
-        /// the wheel's zero is keeping, at `gpsResumeFixCount` (#643). Any other fix resets it.
+        /// the wheel's zero is keeping, at `gpsResumeFixCount` (#643). Any other fix resets it, as
+        /// does a fix while GPS couldn't resume the pause (`canGPSResumeFrozenWheel`) and one that
+        /// arrives more than `movingGPSFixMaxAge` after the last.
         var gpsMovingFixes: Int = 0
         /// Whether the fix behind `coordinate` is good enough to record (#210). Sticky
         /// between fixes, so the once-a-second track point inherits the verdict of the fix
@@ -1320,6 +1322,12 @@ struct ActiveRideFeature {
                 }
                 state.horizontalAccuracy = update.horizontalAccuracy
                 state.speedAccuracy = update.speedAccuracy
+                // Fixes in a row means a second or so apart (#643): two stray moving fixes with a
+                // gap between them, which no stopped fix filled, aren't two in a row.
+                if let previousFixAt = state.lastGPSFixAt,
+                   !(0...Self.movingGPSFixMaxAge).contains(date.now.timeIntervalSince(previousFixAt)) {
+                    state.gpsMovingFixes = 0
+                }
                 state.lastGPSFixAt = date.now
                 let sinceRecorded = date.now.timeIntervalSince(
                     state.lastRecordablePositionAt ?? date.now
@@ -1409,14 +1417,11 @@ struct ActiveRideFeature {
                 // leaves an auto-end's pause, which always raises the alert, to the rider. The bar
                 // is `movingSpeedMPS`, not any speed at all: GPS noise alone used to clear `> 0`
                 // and undo the pause on the next sample (#262). With a wheel sensor the source, GPS
-                // can clear it too, past a frozen wheel's 0 (`isGPSResumingFrozenWheel`, #643).
+                // can clear it too, past a frozen wheel's 0 (`canGPSResumeFrozenWheel`, #643).
                 if state.recordingState == .paused {
                     state.pausedAt = state.pausedAt ?? date.now
                     if let speedMPS = state.speed.speedMPS, speedMPS <= Self.stationarySpeedMPS {
                         state.hasStoppedWhilePaused = true
-                    }
-                    if case .gpsSpeedReceived = speedAction {
-                        state.gpsMovingFixes = isGPSMoving(state) ? state.gpsMovingFixes + 1 : 0
                     }
                 }
                 let isManualPauseArmed = state.hasStoppedWhilePaused
@@ -1424,10 +1429,17 @@ struct ActiveRideFeature {
                 let canAutoResume = state.isAutoPaused
                     || (state.preferences.isResumeWhenMovingEnabled && isManualPauseArmed
                         && state.finishAlert == nil)
+                let canGPSResume = canAutoResume && canGPSResumeFrozenWheel(state)
+                // Only fixes GPS could resume on count. Ones from before, such as a Pause tapped
+                // while coasting (#267), show the rider moving up to the stop that arms the pause,
+                // and would undo it the moment the wheel read stopped.
+                if state.recordingState == .paused, case .gpsSpeedReceived = speedAction {
+                    state.gpsMovingFixes = canGPSResume && isGPSMoving(state) ? state.gpsMovingFixes + 1 : 0
+                }
                 var effect: Effect<Action> = .none
                 if canAutoResume, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
                     effect = resume(&state)
-                } else if canAutoResume, isGPSResumingFrozenWheel(state) {
+                } else if canGPSResume, state.gpsMovingFixes >= Self.gpsResumeFixCount {
                     let wheel = state.speed.speedMPS ?? -1
                     let gps = state.speed.latestGPSSpeedMPS ?? -1
                     let accuracy = state.horizontalAccuracy
@@ -1966,15 +1978,21 @@ struct ActiveRideFeature {
         return gpsSpeed >= Self.movingSpeedMPS
     }
 
-    /// Whether GPS may resume a pause the wheel sensor's reading is keeping (#643): the wheel is the
-    /// source, `isGPSMoving` has held for `gpsResumeFixCount` fixes in a row, and the veto isn't
-    /// spent. A sensor can read 0 for several seconds as the rider pulls away (#623), and the ride
-    /// stayed paused through them, so that stretch was missing from the track, distance and time.
-    /// Only when the ride resumes changes: the wheel still owns the displayed speed and distance.
-    private func isGPSResumingFrozenWheel(_ state: State) -> Bool {
+    /// Whether GPS may resume a pause the wheel sensor's reading is keeping (#643), once `isGPSMoving`
+    /// has held for `gpsResumeFixCount` fixes in a row: the wheel is the source, the veto isn't
+    /// spent, auto-pause is on, and no Finish alert is up. A sensor can read 0 for several seconds as
+    /// the rider pulls away (#623), and the ride stayed paused through them, so that stretch was
+    /// missing from the track, distance and time. Only when the ride resumes changes: the wheel still
+    /// owns the displayed speed and distance.
+    ///
+    /// Auto-pause is what pauses again a GPS resume the wheel never confirms, the bike on a rack;
+    /// without it that ride would run until auto-end. A rider at the Finish alert is done, and
+    /// walking away from the bike mustn't restart the ride behind it.
+    private func canGPSResumeFrozenWheel(_ state: State) -> Bool {
         state.speed.activeSpeedSource == .bleWheel
-            && state.gpsMovingFixes >= Self.gpsResumeFixCount
             && state.gpsMovingVetoSeconds < Self.maxGPSMovingVetoSeconds
+            && state.preferences.isAutoPauseEnabled
+            && state.finishAlert == nil
     }
 
     /// The name the ride-end export carries. An untitled ride gets S10's default name first,

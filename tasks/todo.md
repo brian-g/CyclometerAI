@@ -2998,3 +2998,30 @@ the wheel's first reading. The GPS speeds there are assumed (no Doppler in the l
 checks (own derivedData, caching off): no GPS resume → replay, manual and rack fail; one fix → lone-fix, replay and
 manual fail; no veto spend → only rack fails. `locationContinuesWhilePaused` now asserts the count its moving fix
 makes. Full `CyclometerTests`: 3095 passed, 0 failures.
+
+---
+
+## #643 review (`/code-review xhigh --fix`)
+
+**Fixed.**
+- [x] A Pause tapped while coasting with Resume When Moving on was undone the moment the wheel read stopped: moving fixes
+      counted while the pause couldn't resume yet, and the stop that armed it found the count at 2. Fixes now count only
+      while GPS could resume the pause (`canGPSResume`). Test `pauseTappedWhileRidingStaysPausedAtTheStop`.
+- [x] With auto-pause off, nothing pauses a GPS resume again, so a rack drive or a walk away from the bike ran until
+      auto-end. `canGPSResumeFrozenWheel` requires auto-pause on. Test `gpsResumeNeedsAutoPause`.
+- [x] An auto-paused ride resumed on GPS behind the Finish alert. `canGPSResumeFrozenWheel` requires no alert. Test
+      `finishAlertBlocksGPSResume`.
+- [x] Two moving fixes minutes apart counted as two in a row. A fix more than `movingGPSFixMaxAge` after the last
+      resets the count. Test `movingFixesAcrossAGapStayPaused`.
+- [x] `locationContinuesWhilePaused` no longer asserts a count: GPS can't resume that pause (manual, on GPS).
+
+All four new tests failed on the unfixed reducer. Full `CyclometerTests`: TEST SUCCEEDED, 0 failures.
+
+**Open (Brian's call).**
+- Walking away from the bike (~1.4 m/s, above `movingSpeedMPS`) resumes a wheel-sensor ride for about 11 s. A 2.0 m/s
+  bar for the GPS resume (the calibration gate's Doppler floor) keeps walking out and still resumes the 12:59 replay
+  at :16.
+- A GPS resume lifts the calibration suspension while the wheel is still frozen, so GPS distance without matching
+  revolutions enters the window (about 6–9 m a stop). One option: suspend while `gpsMovingVetoSeconds > 0`, which would
+  cover #623's active-ride freezes too.
+- The spent veto isn't persisted, so after a relaunch a rack-drive pause can resume on GPS one more time.
