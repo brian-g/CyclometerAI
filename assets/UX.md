@@ -1191,6 +1191,7 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 - **Strava** uploads when S10 closes, by Finish Ride or a swipe, so the name and description edited above go with it. The upload runs in the app, not the sheet: closing S10 never cancels it
 - **Apple Health** keeps its automatic write at save (below), so the summary still never waits on it. Turning the row off deletes that workout by #452's delete, without deleting the ride
 - Progress and failures are on the ride's S15 Sync section and S14's Sync swipe, not here: S10 is gone by the time an upload finishes
+- **Locked** (assets/Monetization.md §4, §5): with the trial over and no Lifetime Unlock, Apple Health and every service row show a lock icon in place of the toggle, and nothing is written or uploaded. Tapping a locked row opens the paywall with that row's headline ("Save rides to Apple Health", "Send rides to Strava and more"). The rows read `EntitlementsClient`, never dates or StoreKit
 
 The sheet specified before this revision, kept for its row details:
 

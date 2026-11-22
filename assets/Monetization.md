@@ -1,6 +1,6 @@
 # Monetization Spec
 
-**Status:** Draft v0.1 · 2026-11-21
+**Status:** Draft v0.2 · 2026-11-22 · Milestone: M12 — App Store Submission
 **Model:** Free download · 28-day full-feature trial · $9.99 one-time Lifetime Unlock · No subscription
 
 ---
@@ -32,6 +32,7 @@ The trial is tracked by the app itself. It does **not** use a $0 "XX-day Trial" 
 ### Counting rules
 - **Sensors** are counted per physical paired device (`PairedSensor`). A combined speed/cadence (CSC) sensor counts as **1**, even though it feeds both `SpeedFeature` and `CadenceFeature`.
 - **Radar** and **AR glasses** are gated separately and **do not count** toward the 3-sensor limit.
+- **Apple Watch** as a heart rate source does **not** count toward the limit.
 - **Routes are never gated.**
 
 ---
@@ -63,6 +64,7 @@ Nothing the rider set up during the trial is deleted. Everything returns the mom
 | Radar | Stays paired. The radar column (W7) shows a lock state with an unlock prompt. No radar alerts. |
 | AR glasses | Stay paired, no output. Lock shown in Settings → Sensors. |
 | Weather | The weather widget shows a lock state. No WeatherKit calls. |
+| Apple Health | No workout is written at ride end. The Apple Health row in Sync To (S10) shows a lock. Workouts written during the trial stay in Health. |
 | Services | Accounts stay connected (tokens kept). Sync To in Ride Summary (S10) shows the services locked. No uploads. |
 
 ---
@@ -78,6 +80,7 @@ Show the unlock prompt only when the rider reaches for a locked feature. No payw
 | Pairing AR glasses | "Ride data in your glasses" |
 | Adding a 2nd dashboard page | "Build more dashboard pages" |
 | Turning on weather | "Live weather on your ride" |
+| Tapping the locked Apple Health row in Sync To | "Save rides to Apple Health" |
 | Connecting a service / tapping a locked Sync To row | "Send rides to Strava and more" |
 
 Every paywall shows:
@@ -101,11 +104,11 @@ Radar copy stays factual, not fear-based.
 | Reference name | Lifetime Unlock |
 | Product ID | xyz.acmeapps.ride.lifetime |
 | Price | $9.99 (US base) |
-| Family Sharing | **Open question:** recommend on |
+| Family Sharing | On |
 
 **App Store listing:** the store page won't show a trial badge, so put the offer in the copy. Subtitle or first line: "28-day free trial, then $9.99 once. No subscription."
 
-**App Review notes:** "Free download. All features are unlocked for 28 days, starting with the first recorded ride. After that, ride recording with up to 3 sensors and 1 dashboard page remains free. A one-time non-consumable IAP (Lifetime Unlock) unlocks radar, AR glasses, weather, services, unlimited sensors and dashboard pages. To test the expired state, use Settings → Debug → Expire Trial (debug builds only)."
+**App Review notes:** "Free download. All features are unlocked for 28 days, starting with the first recorded ride. After that, ride recording with up to 3 sensors and 1 dashboard page remains free. A one-time non-consumable IAP (Lifetime Unlock) unlocks radar, AR glasses, weather, Apple Health workouts, services, unlimited sensors and dashboard pages. To test the expired state, use Settings → Debug → Expire Trial (debug builds only)."
 
 ---
 
@@ -134,7 +137,7 @@ enum Limits {
 }
 
 enum GatedFeature: CaseIterable {
-    case radar, arGlasses, weather, services
+    case radar, arGlasses, weather, appleHealth, services
     case extraSensors, extraDashboardPages
 }
 ```
@@ -158,15 +161,17 @@ enum GatedFeature: CaseIterable {
 - Restore → unlocked
 - Free: 4th sensor pairing triggers the paywall; a CSC sensor counts as 1; radar and glasses don't count toward 3
 - Free: with more than 3 sensors paired, the ride start prompts the rider to choose 3
-- Free: pages 2+ are hidden, not deleted; restored on unlock
-- Free: no WeatherKit calls; no service uploads; tokens kept
+- Free: pages 2+ are obscured, not deleted; restored on unlock
+- Free: no WeatherKit calls; no HKWorkout write; no service uploads; tokens kept
+- Free: an Apple Watch HR source doesn't count toward 3
 - Routes: no limit in any state
 
 ---
 
-## 9. Open questions
+## 9. Resolved
 
-1. Family Sharing on or off for Lifetime Unlock? (Recommend on.) On
-2. Does Apple Watch count as a sensor if it's added as an HR source later? No
-3. Which milestone gets this work? M12
-4. Is a launch discount wanted? (Non-consumable promo pricing or offer codes.) No
+1. Family Sharing for Lifetime Unlock: **on** (2026-11-22)
+2. Apple Watch as an HR source: **doesn't count** as a sensor (2026-11-22)
+3. Milestone: **M12 — App Store Submission** (2026-11-22)
+4. Launch discount: **none** (2026-11-22)
+5. Trial length: **28 days**, up from 14; Apple Health workouts move into the unlock (2026-11-22)
