@@ -171,4 +171,27 @@ struct FrozenWheelAutoPauseTests {
         // The fix's own second and the `held` after it don't count; every one after does.
         #expect(paused.first == threshold + held + 1)
     }
+
+    @Test("A wheel that stays at 0 while GPS moves, as on a bike rack, auto-pauses once the veto is spent")
+    func bikeOnARackAutoPauses() async {
+        let store = makeStore()
+        let threshold = ActiveRideFeature.autoPauseZeroSpeedSeconds
+        let cap = ActiveRideFeature.maxGPSMovingVetoSeconds
+        // Driving with the ride running: the sensor keeps sending 0, every fix is good and fast.
+        let seconds = [Second](repeating: (0, (20.0, 3.0)), count: cap + threshold)
+        let paused = await replay(seconds, on: store)
+        #expect(paused.first == cap + threshold)
+    }
+
+    @Test("The veto cap is per freeze: a wheel reading moving between two freezes restores it")
+    func wheelMovingRestoresTheVeto() async {
+        let store = makeStore()
+        let cap = ActiveRideFeature.maxGPSMovingVetoSeconds
+        // Two freezes that together exceed the cap, each within it, split by one real reading.
+        let freeze = [Second](repeating: (0, (3.0, 2.0)), count: cap - 1)
+        let paused = await replay(freeze + [(3.0, (3.0, 2.0))] + freeze, on: store) { store in
+            #expect(store.state.zeroSpeedSeconds == 0)
+        }
+        #expect(paused.isEmpty)
+    }
 }

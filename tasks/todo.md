@@ -2956,3 +2956,9 @@ clock stepped back) as stale rather than fresh. The `zeroSpeedSeconds` doc says 
 `FrozenWheelAutoPauseTests` + the location and state-machine suites: 62 passed. Left for Brian: the veto has no cap, so a
 wheel that is truly stopped while GPS moves (bike on a rack or carried) never auto-pauses or auto-ends while the sensor
 keeps sending 0; and auto-resume still waits for the frozen wheel after a real auto-pause.
+
+**Review follow-up (Brian: fix 1, file 2).** Veto capped at `maxGPSMovingVetoSeconds` = 30 stopped seconds in a row
+(`State.gpsMovingVetoSeconds`, reset when the wheel reads moving), so a bike on a rack auto-pauses after 40 s instead
+of never. Tests `bikeOnARackAutoPauses`, `wheelMovingRestoresTheVeto`; with the cap removed, only the first fails, and
+with the reset removed, only the second. Full `CyclometerTests`: 3082 passed, 0 failures. Auto-resume on a frozen wheel
+filed as #643.

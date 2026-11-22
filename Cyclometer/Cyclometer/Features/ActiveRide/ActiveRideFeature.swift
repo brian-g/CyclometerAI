@@ -88,6 +88,15 @@ struct ActiveRideFeature {
     /// a second, so 3 s covers a late one, and delays auto-pause at most 3 s once they stop.
     static let movingGPSFixMaxAge: TimeInterval = 3
 
+    /// The most stopped seconds in a row that GPS may keep off the auto-pause count (#623).
+    ///
+    /// A frozen wheel recovers within 9 s on the rides on record. A wheel that reads 0 for longer
+    /// while GPS moves is likely not turning at all: the bike is on a rack or being carried with
+    /// the ride still running. Past this cap those seconds count again, so auto-pause fires
+    /// `autoPauseZeroSpeedSeconds` later instead of never. 30 s is over three times the longest
+    /// freeze seen.
+    static let maxGPSMovingVetoSeconds = 30
+
     /// The closest two recorded track points may be (#582): half the 1 s tick.
     ///
     /// The tick can fire twice in a row. When the 1 s timer wakes more than one interval late,
@@ -438,6 +447,9 @@ struct ActiveRideFeature {
         /// When the latest fix arrived: how old `horizontalAccuracy` and the GPS speed it sent to
         /// `SpeedFeature` are. Nil until the first fix. Only `isGPSMoving` reads it (#623).
         var lastGPSFixAt: Date? = nil
+        /// Stopped seconds GPS has kept off `zeroSpeedSeconds` since the wheel last read moving,
+        /// capped by `maxGPSMovingVetoSeconds` (#623).
+        var gpsMovingVetoSeconds: Int = 0
         /// Whether the fix behind `coordinate` is good enough to record (#210). Sticky
         /// between fixes, so the once-a-second track point inherits the verdict of the fix
         /// it is actually made of. False until the first fix arrives.
@@ -462,7 +474,7 @@ struct ActiveRideFeature {
         /// Consecutive seconds at or below `stationarySpeedMPS` — not literally zero,
         /// which GPS never reports (#262). Name kept for the persisted `Ride` field. A wheel
         /// sensor's stopped second while GPS has the rider moving neither counts nor breaks the
-        /// run (#623).
+        /// run, for up to `maxGPSMovingVetoSeconds` (#623).
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
         /// Whether the *current* pause was auto-triggered rather than a manual Pause
@@ -1100,14 +1112,18 @@ struct ActiveRideFeature {
                     state.distanceMeters += speedMPS
                     state.speedSampleCount += 1
                     state.zeroSpeedSeconds = 0
+                    state.gpsMovingVetoSeconds = 0
                     let now = date.now
                     state.averageSpeedSamples.append(SpeedSample(time: now, mps: state.averageSpeedMPS))
                     let cutoff = now.addingTimeInterval(-SpeedFeature.historyWindow)
                     state.averageSpeedSamples.removeAll { $0.time < cutoff }
-                } else if !(state.speed.activeSpeedSource == .bleWheel && isGPSMoving(state)) {
+                } else if state.speed.activeSpeedSource == .bleWheel, isGPSMoving(state),
+                          state.gpsMovingVetoSeconds < Self.maxGPSMovingVetoSeconds {
                     // A wheel sensor can stop counting for 5–9 s as the rider pulls away, reading 0
                     // while GPS has them moving (#623). Such a second is held, not counted and not
                     // a reset: it says the wheel is wrong, not that the stop is over.
+                    state.gpsMovingVetoSeconds += 1
+                } else {
                     state.zeroSpeedSeconds += 1
                 }
                 // Here rather than on each reading: one sample a second whichever source is live,
