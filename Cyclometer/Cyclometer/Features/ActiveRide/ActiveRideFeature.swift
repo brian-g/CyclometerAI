@@ -80,6 +80,23 @@ struct ActiveRideFeature {
     /// moving, not one being nudged in a queue.
     static let movingSpeedMPS: Double = 1.0
 
+    /// The oldest fix whose speed may keep a wheel sensor's zero off the auto-pause count (#623).
+    ///
+    /// `SpeedFeature` holds the last GPS speed with no time limit (#383), and iOS can stop sending
+    /// fixes for 19 s while moving. Without this bound, a rider who stopped where fixes don't return
+    /// would keep a moving speed forever, and auto-pause would never fire. Fixes arrive about once
+    /// a second, so 3 s covers a late one, and delays auto-pause at most 3 s once they stop.
+    static let movingGPSFixMaxAge: TimeInterval = 3
+
+    /// The most stopped seconds in a row that GPS may keep off the auto-pause count (#623).
+    ///
+    /// A frozen wheel recovers within 9 s on the rides on record. A wheel that reads 0 for longer
+    /// while GPS moves is likely not turning at all: the bike is on a rack or being carried with
+    /// the ride still running. Past this cap those seconds count again, so auto-pause fires
+    /// `autoPauseZeroSpeedSeconds` later instead of never. 30 s is over three times the longest
+    /// freeze seen.
+    static let maxGPSMovingVetoSeconds = 30
+
     /// The closest two recorded track points may be (#582): half the 1 s tick.
     ///
     /// The tick can fire twice in a row. When the 1 s timer wakes more than one interval late,
@@ -427,6 +444,12 @@ struct ActiveRideFeature {
         /// The latest fix's `speedAccuracy`, nil when CoreLocation marked it invalid: whether the
         /// GPS speed that fix sends to `SpeedFeature` may become the max (#540).
         var speedAccuracy: Double? = nil
+        /// When the latest fix arrived: how old `horizontalAccuracy` and the GPS speed it sent to
+        /// `SpeedFeature` are. Nil until the first fix. Only `isGPSMoving` reads it (#623).
+        var lastGPSFixAt: Date? = nil
+        /// Stopped seconds GPS has kept off `zeroSpeedSeconds` since the wheel last read moving,
+        /// capped by `maxGPSMovingVetoSeconds` (#623).
+        var gpsMovingVetoSeconds: Int = 0
         /// Whether the fix behind `coordinate` is good enough to record (#210). Sticky
         /// between fixes, so the once-a-second track point inherits the verdict of the fix
         /// it is actually made of. False until the first fix arrives.
@@ -449,7 +472,9 @@ struct ActiveRideFeature {
         var hasUnwrittenFix: Bool = false
         var isLocationAvailable: Bool = false
         /// Consecutive seconds at or below `stationarySpeedMPS` — not literally zero,
-        /// which GPS never reports (#262). Name kept for the persisted `Ride` field.
+        /// which GPS never reports (#262). Name kept for the persisted `Ride` field. A wheel
+        /// sensor's stopped second while GPS has the rider moving neither counts nor breaks the
+        /// run, for up to `maxGPSMovingVetoSeconds` (#623).
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
         /// Whether the *current* pause was auto-triggered rather than a manual Pause
@@ -1080,16 +1105,24 @@ struct ActiveRideFeature {
                 // counts toward auto-pause, and stays out of Avg speed. Integrating the noise
                 // floor instead — what `max(speedMPS, 0)` did — grew the odometer while the
                 // bike stood still (#262), and averaging it dragged Avg speed down (#381).
-                // The displayed speed, so a wheel sensor's reading wins over GPS here too.
+                // The displayed speed, so a wheel sensor's reading wins over GPS here too; GPS only
+                // keeps a frozen wheel's zero off the auto-pause count (#623).
                 let speedMPS = max(state.speed.speedMPS ?? 0, 0)
                 if speedMPS > Self.stationarySpeedMPS {
                     state.distanceMeters += speedMPS
                     state.speedSampleCount += 1
                     state.zeroSpeedSeconds = 0
+                    state.gpsMovingVetoSeconds = 0
                     let now = date.now
                     state.averageSpeedSamples.append(SpeedSample(time: now, mps: state.averageSpeedMPS))
                     let cutoff = now.addingTimeInterval(-SpeedFeature.historyWindow)
                     state.averageSpeedSamples.removeAll { $0.time < cutoff }
+                } else if state.speed.activeSpeedSource == .bleWheel, isGPSMoving(state),
+                          state.gpsMovingVetoSeconds < Self.maxGPSMovingVetoSeconds {
+                    // A wheel sensor can stop counting for 5–9 s as the rider pulls away, reading 0
+                    // while GPS has them moving (#623). Such a second is held, not counted and not
+                    // a reset: it says the wheel is wrong, not that the stop is over.
+                    state.gpsMovingVetoSeconds += 1
                 } else {
                     state.zeroSpeedSeconds += 1
                 }
@@ -1277,6 +1310,7 @@ struct ActiveRideFeature {
                 }
                 state.horizontalAccuracy = update.horizontalAccuracy
                 state.speedAccuracy = update.speedAccuracy
+                state.lastGPSFixAt = date.now
                 let sinceRecorded = date.now.timeIntervalSince(
                     state.lastRecordablePositionAt ?? date.now
                 )
@@ -1883,6 +1917,21 @@ struct ActiveRideFeature {
               date.now.timeIntervalSince(sample.receivedAt) >= Self.healthKitHRStalenessWindow
         else { return }
         state.healthKitHRSample = nil
+    }
+
+    /// Whether the latest fix has the rider moving: fresh, trustworthy, and at `movingSpeedMPS`
+    /// or above (#623). Moving speed, not any speed: a stationary phone's GPS reads a few cm/s
+    /// of noise (#262), and the threshold auto-resume uses keeps that noise out. Trustworthy in
+    /// both position and speed: a 1 m/s reading the fix itself says is ±3 m/s can't tell moving
+    /// from stopped. A fix stamped after now (the wall clock stepped back) isn't fresh.
+    private func isGPSMoving(_ state: State) -> Bool {
+        guard let fixAt = state.lastGPSFixAt,
+              (0...Self.movingGPSFixMaxAge).contains(date.now.timeIntervalSince(fixAt)),
+              GPSFixFilter.isTrustworthy(state.horizontalAccuracy),
+              MaxSpeedGate.isTrustworthy(speedAccuracy: state.speedAccuracy),
+              let gpsSpeed = state.speed.latestGPSSpeedMPS
+        else { return false }
+        return gpsSpeed >= Self.movingSpeedMPS
     }
 
     /// The name the ride-end export carries. An untitled ride gets S10's default name first,

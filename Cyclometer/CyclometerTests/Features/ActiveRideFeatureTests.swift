@@ -438,6 +438,7 @@ struct ActiveRideFeatureLocationTests {
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
+            $0.lastGPSFixAt = testDate
             $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
             $0.heading = 192.0
@@ -497,6 +498,7 @@ struct ActiveRideFeatureLocationTests {
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
+            $0.lastGPSFixAt = testDate
             $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
             $0.heading = 192.0
@@ -536,6 +538,7 @@ struct ActiveRideFeatureLocationTests {
             $0.coordinate = Coordinate(latitude: 43.0731, longitude: -89.4012)
             $0.sunsetFix = SunsetFix(coordinate: Coordinate(latitude: 43.0731, longitude: -89.4012), takenAt: testDate)
             $0.horizontalAccuracy = 13.2
+            $0.lastGPSFixAt = testDate
             $0.speedAccuracy = 0.3
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.heading = 192.0
@@ -640,6 +643,7 @@ struct ActiveRideFeatureLocationTests {
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
+            $0.lastGPSFixAt = testDate
             $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
             $0.heading = 192.0
@@ -729,6 +733,7 @@ struct ActiveRideFeatureLocationTests {
             $0.trackSegments = [[Coordinate(latitude: 43.0731, longitude: -89.4012)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
+            $0.lastGPSFixAt = testDate
             $0.isFixRecordable = true
             $0.heading = 192.0
         }
@@ -2470,6 +2475,7 @@ struct ActiveRideFeatureStateMachineTests {
             $0.trackSegments = [[Coordinate(latitude: 43.0, longitude: -89.0)]]
             $0.altitudeResolver.gpsFix(altitude: 280.0, verticalAccuracy: nil)
             $0.horizontalAccuracy = 5.0
+            $0.lastGPSFixAt = testDate
             $0.speedAccuracy = 0.3
             $0.isFixRecordable = true
             $0.heading = 0
