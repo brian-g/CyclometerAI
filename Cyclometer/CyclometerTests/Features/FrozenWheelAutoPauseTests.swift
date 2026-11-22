@@ -11,13 +11,18 @@ private let testDate = Date(timeIntervalSince1970: 1_000_000)
 /// those seconds auto-paused the ride four times, each just as the rider pulled away. A good,
 /// fresh GPS fix at `movingSpeedMPS` keeps such a second off the auto-pause count; the wheel
 /// still owns the displayed speed, distance and Avg.
+///
+/// #643 is the same fault after a real stop: the ride stayed paused while the frozen wheel read 0
+/// and the rider rode away. Two such fixes in a row now resume it.
 @MainActor
-@Suite("ActiveRideFeature — frozen wheel sensor and auto-pause (#623)")
+@Suite("ActiveRideFeature — frozen wheel sensor, auto-pause and auto-resume (#623, #643)")
 struct FrozenWheelAutoPauseTests {
 
     /// One second of a ride: the wheel frame `CSCCalculator` emitted (nil when it emitted none),
     /// and the GPS fix that arrived (nil when none did).
     typealias Second = (wheel: Double?, gps: (speed: Double, accuracy: Double)?)
+
+    enum Pause { case auto, manual }
 
     /// Ride 2026-11-21, 12:03:13–12:03:26, one entry a second. Wheel frames are the log's. The
     /// log has no Doppler line, so GPS speed is the GPX's positional speed held one second back,
@@ -35,16 +40,25 @@ struct FrozenWheelAutoPauseTests {
 
     /// The state is built inside the in-memory storage scope, so its preferences read the
     /// `isAutoPauseEnabled` set here rather than whatever storage the host resolves.
-    private func makeStore() -> TestStoreOf<ActiveRideFeature> {
+    ///
+    /// - Parameter pause: nil for a ride riding at 3 m/s; otherwise the ride is paused that way,
+    ///   the wheel the source and reading 0.
+    private func makeStore(
+        pause: Pause? = nil, isResumeWhenMovingEnabled: Bool = false
+    ) -> TestStoreOf<ActiveRideFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
             @Shared(.appPreferences) var preferences
-            $preferences.withLock { $0.isAutoPauseEnabled = true }
-            var state = ActiveRideFeature.State(recordingState: .active)
+            $preferences.withLock {
+                $0.isAutoPauseEnabled = true
+                $0.isResumeWhenMovingEnabled = isResumeWhenMovingEnabled
+            }
+            var state = ActiveRideFeature.State(recordingState: pause == nil ? .active : .paused)
+            state.isAutoPaused = pause == .auto
             state.speed = SpeedFeature.State(
-                speedMPS: 3.0,
+                speedMPS: pause == nil ? 3.0 : 0,
                 activeSpeedSource: .bleWheel,
                 connectionState: .active,
                 pairedSensorName: "Wahoo SPEED"
@@ -193,5 +207,110 @@ struct FrozenWheelAutoPauseTests {
             #expect(store.state.zeroSpeedSeconds == 0)
         }
         #expect(paused.isEmpty)
+    }
+
+    // MARK: - Auto-resume (#643)
+
+    /// Ride 2026-11-21, 12:59:13–12:59:19, auto-paused since 12:58:27. Wheel frames are the log's: 0
+    /// through :16, none at :17–18 (the sensor re-priming), 3.34 m/s at :19, where the ride resumed.
+    /// The log has no Doppler line and, paused, the GPX has no points, so the GPS speeds are
+    /// assumed, set to fit what the log does say: accuracy flapped about 10.7–11 m through the
+    /// pause, the recording gate opened at 9.5 m at :14, and the calibration gate (Doppler
+    /// ≥ 2.0 m/s, accuracy ≤ 10 m) opened at :15 and stayed open until :21.
+    private static let ride1259: [Second] = [
+        (0, (0.6, 10.8)), (0, (0.9, 9.5)), (0, (2.1, 9.5)), (0, (2.5, 9.5)),
+        (nil, (2.8, 9.5)), (nil, (3.1, 9.5)), (3.34, (3.3, 9.5)),
+    ]
+
+    /// The first 1-based tick that left the ride riding, from `replay`'s paused ticks.
+    private func firstActiveTick(_ paused: [Int], of count: Int) -> Int? {
+        (1...count).first { !paused.contains($0) }
+    }
+
+    @Test("The 12:59 stop: two moving fixes resume the ride before the frozen wheel reads moving")
+    func ride1259ResumesOnGPS() async {
+        let store = makePausedStore()
+        let paused = await replay(Self.ride1259, on: store)
+        // :16, the second fix with the gate open; the wheel's first reading is tick 7, :19.
+        #expect(firstActiveTick(paused, of: Self.ride1259.count) == 4)
+        #expect(paused == [1, 2, 3])
+
+        // The wheel still owns what the rider sees and what the ride records: no distance until it
+        // reads moving, and once it does the veto the resume spent is back.
+        #expect(store.state.speed.activeSpeedSource == .bleWheel)
+        #expect(store.state.speed.speedMPS == 3.34)
+        #expect(abs(store.state.distanceMeters - 3.34) < 1e-9)
+        #expect(store.state.zeroSpeedSeconds == 0)
+        #expect(store.state.gpsMovingVetoSeconds == 0)
+    }
+
+    @Test(
+        "An auto-paused ride whose wheel reads 0 stays paused when GPS can't show the rider moving",
+        arguments: [
+            ("GPS stationary", (speed: 0.04, accuracy: 2.0) as (speed: Double, accuracy: Double)?),
+            ("GPS just under moving speed", (speed: 0.99, accuracy: 2.0)),
+            ("GPS moving, poor accuracy", (speed: 3.0, accuracy: GPSFixFilter.maxHorizontalAccuracy + 0.1)),
+            ("GPS moving, invalid accuracy", (speed: 3.0, accuracy: -1)),
+            ("no fix", nil),
+        ]
+    )
+    func stoppedWheelStaysPaused(_ label: String, gps: (speed: Double, accuracy: Double)?) async {
+        let store = makePausedStore()
+        let seconds = [Second](repeating: (0, gps), count: 10)
+        let paused = await replay(seconds, on: store)
+        #expect(paused.count == seconds.count, "\(label)")
+    }
+
+    @Test("A moving GPS speed whose speedAccuracy is past MaxSpeedGate's ceiling doesn't resume")
+    func untrustworthyGPSSpeedStaysPaused() async {
+        let store = makePausedStore()
+        let seconds = [Second](repeating: (0, (3.0, 2.0)), count: 10)
+        let paused = await replay(seconds, on: store, speedAccuracy: MaxSpeedGate.maxGPSSpeedAccuracyMPS + 0.1)
+        #expect(paused.count == seconds.count)
+    }
+
+    @Test("One moving fix at a time, between stopped ones or before fixes stop, doesn't resume")
+    func loneMovingFixesStayPaused() async {
+        let store = makePausedStore()
+        // Ends on a moving fix, then iOS sends no more.
+        let stray: [Second] = [(0, (0.04, 2.0)), (0, (3.0, 2.0))]
+        let seconds = Array([[Second]](repeating: stray, count: 5).joined())
+            + [Second](repeating: (0, nil), count: 5)
+        let paused = await replay(seconds, on: store)
+        #expect(paused.count == seconds.count)
+    }
+
+    @Test("A manual pause resumes on GPS only under Resume When Moving's own rules")
+    func manualPauseFollowsResumeWhenMoving() async {
+        let moving = [Second](repeating: (0, (3.0, 2.0)), count: 5)
+
+        let off = makePausedStore(.manual)
+        let pausedOff = await replay(moving, on: off)
+        #expect(pausedOff.count == moving.count)
+
+        // The wheel's 0 is the stop that arms it (#267).
+        let on = makePausedStore(.manual, isResumeWhenMovingEnabled: true)
+        let pausedOn = await replay(moving, on: on)
+        #expect(firstActiveTick(pausedOn, of: moving.count) == 2)
+    }
+
+    @Test("A bike driven away on a rack resumes once, pauses again after the count, and stays paused")
+    func bikeOnARackResumesOnce() async {
+        let store = makePausedStore()
+        let threshold = ActiveRideFeature.autoPauseZeroSpeedSeconds
+        let resumeTick = ActiveRideFeature.gpsResumeFixCount
+        // The sensor keeps sending 0; every fix is good and fast.
+        let seconds = [Second](repeating: (0, (20.0, 3.0)), count: 60)
+        let paused = await replay(seconds, on: store)
+        // The resume spent the veto, so each tick from the resume counts toward auto-pause.
+        let repauseTick = resumeTick + threshold - 1
+        #expect(paused == Array(1..<resumeTick) + Array(repauseTick...seconds.count))
+        #expect(store.state.distanceMeters == 0)
+    }
+
+    private func makePausedStore(
+        _ pause: Pause = .auto, isResumeWhenMovingEnabled: Bool = false
+    ) -> TestStoreOf<ActiveRideFeature> {
+        makeStore(pause: pause, isResumeWhenMovingEnabled: isResumeWhenMovingEnabled)
     }
 }

@@ -699,6 +699,8 @@ struct ActiveRideFeatureLocationTests {
                 SpeedSample(time: testDate, mps: 8.5),
                 SpeedSample(time: testDate, mps: 12.0)
             ]
+            // A good moving fix while paused (#643); only a wheel sensor's pause reads it.
+            $0.gpsMovingFixes = 1
         }
         await store.receive(\.calibration.locationUpdated) {
             $0.calibration.lastFixTimestamp = pausedUpdate.timestamp
