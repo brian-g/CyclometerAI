@@ -2924,3 +2924,27 @@ stale comments. Full `CyclometerTests`: 3070 passed, 0 failures. Left open for a
 - [x] Tests: `frozenFixIsNotRewrittenAsTrusted`, `routeLocationsSkipUntrustedPoints`; `vehiclePassesAgreeAcrossPersistenceAndGPX` now asserts the two fixless ticks are untrusted and compares positions at the GPX's 7 places; 7 exhaustive location sends assert the flag
 - [x] Revert checks: each fix reverted fails its test
 - [x] Full `CyclometerTests`: 3072 passed, 0 failures
+
+---
+
+## #623 Frozen wheel sensor auto-pauses a moving ride
+
+**Log check (scope item 4).** The log has no per-fix Doppler line, only the calibration gate (opens at Doppler ≥ 2.0 m/s).
+Positional speed from the GPX (accuracy 2.0–2.1 m throughout) stands in, with Doppler lagging it 1–3 s (gate-open times).
+
+| pause | wheel ≤ 0.5 from | positional ≥ 1.0 from | Doppler ≥ 2.0 at | ticks counted with the fix |
+|---|---|---|---|---|
+| 11:51:43 | :34 | :38 | :40 | 4–6 of 10 |
+| 12:03:24 | :15 | :20 | :23 | 5–7 |
+| 12:17:47 | :38 | :43 | :48 | 5–9 (thin) |
+| 12:23:53 | :44 | :52 (creeping 0.5–0.9 before) | :53 | 9 (one tick spare) |
+
+All four would be caught; 12:17 and 12:23 only by 1–2 ticks.
+
+**Plan.**
+- [x] `ActiveRideFeature.State.lastGPSFixAt`, set in `.locationUpdated`
+- [x] In `.elapsedTick`, a stopped second doesn't count when the wheel is the source and the last fix is fresh (`movingGPSFixMaxAge` = 3 s, Brian chose the bound over the scope as written), trustworthy (`GPSFixFilter.isTrustworthy`) and ≥ `movingSpeedMPS`. Count held, not reset. Distance/Avg/display untouched
+- [x] Tests (`FrozenWheelAutoPauseTests`, 7 cases): 12:03 replay → no auto-pause, wheel keeps display and distance; wheel 0 + GPS stationary / 0.99 m/s / poor accuracy / invalid accuracy / no fix → auto-pause at 10; stale fix vetoes ≤ 3 s
+- [x] Revert checks (own derivedData): no veto → replay + stale fail; no freshness bound → stale fails; the five "still pauses" cases pass both ways
+- [x] Six exhaustive `.locationUpdated` tests assert `lastGPSFixAt`
+- [x] Full `CyclometerTests`: 3078 passed, 0 failures
