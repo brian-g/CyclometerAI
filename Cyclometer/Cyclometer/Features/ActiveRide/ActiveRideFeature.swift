@@ -460,7 +460,9 @@ struct ActiveRideFeature {
         var hasUnwrittenFix: Bool = false
         var isLocationAvailable: Bool = false
         /// Consecutive seconds at or below `stationarySpeedMPS` — not literally zero,
-        /// which GPS never reports (#262). Name kept for the persisted `Ride` field.
+        /// which GPS never reports (#262). Name kept for the persisted `Ride` field. A wheel
+        /// sensor's stopped second while GPS has the rider moving neither counts nor breaks the
+        /// run (#623).
         var zeroSpeedSeconds: Int = 0
         var isAutoEndEnabled: Bool = true
         /// Whether the *current* pause was auto-triggered rather than a manual Pause
@@ -1903,11 +1905,14 @@ struct ActiveRideFeature {
 
     /// Whether the latest fix has the rider moving: fresh, trustworthy, and at `movingSpeedMPS`
     /// or above (#623). Moving speed, not any speed: a stationary phone's GPS reads a few cm/s
-    /// of noise (#262), and the threshold auto-resume uses keeps that noise out.
+    /// of noise (#262), and the threshold auto-resume uses keeps that noise out. Trustworthy in
+    /// both position and speed: a 1 m/s reading the fix itself says is ±3 m/s can't tell moving
+    /// from stopped. A fix stamped after now (the wall clock stepped back) isn't fresh.
     private func isGPSMoving(_ state: State) -> Bool {
         guard let fixAt = state.lastGPSFixAt,
-              date.now.timeIntervalSince(fixAt) <= Self.movingGPSFixMaxAge,
+              (0...Self.movingGPSFixMaxAge).contains(date.now.timeIntervalSince(fixAt)),
               GPSFixFilter.isTrustworthy(state.horizontalAccuracy),
+              MaxSpeedGate.isTrustworthy(speedAccuracy: state.speedAccuracy),
               let gpsSpeed = state.speed.latestGPSSpeedMPS
         else { return false }
         return gpsSpeed >= Self.movingSpeedMPS

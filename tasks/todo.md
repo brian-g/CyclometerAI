@@ -2948,3 +2948,11 @@ All four would be caught; 12:17 and 12:23 only by 1–2 ticks.
 - [x] Revert checks (own derivedData): no veto → replay + stale fail; no freshness bound → stale fails; the five "still pauses" cases pass both ways
 - [x] Six exhaustive `.locationUpdated` tests assert `lastGPSFixAt`
 - [x] Full `CyclometerTests`: 3078 passed, 0 failures
+
+**Review (2026-11-22, `/code-review xhigh --fix`).** `isGPSMoving` now also requires the fix's `speedAccuracy` to pass
+`MaxSpeedGate.isTrustworthy(speedAccuracy:)` (nil or invalid still passes), and treats a fix stamped after now (wall
+clock stepped back) as stale rather than fresh. The `zeroSpeedSeconds` doc says how the veto holds the run. Two new tests,
+`untrustworthyGPSSpeedAutoPauses` and `clockStepBackStopsVetoing`; with both guards removed, exactly those two fail.
+`FrozenWheelAutoPauseTests` + the location and state-machine suites: 62 passed. Left for Brian: the veto has no cap, so a
+wheel that is truly stopped while GPS moves (bike on a rack or carried) never auto-pauses or auto-ends while the sensor
+keeps sending 0; and auto-resume still waits for the frozen wheel after a real auto-pause.

@@ -69,10 +69,10 @@ struct FrozenWheelAutoPauseTests {
     }
 
     /// Plays `seconds` one a second and returns the 1-based ticks that left the ride paused.
-    /// `eachSecond` runs after every tick.
+    /// Every fix carries `speedAccuracy`. `eachSecond` runs after every tick.
     @discardableResult
     private func replay(
-        _ seconds: [Second], on store: TestStoreOf<ActiveRideFeature>,
+        _ seconds: [Second], on store: TestStoreOf<ActiveRideFeature>, speedAccuracy: Double? = nil,
         eachSecond: (TestStoreOf<ActiveRideFeature>) -> Void = { _ in }
     ) async -> [Int] {
         var pausedTicks: [Int] = []
@@ -82,7 +82,8 @@ struct FrozenWheelAutoPauseTests {
             if let gps = second.gps {
                 await store.send(.locationUpdated(LocationUpdate(
                     coordinate: Coordinate(latitude: 43.0, longitude: -89.0), altitude: 280,
-                    speed: gps.speed, horizontalAccuracy: gps.accuracy, heading: 0, timestamp: now.value
+                    speed: gps.speed, speedAccuracy: speedAccuracy, horizontalAccuracy: gps.accuracy,
+                    heading: 0, timestamp: now.value
                 )))
             }
             await store.send(.elapsedTick)
@@ -131,6 +132,30 @@ struct FrozenWheelAutoPauseTests {
         let seconds = [Second](repeating: (0, gps), count: threshold)
         let paused = await replay(seconds, on: store)
         #expect(paused.first == threshold, "\(label)")
+    }
+
+    @Test("A moving GPS speed whose speedAccuracy is past MaxSpeedGate's ceiling doesn't hold the count")
+    func untrustworthyGPSSpeedAutoPauses() async {
+        let store = makeStore()
+        let threshold = ActiveRideFeature.autoPauseZeroSpeedSeconds
+        let seconds = [Second](repeating: (0, (3.0, 2.0)), count: threshold)
+        let paused = await replay(seconds, on: store, speedAccuracy: MaxSpeedGate.maxGPSSpeedAccuracyMPS + 0.1)
+        #expect(paused.first == threshold)
+    }
+
+    @Test("A fix stamped after now, the wall clock having stepped back, doesn't veto the wheel's zero")
+    func clockStepBackStopsVetoing() async {
+        let store = makeStore()
+        let threshold = ActiveRideFeature.autoPauseZeroSpeedSeconds
+        let seconds: [Second] = [(0, (5.0, 2.0))] + [Second](repeating: (0, nil), count: threshold)
+        var hasStepped = false
+        let paused = await replay(seconds, on: store) { _ in
+            guard !hasStepped else { return }
+            hasStepped = true
+            now.withValue { $0.addTimeInterval(-60) }
+        }
+        // The fix's own second doesn't count; every one after the step does.
+        #expect(paused.first == threshold + 1)
     }
 
     @Test("Once fixes stop, a held moving GPS speed vetoes the wheel's zero for movingGPSFixMaxAge at most")
