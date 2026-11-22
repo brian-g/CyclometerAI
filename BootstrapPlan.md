@@ -11,7 +11,7 @@
 |-----|-------|
 | App name | Cyclometer |
 | Project folder | `CyclometerAI/` (organizational only — never in UI) |
-| Bundle ID | `name.glaeske.cyclometer` |
+| Bundle ID | `xyz.acmeapps.ride` (was `name.glaeske.cyclometer`) |
 | Platform | iOS 26+ (iPhone only) |
 | Min device | iPhone 11 (A13 Bionic) |
 | Architecture | TCA — The Composable Architecture |
@@ -180,7 +180,7 @@ CoreBluetooth · CoreLocation · HealthKit · CoreHaptics · AVFoundation · Swi
 2. **Create Xcode project:**
    - New Project → iOS → App
    - Product Name: `Cyclometer`
-   - Bundle Identifier: `name.glaeske.cyclometer`
+   - Bundle Identifier: `xyz.acmeapps.ride`
    - Interface: SwiftUI · Language: Swift
    - Deployment target: iOS 26
    - Storage: None (managed by stack files)

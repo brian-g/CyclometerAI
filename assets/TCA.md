@@ -73,7 +73,7 @@ Key client outlines (not in BLE.md):
 struct HealthKitClient: Sendable {
     // Read — used at onboarding and ride start
     var readRiderProfile: @Sendable () async throws -> HealthKitRiderData = { HealthKitRiderData() }
-    // Write — HKWorkout recorded automatically at ride end (MVP)
+    // Write — HKWorkout recorded when S10 closes with Sync To's Apple Health on (revised 2026-11-22; not automatic)
     var recordWorkout: @Sendable (HKWorkoutPayload) async throws -> Void = { _ in }
     // Stream — HR updates when Apple Watch is active HR source
     var heartRateStream: @Sendable () -> AsyncStream<Int> = { AsyncStream { _ in } }
@@ -693,7 +693,7 @@ struct RideSummaryFeature {
         var isShowingSyncSheet: Bool = false
         var syncSheet: RideSyncSheetFeature.State?
 
-        // HKWorkout write fires automatically on appear; status tracked here
+        // HKWorkout write fires when S10 closes, only with Sync To's Apple Health on; status tracked here
         var healthKitWorkoutStatus: WorkoutWriteStatus = .pending
     }
 
@@ -746,9 +746,9 @@ enum ServiceSyncStatus: Equatable {
 
 **HKWorkout write flow:**
 ```
-RideSummaryFeature.reduce(.onAppear)
+RideSummaryFeature.reduce(.finishTapped / .dismissed)
     │
-    │ guard healthKitWorkoutStatus == .pending
+    │ guard syncDestinations[.appleHealth] == true, healthKitWorkoutStatus == .pending
     ▼
 HealthKitClient.recordWorkout(HKWorkoutPayload(
     startDate: ride.startedAt,
@@ -930,7 +930,7 @@ token, reads the rate-limit headers, and throws `StravaError.rateLimited(until:)
 |---|---|---|
 | `AccountsFeature` | `SettingsFeature` | S12 Accounts rows and S12.1: connect, disconnect, Reconnect, granted scopes |
 | `SyncQueueFeature` | `AppFeature` (app-lifetime) | Runs uploads after S10 closes: upload, poll `uploadStatus` (1, 2, 4, then 8 s, for 2 min), write `RideSyncRecord`. On launch resumes records left `pending` or `processing`. Replaces `SyncClient.uploadRide`'s single call |
-| `RideSummaryFeature` | — | Gains `syncDestinations: [SyncDestination: Bool]` for S10's Sync To; `.task` loads the defaults; `.finishTapped` and dismissal save them and send the chosen services to `SyncQueueFeature`. Health off sends `healthKit.deleteWorkout`. `RideSyncSheetFeature` is retired |
+| `RideSummaryFeature` | — | Gains `syncDestinations: [SyncDestination: Bool]` for S10's Sync To; `.task` loads the defaults; `.finishTapped` and dismissal save them and send the chosen services to `SyncQueueFeature`. Health is a destination like the services: on, the close sets `isHealthWorkoutOwed` and writes the workout; off, it clears the flag and nothing is written. No write at save. `RideSyncSheetFeature` is retired |
 | `StravaRoutesFeature` | S19 and S05.2 | Paged browser; choosing fetches `routeGPX`, imports through `GPXRouteImporter`, upserts by `stravaRouteID` |
 
 S15's `RideDetailFeature` and S20's `RouteDetailFeature` each gain a `segments` child: load the cache, fetch when it
