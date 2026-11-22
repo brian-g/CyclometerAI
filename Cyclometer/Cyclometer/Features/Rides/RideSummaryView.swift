@@ -1,20 +1,17 @@
-import Charts
 import ComposableArchitecture
 import SwiftUI
 
 /// S10 — Ride Summary, presented as a sheet by `AppFeature` when a ride is finished (#249).
 ///
 /// The Design.sketch S10 frame's structure — map, a grouped list, a floating button — carrying
-/// UX.md §S10's content. The frame's Description, Bike and Sync To rows are not built: Sync is
-/// Phase 2, and there is no bike model. This view owns only the loading, which a snapshot must
-/// not run; the screen itself is `RideSummaryList`.
+/// UX.md §S10's content: S15's Summary, led by distance and time (#645). The frame's Description,
+/// Bike and Sync To rows are not built: Sync is Phase 2, and there is no bike model. This view
+/// owns only the loading, which a snapshot must not run; the screen itself is `RideSummaryList`.
 struct RideSummaryView: View {
     @Bindable var store: StoreOf<RideSummaryFeature>
 
     /// The frame's map placeholder height.
     static let mapHeight: CGFloat = 168
-    static let chartHeight: CGFloat = 140
-    static let pieHeight: CGFloat = 160
 
     var body: some View {
         NavigationStack {
@@ -31,7 +28,7 @@ struct RideSummaryList<MapRow: View>: View {
     @Bindable var store: StoreOf<RideSummaryFeature>
     let mapRow: MapRow
 
-    @FocusState private var isNameFocused: Bool
+    @FocusState private var isTitleFocused: Bool
 
     var body: some View {
         let unit = store.unitSystem
@@ -42,53 +39,42 @@ struct RideSummaryList<MapRow: View>: View {
                     .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerMd, style: .continuous))
                     .listRowInsets(EdgeInsets())
             }
-            Section {
-                // The whole row focuses the field, not only the text: the rider taps the title.
-                LabeledContent("Name") {
-                    TextField("Name", text: $store.title.sending(\.titleChanged))
-                        .multilineTextAlignment(.trailing)
-                        .submitLabel(.done)
-                        .focused($isNameFocused)
-                        .foregroundStyle(Color.cyTextSecondary)
-                }
-                .onChange(of: isNameFocused) { _, isFocused in
-                    if isFocused { store.send(.titleFocused) }
-                }
-                .contentShape(Rectangle())
-                .onTapGesture { isNameFocused = true }
+            // Labelled above their fields, as S15's Edit sheet lays them out (#645).
+            Section("Title") {
+                TextField("Title", text: $store.title.sending(\.titleChanged))
+                    .submitLabel(.done)
+                    .focused($isTitleFocused)
+                    .onChange(of: isTitleFocused) { _, isFocused in
+                        if isFocused { store.send(.titleFocused) }
+                    }
             }
-            Section("Ride Stats") {
-                switch store.load {
-                case .waiting:
+            Section("Notes") {
+                TextField("Notes", text: $store.notes.sending(\.notesChanged), axis: .vertical)
+                    .lineLimit(4...)
+            }
+            switch store.load {
+            case .waiting:
+                Section("Summary") {
                     HStack {
                         Spacer()
                         ProgressView()
                         Spacer()
                     }
-                case .unavailable:
+                }
+            case .unavailable:
+                Section("Summary") {
                     unavailable("This ride's stats couldn't be loaded")
-                case .loaded:
-                    stats(unit)
                 }
-            }
-            if store.load == .loaded {
-                Section("Elevation Profile") {
-                    if let profile = store.elevationProfileMeters {
-                        ElevationProfileView(samples: profile.map(unit.elevation(fromMeters:)),
-                                             unitLabel: unit.elevationLabel)
-                            .frame(height: RideSummaryView.chartHeight)
-                            .padding(.vertical, Spacing.sm)
-                    } else {
-                        unavailable("No elevation recorded")
-                    }
+            case .loaded:
+                // S15's Summary (#645), led by what S15 shows in its title block. A plain passes
+                // row: S10 has no passes sheet.
+                RideSummarySection(stats: store.stats, unit: unit, leading: store.summary?.leadingReadings(unit) ?? []) { passes in
+                    LabeledContent("Vehicle Passes", value: passes.formatted())
                 }
-                Section("Heart Rate Zones") {
-                    let zoneSeconds = store.heartRateZoneSeconds
-                    if zoneSeconds.isEmpty {
-                        unavailable("No heart rate recorded")
-                    } else {
-                        HeartRateZonePie(zoneSeconds: zoneSeconds)
-                            .padding(.vertical, Spacing.sm)
+                // As S15 shows a route: here without a link, since S10 isn't on the Rides stack.
+                if let route = store.stats?.routeName {
+                    Section("Route") {
+                        Text(route)
                     }
                 }
                 // Only when the ride flagged one (#391): a clean ride's summary is unchanged.
@@ -140,35 +126,8 @@ struct RideSummaryList<MapRow: View>: View {
         }
     }
 
-    @ViewBuilder
-    private func stats(_ unit: UnitSystem) -> some View {
-        if let summary = store.summary {
-            LabeledContent("Distance",
-                           value: "\(unit.distance(fromMeters: summary.distanceMeters).formatted(.number.precision(.fractionLength(1)))) \(unit.distanceLabel)")
-            LabeledContent("Time", value: Duration.seconds(summary.durationSeconds)
-                .formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1))))
-        }
-        LabeledContent("Avg Speed", value: speedText(store.stats?.averageSpeedMPS, unit))
-        // Absent, not 0, with no cadence sensor — 0 rpm is a real reading.
-        if let cadence = store.stats?.averageCadenceRPM {
-            LabeledContent("Avg Cadence", value: "\(cadence.formatted()) rpm")
-        }
-        // Absent with no radar paired, where "0 passes" would be a claim nobody measured.
-        if let passes = store.stats?.vehiclePassCount {
-            LabeledContent("Vehicle Passes", value: passes.formatted())
-        }
-        if let route = store.stats?.routeName {
-            LabeledContent("Route", value: route)
-        }
-    }
-
     private func unavailable(_ text: String) -> some View {
         Text(text).foregroundStyle(Color.cyTextSecondary)
-    }
-
-    private func speedText(_ mps: Double?, _ unit: UnitSystem) -> String {
-        guard let mps else { return "—" }
-        return "\(unit.speed(fromMPS: mps).formatted(.number.precision(.fractionLength(1)))) \(unit.speedLabel)"
     }
 }
 
@@ -180,57 +139,37 @@ extension RideSummaryList where MapRow == RideMapView {
     }
 }
 
-// MARK: - HR Zone Pie
-
-/// UX.md §S10's zone breakdown: a pie in the zone colours, with each zone's time beside it.
-/// Zones the ride never reached are left out of both.
-struct HeartRateZonePie: View {
-    /// Seconds in each zone, zone 1 first.
-    let zoneSeconds: [Int]
-
-    private var zones: [(zone: Int, seconds: Int)] {
-        zoneSeconds.enumerated().map { (zone: $0.offset + 1, seconds: $0.element) }.filter { $0.seconds > 0 }
-    }
-
-    var body: some View {
-        HStack(spacing: Spacing.lg) {
-            Chart(zones, id: \.zone) { entry in
-                SectorMark(angle: .value("Time", entry.seconds), angularInset: 1)
-                    .foregroundStyle(Color.hrZone(entry.zone))
-            }
-            .chartLegend(.hidden)
-            .frame(width: RideSummaryView.pieHeight, height: RideSummaryView.pieHeight)
-            .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                ForEach(zones, id: \.zone) { entry in
-                    HStack(spacing: Spacing.sm) {
-                        Circle()
-                            .fill(Color.hrZone(entry.zone))
-                            .frame(width: Spacing.sm, height: Spacing.sm)
-                        Text("Z\(entry.zone)")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer(minLength: Spacing.xs)
-                        Text(Duration.seconds(entry.seconds)
-                            .formatted(.time(pattern: .hourMinuteSecond(padHourToLength: 1))))
-                            .font(.subheadline)
-                            .monospacedDigit()
-                            .foregroundStyle(Color.cyTextSecondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
+extension RideListSummary {
+    /// S10's Summary leads with these (#645), ahead of S15's readings: S15 shows them in its
+    /// title block instead. Time is the ride's with pauses left out, `Ride.durationSeconds`.
+    func leadingReadings(_ unit: UnitSystem) -> [SummaryReading] {
+        let seconds = Int(durationSeconds)
+        return [
+            SummaryReading(label: "Distance", reading: MetricReading(
+                value: unit.distance(fromMeters: distanceMeters).formatted(.number.precision(.fractionLength(1))),
+                unit: unit.distanceLabel, spoken: unit.spokenDistance(fromMeters: distanceMeters)
+            )),
+            SummaryReading(label: "Time", reading: MetricReading(value: seconds.formattedElapsed,
+                                                                 spoken: seconds.spokenElapsed)),
+        ]
     }
 }
 
 // MARK: - Previews
 
-/// S10 as `.task` leaves it, seeded directly. A placeholder map row and no track: the charts show
-/// their empty states, which is what a preview can produce without a recorded ride.
+/// Every sensor: heart rate, cadence, radar and a Health body weight for calories, on a route.
+private let previewStats = RideStats(
+    averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, averageCadenceRPM: 88, vehiclePassCount: 14,
+    routeName: "River Loop", averageHeartRateBPM: 142, ascentMeters: 412, descentMeters: 398,
+    activeKilocalories: 845, movingSeconds: 7_100
+)
+
+/// S10 as `.task` leaves it, seeded directly, with a placeholder map row.
 @MainActor
 private func previewList(
     load: RideSummaryFeature.State.Load = .loaded,
+    stats: RideStats? = previewStats,
+    notes: String = "",
     pairedSensors: [PairedSensor] = [],
     sensorHealth: [UUID: SensorHealthReport] = [:],
     rideId: UUID = UUID()
@@ -247,8 +186,9 @@ private func previewList(
         state.load = load
         state.summary = RideListSummary(id: rideId, title: "", startedAt: .now,
                                         distanceMeters: 52_000, durationSeconds: 7_265)
-        state.stats = RideStats(averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, averageCadenceRPM: 88)
+        state.stats = stats
         state.title = "Morning Ride"
+        state.notes = notes
         return NavigationStack {
             RideSummaryList(store: Store(initialState: state) { RideSummaryFeature() },
                             mapRow: Color.cyBgTertiary)
@@ -258,6 +198,23 @@ private func previewList(
 
 #Preview("Ride Summary") {
     previewList()
+}
+
+/// Notes typed in (#645): the field grows past its four lines.
+#Preview("Ride Summary — notes") {
+    previewList(notes: "Headwind the whole way out. Stopped at the bakery in Moorhead; the bridge on 12th is closed for paving, detour adds a mile.")
+}
+
+/// No HR strap, cadence sensor, radar or body weight, and a free ride: Distance, Time, Ascent,
+/// Descent and Avg Speed alone, and no Route section.
+#Preview("Ride Summary — GPS only") {
+    previewList(stats: RideStats(averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, ascentMeters: 412,
+                                 descentMeters: 398, movingSeconds: 7_100))
+}
+
+/// The ride's stats read failed: Distance and Time come from the ride's row.
+#Preview("Ride Summary — no stats") {
+    previewList(stats: nil)
 }
 
 /// Waiting on the ride's finalize: the stats show progress and Delete is disabled (#452).

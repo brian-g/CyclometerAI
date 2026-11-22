@@ -2962,3 +2962,30 @@ keeps sending 0; and auto-resume still waits for the frozen wheel after a real a
 of never. Tests `bikeOnARackAutoPauses`, `wheelMovingRestoresTheVeto`; with the cap removed, only the first fails, and
 with the reset removed, only the second. Full `CyclometerTests`: 3082 passed, 0 failures. Auto-resume on a frozen wheel
 filed as #643.
+
+---
+
+## #645 — S10 reuses S15's Summary (2026-11-22, `feat/645-s10-summary`)
+
+Issue: remove S10's Elevation Profile and Heart Rate Zones, and add S15's Summary. Brian chose one Summary that is
+led by Distance and Time, with Route as its own section. S10 is now Map · Name · Summary · Route · Sensors.
+
+- [x] `RideSummarySection` moved out of `RideDetailView` into `Features/Rides/RideSummarySection.swift`. It is
+  store-free and generic over the passes row (S15 keeps its button). `RideStats.summaryReadings(_:)` holds S15's order
+- [x] S10 view: Summary (`RideListSummary.leadingReadings` for Distance and Time), a Route section, and the
+  waiting/unavailable rows. The elevation, the zone pie, `HeartRateZonePie` and `import Charts` are gone
+- [x] `RideSummaryFeature`: Health zone reads, `healthProfileFetched`, zone/elevation state, and the `healthKitClient`
+  and `date` dependencies are gone
+- [x] Tests: `RideSummaryFeatureTests` trimmed (`zonesFollowHealth` deleted), new `RideSummaryReadingsTests`, and
+  the snapshot seeding updated. The app and test targets build
+- [x] UX.md §S10 and §S15 updated. Calories now show on S10
+- [ ] Brian runs it: finish a ride
+- [ ] Re-record the 6 `RideSummarySnapshotTests` references. S15's `RideDetail*SnapshotTests` must pass unchanged
+- [ ] Full `CyclometerTests` (`RideDetailView` is a shared path), then commit and open a PR
+
+**Follow-up (Brian): Notes on S10.** The Name row is now **Title**, followed by a **Notes** section. Both are labelled
+above their fields, as in S15's Edit sheet (`RideEditView`). `RideSummaryFeature` gains `notes`, `persistedNotes`
+(loaded from `stats.notes`), `notesChanged` and `notesToSave` (trimmed; nil when unchanged). `AppFeature`'s
+`.rideSummary(.dismiss)` writes the notes first, then the rename, which is followed by the S14 reload and GPX rewrite
+only when the title changed. New tests: 3 in `RideSummaryFeatureTests` and 2 in `RideSummaryPresentationTests`. The
+test build succeeds.

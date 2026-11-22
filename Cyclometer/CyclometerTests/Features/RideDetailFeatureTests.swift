@@ -360,3 +360,41 @@ struct RideDetailFinishStatsRowTests {
         #expect(none.calories == nil)
     }
 }
+
+/// #645: the Summary S15 and S10 share. S10 leads it with the ride's distance and time.
+@Suite("Ride Summary readings")
+struct RideSummaryReadingsTests {
+    @Test("every reading the ride recorded, in S15's order")
+    func fullSet() {
+        let stats = RideStats(averageSpeedMPS: 7, maxSpeedMPS: 12, averageCadenceRPM: 88,
+                              averageHeartRateBPM: 142, ascentMeters: 412, descentMeters: 398,
+                              activeKilocalories: 845, movingSeconds: 3_600)
+        #expect(stats.summaryReadings(.metric).map(\.label)
+                == ["Ascent", "Descent", "Avg Speed", "Avg Heart Rate", "Avg Cadence", "Calories"])
+    }
+
+    @Test("a GPS-only ride leaves out heart rate, cadence and calories")
+    func gpsOnly() {
+        let stats = RideStats(averageSpeedMPS: 7, maxSpeedMPS: 12, ascentMeters: 412, descentMeters: 398,
+                              movingSeconds: 3_600)
+        #expect(stats.summaryReadings(.metric).map(\.label) == ["Ascent", "Descent", "Avg Speed"])
+    }
+
+    @Test("no moving second leaves out the average speed nobody rode")
+    func noMovingTime() {
+        #expect(RideStats(averageSpeedMPS: 0, maxSpeedMPS: 0).summaryReadings(.metric).isEmpty)
+    }
+
+    @Test("S10 leads with distance, then the ride's time without pauses")
+    func s10LeadingReadings() {
+        let summary = RideListSummary(id: UUID(), title: "", startedAt: .now,
+                                      distanceMeters: 52_000, durationSeconds: 7_265)
+        #expect(summary.leadingReadings(.metric) == [
+            SummaryReading(label: "Distance", reading: MetricReading(value: "52.0", unit: "km",
+                                                                     spoken: UnitSystem.metric.spokenDistance(fromMeters: 52_000))),
+            SummaryReading(label: "Time", reading: MetricReading(value: "2:01:05", spoken: 7_265.spokenElapsed)),
+        ])
+        #expect(summary.leadingReadings(.imperial)[0].reading.value == "32.3")
+        #expect(summary.leadingReadings(.imperial)[0].reading.unit == "mi")
+    }
+}

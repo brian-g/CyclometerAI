@@ -41,7 +41,6 @@ final class RideSummarySnapshotTests: XCTestCase {
 
     /// Imperial units, and the state `.task` would have produced seeded directly.
     private func screen(
-        heartRate: Bool,
         stats: RideStats,
         pairedSensors: [PairedSensor] = [],
         sensorHealth: [UUID: SensorHealthReport] = [:]
@@ -56,18 +55,12 @@ final class RideSummarySnapshotTests: XCTestCase {
                 $0.pairedSensors = pairedSensors
                 $0.sensorHealth = sensorHealth
             }
-            let points = RideSummaryFeatureTests.track(count: 600, heartRate: { second in
-                heartRate ? 125 + Int(40 * sin(Double(second) / 40)) : nil
-            })
+            let points = RideSummaryFeatureTests.track(count: 600)
             var state = RideSummaryFeature.State(rideId: Self.summary.id)
             state.load = .loaded
             state.summary = Self.summary
             state.stats = stats
             state.trackSegments = RideMapThumbnail.drawableSegments(points)
-            state.elevationProfileMeters = RideDetailSeries.elevationProfile(
-                points, sampleCount: RideDetailFeature.chartSampleCount
-            )
-            state.heartRateSecondsByBPM = RideDetailSeries.secondsByBPM(points)
             state.title = "Morning Ride"
             return Store(initialState: state) {
                 RideSummaryFeature()
@@ -110,17 +103,20 @@ final class RideSummarySnapshotTests: XCTestCase {
     //
     // Named for this screen — reference PNGs are flat in the test bundle.
 
-    /// HR, cadence, a paired radar and a route: every row and both charts.
+    /// HR, cadence, a paired radar, a Health body weight and a route: every Summary reading, the
+    /// passes row and the Route section (#645).
     func testRideSummaryAllSensors() {
-        assertBothSchemes(screen(heartRate: true, stats: RideStats(
+        assertBothSchemes(screen(stats: RideStats(
             averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, averageCadenceRPM: 88, maxCadenceRPM: 109,
-            vehiclePassCount: 4, routeName: "SW Fargo"
+            vehiclePassCount: 4, routeName: "SW Fargo", averageHeartRateBPM: 142, maxHeartRateBPM: 171,
+            ascentMeters: 412, descentMeters: 398, activeKilocalories: 845, movingSeconds: 7_100
         )), named: "all-sensors")
     }
 
-    /// GPS alone: no cadence or passes rows, and the zones say so rather than drawing an empty pie.
+    /// GPS alone on a free ride: Distance, Time, the climb and Avg Speed; no passes row, no Route.
     func testRideSummaryGPSOnly() {
-        assertBothSchemes(screen(heartRate: false, stats: RideStats(averageSpeedMPS: 7.2, maxSpeedMPS: 12.4)),
+        assertBothSchemes(screen(stats: RideStats(averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, ascentMeters: 412,
+                                                  descentMeters: 398, movingSeconds: 7_100)),
                           named: "gps-only")
     }
 
@@ -129,9 +125,9 @@ final class RideSummarySnapshotTests: XCTestCase {
     func testRideSummaryUnreliableSensors() {
         let rideId = Self.summary.id
         let combo = UUID(1)
-        assertBothSchemes(screen(heartRate: true, stats: RideStats(
+        assertBothSchemes(screen(stats: RideStats(
             averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, averageCadenceRPM: 88, maxCadenceRPM: 109,
-            vehiclePassCount: 4
+            vehiclePassCount: 4, averageHeartRateBPM: 142, movingSeconds: 7_100
         ), pairedSensors: [
             PairedSensor(peripheralID: combo, role: .speed, displayName: "Wahoo RPM"),
             PairedSensor(peripheralID: combo, role: .cadence, displayName: "Wahoo RPM"),
