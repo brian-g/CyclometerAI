@@ -3025,3 +3025,16 @@ All four new tests failed on the unfixed reducer. Full `CyclometerTests`: TEST S
   revolutions enters the window (about 6–9 m a stop). One option: suspend while `gpsMovingVetoSeconds > 0`, which would
   cover #623's active-ride freezes too.
 - The spent veto isn't persisted, so after a relaunch a rack-drive pause can resume on GPS one more time.
+
+**Review decisions (Brian: keep 1, do 2 and 3, accept 4).**
+- [x] 1 kept: GPS resumes only with auto-pause on
+- [x] 2 `gpsResumeSpeedMPS` = 2.0 (the floor wheel calibration takes GPS speed from): the fixes that resume on GPS
+      must reach it, so walking away from the bike (~1.4 m/s) doesn't resume the ride. A wheel reading moving still
+      resumes at `movingSpeedMPS`. The 12:59 replay still resumes at :16. `pauseTappedWhileRidingStaysPausedAtTheStop`'s
+      arming fix raised to 2.5 m/s, or it no longer caught finding 1
+- [x] 3 `isCalibrationSuspended` also while `gpsMovingVetoSeconds > 0`: during #623's freezes and from a GPS resume
+      until the wheel reads moving. Calibration's gate log line names "frozen wheel"
+- [x] 4 accepted: the spent veto isn't persisted
+- [x] Revert checks: bar at 1.0 → walking cases fail; no veto suspension → both replays fail; finding 1 reverted →
+      the coasting test fails
+- [x] Full `CyclometerTests`: 3100 passed, 0 failures

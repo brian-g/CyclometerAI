@@ -114,9 +114,16 @@ struct FrozenWheelAutoPauseTests {
         let store = makeStore()
         var held = 3.0
         var distance = 0.0
+        var suspendedTicks: [Int] = []
+        var tick = 0
         let paused = await replay(Self.ride1203, on: store) { store in
             #expect(store.state.zeroSpeedSeconds < ActiveRideFeature.autoPauseZeroSpeedSeconds)
+            tick += 1
+            if store.state.calibration.isSuspended { suspendedTicks.append(tick) }
         }
+        // Calibration sits out the seconds GPS held off the count (#643 review): GPS moving, the wheel
+        // at 0, from :21 until the wheel reads moving at :26.
+        #expect(suspendedTicks == Array(9...13))
         #expect(paused.isEmpty)
         #expect(!store.state.isAutoPaused)
 
@@ -230,7 +237,12 @@ struct FrozenWheelAutoPauseTests {
     @Test("The 12:59 stop: two moving fixes resume the ride before the frozen wheel reads moving")
     func ride1259ResumesOnGPS() async {
         let store = makePausedStore()
-        let paused = await replay(Self.ride1259, on: store)
+        var suspendedTicks: [Int] = []
+        var tick = 0
+        let paused = await replay(Self.ride1259, on: store) { store in
+            tick += 1
+            if store.state.isCalibrationSuspended { suspendedTicks.append(tick) }
+        }
         // :16, the second fix with the gate open; the wheel's first reading is tick 7, :19.
         #expect(firstActiveTick(paused, of: Self.ride1259.count) == 4)
         #expect(paused == [1, 2, 3])
@@ -242,6 +254,10 @@ struct FrozenWheelAutoPauseTests {
         #expect(abs(store.state.distanceMeters - 3.34) < 1e-9)
         #expect(store.state.zeroSpeedSeconds == 0)
         #expect(store.state.gpsMovingVetoSeconds == 0)
+        // Calibration stays out from the GPS resume until the wheel reads moving: GPS covered ground
+        // the frozen wheel didn't count.
+        #expect(suspendedTicks == Array(1...6))
+        #expect(!store.state.calibration.isSuspended)
     }
 
     @Test(
@@ -249,6 +265,8 @@ struct FrozenWheelAutoPauseTests {
         arguments: [
             ("GPS stationary", (speed: 0.04, accuracy: 2.0) as (speed: Double, accuracy: Double)?),
             ("GPS just under moving speed", (speed: 0.99, accuracy: 2.0)),
+            ("GPS at walking pace, the rider walking away from the bike", (speed: 1.4, accuracy: 2.0)),
+            ("GPS just under the resume speed", (speed: ActiveRideFeature.gpsResumeSpeedMPS - 0.01, accuracy: 2.0)),
             ("GPS moving, poor accuracy", (speed: 3.0, accuracy: GPSFixFilter.maxHorizontalAccuracy + 0.1)),
             ("GPS moving, invalid accuracy", (speed: 3.0, accuracy: -1)),
             ("no fix", nil),
@@ -311,9 +329,10 @@ struct FrozenWheelAutoPauseTests {
     @Test("A Pause tapped while riding on stays paused once the bike stops, GPS a fix behind (#267)")
     func pauseTappedWhileRidingStaysPausedAtTheStop() async {
         let store = makePausedStore(.manual, isResumeWhenMovingEnabled: true)
-        // Riding on after the tap, GPS agreeing, inside the grace; then the stop that arms the pause.
+        // Riding on after the tap, GPS agreeing, inside the grace; then the stop that arms the pause,
+        // GPS still above the resume speed a second behind a hard stop.
         let seconds = [Second](repeating: (3.0, (3.0, 2.0)), count: 5)
-            + [(0, (1.5, 2.0))]
+            + [(0, (2.5, 2.0))]
             + [Second](repeating: (0, (0.04, 2.0)), count: 5)
         let paused = await replay(seconds, on: store)
         #expect(paused.count == seconds.count)

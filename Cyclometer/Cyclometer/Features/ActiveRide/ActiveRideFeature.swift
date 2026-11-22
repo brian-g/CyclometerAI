@@ -104,6 +104,14 @@ struct ActiveRideFeature {
     /// frozen wheel read moving.
     static let gpsResumeFixCount = 2
 
+    /// The GPS speed those fixes must reach (#643): higher than `movingSpeedMPS`, which walking
+    /// pace (about 1.4 m/s) clears. A rider who walks away from the bike at a stop must not resume
+    /// the ride against a wheel reading 0; a wheel that reads moving still resumes it at
+    /// `movingSpeedMPS`. The floor wheel calibration takes GPS speed from
+    /// (`WheelCalibration.minMovingSpeedMPS`); on ride 2026-11-21 GPS cleared it at :15 at both
+    /// stops quoted in #643, three and four seconds before the wheel read moving.
+    static let gpsResumeSpeedMPS: Double = 2.0
+
     /// The closest two recorded track points may be (#582): half the 1 s tick.
     ///
     /// The tick can fire twice in a row. When the 1 s timer wakes more than one interval late,
@@ -509,10 +517,17 @@ struct ActiveRideFeature {
         /// urgent to attend to — a radar alert, or a turn announced and not yet made
         /// (#197) — and whenever the ride isn't actively recording: a paused ride still
         /// receives GPS fixes, and stationary scatter would poison the window (PRD §8.9).
+        ///
+        /// Also while GPS is overriding a wheel reading 0 (`gpsMovingVetoSeconds > 0`, #623), and
+        /// after a resume GPS made, which spends the veto (#643): GPS covers distance the frozen
+        /// wheel isn't counting, so those intervals would skew the circumference. Lifted when the
+        /// wheel next reads moving. The veto counts a second once it has passed, so a freeze's first
+        /// second still reaches the window.
         var isCalibrationSuspended: Bool {
             recordingState != .active
                 || radarTargets.contains { $0.threatLevel != .allClear }
                 || navigation.isTurnAlertActive
+                || gpsMovingVetoSeconds > 0
         }
         /// Reads through to `AppPreferences.preferredUnit` — mirrors
         /// `SettingsFeature.State.preferredUnit` so a Settings toggle propagates
@@ -1434,7 +1449,8 @@ struct ActiveRideFeature {
                 // while coasting (#267), show the rider moving up to the stop that arms the pause,
                 // and would undo it the moment the wheel read stopped.
                 if state.recordingState == .paused, case .gpsSpeedReceived = speedAction {
-                    state.gpsMovingFixes = canGPSResume && isGPSMoving(state) ? state.gpsMovingFixes + 1 : 0
+                    state.gpsMovingFixes = canGPSResume && isGPSMoving(state, atLeast: Self.gpsResumeSpeedMPS)
+                        ? state.gpsMovingFixes + 1 : 0
                 }
                 var effect: Effect<Action> = .none
                 if canAutoResume, (state.speed.speedMPS ?? 0) >= Self.movingSpeedMPS {
@@ -1968,14 +1984,16 @@ struct ActiveRideFeature {
     /// of noise (#262), and the threshold auto-resume uses keeps that noise out. Trustworthy in
     /// both position and speed: a 1 m/s reading the fix itself says is ±3 m/s can't tell moving
     /// from stopped. A fix stamped after now (the wall clock stepped back) isn't fresh.
-    private func isGPSMoving(_ state: State) -> Bool {
+    ///
+    /// - Parameter minimumSpeedMPS: `gpsResumeSpeedMPS` when GPS is to resume a pause (#643).
+    private func isGPSMoving(_ state: State, atLeast minimumSpeedMPS: Double = Self.movingSpeedMPS) -> Bool {
         guard let fixAt = state.lastGPSFixAt,
               (0...Self.movingGPSFixMaxAge).contains(date.now.timeIntervalSince(fixAt)),
               GPSFixFilter.isTrustworthy(state.horizontalAccuracy),
               MaxSpeedGate.isTrustworthy(speedAccuracy: state.speedAccuracy),
               let gpsSpeed = state.speed.latestGPSSpeedMPS
         else { return false }
-        return gpsSpeed >= Self.movingSpeedMPS
+        return gpsSpeed >= minimumSpeedMPS
     }
 
     /// Whether GPS may resume a pause the wheel sensor's reading is keeping (#643), once `isGPSMoving`
