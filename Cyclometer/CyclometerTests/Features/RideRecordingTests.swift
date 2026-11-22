@@ -458,9 +458,13 @@ struct RideRecordingTests {
         #expect(event.latitude == coordinateA.latitude)
         #expect(event.longitude == coordinateA.longitude)
 
+        // The two ticks between the fixes had no new fix, so they were recorded untrusted and read
+        // back on the line from A to B (#624): positions no fix gave, so compared at the 7 decimal
+        // places the file writes.
+        #expect(persistedPoints.map(\.isPositionTrusted) == [true, false, false, true])
         for (index, point) in persistedPoints.enumerated() {
-            #expect(parsed.trackPoints[index].latitude == point.latitude)
-            #expect(parsed.trackPoints[index].longitude == point.longitude)
+            #expect(abs((parsed.trackPoints[index].latitude ?? .nan) - point.latitude) < 1e-7)
+            #expect(abs((parsed.trackPoints[index].longitude ?? .nan) - point.longitude) < 1e-7)
             #expect(parsed.trackPoints[index].elevation == point.altitudeMeters)
         }
 

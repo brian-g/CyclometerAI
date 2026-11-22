@@ -84,6 +84,27 @@ struct HealthKitClientTests {
         #expect(locations[1].speed == -1)
     }
 
+    /// A poor-GPS second's position is one no fix gave, and its accuracy is the rejected fix's,
+    /// −1 for an invalid one, which makes a `CLLocation` invalid. Fitness draws the same line
+    /// between the trusted points either side of it.
+    @Test("the workout route leaves out a second recorded under a poor fix (#624)")
+    func routeLocationsSkipUntrustedPoints() {
+        let rideId = UUID()
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        let points = [(0.0, true, 4.0), (1, false, -1), (2, false, 35), (3, true, 6)].map { second, trusted, accuracy in
+            TrackPointDTO(
+                rideId: rideId, timestamp: start.addingTimeInterval(second), latitude: 43.0731 + second / 10_000,
+                longitude: -89.4012, horizontalAccuracyMeters: accuracy, speedSource: .bleWheel,
+                heartRateSource: .none, isPositionTrusted: trusted
+            )
+        }
+
+        let locations = HealthKitClient.routeLocations(points)
+
+        #expect(locations.map(\.timestamp) == [start, start.addingTimeInterval(3)])
+        #expect(locations.map(\.horizontalAccuracy) == [4, 6])
+    }
+
     // MARK: - Health's preferred zones (#238)
 
     private static func configuration(startingAt starts: [Double]) throws -> HKWorkoutZoneConfiguration {

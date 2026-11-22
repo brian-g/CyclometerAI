@@ -2876,3 +2876,51 @@ A ride closed out with its marker still goes through `finalizeRide` and keeps it
 `finalizeRideWithoutWorkout`, so a regression to `finalizeRide` fails it; two close-out tests wait for the
 `reloadRides` the effect sends after its write instead of asserting straight after `send`; the
 `Ride.isHealthWorkoutOwed` comment names the exception.
+
+---
+
+## GPS backstop accuracy ceiling (branch `gps-backstop-accuracy-ceiling`, 2026-11-21)
+
+The 2026-11-21 ride's first ~300 m was drawn 27–40 m off the road: #210's 10 s backstop took fixes of any accuracy (14–47 m), whose errors all leaned east. A straight line between the good fixes would have been within 7 m. Option 1 chosen: the backstop takes only fixes ≤ 20 m.
+
+- [x] `GPSFixFilter.maxBackstopAccuracy = 20`; fixes worse than that wait for `lastResortInterval = 60` s, so an all-poor ride still records a track (#210's guarantee)
+- [x] Replayed 12 rides: 21 backstop fixes > 20 m, all off the line their neighbours draw; longest new straight-line stretch 52 s / 263 m
+- [x] `GPSFixFilterTests`: 10 pass, including the 11-21 start replay; revert check fails 3 of them
+- [ ] Brian rides it
+- [x] Full `CyclometerTests`: 3058 passed, 0 failures
+
+**Code review (xhigh).** No defect in `isRecordable` itself. Fixed: the parameterized test's title named only the
+backstop's cadence. Left open, because each needs a decision or reaches past this branch:
+- The backstop clock resets on any recordable fix, including one no tick writes. That happens with a batch delivered
+  back to back, or with any fix while paused. A last resort lost this way leaves a gap of 120 s or more.
+- HR, cadence and speed ride on the track point. A 20–60 m stretch now keeps about 1/60 of their seconds, down from 1/10.
+- A 60 s chord cuts across bends on a twisty road under cover.
+- The last resort has no ceiling, so it records km-scale or reduced-accuracy fixes.
+
+**Review follow-ups (items 1 and 2, on #624).**
+- [x] Backstop clock moves on a written trusted point, not on a fix; seeded at resume, where the held fix is judged again. A batch delivered back to back records the newer fix instead of neither
+- [x] Every tick writes a point: an untrusted one holds the last trusted position and keeps its HR, cadence and speed (`TrackPointDTO.isPositionTrusted`, model v4)
+- [x] Saved-track readers get untrusted points on the line between trusted neighbours (`interpolatingUntrustedPositions`, applied in the live `fetchTrackPoints`)
+- [x] Tests: interpolation (5), live-store round trip, v3→v4 migration, three recording tests; each fails with its piece reverted
+- [x] Full `CyclometerTests`: 3070 passed, 0 failures
+
+**Code review (xhigh), second pass.** Fixed: a run of untrusted points opening a segment took the position held
+from before the pause, which drew #263's chord again; it now takes the segment's first trusted position, where the
+live map starts it. `resume()` changes the gate without logging it; both sites now share `logRecordingGate`. Two
+stale comments. Full `CyclometerTests`: 3070 passed, 0 failures. Left open for a decision:
+- During a fix freeze each tick re-writes the frozen fix as trusted, restarting the backstop clock every second and
+  recording a stop that never happened (pre-existing; the clock change makes the wait after it longer).
+- An untrusted point stores the rejected fix's accuracy (possibly −1) beside a position that fix never gave; GPX
+  and the Health route both carry it.
+- A back-to-back batch past the backstop adds every fix to the live map, but only one is saved.
+- Antimeridian interpolation: not reachable for this app's riders; dropped.
+
+---
+
+## #624 review leftovers: frozen fix, Health route
+
+- [x] One fix, one trusted point: `State.hasUnwrittenFix`, set by each fix and cleared by the trusted write. Seconds with no new fix (iOS stops sending under cover, 19 s on 10-16) are untrusted, read back on the line to the next fix, and no longer restart the backstop's wait
+- [x] Health route built from trusted points only: an untrusted point's −1 accuracy made its `CLLocation` invalid. The "store a negative accuracy as 0" half was dropped: the route was the only reader that took it as-is (GPX already omits ≤ 0)
+- [x] Tests: `frozenFixIsNotRewrittenAsTrusted`, `routeLocationsSkipUntrustedPoints`; `vehiclePassesAgreeAcrossPersistenceAndGPX` now asserts the two fixless ticks are untrusted and compares positions at the GPX's 7 places; 7 exhaustive location sends assert the flag
+- [x] Revert checks: each fix reverted fails its test
+- [x] Full `CyclometerTests`: 3072 passed, 0 failures
