@@ -46,6 +46,7 @@
 | 0.6.19 | 2026-11-14 | Brian / Claude | Rain along the route (#152). With a route loaded, each forecast W10 fetches during a ride also checks the stretch the rider reaches within two hours: a 50% or higher chance of precipitation at any point, in the hour the rider gets there, shows a silent four-second banner. It shows again on every check while it stays wet. It never goes through the radar alert path. It checks only while the dashboard is on screen and the rider is on the route. §12 Privacy: those checks send up to seven points ahead on the route, at least a kilometre past the rider, about every 10 minutes. W10's wind map (#561) is recorded there too. The in-app privacy policy names points along a route. |
 | 0.6.20 | 2026-11-19 | Brian / Claude | Spec reconciliation (#588). §10's `Ride`, `TrackPoint`, `RadarEvent`, `RadarVehicle` and `VehiclePassEvent` blocks, which predated `DataModel.md`, are replaced by pointers to it. §11's client list, feature tree, folder structure and test list, which named features, folders and tests that don't exist, are replaced by pointers to `TCA.md` §3 and §8. Appendix B's GPX example and §8.7's file naming use the exporter's `creator`, `cyc:` namespace URI and `AcmeRide_` filename prefix. No requirement changes. |
 | 0.6.21 | 2026-11-19 | Brian / Claude | Onboarding permissions and privacy policy (#596, #597, #598). Bluetooth and Motion and Fitness are optional at S01; Location is the only gate. The Motion purpose string names the barometer (elevation), its only use. S12's Privacy Policy opens https://acmeapps.xyz/ride/privacy/; the bundled copy is removed, so §12's mentions of the privacy policy now mean that page. |
+| 0.6.24 | 2026-11-22 | Brian / Claude | HKWorkout no longer automatic. The workout is written when S10 closes with Sync To's Apple Health row on, like any service, so a ride also sent to Strava doesn't duplicate in Fitness or on Strava (Strava's app imports Health workouts). §9.4 and §12 Privacy follow; UX.md §S10. |
 | 0.6.23 | 2026-11-21 | Brian / Claude | Strava (Phase 2). New §8.12: connecting through a stateless token service that holds the client secret, Keychain tokens, uploads chosen per ride in S10's Sync To section, segment efforts on S15, and segments on S20 from a Strava route itself or, for any route, from its previous rides synced to Strava (Explore Segments is closed to Standard-tier apps since 2026-09-01), Strava route import on S19 and S05.2, and gear with Multi-bike later. §6 and §8.6 point to it. |
 | 0.6.22 | 2026-11-19 | Brian / Claude | Orphan workouts (#584). §9.4's #318 decision note: an orphan closed out at relaunch that the rider had already ended keeps its real end time and gets its `HKWorkout` (UX.md §S10). One with no ride-end marker still gets none, since its end is the relaunch. |
 
@@ -1070,7 +1071,8 @@ Strava activity history into Cyclometer, and on-device segment detection (Phase 
   `GET /api/v3/uploads/:id` — after 1, 2, 4 and then every 8 seconds, for two minutes — until `activity_id` arrives,
   stores it as `RideSyncRecord.remoteActivityId`, and marks the record synced
 - **Duplicates.** Many riders' Strava app imports workouts from Apple Health, so the ride may already be on Strava.
-  An upload Strava rejects as a duplicate of an existing activity is recorded as synced, with that activity's id
+  An upload Strava rejects as a duplicate of an existing activity is recorded as synced, with that activity's id.
+  This is also why the Health workout is a Sync To choice rather than automatic (UX.md §S10)
 - Uploads outlive S10: they run in an app-scoped queue, a ride still pending at quit resumes at the next launch, and
   a failed one is retried from S15's Sync section or S14's Sync swipe. Nothing uploads without the rider's choice
 - Not synced back: renaming or deleting a ride in Cyclometer after upload leaves the Strava activity as it is
@@ -1237,7 +1239,7 @@ Derived from cumulative crank revolutions and event time stamps per CSC specific
 - `HKQuantityTypeIdentifierRestingHeartRate` (read)
 - `HKCharacteristicTypeIdentifierDateOfBirth` (read — for max HR estimation if not available, and the
   rider's age in the workout's heart-rate energy estimate)
-- `HKWorkoutType` (write — MVP; the ride is written back at ride end per UX.md §S10, and the share
+- `HKWorkoutType` (write — the ride is written back when the rider sends it to Apple Health from S10's Sync To, UX.md §S10, and the share
   authorization is requested alongside the reads at S01 so the rider answers one sheet, not two)
 - `HKQuantityTypeIdentifierDistanceCycling` (write — the workout's distance reaches it as a sample,
   which `HKWorkoutBuilder` only accepts with share access to that type)
@@ -1436,7 +1438,7 @@ All three tabs are functional in MVP. The Routes tab (S19, S20) came into MVP wi
 - High contrast: tested with iOS Increase Contrast enabled
 
 ### Privacy
-- HealthKit data: read-only, apart from the `HKWorkout` and its cycling-distance sample the app writes back at ride end (UX.md §S10); no data transmitted to any server
+- HealthKit data: read-only, apart from the `HKWorkout` and its cycling-distance sample the app writes back when the rider chooses Apple Health in S10's Sync To (UX.md §S10); no data transmitted to any server
 - GPS and ride data: stored locally only, apart from a free ride's start coordinate sent for its place name (below), which the rider can turn off
 - Route surface lookup (#252): after a route is imported, its line — the planned route, never a recorded ride — is sent to the public OpenStreetMap Overpass API (`overpass-api.de`) to read the surface of the roads along it. Nothing else is sent, and no account or identifier is attached. A failed or offline lookup leaves the route without a surface; it is retried on the next launch, and the first failure in a batch stops the rest, so a refusing or unreachable server is not asked again and again. Surface data is credited "© OpenStreetMap contributors" wherever it is shown (ODbL)
 - Ride place name (#283): when a ride that did not follow a route is summarised (S10), its start coordinate — that one point, nothing else — is sent to Apple's reverse geocoder (MapKit `MKReverseGeocodingRequest`) for the name of the town it started in, used in the ride's default name ("Fargo Morning Loop"). A ride on a route is named for the route and sends nothing. The S12 **Place Names** toggle (on by default) turns the lookup off, and the privacy policy says so. A failed or offline lookup keeps the offline name silently

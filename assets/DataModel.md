@@ -208,14 +208,17 @@ final class Ride {
     var mapThumbnailDark: Data?
 
     // MARK: - Apple Health (#277)
-    // Set by finalizeRide, cleared once the ride's HKWorkout is written or skipped as a duplicate;
+    // Set by finalizeRide when the rider's remembered Sync To Apple Health choice is on (revised
+    // 2026-11-22: not automatic), then set or cleared as S10 closes from the row as left; cleared
+    // once the ride's HKWorkout is written or skipped as a duplicate;
     // RideHealthWorkout.backfill writes every ride still owed one. A launch close-out with no
     // ride-end marker is finalized never owed one, in the same write (#606): it ends at the
     // relaunch, so a workout would span every hour since the kill. The declaration default is what
     // migration gives rides that ended before this existed, so they are not owed: the ones since
     // #250 already have their workout.
     var isHealthWorkoutOwed: Bool = false
-    // M12 Monetization: finished while Free, so no workout was written; offered for backfill on unlock
+    // M12 Monetization: finished while Free with the Apple Health choice on, so no workout was
+    // written; offered for backfill on unlock
     var isHealthWorkoutDeferred: Bool = false
 
     // MARK: - Sync Status
