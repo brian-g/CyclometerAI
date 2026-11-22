@@ -49,8 +49,8 @@ struct TimeSeriesMigrationTests {
     }
 
     /// Every version a rider's device could still be on. v1 predates `segmentIndex` (#263),
-    /// v2 predates the optional `altitudeMeters` (#303).
-    static let shippedVersions = ["CyclometerTimeSeries", "CyclometerTimeSeries 2"]
+    /// v2 predates the optional `altitudeMeters` (#303), v3 predates `isPositionTrusted`.
+    static let shippedVersions = ["CyclometerTimeSeries", "CyclometerTimeSeries 2", "CyclometerTimeSeries 3"]
 
     @Test("A store written by a shipped model opens under the current one", arguments: shippedVersions)
     func aShippedStoreMigrates(version: String) throws {
@@ -106,6 +106,9 @@ struct TimeSeriesMigrationTests {
             // of its points belongs to the first segment — the attribute's default, and the
             // one value that keeps its export exactly the single `<trkseg>` it was.
             #expect(row.segmentIndex == 0)
+            // Every point a shipped model wrote was written only once its fix passed the
+            // filter, so it reads back as the trusted point it was.
+            #expect(row.isPositionTrusted)
         }
     }
 }

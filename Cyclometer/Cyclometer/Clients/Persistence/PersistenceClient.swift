@@ -137,7 +137,13 @@ extension PersistenceClient: DependencyKey {
     static func live(stores: PersistentStores) -> PersistenceClient {
         PersistenceClient(
             flushTrackPoints: { try await batchInsertTrackPoints($0, container: stores.trackContainer) },
-            fetchTrackPoints: { try await fetchTrackPointsLive(rideId: $0, container: stores.trackContainer) },
+            // Interpolated here, the one read every consumer of a saved track shares, so the map,
+            // GPX, Health route and energy all put a poor-GPS second in the same place.
+            fetchTrackPoints: {
+                TrackPointDTO.interpolatingUntrustedPositions(
+                    try await fetchTrackPointsLive(rideId: $0, container: stores.trackContainer)
+                )
+            },
             fetchRide: { try await stores.rideActor.fetchRideExportMetadata(id: $0) },
             fetchRideStats: { try await stores.rideActor.fetchRideStats(id: $0) },
             createRide: { try await stores.rideActor.createRide(id: $0, startedAt: $1, route: $2) },
@@ -291,6 +297,7 @@ private func batchInsertTrackPoints(_ points: [TrackPointDTO], container: NSPers
             mo.powerWatts = Int16(clamping: point.powerWatts ?? -1)
             // Not a sensor reading, so no sentinel: 0 is the first segment (#263).
             mo.segmentIndex = Int16(clamping: point.segmentIndex)
+            mo.isPositionTrusted = point.isPositionTrusted
             index += 1
             return false
         })
@@ -392,7 +399,8 @@ private func fetchTrackPointsLive(rideId: UUID, container: NSPersistentContainer
                 heartRateSource: SensorSource(rawValue: mo.heartRateSourceRaw) ?? .none,
                 cadenceRPM: mo.cadenceRPM < 0 ? nil : Int(mo.cadenceRPM),
                 powerWatts: mo.powerWatts < 0 ? nil : Int(mo.powerWatts),
-                segmentIndex: Int(mo.segmentIndex)
+                segmentIndex: Int(mo.segmentIndex),
+                isPositionTrusted: mo.isPositionTrusted
             )
         }
     }

@@ -431,9 +431,22 @@ struct ActiveRideFeature {
         /// between fixes, so the once-a-second track point inherits the verdict of the fix
         /// it is actually made of. False until the first fix arrives.
         var isFixRecordable: Bool = false
-        /// When a track point was last recorded, or ride start while none has been —
-        /// what `GPSFixFilter.maxSuppressedInterval` is measured against.
+        /// When a trusted track point was last written, or the start of the ride or of the
+        /// stretch since its last resume while none has been: what `GPSFixFilter.isRecordable`'s
+        /// backstops are measured against. Moved by the write, not by the fix: a fix the next
+        /// one overrides before any tick writes it, as in a batch iOS delivers back to back, or
+        /// one taken while paused, recorded nothing and must not restart the wait (#624 review).
         var lastRecordablePositionAt: Date? = nil
+        /// Where the last trusted track point was written: the position a second recorded with
+        /// the gate shut holds, so its sensor readings are kept without a position the filter
+        /// rejected (`TrackPointDTO.isPositionTrusted`).
+        var lastTrustedCoordinate: Coordinate? = nil
+        /// Whether a fix has arrived since the last trusted track point was written: one fix, one
+        /// trusted point. When iOS stops sending fixes, as under cover while moving (19 s on
+        /// 2026-10-16), the seconds until the next one hold the last position untrusted, and a
+        /// reader puts them on the line to that fix. Re-writing the frozen fix as trusted drew a
+        /// stop that never happened, then a jump, and restarted the backstop's wait every second.
+        var hasUnwrittenFix: Bool = false
         var isLocationAvailable: Bool = false
         /// Consecutive seconds at or below `stationarySpeedMPS` — not literally zero,
         /// which GPS never reports (#262). Name kept for the persisted `Ride` field.
@@ -646,9 +659,9 @@ struct ActiveRideFeature {
                     state.recordingState = .active
                 }
                 let startedAt = date.now
-                // Seeds the backstop `GPSFixFilter.maxSuppressedInterval` is measured
-                // against, so a ride that never sees a good fix still starts recording one
-                // 10 s in rather than never (#210).
+                // Seeds the backstops `GPSFixFilter.isRecordable` measures against, so a ride
+                // that never sees a good fix still starts recording one 10 s in (60 s if every
+                // fix is worse than 20 m) rather than never (#210).
                 state.lastRecordablePositionAt = startedAt
                 return .merge(
                     .send(.speed(.startListening)),
@@ -1098,6 +1111,11 @@ struct ActiveRideFeature {
                 // silently if GPS hasn't locked yet (rare — ride start already
                 // requires a GPS lock, PRD §8.8), or for the timer's catch-up tick (#582).
                 if let point = makeTrackPoint(from: state) {
+                    if point.isPositionTrusted {
+                        state.hasUnwrittenFix = false
+                        state.lastRecordablePositionAt = date.now
+                        state.lastTrustedCoordinate = Coordinate(latitude: point.latitude, longitude: point.longitude)
+                    }
                     // Claim the HealthKit sample this point just carried, so the next
                     // tick records absence rather than the same reading again (#221).
                     if point.heartRateSource == .appleWatch {
@@ -1250,9 +1268,10 @@ struct ActiveRideFeature {
             case .locationUpdated(let update):
                 // `coordinate` always takes the freshest fix — the live map marker is
                 // best-effort, and there is nothing better to show. What a poor fix does
-                // not do is enter the recorded track: no polyline vertex here, and no
-                // track point at the next tick (#210).
+                // not do is enter the recorded track: no polyline vertex here, and the next
+                // tick's point holds the last trusted position instead of this one (#210).
                 state.coordinate = update.coordinate
+                state.hasUnwrittenFix = true
                 if state.sunsetFix?.isFresh(at: date.now) != true {
                     state.sunsetFix = SunsetFix(coordinate: update.coordinate, takenAt: date.now)
                 }
@@ -1267,7 +1286,6 @@ struct ActiveRideFeature {
                     sinceLastRecorded: sinceRecorded
                 )
                 if state.isFixRecordable {
-                    state.lastRecordablePositionAt = date.now
                     // Only record track points while actively riding, so paused/stopped
                     // GPS jitter doesn't pollute the polyline — mirrors distanceMeters,
                     // which also only accumulates while active (.elapsedTick).
@@ -1276,14 +1294,7 @@ struct ActiveRideFeature {
                     }
                 }
                 if wasRecordable != state.isFixRecordable {
-                    let gate = state.isFixRecordable ? "open" : "shut"
-                    logger.notice(
-                        """
-                        recording gps gate \
-                        \(gate, privacy: .public) — accuracy \
-                        \(update.horizontalAccuracy, format: .fixed(precision: 1), privacy: .public) m
-                        """
-                    )
+                    logRecordingGate(isOpen: state.isFixRecordable, accuracyMeters: update.horizontalAccuracy)
                 }
                 state.altitudeResolver.gpsFix(altitude: update.altitude, verticalAccuracy: update.verticalAccuracy)
                 state.heading = update.heading
@@ -1728,9 +1739,13 @@ struct ActiveRideFeature {
     /// while there's no GPS fix yet, since `TrackPointDTO.latitude`/`longitude` are
     /// non-optional — ride start already requires a GPS lock (PRD §8.8), so this is rare.
     ///
-    /// Also nil while the fix behind `coordinate` is too poor to record (#210): the track
-    /// takes a gap rather than a position the app already knows is untrustworthy.
-    /// `GPSFixFilter.maxSuppressedInterval` bounds how long such a gap can run.
+    /// While the fix behind `coordinate` is too poor to record (#210), or is one a trusted point
+    /// has already been written from (`hasUnwrittenFix`), the point keeps the second's sensor
+    /// readings but not that position: it holds `lastTrustedCoordinate` and is marked untrusted,
+    /// and a reader of the saved track puts it on the line between its trusted neighbours
+    /// (`TrackPointDTO.interpolatingUntrustedPositions`). Nil only before the ride's first trusted
+    /// point, when there is no position to hold. While fixes keep arriving,
+    /// `GPSFixFilter.lastResortInterval` bounds how long the position can go untrusted.
     ///
     /// And nil for a tick under `minimumTrackPointSpacing` after the last recorded point
     /// (#582). That is mostly the timer's catch-up tick, which isn't a second of its own. It can
@@ -1742,7 +1757,9 @@ struct ActiveRideFeature {
     /// that tick still records: waiting for the clock to catch up would drop the track for as
     /// long as it was set back.
     private func makeTrackPoint(from state: State) -> TrackPointDTO? {
-        guard let coordinate = state.coordinate, state.isFixRecordable else { return nil }
+        let isTrusted = state.isFixRecordable && state.hasUnwrittenFix
+        guard let coordinate = isTrusted ? state.coordinate : state.lastTrustedCoordinate
+        else { return nil }
         let now = date.now
         // `calorieTrack` is every point recorded this ride, in order, so its last is the previous one.
         if let previous = state.calorieTrack.last?.timestamp,
@@ -1772,7 +1789,8 @@ struct ActiveRideFeature {
             heartRateSource: state.isHeartRateRecordable ? state.heartRateProvenance : .none,
             cadenceRPM: state.cadence.cadenceRPM,
             powerWatts: nil,
-            segmentIndex: state.trackSegmentIndex
+            segmentIndex: state.trackSegmentIndex,
+            isPositionTrusted: isTrusted
         )
     }
 
@@ -1806,6 +1824,15 @@ struct ActiveRideFeature {
         state.hasStoppedWhilePaused = false
         state.pausedAt = nil
         state.pauses.close(at: date.now)
+        // The backstops wait from the resume, as from ride start, not from the last point before
+        // the pause. And the held fix is judged again on that clock: one the pause let through
+        // on its long wait would otherwise be the new stretch's first trusted point (#624 review).
+        state.lastRecordablePositionAt = date.now
+        let wasRecordable = state.isFixRecordable
+        state.isFixRecordable = GPSFixFilter.isTrustworthy(state.horizontalAccuracy)
+        if wasRecordable != state.isFixRecordable {
+            logRecordingGate(isOpen: state.isFixRecordable, accuracyMeters: state.horizontalAccuracy)
+        }
         beginTrackSegment(&state)
         // After `beginTrackSegment`, so the checkpoint this resume writes already
         // carries the new segment index — a kill before the next one would
@@ -1816,6 +1843,19 @@ struct ActiveRideFeature {
             .run { [persistenceClient] _ in
                 try? await persistenceClient.updateRideSummary(update)
             }
+        )
+    }
+
+    /// The recording log's gate line (#210), which a ride's forensics replay the filter from, so
+    /// every change of `isFixRecordable` writes one.
+    private func logRecordingGate(isOpen: Bool, accuracyMeters: Double) {
+        let gate = isOpen ? "open" : "shut"
+        logger.notice(
+            """
+            recording gps gate \
+            \(gate, privacy: .public) — accuracy \
+            \(accuracyMeters, format: .fixed(precision: 1), privacy: .public) m
+            """
         )
     }
 
