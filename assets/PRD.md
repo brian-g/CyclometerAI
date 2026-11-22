@@ -1125,7 +1125,7 @@ one (`Bike.stravaGearID`). Uploads can't name gear, so once the upload has an `a
 
 **Open questions.**
 
-- OQ-S1: Should S12.1 offer "Upload automatically", making Strava's Sync To default sticky without a choice per ride?
+- OQ-S1: Should S12.1 offer "Upload automatically", making Strava's Sync To default sticky without a choice per ride? No
 - OQ-S2: Is the on-device route narrative allowed for Strava-exported routes? Ask in the app review (#288)
 - OQ-S3: Must routes imported from Strava be deleted on disconnect or deauthorization? Ask in the app review (#288)
 
