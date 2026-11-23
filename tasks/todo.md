@@ -3171,3 +3171,21 @@ Elevation mirrors S15 (Ascent / Descent / Steepest; Max Grade leaves Summary). H
 - [x] Targeted run on "Cyclometer Tests", fresh DerivedData: 84 passed, 0 failed (RouteWindExposure 5,
       RouteMapSheetFeature 5, RouteGradeBands 3, RouteDetailMapSheet 6, RouteDetailFeature 17, RouteWindFeature 9,
       RideDetailFeature 14, RideDetailSnapshot 9, RouteDetailSnapshot 11, MapHeaderChrome 5)
+
+---
+
+## #646 — a ride longer than 4 days crashed the HealthKit workout write
+
+HealthKit raises an uncatchable Objective-C exception on a sample over its type's `maximumAllowedDuration`.
+Probed on iOS 27: the workout, its route, distance and active energy are all capped at 345,600 s, so
+`HKWorkoutBuilder`'s workout is capped too, not only the samples.
+
+- [x] `HealthKitClient.checkSpan(from:to:)`: one guard for both uncatchable spans, ends-before-start and
+      over-limit, read from each type's own limit (`workoutSpanTypes`). `saveWorkout` calls it before building
+      anything
+- [x] `RideHealthWorkout.write` runs the same check up front (replacing its ends-before-start guard), logs the
+      reason and settles the ride unwritten, so the launch backfill can't crash-loop and rides behind it still write
+- [x] Tests: span within / at / over the limit, ends-before-start, every written type checked; a 5-day owed ride
+      settled unwritten without holding back the next
+- [x] Full `CyclometerTests` on "Cyclometer Tests": 3135 passed, 0 failed
+- [ ] Brian: launch on the sim that holds the 5-day ride (the backfill crashed every launch), and finish a >4-day ride

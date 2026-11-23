@@ -243,6 +243,27 @@ struct RideHealthWorkoutTests {
         #expect(owed.value.isEmpty)
     }
 
+    /// #646: HealthKit raised an uncatchable exception on a ride left running for 5 days, so the
+    /// launch backfill would have crashed on it at every launch.
+    @Test("a ride longer than Health allows is settled without a write, and doesn't hold back the rides after it")
+    func overLongRideIsSettledUnwritten() async {
+        let forgotten = Self.owed(minutes: 5 * 24 * 60)
+        let good = Self.owed()
+        let owed = LockIsolated([forgotten, good])
+        let written = LockIsolated<[UUID]>([])
+
+        let settled = await withDependencies {
+            $0.persistenceClient = Self.persistence(owed)
+            $0.healthKitClient = .mock(onSaveWorkout: { workout in written.withValue { $0.append(workout.rideId) } })
+        } operation: {
+            await RideHealthWorkout.backfill()
+        }
+
+        #expect(written.value == [good.rideId])
+        #expect(settled == 2)
+        #expect(owed.value.isEmpty)
+    }
+
     /// A Finish's backfill landing while the launch backfill is still writing must not write
     /// the same ride a second time.
     @Test("an overlapping backfill waits for the one running, then finds nothing left to do")

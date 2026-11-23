@@ -91,10 +91,13 @@ enum RideHealthWorkout {
         @Dependency(\.persistenceClient) var persistenceClient
         @Dependency(\.healthKitClient) var healthKitClient
 
-        // `saveWorkout` would throw on this every time, and a failure that never clears would
-        // hold back every ride queued behind it. A device clock set back mid-ride produces it.
-        guard ride.endedAt > ride.startedAt else {
-            logger.error("workout for ride \(ride.rideId, privacy: .public) never written: it ends before it starts (device clock changed mid-ride?)")
+        // `saveWorkout` would throw on a span Health can't take every time, and a failure that
+        // never clears would hold back every ride queued behind it: a clock set back mid-ride,
+        // or a ride left running for days (#646).
+        do {
+            try HealthKitClient.checkSpan(from: ride.startedAt, to: ride.endedAt)
+        } catch {
+            logger.error("workout for ride \(ride.rideId, privacy: .public) never written: \(error.localizedDescription, privacy: .public)")
             try await settle(ride.rideId)
             return
         }

@@ -18,9 +18,23 @@ private let restingHeartRateStalenessWindow: TimeInterval = 30 * 24 * 60 * 60
 /// HealthKit hiccup.
 private let heartRateStreamRetryDelay: Duration = .seconds(5)
 
-private enum WorkoutWriteError: LocalizedError {
+/// A ride span HealthKit can't take. Both raise an Objective-C exception, which Swift can't
+/// catch, if they reach HealthKit, so `HealthKitClient.checkSpan` throws them first.
+enum WorkoutWriteError: LocalizedError, Equatable {
+    /// A device clock set back mid-ride can produce one.
     case endsBeforeStart
-    var errorDescription: String? { "the ride ends before it starts (device clock changed mid-ride?)" }
+    /// Longer than one of the workout's types allows (#646), 4 days on iOS 27. A ride that long
+    /// is a forgotten Finish, not a real ride.
+    case exceedsMaximumDuration(TimeInterval)
+
+    var errorDescription: String? {
+        switch self {
+        case .endsBeforeStart:
+            "the ride ends before it starts (device clock changed mid-ride?)"
+        case .exceedsMaximumDuration(let limit):
+            "the ride is longer than the \(Int(limit)) s Health allows a workout (forgotten Finish?)"
+        }
+    }
 }
 
 /// The app's single `HKHealthStore`, shared with `PermissionProbes` so authorization
@@ -300,9 +314,7 @@ extension HealthKitClient {
     private static func saveWorkout(_ workout: RideWorkout, _ store: HKHealthStore) async throws {
         var builder: HKWorkoutBuilder?
         do {
-            // `HKQuantitySample` raises an Objective-C exception, which Swift can't catch, on an
-            // end before its start. A clock set back mid-ride can produce one.
-            guard workout.endedAt > workout.startedAt else { throw WorkoutWriteError.endsBeforeStart }
+            try checkSpan(from: workout.startedAt, to: workout.endedAt)
 
             if let existing = await overlappingCyclingWorkout(workout, store) {
                 logger.notice(
@@ -364,6 +376,27 @@ extension HealthKitClient {
                 "workout write failed for ride \(workout.rideId, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
             throw error
+        }
+    }
+
+    /// Every sample type `saveWorkout` writes over the ride's span: the workout itself, its route,
+    /// and the distance and energy samples.
+    static let workoutSpanTypes: [HKSampleType] = [
+        PermissionsClient.workoutType,
+        PermissionsClient.workoutRouteType,
+        PermissionsClient.distanceCyclingType,
+        PermissionsClient.activeEnergyBurnedType,
+    ]
+
+    /// Throws for a span HealthKit would raise an uncatchable exception on: one that ends before
+    /// it starts, or one longer than a type allows (#646). The limit is HealthKit's own, read from
+    /// each type rather than hard-coded.
+    static func checkSpan(from start: Date, to end: Date, types: [HKSampleType] = workoutSpanTypes) throws(WorkoutWriteError) {
+        guard end > start else { throw .endsBeforeStart }
+        let span = end.timeIntervalSince(start)
+        // `maximumAllowedDuration` itself raises on a type without a limit.
+        for type in types where type.isMaximumDurationRestricted && span > type.maximumAllowedDuration {
+            throw .exceedsMaximumDuration(type.maximumAllowedDuration)
         }
     }
 
