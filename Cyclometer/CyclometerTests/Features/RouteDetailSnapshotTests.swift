@@ -94,12 +94,12 @@ final class RouteDetailSnapshotTests: XCTestCase {
         // Light pinned as a trait, as dark is, rather than left to whatever the host resolves.
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.light)),
-            as: .image(on: device, traits: .init(userInterfaceStyle: .light)),
+            as: .image(on: device, traits: .snapshot(.light)),
             named: "\(name)-light", file: file, testName: testName, line: line
         )
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.dark)),
-            as: .image(on: device, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(on: device, traits: .snapshot(.dark)),
             named: "\(name)-dark", file: file, testName: testName, line: line
         )
     }

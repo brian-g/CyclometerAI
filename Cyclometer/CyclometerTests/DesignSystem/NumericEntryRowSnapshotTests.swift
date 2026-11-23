@@ -26,12 +26,12 @@ final class NumericEntryRowSnapshotTests: XCTestCase {
     ) {
         assertSnapshot(
             of: view.preferredColorScheme(.light),
-            as: .image(layout: canvas),
+            as: .image(layout: canvas, traits: .snapshot()),
             named: "\(name)-light", file: file, testName: testName, line: line
         )
         assertSnapshot(
             of: view.preferredColorScheme(.dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(layout: canvas, traits: .snapshot(.dark)),
             named: "\(name)-dark", file: file, testName: testName, line: line
         )
     }

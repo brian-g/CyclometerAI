@@ -47,12 +47,12 @@ Dashboard labels: **ALL CAPS** · Units: *lowercase* · Units: baseline-aligned 
 
 Requires **Xcode 27**. TCA 1.25 and earlier don't compile on it, and `Package.resolved` pins Xcode 27's dependency graph. CI runs on the `xcode-27` runner to match.
 
-Build and test from `Cyclometer/`. The destination is pinned on purpose: snapshot references are recorded on iPhone 17 Pro, iOS 27.0 (`.claude/rules/testing.md`), and without `OS=` xcodebuild looks only at the newest runtime, which has no iPhone 17 Pro. CI resolves its own simulator (`.github/scripts/resolve-simulator.sh`).
+Build and test from `Cyclometer/`. Tests run on their own simulator, never a personal one: `scripts/test-simulator.sh` prints the UDID of "Cyclometer Tests" (iPhone 17 Pro, iOS 27.0, the runtime the snapshot references are recorded on), creating it if needed and erasing it first, so nothing set in Device Hub reaches the snapshots (#648). The build destination is pinned too: without `OS=`, xcodebuild looks only at the newest runtime, which has no iPhone 17 Pro. CI resolves its own simulator (`.github/scripts/resolve-simulator.sh`).
 ```
 xcodebuild build -project Cyclometer.xcodeproj -scheme Cyclometer \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0'
 xcodebuild test  -project Cyclometer.xcodeproj -scheme Cyclometer \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' -only-testing:CyclometerTests
+  -destination "id=$(../scripts/test-simulator.sh)" -only-testing:CyclometerTests
 ```
 
 ## General Claude Rules

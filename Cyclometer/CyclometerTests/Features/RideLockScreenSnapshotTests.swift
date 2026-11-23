@@ -43,14 +43,14 @@ final class RideLockScreenSnapshotTests: XCTestCase {
 
     /// Passes the caller's name through: the reference is named after the test, not this helper.
     private func dark(_ view: some View, testName: String = #function) {
-        assertSnapshot(of: view, as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark)),
+        assertSnapshot(of: view, as: .image(layout: canvas, traits: .snapshot(.dark)),
                        testName: testName)
     }
 
     // MARK: - Riding
 
     func testLockScreenRouteLight() {
-        assertSnapshot(of: card(state()), as: .image(layout: canvas))
+        assertSnapshot(of: card(state()), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testLockScreenRouteDark() {
@@ -58,7 +58,7 @@ final class RideLockScreenSnapshotTests: XCTestCase {
     }
 
     func testLockScreenNoRouteImperialLight() {
-        assertSnapshot(of: card(state(routeProgress: nil), units: .imperial), as: .image(layout: canvas))
+        assertSnapshot(of: card(state(routeProgress: nil), units: .imperial), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testLockScreenNoRouteDark() {
@@ -68,7 +68,7 @@ final class RideLockScreenSnapshotTests: XCTestCase {
     // MARK: - Paused → pause icon, frozen timer
 
     func testLockScreenPausedLight() {
-        assertSnapshot(of: card(state(status: .paused)), as: .image(layout: canvas))
+        assertSnapshot(of: card(state(status: .paused)), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testLockScreenPausedDark() {
@@ -79,12 +79,12 @@ final class RideLockScreenSnapshotTests: XCTestCase {
 
     /// 4:44:44, the widest one-digit-hour time: fits its slot without truncating.
     func testLockScreenWidestTimer() {
-        assertSnapshot(of: card(state(status: .paused, pausedElapsed: 17_084)), as: .image(layout: canvas))
+        assertSnapshot(of: card(state(status: .paused, pausedElapsed: 17_084)), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     /// 10:00:00: two-digit hours, a ride longer than one activity.
     func testLockScreenTwoDigitHours() {
-        assertSnapshot(of: card(state(status: .paused, pausedElapsed: 36_000)), as: .image(layout: canvas))
+        assertSnapshot(of: card(state(status: .paused, pausedElapsed: 36_000)), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     /// 9:30:00 metric on a long ride: the row is wider than the card even with distance's unit
@@ -93,13 +93,13 @@ final class RideLockScreenSnapshotTests: XCTestCase {
         let state = RideActivityAttributes.ContentState(
             status: .paused, startDate: .now.addingTimeInterval(-34_200), pausedElapsed: 34_200,
             speedMPS: 12.5, distanceMeters: 125_300, routeProgress: 0.42)
-        assertSnapshot(of: card(state), as: .image(layout: canvas))
+        assertSnapshot(of: card(state), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     // MARK: - Stale → dimmed values, "Reconnecting…"
 
     func testLockScreenStaleLight() {
-        assertSnapshot(of: card(state(status: .paused), isStale: true), as: .image(layout: canvas))
+        assertSnapshot(of: card(state(status: .paused), isStale: true), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testLockScreenStaleDark() {
@@ -109,6 +109,6 @@ final class RideLockScreenSnapshotTests: XCTestCase {
     // MARK: - Reduced luminance → the dark card and white text, in either appearance
 
     func testLockScreenReducedLuminanceLight() {
-        assertSnapshot(of: card(state(status: .paused), isLuminanceReduced: true), as: .image(layout: canvas))
+        assertSnapshot(of: card(state(status: .paused), isLuminanceReduced: true), as: .image(layout: canvas, traits: .snapshot()))
     }
 }

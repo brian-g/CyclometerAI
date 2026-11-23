@@ -16,36 +16,36 @@ final class SunsetWidgetSnapshotTests: XCTestCase {
     }
 
     func testSunsetCountdown() {
-        assertSnapshot(of: makeSunset(.minutesLeft(72)), as: .image(layout: canvas))
+        assertSnapshot(of: makeSunset(.minutesLeft(72)), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     /// After sunset and no sunset today read the same "—".
     func testSunsetAfterSunset() {
-        assertSnapshot(of: makeSunset(.passed), as: .image(layout: canvas))
+        assertSnapshot(of: makeSunset(.passed), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testSunsetNoFix() {
-        assertSnapshot(of: makeSunset(.noFix), as: .image(layout: canvas))
+        assertSnapshot(of: makeSunset(.noFix), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testSunsetCountdownDark() {
         assertSnapshot(
             of: makeSunset(.minutesLeft(72), scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
     func testSunsetAfterSunsetDark() {
         assertSnapshot(
             of: makeSunset(.passed, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
     func testSunsetNoFixDark() {
         assertSnapshot(
             of: makeSunset(.noFix, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 }

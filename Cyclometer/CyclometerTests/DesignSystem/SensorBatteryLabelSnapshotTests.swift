@@ -23,7 +23,7 @@ final class SensorBatteryLabelSnapshotTests: XCTestCase {
         for level in levels {
             assertSnapshot(
                 of: wrap(SensorBatteryLabel(percent: level)),
-                as: .image(layout: canvas),
+                as: .image(layout: canvas, traits: .snapshot()),
                 named: "\(level)"
             )
         }
@@ -33,7 +33,7 @@ final class SensorBatteryLabelSnapshotTests: XCTestCase {
         for level in levels {
             assertSnapshot(
                 of: wrap(SensorBatteryLabel(percent: level), scheme: .dark),
-                as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark)),
+                as: .image(layout: canvas, traits: .snapshot(.dark)),
                 named: "\(level)"
             )
         }
@@ -43,12 +43,12 @@ final class SensorBatteryLabelSnapshotTests: XCTestCase {
     func testLowThresholdBoundary() {
         assertSnapshot(
             of: wrap(SensorBatteryLabel(percent: 20)),
-            as: .image(layout: canvas),
+            as: .image(layout: canvas, traits: .snapshot()),
             named: "low"
         )
         assertSnapshot(
             of: wrap(SensorBatteryLabel(percent: 21)),
-            as: .image(layout: canvas),
+            as: .image(layout: canvas, traits: .snapshot()),
             named: "notLow"
         )
     }

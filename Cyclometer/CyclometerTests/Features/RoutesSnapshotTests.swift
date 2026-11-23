@@ -91,12 +91,12 @@ final class RoutesSnapshotTests: XCTestCase {
     ) {
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.light)),
-            as: .image(on: device),
+            as: .image(on: device, traits: .snapshot()),
             named: "\(name)-light", file: file, testName: testName, line: line
         )
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.dark)),
-            as: .image(on: device, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(on: device, traits: .snapshot(.dark)),
             named: "\(name)-dark", file: file, testName: testName, line: line
         )
     }
@@ -125,7 +125,9 @@ final class RoutesSnapshotTests: XCTestCase {
         let format = UIGraphicsImageRendererFormat()
         format.scale = RideMapThumbnail.scale
         return UIGraphicsImageRenderer(size: RideMapThumbnail.pointSize, format: format).image { context in
-            color.setFill()
+            // Resolved here, not by `setFill()` against the simulator's current appearance (#648).
+            // Light for both, as the reference was recorded.
+            color.resolvedColor(with: .snapshot()).setFill()
             context.fill(CGRect(origin: .zero, size: RideMapThumbnail.pointSize))
         }
     }

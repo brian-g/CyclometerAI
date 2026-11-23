@@ -29,21 +29,21 @@ final class HeroNumberSnapshotTests: XCTestCase {
     func testLargeLight() {
         assertSnapshot(
             of: wrap(HeroNumber(28.4, unit: "mph")),
-            as: .image(layout: horizontalCanvas)
+            as: .image(layout: horizontalCanvas, traits: .snapshot())
         )
     }
 
     func testMediumLight() {
         assertSnapshot(
             of: wrap(HeroNumber(28.4, unit: "mph").heroNumberSize(.medium)),
-            as: .image(layout: horizontalCanvas)
+            as: .image(layout: horizontalCanvas, traits: .snapshot())
         )
     }
 
     func testSmallLight() {
         assertSnapshot(
             of: wrap(HeroNumber(28.4, unit: "mph").heroNumberSize(.small)),
-            as: .image(layout: horizontalCanvas)
+            as: .image(layout: horizontalCanvas, traits: .snapshot())
         )
     }
 
@@ -52,21 +52,21 @@ final class HeroNumberSnapshotTests: XCTestCase {
     func testLargeDark() {
         assertSnapshot(
             of: wrap(HeroNumber(28.4, unit: "mph"), scheme: .dark),
-            as: .image(layout: horizontalCanvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: horizontalCanvas, traits: .snapshot(.dark))
         )
     }
 
     func testMediumDark() {
         assertSnapshot(
             of: wrap(HeroNumber(28.4, unit: "mph").heroNumberSize(.medium), scheme: .dark),
-            as: .image(layout: horizontalCanvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: horizontalCanvas, traits: .snapshot(.dark))
         )
     }
 
     func testSmallDark() {
         assertSnapshot(
             of: wrap(HeroNumber(28.4, unit: "mph").heroNumberSize(.small), scheme: .dark),
-            as: .image(layout: horizontalCanvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: horizontalCanvas, traits: .snapshot(.dark))
         )
     }
 
@@ -75,7 +75,7 @@ final class HeroNumberSnapshotTests: XCTestCase {
     func testEmptyState() {
         assertSnapshot(
             of: wrap(HeroNumber("—", unit: "mph")),
-            as: .image(layout: horizontalCanvas)
+            as: .image(layout: horizontalCanvas, traits: .snapshot())
         )
     }
 
@@ -89,7 +89,7 @@ final class HeroNumberSnapshotTests: XCTestCase {
     func testCustomColor() {
         assertSnapshot(
             of: wrap(HeroNumber(28.4, unit: "mph").valueColor(.cyPrimary)),
-            as: .image(layout: horizontalCanvas)
+            as: .image(layout: horizontalCanvas, traits: .snapshot())
         )
     }
 
@@ -102,7 +102,7 @@ final class HeroNumberSnapshotTests: XCTestCase {
                 .heroNumberSize(.small)
                 .layout(.vertical)
             ),
-            as: .image(layout: verticalCanvas)
+            as: .image(layout: verticalCanvas, traits: .snapshot())
         )
     }
 
@@ -114,7 +114,7 @@ final class HeroNumberSnapshotTests: XCTestCase {
                 }
                 .layout(.vertical)
             ),
-            as: .image(layout: verticalCanvas)
+            as: .image(layout: verticalCanvas, traits: .snapshot())
         )
     }
 
@@ -123,7 +123,7 @@ final class HeroNumberSnapshotTests: XCTestCase {
     func testLargeAccessibilityDynamicType() {
         assertSnapshot(
             of: wrap(HeroNumber(28.4, unit: "mph"), sizeCategory: .accessibilityExtraExtraExtraLarge),
-            as: .image(layout: accessibilityCanvas)
+            as: .image(layout: accessibilityCanvas, traits: .snapshot())
         )
     }
 
@@ -136,7 +136,7 @@ final class HeroNumberSnapshotTests: XCTestCase {
                 HeroNumber(28.4, unit: "mph") { Text("Speed").font(.caption) },
                 sizeCategory: .accessibilityExtraExtraExtraLarge
             ),
-            as: .image(layout: accessibilityCanvas)
+            as: .image(layout: accessibilityCanvas, traits: .snapshot())
         )
     }
 }

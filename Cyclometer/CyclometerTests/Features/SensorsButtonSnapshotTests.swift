@@ -21,7 +21,7 @@ final class SensorsButtonSnapshotTests: XCTestCase {
             .preferredColorScheme(scheme),
             // Glass composites against a real window; offscreen, the button's disc isn't drawn.
             as: .image(drawHierarchyInKeyWindow: true, layout: canvas,
-                       traits: .init(userInterfaceStyle: scheme == .dark ? .dark : .light)),
+                       traits: .snapshot(scheme == .dark ? .dark : .light)),
             testName: testName
         )
     }

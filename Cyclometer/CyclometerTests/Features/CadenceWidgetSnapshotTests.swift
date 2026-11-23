@@ -39,21 +39,21 @@ final class CadenceWidgetSnapshotTests: XCTestCase {
     func testTwoByOneActive() {
         assertSnapshot(
             of: widget(history: sampleHistory, size: .twoByOne),
-            as: .image(layout: canvas2x1)
+            as: .image(layout: canvas2x1, traits: .snapshot())
         )
     }
 
     func testTwoByOneNoSignal() {
         assertSnapshot(
             of: widget(cadence: nil, history: [], average: 0, max: 0, size: .twoByOne),
-            as: .image(layout: canvas2x1)
+            as: .image(layout: canvas2x1, traits: .snapshot())
         )
     }
 
     func testTwoByOneActiveDark() {
         assertSnapshot(
             of: widget(history: sampleHistory, size: .twoByOne, scheme: .dark),
-            as: .image(layout: canvas2x1, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas2x1, traits: .snapshot(.dark))
         )
     }
 
@@ -65,7 +65,7 @@ final class CadenceWidgetSnapshotTests: XCTestCase {
         }.filter { !(8..<12).contains(Int($0.time.timeIntervalSinceReferenceDate)) }
         assertSnapshot(
             of: widget(history: gapped, window: sampleHistory.plotDomain(nil), size: .twoByOne),
-            as: .image(layout: canvas2x1)
+            as: .image(layout: canvas2x1, traits: .snapshot())
         )
     }
 
@@ -74,21 +74,21 @@ final class CadenceWidgetSnapshotTests: XCTestCase {
     func testOneByOneActive() {
         assertSnapshot(
             of: widget(history: sampleHistory, size: .oneByOne),
-            as: .image(layout: canvas1x1)
+            as: .image(layout: canvas1x1, traits: .snapshot())
         )
     }
 
     func testOneByOneNoSignal() {
         assertSnapshot(
             of: widget(cadence: nil, history: [], average: 0, max: 0, size: .oneByOne),
-            as: .image(layout: canvas1x1)
+            as: .image(layout: canvas1x1, traits: .snapshot())
         )
     }
 
     func testOneByOneNoSignalDark() {
         assertSnapshot(
             of: widget(cadence: nil, history: [], average: 0, max: 0, size: .oneByOne, scheme: .dark),
-            as: .image(layout: canvas1x1, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas1x1, traits: .snapshot(.dark))
         )
     }
 
@@ -97,7 +97,7 @@ final class CadenceWidgetSnapshotTests: XCTestCase {
     func testCadenceOneByOneTrendUp() {
         assertSnapshot(
             of: widget(cadence: 96, history: sampleHistory, size: .oneByOne),
-            as: .image(layout: canvas1x1)
+            as: .image(layout: canvas1x1, traits: .snapshot())
         )
     }
 
@@ -105,14 +105,14 @@ final class CadenceWidgetSnapshotTests: XCTestCase {
         // The one size where the ▼ sits between the cadence and AVG.
         assertSnapshot(
             of: widget(cadence: 78, history: sampleHistory, size: .twoByOne),
-            as: .image(layout: canvas2x1)
+            as: .image(layout: canvas2x1, traits: .snapshot())
         )
     }
 
     func testCadenceTrendDownDark() {
         assertSnapshot(
             of: widget(cadence: 78, history: sampleHistory, size: .oneByOne, scheme: .dark),
-            as: .image(layout: canvas1x1, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas1x1, traits: .snapshot(.dark))
         )
     }
 }

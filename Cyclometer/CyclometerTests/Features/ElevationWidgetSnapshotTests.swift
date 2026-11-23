@@ -21,7 +21,7 @@ final class ElevationWidgetSnapshotTests: XCTestCase {
                             file: StaticString = #filePath, testName: String = #function, line: UInt = #line) {
         assertSnapshot(
             of: make(view, width: width, scheme: .dark),
-            as: .image(layout: layout, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(layout: layout, traits: .snapshot(.dark)),
             file: file, testName: testName, line: line
         )
     }
@@ -30,17 +30,17 @@ final class ElevationWidgetSnapshotTests: XCTestCase {
 
     func testAscentMetric() {
         assertSnapshot(of: make(ElevationTotalWidget(title: "Ascent", symbol: "arrow.up.forward", meters: 412, unit: .metric), width: 196),
-                       as: .image(layout: oneByOne))
+                       as: .image(layout: oneByOne, traits: .snapshot()))
     }
 
     func testAscentImperial() {
         assertSnapshot(of: make(ElevationTotalWidget(title: "Ascent", symbol: "arrow.up.forward", meters: 412, unit: .imperial), width: 196),
-                       as: .image(layout: oneByOne))
+                       as: .image(layout: oneByOne, traits: .snapshot()))
     }
 
     func testDescentRideStart() {
         assertSnapshot(of: make(ElevationTotalWidget(title: "Descent", symbol: "arrow.down.forward", meters: 0, unit: .metric), width: 196),
-                       as: .image(layout: oneByOne))
+                       as: .image(layout: oneByOne, traits: .snapshot()))
     }
 
     func testAscentDark() {
@@ -48,15 +48,15 @@ final class ElevationWidgetSnapshotTests: XCTestCase {
     }
 
     func testGradeClimb() {
-        assertSnapshot(of: make(GradeWidget(percent: 4.4), width: 196), as: .image(layout: oneByOne))
+        assertSnapshot(of: make(GradeWidget(percent: 4.4), width: 196), as: .image(layout: oneByOne, traits: .snapshot()))
     }
 
     func testGradeDescent() {
-        assertSnapshot(of: make(GradeWidget(percent: -7.6), width: 196), as: .image(layout: oneByOne))
+        assertSnapshot(of: make(GradeWidget(percent: -7.6), width: 196), as: .image(layout: oneByOne, traits: .snapshot()))
     }
 
     func testGradeNoReading() {
-        assertSnapshot(of: make(GradeWidget(percent: nil), width: 196), as: .image(layout: oneByOne))
+        assertSnapshot(of: make(GradeWidget(percent: nil), width: 196), as: .image(layout: oneByOne, traits: .snapshot()))
     }
 
     // MARK: - W17
@@ -64,21 +64,21 @@ final class ElevationWidgetSnapshotTests: XCTestCase {
     func testElevationMetric() {
         assertSnapshot(
             of: make(ElevationWidget(altitude: 284, gradePercent: 4.4, history: history, unit: .metric), width: 393),
-            as: .image(layout: twoByOne)
+            as: .image(layout: twoByOne, traits: .snapshot())
         )
     }
 
     func testElevationImperial() {
         assertSnapshot(
             of: make(ElevationWidget(altitude: 284, gradePercent: -3, history: history, unit: .imperial), width: 393),
-            as: .image(layout: twoByOne)
+            as: .image(layout: twoByOne, traits: .snapshot())
         )
     }
 
     func testElevationNoReading() {
         assertSnapshot(
             of: make(ElevationWidget(altitude: nil, gradePercent: nil, history: [], unit: .metric), width: 393),
-            as: .image(layout: twoByOne)
+            as: .image(layout: twoByOne, traits: .snapshot())
         )
     }
 
@@ -95,17 +95,17 @@ final class ElevationWidgetSnapshotTests: XCTestCase {
     }
 
     func testRouteElevationOnRoute() {
-        assertSnapshot(of: make(route(progress: 0.4), width: 393), as: .image(layout: twoByOne))
+        assertSnapshot(of: make(route(progress: 0.4), width: 393), as: .image(layout: twoByOne, traits: .snapshot()))
     }
 
     /// Turn-by-turn off: the route, with nothing marked ridden.
     func testRouteElevationNoProgress() {
-        assertSnapshot(of: make(route(progress: nil), width: 393), as: .image(layout: twoByOne))
+        assertSnapshot(of: make(route(progress: nil), width: 393), as: .image(layout: twoByOne, traits: .snapshot()))
     }
 
     /// No route: W17's face.
     func testRouteElevationNoRoute() {
-        assertSnapshot(of: make(route(progress: nil, profile: nil), width: 393), as: .image(layout: twoByOne))
+        assertSnapshot(of: make(route(progress: nil, profile: nil), width: 393), as: .image(layout: twoByOne, traits: .snapshot()))
     }
 
     func testRouteElevationDark() {

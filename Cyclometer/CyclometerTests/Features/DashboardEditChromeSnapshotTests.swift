@@ -42,12 +42,12 @@ final class DashboardEditChromeSnapshotTests: XCTestCase {
     func testDashboardEditChrome() {
         assertSnapshot(
             of: makeRow(isEditing: true, scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light)),
+            as: .image(layout: canvas, traits: .snapshot(.light)),
             named: "light"
         )
         assertSnapshot(
             of: makeRow(isEditing: true, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(layout: canvas, traits: .snapshot(.dark)),
             named: "dark"
         )
     }
@@ -71,12 +71,12 @@ final class DashboardEditChromeSnapshotTests: XCTestCase {
         let canvas: SwiftUISnapshotLayout = .fixed(width: 402 + 2 * Spacing.lg, height: 96 + 2 * Spacing.lg)
         assertSnapshot(
             of: makeEmptySlotRow(scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light)),
+            as: .image(layout: canvas, traits: .snapshot(.light)),
             named: "light"
         )
         assertSnapshot(
             of: makeEmptySlotRow(scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(layout: canvas, traits: .snapshot(.dark)),
             named: "dark"
         )
     }
@@ -85,7 +85,7 @@ final class DashboardEditChromeSnapshotTests: XCTestCase {
     func testDashboardEditChromeOff() {
         assertSnapshot(
             of: makeRow(isEditing: false, scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light)),
+            as: .image(layout: canvas, traits: .snapshot(.light)),
             named: "light"
         )
     }

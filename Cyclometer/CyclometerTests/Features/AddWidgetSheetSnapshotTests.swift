@@ -48,12 +48,12 @@ final class AddWidgetSheetSnapshotTests: XCTestCase {
     func testAddWidgetCatalog() {
         assertSnapshot(
             of: makeCatalog(scheme: .light),
-            as: .image(layout: .fixed(width: 402, height: Self.expandedHeight), traits: .init(userInterfaceStyle: .light)),
+            as: .image(layout: .fixed(width: 402, height: Self.expandedHeight), traits: .snapshot(.light)),
             named: "light"
         )
         assertSnapshot(
             of: makeCatalog(scheme: .dark),
-            as: .image(layout: .fixed(width: 402, height: Self.expandedHeight), traits: .init(userInterfaceStyle: .dark)),
+            as: .image(layout: .fixed(width: 402, height: Self.expandedHeight), traits: .snapshot(.dark)),
             named: "dark"
         )
     }
@@ -61,7 +61,7 @@ final class AddWidgetSheetSnapshotTests: XCTestCase {
     func testAddWidgetCatalogCollapsed() {
         assertSnapshot(
             of: makeCatalog(scheme: .light, collapsed: [.heartRate, .elevation], height: Self.collapsedHeight),
-            as: .image(layout: .fixed(width: 402, height: Self.collapsedHeight), traits: .init(userInterfaceStyle: .light)),
+            as: .image(layout: .fixed(width: 402, height: Self.collapsedHeight), traits: .snapshot(.light)),
             named: "light"
         )
     }

@@ -18,7 +18,7 @@ final class CaloriesSheetSnapshotTests: XCTestCase {
                 .frame(width: 402, height: 520)
                 .environment(\.locale, Locale(identifier: "en_US"))
                 .preferredColorScheme(scheme),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: scheme == .dark ? .dark : .light)),
+            as: .image(layout: canvas, traits: .snapshot(scheme == .dark ? .dark : .light)),
             testName: testName
         )
     }

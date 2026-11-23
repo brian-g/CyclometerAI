@@ -19,21 +19,21 @@ final class DistanceWidgetSnapshotTests: XCTestCase {
     }
 
     func testDistanceMetric() {
-        assertSnapshot(of: makeDistance(unit: .metric), as: .image(layout: canvas))
+        assertSnapshot(of: makeDistance(unit: .metric), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testDistanceImperial() {
-        assertSnapshot(of: makeDistance(unit: .imperial), as: .image(layout: canvas))
+        assertSnapshot(of: makeDistance(unit: .imperial), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testDistanceRideStart() {
-        assertSnapshot(of: makeDistance(distance: 0), as: .image(layout: canvas))
+        assertSnapshot(of: makeDistance(distance: 0), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testDistanceMetricDark() {
         assertSnapshot(
             of: makeDistance(unit: .metric, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 }

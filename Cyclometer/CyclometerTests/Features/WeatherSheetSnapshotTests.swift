@@ -45,21 +45,21 @@ final class WeatherSheetSnapshotTests: XCTestCase {
     func testWeatherSheetLoaded() {
         assertSnapshot(
             of: makeList(Self.loaded, scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+            as: .image(layout: canvas, traits: .snapshot(.light))
         )
     }
 
     func testWeatherSheetLoadedDark() {
         assertSnapshot(
             of: makeList(Self.loaded, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
     func testWeatherSheetNoWeather() {
         assertSnapshot(
             of: makeList(WeatherMetrics(), scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+            as: .image(layout: canvas, traits: .snapshot(.light))
         )
     }
 
@@ -67,21 +67,21 @@ final class WeatherSheetSnapshotTests: XCTestCase {
     func testWeatherSheetOffline() {
         assertSnapshot(
             of: makeList(WeatherMetrics(isOffline: true), scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+            as: .image(layout: canvas, traits: .snapshot(.light))
         )
     }
 
     func testWeatherSheetWindMap() {
         assertSnapshot(
             of: makeList(Self.withMap, scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+            as: .image(layout: canvas, traits: .snapshot(.light))
         )
     }
 
     func testWeatherSheetWindMapDark() {
         assertSnapshot(
             of: makeList(Self.withMap, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 }

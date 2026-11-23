@@ -42,57 +42,57 @@ final class DirectionsWidgetSnapshotTests: XCTestCase {
     // MARK: - 2×1
 
     func testTwoByOneTurn() {
-        assertSnapshot(of: widget(.turn, size: .twoByOne), as: .image(layout: canvas2x1))
+        assertSnapshot(of: widget(.turn, size: .twoByOne), as: .image(layout: canvas2x1, traits: .snapshot()))
     }
 
     func testTwoByOneTurnDark() {
         assertSnapshot(
             of: widget(.turn, size: .twoByOne, scheme: .dark),
-            as: .image(layout: canvas2x1, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas2x1, traits: .snapshot(.dark))
         )
     }
 
     func testTwoByOneNoRoute() {
-        assertSnapshot(of: widget(.noRoute, size: .twoByOne), as: .image(layout: canvas2x1))
+        assertSnapshot(of: widget(.noRoute, size: .twoByOne), as: .image(layout: canvas2x1, traits: .snapshot()))
     }
 
     func testTwoByOneNoRouteDark() {
         assertSnapshot(
             of: widget(.noRoute, size: .twoByOne, scheme: .dark),
-            as: .image(layout: canvas2x1, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas2x1, traits: .snapshot(.dark))
         )
     }
 
     // MARK: - 1×1 (the dashboard's slot)
 
     func testOneByOneTurn() {
-        assertSnapshot(of: widget(.turn, size: .oneByOne), as: .image(layout: canvas1x1))
+        assertSnapshot(of: widget(.turn, size: .oneByOne), as: .image(layout: canvas1x1, traits: .snapshot()))
     }
 
     func testOneByOneTurnDark() {
         assertSnapshot(
             of: widget(.turn, size: .oneByOne, scheme: .dark),
-            as: .image(layout: canvas1x1, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas1x1, traits: .snapshot(.dark))
         )
     }
 
     func testOneByOneNoRoute() {
-        assertSnapshot(of: widget(.noRoute, size: .oneByOne), as: .image(layout: canvas1x1))
+        assertSnapshot(of: widget(.noRoute, size: .oneByOne), as: .image(layout: canvas1x1, traits: .snapshot()))
     }
 
     func testOneByOneNoRouteDark() {
         assertSnapshot(
             of: widget(.noRoute, size: .oneByOne, scheme: .dark),
-            as: .image(layout: canvas1x1, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas1x1, traits: .snapshot(.dark))
         )
     }
 
     /// Route loaded, but no distance: before the first match, off route, past the last turn.
     func testOneByOneNoTurnAhead() {
-        assertSnapshot(of: widget(.noTurnAhead, size: .oneByOne), as: .image(layout: canvas1x1))
+        assertSnapshot(of: widget(.noTurnAhead, size: .oneByOne), as: .image(layout: canvas1x1, traits: .snapshot()))
     }
 
     func testOneByOneTurnImperial() {
-        assertSnapshot(of: widget(.turn, size: .oneByOne, unit: .imperial), as: .image(layout: canvas1x1))
+        assertSnapshot(of: widget(.turn, size: .oneByOne, unit: .imperial), as: .image(layout: canvas1x1, traits: .snapshot()))
     }
 }

@@ -29,29 +29,29 @@ final class TurnInstructionOverlaySnapshotTests: XCTestCase {
     }
 
     func testTurnLeft() {
-        assertSnapshot(of: overlay(.left), as: .image(layout: canvas))
+        assertSnapshot(of: overlay(.left), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testTurnLeftDark() {
         assertSnapshot(
             of: overlay(.left, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
     func testUTurn() {
-        assertSnapshot(of: overlay(.uTurn), as: .image(layout: canvas))
+        assertSnapshot(of: overlay(.uTurn), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     /// A cue's own words run longer than the design's square: the card grows and the text wraps.
     func testCueWordsWrap() {
-        assertSnapshot(of: overlay(.right, name: "Turn right onto County Road S"), as: .image(layout: canvas))
+        assertSnapshot(of: overlay(.right, name: "Turn right onto County Road S"), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testCueWordsWrapDark() {
         assertSnapshot(
             of: overlay(.right, name: "Turn right onto County Road S", scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 }

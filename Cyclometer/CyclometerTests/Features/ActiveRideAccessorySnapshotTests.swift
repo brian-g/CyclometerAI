@@ -36,40 +36,40 @@ final class ActiveRideAccessorySnapshotTests: XCTestCase {
     // MARK: - No route → bicycle glyph
 
     func testNoRouteMetric() {
-        assertSnapshot(of: strip(), as: .image(layout: canvas))
+        assertSnapshot(of: strip(), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testNoRouteImperial() {
-        assertSnapshot(of: strip(unit: .imperial), as: .image(layout: canvas))
+        assertSnapshot(of: strip(unit: .imperial), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testNoRouteDark() {
         assertSnapshot(
             of: strip(scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
     // MARK: - With route → completion ring
 
     func testWithRouteMetric() {
-        assertSnapshot(of: strip(progress: 0.42), as: .image(layout: canvas))
+        assertSnapshot(of: strip(progress: 0.42), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     /// Every route's start (#404): a sliver of the completed arc is still drawn.
     func testWithRouteStart() {
-        assertSnapshot(of: strip(progress: 0), as: .image(layout: canvas))
+        assertSnapshot(of: strip(progress: 0), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     /// Every route's finish (#404): "100%" is the widest label in the ring.
     func testWithRouteFinished() {
-        assertSnapshot(of: strip(progress: 1), as: .image(layout: canvas))
+        assertSnapshot(of: strip(progress: 1), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testWithRouteDark() {
         assertSnapshot(
             of: strip(progress: 0.42, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
@@ -80,7 +80,7 @@ final class ActiveRideAccessorySnapshotTests: XCTestCase {
     func testCollapsedImperial() {
         assertSnapshot(
             of: strip(unit: .imperial, isCollapsed: true, width: 300),
-            as: .image(layout: .fixed(width: 300, height: 120))
+            as: .image(layout: .fixed(width: 300, height: 120), traits: .snapshot())
         )
     }
 }

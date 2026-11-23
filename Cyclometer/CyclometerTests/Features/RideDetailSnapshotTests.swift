@@ -136,12 +136,12 @@ final class RideDetailSnapshotTests: XCTestCase {
     ) {
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.light)),
-            as: .image(on: device, traits: .init(userInterfaceStyle: .light)),
+            as: .image(on: device, traits: .snapshot(.light)),
             named: "\(name)-light", file: file, testName: testName, line: line
         )
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.dark)),
-            as: .image(on: device, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(on: device, traits: .snapshot(.dark)),
             named: "\(name)-dark", file: file, testName: testName, line: line
         )
     }
@@ -227,7 +227,7 @@ final class RideDetailSnapshotTests: XCTestCase {
             for scheme in [UIUserInterfaceStyle.light, .dark] {
                 assertSnapshot(
                     of: UIHostingController(rootView: view.preferredColorScheme(scheme == .light ? .light : .dark)),
-                    as: .image(on: device, traits: .init(userInterfaceStyle: scheme)),
+                    as: .image(on: device, traits: .snapshot(scheme)),
                     named: "\(isExpanded ? "expanded" : "collapsed")-\(scheme == .light ? "light" : "dark")"
                 )
             }

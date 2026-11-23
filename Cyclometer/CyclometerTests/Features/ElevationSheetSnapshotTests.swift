@@ -26,21 +26,21 @@ final class ElevationSheetSnapshotTests: XCTestCase {
     func testElevationSheetOnRoute() {
         assertSnapshot(
             of: makeList(.sample(), scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+            as: .image(layout: canvas, traits: .snapshot(.light))
         )
     }
 
     func testElevationSheetOnRouteDark() {
         assertSnapshot(
             of: makeList(.sample(), scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
     func testElevationSheetNoReading() {
         assertSnapshot(
             of: makeList(ElevationMetrics(), scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+            as: .image(layout: canvas, traits: .snapshot(.light))
         )
     }
 }

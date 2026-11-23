@@ -15,21 +15,21 @@ final class DurationWidgetSnapshotTests: XCTestCase {
     }
 
     func testDurationUnderAnHour() {
-        assertSnapshot(of: makeDuration(movingSeconds: 2340), as: .image(layout: canvas))
+        assertSnapshot(of: makeDuration(movingSeconds: 2340), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testDurationOverAnHour() {
-        assertSnapshot(of: makeDuration(movingSeconds: 30_873), as: .image(layout: canvas))
+        assertSnapshot(of: makeDuration(movingSeconds: 30_873), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testDurationRideStart() {
-        assertSnapshot(of: makeDuration(movingSeconds: 0), as: .image(layout: canvas))
+        assertSnapshot(of: makeDuration(movingSeconds: 0), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testDurationOverAnHourDark() {
         assertSnapshot(
             of: makeDuration(movingSeconds: 30_873, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 }

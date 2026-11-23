@@ -2962,3 +2962,29 @@ keeps sending 0; and auto-resume still waits for the frozen wheel after a real a
 of never. Tests `bikeOnARackAutoPauses`, `wheelMovingRestoresTheVeto`; with the cap removed, only the first fails, and
 with the reset removed, only the second. Full `CyclometerTests`: 3082 passed, 0 failures. Auto-resume on a frozen wheel
 filed as #643.
+
+---
+
+## #648: snapshot tests isolated from simulator settings (2026-11-22, `fix/648-snapshot-device-isolation`)
+
+**Cause (proven).** The tests ran on clones of the everyday iPhone 17 Pro. Brian set its text size to Medium in
+Device Hub, and no snapshot pinned Dynamic Type: SnapshotTesting overrides only the traits a test passes, and its
+window has no scene. Evidence: a fresh device passed 25/25 of the failing snapshots, and the same device with only
+`content_size medium` failed 0/16.
+
+- [x] `scripts/test-simulator.sh`: "Cyclometer Tests" (iPhone 17 Pro, iOS 27.0), erased each run. Erasing drops the
+  app's location decision, which hangs `MapWidgetAccessibilityTests` and times out tests beside them, so the script
+  installs the newest build and grants location (about 28 s per run). It fails if nothing is built. CLAUDE.md, the
+  testing rules, the `tca-feature` skill and `stress-tests.sh` use it. `stress-tests.sh` also no longer runs
+  `simctl shutdown all`
+- [x] `UITraitCollection.snapshot(_:_:)`: Large text, regular weight, normal contrast, Light by default. All 192
+  `assertSnapshot` calls use it. Three fixtures resolve dynamic colours with it (`RoutesSnapshotTests`,
+  `RidesSnapshotTests`, `LiveActivityContrastTests`)
+- [x] Probe simulator at Medium text and Dark: all 46 snapshot suites plus `LiveActivityContrastTests` passed 313/313
+  against unchanged references
+- [x] Known limit: with Increase Contrast on, 10 snapshots (Settings, Weather sheet) still differ. UIKit adjusts tinted
+  system controls from the global setting; neither the trait nor `\._colorSchemeContrast` stops it, and no `cy`
+  token has a high-contrast variant. The erased test simulator is what covers it
+- [x] Full `CyclometerTests` on the test simulator: 2962 passed, 1 failed (`RidesFeatureTests/rideFinishedKeepsListWhenReadsFail`
+  hit the 120 s limit under load; it passes alone, 17/17). No references re-recorded
+- [x] Brian's iPhone 17 Pro untouched (still text size M)

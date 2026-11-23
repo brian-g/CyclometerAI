@@ -67,7 +67,7 @@ final class RideDynamicIslandSnapshotTests: XCTestCase {
 
     /// Passes the caller's name through: the reference is named after the test, not this helper.
     private func snap(_ view: some View, _ layout: SwiftUISnapshotLayout, testName: String = #function) {
-        assertSnapshot(of: view, as: .image(layout: layout, traits: .init(userInterfaceStyle: .dark)),
+        assertSnapshot(of: view, as: .image(layout: layout, traits: .snapshot(.dark)),
                        testName: testName)
     }
 

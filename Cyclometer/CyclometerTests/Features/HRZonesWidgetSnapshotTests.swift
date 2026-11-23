@@ -28,25 +28,25 @@ final class HRZonesWidgetSnapshotTests: XCTestCase {
     // Named for this widget — reference PNGs are flat in the test bundle.
 
     func testHRZonesWidgetOneByOne() {
-        assertSnapshot(of: widget(size: .oneByOne), as: .image(layout: canvas1x1))
+        assertSnapshot(of: widget(size: .oneByOne), as: .image(layout: canvas1x1, traits: .snapshot()))
     }
 
     func testHRZonesWidgetOneByOneDark() {
         assertSnapshot(
             of: widget(size: .oneByOne, scheme: .dark),
-            as: .image(layout: canvas1x1, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas1x1, traits: .snapshot(.dark))
         )
     }
 
     func testHRZonesWidgetTwoByOne() {
-        assertSnapshot(of: widget(size: .twoByOne), as: .image(layout: canvas2x1))
+        assertSnapshot(of: widget(size: .twoByOne), as: .image(layout: canvas2x1, traits: .snapshot()))
     }
 
     func testHRZonesWidgetNoTimeYet() {
-        assertSnapshot(of: widget(zone: 2, seconds: [], size: .oneByOne), as: .image(layout: canvas1x1))
+        assertSnapshot(of: widget(zone: 2, seconds: [], size: .oneByOne), as: .image(layout: canvas1x1, traits: .snapshot()))
     }
 
     func testHRZonesWidgetNoSource() {
-        assertSnapshot(of: widget(zone: 0, source: .none, seconds: [], size: .oneByOne), as: .image(layout: canvas1x1))
+        assertSnapshot(of: widget(zone: 0, source: .none, seconds: [], size: .oneByOne), as: .image(layout: canvas1x1, traits: .snapshot()))
     }
 }

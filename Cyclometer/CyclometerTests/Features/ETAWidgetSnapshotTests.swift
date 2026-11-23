@@ -26,29 +26,29 @@ final class ETAWidgetSnapshotTests: XCTestCase {
     }
 
     func testETATwelveHour() {
-        assertSnapshot(of: makeETA(arrival: afternoon), as: .image(layout: canvas))
+        assertSnapshot(of: makeETA(arrival: afternoon), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testETATwentyFourHour() {
-        assertSnapshot(of: makeETA(arrival: afternoon, hourCycle: .zeroToTwentyThree), as: .image(layout: canvas))
+        assertSnapshot(of: makeETA(arrival: afternoon, hourCycle: .zeroToTwentyThree), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     /// No route, no moving average yet, and a complete route all read the same "—".
     func testETANoArrival() {
-        assertSnapshot(of: makeETA(arrival: nil), as: .image(layout: canvas))
+        assertSnapshot(of: makeETA(arrival: nil), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testETATwelveHourDark() {
         assertSnapshot(
             of: makeETA(arrival: afternoon, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
     func testETANoArrivalDark() {
         assertSnapshot(
             of: makeETA(arrival: nil, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 }

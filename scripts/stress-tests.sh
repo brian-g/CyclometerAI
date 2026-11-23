@@ -28,7 +28,10 @@ LOAD="${2:-$(( $(sysctl -n hw.ncpu) / 2 ))}"
 cd "$(dirname "$0")/.."/Cyclometer || exit 1
 
 OUT="$(mktemp -d)"
-trap 'kill $(jobs -p) 2>/dev/null; xcrun simctl shutdown all >/dev/null 2>&1; rm -rf "$OUT"' EXIT
+# The tests' own simulator (#648). Only it is shut down: `shutdown all` takes down simulators
+# other sessions are using.
+UDID="$(../scripts/test-simulator.sh)"
+trap 'kill $(jobs -p) 2>/dev/null; xcrun simctl shutdown "$UDID" >/dev/null 2>&1; rm -rf "$OUT"' EXIT
 
 echo "Stressing CyclometerTests: $RUNS runs, $LOAD load processes."
 echo "Logs: $OUT"
@@ -46,7 +49,7 @@ for i in $(seq 1 "$RUNS"); do
   xcodebuild test \
     -project Cyclometer.xcodeproj \
     -scheme Cyclometer \
-    -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' \
+    -destination "id=$UDID" \
     -skipMacroValidation \
     -parallel-testing-enabled NO \
     -only-testing:CyclometerTests \
@@ -57,7 +60,7 @@ for i in $(seq 1 "$RUNS"); do
   # accumulate: an earlier 10-run pass ended with 221 simulator processes and was
   # killed by the OS for memory pressure before it finished. Shutting down between
   # runs also makes every run start from the same state, which is the point.
-  xcrun simctl shutdown all >/dev/null 2>&1
+  xcrun simctl shutdown "$UDID" >/dev/null 2>&1
 
   if [ $status -eq 0 ]; then
     printf 'run %2d/%d  ok\n' "$i" "$RUNS"

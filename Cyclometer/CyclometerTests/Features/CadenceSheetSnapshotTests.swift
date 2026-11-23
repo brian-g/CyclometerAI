@@ -23,7 +23,7 @@ final class CadenceSheetSnapshotTests: XCTestCase {
                 .environment(\.locale, Locale(identifier: "en_US"))
                 .environment(\.timeZone, TimeZone(identifier: "America/Chicago")!)
                 .preferredColorScheme(scheme),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: scheme == .dark ? .dark : .light)),
+            as: .image(layout: canvas, traits: .snapshot(scheme == .dark ? .dark : .light)),
             file: file, testName: testName, line: line
         )
     }

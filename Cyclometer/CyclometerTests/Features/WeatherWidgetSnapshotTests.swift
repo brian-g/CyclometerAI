@@ -32,7 +32,7 @@ final class WeatherWidgetSnapshotTests: XCTestCase {
         let canvas: SwiftUISnapshotLayout = .fixed(width: size == .oneByOne ? 196 : 393, height: 96)
         assertSnapshot(
             of: view,
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: dark ? .dark : .light)),
+            as: .image(layout: canvas, traits: .snapshot(dark ? .dark : .light)),
             file: file, testName: testName, line: line
         )
     }
