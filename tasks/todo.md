@@ -3193,3 +3193,17 @@ Probed on iOS 27: the workout, its route, distance and active energy are all cap
       `main` (fresh DerivedData) crashed at launch with the issue's `_HKObjectValidationFailureException`; the branch
       launched, logged "never written … 345600 s" and wrote the 30-min ride's workout
 - [x] Brian: a resumed 5-day ride, Finish → S10 shows and the ride saves ("confirmed")
+
+---
+
+## #646 review (`/code-review --fix`, xhigh)
+
+- [x] Boundary probed with HealthKit on macOS (same 345,600 s limits): a distance `HKQuantitySample` builds at exactly
+      345,600 s and raises at 345,600.0001 s, so `checkSpan`'s `>` matches HealthKit. None of the four types has a
+      minimum duration. A zero-length sample builds too, so `end > start` is stricter than HealthKit (pre-existing,
+      no rider path)
+- Found, not fixed (no rider path): `saveRoute` writes track points stamped with the wall clock, so a clock moved by
+  days mid-ride and back could stretch the route past the limit while the ride's own span passes `checkSpan`. Not
+  verified whether HealthKit raises on an over-long route or returns an error, which `saveRoute` already catches
+- Found, not fixed (no effect on iOS 27): `checkSpan` lets the route, distance and energy limits veto the whole
+  workout, though `saveRoute` says the route never costs it. All four limits are equal today
