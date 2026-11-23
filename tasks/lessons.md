@@ -1022,3 +1022,19 @@ starved for ~30 s, the hold expired, and the test failed. A neighbouring test al
 can only be tested by holding a queue, remove the race instead: make the check and the action one step on the
 queue that serialises them (#614 moved the one-shot's whole decision onto the main queue). Never run a full suite
 in the background without a stall watch: a Monitor that reports when the log has had no new output for 3 minutes.
+
+---
+
+## Snapshot references recorded on a customised simulator (2026-11-22, #645 / #648)
+
+**What happened.** I re-recorded S10's 6 references for #645, and then the full suite showed 292 unrelated snapshot
+failures. I showed that `main` failed the same way and that S15's renders were byte-identical, and called the failures
+"environmental". That was true, but I had already recorded #645's references on the same broken environment and
+committed them. Brian had set the everyday iPhone 17 Pro simulator's text size to Medium in Device Hub. No snapshot
+pinned Dynamic Type, so every reference rendered at the device's size. Brian: "We really can't have random changes
+fucking up the test suite. Let's find it before we rerecord the snapshots."
+
+**Rule.** When many unrelated snapshots fail at once, stop and find the environment change before recording anything.
+Run one failing suite on a freshly created simulator. If it passes there, diff the device's settings rather than the
+code. Record only on the erased "Cyclometer Tests" simulator (`scripts/test-simulator.sh`), and every snapshot passes
+`traits: .snapshot(…)`.

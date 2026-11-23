@@ -18,7 +18,7 @@ final class CaloriesWidgetSnapshotTests: XCTestCase {
     private func assertCalories(_ metrics: CaloriesMetrics, scheme: ColorScheme, testName: String = #function) {
         assertSnapshot(
             of: makeCalories(metrics, scheme: scheme),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: scheme == .dark ? .dark : .light)),
+            as: .image(layout: canvas, traits: .snapshot(scheme == .dark ? .dark : .light)),
             testName: testName
         )
     }

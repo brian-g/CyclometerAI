@@ -40,24 +40,24 @@ final class HeartRateWidgetSnapshotTests: XCTestCase {
     // Named for this widget — reference PNGs are flat in the test bundle.
 
     func testHeartRateWidgetOneByOne() {
-        assertSnapshot(of: widget(size: .oneByOne), as: .image(layout: canvas1x1))
+        assertSnapshot(of: widget(size: .oneByOne), as: .image(layout: canvas1x1, traits: .snapshot()))
     }
 
     func testHeartRateWidgetOneByOneFallingDark() {
         assertSnapshot(
             of: widget(bpm: 170, trend: .down, size: .oneByOne, scheme: .dark),
-            as: .image(layout: canvas1x1, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas1x1, traits: .snapshot(.dark))
         )
     }
 
     func testHeartRateWidgetTwoByOne() {
-        assertSnapshot(of: widget(size: .twoByOne), as: .image(layout: canvas2x1))
+        assertSnapshot(of: widget(size: .twoByOne), as: .image(layout: canvas2x1, traits: .snapshot()))
     }
 
     func testHeartRateWidgetTwoByOneDark() {
         assertSnapshot(
             of: widget(size: .twoByOne, scheme: .dark),
-            as: .image(layout: canvas2x1, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas2x1, traits: .snapshot(.dark))
         )
     }
 
@@ -71,18 +71,18 @@ final class HeartRateWidgetSnapshotTests: XCTestCase {
         let history = Watermark.points(samples, over: window, time: \.time) { Double($0.bpm) }
         assertSnapshot(
             of: widget(source: .healthKit, history: history, trend: .steady, size: .twoByOne),
-            as: .image(layout: canvas2x1)
+            as: .image(layout: canvas2x1, traits: .snapshot())
         )
     }
 
     func testHeartRateWidgetNoReading() {
-        assertSnapshot(of: widget(bpm: 0, history: [], trend: .steady, size: .twoByOne), as: .image(layout: canvas2x1))
+        assertSnapshot(of: widget(bpm: 0, history: [], trend: .steady, size: .twoByOne), as: .image(layout: canvas2x1, traits: .snapshot()))
     }
 
     func testHeartRateWidgetNoSource() {
         assertSnapshot(
             of: widget(bpm: 0, source: .none, history: [], trend: .steady, size: .oneByOne),
-            as: .image(layout: canvas1x1)
+            as: .image(layout: canvas1x1, traits: .snapshot())
         )
     }
 }

@@ -20,32 +20,32 @@ final class DistanceRemainingWidgetSnapshotTests: XCTestCase {
     }
 
     func testDistanceRemainingMidRouteMetric() {
-        assertSnapshot(of: makeDistanceRemaining(unit: .metric), as: .image(layout: canvas))
+        assertSnapshot(of: makeDistanceRemaining(unit: .metric), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testDistanceRemainingMidRouteImperial() {
-        assertSnapshot(of: makeDistanceRemaining(unit: .imperial), as: .image(layout: canvas))
+        assertSnapshot(of: makeDistanceRemaining(unit: .imperial), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testDistanceRemainingComplete() {
-        assertSnapshot(of: makeDistanceRemaining(remaining: 0), as: .image(layout: canvas))
+        assertSnapshot(of: makeDistanceRemaining(remaining: 0), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testDistanceRemainingNoRoute() {
-        assertSnapshot(of: makeDistanceRemaining(remaining: nil), as: .image(layout: canvas))
+        assertSnapshot(of: makeDistanceRemaining(remaining: nil), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testDistanceRemainingMidRouteDark() {
         assertSnapshot(
             of: makeDistanceRemaining(scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
     func testDistanceRemainingNoRouteDark() {
         assertSnapshot(
             of: makeDistanceRemaining(remaining: nil, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 }

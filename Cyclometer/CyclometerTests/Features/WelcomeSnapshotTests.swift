@@ -67,12 +67,12 @@ final class WelcomeSnapshotTests: XCTestCase {
     ) {
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.light)),
-            as: .image(on: device),
+            as: .image(on: device, traits: .snapshot()),
             named: "\(name)-light", file: file, testName: testName, line: line
         )
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.dark)),
-            as: .image(on: device, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(on: device, traits: .snapshot(.dark)),
             named: "\(name)-dark", file: file, testName: testName, line: line
         )
     }
@@ -115,7 +115,7 @@ final class WelcomeSnapshotTests: XCTestCase {
             ),
             as: .image(
                 on: device,
-                traits: UITraitCollection(preferredContentSizeCategory: .accessibilityLarge)
+                traits: .snapshot { $0.preferredContentSizeCategory = .accessibilityLarge }
             ),
             named: "largeType-light"
         )

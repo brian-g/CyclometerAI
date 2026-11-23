@@ -19,7 +19,7 @@ final class ClimbWidgetSnapshotTests: XCTestCase {
             of: ClimbWidget(reading: reading, unit: unit)
                 .frame(width: 393, height: 96)
                 .preferredColorScheme(dark ? .dark : .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: dark ? .dark : .light)),
+            as: .image(layout: canvas, traits: .snapshot(dark ? .dark : .light)),
             file: file, testName: testName, line: line
         )
     }

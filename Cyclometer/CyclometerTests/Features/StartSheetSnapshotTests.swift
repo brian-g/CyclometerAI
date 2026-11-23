@@ -50,12 +50,12 @@ final class StartSheetSnapshotTests: XCTestCase {
         let layout = layout ?? canvas
         assertSnapshot(
             of: view.preferredColorScheme(.light),
-            as: .image(layout: layout),
+            as: .image(layout: layout, traits: .snapshot()),
             named: "\(name)-light", file: file, testName: testName, line: line
         )
         assertSnapshot(
             of: view.preferredColorScheme(.dark),
-            as: .image(layout: layout, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(layout: layout, traits: .snapshot(.dark)),
             named: "\(name)-dark", file: file, testName: testName, line: line
         )
     }

@@ -94,7 +94,7 @@ final class RideDashboardSnapshotTests: XCTestCase {
                 // Glass composites against a real window; offscreen, the controls' discs aren't drawn.
                 // Captured at once, the glass is still settling, and the control band differs run to run.
                 as: .wait(for: 1, on: .image(drawHierarchyInKeyWindow: true, layout: .device(config: device),
-                                             traits: .init(userInterfaceStyle: scheme == .dark ? .dark : .light))),
+                                             traits: .snapshot(scheme == .dark ? .dark : .light))),
                 named: scheme == .dark ? "dark" : "light",
                 file: file,
                 testName: testName,

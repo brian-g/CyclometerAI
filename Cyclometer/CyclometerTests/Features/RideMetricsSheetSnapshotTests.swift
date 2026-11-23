@@ -27,21 +27,21 @@ final class RideMetricsSheetSnapshotTests: XCTestCase {
     func testRideMetricsLive() {
         assertSnapshot(
             of: makeList(.sample(), scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+            as: .image(layout: canvas, traits: .snapshot(.light))
         )
     }
 
     func testRideMetricsImperialDark() {
         assertSnapshot(
             of: makeList(.sample(.imperial), scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
     func testRideMetricsNoData() {
         assertSnapshot(
             of: makeList(RideMetrics(), scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+            as: .image(layout: canvas, traits: .snapshot(.light))
         )
     }
 }

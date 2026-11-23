@@ -111,12 +111,12 @@ final class SettingsSnapshotTests: XCTestCase {
     ) {
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.light)),
-            as: .image(on: config ?? device),
+            as: .image(on: config ?? device, traits: .snapshot()),
             named: "\(name)-light", file: file, testName: testName, line: line
         )
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.dark)),
-            as: .image(on: config ?? device, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(on: config ?? device, traits: .snapshot(.dark)),
             named: "\(name)-dark", file: file, testName: testName, line: line
         )
     }

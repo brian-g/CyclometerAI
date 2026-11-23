@@ -19,11 +19,11 @@ final class MapSheetButtonsSnapshotTests: XCTestCase {
         .preferredColorScheme(scheme)
     }
 
-    private var dark: UITraitCollection { .init(userInterfaceStyle: .dark) }
+    private var dark: UITraitCollection { .snapshot(.dark) }
 
     func testHeadingUp() {
         assertSnapshot(of: onBackground(MapOrientationButton(orientation: .headingUp) {}),
-                       as: .image(layout: canvas))
+                       as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testHeadingUpDark() {
@@ -33,7 +33,7 @@ final class MapSheetButtonsSnapshotTests: XCTestCase {
 
     func testNorthUp() {
         assertSnapshot(of: onBackground(MapOrientationButton(orientation: .northUp) {}),
-                       as: .image(layout: canvas))
+                       as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testNorthUpDark() {
@@ -42,7 +42,7 @@ final class MapSheetButtonsSnapshotTests: XCTestCase {
     }
 
     func testRouteOverview() {
-        assertSnapshot(of: onBackground(RouteOverviewButton {}), as: .image(layout: canvas))
+        assertSnapshot(of: onBackground(RouteOverviewButton {}), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testRouteOverviewDark() {

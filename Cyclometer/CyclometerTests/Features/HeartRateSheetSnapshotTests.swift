@@ -26,21 +26,21 @@ final class HeartRateSheetSnapshotTests: XCTestCase {
     func testHeartRateSheetLive() {
         assertSnapshot(
             of: makeList(.sample, scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+            as: .image(layout: canvas, traits: .snapshot(.light))
         )
     }
 
     func testHeartRateSheetLiveDark() {
         assertSnapshot(
             of: makeList(.sample, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 
     func testHeartRateSheetNoSource() {
         assertSnapshot(
             of: makeList(HeartRateMetrics(), scheme: .light),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .light))
+            as: .image(layout: canvas, traits: .snapshot(.light))
         )
     }
 }

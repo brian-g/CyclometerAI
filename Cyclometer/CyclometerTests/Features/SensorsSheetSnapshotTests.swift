@@ -18,7 +18,7 @@ final class SensorsSheetSnapshotTests: XCTestCase {
             of: SensorsList(devices: devices)
                 .frame(width: 402, height: 360)
                 .preferredColorScheme(scheme),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: scheme == .dark ? .dark : .light)),
+            as: .image(layout: canvas, traits: .snapshot(scheme == .dark ? .dark : .light)),
             testName: testName
         )
     }

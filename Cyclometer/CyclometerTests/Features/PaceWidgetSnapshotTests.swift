@@ -19,21 +19,21 @@ final class PaceWidgetSnapshotTests: XCTestCase {
     }
 
     func testMetric() {
-        assertSnapshot(of: makePace(unit: .metric), as: .image(layout: canvas))
+        assertSnapshot(of: makePace(unit: .metric), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testImperial() {
-        assertSnapshot(of: makePace(unit: .imperial), as: .image(layout: canvas))
+        assertSnapshot(of: makePace(unit: .imperial), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testStoppedShowsPlaceholder() {
-        assertSnapshot(of: makePace(speedMPS: 0), as: .image(layout: canvas))
+        assertSnapshot(of: makePace(speedMPS: 0), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testMetricDark() {
         assertSnapshot(
             of: makePace(unit: .metric, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 }

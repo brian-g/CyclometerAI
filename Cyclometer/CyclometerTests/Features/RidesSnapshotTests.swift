@@ -41,7 +41,8 @@ final class RidesSnapshotTests: XCTestCase {
     /// A stand-in for a stored thumbnail: a trace in `cyMapTravelPath` over `cyBgSecondary`,
     /// each resolved for the appearance it stands in for, like the real capture.
     private static func thumbnail(_ style: UIUserInterfaceStyle) -> UIImage {
-        let traits = UITraitCollection(userInterfaceStyle: style)
+        // Contrast pinned too: unset, it comes from the simulator (#648).
+        let traits = UITraitCollection.snapshot(style)
         let size = CGSize(width: Spacing.rideThumbnail, height: Spacing.rideThumbnail)
         let format = UIGraphicsImageRendererFormat()
         format.scale = RideMapThumbnail.scale
@@ -130,12 +131,12 @@ final class RidesSnapshotTests: XCTestCase {
     ) {
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.light)),
-            as: .image(on: device),
+            as: .image(on: device, traits: .snapshot()),
             named: "\(name)-light", file: file, testName: testName, line: line
         )
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.dark)),
-            as: .image(on: device, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(on: device, traits: .snapshot(.dark)),
             named: "\(name)-dark", file: file, testName: testName, line: line
         )
     }

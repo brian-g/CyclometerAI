@@ -41,17 +41,17 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
     // MARK: - 2×2 — Source badge variants
 
     func testTwoByTwoGPSSource() {
-        assertSnapshot(of: make2x2(), as: .image(layout: canvas2x2))
+        assertSnapshot(of: make2x2(), as: .image(layout: canvas2x2, traits: .snapshot()))
     }
 
     func testTwoByTwoBLEWheelSource() {
-        assertSnapshot(of: make2x2(source: .bleWheel), as: .image(layout: canvas2x2))
+        assertSnapshot(of: make2x2(source: .bleWheel), as: .image(layout: canvas2x2, traits: .snapshot()))
     }
 
     func testTwoByTwoNoSignal() {
         assertSnapshot(
             of: make2x2(speed: nil, source: .none, averageSpeed: 0, maxSpeed: 0),
-            as: .image(layout: canvas2x2)
+            as: .image(layout: canvas2x2, traits: .snapshot())
         )
     }
 
@@ -60,14 +60,14 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
     func testTwoByTwoGPSDark() {
         assertSnapshot(
             of: make2x2(scheme: .dark),
-            as: .image(layout: canvas2x2, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas2x2, traits: .snapshot(.dark))
         )
     }
 
     func testTwoByTwoNoSignalDark() {
         assertSnapshot(
             of: make2x2(speed: nil, source: .none, averageSpeed: 0, maxSpeed: 0, scheme: .dark),
-            as: .image(layout: canvas2x2, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas2x2, traits: .snapshot(.dark))
         )
     }
 
@@ -77,14 +77,14 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
         // ~100 km/h to verify layout doesn't clip the triple-digit hero number.
         assertSnapshot(
             of: make2x2(speed: 27.78, averageSpeed: 24.53, maxSpeed: 27.78),
-            as: .image(layout: canvas2x2)
+            as: .image(layout: canvas2x2, traits: .snapshot())
         )
     }
 
     func testTwoByTwoImperial() {
         assertSnapshot(
             of: make2x2(unit: .imperial),
-            as: .image(layout: canvas2x2)
+            as: .image(layout: canvas2x2, traits: .snapshot())
         )
     }
 
@@ -94,7 +94,7 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
         // ~22 km/h against a 28.4 km/h average → ▼ right of the speed, level with its digits.
         assertSnapshot(
             of: make2x2(speed: 6.11),
-            as: .image(layout: canvas2x2)
+            as: .image(layout: canvas2x2, traits: .snapshot())
         )
     }
 
@@ -102,7 +102,7 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
         // `cyRatingBad` has its own dark value.
         assertSnapshot(
             of: make2x2(speed: 6.11, scheme: .dark),
-            as: .image(layout: canvas2x2, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas2x2, traits: .snapshot(.dark))
         )
     }
 
@@ -122,7 +122,7 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
             size: .twoByOne
         )
         .frame(width: 393, height: 96)
-        assertSnapshot(of: widget, as: .image(layout: canvas))
+        assertSnapshot(of: widget, as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testSpeedTwoByOneTrendUp() {
@@ -140,7 +140,7 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
             size: .twoByOne
         )
         .frame(width: 393, height: 96)
-        assertSnapshot(of: widget, as: .image(layout: canvas))
+        assertSnapshot(of: widget, as: .image(layout: canvas, traits: .snapshot()))
     }
 
     // MARK: - 1×1 (half-width single row: 196×96)
@@ -159,7 +159,7 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
             size: .oneByOne
         )
         .frame(width: 196, height: 96)
-        assertSnapshot(of: widget, as: .image(layout: canvas))
+        assertSnapshot(of: widget, as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testSpeedOneByOneTrendUp() {
@@ -177,6 +177,6 @@ final class SpeedWidgetSnapshotTests: XCTestCase {
             size: .oneByOne
         )
         .frame(width: 196, height: 96)
-        assertSnapshot(of: widget, as: .image(layout: canvas))
+        assertSnapshot(of: widget, as: .image(layout: canvas, traits: .snapshot()))
     }
 }

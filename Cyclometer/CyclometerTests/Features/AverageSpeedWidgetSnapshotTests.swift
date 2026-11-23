@@ -25,21 +25,21 @@ final class AverageSpeedWidgetSnapshotTests: XCTestCase {
     }
 
     func testAverageSpeedMetric() {
-        assertSnapshot(of: makeAverageSpeed(unit: .metric), as: .image(layout: canvas))
+        assertSnapshot(of: makeAverageSpeed(unit: .metric), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testAverageSpeedImperial() {
-        assertSnapshot(of: makeAverageSpeed(unit: .imperial), as: .image(layout: canvas))
+        assertSnapshot(of: makeAverageSpeed(unit: .imperial), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testAverageSpeedNoMovingTime() {
-        assertSnapshot(of: makeAverageSpeed(averageSpeed: 0, withHistory: false), as: .image(layout: canvas))
+        assertSnapshot(of: makeAverageSpeed(averageSpeed: 0, withHistory: false), as: .image(layout: canvas, traits: .snapshot()))
     }
 
     func testAverageSpeedMetricDark() {
         assertSnapshot(
             of: makeAverageSpeed(unit: .metric, scheme: .dark),
-            as: .image(layout: canvas, traits: .init(userInterfaceStyle: .dark))
+            as: .image(layout: canvas, traits: .snapshot(.dark))
         )
     }
 }

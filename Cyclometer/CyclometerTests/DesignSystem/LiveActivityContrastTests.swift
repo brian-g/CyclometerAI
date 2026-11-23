@@ -26,7 +26,8 @@ struct LiveActivityContrastTests {
                                                     isLuminanceReduced: isLuminanceReduced))
         let backdrop = Self.composite(card, over: wallpaper)
         // The view switches its text to dark on the Always-On display, as the card does.
-        let traits = UITraitCollection(userInterfaceStyle: isLuminanceReduced ? .dark : style)
+        // Standard contrast, whatever the simulator's Increase Contrast (#648).
+        let traits = UITraitCollection.snapshot(isLuminanceReduced ? .dark : style)
 
         for token in [ColorResource.cyTextPrimary, .cyTextSecondary] {
             let text = UIColor(resource: token).resolvedColor(with: traits)
@@ -38,7 +39,7 @@ struct LiveActivityContrastTests {
     /// #310 — the Dynamic Island is always black and its views take the dark scheme. Text passes
     /// AA; the status mark (ring, rider glyph, pause icon) passes the 3:1 non-text minimum.
     @Test func islandPassesOnBlack() {
-        let dark = UITraitCollection(userInterfaceStyle: .dark)
+        let dark = UITraitCollection.snapshot(.dark)
         for token in [ColorResource.cyTextPrimary, .cyTextSecondary] {
             let ratio = Self.contrast(UIColor(resource: token).resolvedColor(with: dark), .black)
             #expect(ratio >= Self.wcagAA, "\(token) on the island: \(ratio):1")

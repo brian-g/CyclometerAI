@@ -89,12 +89,12 @@ final class RideSummarySnapshotTests: XCTestCase {
         let device = device ?? self.device
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.light)),
-            as: .image(on: device, drawHierarchyInKeyWindow: true, traits: .init(userInterfaceStyle: .light)),
+            as: .image(on: device, drawHierarchyInKeyWindow: true, traits: .snapshot(.light)),
             named: "\(name)-light", file: file, testName: testName, line: line
         )
         assertSnapshot(
             of: UIHostingController(rootView: view.preferredColorScheme(.dark)),
-            as: .image(on: device, drawHierarchyInKeyWindow: true, traits: .init(userInterfaceStyle: .dark)),
+            as: .image(on: device, drawHierarchyInKeyWindow: true, traits: .snapshot(.dark)),
             named: "\(name)-dark", file: file, testName: testName, line: line
         )
     }
