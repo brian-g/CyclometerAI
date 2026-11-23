@@ -2989,3 +2989,76 @@ above their fields, as in S15's Edit sheet (`RideEditView`). `RideSummaryFeature
 `.rideSummary(.dismiss)` writes the notes first, then the rename, which is followed by the S14 reload and GPX rewrite
 only when the title changed. New tests: 3 in `RideSummaryFeatureTests` and 2 in `RideSummaryPresentationTests`. The
 test build succeeds.
+## #643 Auto-resume waits for a frozen wheel sensor
+
+**Log check.** At 12:59 the fix accuracy was 9.5–11 m, not the 2 m the issue assumed: the recording gate flapped at
+10.7–11.0 m through the pause, opened at 9.5 m at :14, and the calibration gate (Doppler ≥ 2.0, accuracy ≤ 10) opened
+at :15. So `isGPSMoving` first holds at :15 at both stops (12:59 and 13:14); the wheel read moving at :19 and :18.
+
+**Decisions (Brian).** Two GPS-moving fixes in a row, not one. The bike-on-a-rack case can't be blocked, since a car's
+first seconds look like a rider pulling away, so it is shortened: a GPS resume spends #623's veto until the wheel
+next reads moving, so a rack drive re-pauses after about 10 s and stays paused.
+
+**Plan.**
+- [x] `State.gpsMovingFixes`: consecutive fixes for which `isGPSMoving` holds, counted on `.speed(.gpsSpeedReceived)`
+      while paused, and reset by any fix that doesn't and by `resume`
+- [x] In the `.speed` case, a pause that may resume (`canAutoResume`, unchanged) also resumes when the wheel is the
+      active source, `gpsMovingFixes` ≥ `gpsResumeFixCount` (2), and the veto isn't spent
+      (`gpsMovingVetoSeconds < maxGPSMovingVetoSeconds`)
+- [x] A GPS resume sets `gpsMovingVetoSeconds = maxGPSMovingVetoSeconds`; the wheel reading moving restores it
+      (existing reset in `.elapsedTick`)
+- [x] Display, distance, Avg/Max stay on the wheel
+- [x] Tests (`FrozenWheelAutoPauseTests`): 12:59 replay resumes before the wheel's first reading; stays paused with GPS
+      stationary / under moving speed / poor accuracy / poor speed accuracy / stale fix / one moving fix then a
+      stopped one; manual pause with Resume When Moving off stays paused, on and armed resumes; rack drive resumes
+      once, re-pauses after the count, stays paused
+- [x] Revert checks: no GPS resume → replay fails; one fix instead of two → stray-fix test fails; no veto spend →
+      rack test fails
+- [x] Full `CyclometerTests`
+
+**Results.** `isGPSResumingFrozenWheel` in `ActiveRideFeature`, plus one `auto-resume on gps` log line for field
+checks. 13 new cases in `FrozenWheelAutoPauseTests` (21 in the suite); 12:59 replay resumes at :16, three ticks before
+the wheel's first reading. The GPS speeds there are assumed (no Doppler in the log; the gates bound them). Revert
+checks (own derivedData, caching off): no GPS resume → replay, manual and rack fail; one fix → lone-fix, replay and
+manual fail; no veto spend → only rack fails. `locationContinuesWhilePaused` now asserts the count its moving fix
+makes. Full `CyclometerTests`: 3095 passed, 0 failures.
+
+---
+
+## #643 review (`/code-review xhigh --fix`)
+
+**Fixed.**
+- [x] A Pause tapped while coasting with Resume When Moving on was undone the moment the wheel read stopped: moving fixes
+      counted while the pause couldn't resume yet, and the stop that armed it found the count at 2. Fixes now count only
+      while GPS could resume the pause (`canGPSResume`). Test `pauseTappedWhileRidingStaysPausedAtTheStop`.
+- [x] With auto-pause off, nothing pauses a GPS resume again, so a rack drive or a walk away from the bike ran until
+      auto-end. `canGPSResumeFrozenWheel` requires auto-pause on. Test `gpsResumeNeedsAutoPause`.
+- [x] An auto-paused ride resumed on GPS behind the Finish alert. `canGPSResumeFrozenWheel` requires no alert. Test
+      `finishAlertBlocksGPSResume`.
+- [x] Two moving fixes minutes apart counted as two in a row. A fix more than `movingGPSFixMaxAge` after the last
+      resets the count. Test `movingFixesAcrossAGapStayPaused`.
+- [x] `locationContinuesWhilePaused` no longer asserts a count: GPS can't resume that pause (manual, on GPS).
+
+All four new tests failed on the unfixed reducer. Full `CyclometerTests`: TEST SUCCEEDED, 0 failures.
+
+**Open (Brian's call).**
+- Walking away from the bike (~1.4 m/s, above `movingSpeedMPS`) resumes a wheel-sensor ride for about 11 s. A 2.0 m/s
+  bar for the GPS resume (the calibration gate's Doppler floor) keeps walking out and still resumes the 12:59 replay
+  at :16.
+- A GPS resume lifts the calibration suspension while the wheel is still frozen, so GPS distance without matching
+  revolutions enters the window (about 6–9 m a stop). One option: suspend while `gpsMovingVetoSeconds > 0`, which would
+  cover #623's active-ride freezes too.
+- The spent veto isn't persisted, so after a relaunch a rack-drive pause can resume on GPS one more time.
+
+**Review decisions (Brian: keep 1, do 2 and 3, accept 4).**
+- [x] 1 kept: GPS resumes only with auto-pause on
+- [x] 2 `gpsResumeSpeedMPS` = 2.0 (the floor wheel calibration takes GPS speed from): the fixes that resume on GPS
+      must reach it, so walking away from the bike (~1.4 m/s) doesn't resume the ride. A wheel reading moving still
+      resumes at `movingSpeedMPS`. The 12:59 replay still resumes at :16. `pauseTappedWhileRidingStaysPausedAtTheStop`'s
+      arming fix raised to 2.5 m/s, or it no longer caught finding 1
+- [x] 3 `isCalibrationSuspended` also while `gpsMovingVetoSeconds > 0`: during #623's freezes and from a GPS resume
+      until the wheel reads moving. Calibration's gate log line names "frozen wheel"
+- [x] 4 accepted: the spent veto isn't persisted
+- [x] Revert checks: bar at 1.0 → walking cases fail; no veto suspension → both replays fail; finding 1 reverted →
+      the coasting test fails
+- [x] Full `CyclometerTests`: 3100 passed, 0 failures
