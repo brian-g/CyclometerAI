@@ -3207,3 +3207,26 @@ Probed on iOS 27: the workout, its route, distance and active energy are all cap
   verified whether HealthKit raises on an over-long route or returns an error, which `saveRoute` already catches
 - Found, not fixed (no effect on iOS 27): `checkSpan` lets the route, distance and energy limits veto the whole
   workout, though `saveRoute` says the route never costs it. All four limits are equal today
+
+---
+
+## #650 — S10 shows finish stats stored by the backfill after it opens
+
+Approach (Brian, 2026-11-23): show the Summary as now, and fill in Ascent, Descent and Calories once the backfill
+stores them.
+
+- [x] `RideStats.isFinishStatsOwed`, read from `Ride.isFinishStatsOwed` in `fetchRideStats`
+- [x] `RideSummaryFeature`: on `.loaded` with stats still owed, re-read once a second for up to
+      `finishStatsWaitSeconds` (30); `.finishStatsStored(RideStats)` replaces the stats; a backfill that never lands
+      leaves them as loaded
+- [x] Tests: owed at load then stored; owed and never stored (stops after the limit, no hang); not owed reads once
+- [x] UX.md §S10 Summary line
+- [x] Build (app + tests)
+- [x] Full `CyclometerTests`, commit + PR
+
+**Review.** The full run failed 2 tests. `PersistenceClientTests.fetchRideStatsReturnsAggregates` compares a whole
+`RideStats` for rides finalized without finish stats, which are now correctly reported as owed: expectation updated,
+and `finalizeWithoutFinishStatsIsOwed` now checks the flag before and after the backfill's save.
+`LocationOneShotTests.concurrentRequestsAllResolve` failed with no message during a heavily loaded run (every test
+70–100 s, several clones failed to launch the host); it doesn't touch this change and passed on the rerun of the
+three affected suites (95 passed).

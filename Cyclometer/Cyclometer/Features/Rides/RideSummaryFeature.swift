@@ -18,6 +18,11 @@ private let logger = Logger.cyclometer(.persistence)
 /// A failed lookup, or one still out when the sheet closes, leaves the offline name the ride was
 /// given at ride end.
 ///
+/// A ride whose live state didn't cover all of it is still owed its Ascent, Descent and Calories
+/// when the finalize lands, until `RideFinishStats.backfill` stores them moments later (#650).
+/// The Summary shows without them and reads again until they arrive; a backfill that fails
+/// leaves them out, as S15 does until the next launch's backfill.
+///
 /// The rename and the notes (#645) are saved by `AppFeature` on dismissal, not here: a child's effects are cancelled
 /// as it is dismissed, and a swipe-down is a dismissal like the Finish Ride button.
 @Reducer
@@ -127,6 +132,8 @@ struct RideSummaryFeature {
     enum Action: Equatable {
         case task
         case loaded(Loaded)
+        /// The ride's stats once the backfill has stored its finish stats (#650).
+        case finishStatsStored(RideStats)
         case finalizeTimedOut
         /// The default name with the start's place name in it, once the geocoder has answered.
         case placedTitleResolved(String)
@@ -157,6 +164,12 @@ struct RideSummaryFeature {
     @Dependency(\.continuousClock) var clock
     @Dependency(\.calendar) var calendar
     @Dependency(\.dismiss) var dismiss
+
+    /// How long a ride still owed its finish stats at load is read again for them, once a
+    /// second (#650). The backfill starts right after the finalize S10 waited for, and reads
+    /// Health's body mass and the saved track; one that hasn't landed by now has failed, and
+    /// is retried at the next launch.
+    static let finishStatsWaitSeconds = 30
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -224,6 +237,12 @@ struct RideSummaryFeature {
                     state.alert = Self.unsavedTrackAlert(unsaved, calendar: calendar)
                     Self.clearUnsavedTrack(state.rideId)
                 }
+                guard loaded.stats?.isFinishStatsOwed == true else { return .none }
+                return awaitFinishStats(state.rideId)
+
+            case .finishStatsStored(let stats):
+                // The name and notes fields keep what they show: they read the stats only at load.
+                state.stats = stats
                 return .none
 
             case .finalizeTimedOut:
@@ -316,6 +335,20 @@ struct RideSummaryFeature {
         } catch {
             logger.error("fetchRideStats failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
+        }
+    }
+
+    /// Reads the ride's stats once a second until the backfill has stored its finish stats, for up
+    /// to `finishStatsWaitSeconds`. A failed read is tried again the next second.
+    private func awaitFinishStats(_ id: UUID) -> Effect<Action> {
+        .run { [persistenceClient, clock] send in
+            for _ in 0..<Self.finishStatsWaitSeconds {
+                try await clock.sleep(for: .seconds(1))
+                guard let stats = try? await persistenceClient.fetchRideStats(id), !stats.isFinishStatsOwed else { continue }
+                await send(.finishStatsStored(stats))
+                return
+            }
+            logger.notice("ride \(id, privacy: .public)'s finish stats weren't stored within \(Self.finishStatsWaitSeconds, privacy: .public) s: S10 shows it without Ascent, Descent and Calories")
         }
     }
 

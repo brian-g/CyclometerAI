@@ -317,6 +317,7 @@ actor RidePersistenceActor {
             descentMeters: ride.descentMeters,
             activeKilocalories: ride.activeKilocalories,
             calorieSeries: ride.calorieSeries,
+            isFinishStatsOwed: ride.isFinishStatsOwed,
             movingSeconds: ride.speedSampleCount,
             cadenceSecondsByRPM: ride.cadenceSecondsByRPM,
             cadenceCoastingSeconds: ride.cadenceCoastingSeconds,
