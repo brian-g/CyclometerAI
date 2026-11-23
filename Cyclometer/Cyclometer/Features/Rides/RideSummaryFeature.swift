@@ -18,7 +18,7 @@ private let logger = Logger.cyclometer(.persistence)
 /// A failed lookup, or one still out when the sheet closes, leaves the offline name the ride was
 /// given at ride end.
 ///
-/// The rename is saved by `AppFeature` on dismissal, not here: a child's effects are cancelled
+/// The rename and the notes (#645) are saved by `AppFeature` on dismissal, not here: a child's effects are cancelled
 /// as it is dismissed, and a swipe-down is a dismissal like the Finish Ride button.
 @Reducer
 struct RideSummaryFeature {
@@ -27,16 +27,6 @@ struct RideSummaryFeature {
     struct State: Equatable {
         /// Units follow the S12 picker.
         @Shared(.appPreferences) var preferences
-
-        /// The zone breakdown follows S12's zones, overrides included — resolved now rather
-        /// than stored with the ride, as S15 does.
-        @SharedReader(.riderProfile) var riderProfile
-
-        /// `RideDetailFeature`'s Health terms. Nil until fetched, and nil when Health has nothing.
-        var healthRestingBPM: Int?
-        var healthMaxBPM: Int?
-        /// Health's preferred zones as ceilings (#238), the middle term of every zone boundary.
-        var healthZoneCeilingsBPM: [Int]?
 
         let rideId: UUID
 
@@ -58,15 +48,17 @@ struct RideSummaryFeature {
         /// Whether the rider has focused or typed in the name field. Once they have, a late place
         /// name (#283) never replaces what the field shows, even when it still reads as the default.
         var isTitleTouched = false
+        /// What the Notes field shows (#645), as S15's Edit sheet edits them.
+        var notes = ""
+        /// The notes as stored when the screen loaded: "" for a ride just finished, unless a
+        /// stats read that failed left them unknown.
+        var persistedNotes = ""
 
         var summary: RideListSummary?
         /// Nil until loaded, and nil for good if the read fails.
         var stats: RideStats?
         /// One polyline per stretch of riding (#263). Empty for a ride with no drawable track.
         var trackSegments: [[RouteCoordinate]] = []
-        var elevationProfileMeters: [Double]?
-        /// Empty for a ride with no heart-rate readings.
-        var heartRateSecondsByBPM: [Int: Int] = [:]
 
         /// The ride ended without part of its track (#345), or the Delete confirmation (#452).
         @Presents var alert: AlertState<Action.Alert>?
@@ -76,17 +68,6 @@ struct RideSummaryFeature {
         }
 
         var unitSystem: UnitSystem { preferences.preferredUnit }
-
-        /// Seconds in each zone, zone 1 first. Empty for a ride with no heart rate, so the view
-        /// shows its empty state rather than a chart of nothing.
-        var heartRateZoneSeconds: [Int] {
-            guard !heartRateSecondsByBPM.isEmpty else { return [] }
-            let bounds = HeartRateZone.allCases.map {
-                riderProfile.bounds(for: $0, healthResting: healthRestingBPM, healthMax: healthMaxBPM,
-                                    healthZoneCeilings: healthZoneCeilingsBPM)
-            }
-            return RideDetailSeries.zoneSeconds(heartRateSecondsByBPM, zoneBounds: bounds)
-        }
 
         /// The sensors this ride flagged (#391), one per device, in pairing order. Read from
         /// `AppPreferences.sensorHealth`, where `ActiveRideFeature` saved each device's verdict at
@@ -113,6 +94,13 @@ struct RideSummaryFeature {
             let name = typed.isEmpty ? (defaultTitle ?? "") : typed
             return name.isEmpty || name == persistedTitle ? nil : name
         }
+
+        /// What dismissing should store as the notes, or nil when they didn't change. Trimmed as
+        /// S15's Edit sheet trims them, so notes of only spaces are no notes.
+        var notesToSave: String? {
+            let typed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            return typed == persistedNotes ? nil : typed
+        }
     }
 
     /// One device the ride flagged: a combo CSC sensor is one battery and one radio, listed once
@@ -131,8 +119,6 @@ struct RideSummaryFeature {
         var summary: RideListSummary
         var stats: RideStats?
         var trackSegments: [[RouteCoordinate]]
-        var elevationProfileMeters: [Double]?
-        var heartRateSecondsByBPM: [Int: Int]
         var defaultTitle: String
         /// The stretch of track the ride ended without (#345).
         var unsavedTrack: ClosedRange<Date>?
@@ -142,11 +128,11 @@ struct RideSummaryFeature {
         case task
         case loaded(Loaded)
         case finalizeTimedOut
-        case healthProfileFetched(restingBPM: Int?, maxBPM: Int?, zoneCeilingsBPM: [Int]?)
         /// The default name with the start's place name in it, once the geocoder has answered.
         case placedTitleResolved(String)
         case titleChanged(String)
         case titleFocused
+        case notesChanged(String)
         case finishTapped
         /// The toolbar's trash button (#452). Enabled only once loaded: before that the ride's
         /// finalize hasn't landed, and an unavailable ride is still the next launch's to close out.
@@ -167,10 +153,8 @@ struct RideSummaryFeature {
     }
 
     @Dependency(\.persistenceClient) var persistenceClient
-    @Dependency(\.healthKitClient) var healthKitClient
     @Dependency(\.geocodingClient) var geocodingClient
     @Dependency(\.continuousClock) var clock
-    @Dependency(\.date) var date
     @Dependency(\.calendar) var calendar
     @Dependency(\.dismiss) var dismiss
 
@@ -181,66 +165,50 @@ struct RideSummaryFeature {
             case .task:
                 let id = state.rideId
                 let isPlaceNameLookupEnabled = state.preferences.isPlaceNameLookupEnabled
-                return .merge(
-                    .run { [persistenceClient, geocodingClient, clock, calendar] send in
-                        guard let summary = try await RidesFeature.awaitFinalized(
-                            id, persistenceClient: persistenceClient, clock: clock
-                        ) else {
-                            await send(.finalizeTimedOut)
-                            return
-                        }
-                        // Recorded before the finalize that just landed, so it's already there.
-                        // Cleared only once the alert is up, so a cancelled load keeps it.
-                        @SharedReader(.unsavedTrack) var unsavedTrack
-                        let unsaved = unsavedTrack[id]
-                        async let stats = Self.fetchStats(id, persistenceClient)
-                        async let points = Self.fetchTrackPoints(id, persistenceClient)
-                        let track = await points
-                        let rideStats = await stats
-                        let segments = RideMapThumbnail.drawableSegments(track)
-                        let routeName = rideStats?.routeName
-                        let defaultTitle = RideTitle.defaultTitle(
-                            routeName: routeName,
-                            startedAt: summary.startedAt,
-                            segments: segments,
-                            calendar: calendar
-                        )
-                        await send(.loaded(Loaded(
-                            summary: summary,
-                            stats: rideStats,
-                            trackSegments: segments,
-                            elevationProfileMeters: RideDetailSeries.elevationProfile(
-                                track, sampleCount: RideDetailFeature.chartSampleCount
-                            ),
-                            heartRateSecondsByBPM: RideDetailSeries.secondsByBPM(track),
-                            defaultTitle: defaultTitle,
-                            unsavedTrack: unsaved
-                        )))
-                        // Only after the screen has its numbers, so it never waits on the network.
-                        guard isPlaceNameLookupEnabled,
-                              Self.isKnownFreeRide(stats: rideStats, storedTitle: summary.title, defaultTitle: defaultTitle),
-                              let start = segments.first?.first,
-                              let place = try? await geocodingClient.locality(start)
-                        else { return }
-                        await send(.placedTitleResolved(RideTitle.placed(defaultTitle, in: place)))
-                    },
-                    // `RideDetailFeature`'s read, so the zones match S12's table.
-                    .run { [healthKitClient, date] send in
-                        async let restingBPM = try? healthKitClient.fetchRestingHeartRate()
-                        async let dob = try? healthKitClient.fetchDateOfBirth()
-                        async let zoneCeilings = try? healthKitClient.fetchHeartRateZoneCeilings()
-                        let maxBPM = RiderProfile.estimatedMaxBPM(fromDateOfBirth: await dob, on: date.now)
-                        await send(.healthProfileFetched(restingBPM: await restingBPM, maxBPM: maxBPM, zoneCeilingsBPM: await zoneCeilings))
+                return .run { [persistenceClient, geocodingClient, clock, calendar] send in
+                    guard let summary = try await RidesFeature.awaitFinalized(
+                        id, persistenceClient: persistenceClient, clock: clock
+                    ) else {
+                        await send(.finalizeTimedOut)
+                        return
                     }
-                )
+                    // Recorded before the finalize that just landed, so it's already there.
+                    // Cleared only once the alert is up, so a cancelled load keeps it.
+                    @SharedReader(.unsavedTrack) var unsavedTrack
+                    let unsaved = unsavedTrack[id]
+                    async let stats = Self.fetchStats(id, persistenceClient)
+                    async let points = Self.fetchTrackPoints(id, persistenceClient)
+                    let track = await points
+                    let rideStats = await stats
+                    let segments = RideMapThumbnail.drawableSegments(track)
+                    let routeName = rideStats?.routeName
+                    let defaultTitle = RideTitle.defaultTitle(
+                        routeName: routeName,
+                        startedAt: summary.startedAt,
+                        segments: segments,
+                        calendar: calendar
+                    )
+                    await send(.loaded(Loaded(
+                        summary: summary,
+                        stats: rideStats,
+                        trackSegments: segments,
+                        defaultTitle: defaultTitle,
+                        unsavedTrack: unsaved
+                    )))
+                    // Only after the screen has its numbers, so it never waits on the network.
+                    guard isPlaceNameLookupEnabled,
+                          Self.isKnownFreeRide(stats: rideStats, storedTitle: summary.title, defaultTitle: defaultTitle),
+                          let start = segments.first?.first,
+                          let place = try? await geocodingClient.locality(start)
+                    else { return }
+                    await send(.placedTitleResolved(RideTitle.placed(defaultTitle, in: place)))
+                }
 
             case .loaded(let loaded):
                 state.load = .loaded
                 state.summary = loaded.summary
                 state.stats = loaded.stats
                 state.trackSegments = loaded.trackSegments
-                state.elevationProfileMeters = loaded.elevationProfileMeters
-                state.heartRateSecondsByBPM = loaded.heartRateSecondsByBPM
                 let defaultTitle = loaded.defaultTitle
                 state.defaultTitle = defaultTitle
                 state.persistedTitle = loaded.summary.title
@@ -248,6 +216,10 @@ struct RideSummaryFeature {
                 if state.title.isEmpty {
                     state.title = loaded.summary.title.isEmpty ? defaultTitle : loaded.summary.title
                 }
+                let storedNotes = loaded.stats?.notes ?? ""
+                state.persistedNotes = storedNotes
+                // As with the title: notes typed before the load lands are kept.
+                if state.notes.isEmpty { state.notes = storedNotes }
                 if let unsaved = loaded.unsavedTrack {
                     state.alert = Self.unsavedTrackAlert(unsaved, calendar: calendar)
                     Self.clearUnsavedTrack(state.rideId)
@@ -258,12 +230,6 @@ struct RideSummaryFeature {
                 state.load = .unavailable
                 // Nothing here to tell the rider on; the entry just goes.
                 Self.clearUnsavedTrack(state.rideId)
-                return .none
-
-            case let .healthProfileFetched(restingBPM, maxBPM, zoneCeilingsBPM):
-                state.healthRestingBPM = restingBPM
-                state.healthMaxBPM = maxBPM
-                state.healthZoneCeilingsBPM = zoneCeilingsBPM
                 return .none
 
             case .placedTitleResolved(let placedTitle):
@@ -282,6 +248,10 @@ struct RideSummaryFeature {
 
             case .titleFocused:
                 state.isTitleTouched = true
+                return .none
+
+            case .notesChanged(let notes):
+                state.notes = notes
                 return .none
 
             case .finishTapped:
@@ -338,7 +308,8 @@ struct RideSummaryFeature {
         return storedTitle.isEmpty || storedTitle == defaultTitle
     }
 
-    /// Nil on failure, leaving the stats rows as dashes — logged, as S15 does.
+    /// Nil on failure, leaving the Summary with Distance and Time and a row saying the rest
+    /// didn't load — logged, as S15 does.
     private static func fetchStats(_ id: UUID, _ persistenceClient: PersistenceClient) async -> RideStats? {
         do {
             return try await persistenceClient.fetchRideStats(id)

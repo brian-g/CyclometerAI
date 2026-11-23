@@ -323,12 +323,23 @@ struct AppFeature {
 
             case .rideSummary(.dismiss):
                 // The Finish Ride button and a swipe-down both land here, with the child's
-                // state still present — TCA runs this reducer before it nils it. The rename is
-                // written from here rather than from the child, whose effects are cancelled as
-                // it is dismissed.
-                guard let summary = state.rideSummary, let title = summary.titleToSave else { return .none }
+                // state still present — TCA runs this reducer before it nils it. The rename and
+                // the notes (#645) are written from here rather than from the child, whose
+                // effects are cancelled as it is dismissed.
+                guard let summary = state.rideSummary else { return .none }
+                let title = summary.titleToSave
+                let notes = summary.notesToSave
+                guard title != nil || notes != nil else { return .none }
                 let id = summary.rideId
                 return .run { [persistenceClient] send in
+                    // The notes first, as S15's Edit saves them: a rename must reach S14 and the
+                    // GPX, so it goes last. Neither failure stops the other: the notes aren't in
+                    // the GPX or on S14.
+                    if let notes {
+                        // Logged in RidePersistenceActor. The ride keeps its old notes.
+                        try? await persistenceClient.updateRideNotes(id, notes)
+                    }
+                    guard let title else { return }
                     do {
                         try await persistenceClient.renameRide(id, title)
                     } catch {

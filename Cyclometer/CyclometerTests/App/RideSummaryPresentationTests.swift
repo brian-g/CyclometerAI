@@ -38,12 +38,13 @@ struct RideSummaryPresentationTests {
     }
 
     /// App state with S10 up for a loaded, unnamed ride whose default is "Morning Loop".
-    private func presenting(title: String, persistedTitle: String = "") -> AppFeature.State {
+    private func presenting(title: String, persistedTitle: String = "", notes: String = "") -> AppFeature.State {
         var summary = RideSummaryFeature.State(rideId: Self.rideId)
         summary.load = .loaded
         summary.defaultTitle = "Morning Loop"
         summary.persistedTitle = persistedTitle
         summary.title = title
+        summary.notes = notes
         var state = AppFeature.State()
         state.rideSummary = summary
         return state
@@ -153,6 +154,46 @@ struct RideSummaryPresentationTests {
             $0.rideSummary = nil
         }
         #expect(renamed.value == 0)
+    }
+
+    @Test("notes typed in S10 are saved on dismiss, without a rename, S14 reload or GPX rewrite (#645)")
+    func notesSavedAlone() async {
+        let notes = LockIsolated<[(UUID, String)]>([])
+        let renamed = LockIsolated(0)
+        let replaced = LockIsolated(0)
+        let store = makeStore(presenting(title: "Coffee Run", persistedTitle: "Coffee Run", notes: "  Headwind "),
+                              persistenceClient: .mock(
+            onRenameRide: { _, _ in renamed.withValue { $0 += 1 } },
+            onUpdateRideNotes: { id, text in notes.withValue { $0.append((id, text)) } },
+            onReplaceRideGPX: { _, _ in replaced.withValue { $0 += 1 } }
+        ))
+
+        await store.send(.rideSummary(.dismiss)) {
+            $0.rideSummary = nil
+        }
+        await store.finish()
+
+        #expect(notes.value.map(\.0) == [Self.rideId])
+        #expect(notes.value.map(\.1) == ["Headwind"])
+        #expect(renamed.value == 0)
+        #expect(replaced.value == 0)
+    }
+
+    @Test("the notes are written before the rename; a failed notes write doesn't stop the rename (#645)")
+    func notesAndRename() async {
+        let writes = LockIsolated<[String]>([])
+        var client = PersistenceClient.mock(onRenameRide: { _, title in writes.withValue { $0.append("rename \(title)") } })
+        client.updateRideNotes = { _, notes in
+            writes.withValue { $0.append("notes \(notes)") }
+            throw PersistenceError.rideNotFound
+        }
+        let store = makeStore(presenting(title: "Hill Repeats", notes: "Legs gone"), persistenceClient: client)
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.dismiss))
+        await store.receive(\.rides.reloadRides)
+
+        #expect(writes.value == ["notes Legs gone", "rename Hill Repeats"])
     }
 
     /// A rename typed before deleting must not be written to a ride that's going (#452).

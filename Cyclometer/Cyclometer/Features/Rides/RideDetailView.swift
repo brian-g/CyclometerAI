@@ -89,7 +89,13 @@ struct RideDetailList<MapHeader: View>: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
-            RideSummarySection(store: store)
+            RideSummarySection(stats: store.stats, unit: store.unitSystem) { passes in
+                Button { store.send(.passesTapped) } label: {
+                    LabeledContent("Vehicle Passes", value: passes.formatted())
+                }
+                .tint(Color.cyTextPrimary)
+                .disabled(store.vehiclePasses.isEmpty)
+            }
             RideDetailMetricSections(store: store)
             // Gone for a free ride. A deleted route keeps its name, without a link (#426).
             if let route = store.route {
@@ -289,90 +295,6 @@ private struct RideTitleBlock: View {
             return Text(start..<end, format: .interval.month(.wide).day().year().hour().minute())
         }
         return Text(start, format: .dateTime.month(.wide).day().year().hour().minute())
-    }
-}
-
-// MARK: - Summary
-
-/// S15's Summary (UX.md §S15): the whole ride at a glance in hero numbers, each left out when the
-/// ride recorded nothing for it (#460), then the vehicle pass count (#549). Average Power waits
-/// for Phase 3.
-private struct RideSummarySection: View {
-    let store: StoreOf<RideDetailFeature>
-
-    var body: some View {
-        if let stats = store.stats {
-            let unit = store.unitSystem
-            let readings: [(label: String, reading: MetricReading)] = [
-                stats.ascent(unit).map { ("Ascent", $0) },
-                stats.descent(unit).map { ("Descent", $0) },
-                stats.averageSpeed(unit).map { ("Avg Speed", $0) },
-                stats.averageHeartRate.map { ("Avg Heart Rate", $0) },
-                stats.averageCadence.map { ("Avg Cadence", $0) },
-                stats.calories.map { ("Calories", $0) },
-            ].compactMap { $0 }
-            if !readings.isEmpty || stats.vehiclePassCount != nil {
-                Section("Summary") {
-                    if !readings.isEmpty {
-                        ReadingColumns {
-                            ForEach(readings, id: \.label) { item in
-                                ReadingColumn(item.label, item.reading)
-                            }
-                        }
-                    }
-                    // Absent with no radar paired, where "0 passes" would be a claim nobody measured.
-                    if let passes = stats.vehiclePassCount {
-                        Button { store.send(.passesTapped) } label: {
-                            LabeledContent("Vehicle Passes", value: passes.formatted())
-                        }
-                        .tint(Color.cyTextPrimary)
-                        .disabled(store.vehiclePasses.isEmpty)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// S15's Summary values, each nil when the ride recorded nothing for it, so it is left out rather
-/// than dashed (UX.md §S15, #460).
-extension RideStats {
-    func ascent(_ unit: UnitSystem) -> MetricReading? {
-        ascentMeters.map { Self.elevation($0, unit) }
-    }
-
-    func descent(_ unit: UnitSystem) -> MetricReading? {
-        descentMeters.map { Self.elevation($0, unit) }
-    }
-
-    /// Nil with no moving second, when the stored average is a 0 nobody rode — the Speed
-    /// section's rule (`RideMetrics.hasSpeed`).
-    func averageSpeed(_ unit: UnitSystem) -> MetricReading? {
-        guard movingSeconds > 0 else { return nil }
-        return MetricReading(value: unit.speed(fromMPS: averageSpeedMPS).formatted(.number.precision(.fractionLength(1))),
-                             unit: unit.speedLabel, spoken: unit.spokenSpeed(fromMPS: averageSpeedMPS))
-    }
-
-    var averageHeartRate: MetricReading? { averageHeartRateBPM.map(Self.heartRate) }
-
-    /// Nil with no cadence sensor. A real 0 rpm average is a reading.
-    var averageCadence: MetricReading? {
-        averageCadenceRPM.map { MetricReading(value: $0.formatted(), unit: "rpm", spoken: "\($0) rpm") }
-    }
-
-    var calories: MetricReading? {
-        activeKilocalories.map {
-            MetricReading(value: CaloriesMetrics.whole($0), unit: "kcal", spoken: CaloriesMetrics.spoken($0))
-        }
-    }
-
-    private static func elevation(_ meters: Double, _ unit: UnitSystem) -> MetricReading {
-        MetricReading(value: unit.elevation(fromMeters: meters).formatted(.number.precision(.fractionLength(0))),
-                      unit: unit.elevationLabel, spoken: unit.spokenElevation(fromMeters: meters))
-    }
-
-    private static func heartRate(_ bpm: Int) -> MetricReading {
-        MetricReading(value: bpm.formatted(), unit: "bpm", spoken: "\(bpm) beats per minute")
     }
 }
 
