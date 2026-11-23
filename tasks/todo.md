@@ -3230,3 +3230,22 @@ and `finalizeWithoutFinishStatsIsOwed` now checks the flag before and after the 
 `LocationOneShotTests.concurrentRequestsAllResolve` failed with no message during a heavily loaded run (every test
 70–100 s, several clones failed to launch the host); it doesn't touch this change and passed on the rerun of the
 three affected suites (95 passed).
+
+---
+
+## #625 — Strava token service (exchange, refresh, revoke, webhook)
+
+Approach (Brian, 2026-11-23): Cloudflare Pages Functions in the acmeapps.xyz repo, with one WAF rate-limit rule.
+The Strava dev app is already registered.
+
+- [x] Checked Strava's docs: `oauth/revoke` (Basic auth, `token`, 200 with no body, found or not) matches the issue;
+      `deauthorize` retires 2027-06-01. The docs don't cover secret rotation or the exact deauth event shape
+- [x] acmeapps.xyz `strava-token-service`: `functions/ride/api/strava/{token,refresh,revoke,webhook}.js`,
+      `lib/strava.js`, `test/strava.test.js` (12 tests, node:test, Strava faked), `docs/strava-token-service.md`
+- [x] Local `wrangler pages dev`: every route checked. Real Strava refusals (fake client id) pass through. Static
+      pages unaffected. Only `strava <endpoint>: <status>` is logged
+- [x] PRD §12 Privacy bullet, §8.12 webhook wording, 0.6.26
+- [ ] Brian: set `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN` (Production + Preview)
+- [ ] End to end on the preview deploy: token → refresh → revoke → refresh refused
+- [ ] Merge, create the webhook subscription, deauthorize → POST 200 in Pages logs
+- [ ] WAF rate-limit rule, burst check
