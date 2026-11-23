@@ -1655,6 +1655,7 @@ Sections appear on screen in the order listed below.
     - **Content:** the route, its start and finish flags and its direction-of-travel arrows (#341). No wind: that is the sheet's layer. No panning or zooming.
     - **Framing:** tight on the route, as S15's header frames a ride (each side floored at 200 m, margins in points), between the toolbar and the fade.
     - **While loading:** the room is kept from the first frame, and the map fades in when the polyline lands.
+    - **Accepted gap (#570, Brian):** a route whose read fails, or whose saved polyline can't be decoded, keeps the room empty for good: a blank half-screen above the title, with nothing to tap. Unlike S15, which gives the room back when its track read fails. Both causes are rare (a SwiftData error, a corrupt saved route).
   - **Title block:** the route's name in `.title`, wrapping, then its distance as a small hero, unlabelled. Once the block passes under the toolbar the name fades in and rises into the bar, as on S15.
   - **Map sheet:** tapping the header opens the route full screen. It pans and zooms, with compass and scale. It has no pitch toggle, unlike S15's: a pitched camera would space the arrows for the wrong view. One "Map Options" menu, as on S15 (#537):
     - **Map:** Standard or Satellite, remembered and shared with S15's sheet (`AppPreferences.rideMapBasemap`).

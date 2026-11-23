@@ -3166,8 +3166,8 @@ Elevation mirrors S15 (Ascent / Descent / Steepest; Max Grade leaves Summary). H
 - [x] Header arrows keep the camera's last bounds; the route-rect seed only applies until the camera reports, so a
       return from S15 doesn't re-place them narrower
 - [x] Stale doc comments: `coordinates`, `wind`, `RouteSummarySection`, `WindSample.distanceMeters`
-- [ ] **Decide (Brian):** a failed route read (or an undecodable polyline) keeps a blank half-screen band above the
-      title for good. S15 gives the room back on `trackReadFailed`; S20 would need a `routeUnavailable` action or flag
+- [x] **Decided (Brian): accepted.** A failed route read (or an undecodable polyline) keeps a blank half-screen band
+      above the title for good. Recorded as an accepted gap in UX.md §S20; no follow-up issue
 - [x] Targeted run on "Cyclometer Tests", fresh DerivedData: 84 passed, 0 failed (RouteWindExposure 5,
       RouteMapSheetFeature 5, RouteGradeBands 3, RouteDetailMapSheet 6, RouteDetailFeature 17, RouteWindFeature 9,
       RideDetailFeature 14, RideDetailSnapshot 9, RouteDetailSnapshot 11, MapHeaderChrome 5)
