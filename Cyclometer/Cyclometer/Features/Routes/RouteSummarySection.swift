@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// S20's route summary card (#252): the one-line summary, then what it abbreviates.
+/// S20's route summary card (#252): the one-line summary, then what it abbreviates. Max Grade
+/// moved to the Elevation section's Steepest (#570).
 ///
 /// Absent for a route with neither elevation nor a surface yet, where the line would only
 /// repeat the Distance row above it. Every value takes `.monospacedDigit()` so figures line up
@@ -27,7 +28,7 @@ struct RouteSummarySection: View {
                 }
                 if let terrain = summary.terrain {
                     LabeledContent("Character", value: terrain.character.label)
-                    LabeledContent("Max Grade", value: Self.percent(terrain.maxGradePercent))
+                    // The steepest grade is the Elevation section's Steepest (#570), as on S15.
                     if let hardest = terrain.hardestClimb {
                         LabeledContent("Hardest Climb (FIETS)",
                                        value: hardest.fiets.formatted(.number.precision(.fractionLength(1))))

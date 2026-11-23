@@ -5,25 +5,27 @@ import SwiftUI
 @_spi(Internals) import ComposableArchitecture
 @testable import Cyclometer
 
-/// S20 — Route Detail (#195), from seeded state.
+/// S20 — Route Detail (#195, laid out as S15 by #570), from seeded state.
 ///
 /// Renders `RouteDetailList`, not `RouteDetailView`. The list is everything except the loading and
-/// the toolbar, so a capture never starts a read that could land between its light and dark
-/// images. It also takes its map row as a parameter: a live `Map` renders its tiles asynchronously
-/// and the first render per process differs from later ones (`RoutesSnapshotTests`), so these pass
-/// a placeholder of the same height, and the chevron and framing arithmetic is pinned by
-/// `RouteDirectionMarkersTests` and `RoutesMapCameraTests` instead. The toolbar's "Use This Route"
-/// would render as nothing here anyway; `AppRouteSelectionTests` covers it.
+/// the clock, so a capture never starts a read that could land between its light and dark images.
+/// It also takes its map header as a parameter: a live `Map` renders its tiles asynchronously and
+/// the first render per process differs from later ones (`RoutesSnapshotTests`), so these pass a
+/// placeholder, and the chevron and framing arithmetic is pinned by `RouteDirectionMarkersTests`
+/// and `RoutesMapCameraTests` instead. The header's scroll arithmetic is `MapHeaderChromeTests`'.
+/// The toolbar's "Use Route" would render as nothing here anyway; `AppRouteSelectionTests` covers
+/// it.
 ///
 /// Skipped in CI along with the other snapshot suites — the references were recorded against a
 /// local simulator (see `.github/workflows/tests.yml`).
 final class RouteDetailSnapshotTests: XCTestCase {
 
     /// The iPhone 17 Pro's width, insets and scale, drawn taller than the device so the whole
-    /// screen — Previous Rides included — is in one reference rather than cut off at the fold.
+    /// screen — Previous Rides included — is in one reference rather than cut off at the fold. The
+    /// header is sized from `screenHeight`, a phone's, not from this canvas.
     private let device = ViewImageConfig(
         safeArea: UIEdgeInsets(top: 62, left: 0, bottom: 34, right: 0),
-        size: CGSize(width: 402, height: 1_300),
+        size: CGSize(width: 402, height: 1_900),
         traits: UITraitCollection { traits in
             traits.horizontalSizeClass = .compact
             traits.verticalSizeClass = .regular
@@ -37,7 +39,8 @@ final class RouteDetailSnapshotTests: XCTestCase {
     /// captures one layout pass and never awaits an effect. The weather (#204) is the fixture
     /// forecast, read at the fixture's own clock, unless a test seeds another state.
     private func screen(_ route: RouteSummary, rides: [RouteRideSummary],
-                        weather: RouteWeather = .loaded(.fixture)) -> some View {
+                        weather: RouteWeather = .loaded(.fixture),
+                        windExposure: RideWindExposure? = nil) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
@@ -52,6 +55,7 @@ final class RouteDetailSnapshotTests: XCTestCase {
             )
             state.previousRides = rides
             state.weather = weather
+            state.windExposure = windExposure
             return Store(initialState: state) {
                 RouteDetailFeature()
             } withDependencies: {
@@ -68,7 +72,11 @@ final class RouteDetailSnapshotTests: XCTestCase {
         // TCA's links where they push, so the type a store-powered one would set is set here;
         // without it every Previous Rides row reports "not presentable" and fails the test.
         return NavigationStack {
-            RouteDetailList(store: store, mapRow: Color.cyBgTertiary, now: WeatherReading.fixtureNow)
+            // iPhone 17 Pro's screen and status bar (`device`'s top inset), as S15's suite draws it.
+            // The placeholder runs under the header's safe-area padding, as the `Map` does.
+            RouteDetailList(store: store, now: WeatherReading.fixtureNow, screenHeight: 874, toolbarBottom: 62) {
+                Color.cyBgTertiary.ignoresSafeArea()
+            }
                 .toolbar(.hidden, for: .navigationBar)
         }
             .environment(\.navigationDestinationType, RideRoutePath.State.self)
@@ -126,6 +134,19 @@ final class RouteDetailSnapshotTests: XCTestCase {
     }
 
     // MARK: Weather (#204)
+
+    /// The ranges over the hours a ride would see, and the wind along the route once it has landed
+    /// (#570).
+    func testRouteDetailWeatherWind() {
+        assertBothSchemes(screen(RouteSummary.previewRoutes[3], rides: [],
+                                 windExposure: .shares(headwind: 45, crosswind: 30, tailwind: 25)),
+                          named: "weather-wind")
+    }
+
+    func testRouteDetailWeatherCalm() {
+        assertBothSchemes(screen(RouteSummary.previewRoutes[3], rides: [], windExposure: .calm),
+                          named: "weather-calm")
+    }
 
     func testRouteDetailWeatherLoading() {
         assertBothSchemes(screen(RouteSummary.previewRoutes[3], rides: [], weather: .loading), named: "weather-loading")

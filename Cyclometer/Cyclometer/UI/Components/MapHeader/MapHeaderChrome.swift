@@ -1,11 +1,16 @@
 import CoreGraphics
 
-/// How S15's map header answers the scroll (#538), as arithmetic so it is tested without
-/// scrolling a view. `offset` is how far the list has scrolled from its top: positive scrolled
-/// up, negative pulled down past the top.
-enum RideDetailHeaderChrome {
-    /// The header's share of the screen's height (UX.md §S15).
+/// How a detail screen's map header answers the scroll — S15's (#538) and S20's (#570) — as
+/// arithmetic so it is tested without scrolling a view. `offset` is how far the list has scrolled
+/// from its top: positive scrolled up, negative pulled down past the top.
+enum MapHeaderChrome {
+    /// The header's share of the screen's height (UX.md §S15, §S20).
     static let mapHeightFraction: CGFloat = 0.5
+
+    /// The header's height for a screen `screenHeight` tall, safe areas included.
+    static func mapHeight(screenHeight: CGFloat) -> CGFloat {
+        (screenHeight * mapHeightFraction).rounded()
+    }
 
     /// The map's opacity: whole at rest, falling linearly to nothing as the title area, which
     /// starts `fade` above the map's bottom, scrolls up to the top of the screen.

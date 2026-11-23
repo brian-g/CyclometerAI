@@ -64,9 +64,13 @@ struct RouteWindFeatureTests {
         await store.receive(\.loaded) {
             $0.samples = [
                 Self.known,
-                WindSample(coordinate: Self.points[1].coordinate, reading: Self.reading(1, hour: 1)),
-                WindSample(coordinate: Self.points[2].coordinate, reading: Self.reading(2, hour: 1)),
-                WindSample(coordinate: Self.points[3].coordinate, reading: Self.reading(3, hour: 2)),
+                // Each carries how far along the route it is, for S20's wind shares (#570).
+                WindSample(coordinate: Self.points[1].coordinate, reading: Self.reading(1, hour: 1),
+                           distanceMeters: Self.points[1].distanceMeters),
+                WindSample(coordinate: Self.points[2].coordinate, reading: Self.reading(2, hour: 1),
+                           distanceMeters: Self.points[2].distanceMeters),
+                WindSample(coordinate: Self.points[3].coordinate, reading: Self.reading(3, hour: 2),
+                           distanceMeters: Self.points[3].distanceMeters),
             ]
         }
     }

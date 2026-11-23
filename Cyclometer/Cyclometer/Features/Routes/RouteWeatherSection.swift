@@ -1,8 +1,10 @@
 import SwiftUI
 
 /// S20's Weather section (#204): the conditions at the route's start and the hours a ride on it
-/// would see, or why there are none. Its footer carries WeatherKit's attribution, shown only with
-/// WeatherKit data above it.
+/// would see, or why there are none. Under the strip, S15's ranges and wind shares for that ride
+/// (#570): the temperature and humidity over those hours, and how the forecast wind along the route
+/// would meet it. Its footer carries WeatherKit's attribution, shown only with WeatherKit data above
+/// it.
 ///
 /// S05.1's `StartSheetWeatherSection` in shape. Its unavailable states differ: the route's start is
 /// a fixed coordinate, so there is no location to turn on, but being offline is named.
@@ -13,6 +15,8 @@ struct RouteWeatherSection: View {
     /// The strip's "Now".
     let now: Date
     let unit: UnitSystem
+    /// `RouteDetailFeature.State.windExposure`: nil until the wind along the route lands.
+    var windExposure: RideWindExposure? = nil
 
     var body: some View {
         Section {
@@ -29,6 +33,8 @@ struct RouteWeatherSection: View {
                 if !hours.isEmpty {
                     HourlyForecastStrip(hours: hours, now: now)
                 }
+                WeatherSummaryRows(summary: RideWeatherSummary(samples: hours.compactMap(RideWeatherSample.init),
+                                                               exposure: windExposure))
             }
         } header: {
             Text("Weather")
@@ -64,7 +70,32 @@ struct RouteWeatherSection: View {
             weather: .loaded(.fixture),
             hours: AttributedForecast.fixture.rideHours(estimate: nil, from: WeatherReading.fixtureNow),
             now: WeatherReading.fixtureNow,
+            unit: .metric,
+            windExposure: .shares(headwind: 45, crosswind: 30, tailwind: 25)
+        )
+    }
+}
+
+/// The ranges in before the wind along the route has landed.
+#Preview("Loaded, wind loading") {
+    List {
+        RouteWeatherSection(
+            weather: .loaded(.fixture),
+            hours: AttributedForecast.fixture.rideHours(estimate: nil, from: WeatherReading.fixtureNow),
+            now: WeatherReading.fixtureNow,
             unit: .metric
+        )
+    }
+}
+
+#Preview("Loaded, calm") {
+    List {
+        RouteWeatherSection(
+            weather: .loaded(.fixture),
+            hours: AttributedForecast.fixture.rideHours(estimate: nil, from: WeatherReading.fixtureNow),
+            now: WeatherReading.fixtureNow,
+            unit: .metric,
+            windExposure: .calm
         )
     }
 }
@@ -75,7 +106,8 @@ struct RouteWeatherSection: View {
             weather: .loaded(.fixture),
             hours: AttributedForecast.fixture.rideHours(estimate: 2 * 3600, from: WeatherReading.fixtureNow),
             now: WeatherReading.fixtureNow,
-            unit: .imperial
+            unit: .imperial,
+            windExposure: .shares(headwind: 10, crosswind: 35, tailwind: 55)
         )
     }
     .environment(\.locale, Locale(identifier: "en_US"))

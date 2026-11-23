@@ -22,6 +22,9 @@ struct WeatherMap: View {
 
     /// Wide enough to read the wind's direction against roads, close enough to know where you are.
     static let riderSpanMeters = 5_000.0
+    /// The map's height in the sheet: S20's map's when #561 built it, kept when S20's became a
+    /// half-screen header (#570).
+    static let height: CGFloat = 220
 
     @State private var metersPerPoint: Double?
     /// What the camera shows; the free-ride field fills it, re-placed when the camera settles.
@@ -83,7 +86,7 @@ private extension WeatherMetrics {
 
 #Preview("Free Ride") {
     WeatherMap(metrics: WeatherMetrics(forecast: .fixture, riderCoordinate: WeatherMetrics.previewRider))
-        .frame(height: RouteDetailView.mapHeight)
+        .frame(height: WeatherMap.height)
 }
 
 #Preview("Route") {
@@ -98,7 +101,7 @@ private extension WeatherMetrics {
             return WindSample(coordinate: route[step], reading: reading)
         }
     ))
-    .frame(height: RouteDetailView.mapHeight)
+    .frame(height: WeatherMap.height)
 }
 
 #Preview("Route — Dark") {
@@ -110,6 +113,6 @@ private extension WeatherMetrics {
         routeWind: [WindSample(coordinate: route[0], reading: .fixture),
                     WindSample(coordinate: route[40], reading: WeatherReading.fixtureHourly[6])]
     ))
-    .frame(height: RouteDetailView.mapHeight)
+    .frame(height: WeatherMap.height)
     .preferredColorScheme(.dark)
 }

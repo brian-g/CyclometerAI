@@ -58,6 +58,12 @@ struct RouteDetailFeature {
         /// so a return samples once, on the fresh answers.
         var hasFreshForecast = false
         var hasFreshRides = false
+        /// How that wind would meet a ride on the route (#570), for the Weather section: worked out
+        /// once the samples land, not on every draw. Nil until then, and with no forecast.
+        var windExposure: RideWindExposure?
+
+        /// The full-screen map, opened from the map header (#570).
+        @Presents var mapSheet: RouteMapSheetFeature.State?
 
         init(summary: RouteSummary) {
             self.summary = summary
@@ -86,6 +92,8 @@ struct RouteDetailFeature {
         case weatherLoaded(AttributedForecast)
         case weatherUnavailable(RouteWeather.Unavailable)
         case wind(RouteWindFeature.Action)
+        case mapTapped
+        case mapSheet(PresentationAction<RouteMapSheetFeature.Action>)
         case useRouteButtonTapped
         case delegate(Delegate)
 
@@ -193,11 +201,33 @@ struct RouteDetailFeature {
             case .weatherUnavailable(let reason):
                 state.weather = .unavailable(reason)
                 // An earlier appearance's arrows extend a forecast that is gone, for a ride that
-                // started then: with no forecast at the start, no arrows (UX.md §S20).
+                // started then: with no forecast at the start, no arrows (UX.md §S20). Nor shares.
                 state.wind.samples = []
+                state.windExposure = nil
+                state.mapSheet?.wind = []
                 return .none
 
-            case .wind:
+            case .wind(let action):
+                // `Scope` has already updated the samples. An open map shows them as they land.
+                let samples = state.wind.samples
+                state.mapSheet?.wind = samples
+                // The shares wait for the answers: the known sample alone would quote the start's
+                // wind over the whole route, then change.
+                if case .loaded = action {
+                    state.windExposure = RideWindExposure.alongRoute(state.coordinates, samples: samples)
+                }
+                return .none
+
+            case .mapTapped:
+                // The header's tap row is off until the route loads; a polyline that couldn't be
+                // decoded has nothing to show full screen.
+                guard !state.coordinates.isEmpty else { return .none }
+                state.mapSheet = RouteMapSheetFeature.State(
+                    summary: state.summary, coordinates: state.coordinates, wind: state.wind.samples
+                )
+                return .none
+
+            case .mapSheet:
                 return .none
 
             case .useRouteButtonTapped:
@@ -206,6 +236,9 @@ struct RouteDetailFeature {
             case .delegate:
                 return .none
             }
+        }
+        .ifLet(\.$mapSheet, action: \.mapSheet) {
+            RouteMapSheetFeature()
         }
     }
 }
@@ -232,7 +265,7 @@ extension RouteDetailFeature {
             start: date.now,
             speedMPS: WindSampling.speedMPS(routeDistanceMeters: state.summary.distanceMeters, estimate: estimate)
         )
-        let known = WindSample(coordinate: start, reading: forecast.current)
+        let known = WindSample(coordinate: start, reading: forecast.current, distanceMeters: 0)
         return .send(.wind(.load(known: known, ahead: Array(points.dropFirst()))))
     }
 }

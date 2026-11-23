@@ -123,12 +123,12 @@ struct WeatherList<MapRow: View>: View {
 
     var body: some View {
         List {
-            // First, at S20's height (#561, Brian). Only with weather to show: the unavailable sheet
-            // is unchanged.
+            // First, at the height S20's map had (#561, Brian). Only with weather to show: the
+            // unavailable sheet is unchanged.
             if metrics.hasWindMap {
                 Section {
                     mapRow
-                        .frame(height: RouteDetailView.mapHeight)
+                        .frame(height: WeatherMap.height)
                         .clipShape(RoundedRectangle(cornerRadius: Spacing.cornerMd, style: .continuous))
                         .listRowInsets(EdgeInsets())
                 }

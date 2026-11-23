@@ -30,6 +30,10 @@ struct RouteMapContent: MapContent {
     /// What one screen point covers on the ground, measured from the map. Nil, before the map has
     /// reported a camera, means no arrows.
     var metersPerPoint: Double?
+    /// S20's map sheet's route coloring (#570): the route as runs of one band each, drawn in
+    /// place of the plain line. Empty, the default, draws the line in the brand color.
+    var coloring: RouteColoring = .plain
+    var coloredRuns: [ColoredRun] = []
 
     /// Start and finish closer together than this is a loop, and a loop has no finish to mark.
     /// Without this every loop route stacks a checkered flag on top of its start flag, which
@@ -38,9 +42,16 @@ struct RouteMapContent: MapContent {
 
     @MapContentBuilder
     var body: some MapContent {
-        if coordinates.count > 1 {
-            MapPolyline(coordinates: coordinates.map(\.coordinate2D))
-                .stroke(Color.cyPrimary, lineWidth: strokeWidth)
+        if coloredRuns.isEmpty {
+            if coordinates.count > 1 {
+                MapPolyline(coordinates: coordinates.map(\.coordinate2D))
+                    .stroke(Color.cyPrimary, lineWidth: strokeWidth)
+            }
+        } else {
+            ForEach(Array(coloredRuns.enumerated()), id: \.offset) { _, run in
+                MapPolyline(coordinates: run.coordinates.map(\.coordinate2D))
+                    .stroke(coloring.color(band: run.band), lineWidth: strokeWidth)
+            }
         }
 
         RouteDirectionArrows(
